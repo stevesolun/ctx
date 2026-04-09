@@ -1,6 +1,6 @@
 # ctx — Real-Time Skill & Agent Recommendation and Management Agent for Claude Code
 
-A real-time recommendation engine for Claude Code skills and agents. It watches what you develop, walks a knowledge graph of **1,434 skills + 425 agents**, and recommends the right skills and agents on the fly — you decide what to load. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+Watches what you develop, walks a knowledge graph of **1,450+ skills and 427 agents**, and recommends the right ones on the fly — you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 ---
 
