@@ -23,6 +23,7 @@ from pathlib import Path
 
 CLAUDE_DIR = Path(os.path.expanduser("~/.claude"))
 PENDING_SKILLS = CLAUDE_DIR / "pending-skills.json"
+PENDING_UNLOAD = CLAUDE_DIR / "pending-unload.json"
 SHOWN_FLAG = CLAUDE_DIR / ".skill-suggest-shown"
 
 
@@ -66,11 +67,23 @@ def main() -> None:
     graph_suggestions = pending.get("graph_suggestions", [])
     unmatched = pending.get("unmatched_signals", [])
 
-    if not graph_suggestions and not unmatched:
+    # Also check for unload suggestions
+    unload_suggestions: list[dict] = []
+    if PENDING_UNLOAD.exists():
+        try:
+            unload_data = json.loads(PENDING_UNLOAD.read_text(encoding="utf-8"))
+            unload_suggestions = unload_data.get("suggestions", [])
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    if not graph_suggestions and not unmatched and not unload_suggestions:
         sys.exit(0)
 
     # Build the recommendation message
-    lines = ["ctx detected stack signals not covered by your loaded skills."]
+    lines: list[str] = []
+
+    if unmatched or graph_suggestions:
+        lines.append("ctx detected stack signals not covered by your loaded skills.")
 
     if unmatched:
         lines.append(f"Unmatched signals: {', '.join(unmatched)}")
@@ -86,6 +99,18 @@ def main() -> None:
             "To load any of these, tell the user: "
             "\"ctx detected you might benefit from these skills: [list]. "
             "Want me to load any of them?\""
+        )
+
+    if unload_suggestions:
+        if lines:
+            lines.append("")
+        lines.append("ctx detected skills/agents that have been loaded but never used:")
+        for s in unload_suggestions[:5]:
+            lines.append(f"  - {s['name']} ({s['reason']})")
+        lines.append("")
+        lines.append(
+            "Tell the user: \"These skills have been loaded but unused. "
+            "Want me to unload any of them?\""
         )
 
     message = "\n".join(lines)

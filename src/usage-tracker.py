@@ -138,6 +138,30 @@ def _set_frontmatter_field(content: str, field: str, value: str) -> str:
     )
 
 
+PENDING_UNLOAD = CLAUDE_DIR / "pending-unload.json"
+
+
+def _queue_unload_suggestion(skill_name: str, session_count: int, use_count: int) -> None:
+    """Add a skill to the pending-unload list for user approval."""
+    pending: dict = {"suggestions": [], "generated_at": ""}
+    if PENDING_UNLOAD.exists():
+        try:
+            pending = json.loads(PENDING_UNLOAD.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pending = {"suggestions": [], "generated_at": ""}
+
+    existing_names = {s["name"] for s in pending.get("suggestions", [])}
+    if skill_name not in existing_names:
+        pending.setdefault("suggestions", []).append({
+            "name": skill_name,
+            "reason": f"Loaded {session_count} sessions, used {use_count} times",
+            "session_count": session_count,
+            "use_count": use_count,
+        })
+    pending["generated_at"] = datetime.now(timezone.utc).isoformat()
+    PENDING_UNLOAD.write_text(json.dumps(pending, indent=2), encoding="utf-8")
+
+
 def update_skill_page(skill_name: str, used: bool, session_count_bump: bool = True) -> bool:
     """
     Update wiki entity page for a skill.
@@ -164,12 +188,12 @@ def update_skill_page(skill_name: str, used: bool, session_count_bump: bool = Tr
             # Reset stale status if skill was used
             content = _set_frontmatter_field(content, "status", "installed")
         else:
-            # Check if stale threshold reached
+            # Check if stale threshold reached — don't mark stale directly,
+            # write to pending-unload.json so the user can approve
             session_count = int(meta.get("session_count", "0"))
             use_count = int(meta.get("use_count", "0"))
-            # Only mark stale if in manifest (loaded but not used in signals)
             if session_count >= STALE_THRESHOLD and use_count == 0:
-                content = _set_frontmatter_field(content, "status", "stale")
+                _queue_unload_suggestion(skill_name, session_count, use_count)
 
         page_path.write_text(content, encoding="utf-8")
         return True
