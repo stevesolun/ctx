@@ -1,91 +1,91 @@
 # Graph Report
 
 > Generated: 2026-04-09
-> Nodes: 1883 | Edges: 497287 | Communities: 836
+> Nodes: 1877 | Edges: 494001 | Communities: 835
 
 ## God Nodes (Most Connected)
 
-- **openant-pipeline** (1056 connections) — skill
-- **test-automator** (1056 connections) — agent
-- **django-developer** (1055 connections) — agent
-- **openant-repo-inspection** (1054 connections) — skill
-- **phase-3-build** (1054 connections) — agent
-- **prompt-optimizer** (1053 connections) — skill
-- **security-engineer** (1053 connections) — agent
-- **legacy-modernizer** (1052 connections) — skill
-- **powershell-7-expert** (1052 connections) — agent
-- **verification-loop** (1051 connections) — skill
-- **wiki-onboarding** (1051 connections) — skill
-- **deployment-engineer** (1051 connections) — agent
-- **frontend-security-coder** (1051 connections) — agent
-- **machine-learning-engineer** (1051 connections) — agent
-- **phase-2-foundation** (1051 connections) — agent
-- **python-pro** (1051 connections) — agent
-- **backend-security-coder** (1050 connections) — skill
-- **circleci-automation** (1050 connections) — skill
-- **everything-claude-code** (1050 connections) — skill
-- **hugging-face-tool-builder** (1050 connections) — skill
+- **test-automator** (1051 connections) — agent
+- **openant-pipeline** (1050 connections) — skill
+- **django-developer** (1050 connections) — agent
+- **phase-3-build** (1049 connections) — agent
+- **openant-repo-inspection** (1048 connections) — skill
+- **prompt-optimizer** (1048 connections) — skill
+- **security-engineer** (1048 connections) — agent
+- **legacy-modernizer** (1047 connections) — skill
+- **powershell-7-expert** (1047 connections) — agent
+- **verification-loop** (1046 connections) — skill
+- **wiki-onboarding** (1046 connections) — skill
+- **deployment-engineer** (1046 connections) — agent
+- **frontend-security-coder** (1046 connections) — agent
+- **machine-learning-engineer** (1046 connections) — agent
+- **phase-2-foundation** (1046 connections) — agent
+- **python-pro** (1046 connections) — agent
+- **backend-security-coder** (1045 connections) — skill
+- **circleci-automation** (1045 connections) — skill
+- **hugging-face-tool-builder** (1045 connections) — skill
+- **incident-response-smart-fix** (1045 connections) — skill
 
 ## Communities (by size)
 
-- **Security + Python + Typescript** — 237 members
+- **Security + Python + Testing** — 231 members
 - **Javascript + Typescript + Frontend** — 74 members
 - **Rust + Ai + Typescript** — 48 members
-- **Database + Typescript + Devops** — 41 members
-- **Automation + Devops + Typescript** — 41 members
-- **Ai + Frontend + Typescript** — 39 members
-- **Typescript + Frontend + Ai** — 38 members
-- **Typescript + Ai + Devops** — 36 members
+- **Ai + Typescript + Frontend** — 42 members
+- **Typescript + Devops + Ai** — 40 members
+- **Typescript + Frontend + Ai** — 39 members
+- **Database + Devops + Typescript** — 38 members
 - **Typescript + Ai + Devops** — 35 members
-- **Typescript + Ai + Devops** — 31 members
-- **Typescript + Devops + Frontend** — 31 members
-- **Testing + Frontend + Typescript** — 30 members
-- **Frontend + Ai + Devops** — 28 members
-- **Typescript + Ai + Devops** — 24 members
+- **Frontend + Ai + Devops** — 32 members
+- **Typescript + Ai + Devops** — 30 members
+- **Typescript + Javascript + Frontend** — 27 members
+- **Typescript + Devops + Frontend** — 27 members
 - **Python + Typescript + Ai** — 23 members
-- **Database + Ai + Frontend** — 22 members
-- **Typescript + Database + Frontend** — 22 members
-- **Typescript + Swift + Devops** — 21 members
-- **Security + Devops + Frontend** — 21 members
-- **Typescript + Ai + Devops** — 16 members
-- **Python + Typescript + Ai** — 15 members
-- **Typescript + Ai + Testing** — 14 members
+- **Typescript + Devops + Frontend** — 23 members
+- **Typescript + Security + Javascript** — 21 members
+- **Database + Ai + Devops** — 20 members
+- **Typescript + Frontend + Database** — 19 members
+- **Typescript + Swift + Devops** — 18 members
+- **Typescript + Ai + Devops** — 18 members
+- **Typescript + Database + Ai** — 16 members
+- **Typescript + Ai + Testing** — 15 members
+- **Python + Typescript + Database** — 15 members
 - **Typescript + Ai + Devops** — 14 members
+- **Typescript + Javascript + Ai** — 14 members
+- **Typescript + Aws + Ai** — 14 members
+- **Typescript + Database + Ai** — 13 members
 - **Typescript + Ai + Devops** — 13 members
-- **Typescript + Javascript + Ai** — 11 members
-- **Typescript + Ai + Security** — 11 members
-- **Typescript + Ai + Testing** — 10 members
+- **Typescript + Javascript + Ai** — 12 members
+- **Typescript + Ai + Devops** — 12 members
+- **Typescript + Ai + Testing** — 11 members
+- **Typescript + Java + Ai** — 11 members
 - **Typescript + Ai + Testing** — 9 members
-- **Typescript + Database + Ai** — 8 members
-- **Typescript + Database + Ai** — 8 members
-- **Typescript + Ai + Security** — 7 members
-- **Typescript + Ai + Security** — 7 members
-- **Typescript + Ai + Security** — 7 members
+- **Typescript + Ai + Security** — 9 members
+- **Typescript + Ai + Security** — 9 members
+- **Typescript + Ai + Testing** — 8 members
 - **Typescript + Ai + Security** — 7 members
 - **Python + Typescript + Ai** — 7 members
-- **Typescript + Go + Devops** — 6 members
 - **Python + Typescript + Ai** — 6 members
 - **Typescript + Ai + Testing** — 6 members
 - **Python + Typescript + Ai** — 6 members
-- **Typescript + Aws + Ai** — 6 members
-- **Typescript + Ai + Devops** — 5 members
+- **Typescript + Database + Ai** — 6 members
+- **Typescript + Azure + Ai** — 5 members
+- **Typescript + Ai + Testing** — 5 members
 - **Typescript + Kubernetes + Ai** — 5 members
 - **Typescript + Ai + Testing** — 5 members
 - **Typescript + Javascript + Ai** — 5 members
-- **Typescript + Ai + Security** — 4 members
+- **Typescript + Javascript + Ai** — 5 members
+- **Python + Typescript + Ai** — 4 members
 - **Typescript + Database + Ai** — 4 members
-- **Typescript + Javascript + Ai** — 4 members
-- **Typescript + Database + Ai** — 4 members
-- **Typescript + Ai + Testing** — 4 members
 - **Typescript + Ai + Devops** — 4 members
-- **Typescript + Rust + Ai** — 4 members
-- **Python + Typescript + Javascript** — 4 members
 - **Typescript + Ai + Testing** — 3 members
-- **Typescript + Javascript + Database** — 3 members
-- **Python + Typescript + Ai** — 3 members
-- **Typescript + Java + Ai** — 3 members
+- **Python + Typescript + Database** — 3 members
+- **Typescript + Javascript + Ai** — 3 members
 - **Typescript + Ai + Testing** — 3 members
-- **Python + Typescript + Ai** — 2 members
+- **Typescript + Rust + Ai** — 2 members
+- **Typescript + Javascript + Java** — 2 members
+- **Typescript + Javascript + Terraform** — 2 members
+- **Typescript + Database + Ai** — 2 members
 - **Miscellaneous** — 1 members
 - **Miscellaneous** — 1 members
 - **Miscellaneous** — 1 members
@@ -630,7 +630,6 @@
 - **Miscellaneous** — 1 members
 - **Miscellaneous** — 1 members
 - **Miscellaneous** — 1 members
-- **Python + Typescript + Azure** — 1 members
 - **Miscellaneous** — 1 members
 - **Miscellaneous** — 1 members
 - **Miscellaneous** — 1 members
@@ -862,5 +861,5 @@
 - **Miscellaneous** — 1 members
 - **Miscellaneous** — 1 members
 - **Miscellaneous** — 1 members
-- **Typescript + Database + Ai** — 1 members
-- **Python + Typescript + Swift** — 1 members
+- **Python + Typescript + Javascript** — 1 members
+- **Typescript + Ai + Security** — 1 members
