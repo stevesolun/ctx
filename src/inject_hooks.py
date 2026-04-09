@@ -45,6 +45,10 @@ def make_hooks(ctx_dir: str) -> dict:
         f'python3 "{ctx_dir}/skill_add_detector.py" '
         f'--tool "$CLAUDE_TOOL_NAME" --input "$CLAUDE_TOOL_INPUT" 2>/dev/null || true'
     )
+    # Graph-based skill suggestion: surfaces pending-skills.json to Claude for user approval
+    suggest_cmd = (
+        f'python3 "{ctx_dir}/skill_suggest.py" 2>/dev/null || true'
+    )
 
     return {
         "PostToolUse": [
@@ -58,6 +62,10 @@ def make_hooks(ctx_dir: str) -> dict:
                     {
                         "type": "command",
                         "command": skill_add_cmd,
+                    },
+                    {
+                        "type": "command",
+                        "command": suggest_cmd,
                     },
                 ],
             }
@@ -124,7 +132,7 @@ def main() -> None:
     settings_path.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
 
     print(f"Hooks injected into {settings_path}")
-    print(f"  PostToolUse: context-monitor + skill-add-detector")
+    print(f"  PostToolUse: context-monitor + skill-add-detector + skill-suggest")
     print(f"  Stop: usage-tracker")
 
 

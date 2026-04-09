@@ -21,7 +21,12 @@ Checks:
 
 from __future__ import annotations
 
-import argparse, json, os, re, sys
+import argparse, io, json, os, re, sys
+
+# Windows cp1252 cannot encode emoji — force UTF-8 output
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
