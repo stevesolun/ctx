@@ -41,10 +41,18 @@ log() { echo "[install] $*"; }
 ok()  { echo "[install] ✓ $*"; }
 warn(){ echo "[install] ⚠ $*"; }
 
-# ── Step 1: Initialize wiki ───────────────────────────────────────────────────
-log "Step 1: Initializing skill wiki at $WIKI_DIR"
-"$PYTHON" "$SRC_DIR/wiki_sync.py" --init --wiki "$WIKI_DIR"
-ok "Wiki initialized"
+# ── Step 1: Initialize wiki (extract pre-built if available) ─────────────────
+WIKI_ARCHIVE="$CTX_DIR/graph/wiki-graph.tar.gz"
+if [[ -f "$WIKI_ARCHIVE" && ! -f "$WIKI_DIR/graphify-out/graph.json" ]]; then
+  log "Step 1: Extracting pre-built wiki + knowledge graph (8.9 MB -> 159 MB)"
+  mkdir -p "$WIKI_DIR"
+  tar xzf "$WIKI_ARCHIVE" -C "$WIKI_DIR/"
+  ok "Wiki extracted with 1,851 entity pages + 472K-edge knowledge graph"
+else
+  log "Step 1: Initializing skill wiki at $WIKI_DIR"
+  "$PYTHON" "$SRC_DIR/wiki_sync.py" --init --wiki "$WIKI_DIR"
+  ok "Wiki initialized"
+fi
 
 # ── Step 2: Build bulk skill catalog ─────────────────────────────────────────
 log "Step 2: Building skill catalog (all installed skills → catalog.md)"
