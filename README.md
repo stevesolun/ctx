@@ -1,6 +1,13 @@
 # ctx - Skill & Agent Recommendation and Management for Claude Code
 
-Watches what you develop, walks a knowledge graph of **1,450+ skills and 427 agents**, and recommends the right ones on the fly — you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-green.svg)](https://python.org)
+[![Skills](https://img.shields.io/badge/Skills-1%2C450+-purple.svg)](#)
+[![Agents](https://img.shields.io/badge/Agents-427-orange.svg)](#)
+[![Graph](https://img.shields.io/badge/Knowledge_Graph-497K_edges-red.svg)](#knowledge-graph)
+[![Tests](https://img.shields.io/badge/Tests-121_passing-brightgreen.svg)](#)
+
+Watches what you develop, walks a knowledge graph of **1,450+ skills and 427 agents**, and recommends the right ones on the fly - you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 ---
 
