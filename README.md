@@ -1,24 +1,40 @@
 # ctx — Alive Skill System Agent
 
-An autonomous agent that uses a Karpathy LLM wiki as ground truth to manage 1,489 skills for Claude Code. It scans your project, loads only what is relevant, converts long skills into structured micro-skill pipelines, and learns from session usage — without manual intervention.
+An autonomous agent that uses a Karpathy LLM wiki and a knowledge graph of **1,434 skills + 425 agents** as ground truth for Claude Code. It scans your project, loads only what is relevant, traverses the graph to suggest related capabilities in real-time, converts long skills into structured micro-skill pipelines, and learns from session usage — without manual intervention.
+
+---
+
+## Why This Exists
+
+Claude Code skills and agents are powerful, but at scale they become unmanageable:
+
+- **Discovery problem**: With 1,400+ skills, how do you know which ones exist? Which ones are relevant to your current project?
+- **Context budget**: Loading all skills into context wastes tokens and degrades quality. You need exactly the right 10-15 skills per session.
+- **Hidden connections**: A FastAPI skill is useful, but you also need the Pydantic skill, the async Python patterns skill, and the Docker skill. Nobody tells you that.
+- **Skill rot**: Skills you installed 3 months ago and never used are cluttering your context. Stale skills should be flagged and archived.
+
+ctx solves all of these by treating your skill library as a **knowledge graph with persistent memory**, not a flat directory.
 
 ---
 
 ## What Is This
 
-ctx is not a collection of scripts. It is an agent with persistent memory.
+ctx is not a collection of scripts. It is an agent with persistent memory and a knowledge graph.
 
 The core idea comes from Andrej Karpathy's LLM wiki pattern: instead of re-loading everything from scratch each session, an LLM maintains a wiki it can read, write, and query. The wiki becomes the agent's long-term memory.
 
-ctx applies that pattern to skill management:
+ctx applies that pattern to skill management — and extends it with graph-based discovery:
 
 - A Karpathy 3-layer wiki at `~/.claude/skill-wiki/` is the single source of truth
-- Every skill has an entity page tracking use count, last used date, tags, and status
+- **1,851 entity pages** (1,439 skills + 412 agents) with frontmatter tracking use count, last used date, tags, and status
+- A **knowledge graph** (1,851 nodes, 472K edges, 835 communities) connects skills and agents by shared tags, enabling context-aware recommendations
+- **34 auto-generated concept pages** group related skills into named communities (e.g., "Security + Testing", "Python + Api + Database")
 - PostToolUse and Stop hooks update the wiki automatically during each Claude Code session
-- Skills over 180 lines are converted to a gated 5-stage micro-skill pipeline so the router can load them incrementally
+- Skills over 180 lines are converted to a gated 5-stage micro-skill pipeline (844 converted) so the router can load them incrementally
 - The skill-router agent runs at session start, reads the wiki, and loads only the skills that match your current project's stack
+- Mid-session, the context monitor watches every tool call, detects new stack signals, walks the graph, and suggests relevant skills/agents — **but only loads them if you approve**
 
-The result: your skill library gets smarter every session. High-signal skills surface. Stale ones are flagged. New ones self-ingest.
+The result: your skill library gets smarter every session. High-signal skills surface. The graph reveals hidden connections. Stale ones are flagged. New ones self-ingest.
 
 ---
 
@@ -26,9 +42,10 @@ The result: your skill library gets smarter every session. High-signal skills su
 
 ```
 Session start
-  skill-router reads stack-profile.json + wiki entity pages
+  skill-router reads stack-profile.json + wiki entity pages + knowledge graph
     -> scan_repo.py detects stacks (Python, Docker, FastAPI, etc.) with confidence scores
     -> resolve_skills.py scores each skill against the detected stack
+    -> resolve_graph.py walks the graph from matched skills to discover related ones
     -> loads <=15 highest-priority skills into context
     -> unloads stale ones (unseen >30 days)
 
@@ -36,7 +53,19 @@ Mid-session (every tool call)
   context-monitor.py (PostToolUse hook)
     -> extracts intent signals from file extensions and framework keywords
     -> writes signals to ~/.claude/intent-log.jsonl
-    -> if >=3 new unmatched signals -> queues skill candidates in pending-skills.json
+    -> if >=3 new unmatched signals -> walks the graph for best matches
+    -> writes pending-skills.json with graph-ranked suggestions
+
+  skill_suggest.py (PostToolUse hook, runs after context-monitor)
+    -> reads pending-skills.json
+    -> surfaces suggestions to Claude via hookSpecificOutput
+    -> Claude tells the user: "ctx suggests these skills. Want me to load any?"
+    -> user decides yes/no — nothing auto-loads
+
+  skill_loader.py (called by Claude when user approves)
+    -> loads the skill/agent into the session manifest
+    -> outputs the file path so Claude reads and applies it
+    -> clears loaded skills from pending-skills.json
 
 Session end
   usage-tracker.py (Stop hook)
@@ -46,10 +75,11 @@ Session end
     -> appends session summary to skill-wiki/log.md
 
 Maintenance (on-demand)
-  wiki_orchestrator.py --check   -> health score 0-100 across all subsystems
-  wiki_orchestrator.py --sync    -> full maintenance pass (lint + link + catalog rebuild)
-  wiki_lint.py                   -> find orphans, broken links, stale entity pages
-  wiki_query.py                  -> query wiki with citations, filter by tag, show stats
+  python src/wiki_orchestrator.py --check   -> health score 0-100
+  python src/wiki_orchestrator.py --sync    -> full maintenance pass
+  python src/wiki_graphify.py               -> rebuild knowledge graph
+  python src/wiki_lint.py                   -> find broken links and orphans
+  python src/wiki_query.py --tag python     -> query the wiki
 ```
 
 ---
@@ -60,12 +90,14 @@ Maintenance (on-demand)
 # 1. Clone and enter
 git clone https://github.com/stevesolun/ctx && cd ctx
 
-# 2. Deploy everything
+# 2. Deploy everything (wiki + catalog + hooks + entity pages + graph)
 bash install.sh
 
 # 3. Check health
-python wiki_orchestrator.py --check
+python src/wiki_orchestrator.py --check
 ```
+
+**Prerequisites**: Python 3.10+, Claude Code CLI installed (`~/.claude/` exists), `~/.claude/skills/` populated with skills.
 
 ---
 
@@ -82,54 +114,47 @@ The install script runs these phases in order:
 | Phase | What happens |
 |-------|-------------|
 | 1 | Init skill wiki at `~/.claude/skill-wiki/` |
-| 2 | Catalog all 1,489 skills -> `catalog.md` |
+| 2 | Catalog all skills + agents -> `catalog.md` |
 | 3 | Deploy `skill-router` to `~/.claude/agents/skill-router/` |
 | 4 | Inject PostToolUse + Stop hooks into `~/.claude/settings.json` |
 | 5 | Create `skill-registry.json` at `~/.claude/skill-registry.json` |
-| 6 | Dry-run: count skills >180 lines eligible for conversion |
-| 7 | Convert eligible skills to micro-skill pipeline format |
-| 8 | Build dual-version sub-catalog (`versions-catalog.md`) |
+| 6 | Generate entity pages for all skills + agents |
+| 7 | Build knowledge graph + concept pages + wikilinks |
+| 8 | Summary of installed hooks and tools |
 
 ### Option B — Manual (step by step)
 
 ```bash
 cd ctx
 
-# Init wiki (creates 3-layer directory structure + SCHEMA.md + index.md)
-python wiki_sync.py --init --wiki ~/.claude/skill-wiki
+# Init wiki
+python src/wiki_sync.py --init --wiki ~/.claude/skill-wiki
 
 # Build catalog
-python catalog_builder.py --wiki ~/.claude/skill-wiki
+python src/catalog_builder.py --wiki ~/.claude/skill-wiki
 
 # Deploy skill-router agent
 mkdir -p ~/.claude/agents/skill-router
 cp -r skills/skill-router/. ~/.claude/agents/skill-router/
 
-# Inject hooks into Claude Code settings
-python inject_hooks.py --settings ~/.claude/settings.json --ctx-dir $(pwd)
+# Inject hooks
+python src/inject_hooks.py --settings ~/.claude/settings.json --ctx-dir "$(pwd)/src"
 
-# Convert long skills to micro-skill pipeline format (dry-run first)
-PYTHONIOENCODING=utf-8 python batch_convert.py --scan ~/.claude/skills --dry-run
-PYTHONIOENCODING=utf-8 python batch_convert.py --scan ~/.claude/skills --auto
+# Convert long skills to micro-skill pipeline format
+python src/batch_convert.py --scan ~/.claude/skills --auto
 
-# Link wiki entity pages to converted pipelines
-python link_conversions.py --wiki ~/.claude/skill-wiki
+# Generate entity pages for all skills + agents
+python src/wiki_batch_entities.py --all
 
-# Build versions catalog (tracks both original + pipeline versions)
-python versions_catalog.py --wiki ~/.claude/skill-wiki
+# Build knowledge graph
+python src/wiki_graphify.py
 ```
-
-**Prerequisites:**
-
-- Python 3.10+
-- Claude Code CLI installed (provides `~/.claude/`)
-- `~/.claude/skills/` populated with your global skill library
 
 ---
 
 ## Configuration
 
-All paths, thresholds, and numeric limits live in `config.json`. Nothing is hardcoded in the scripts.
+All paths, thresholds, and numeric limits live in `src/config.json`. Nothing is hardcoded.
 
 ```json
 {
@@ -137,12 +162,6 @@ All paths, thresholds, and numeric limits live in `config.json`. Nothing is hard
   "wiki_path":                "~/.claude/skill-wiki",
   "skills_dir":               "~/.claude/skills",
   "agents_dir":               "~/.claude/agents",
-  "intent_log":               "~/.claude/intent-log.jsonl",
-  "pending_skills":           "~/.claude/pending-skills.json",
-  "manifest":                 "~/.claude/skill-manifest.json",
-  "skill_registry":           "~/.claude/skill-registry.json",
-  "catalog_path":             "~/.claude/skill-wiki/catalog.md",
-  "versions_catalog_path":    "~/.claude/skill-wiki/versions-catalog.md",
   "max_skills_loaded":        15,
   "stale_threshold_days":     30,
   "intent_signal_threshold":  3,
@@ -154,305 +173,208 @@ All paths, thresholds, and numeric limits live in `config.json`. Nothing is hard
 
 | Key | What it controls |
 |-----|-----------------|
-| `claude_dir` | Root of Claude Code installation |
-| `wiki_path` | Karpathy wiki vault location |
-| `skills_dir` | Global skill library scanned at session start |
 | `max_skills_loaded` | Max skills loaded into context per session |
 | `stale_threshold_days` | Days of inactivity before a skill is flagged stale |
-| `intent_signal_threshold` | Unmatched signals needed to queue a new skill candidate |
+| `intent_signal_threshold` | Unmatched signals needed to trigger graph suggestions |
 | `convert_line_threshold` | Skills over this line count get converted to pipeline format |
-| `health_score_warn` | Orchestrator warns below this health score |
-| `health_score_critical` | Orchestrator alerts critical below this score |
 
-`ctx_config.py` is the config singleton — all scripts import from it. Environment variable overrides are supported for CI use.
+`src/ctx_config.py` is the config singleton. Environment variable overrides are supported.
 
 ---
 
-## Usage Examples
+## Usage
 
 ### Health check
 
 ```bash
-python wiki_orchestrator.py --check
+python src/wiki_orchestrator.py --check
 ```
-
-Runs all subsystem checks and outputs a health score from 0-100. Checks include: wiki integrity, entity page completeness, catalog freshness, hook injection status, stale skill count, and broken internal links.
-
-### Full maintenance sync
-
-```bash
-python wiki_orchestrator.py --sync
-```
-
-Runs lint, relinks converted pipelines to entity pages, rebuilds catalog and versions catalog, and updates the health score. Safe to run any time.
 
 ### Query the wiki
 
 ```bash
-# Natural language query with citations
-python wiki_query.py --query "docker skills"
-
-# Filter by tag
-python wiki_query.py --tag python
-
-# Show usage statistics
-python wiki_query.py --tag python --stats
+python src/wiki_query.py --tag python          # filter by tag
+python src/wiki_query.py --query "docker"      # natural language
+python src/wiki_query.py --tag python --stats   # with usage stats
 ```
-
-### Lint the wiki
-
-```bash
-python wiki_lint.py --wiki ~/.claude/skill-wiki
-```
-
-Finds orphaned entity pages (no matching skill file), broken internal links, and entity pages that have not been updated in over 30 days.
 
 ### Add a new skill
 
 ```bash
-python skill_add.py --skill-path /path/to/MY-SKILL.md --name my-skill
+python src/skill_add.py --skill-path /path/to/SKILL.md --name my-skill
 ```
 
-This copies the skill to `~/.claude/skills/my-skill/SKILL.md`, checks line count, auto-converts if over the threshold, creates a wiki entity page, links the entity to the converted pipeline if applicable, and updates the catalog.
+Copies the skill, auto-converts if >180 lines, creates wiki entity page, and updates the catalog.
 
-### Check what is eligible for conversion (dry-run)
+### Graph-based discovery
 
 ```bash
-PYTHONIOENCODING=utf-8 python batch_convert.py --scan ~/.claude/skills --dry-run
+# Find skills related to your current stack
+python src/resolve_graph.py --matched fastapi-pro,docker-expert --top 10
+
+# Or search by tags
+python src/resolve_graph.py --tags python,api --top 10
 ```
 
-### Run conversion on all eligible skills
+### Rebuild the knowledge graph
 
 ```bash
-PYTHONIOENCODING=utf-8 python batch_convert.py --scan ~/.claude/skills --auto
+python src/wiki_batch_entities.py --all     # ensure all have entity pages
+python src/wiki_graphify.py                 # rebuild graph + concepts + wikilinks
+```
+
+### Full maintenance sync
+
+```bash
+python src/wiki_orchestrator.py --sync
 ```
 
 ---
 
-## Adding New Skills
+## Knowledge Graph
 
-`skill_add.py` is the single entry point for adding skills to the system.
+The graph is stored at `~/.claude/skill-wiki/graphify-out/`:
 
-```bash
-python skill_add.py --skill-path /path/to/SKILL.md --name my-skill [--tags python,api]
+```
+graphify-out/
+  graph.json           # full graph (1,851 nodes, 472K edges) — networkx node-link format
+  communities.json     # 835 detected communities with labels and members
+  graph-report.md      # god nodes (most connected) + community summary
 ```
 
-What it does internally:
+### How graph-based routing works
 
-1. Copies the skill file to `~/.claude/skills/my-skill/SKILL.md`
-2. Counts lines — if over `convert_line_threshold` (default 180), invokes the micro-skills pipeline conversion
-3. Creates a wiki entity page at `~/.claude/skill-wiki/entities/skills/my-skill.md` with frontmatter: `use_count: 0`, `last_used: null`, `status: active`, and the supplied tags
-4. If converted, calls `link_conversions.py` to write a `pipeline_path` reference into the entity page
-5. Regenerates `catalog.md` and `versions-catalog.md`
+```
+1. scan_repo.py detects your stack (Python, FastAPI, Docker, etc.)
+2. resolve_skills.py finds the top skills matching your stack tags
+3. resolve_graph.py loads graph.json and walks 2-hop neighbors from matched skills
+   -> discovers skills/agents you didn't search for but are strongly connected
+   -> ranks by name relevance (50pts) + tag overlap (10pts/tag) + degree (tiebreak)
+   -> returns "you might also need" suggestions
+```
 
-To remove a skill: delete the directory from `~/.claude/skills/` and run `python wiki_lint.py --wiki ~/.claude/skill-wiki` to clean up the orphaned entity page.
+Example: you open a FastAPI project. The tag matcher finds `fastapi-pro`, `fastapi-templates`. The graph walker discovers that `python-fastapi-development`, `pydantic-models-py`, `async-python-patterns`, and `api-security-best-practices` are all heavily connected — and suggests them.
+
+### View in Obsidian
+
+Open `~/.claude/skill-wiki/` as an Obsidian vault. The graph view shows all 1,851 entities with wikilink connections. Concept pages act as cluster hubs.
 
 ---
 
-## Micro-Skills Pipeline
-
-Skills over 180 lines are too large to load in full context. ctx converts them to the stevesolun/micro-skills 5-stage gated pipeline format.
-
-Each stage is a separate file with a YES/NO quality gate before the next stage executes. The orchestrator SKILL.md is ~30 lines and is what the skill-router loads. Full stage content is read on demand.
-
-### Converted skill directory structure
+## Project Structure
 
 ```
-~/.claude/skills/<skill-name>/
-  SKILL.md              # orchestrator (~30 lines, loaded by router)
-  SKILL.md.original     # original file, preserved for audit and revert
-  check-gates.md        # gate definitions for each stage transition
-  failure-log.md        # append-only log of gate failures
-  original-hash.txt     # SHA of original for change detection
-  references/
-    01-scope.md         # Stage 1: define scope and constraints
-    02-plan.md          # Stage 2: produce implementation plan
-    03-build.md         # Stage 3: execute the build
-    04-check.md         # Stage 4: verify quality gates pass
-    05-deliver.md       # Stage 5: package and deliver output
+ctx/
+  README.md
+  CLAUDE.md
+  install.sh                    # end-to-end deployment script
+  skills/skill-router/          # skill-router agent, deployed to ~/.claude/agents/
+  src/
+    config.json                 # all configurable values
+    ctx_config.py               # config singleton
+    scan_repo.py                # detect tech stacks with confidence scores
+    resolve_skills.py           # score skills against a stack profile
+    resolve_graph.py            # walk the knowledge graph for discovery
+    context-monitor.py          # PostToolUse hook: extract intent signals
+    skill_suggest.py            # PostToolUse hook: surface graph suggestions
+    skill_loader.py             # load approved skills into session
+    skill_add.py                # add new skills with auto-convert + wiki ingestion
+    skill_add_detector.py       # PostToolUse hook: auto-register new skills
+    usage-tracker.py            # Stop hook: update wiki usage stats
+    batch_convert.py            # convert skills >180 lines to pipeline format
+    wiki_sync.py                # create/update wiki entity pages
+    wiki_batch_entities.py      # batch-generate entity pages for all skills/agents
+    wiki_graphify.py            # build knowledge graph + concept pages + wikilinks
+    wiki_lint.py                # find orphans, broken links, stale pages
+    wiki_query.py               # query wiki with tag filters and stats
+    wiki_orchestrator.py        # master orchestrator: health score + maintenance
+    catalog_builder.py          # build catalog.md listing all skills/agents
+    versions_catalog.py         # build versions-catalog.md for dual-version skills
+    link_conversions.py         # link entity pages to converted pipelines
+    inject_hooks.py             # merge hooks into ~/.claude/settings.json
+    skill-transformer.py        # interactive skill conversion tool
+    tests/                      # 121 pytest tests
 ```
-
-To revert a single skill to its original form:
-
-```bash
-cp ~/.claude/skills/<name>/SKILL.md.original ~/.claude/skills/<name>/SKILL.md
-```
-
-Full list of dual-version skills: `~/.claude/skill-wiki/versions-catalog.md`
 
 ---
 
 ## Wiki Structure
 
-The wiki uses Karpathy's 3-layer architecture: raw data, structured wiki pages, and a schema layer. It is an Obsidian-compatible vault with `.obsidian/` config included.
-
 ```
 ~/.claude/skill-wiki/
   SCHEMA.md                    # tag taxonomy, conventions, update policy
   index.md                     # all entity pages with one-line summaries
-  log.md                       # append-only action log (written by Stop hook)
-  catalog.md                   # bulk listing of all 1,489 managed skills + agents
-  versions-catalog.md          # 760 dual-version skills (original + pipeline)
-  .obsidian/                   # Obsidian vault config (graph, plugins, settings)
-  raw/
-    scans/                     # per-repo scan results (JSON)
-    marketplace-dumps/         # upstream skill registry snapshots
+  log.md                       # append-only action log
+  catalog.md                   # bulk listing of all skills + agents
+  versions-catalog.md          # 844 dual-version skills (original + pipeline)
   entities/
-    skills/                    # one .md per discovered skill
-      <skill-name>.md          # frontmatter: use_count, last_used, status, tags
-                               # body: description, pipeline_path (if converted)
-  converted/
-    <skill-name>/              # 760 converted pipelines
-      SKILL.md                 # orchestrator
-      references/              # 5 stage files
-      check-gates.md
-      failure-log.md
+    skills/                    # 1,439 entity pages (one per skill)
+    agents/                    # 412 entity pages (one per agent)
+  concepts/                    # 34 auto-generated community concept pages
+  converted/                   # 844 micro-skill pipelines
+  graphify-out/                # knowledge graph (graph.json, communities.json)
+  raw/scans/                   # per-repo scan results
+  .obsidian/                   # Obsidian vault config
 ```
 
-Entity page frontmatter example:
+---
 
-```yaml
----
-name: python-patterns
-status: active
-use_count: 14
-last_used: 2026-03-28
-tags: [python, patterns, async]
-pipeline_path: converted/python-patterns/SKILL.md
----
+## Micro-Skills Pipeline
+
+Skills over 180 lines are converted to the [stevesolun/micro-skills](https://github.com/stevesolun/micro-skills) 5-stage gated pipeline:
+
+```
+~/.claude/skills/<skill-name>/
+  SKILL.md              # orchestrator (~30 lines, loaded by router)
+  SKILL.md.original     # original file, preserved for revert
+  references/
+    01-scope.md         # Stage 1: define scope
+    02-plan.md          # Stage 2: implementation plan
+    03-build.md         # Stage 3: execute
+    04-check.md         # Stage 4: quality gates
+    05-deliver.md       # Stage 5: deliver
 ```
 
-Open `~/.claude/skill-wiki/` as a vault in Obsidian to get graph view, tag explorer, and backlink navigation across all 1,489 skills.
-
----
-
-## File Reference
-
-| File | Role |
-|------|------|
-| `scan_repo.py` | Scans a repo, detects tech stacks with confidence scores -> `stack-profile.json` |
-| `resolve_skills.py` | Scores all skills against a stack profile, outputs ranked `skill-manifest.json` |
-| `wiki_sync.py` | Creates/updates wiki entity pages, index.md, and log.md |
-| `context-monitor.py` | PostToolUse hook: extracts intent signals, writes `intent-log.jsonl` |
-| `usage-tracker.py` | Stop hook: updates wiki use counts, marks stale skills, appends to log.md |
-| `batch_convert.py` | Scans skills dir, converts all files over threshold to micro-skill pipeline format |
-| `skill_add.py` | Adds a new skill: copy + auto-convert + wiki entity page + catalog update |
-| `wiki_lint.py` | Finds orphaned pages, broken links, and stale entity pages in the wiki |
-| `wiki_query.py` | Queries the wiki with citations; supports tag filtering and usage stats |
-| `wiki_orchestrator.py` | Master orchestrator: health score 0-100, runs all maintenance operations |
-| `link_conversions.py` | Links wiki entity pages to their converted pipeline directories |
-| `catalog_builder.py` | Builds `catalog.md` listing all managed skills and agents |
-| `versions_catalog.py` | Builds `versions-catalog.md` listing all dual-version skills |
-| `inject_hooks.py` | Merges PostToolUse + Stop hooks into `~/.claude/settings.json` |
-| `ctx_config.py` | Config singleton: reads `config.json`, exposes all paths and thresholds |
-| `config.json` | All configurable values: paths, thresholds, numeric limits |
-| `skill-registry.json` | List of skill directories to scan (add project-local dirs here) |
-| `skills/skill-router/` | The skill-router micro-skill, deployed to `~/.claude/agents/` |
-| `install.sh` | End-to-end deployment script |
-
----
-
-## Skill Versions
-
-Every converted skill exists in two forms simultaneously:
-
-| Location | Content | Purpose |
-|----------|---------|---------|
-| `~/.claude/skills/<name>/SKILL.md` | Micro-skill orchestrator (~30 lines) | Loaded by skill-router at session start |
-| `~/.claude/skills/<name>/SKILL.md.original` | Original unmodified file | Audit trail, revert source |
-| `~/.claude/skill-wiki/converted/<name>/` | Full pipeline (5 stage files) | On-demand stage loading during execution |
-| `~/.claude/skill-wiki/entities/skills/<name>.md` | Wiki entity page | Usage tracking, tagging, status |
-
-The original is never deleted or modified. Revert any skill by copying `.original` over `SKILL.md`.
-
----
-
-## Adding More Skill Repositories
-
-Edit `~/.claude/skill-registry.json` to add project-local or team skill directories:
-
-```json
-{
-  "version": "1.0",
-  "skill_dirs": [
-    {"path": "~/.claude/skills",            "label": "global-skills", "enabled": true},
-    {"path": "~/.claude/agents",            "label": "global-agents", "enabled": true},
-    {"path": "/path/to/my/repo/skills",     "label": "my-project",   "enabled": true},
-    {"path": "/path/to/team/shared-skills", "label": "team-shared",  "enabled": true}
-  ]
-}
-```
-
-All enabled directories are scanned by `scan_repo.py` and their skills appear in `catalog.md`.
+Each stage has a YES/NO gate. Revert any skill: `cp ~/.claude/skills/<name>/SKILL.md.original ~/.claude/skills/<name>/SKILL.md`
 
 ---
 
 ## Troubleshooting
 
-**UnicodeEncodeError on Windows when running batch_convert.py**
-
-```bash
-PYTHONIOENCODING=utf-8 python batch_convert.py --scan ~/.claude/skills --auto
-```
-
-Set this permanently in your shell profile to avoid repeating it:
-
+**UnicodeEncodeError on Windows**
 ```bash
 export PYTHONIOENCODING=utf-8
 ```
 
-**inject_hooks.py exits with "missing required arguments"**
-
-Both `--settings` and `--ctx-dir` are required. `--ctx-dir` must be the absolute path to this repo so hook scripts can be referenced by absolute path in `settings.json`:
-
+**Health score below 70**
 ```bash
-python inject_hooks.py --settings ~/.claude/settings.json --ctx-dir $(pwd)
+python src/wiki_orchestrator.py --sync
 ```
 
-**wiki_orchestrator.py reports health score below 70**
-
-Run `--sync` to attempt automatic repair:
-
+**Hook not firing**
 ```bash
-python wiki_orchestrator.py --sync
-```
-
-If the health score stays below 70, run lint to see specific issues:
-
-```bash
-python wiki_lint.py --wiki ~/.claude/skill-wiki
-```
-
-**Entity pages exist but no matching skill files (orphans after deleting skills)**
-
-```bash
-python wiki_lint.py --wiki ~/.claude/skill-wiki --fix-orphans
-```
-
-**batch_convert.py finds 0 eligible skills**
-
-Check that `convert_line_threshold` in `config.json` is set correctly (default 180) and that the `skills_dir` path resolves to your actual skill library. Run with `--dry-run` to confirm file discovery:
-
-```bash
-python batch_convert.py --scan ~/.claude/skills --dry-run
-```
-
-**Hook not firing during Claude Code sessions**
-
-Verify hooks are present in `~/.claude/settings.json`:
-
-```bash
-python inject_hooks.py --settings ~/.claude/settings.json --ctx-dir $(pwd) --check
+python src/inject_hooks.py --settings ~/.claude/settings.json --ctx-dir "$(pwd)/src" --check
 ```
 
 ---
 
 ## Credits
 
-- Inspired by [Andrej Karpathy's LLM wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — the concept of LLMs maintaining persistent, compounding knowledge wikis that grow more useful over time
-- Micro-skill pipeline format from [stevesolun/micro-skills](https://github.com/stevesolun/micro-skills) — gated 5-stage pipeline (scope -> plan -> build -> check -> deliver) with YES/NO quality gates between stages
-- LLM wiki skill implementation adapted from [NousResearch/hermes-agent](https://raw.githubusercontent.com/NousResearch/hermes-agent/refs/heads/main/skills/research/llm-wiki/SKILL.md)
-- Extended wiki lifecycle concepts from [rohitg00's LLM wiki v2](https://gist.github.com/rohitg00/2067ab416f7bbe447c1977edaaa681e2)
+### Core concepts
+- [Andrej Karpathy's LLM wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — persistent, compounding knowledge wikis for LLMs
+- [stevesolun/micro-skills](https://github.com/stevesolun/micro-skills) — gated 5-stage pipeline format (scope -> plan -> build -> check -> deliver)
+- [NousResearch/hermes-agent](https://raw.githubusercontent.com/NousResearch/hermes-agent/refs/heads/main/skills/research/llm-wiki/SKILL.md) — LLM wiki skill implementation
+- [rohitg00's LLM wiki v2](https://gist.github.com/rohitg00/2067ab416f7bbe447c1977edaaa681e2) — extended wiki lifecycle concepts
+
+### Knowledge graph
+- [safishamsi/graphify](https://github.com/safishamsi/graphify) — knowledge graph library for AI coding assistants (community detection, wiki export)
+
+### Skill sources (ingested into the graph)
+- [affaan-m/everything-claude-code](https://github.com/affaan-m/everything-claude-code) — 457 skills, largest single source
+- [wshobson/agents](https://github.com/wshobson/agents) — 149 skills with agent-team patterns
+- [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents) — 158 agent definitions across 10 categories
+- [Lum1104/Understand-Anything](https://github.com/Lum1104/Understand-Anything) — 7 skills + 8 agents for codebase understanding
+- [zubair-trabzada/ai-legal-claude](https://github.com/zubair-trabzada/ai-legal-claude) — 13 legal skills + 5 agents
 
 ---
 

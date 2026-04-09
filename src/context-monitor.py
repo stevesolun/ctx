@@ -165,13 +165,69 @@ def count_recent_unmatched(signals: list[str], loaded_skills: set[str]) -> list[
     return unmatched
 
 
+def graph_suggest(unmatched_tags: list[str]) -> list[dict]:
+    """Use the knowledge graph to suggest skills/agents for unmatched signals.
+
+    Scoring: name match (50pts) > tag overlap (10pts/tag) > degree (tiebreak).
+    This ensures 'fastapi-pro' ranks above 'prompt-optimizer' for a 'fastapi' signal.
+    """
+    graph_path = Path(os.path.expanduser("~/.claude/skill-wiki/graphify-out/graph.json"))
+    if not graph_path.exists():
+        return []
+    try:
+        from networkx.readwrite import node_link_graph
+        import math
+        with open(graph_path, encoding="utf-8") as f:
+            G = node_link_graph(json.load(f))
+        tag_set = set(unmatched_tags)
+        scores: dict[str, float] = {}
+        for nid, data in G.nodes(data=True):
+            label = data.get("label", nid.split(":", 1)[-1]).lower()
+            node_tags = set(data.get("tags", []))
+            tag_overlap = tag_set & node_tags
+
+            score = 0.0
+            # Name-match bonus: if signal appears in the skill/agent name
+            for signal in unmatched_tags:
+                if signal.lower() in label:
+                    score += 50.0
+            # Tag overlap
+            score += len(tag_overlap) * 10.0
+            # Degree tiebreak (small)
+            if score > 0:
+                score += math.log1p(G.degree(nid))
+                scores[nid] = score
+
+        ranked = sorted(scores.items(), key=lambda x: -x[1])[:8]
+        return [
+            {
+                "name": G.nodes[nid].get("label", nid.split(":", 1)[-1]),
+                "type": G.nodes[nid].get("type", "skill"),
+                "score": round(sc, 1),
+                "matching_tags": sorted(tag_set & set(G.nodes[nid].get("tags", []))),
+            }
+            for nid, sc in ranked
+        ]
+    except Exception:
+        return []
+
+
 def write_pending_skills(unmatched: list[str]) -> None:
-    """Write pending skill suggestions for the next skill-router invocation."""
+    """Write pending skill suggestions enriched with graph-based discovery."""
+    graph_suggestions = graph_suggest(unmatched)
+    suggestion_names = [s["name"] for s in graph_suggestions[:5]]
+    suggestion_text = (
+        f"Detected {len(unmatched)} stack signals not covered by loaded skills: {', '.join(unmatched)}"
+    )
+    if suggestion_names:
+        suggestion_text += f". Graph suggests: {', '.join(suggestion_names)}"
+
     pending = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": "context-monitor",
         "unmatched_signals": unmatched,
-        "suggestion": f"Detected {len(unmatched)} stack signals not covered by loaded skills: {', '.join(unmatched)}",
+        "suggestion": suggestion_text,
+        "graph_suggestions": graph_suggestions,
     }
     with open(PENDING_SKILLS, "w", encoding="utf-8") as f:
         json.dump(pending, f, indent=2)

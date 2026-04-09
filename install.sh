@@ -9,8 +9,8 @@
 #   5. Deploys Python helpers (context-monitor, usage-tracker, skill-compiler)
 #   6. Creates skill-registry.json to track known skill directories
 #
-# Does NOT auto-convert skills to micro-skills (use skill-transformer.py separately)
-# Does NOT create individual wiki pages for all 1489 skills (done on demand)
+#   7. Generates entity pages for all skills + agents
+#   8. Builds the knowledge graph + concept pages + wikilinks
 #
 # Usage:
 #   bash install.sh [--ctx-dir /path/to/ctx]
@@ -26,6 +26,7 @@ SKILLS_DIR="$CLAUDE_DIR/skills"
 # Resolve ctx/ dir (where this script lives)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CTX_DIR="${1:-$SCRIPT_DIR}"
+SRC_DIR="$CTX_DIR/src"
 if [[ "$1" == "--ctx-dir" && -n "${2:-}" ]]; then
   CTX_DIR="$2"
 fi
@@ -42,12 +43,12 @@ warn(){ echo "[install] ⚠ $*"; }
 
 # ── Step 1: Initialize wiki ───────────────────────────────────────────────────
 log "Step 1: Initializing skill wiki at $WIKI_DIR"
-"$PYTHON" "$CTX_DIR/wiki_sync.py" --init --wiki "$WIKI_DIR"
+"$PYTHON" "$SRC_DIR/wiki_sync.py" --init --wiki "$WIKI_DIR"
 ok "Wiki initialized"
 
 # ── Step 2: Build bulk skill catalog ─────────────────────────────────────────
 log "Step 2: Building skill catalog (all installed skills → catalog.md)"
-"$PYTHON" "$CTX_DIR/catalog_builder.py" \
+"$PYTHON" "$SRC_DIR/catalog_builder.py" \
   --wiki "$WIKI_DIR" \
   --skills-dir "$SKILLS_DIR" \
   --agents-dir "$AGENTS_DIR"
@@ -68,9 +69,9 @@ fi
 
 # ── Step 4: Inject hooks into settings.json ───────────────────────────────────
 log "Step 4: Injecting hooks into $CLAUDE_DIR/settings.json"
-"$PYTHON" "$CTX_DIR/inject_hooks.py" \
+"$PYTHON" "$SRC_DIR/inject_hooks.py" \
   --settings "$CLAUDE_DIR/settings.json" \
-  --ctx-dir "$CTX_DIR"
+  --ctx-dir "$SRC_DIR"
 ok "Hooks injected"
 
 # ── Step 5: Create skill-registry.json ───────────────────────────────────────
@@ -111,12 +112,22 @@ print(f"Registry written: {len(dirs)} skill dirs")
 PYEOF
 ok "Skill registry created"
 
-# ── Step 6: Copy Python helpers ───────────────────────────────────────────────
-log "Step 6: Skill tools available at $CTX_DIR"
-log "  context-monitor.py  → PostToolUse hook"
-log "  usage-tracker.py    → Stop hook"
-log "  skill-transformer.py   → convert skills >180 lines"
-log "  catalog_builder.py  → rebuild skill catalog"
+# ── Step 6: Generate entity pages for all skills + agents ────────────────────
+log "Step 6: Generating entity pages for all skills and agents"
+"$PYTHON" "$SRC_DIR/wiki_batch_entities.py" --all
+ok "Entity pages generated"
+
+# ── Step 7: Build knowledge graph ────────────────────────────────────────────
+log "Step 7: Building knowledge graph + concept pages + wikilinks"
+"$PYTHON" "$SRC_DIR/wiki_graphify.py"
+ok "Knowledge graph built"
+
+# ── Step 8: Summary ──────────────────────────────────────────────────────────
+log "Step 8: Hooks and tools"
+log "  context-monitor.py   → PostToolUse: detect stack signals"
+log "  skill_suggest.py     → PostToolUse: surface graph suggestions"
+log "  skill_add_detector.py → PostToolUse: auto-register new skills"
+log "  usage-tracker.py     → Stop: update wiki usage stats"
 
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo ""
@@ -126,10 +137,15 @@ echo "════════════════════════�
 echo " Wiki:         $WIKI_DIR"
 echo " Registry:     $REGISTRY"
 echo " Skill router: $ROUTER_DST"
+echo " Source:       $SRC_DIR"
 echo ""
-echo " To convert large skills interactively:"
-echo "   $PYTHON $CTX_DIR/skill-transformer.py --scan $SKILLS_DIR"
+echo " To add a new skill:"
+echo "   $PYTHON $SRC_DIR/skill_add.py --skill-path /path/to/SKILL.md --name my-skill"
 echo ""
-echo " To rebuild catalog after adding new skills:"
-echo "   $PYTHON $CTX_DIR/catalog_builder.py --wiki $WIKI_DIR"
+echo " To rebuild the knowledge graph after changes:"
+echo "   $PYTHON $SRC_DIR/wiki_batch_entities.py --all"
+echo "   $PYTHON $SRC_DIR/wiki_graphify.py"
+echo ""
+echo " To check wiki health:"
+echo "   $PYTHON $SRC_DIR/wiki_orchestrator.py --check"
 echo ""
