@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "skill_dirs": [
+    {
+      "path": "C:\\Users\\solun/.claude/skills",
+      "label": "global-skills",
+      "enabled": true
+    },
+    {
+      "path": "C:\\Users\\solun/.claude/agents",
+      "label": "global-agents",
+      "enabled": true
+    }
+  ],
+  "notes": "Add more repos here. Each entry: {path, label, enabled}"
+}
