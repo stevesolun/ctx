@@ -21,6 +21,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+sys.path.insert(0, str(Path(__file__).parent))
+from ctx_config import cfg  # noqa: E402
+
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
@@ -315,8 +318,8 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--wiki", default=os.path.expanduser("~/.claude/skill-wiki"),
-                        help="Wiki root path (default: ~/.claude/skill-wiki)")
+    parser.add_argument("--wiki", default=str(cfg.wiki_dir),
+                        help=f"Wiki root path (default: {cfg.wiki_dir})")
     parser.add_argument("--query", "-q", help="Keyword query: searches name, tags, and body")
     parser.add_argument("--tag",   "-t", help="Filter skills by tag")
     parser.add_argument("--related", "-r", help="Find skills related to a given skill name")

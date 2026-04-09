@@ -24,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from batch_convert import convert_skill  # noqa: E402
+from ctx_config import cfg  # noqa: E402
 from wiki_sync import append_log, ensure_wiki, update_index, upsert_skill_page  # noqa: E402
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -81,7 +82,7 @@ def maybe_convert(
     Returns:
         (was_converted, output_dir | None)
     """
-    if line_count <= 180:
+    if line_count <= cfg.line_threshold:
         return False, None
 
     output_dir = converted_root / name
@@ -147,7 +148,7 @@ def build_entity_page(
     pipeline_note = (
         f"Pipeline converted to `{pipeline_path_str}` (original: {line_count} lines)."
         if has_pipeline
-        else f"Skill is {line_count} lines — under the 180-line threshold, no pipeline generated."
+        else f"Skill is {line_count} lines — under the {cfg.line_threshold}-line threshold, no pipeline generated."
     )
 
     return "\n".join(frontmatter_lines) + f"""
@@ -328,8 +329,8 @@ def main() -> None:
     parser.add_argument("--skill-path", help="Path to a single SKILL.md to add")
     parser.add_argument("--name", help="Skill name (required with --skill-path)")
     parser.add_argument("--scan-dir", help="Directory of skills to batch-add (each subdir with SKILL.md)")
-    parser.add_argument("--wiki", default=os.path.expanduser("~/.claude/skill-wiki"), help="Wiki path")
-    parser.add_argument("--skills-dir", default=os.path.expanduser("~/.claude/skills"), help="Skills install path")
+    parser.add_argument("--wiki", default=str(cfg.wiki_dir), help="Wiki path")
+    parser.add_argument("--skills-dir", default=str(cfg.skills_dir), help="Skills install path")
     args = parser.parse_args()
 
     wiki_path = Path(os.path.expanduser(args.wiki))

@@ -20,8 +20,12 @@ import argparse
 import json
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from ctx_config import cfg  # noqa: E402
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -45,7 +49,7 @@ def scan_skills_dir(skills_dir: Path) -> list[dict]:
                     "path": str(skill_md),
                     "lines": lines,
                     "type": "skill",
-                    "over_180": lines > 180,
+                    "over_180": lines > cfg.line_threshold,
                 })
     return results
 
@@ -66,7 +70,7 @@ def scan_agents_dir(agents_dir: Path) -> list[dict]:
             "path": str(item),
             "lines": lines,
             "type": "agent",
-            "over_180": lines > 180,
+            "over_180": lines > cfg.line_threshold,
         })
     return results
 
@@ -194,9 +198,9 @@ def append_log(wiki_dir: Path, stats: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build bulk skill catalog in wiki")
-    parser.add_argument("--wiki", default=os.path.expanduser("~/.claude/skill-wiki"), help="Wiki directory")
-    parser.add_argument("--skills-dir", default=os.path.expanduser("~/.claude/skills"), help="Skills directory")
-    parser.add_argument("--agents-dir", default=os.path.expanduser("~/.claude/agents"), help="Agents directory")
+    parser.add_argument("--wiki", default=str(cfg.wiki_dir), help="Wiki directory")
+    parser.add_argument("--skills-dir", default=str(cfg.skills_dir), help="Skills directory")
+    parser.add_argument("--agents-dir", default=str(cfg.agents_dir), help="Agents directory")
     parser.add_argument("--extra-dirs", nargs="*", default=[], help="Additional skill directories")
     args = parser.parse_args()
 

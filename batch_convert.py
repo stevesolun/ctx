@@ -25,8 +25,11 @@ import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
-MIN_LINES = 180
-MAX_STAGE_LINES = 40
+sys.path.insert(0, str(Path(__file__).parent))
+from ctx_config import cfg  # noqa: E402
+
+MIN_LINES = cfg.line_threshold
+MAX_STAGE_LINES = cfg.max_stage_lines
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
@@ -212,7 +215,7 @@ def convert_skill(skill_path: Path, output_dir: Path | None = None) -> dict:
     lines = content.split("\n")
     line_count = len(lines)
 
-    if line_count <= 180:
+    if line_count <= cfg.line_threshold:
         return {"status": "skipped", "reason": f"{line_count} lines <= {MIN_LINES}"}
 
     # Compute source hash
@@ -452,7 +455,7 @@ def main():
     parser = argparse.ArgumentParser(description="Batch convert skills to micro-skill pipeline")
     parser.add_argument("--scan", help="Directory to scan for SKILL.md files")
     parser.add_argument("--file", help="Single SKILL.md file to convert")
-    parser.add_argument("--min-lines", type=int, default=180, help="Minimum lines to convert (default: 180)")
+    parser.add_argument("--min-lines", type=int, default=cfg.line_threshold, help=f"Minimum lines to convert (default: {cfg.line_threshold})")
     parser.add_argument("--dry-run", action="store_true", help="Just count, don't convert")
     parser.add_argument("--extra-dirs", nargs="*", help="Additional directories to scan")
     args = parser.parse_args()

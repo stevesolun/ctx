@@ -23,6 +23,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+from ctx_config import cfg  # noqa: E402
+
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 # ---------------------------------------------------------------------------
@@ -396,13 +399,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--wiki",
-        default=os.path.expanduser("~/.claude/skill-wiki"),
-        help="Path to the skill wiki root (default: ~/.claude/skill-wiki)",
+        default=str(cfg.wiki_dir),
+        help=f"Path to the skill wiki root (default: {cfg.wiki_dir})",
     )
     parser.add_argument(
         "--skills-dir",
-        default=os.path.expanduser("~/.claude/skills"),
-        help="Path to the skills directory (default: ~/.claude/skills)",
+        default=str(cfg.skills_dir),
+        help=f"Path to the skills directory (default: {cfg.skills_dir})",
     )
     args = parser.parse_args()
 

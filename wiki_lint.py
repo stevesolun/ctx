@@ -27,6 +27,9 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).parent))
+from ctx_config import cfg  # noqa: E402
+
 WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*)?\]\]")
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 REQUIRED_FM_KEYS = {"title", "created", "updated", "type", "tags"}
@@ -144,7 +147,6 @@ def check_broken_wikilinks(pages: dict[str, Path]) -> list[Finding]:
                                  f"[[{link}]] resolves to no existing page"))
     return out
 
-
 def check_orphan_pages(pages: dict[str, Path]) -> list[Finding]:
     inbound: dict[str, int] = {s: 0 for s in pages}
     for slug, path in pages.items():
@@ -159,7 +161,6 @@ def check_orphan_pages(pages: dict[str, Path]) -> list[Finding]:
         if count == 0 and _is_canonical(slug)
     ]
 
-
 def check_missing_frontmatter(pages: dict[str, Path]) -> list[Finding]:
     out: list[Finding] = []
     for slug, path in pages.items():
@@ -173,7 +174,6 @@ def check_missing_frontmatter(pages: dict[str, Path]) -> list[Finding]:
                              f"Frontmatter missing keys: {sorted(missing)}"))
     return out
 
-
 def check_stale_content(pages: dict[str, Path]) -> list[Finding]:
     out: list[Finding] = []
     for slug, path in pages.items():
@@ -186,7 +186,6 @@ def check_stale_content(pages: dict[str, Path]) -> list[Finding]:
                              f"updated {age} days ago (threshold: {STALE_DAYS})"))
     return out
 
-
 def check_index_completeness(pages: dict[str, Path], wiki: Path) -> list[Finding]:
     refs = _index_refs(wiki)
     return [
@@ -194,7 +193,6 @@ def check_index_completeness(pages: dict[str, Path], wiki: Path) -> list[Finding
         for slug in pages
         if _is_canonical(slug) and slug not in refs and Path(slug).stem not in refs
     ]
-
 
 def check_tag_hygiene(pages: dict[str, Path], wiki: Path) -> list[Finding]:
     allowed = _schema_tags(wiki)
@@ -213,7 +211,6 @@ def check_tag_hygiene(pages: dict[str, Path], wiki: Path) -> list[Finding]:
                                  f"Tag '{t}' not in SCHEMA.md taxonomy"))
     return out
 
-
 def check_wikilink_minimum(pages: dict[str, Path]) -> list[Finding]:
     return [
         _find("wikilink_minimum", "warn", slug,
@@ -222,7 +219,6 @@ def check_wikilink_minimum(pages: dict[str, Path]) -> list[Finding]:
         if _is_canonical(slug) and (n := len(_wikilinks(_read(path)))) < MIN_OUTBOUND_LINKS
     ]
 
-
 def check_log_rotation(wiki: Path) -> list[Finding]:
     n = _log_entry_count(wiki)
     if n > LOG_ENTRY_LIMIT:
@@ -230,14 +226,12 @@ def check_log_rotation(wiki: Path) -> list[Finding]:
                       f"{n} entries (threshold: {LOG_ENTRY_LIMIT}); consider archiving")]
     return []
 
-
 def check_oversized_pages(pages: dict[str, Path]) -> list[Finding]:
     return [
         _find("oversized_page", "info", slug, f"{n} lines (threshold: {MAX_PAGE_LINES})")
         for slug, path in pages.items()
         if _is_canonical(slug) and (n := len(_read(path).splitlines())) > MAX_PAGE_LINES
     ]
-
 
 def check_pipeline_linkage(pages: dict[str, Path], wiki: Path) -> list[Finding]:
     converted = wiki / "converted"
@@ -252,7 +246,6 @@ def check_pipeline_linkage(pages: dict[str, Path], wiki: Path) -> list[Finding]:
             out.append(_find("pipeline_linkage", "error", slug,
                              f"has_pipeline: true but converted/{path.stem}/ not found"))
     return out
-
 
 def check_contradictions(pages: dict[str, Path]) -> list[Finding]:
     out: list[Finding] = []
@@ -291,7 +284,6 @@ def fix_index(wiki: Path, missing_slugs: list[str]) -> int:
         added += 1
     idx.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return added
-
 
 def fix_log_rotation(wiki: Path) -> bool:
     log = wiki / "log.md"
@@ -364,8 +356,8 @@ def print_json_output(result: AuditResult) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Audit skill wiki health.")
-    parser.add_argument("--wiki", default=os.path.expanduser("~/.claude/skill-wiki"),
-                        help="Wiki root path (default: ~/.claude/skill-wiki)")
+    parser.add_argument("--wiki", default=str(cfg.wiki_dir),
+                        help=f"Wiki root path (default: {cfg.wiki_dir})")
     parser.add_argument("--fix", action="store_true",
                         help="Auto-fix: add missing index entries, rotate log")
     parser.add_argument("--json", action="store_true",
