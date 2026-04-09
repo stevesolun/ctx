@@ -1,0 +1,54 @@
+{
+  "_comment": "Alive Skill System configuration. Edit this file to customize paths and thresholds.",
+  "_config_path": "~/.claude/skill-system-config.json",
+
+  "paths": {
+    "claude_dir": "~/.claude",
+    "wiki_dir": "~/.claude/skill-wiki",
+    "skills_dir": "~/.claude/skills",
+    "agents_dir": "~/.claude/agents",
+    "skill_manifest": "~/.claude/skill-manifest.json",
+    "intent_log": "~/.claude/intent-log.jsonl",
+    "pending_skills": "~/.claude/pending-skills.json",
+    "skill_registry": "~/.claude/skill-registry.json",
+    "stack_profile_tmp": "/tmp/skill-stack-profile.json",
+    "catalog": "~/.claude/skill-wiki/catalog.md"
+  },
+
+  "resolver": {
+    "max_skills": 15,
+    "intent_boost_per_signal": 5,
+    "intent_boost_max": 15,
+    "staleness_penalty": -8,
+    "meta_skills": ["skill-router", "file-reading"]
+  },
+
+  "context_monitor": {
+    "unmatched_signal_threshold": 3,
+    "manifest_stale_minutes": 60
+  },
+
+  "usage_tracker": {
+    "stale_threshold_sessions": 30,
+    "keep_log_days": 5
+  },
+
+  "skill_transformer": {
+    "line_threshold": 180,
+    "max_stage_lines": 40,
+    "stage_count": 5
+  },
+
+  "skill_router": {
+    "manifest_stale_minutes": 60,
+    "manifest_max_age_hours": 24
+  },
+
+  "extra_skill_dirs": [],
+
+  "babysitter": {
+    "plugin_root": "C:/Users/solun/.claude/plugins/cache/a5c-ai/babysitter/4.0.149",
+    "runs_dir": ".a5c/runs",
+    "sdk_version": "latest"
+  }
+}

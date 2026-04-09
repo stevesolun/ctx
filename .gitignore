@@ -1,0 +1,52 @@
+# Babysitter orchestration — runs, state, and local SDK install
+.a5c/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+.venv/
+venv/
+env/
+.env
+
+# Node / npm
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Temp / runtime outputs
+/tmp/
+*.tmp
+*.bak
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Skill system runtime files (generated, not source)
+/skills/skill-router/check-gates.md
+/skills/skill-router/failure-log.md
+
+# Agent directives (cloned from global ~/.claude/CLAUDE.md — personal, not for sharing)
+CLAUDE.md
+
+# Wiki (runtime knowledge store, not source)
+# Uncomment to exclude the wiki from the repo:
+# ~/.claude/skill-wiki/
+
+# Intent log and pending signals (session runtime)
+# These live in ~/.claude/ so already outside the repo
+
+# Secrets / config overrides
+skill-system-config.json
+.env.local
