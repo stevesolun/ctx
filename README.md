@@ -1,6 +1,6 @@
 # ctx — Alive Skill System Agent
 
-An autonomous agent that uses a Karpathy LLM wiki and a knowledge graph of **1,434 skills + 425 agents** as ground truth for Claude Code. It scans your project, loads only what is relevant, traverses the graph to suggest related capabilities in real-time, converts long skills into structured micro-skill pipelines, and learns from session usage — without manual intervention.
+A real-time recommendation engine for Claude Code skills and agents. It watches what you develop, walks a knowledge graph of **1,434 skills + 425 agents**, and recommends the right skills and agents on the fly — you decide what to load. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 ---
 
@@ -9,7 +9,7 @@ An autonomous agent that uses a Karpathy LLM wiki and a knowledge graph of **1,4
 Claude Code skills and agents are powerful, but at scale they become unmanageable:
 
 - **Discovery problem**: With 1,400+ skills, how do you know which ones exist? Which ones are relevant to your current project?
-- **Context budget**: Loading all skills into context wastes tokens and degrades quality. You need exactly the right 10-15 skills per session.
+- **Context budget**: Loading all skills into context wastes tokens and degrades quality. You need exactly the right 10-15 skills and agents per session.
 - **Hidden connections**: A FastAPI skill is useful, but you also need the Pydantic skill, the async Python patterns skill, and the Docker skill. Nobody tells you that.
 - **Skill rot**: Skills you installed 3 months ago and never used are cluttering your context. Stale skills should be flagged and archived.
 
@@ -31,10 +31,10 @@ ctx applies that pattern to skill management — and extends it with graph-based
 - **34 auto-generated concept pages** group related skills into named communities (e.g., "Security + Testing", "Python + Api + Database")
 - PostToolUse and Stop hooks update the wiki automatically during each Claude Code session
 - Skills over 180 lines are converted to a gated 5-stage micro-skill pipeline (844 converted) so the router can load them incrementally
-- The skill-router agent runs at session start, reads the wiki, and loads only the skills that match your current project's stack
-- Mid-session, the context monitor watches every tool call, detects new stack signals, walks the graph, and suggests relevant skills/agents — **but only loads them if you approve**
+- At session start, the skill-router scans your project and **recommends** the best-matching skills and agents
+- Mid-session, the context monitor watches every tool call, detects new stack signals, walks the graph, and **recommends** relevant skills and agents in real-time — **nothing loads without your approval**
 
-The result: your skill library gets smarter every session. High-signal skills surface. The graph reveals hidden connections. Stale ones are flagged. New ones self-ingest.
+The result: you always know what skills and agents are available for your current task. The graph reveals hidden connections. The wiki learns from your usage. Stale ones are flagged. New ones self-ingest.
 
 ---
 
@@ -46,8 +46,9 @@ Session start
     -> scan_repo.py detects stacks (Python, Docker, FastAPI, etc.) with confidence scores
     -> resolve_skills.py scores each skill against the detected stack
     -> resolve_graph.py walks the graph from matched skills to discover related ones
-    -> loads <=15 highest-priority skills into context
-    -> unloads stale ones (unseen >30 days)
+    -> recommends top skills + agents for this project
+    -> user approves which ones to load (max 15 per session)
+    -> flags stale ones unseen >30 days
 
 Mid-session (every tool call)
   context-monitor.py (PostToolUse hook)
