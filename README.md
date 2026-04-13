@@ -5,7 +5,7 @@
 [![Skills](https://img.shields.io/badge/Skills-1%2C724-purple.svg)](#)
 [![Agents](https://img.shields.io/badge/Agents-443-orange.svg)](#)
 [![Graph](https://img.shields.io/badge/Knowledge_Graph-593K_edges-red.svg)](#knowledge-graph)
-[![Tests](https://img.shields.io/badge/Tests-121_passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-163_passing-brightgreen.svg)](#)
 
 Watches what you develop, walks a knowledge graph of **1,724 skills and 443 agents**, and recommends the right ones on the fly - you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
@@ -64,7 +64,7 @@ Mid-session (every tool call)
     -> if >=3 new unmatched signals -> walks the graph for best matches
     -> writes pending-skills.json with graph-ranked suggestions
 
-  skill_suggest.py (PostToolUse hook, runs after context-monitor)
+  skill_suggest.py (PostToolUse hook, runs after context_monitor)
     -> reads pending-skills.json
     -> surfaces suggestions to Claude via hookSpecificOutput
     -> Claude tells the user: "ctx suggests these skills. Want me to load any?"
@@ -162,31 +162,41 @@ python src/wiki_graphify.py
 
 ## Configuration
 
-All paths, thresholds, and numeric limits live in `src/config.json`. Nothing is hardcoded.
+All paths, thresholds, and numeric limits live in `src/config.json` (nested structure). User overrides go in `~/.claude/skill-system-config.json`. Nothing is hardcoded.
 
 ```json
 {
-  "claude_dir":               "~/.claude",
-  "wiki_path":                "~/.claude/skill-wiki",
-  "skills_dir":               "~/.claude/skills",
-  "agents_dir":               "~/.claude/agents",
-  "max_skills_loaded":        15,
-  "stale_threshold_days":     30,
-  "intent_signal_threshold":  3,
-  "convert_line_threshold":   180,
-  "health_score_warn":        70,
-  "health_score_critical":    50
+  "paths": {
+    "wiki_dir": "~/.claude/skill-wiki",
+    "skills_dir": "~/.claude/skills",
+    "agents_dir": "~/.claude/agents"
+  },
+  "resolver": {
+    "max_skills": 15,
+    "staleness_penalty": -8
+  },
+  "context_monitor": {
+    "unmatched_signal_threshold": 3
+  },
+  "usage_tracker": {
+    "stale_threshold_sessions": 30
+  },
+  "skill_transformer": {
+    "line_threshold": 180
+  },
+  "tags": ["python", "javascript", "..."]
 }
 ```
 
-| Key | What it controls |
-|-----|-----------------|
-| `max_skills_loaded` | Max skills loaded into context per session |
-| `stale_threshold_days` | Days of inactivity before a skill is flagged stale |
-| `intent_signal_threshold` | Unmatched signals needed to trigger graph suggestions |
-| `convert_line_threshold` | Skills over this line count get converted to pipeline format |
+| Section | Key | What it controls |
+|---------|-----|-----------------|
+| `resolver` | `max_skills` | Max skills loaded into context per session |
+| `usage_tracker` | `stale_threshold_sessions` | Sessions of inactivity before flagging stale |
+| `context_monitor` | `unmatched_signal_threshold` | Unmatched signals needed to trigger graph walk |
+| `skill_transformer` | `line_threshold` | Skills over this line count get converted to pipeline |
+| root | `tags` | Tag taxonomy for skill classification (configurable) |
 
-`src/ctx_config.py` is the config singleton. Environment variable overrides are supported.
+`src/ctx_config.py` is the config singleton. User overrides in `~/.claude/skill-system-config.json` are deep-merged over defaults.
 
 ---
 
@@ -337,12 +347,13 @@ ctx/
     wiki_lint.py                # find orphans, broken links, stale pages
     wiki_query.py               # query wiki with tag filters and stats
     wiki_orchestrator.py        # master orchestrator: health score + maintenance
+    wiki_utils.py               # shared frontmatter parsing + name validation
     catalog_builder.py          # build catalog.md listing all skills/agents
     versions_catalog.py         # build versions-catalog.md for dual-version skills
     link_conversions.py         # link entity pages to converted pipelines
     inject_hooks.py             # merge hooks into ~/.claude/settings.json
     skill_transformer.py        # interactive skill conversion tool
-    tests/                      # 121 pytest tests
+    tests/                      # 163 pytest tests
 ```
 
 ---
