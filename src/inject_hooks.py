@@ -30,15 +30,14 @@ def load_settings(path: Path) -> dict:
 
 def make_hooks(ctx_dir: str) -> dict:
     """Return the hooks config block for this installation."""
-    python = "python3"
-    # On Windows with bash, python3 might not exist — try python fallback
-    # The hooks system runs in the user's shell, so we embed a safe fallback
+    # The hooks system runs in the user's shell; 2>/dev/null || true ensures
+    # silent failure if the script is missing or python3 is unavailable
     monitor_cmd = (
-        f'python3 "{ctx_dir}/context-monitor.py" '
+        f'python3 "{ctx_dir}/context_monitor.py" '
         f'--tool "$CLAUDE_TOOL_NAME" --input "$CLAUDE_TOOL_INPUT" 2>/dev/null || true'
     )
     tracker_cmd = (
-        f'python3 "{ctx_dir}/usage-tracker.py" --sync 2>/dev/null || true'
+        f'python3 "{ctx_dir}/usage_tracker.py" --sync 2>/dev/null || true'
     )
     # Skill-add detection: when Write/Edit/Bash touches a SKILL.md path → register in wiki
     skill_add_cmd = (
@@ -77,6 +76,32 @@ def make_hooks(ctx_dir: str) -> dict:
             }
         ],
     }
+
+
+# Old filenames that were renamed — remove stale hook entries referencing them
+_STALE_PATTERNS = ["context-monitor.py", "usage-tracker.py", "skill-transformer.py"]
+
+
+def _remove_stale_hooks(settings: dict) -> dict:
+    """Remove hook entries that reference renamed/deleted scripts."""
+    hooks = settings.get("hooks", {})
+    for event_name, entries in list(hooks.items()):
+        cleaned = []
+        for entry in entries:
+            if isinstance(entry, dict):
+                cmd = entry.get("command", "")
+                sub_hooks = entry.get("hooks", [])
+                if any(pat in cmd for pat in _STALE_PATTERNS):
+                    continue
+                if sub_hooks:
+                    sub_hooks = [h for h in sub_hooks
+                                 if not any(pat in h.get("command", "") for pat in _STALE_PATTERNS)]
+                    if not sub_hooks:
+                        continue
+                    entry["hooks"] = sub_hooks
+            cleaned.append(entry)
+        hooks[event_name] = cleaned
+    return settings
 
 
 def merge_hooks(existing: dict, new_hooks: dict) -> dict:
@@ -124,6 +149,7 @@ def main() -> None:
     ctx_dir = os.path.abspath(args.ctx_dir)
 
     settings = load_settings(settings_path)
+    settings = _remove_stale_hooks(settings)
     new_hooks = make_hooks(ctx_dir)
     updated = merge_hooks(settings, new_hooks)
 
@@ -132,8 +158,8 @@ def main() -> None:
     settings_path.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
 
     print(f"Hooks injected into {settings_path}")
-    print(f"  PostToolUse: context-monitor + skill-add-detector + skill-suggest")
-    print(f"  Stop: usage-tracker")
+    print(f"  PostToolUse: context_monitor + skill-add-detector + skill-suggest")
+    print(f"  Stop: usage_tracker")
 
 
 if __name__ == "__main__":

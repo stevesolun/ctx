@@ -2,7 +2,7 @@
 """
 skill_suggest.py -- PostToolUse hook: surface graph-based skill suggestions to the user.
 
-Reads pending-skills.json (written by context-monitor.py when unmatched signals
+Reads pending-skills.json (written by context_monitor.py when unmatched signals
 are detected). If suggestions exist and haven't been shown this session, outputs
 a hookSpecificOutput message that Claude presents to the user as a recommendation.
 
@@ -40,7 +40,8 @@ def already_shown_this_session() -> bool:
             pending_at = pending_data.get("generated_at", "")
         # Already shown if the pending file hasn't been updated since last show
         return shown_at >= pending_at
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: failed to check shown status: {exc}", file=sys.stderr)
         return False
 
 

@@ -34,9 +34,9 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 from ctx_config import cfg  # noqa: E402
+from wiki_utils import FRONTMATTER_RE, parse_frontmatter as _parse_frontmatter  # noqa: E402
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*)?\]\]")
-FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 REQUIRED_FM_KEYS = {"title", "created", "updated", "type", "tags"}
 STALE_DAYS = 90
 LOG_ENTRY_LIMIT = 500
@@ -68,21 +68,6 @@ class AuditResult:
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
-
-def _parse_frontmatter(text: str) -> dict[str, Any]:
-    m = FRONTMATTER_RE.match(text)
-    if not m:
-        return {}
-    fm: dict[str, Any] = {}
-    for line in m.group(1).splitlines():
-        if ":" not in line:
-            continue
-        key, _, val = line.partition(":")
-        key, val = key.strip(), val.strip()
-        if val.startswith("[") and val.endswith("]"):
-            val = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
-        fm[key] = val
-    return fm
 
 
 def _parse_date(value: str) -> date | None:

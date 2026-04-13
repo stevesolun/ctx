@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import json
+import math
 import os
 import sys
 from collections import defaultdict
@@ -127,7 +128,6 @@ def resolve_by_tags(
         overlap = tag_set & node_tags
         if overlap:
             # Score = number of matching tags + log(degree) for tiebreaking
-            import math
             scores[nid] = len(overlap) * 10 + math.log1p(G.degree(nid))
 
     ranked = sorted(scores.items(), key=lambda x: -x[1])[:top_n]

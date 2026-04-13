@@ -102,7 +102,8 @@ def count_lines(filepath: Path) -> int:
     """Count lines in a file."""
     try:
         return len(filepath.read_text(encoding="utf-8", errors="replace").split("\n"))
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: failed to count lines in {filepath}: {exc}", file=sys.stderr)
         return 0
 
 
@@ -121,14 +122,16 @@ def generate_skill_page(skill_name: str) -> str:
     if skill_file.exists():
         try:
             content = skill_file.read_text(encoding="utf-8", errors="replace")
-        except Exception:
+        except Exception as exc:
+            print(f"Warning: failed to read skill file {skill_file}: {exc}", file=sys.stderr)
             content = ""
 
     original_content = ""
     if original_file.exists():
         try:
             original_content = original_file.read_text(encoding="utf-8", errors="replace")
-        except Exception:
+        except Exception as exc:
+            print(f"Warning: failed to read original skill file {original_file}: {exc}", file=sys.stderr)
             original_content = ""
 
     # Use original content for description if available (it's the unmodified version)
@@ -160,7 +163,7 @@ updated: {TODAY}
 type: skill
 status: installed
 tags: [{', '.join(tags)}]
-has_original: {'true' if has_original or not has_transformed else 'true'}
+has_original: {'true' if has_original else 'false'}
 has_transformed: {'true' if has_transformed else 'false'}
 preferred_version: {preferred}
 original_path: {orig_path}
@@ -196,7 +199,8 @@ def generate_agent_page(agent_name: str, agent_file: Path | None = None) -> str:
     if agent_file.exists():
         try:
             content = agent_file.read_text(encoding="utf-8", errors="replace")
-        except Exception:
+        except Exception as exc:
+            print(f"Warning: failed to read agent file {agent_file}: {exc}", file=sys.stderr)
             content = ""
 
     description = extract_description(content)

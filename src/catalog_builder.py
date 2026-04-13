@@ -42,7 +42,8 @@ def scan_skills_dir(skills_dir: Path) -> list[dict]:
             if skill_md.exists():
                 try:
                     lines = len(skill_md.read_text(encoding="utf-8", errors="replace").splitlines())
-                except Exception:
+                except Exception as exc:
+                    print(f"Warning: failed to read skill file {skill_md}: {exc}", file=sys.stderr)
                     lines = 0
                 results.append({
                     "name": item.name,
@@ -63,7 +64,8 @@ def scan_agents_dir(agents_dir: Path) -> list[dict]:
     for item in sorted(agents_dir.glob("*.md")):
         try:
             lines = len(item.read_text(encoding="utf-8", errors="replace").splitlines())
-        except Exception:
+        except Exception as exc:
+            print(f"Warning: failed to read agent file {item}: {exc}", file=sys.stderr)
             lines = 0
         results.append({
             "name": item.stem,

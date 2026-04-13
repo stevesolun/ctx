@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from ctx_config import cfg
+from wiki_utils import parse_frontmatter as _parse_frontmatter
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 SCRIPT_DIR = Path(__file__).parent
@@ -114,19 +115,6 @@ def _count_log_entries(log_path: Path) -> int:
                if ln.startswith("## ["))
 
 
-def _parse_frontmatter(text: str) -> dict[str, str]:
-    if not text.startswith("---"):
-        return {}
-    end = text.find("---", 3)
-    if end < 0:
-        return {}
-    fm: dict[str, str] = {}
-    for line in text[3:end].splitlines():
-        if ":" in line:
-            k, _, v = line.partition(":")
-            fm[k.strip()] = v.strip()
-    return fm
-
 
 def _entity_pages(wiki_dir: Path) -> list[Path]:
     d = wiki_dir / "entities" / "skills"
@@ -140,8 +128,8 @@ def _all_wikilinks(wiki_dir: Path) -> set[str]:
             for m in re.finditer(r"\[\[([^\]]+)\]\]",
                                  md.read_text(encoding="utf-8", errors="replace")):
                 links.add(m.group(1).strip())
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"Warning: failed to extract wikilinks from {md}: {exc}", file=sys.stderr)
     return links
 
 
@@ -242,8 +230,8 @@ def run_check(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: A
                 fm = _parse_frontmatter(pp.read_text(encoding="utf-8", errors="replace"))
                 if fm.get("has_pipeline", "").lower() != "true":
                     r.warnings.append(f"  [warn] {name}: entity page missing has_pipeline: true")
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"Warning: failed to check pipeline flag for {name}: {exc}", file=sys.stderr)
 
     # index.md count vs disk count
     declared = _index_declared_count(wiki_dir)
@@ -468,7 +456,13 @@ def run_add(wiki_dir: Path, skill_path_or_name: str) -> None:
     sa = _try_import("skill_add", r)
     if sa and hasattr(sa, "add_skill"):
         try:
-            sa.add_skill(skill_path_or_name, str(wiki_dir))
+            skill_name = Path(skill_path_or_name).stem
+            sa.add_skill(
+                source_path=Path(skill_path_or_name),
+                name=skill_name,
+                wiki_path=wiki_dir,
+                skills_dir=cfg.skills_dir,
+            )
             print(f"Added skill via skill_add: {skill_path_or_name}")
             return
         except Exception as exc:

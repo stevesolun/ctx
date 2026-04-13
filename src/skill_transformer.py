@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-skill-transformer.py -- Convert skills >180 lines to micro-skills pipeline format.
+skill_transformer.py -- Convert skills >180 lines to micro-skills pipeline format.
 
 Micro-skill format (from https://github.com/stevesolun/micro-skills):
   skill-name/
@@ -17,19 +17,19 @@ Micro-skill format (from https://github.com/stevesolun/micro-skills):
 
 Usage:
     # Interactive: scan dir and ASK before converting each
-    python skill-transformer.py --scan ~/.claude/skills
+    python skill_transformer.py --scan ~/.claude/skills
 
     # Convert a specific file (still asks for confirmation)
-    python skill-transformer.py --file ~/.claude/skills/my-skill/SKILL.md
+    python skill_transformer.py --file ~/.claude/skills/my-skill/SKILL.md
 
     # Non-interactive bulk conversion (for automation)
-    python skill-transformer.py --scan ~/.claude/skills --auto
+    python skill_transformer.py --scan ~/.claude/skills --auto
 
     # Dry run: report what would be converted, no changes
-    python skill-transformer.py --scan ~/.claude/skills --dry-run
+    python skill_transformer.py --scan ~/.claude/skills --dry-run
 
     # Add extra skill directories (future repos)
-    python skill-transformer.py --scan ~/.claude/skills --extra-dirs /path/to/more-skills
+    python skill_transformer.py --scan ~/.claude/skills --extra-dirs /path/to/more-skills
 """
 
 import argparse
@@ -70,7 +70,8 @@ def find_skills_over_threshold(scan_dir: Path) -> list[tuple[Path, int]]:
             lines = skill_md.read_text(encoding="utf-8", errors="replace").splitlines()
             if len(lines) > LINE_THRESHOLD:
                 results.append((skill_md, len(lines)))
-        except Exception:
+        except Exception as exc:
+            print(f"Warning: failed to read skill file {skill_md}: {exc}", file=sys.stderr)
             continue
     return results
 

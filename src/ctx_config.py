@@ -14,6 +14,7 @@ Usage:
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -30,16 +31,16 @@ def _load_raw() -> dict[str, Any]:
     if _DEFAULT_CONFIG.exists():
         try:
             raw = json.loads(_DEFAULT_CONFIG.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"Warning: failed to load default config: {exc}", file=sys.stderr)
 
     if _USER_CONFIG.exists():
         try:
             user = json.loads(_USER_CONFIG.read_text(encoding="utf-8"))
             # Deep merge: user values override defaults
             _deep_merge(raw, user)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"Warning: failed to load user config: {exc}", file=sys.stderr)
 
     return raw
 
@@ -111,6 +112,19 @@ class Config:
         self.extra_skill_dirs: list[Path] = [
             Path(_expand(d)) for d in raw.get("extra_skill_dirs", [])
         ]
+
+        # ── Tag Taxonomy ──────────────────────────────────────────────────
+        self.all_tags: list[str] = raw.get("tags", [
+            "python", "javascript", "typescript", "rust", "go", "java", "ruby", "swift", "kotlin",
+            "react", "vue", "angular", "nextjs", "fastapi", "django", "express", "flask",
+            "docker", "kubernetes", "terraform", "ci-cd", "aws", "gcp", "azure",
+            "sql", "nosql", "redis", "kafka", "spark", "dbt", "airflow",
+            "llm", "agents", "mcp", "langchain", "embeddings", "fine-tuning", "rag",
+            "testing", "linting", "typing", "security", "performance",
+            "documentation", "api-spec", "markdown", "diagrams",
+            "comparison", "decision", "pattern", "troubleshooting",
+            "marketplace", "registry", "versioning", "compatibility",
+        ])
 
         # ── Babysitter ─────────────────────────────────────────────────────
         self.babysitter_plugin_root: str = bsitter.get("plugin_root", "")

@@ -25,6 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from ctx_config import cfg  # noqa: E402
+from wiki_utils import get_field as _find_field  # noqa: E402
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -58,11 +59,6 @@ class ProcessResult:
 _FM_PATTERN = re.compile(r"^---\r?\n(.*?\r?\n)---\r?\n", re.DOTALL)
 _FIELD_PATTERN_TMPL = r"^{key}:\s*(.+)$"
 
-
-def _find_field(content: str, key: str) -> str:
-    """Extract a frontmatter field value from page content."""
-    match = re.search(_FIELD_PATTERN_TMPL.format(key=re.escape(key)), content, re.MULTILINE)
-    return match.group(1).strip() if match else ""
 
 
 def _set_field(content: str, key: str, value: str) -> str:

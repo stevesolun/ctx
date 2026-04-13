@@ -14,9 +14,13 @@ Creates the wiki if it doesn't exist. Updates entity pages, index, and log.
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from wiki_utils import SAFE_NAME_RE, get_field as _find_field  # noqa: E402
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -78,7 +82,7 @@ marketplace sources for the agent development environment.
 - Flag for user review in lint report
 
 Created: {TODAY}
-""")
+""", encoding="utf-8")
 
     # index.md
     index_path = wiki / "index.md"
@@ -99,7 +103,7 @@ Created: {TODAY}
 ## Comparisons
 
 ## Queries
-""")
+""", encoding="utf-8")
 
     # log.md
     log_path = wiki / "log.md"
@@ -112,7 +116,7 @@ Created: {TODAY}
 ## [{TODAY}] create | Wiki initialized
 - Domain: Skills, plugins, and MCP server catalog
 - Structure created with SCHEMA.md, index.md, log.md
-""")
+""", encoding="utf-8")
 
 
 def save_scan(wiki_path: str, profile: dict) -> str:
@@ -121,14 +125,33 @@ def save_scan(wiki_path: str, profile: dict) -> str:
     filename = f"scan-{TODAY}-{repo_name}.json"
     scan_path = Path(wiki_path) / "raw" / "scans" / filename
 
-    with open(scan_path, "w") as f:
+    with open(scan_path, "w", encoding="utf-8") as f:
         json.dump(profile, f, indent=2)
 
     return str(scan_path)
 
 
+def _sanitize_yaml_value(value: str) -> str:
+    """Sanitize a string for safe inclusion in unquoted YAML frontmatter.
+
+    Strips newlines (prevents key injection) and replaces leading
+    colons/hashes (prevents YAML comment/structure ambiguity).
+    Does NOT add surrounding quotes so values round-trip cleanly
+    through parse_frontmatter/get_field.
+    """
+    sanitized = str(value).replace("\r", "").replace("\n", " ").strip()
+    # Prevent YAML structural characters at start of value
+    if sanitized.startswith(":"):
+        sanitized = sanitized.lstrip(":")
+    if sanitized.startswith("#"):
+        sanitized = sanitized.lstrip("#")
+    return sanitized.strip()
+
+
 def upsert_skill_page(wiki_path: str, skill_name: str, skill_info: dict) -> bool:
     """Create or update a skill entity page. Returns True if created new."""
+    if not SAFE_NAME_RE.match(skill_name):
+        raise ValueError(f"Invalid skill name: {skill_name!r}")
     page_path = Path(wiki_path) / "entities" / "skills" / f"{skill_name}.md"
     is_new = not page_path.exists()
 
@@ -143,6 +166,10 @@ def upsert_skill_page(wiki_path: str, skill_name: str, skill_info: dict) -> bool
         if not tags:
             tags = ["uncategorized"]
 
+        safe_path = _sanitize_yaml_value(skill_info.get('path', 'unknown'))
+        safe_reason = _sanitize_yaml_value(skill_info.get('reason', 'Unknown'))
+        safe_repo = _sanitize_yaml_value(skill_info.get('repo', 'unknown'))
+
         content = f"""---
 title: {skill_name}
 created: {TODAY}
@@ -151,7 +178,7 @@ type: skill
 status: installed
 tags: [{', '.join(tags)}]
 source: local
-path: {skill_info.get('path', 'unknown')}
+path: {safe_path}
 stacks: [{', '.join(tags)}]
 always_load: false
 never_load: false
@@ -167,7 +194,7 @@ notes: ""
 Detected and loaded by skill-router.
 
 ## Detection Reason
-{skill_info.get('reason', 'Unknown')}
+{safe_reason}
 
 ## Priority Score
 {skill_info.get('priority', 0)}
@@ -178,42 +205,36 @@ Detected and loaded by skill-router.
 ## Usage History
 | Date | Repo | Outcome |
 |------|------|---------|
-| {TODAY} | {skill_info.get('repo', 'unknown')} | Loaded by router |
+| {TODAY} | {safe_repo} | Loaded by router |
 """
-        page_path.write_text(content)
+        page_path.write_text(content, encoding="utf-8")
     else:
         # Update existing page: bump updated date and use_count
-        content = page_path.read_text()
-        content = content.replace(
-            f"updated: {_find_field(content, 'updated')}",
-            f"updated: {TODAY}",
+        content = page_path.read_text(encoding="utf-8")
+        content = re.sub(
+            r"^updated: .+$", f"updated: {TODAY}",
+            content, count=1, flags=re.MULTILINE,
         )
         # Increment use_count
         old_count = _find_field(content, "use_count")
         if old_count:
             try:
                 new_count = int(old_count) + 1
-                content = content.replace(
-                    f"use_count: {old_count}",
-                    f"use_count: {new_count}",
+                content = re.sub(
+                    r"^use_count: .+$", f"use_count: {new_count}",
+                    content, count=1, flags=re.MULTILINE,
                 )
             except ValueError:
                 pass
 
-        content = content.replace(
-            f"last_used: {_find_field(content, 'last_used')}",
-            f"last_used: {TODAY}",
+        content = re.sub(
+            r"^last_used: .+$", f"last_used: {TODAY}",
+            content, count=1, flags=re.MULTILINE,
         )
-        page_path.write_text(content)
+        page_path.write_text(content, encoding="utf-8")
 
     return is_new
 
-
-def _find_field(content: str, field: str) -> str:
-    """Extract a frontmatter field value."""
-    import re
-    match = re.search(rf"^{field}:\s*(.+)$", content, re.MULTILINE)
-    return match.group(1).strip() if match else ""
 
 
 def update_index(wiki_path: str, new_skills: list[str]) -> None:
@@ -222,7 +243,7 @@ def update_index(wiki_path: str, new_skills: list[str]) -> None:
         return
 
     index_path = Path(wiki_path) / "index.md"
-    content = index_path.read_text()
+    content = index_path.read_text(encoding="utf-8")
 
     # Find the ## Skills section and append
     lines = content.split("\n")
@@ -253,7 +274,7 @@ def update_index(wiki_path: str, new_skills: list[str]) -> None:
             lines[i] = re.sub(r"Last updated: [\d-]+", f"Last updated: {TODAY}", lines[i])
             break
 
-    index_path.write_text("\n".join(lines))
+    index_path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def append_log(wiki_path: str, action: str, subject: str, details: list[str]) -> None:
@@ -263,17 +284,16 @@ def append_log(wiki_path: str, action: str, subject: str, details: list[str]) ->
     for detail in details:
         entry += f"- {detail}\n"
 
-    with open(log_path, "a") as f:
+    with open(log_path, "a", encoding="utf-8") as f:
         f.write(entry)
 
 
 def upsert_usage(wiki_path: str, skill_name: str, session_date: str, used: bool) -> None:
     """Update use_count and session_count for a skill page. Called by usage-tracker."""
-    import re as _re
     page_path = Path(wiki_path) / "entities" / "skills" / f"{skill_name}.md"
     if not page_path.exists():
         return
-    content = page_path.read_text()
+    content = page_path.read_text(encoding="utf-8")
 
     # session_count
     old_session = _find_field(content, "session_count")
@@ -287,21 +307,24 @@ def upsert_usage(wiki_path: str, skill_name: str, session_date: str, used: bool)
             pass
     else:
         # Add field after use_count if missing
-        content = _re.sub(r"(use_count: \d+)", r"\1\nsession_count: 1", content, count=1)
+        content = re.sub(r"(use_count: \d+)", r"\1\nsession_count: 1", content, count=1)
 
     if used:
         old_count = _find_field(content, "use_count")
         if old_count:
             try:
-                content = content.replace(f"use_count: {old_count}", f"use_count: {int(old_count) + 1}")
+                content = re.sub(
+                    r"^use_count: .+$", f"use_count: {int(old_count) + 1}",
+                    content, count=1, flags=re.MULTILINE,
+                )
             except ValueError:
                 pass
-        content = content.replace(
-            f"last_used: {_find_field(content, 'last_used')}",
-            f"last_used: {session_date}",
+        content = re.sub(
+            r"^last_used: .+$", f"last_used: {session_date}",
+            content, count=1, flags=re.MULTILINE,
         )
 
-    page_path.write_text(content)
+    page_path.write_text(content, encoding="utf-8")
 
 
 def mark_stale(wiki_path: str, skill_name: str) -> None:
@@ -309,11 +332,11 @@ def mark_stale(wiki_path: str, skill_name: str) -> None:
     page_path = Path(wiki_path) / "entities" / "skills" / f"{skill_name}.md"
     if not page_path.exists():
         return
-    content = page_path.read_text()
+    content = page_path.read_text(encoding="utf-8")
     old_status = _find_field(content, "status")
     if old_status:
         content = content.replace(f"status: {old_status}", "status: stale")
-    page_path.write_text(content)
+    page_path.write_text(content, encoding="utf-8")
 
 
 def main():

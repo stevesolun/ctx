@@ -129,7 +129,7 @@ def main() -> None:
         print(
             f"\n[skill-system] New skill '{skill_name}' has {lines} lines (>{180}).\n"
             f"  Consider converting to micro-skills pipeline (>={LINE_THRESHOLD} lines):\n"
-            f"  python {Path(__file__).parent}/skill-transformer.py --file \"{file_path}\"\n"
+            f"  python {Path(__file__).parent}/skill_transformer.py --file \"{file_path}\"\n"
         )
 
 

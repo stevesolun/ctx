@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,7 +41,8 @@ def find_dual_version_skills(skills_dir: Path) -> list[dict]:
             try:
                 transformed_lines = len(skill_md.read_text(encoding="utf-8", errors="replace").splitlines())
                 original_lines = len(original_md.read_text(encoding="utf-8", errors="replace").splitlines())
-            except Exception:
+            except Exception as exc:
+                print(f"Warning: failed to read skill files in {d.name}: {exc}", file=sys.stderr)
                 transformed_lines = original_lines = 0
 
             results.append({

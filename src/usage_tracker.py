@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-usage-tracker.py -- Stop hook handler: sync session usage into the skill wiki.
+usage_tracker.py -- Stop hook handler: sync session usage into the skill wiki.
 
 Called by Claude Code Stop hook:
-    python usage-tracker.py --sync
+    python usage_tracker.py --sync
 
 Reads ~/.claude/intent-log.jsonl (today's tool signals) and
 ~/.claude/skill-manifest.json (what was loaded this session), then:
@@ -21,6 +21,9 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from wiki_utils import SAFE_NAME_RE, parse_frontmatter as _read_frontmatter  # noqa: E402
 
 try:
     from ctx_config import cfg as _cfg
@@ -86,8 +89,8 @@ def read_today_signals() -> dict[str, int]:
                             signal_counts[sig] = signal_counts.get(sig, 0) + 1
                 except json.JSONDecodeError:
                     continue
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"Warning: failed to read today's signals: {exc}", file=sys.stderr)
 
     return signal_counts
 
@@ -109,23 +112,10 @@ def read_loaded_skills() -> list[str]:
         with open(MANIFEST_PATH, encoding="utf-8") as f:
             manifest = json.load(f)
         return [entry["skill"] for entry in manifest.get("load", [])]
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: failed to read loaded skills: {exc}", file=sys.stderr)
         return []
 
-
-def _read_frontmatter(content: str) -> dict[str, str]:
-    """Parse YAML frontmatter from markdown content."""
-    meta: dict[str, str] = {}
-    if not content.startswith("---"):
-        return meta
-    end = content.find("---", 3)
-    if end < 0:
-        return meta
-    for line in content[3:end].strip().split("\n"):
-        if ":" in line:
-            key, _, val = line.partition(":")
-            meta[key.strip()] = val.strip().strip('"').strip("'")
-    return meta
 
 
 def _set_frontmatter_field(content: str, field: str, value: str) -> str:
@@ -167,6 +157,9 @@ def update_skill_page(skill_name: str, used: bool, session_count_bump: bool = Tr
     Update wiki entity page for a skill.
     Returns True if page existed and was updated.
     """
+    if not SAFE_NAME_RE.match(skill_name):
+        print(f"Warning: skipping invalid skill name: {skill_name!r}", file=sys.stderr)
+        return False
     page_path = ENTITIES_DIR / f"{skill_name}.md"
     if not page_path.exists():
         return False
@@ -177,11 +170,11 @@ def update_skill_page(skill_name: str, used: bool, session_count_bump: bool = Tr
 
         # Bump session_count
         if session_count_bump:
-            session_count = int(meta.get("session_count", "0")) + 1
+            session_count = int(str(meta.get("session_count", "0"))) + 1
             content = _set_frontmatter_field(content, "session_count", str(session_count))
 
         if used:
-            use_count = int(meta.get("use_count", "0")) + 1
+            use_count = int(str(meta.get("use_count", "0"))) + 1
             content = _set_frontmatter_field(content, "use_count", str(use_count))
             content = _set_frontmatter_field(content, "last_used", TODAY)
             content = _set_frontmatter_field(content, "updated", TODAY)
@@ -190,14 +183,15 @@ def update_skill_page(skill_name: str, used: bool, session_count_bump: bool = Tr
         else:
             # Check if stale threshold reached — don't mark stale directly,
             # write to pending-unload.json so the user can approve
-            session_count = int(meta.get("session_count", "0"))
-            use_count = int(meta.get("use_count", "0"))
+            session_count = int(str(meta.get("session_count", "0")))
+            use_count = int(str(meta.get("use_count", "0")))
             if session_count >= STALE_THRESHOLD and use_count == 0:
                 _queue_unload_suggestion(skill_name, session_count, use_count)
 
         page_path.write_text(content, encoding="utf-8")
         return True
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: failed to update skill page {skill_name}: {exc}", file=sys.stderr)
         return False
 
 
@@ -245,8 +239,11 @@ def truncate_intent_log() -> None:
         for line in lines_by_date[date]
     ]
 
-    with open(INTENT_LOG, "w", encoding="utf-8") as f:
-        f.writelines(kept_lines)
+    try:
+        with open(INTENT_LOG, "w", encoding="utf-8") as f:
+            f.writelines(kept_lines)
+    except Exception as exc:
+        print(f"Warning: failed to truncate intent log: {exc}", file=sys.stderr)
 
 
 def main() -> None:

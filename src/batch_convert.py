@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import textwrap
 from datetime import datetime, timezone
@@ -138,7 +139,7 @@ def extract_gate_questions(text: str) -> list[str]:
     return questions
 
 
-def parse_sections(content: str) -> list[dict]:
+def parse_sections(content: str) -> tuple[list[dict], str]:
     """Parse a markdown document into sections by ## headers."""
     sections = []
     current_header = ""
@@ -291,13 +292,12 @@ def convert_skill(skill_path: Path, output_dir: Path | None = None) -> dict:
 
     # ── Write pipeline files ──────────────────────────────────────────────
 
-    # Preserve original
+    # Preserve original — copy first, then remove, so a crash never
+    # leaves the skill without any SKILL.md on disk.
     original_path = output_dir / "SKILL.md.original"
     if not original_path.exists():
-        skill_path.rename(original_path)
-    else:
-        # Original already preserved, just remove the current SKILL.md
-        skill_path.unlink(missing_ok=True)
+        shutil.copy2(skill_path, original_path)
+    skill_path.unlink(missing_ok=True)
 
     # 01-scope.md
     scope_text = "\n\n".join(scope_parts)
@@ -494,8 +494,8 @@ def main():
                 line_count = len(skill_md.read_text(encoding="utf-8", errors="replace").split("\n"))
                 if line_count > min_lines_val:
                     skill_files.append((skill_md, line_count))
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"Warning: failed to read skill file {skill_md}: {exc}", file=sys.stderr)
 
     print(f"Found {len(skill_files)} skills > {min_lines_val} lines")
 

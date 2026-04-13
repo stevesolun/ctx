@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-context-monitor.py -- PostToolUse hook: extract intent signals, update intent log.
+context_monitor.py -- PostToolUse hook: extract intent signals, update intent log.
 
 Called by Claude Code PostToolUse hook:
-    python context-monitor.py --tool <tool_name> [--input <json_string>]
+    python context_monitor.py --tool <tool_name> [--input <json_string>]
 
 Runs in <200ms. Appends to ~/.claude/intent-log.jsonl.
 If >=3 unmatched signals detected, writes ~/.claude/pending-skills.json.
@@ -144,7 +144,8 @@ def load_manifest_skills() -> set[str]:
         with open(MANIFEST_PATH) as f:
             manifest = json.load(f)
         return {entry["skill"] for entry in manifest.get("load", [])}
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: failed to load manifest skills: {exc}", file=sys.stderr)
         return set()
 
 
@@ -208,7 +209,8 @@ def graph_suggest(unmatched_tags: list[str]) -> list[dict]:
             }
             for nid, sc in ranked
         ]
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: graph suggest error: {exc}", file=sys.stderr)
         return []
 
 
@@ -248,8 +250,8 @@ def load_recent_unmatched_count() -> int:
                         unmatched.update(entry.get("unmatched", []))
                 except json.JSONDecodeError:
                     continue
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"Warning: failed to load recent unmatched: {exc}", file=sys.stderr)
     return len(unmatched)
 
 
@@ -297,8 +299,8 @@ def main() -> None:
                                 all_unmatched.update(e.get("unmatched", []))
                         except json.JSONDecodeError:
                             continue
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"Warning: failed to collect today's unmatched: {exc}", file=sys.stderr)
         write_pending_skills(sorted(all_unmatched))
 
 

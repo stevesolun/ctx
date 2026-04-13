@@ -6,7 +6,7 @@
 #   2. Builds a bulk skill catalog (catalog.md) from all installed skills
 #   3. Deploys skill-router micro-skill to ~/.claude/agents/skill-router/
 #   4. Injects PostToolUse + Stop hooks into ~/.claude/settings.json
-#   5. Deploys Python helpers (context-monitor, usage-tracker, skill-compiler)
+#   5. Deploys Python helpers (context_monitor, usage_tracker, skill-compiler)
 #   6. Creates skill-registry.json to track known skill directories
 #
 #   7. Generates entity pages for all skills + agents
@@ -132,10 +132,10 @@ ok "Knowledge graph built"
 
 # ── Step 8: Summary ──────────────────────────────────────────────────────────
 log "Step 8: Hooks and tools"
-log "  context-monitor.py   → PostToolUse: detect stack signals"
+log "  context_monitor.py   → PostToolUse: detect stack signals"
 log "  skill_suggest.py     → PostToolUse: surface graph suggestions"
 log "  skill_add_detector.py → PostToolUse: auto-register new skills"
-log "  usage-tracker.py     → Stop: update wiki usage stats"
+log "  usage_tracker.py     → Stop: update wiki usage stats"
 
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo ""

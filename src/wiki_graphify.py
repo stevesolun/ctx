@@ -24,6 +24,9 @@ from pathlib import Path
 import networkx as nx
 from networkx.algorithms.community import greedy_modularity_communities
 
+sys.path.insert(0, str(Path(__file__).parent))
+from wiki_utils import parse_frontmatter as _parse_fm  # noqa: E402
+
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki"))
@@ -34,19 +37,10 @@ GRAPH_OUT = WIKI_DIR / "graphify-out"
 
 
 def parse_frontmatter(filepath: Path) -> dict:
-    """Parse YAML frontmatter from a markdown file."""
+    """Parse YAML frontmatter from a markdown file, adding path metadata."""
     content = filepath.read_text(encoding="utf-8", errors="replace")
     result: dict = {"_path": str(filepath), "_stem": filepath.stem, "_content": content}
-    match = re.match(r"^---\n(.*?\n)---", content, re.DOTALL)
-    if not match:
-        return result
-    for line in match.group(1).split("\n"):
-        if ":" in line:
-            key, _, val = line.partition(":")
-            val = val.strip().strip('"').strip("'")
-            if val.startswith("[") and val.endswith("]"):
-                val = [v.strip() for v in val[1:-1].split(",") if v.strip()]
-            result[key.strip()] = val
+    result.update(_parse_fm(content))
     return result
 
 

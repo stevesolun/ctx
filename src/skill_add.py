@@ -26,21 +26,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from batch_convert import convert_skill  # noqa: E402
 from ctx_config import cfg  # noqa: E402
 from wiki_sync import append_log, ensure_wiki, update_index, upsert_skill_page  # noqa: E402
+from wiki_utils import validate_skill_name  # noqa: E402
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-# Tags the taxonomy recognises (mirrors wiki_sync SCHEMA.md)
-_ALL_TAGS = [
-    "python", "javascript", "typescript", "rust", "go", "java", "ruby", "swift", "kotlin",
-    "react", "vue", "angular", "nextjs", "fastapi", "django", "express", "flask",
-    "docker", "kubernetes", "terraform", "ci-cd", "aws", "gcp", "azure",
-    "sql", "nosql", "redis", "kafka", "spark", "dbt", "airflow",
-    "llm", "agents", "mcp", "langchain", "embeddings", "fine-tuning", "rag",
-    "testing", "linting", "typing", "security", "performance",
-    "documentation", "api-spec", "markdown", "diagrams",
-    "comparison", "decision", "pattern", "troubleshooting",
-    "marketplace", "registry", "versioning", "compatibility",
-]
 
 
 # ── Tag inference ─────────────────────────────────────────────────────────────
@@ -48,7 +36,7 @@ _ALL_TAGS = [
 def infer_tags(name: str, content: str) -> list[str]:
     """Infer taxonomy tags from skill name and file content."""
     combined = f"{name} {content}".lower()
-    found = [tag for tag in _ALL_TAGS if re.search(rf"\b{re.escape(tag)}\b", combined)]
+    found = [tag for tag in cfg.all_tags if re.search(rf"\b{re.escape(tag)}\b", combined)]
     return found if found else ["uncategorized"]
 
 
@@ -263,6 +251,16 @@ def add_skill(
 
     Returns a result dict with keys: name, installed, converted, is_new_page.
     """
+    validate_skill_name(name)
+
+    # Reject oversized files before reading into memory
+    file_size = source_path.stat().st_size
+    if file_size > 1_048_576:  # 1 MB
+        raise ValueError(
+            f"SKILL.md too large ({file_size:,} bytes). Max 1 MB. "
+            f"Split the skill or trim content before ingestion."
+        )
+
     content = source_path.read_text(encoding="utf-8", errors="replace")
     line_count = len(content.splitlines())
     tags = infer_tags(name, content)

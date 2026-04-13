@@ -76,8 +76,8 @@ def clear_pending_unload(names: list[str]) -> None:
         data = json.loads(PENDING_UNLOAD.read_text(encoding="utf-8"))
         data["suggestions"] = [s for s in data.get("suggestions", []) if s["name"] not in names]
         PENDING_UNLOAD.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"Warning: failed to clear pending unload: {exc}", file=sys.stderr)
 
 
 def unload_from_session(names: list[str]) -> list[str]:

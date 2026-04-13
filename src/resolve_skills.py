@@ -22,6 +22,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).parent))
+from wiki_utils import parse_frontmatter as _parse_fm  # noqa: E402
+
 
 def discover_available_skills(skills_dir: str) -> dict[str, dict]:
     """Find all SKILL.md files and extract metadata."""
@@ -37,21 +40,12 @@ def discover_available_skills(skills_dir: str) -> dict[str, dict]:
 
         # Read frontmatter
         try:
-            content = skill_md.read_text()
+            content = skill_md.read_text(encoding="utf-8", errors="replace")
             meta = {"name": skill_name, "path": str(skill_md)}
-
-            # Basic YAML frontmatter parsing
-            if content.startswith("---"):
-                end = content.find("---", 3)
-                if end > 0:
-                    fm = content[3:end]
-                    for line in fm.strip().split("\n"):
-                        if ":" in line:
-                            key, val = line.split(":", 1)
-                            meta[key.strip()] = val.strip().strip('"').strip("'")
-
+            meta.update(_parse_fm(content))
             skills[skill_name] = meta
-        except Exception:
+        except Exception as exc:
+            print(f"Warning: skill metadata parse error for {skill_name}: {exc}", file=sys.stderr)
             skills[skill_name] = {"name": skill_name, "path": str(skill_md)}
 
     return skills
@@ -67,30 +61,22 @@ def read_wiki_overrides(wiki_path: str) -> dict[str, dict]:
 
     for page in entities_dir.glob("*.md"):
         try:
-            content = page.read_text()
-            if not content.startswith("---"):
+            content = page.read_text(encoding="utf-8", errors="replace")
+            meta = _parse_fm(content)
+            if not meta:
                 continue
-
-            end = content.find("---", 3)
-            if end < 0:
-                continue
-
-            fm = content[3:end]
-            meta = {}
-            for line in fm.strip().split("\n"):
-                if ":" in line:
-                    key, val = line.split(":", 1)
-                    meta[key.strip()] = val.strip()
 
             skill_name = page.stem
+            use_count_val = int(str(meta.get("use_count", "0")))
             overrides[skill_name] = {
-                "always_load": meta.get("always_load", "false").lower() == "true",
-                "never_load": meta.get("never_load", "false").lower() == "true",
-                "last_used": meta.get("last_used", ""),
-                "use_count": int(meta.get("use_count", "0")),
-                "status": meta.get("status", "unknown"),
+                "always_load": str(meta.get("always_load", "false")).lower() == "true",
+                "never_load": str(meta.get("never_load", "false")).lower() == "true",
+                "last_used": str(meta.get("last_used", "")),
+                "use_count": use_count_val,
+                "status": str(meta.get("status", "unknown")),
             }
-        except Exception:
+        except Exception as exc:
+            print(f"Warning: wiki override parse error for {page.stem}: {exc}", file=sys.stderr)
             continue
 
     return overrides
@@ -329,8 +315,8 @@ def read_intent_signals(intent_log_path: str) -> dict[str, int]:
                             counts[sig] = counts.get(sig, 0) + 1
                 except json.JSONDecodeError:
                     continue
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"Warning: failed to read intent signals: {exc}", file=sys.stderr)
     return counts
 
 
@@ -366,8 +352,8 @@ def main():
         try:
             registry = json.loads(registry_path.read_text())
             skill_dirs = registry.get("skill_dirs", skill_dirs)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"Warning: failed to read skill registry: {exc}", file=sys.stderr)
 
     available: dict[str, Any] = {}
     for d in skill_dirs:
@@ -401,13 +387,13 @@ def main():
 
     # Write manifest
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    with open(args.output, "w") as f:
+    with open(args.output, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
     # Also write to pending-output if requested (mid-session re-run)
     if args.pending_output:
         Path(args.pending_output).parent.mkdir(parents=True, exist_ok=True)
-        with open(args.pending_output, "w") as f:
+        with open(args.pending_output, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
 
     print(f"\nManifest: {len(manifest['load'])} to load, {len(manifest['unload'])} to unload")

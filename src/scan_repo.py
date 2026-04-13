@@ -100,7 +100,8 @@ def read_json_safe(path: str) -> dict | None:
     try:
         with open(path) as f:
             return json.load(f)
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: failed to read JSON file {path}: {exc}", file=sys.stderr)
         return None
 
 
@@ -112,7 +113,8 @@ def read_toml_deps(path: str) -> list[str]:
         # Match dependencies = [...] and [project.dependencies] style
         deps = re.findall(r'["\']([a-zA-Z0-9_-]+)(?:\[.*?\])?(?:>=|<=|==|~=|!=|>|<|,|\s)*["\']', content)
         return [d.lower() for d in deps]
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: failed to read TOML deps from {path}: {exc}", file=sys.stderr)
         return []
 
 
@@ -129,7 +131,8 @@ def read_requirements(path: str) -> list[str]:
                 if name:
                     deps.append(name.lower())
         return deps
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: failed to read requirements from {path}: {exc}", file=sys.stderr)
         return []
 
 
@@ -466,7 +469,7 @@ def main():
     signals = scan_directory(args.repo, max_depth=args.depth)
     profile = detect_stack(args.repo, signals)
 
-    with open(args.output, "w") as f:
+    with open(args.output, "w", encoding="utf-8") as f:
         json.dump(profile, f, indent=2)
 
     # Summary to stdout

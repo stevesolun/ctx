@@ -58,7 +58,7 @@ Session start
     -> flags stale ones unseen >30 days
 
 Mid-session (every tool call)
-  context-monitor.py (PostToolUse hook)
+  context_monitor.py (PostToolUse hook)
     -> extracts intent signals from file extensions and framework keywords
     -> writes signals to ~/.claude/intent-log.jsonl
     -> if >=3 new unmatched signals -> walks the graph for best matches
@@ -76,7 +76,7 @@ Mid-session (every tool call)
     -> clears loaded skills from pending-skills.json
 
 Session end
-  usage-tracker.py (Stop hook)
+  usage_tracker.py (Stop hook)
     -> reads intent-log.jsonl
     -> updates use_count + last_used in wiki entity pages
     -> marks skills unseen >30 days as status: stale
@@ -322,13 +322,13 @@ ctx/
     scan_repo.py                # detect tech stacks with confidence scores
     resolve_skills.py           # score skills against a stack profile
     resolve_graph.py            # walk the knowledge graph for discovery
-    context-monitor.py          # PostToolUse hook: extract intent signals
+    context_monitor.py          # PostToolUse hook: extract intent signals
     skill_suggest.py            # PostToolUse hook: surface graph suggestions
     skill_loader.py             # load approved skills into session
     skill_unload.py             # unload skills on user approval
     skill_add.py                # add new skills with auto-convert + wiki ingestion
     skill_add_detector.py       # PostToolUse hook: auto-register new skills
-    usage-tracker.py            # Stop hook: update wiki usage stats
+    usage_tracker.py            # Stop hook: update wiki usage stats
     batch_convert.py            # convert skills >180 lines to pipeline format
     wiki_sync.py                # create/update wiki entity pages
     wiki_batch_entities.py      # batch-generate entity pages for all skills/agents
@@ -341,7 +341,7 @@ ctx/
     versions_catalog.py         # build versions-catalog.md for dual-version skills
     link_conversions.py         # link entity pages to converted pipelines
     inject_hooks.py             # merge hooks into ~/.claude/settings.json
-    skill-transformer.py        # interactive skill conversion tool
+    skill_transformer.py        # interactive skill conversion tool
     tests/                      # 121 pytest tests
 ```
 

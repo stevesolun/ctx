@@ -23,6 +23,7 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent))
 from ctx_config import cfg  # noqa: E402
+from wiki_utils import parse_frontmatter_and_body as _extract_frontmatter  # noqa: E402
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -55,25 +56,13 @@ class QueryResult:
     wikilink: str
 
 
-# --- Frontmatter parsing ---
-
-def _extract_frontmatter(content: str) -> tuple[dict[str, str], str]:
-    """Split YAML frontmatter block from body. Tolerates missing/malformed blocks."""
-    if not content.startswith("---"):
-        return {}, content
-    end = content.find("\n---", 3)
-    if end == -1:
-        return {}, content
-    fields: dict[str, str] = {}
-    for line in content[3:end].splitlines():
-        if ":" in line:
-            k, _, v = line.partition(":")
-            fields[k.strip()] = v.strip()
-    return fields, content[end + 4:].strip()
+# _extract_frontmatter is imported from wiki_utils
 
 
-def _parse_list_field(raw: str) -> list[str]:
-    """Parse inline YAML list ``[a, b]`` or bare ``a, b``."""
+def _parse_list_field(raw: str | list) -> list[str]:
+    """Normalise a frontmatter value to a list of strings."""
+    if isinstance(raw, list):
+        return raw
     raw = raw.strip()
     if raw.startswith("[") and raw.endswith("]"):
         raw = raw[1:-1]

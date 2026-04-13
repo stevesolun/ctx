@@ -73,8 +73,8 @@ def clear_pending(names: list[str]) -> None:
         unmatched = pending.get("unmatched_signals", [])
         pending["unmatched_signals"] = [s for s in unmatched if s not in names]
         PENDING_SKILLS.write_text(json.dumps(pending, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"Warning: failed to clear pending: {exc}", file=sys.stderr)
 
 
 def show_pending() -> None:
