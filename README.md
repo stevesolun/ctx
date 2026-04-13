@@ -2,12 +2,12 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-green.svg)](https://python.org)
-[![Skills](https://img.shields.io/badge/Skills-1%2C450+-purple.svg)](#)
-[![Agents](https://img.shields.io/badge/Agents-427-orange.svg)](#)
-[![Graph](https://img.shields.io/badge/Knowledge_Graph-497K_edges-red.svg)](#knowledge-graph)
+[![Skills](https://img.shields.io/badge/Skills-1%2C724-purple.svg)](#)
+[![Agents](https://img.shields.io/badge/Agents-443-orange.svg)](#)
+[![Graph](https://img.shields.io/badge/Knowledge_Graph-593K_edges-red.svg)](#knowledge-graph)
 [![Tests](https://img.shields.io/badge/Tests-121_passing-brightgreen.svg)](#)
 
-Watches what you develop, walks a knowledge graph of **1,450+ skills and 427 agents**, and recommends the right ones on the fly - you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+Watches what you develop, walks a knowledge graph of **1,724 skills and 443 agents**, and recommends the right ones on the fly - you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 ---
 
@@ -383,6 +383,20 @@ python src/inject_hooks.py --settings ~/.claude/settings.json --ctx-dir "$(pwd)/
 - [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents) — 158 agent definitions across 10 categories
 - [Lum1104/Understand-Anything](https://github.com/Lum1104/Understand-Anything) — 7 skills + 8 agents for codebase understanding
 - [zubair-trabzada/ai-legal-claude](https://github.com/zubair-trabzada/ai-legal-claude) — 13 legal skills + 5 agents
+- [gadievron/raptor](https://github.com/gadievron/raptor) — 11 crash analysis + OSS forensics skills, 16 agents
+- [gadievron/exploitation-validator](https://github.com/gadievron/exploitation-validator) — 6-stage exploit validation pipeline
+- [knostic/OpenAnt](https://github.com/knostic/OpenAnt) — 4 vulnerability hunting protocol skills
+- [sickn33/antigravity-awesome-skills](https://github.com/sickn33/antigravity-awesome-skills) — 274 skills, canonical Claude Code skill registry
+- [FlorianBruniaux/claude-code-ultimate-guide](https://github.com/FlorianBruniaux/claude-code-ultimate-guide) — 21 skills + 11 agents + hook patterns
+- [getcompanion-ai/feynman](https://github.com/getcompanion-ai/feynman) — 18 research and academic skills
+- [ComposioHQ/awesome-claude-plugins](https://github.com/ComposioHQ/awesome-claude-plugins) — 17 plugin skills
+- [raphaelmansuy/edgequake](https://github.com/raphaelmansuy/edgequake) — 10 testing and documentation skills
+- [thedotmack/claude-mem](https://github.com/thedotmack/claude-mem) — 8 memory persistence skills
+- [forrestchang/andrej-karpathy-skills](https://github.com/forrestchang/andrej-karpathy-skills) — Karpathy coding discipline principles
+- [piercelamb/deep-project](https://github.com/piercelamb/deep-project) — deep project analysis
+- [santifer/career-ops](https://github.com/santifer/career-ops) — career operations
+- [russelleNVy/three-man-team](https://github.com/russelleNVy/three-man-team) — multi-agent team pattern (3 agents)
+- [czlonkowski/n8n-mcp](https://github.com/czlonkowski/n8n-mcp) — n8n workflow agents
 
 ---
 

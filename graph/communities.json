@@ -1,142 +1,200 @@
 {
   "communities": {
     "0": {
-      "label": "Security + Python + Testing",
+      "label": "Security + Agents + Python",
       "members": [
+        "agent:01-scope",
         "agent:02-plan",
         "agent:04-check",
-        "agent:backend-developer",
-        "agent:backend-security-coder",
-        "agent:csharp-developer",
-        "agent:deployment-engineer",
-        "agent:devops-engineer",
-        "agent:django-developer",
-        "agent:django-pro",
         "agent:domain-analyzer",
-        "agent:dotnet-architect",
-        "agent:e2e-runner",
-        "agent:engineering-code-reviewer",
-        "agent:engineering-security-engineer",
-        "agent:exploitability-validator-agent",
-        "agent:frontend-security-coder",
-        "agent:fullstack-developer",
-        "agent:java-pro",
-        "agent:laravel-specialist",
-        "agent:machine-learning-engineer",
-        "agent:marketing-social-media-strategist",
-        "agent:mcp-developer",
-        "agent:mobile-security-coder",
         "agent:oss-hypothesis-former-agent",
-        "agent:oss-investigator-ioc-extractor-agent",
         "agent:paid-media-auditor",
-        "agent:phase-2-foundation",
-        "agent:phase-3-build",
-        "agent:phase-6-operate",
-        "agent:powershell-7-expert",
-        "agent:python-pro",
         "agent:python-reviewer",
-        "agent:scenario-enterprise-feature",
-        "agent:security-engineer",
-        "agent:support-infrastructure-maintainer",
+        "skill:3d-games",
+        "skill:acceptance-orchestrator",
         "skill:accessibility-compliance",
+        "skill:ad-creative",
+        "skill:adhx",
+        "skill:aegisops-ai",
         "skill:agent-eval",
         "skill:agent-harness-construction",
         "skill:agent-introspection-debugging",
         "skill:agent-payment-x402",
         "skill:agent-sort",
+        "skill:agentflow",
         "skill:agentic-engineering",
+        "skill:agentphone",
+        "skill:ai-engineering-toolkit",
+        "skill:ai-md",
+        "skill:ai-native-cli",
+        "skill:ai-seo",
+        "skill:alpha-research",
         "skill:alpha-vantage",
+        "skill:analyze-project",
+        "skill:analyzer",
+        "skill:android_ui_verification",
+        "skill:antigravity-skill-orchestrator",
         "skill:api-connector-builder",
         "skill:article-writing",
+        "skill:artifacts-builder",
+        "skill:astro",
         "skill:attack-tree-construction",
+        "skill:audit-agents-skills",
         "skill:automation-audit-ops",
         "skill:autonomous-agent-harness",
         "skill:autonomous-loops",
+        "skill:autoresearch",
+        "skill:awareness-stage-mapper",
+        "skill:aws-compliance-checker",
+        "skill:aws-iam-best-practices",
+        "skill:aws-secrets-rotation",
+        "skill:aws-security-audit",
+        "skill:awt-e2e-testing",
         "skill:azure-eventgrid-py",
-        "skill:azure-functions",
         "skill:babysitter-stop-hook-loop",
-        "skill:backend-security-coder",
+        "skill:base",
+        "skill:baseline",
+        "skill:bdistill-behavioral-xray",
+        "skill:bdistill-knowledge-extraction",
         "skill:benchmark",
         "skill:block-no-verify-hook",
         "skill:blueprint",
+        "skill:brand-perception-psychologist",
         "skill:browser-qa",
         "skill:bun-runtime",
+        "skill:calc",
         "skill:canary-watch",
-        "skill:circleci-automation",
+        "skill:ccboard",
+        "skill:changelog-generator",
+        "skill:churn-prevention",
         "skill:ck",
+        "skill:clarvia-aeo-check",
         "skill:claude-api",
+        "skill:claude-code-expert",
+        "skill:claude-code-guide",
+        "skill:claude-d3js-skill",
         "skill:claude-devfleet",
+        "skill:claude-in-chrome-troubleshooting",
+        "skill:claude-monitor",
+        "skill:claude-settings-audit",
         "skill:click-path-audit",
         "skill:clickhouse-io",
-        "skill:code-review-excellence",
+        "skill:closed-loop-delivery",
+        "skill:code-paths",
         "skill:code-tour",
         "skill:code-understanding",
         "skill:codebase-onboarding",
+        "skill:codebase-to-wordpress-converter",
+        "skill:cold-email",
         "skill:content-hash-cache-pattern",
+        "skill:content-strategy",
         "skill:context-budget",
+        "skill:contributing",
+        "skill:copilotkit-nextjs-integration",
+        "skill:copywriting-psychologist",
         "skill:cost-aware-llm-pipeline",
         "skill:council",
         "skill:csharp-testing",
         "skill:customer-billing-ops",
+        "skill:customer-psychographic-profiler",
+        "skill:cyber-defense-team",
         "skill:dart-flutter-patterns",
         "skill:dashboard-builder",
         "skill:data-scraper-agent",
         "skill:database-migrations",
+        "skill:deep-project",
         "skill:defi-amm-security",
+        "skill:defuddle",
         "skill:deployment-patterns",
+        "skill:design-patterns",
         "skill:design-system",
         "skill:design-system-patterns",
         "skill:dispatching-parallel-agents",
         "skill:django-security",
         "skill:dmux-workflows",
+        "skill:doc-traceability-validator",
+        "skill:docker",
         "skill:docker-patterns",
         "skill:documentation-lookup",
         "skill:dotnet-patterns",
-        "skill:earllm-build",
+        "skill:draw",
+        "skill:e2e-test-service-management",
         "skill:ecc-tools-cost-audit",
+        "skill:electron-development",
+        "skill:emotional-arc-designer",
+        "skill:eval-skills",
         "skill:evaluation-methodology",
         "skill:everything-claude-code",
         "skill:evm-token-decimals",
+        "skill:explain-like-socrates",
         "skill:exploitability-validation",
         "skill:exploitation-validator",
+        "skill:faf-expert",
+        "skill:faf-wizard",
         "skill:fal-ai-media",
         "skill:family-health-analyzer",
         "skill:finance-billing-ops",
         "skill:find-bugs",
         "skill:flutter-dart-code-review",
         "skill:foundation-models-on-device",
-        "skill:frontend-security-coder",
+        "skill:game-art",
+        "skill:game-audio",
         "skill:gan-style-harness",
         "skill:gcov-coverage",
+        "skill:gdb-cli",
+        "skill:git-ai-archaeology",
         "skill:git-workflow",
         "skill:github-archive",
         "skill:github-commit-recovery",
         "skill:github-evidence-kit",
         "skill:github-ops",
         "skill:github-wayback-recovery",
+        "skill:global-chat-agent-discovery",
         "skill:google-workspace-ops",
+        "skill:guide-recap",
         "skill:hads",
+        "skill:headline-psychologist",
         "skill:healthcare-cdss-patterns",
         "skill:healthcare-emr-patterns",
         "skill:healthcare-eval-harness",
         "skill:healthcare-phi-compliance",
         "skill:hexagonal-architecture",
         "skill:hipaa-compliance",
+        "skill:hono",
         "skill:hookify-rules",
         "skill:hubspot-integration",
-        "skill:hugging-face-tool-builder",
+        "skill:hugging-face-community-evals",
+        "skill:hugging-face-gradio",
+        "skill:hugging-face-papers",
+        "skill:hugging-face-trackio",
+        "skill:hugging-face-vision-trainer",
         "skill:i18n-localization",
-        "skill:incident-response-smart-fix",
+        "skill:idea-darwin",
+        "skill:identity-mirror",
+        "skill:impress",
         "skill:interaction-design",
+        "skill:investigation-logger",
         "skill:investor-materials",
         "skill:investor-outreach",
+        "skill:ios-debugger-agent",
+        "skill:issue-triage",
         "skill:jira-integration",
+        "skill:jobgpt",
+        "skill:jobs-to-be-done-analyst",
         "skill:jpa-patterns",
+        "skill:jq",
+        "skill:json-canvas",
+        "skill:k6-load-testing",
+        "skill:karpathy-guidelines",
+        "skill:knowledge-agent",
         "skill:knowledge-ops",
+        "skill:landing-page-generator",
         "skill:laravel-plugin-discovery",
         "skill:laravel-security",
         "skill:laravel-verification",
+        "skill:latex-paper-conversion",
         "skill:lead-intelligence",
+        "skill:lead-magnets",
         "skill:legal-agreement",
         "skill:legal-compare",
         "skill:legal-compliance",
@@ -150,36 +208,83 @@
         "skill:legal-review",
         "skill:legal-risks",
         "skill:legal-terms",
+        "skill:lex",
         "skill:line-execution-checker",
         "skill:lint-and-validate",
         "skill:liquid-glass-design",
+        "skill:literature-review",
+        "skill:llm-structured-output",
         "skill:llm-trading-agent-security",
+        "skill:local-llm-expert",
+        "skill:loss-aversion-designer",
+        "skill:macos-menubar-tuist-app",
+        "skill:macos-spm-app-packaging",
+        "skill:makefile-dev-workflow",
+        "skill:manage-skills",
+        "skill:manim-video",
         "skill:market-research",
+        "skill:maxia",
+        "skill:mem-search",
         "skill:mobile-android-design",
+        "skill:mobile-games",
         "skill:mobile-ios-design",
         "skill:mobile-security-coder",
+        "skill:modal-compute",
+        "skill:monte-carlo-monitor-creation",
+        "skill:monte-carlo-prevent",
+        "skill:monte-carlo-push-ingestion",
+        "skill:monte-carlo-validation-notebook",
+        "skill:moyu",
+        "skill:multi-agent-task-orchestrator",
         "skill:multi-reviewer-patterns",
+        "skill:multiplayer",
         "skill:nanoclaw-repl",
         "skill:nestjs-patterns",
-        "skill:new-rails-project",
+        "skill:nextjs-turbopack",
+        "skill:nodejs-keccak256",
         "skill:nutrient-document-processing",
         "skill:nuxt4-patterns",
+        "skill:objection-preemptor",
+        "skill:obsidian-bases",
+        "skill:obsidian-cli",
+        "skill:obsidian-markdown",
         "skill:odoo-hr-payroll-setup",
-        "skill:odoo-module-developer",
-        "skill:odoo-rpc-api",
+        "skill:onboarding-psychologist",
         "skill:openant-pipeline",
         "skill:openant-repo-inspection",
         "skill:openant-two-stage-planning",
         "skill:openant-vuln-hunting",
+        "skill:openclaw",
+        "skill:openclaw-github-repo-commander",
         "skill:openclaw-persona-forge",
         "skill:opensource-pipeline",
+        "skill:orchestrate-batch-refactor",
         "skill:orchestration",
+        "skill:paper-code-audit",
+        "skill:paper-writing",
         "skill:parallel-feature-development",
+        "skill:pc-games",
+        "skill:pdf-markdown-validator",
+        "skill:peer-review",
         "skill:perl-security",
+        "skill:phase-gated-debugging",
+        "skill:pipecat-friday-agent",
+        "skill:pitch-psychologist",
+        "skill:playwright-ux-ui-capture",
         "skill:postgres-patterns",
+        "skill:pr-triage",
+        "skill:preview",
+        "skill:price-psychology-strategist",
+        "skill:privacy-by-design",
         "skill:product-capability",
         "skill:product-lens",
+        "skill:product-marketing-context",
+        "skill:progressive-estimation",
+        "skill:progressive-web-app",
+        "skill:project-skill-audit",
         "skill:prompt-optimizer",
+        "skill:protect-mcp-governance",
+        "skill:pydantic-ai",
         "skill:python-anti-patterns",
         "skill:python-background-jobs",
         "skill:python-code-style",
@@ -187,139 +292,319 @@
         "skill:python-design-patterns",
         "skill:python-error-handling",
         "skill:python-observability",
+        "skill:python-pptx-generator",
         "skill:python-project-structure",
         "skill:python-resilience",
         "skill:python-resource-management",
         "skill:python-type-safety",
         "skill:pytorch-patterns",
+        "skill:rayden-code",
+        "skill:rayden-use",
+        "skill:react-component-performance",
         "skill:react-native-design",
+        "skill:recallmax",
         "skill:regex-vs-llm-structured-text",
+        "skill:release-notes-generator",
         "skill:remotion-video-creation",
+        "skill:replication",
         "skill:repo-scan",
         "skill:research-ops",
         "skill:responsive-design",
+        "skill:reverse-documentation",
+        "skill:revops",
         "skill:rr-debugger",
+        "skill:rtk-optimizer",
         "skill:rules-distill",
+        "skill:saas-multi-tenant",
         "skill:safety-guard",
+        "skill:sales-enablement",
+        "skill:sankhya-dashboard-html-jsp-custom-best-pratices",
         "skill:santa-method",
+        "skill:satori",
+        "skill:scarcity-urgency-psychologist",
         "skill:search-first",
         "skill:security-bounty-hunter",
         "skill:security-review",
         "skill:security-scan",
+        "skill:seek-and-analyze-video",
         "skill:seo",
+        "skill:seo-aeo-blog-writer",
+        "skill:seo-aeo-content-cluster",
+        "skill:seo-aeo-content-quality-auditor",
+        "skill:seo-aeo-internal-linking",
+        "skill:seo-aeo-keyword-research",
+        "skill:seo-aeo-landing-page-writer",
+        "skill:seo-aeo-meta-description-generator",
+        "skill:seo-aeo-schema-generator",
+        "skill:seo-competitor-pages",
+        "skill:seo-content",
+        "skill:seo-dataforseo",
+        "skill:seo-geo",
+        "skill:seo-hreflang",
+        "skill:seo-image-gen",
+        "skill:seo-images",
+        "skill:seo-page",
+        "skill:seo-plan",
+        "skill:seo-programmatic",
+        "skill:seo-schema",
+        "skill:seo-sitemap",
+        "skill:seo-technical",
+        "skill:sequence-psychologist",
+        "skill:simplify-code",
+        "skill:site-architecture",
+        "skill:skill-check",
         "skill:skill-comply",
+        "skill:skill-optimizer",
+        "skill:smart-explore",
+        "skill:snowflake-development",
+        "skill:social-proof-architect",
+        "skill:source-comparison",
         "skill:springboot-security",
+        "skill:stage-1-extract",
+        "skill:stage-2-research",
+        "skill:stage-3-concepts",
+        "skill:stage-4-position",
+        "skill:stage-5-script",
+        "skill:stage-6-revision",
         "skill:strategic-compact",
+        "skill:subject-line-psychologist",
+        "skill:sveltekit",
         "skill:swift-actor-persistence",
         "skill:swift-concurrency-6-2",
+        "skill:swift-concurrency-expert",
         "skill:swift-protocol-di-testing",
+        "skill:swiftui-liquid-glass",
         "skill:swiftui-patterns",
+        "skill:swiftui-performance-audit",
+        "skill:swiftui-ui-patterns",
+        "skill:swiftui-view-refactor",
         "skill:task-coordination-strategies",
         "skill:team-builder",
         "skill:team-communication-protocols",
         "skill:team-composition-patterns",
+        "skill:technical-change-tracker",
+        "skill:templates",
         "skill:terminal-ops",
+        "skill:theory",
+        "skill:timeline-report",
+        "skill:tmux",
+        "skill:token-audit",
         "skill:token-budget-advisor",
+        "skill:tool-use-guardian",
+        "skill:transformers-js",
+        "skill:trpc-fullstack",
+        "skill:trust-calibrator",
+        "skill:typescript",
+        "skill:ui-component",
         "skill:ui-demo",
+        "skill:ui-pattern",
+        "skill:ui-review",
+        "skill:ui-setup",
         "skill:understand",
         "skill:understand-dashboard",
         "skill:understand-domain",
         "skill:understand-onboard",
         "skill:unified-notifications-ops",
+        "skill:ux-copy",
+        "skill:ux-feedback",
+        "skill:ux-flow",
+        "skill:ux-persuasion-engineer",
+        "skill:ux-ui-analyze-single-page",
+        "skill:ux-ui-map-page-by-page",
+        "skill:uxui-principles",
         "skill:verification-loop",
+        "skill:version-bump",
+        "skill:vibers-code-review",
+        "skill:viboscope",
         "skill:video-editing",
         "skill:visa-doc-translate",
+        "skill:visual-emotion-engineer",
+        "skill:voice-refine",
+        "skill:vr-ar",
+        "skill:vscode-extension-guide-en",
+        "skill:watch",
         "skill:web-component-design",
+        "skill:web-games",
         "skill:web-security-testing",
         "skill:wiki-onboarding",
+        "skill:windows-shell-reliability",
+        "skill:wordpress-centric-high-seo-optimized-blogwriting-skill",
         "skill:workspace-surface-audit",
-        "skill:x-api"
+        "skill:writer",
+        "skill:x-api",
+        "skill:xvary-stock-research",
+        "skill:yes-md"
       ]
     },
     "1": {
       "label": "Javascript + Typescript + Frontend",
       "members": [
-        "agent:01-scope",
-        "agent:03-build",
+        "agent:SKILL",
         "agent:agent-installer",
-        "agent:angular-architect",
-        "agent:architecture-analyzer",
-        "agent:build-engineer",
-        "agent:c4-code",
-        "agent:c4-container",
-        "agent:check-gates",
-        "agent:doc-updater",
-        "agent:engineering-senior-developer",
+        "agent:assemble-reviewer",
+        "agent:build-error-resolver",
+        "agent:design-system-architect",
+        "agent:engineering-feishu-integration-developer",
         "agent:engineering-technical-writer",
-        "agent:file-analyzer",
-        "agent:java-reviewer",
-        "agent:knowledge-graph-guide",
-        "agent:kotlin-specialist",
-        "agent:lsp-index-engineer",
-        "agent:minecraft-bukkit-pro",
+        "agent:function-trace-generator-agent",
         "agent:oss-evidence-verifier-agent",
+        "agent:oss-hypothesis-checker-agent",
+        "agent:oss-investigator-gh-archive-agent",
         "agent:oss-investigator-github-agent",
+        "agent:oss-investigator-ioc-extractor-agent",
         "agent:oss-investigator-local-git-agent",
         "agent:oss-investigator-wayback-agent",
-        "agent:project-scanner",
+        "agent:oss-report-generator-agent",
+        "agent:project-management-jira-workflow-steward",
         "agent:refactor-cleaner",
-        "agent:specialized-document-generator",
-        "agent:swift-expert",
-        "agent:tour-builder",
-        "agent:ui-designer",
+        "agent:security-reviewer",
+        "agent:tdd-guide",
         "skill:00-andruia-consultant",
         "skill:agent-tool-builder",
-        "skill:agents-md",
         "skill:ai-agents-architect",
         "skill:algolia-search",
-        "skill:api-documenter",
+        "skill:animejs-animation",
         "skill:apify-audience-analysis",
         "skill:apify-brand-reputation-monitoring",
+        "skill:apify-competitor-intelligence",
         "skill:apify-content-analytics",
+        "skill:apify-influencer-discovery",
         "skill:apify-lead-generation",
         "skill:apify-market-research",
         "skill:apify-trend-analysis",
         "skill:app-builder",
-        "skill:c4-container",
-        "skill:canvas-design",
+        "skill:bullmq-specialist",
+        "skill:context-agent",
+        "skill:context-management-context-save",
         "skill:context7-auto-research",
         "skill:continuous-learning",
+        "skill:database-design",
+        "skill:dbos-python",
+        "skill:dbos-typescript",
+        "skill:design-spells",
+        "skill:emblemai-crypto-wallet",
         "skill:expo-cicd-workflows",
-        "skill:expo-ui-jetpack-compose",
-        "skill:expo-ui-swift-ui",
+        "skill:expo-dev-client",
+        "skill:fal-workflow",
+        "skill:firebase",
+        "skill:fixing-metadata",
         "skill:fixing-motion-performance",
         "skill:fp-taskeither-ref",
         "skill:frontend-developer",
-        "skill:gemini-api-dev",
-        "skill:javascript-pro",
-        "skill:nanobanana-ppt-skills",
+        "skill:gh-review-requests",
+        "skill:haskell-pro",
+        "skill:inngest",
+        "skill:java-pro",
+        "skill:magic-animator",
+        "skill:magic-ui-generator",
+        "skill:manifest",
         "skill:nextjs-app-router-patterns",
-        "skill:nodejs-keccak256",
-        "skill:nosql-expert",
+        "skill:nextjs-supabase-auth",
+        "skill:obsidian-clipper-template-creator",
+        "skill:odoo-manufacturing-advisor",
         "skill:odoo-migration-helper",
-        "skill:odoo-upgrade-advisor",
+        "skill:odoo-rpc-api",
+        "skill:odoo-sales-crm-expert",
         "skill:odoo-xml-views-builder",
-        "skill:rag-engineer",
+        "skill:performance-profiling",
+        "skill:python-pro",
         "skill:react-best-practices",
         "skill:segment-cdp",
-        "skill:server-management",
         "skill:speed",
         "skill:spline-3d-integration",
-        "skill:tavily-web",
         "skill:tdd-workflows-tdd-green",
+        "skill:trigger-dev",
         "skill:typescript-advanced-types",
-        "skill:upgrading-expo",
-        "skill:vercel-deployment",
-        "skill:vexor-cli",
-        "skill:wiki-vitepress",
+        "skill:zapier-make-patterns",
         "skill:zustand-store-ts"
       ]
     },
     "2": {
+      "label": "Frontend + Ai + Api",
+      "members": [
+        "agent:BUILDER",
+        "agent:adr-writer",
+        "agent:architect",
+        "agent:architect-review",
+        "agent:architect-reviewer",
+        "agent:architecture-analyzer",
+        "agent:backend-architect-with-memory",
+        "agent:c4-component",
+        "agent:c4-container",
+        "agent:code-reviewer",
+        "agent:data-researcher",
+        "agent:database-architect",
+        "agent:doc-updater",
+        "agent:documentation-engineer",
+        "agent:dotnet-architect",
+        "agent:embedded-systems",
+        "agent:engineering-backend-architect",
+        "agent:engineering-incident-response-commander",
+        "agent:engineering-senior-developer",
+        "agent:government-digital-presales-consultant",
+        "agent:graphql-architect",
+        "agent:java-architect",
+        "agent:java-reviewer",
+        "agent:knowledge-graph-guide",
+        "agent:legacy-modernizer",
+        "agent:legal-terms",
+        "agent:minecraft-bukkit-pro",
+        "agent:php-pro",
+        "agent:platform-engineer",
+        "agent:research-analyst",
+        "agent:rust-reviewer",
+        "agent:security-patcher",
+        "agent:spring-boot-engineer",
+        "agent:technical-writer",
+        "agent:test-writer",
+        "agent:vector-database-engineer",
+        "agent:wordpress-master",
+        "skill:api-documenter",
+        "skill:api-patterns",
+        "skill:architect-review",
+        "skill:architecture",
+        "skill:c4-container",
+        "skill:c4-context",
+        "skill:code-documentation-code-explain",
+        "skill:ddd-tactical-patterns",
+        "skill:dotnet-backend-patterns",
+        "skill:employment-contract-templates",
+        "skill:exa-search",
+        "skill:expo-ui-jetpack-compose",
+        "skill:expo-ui-swift-ui",
+        "skill:fal-platform",
+        "skill:firecrawl-scraper",
+        "skill:gemini-api-dev",
+        "skill:graphql",
+        "skill:hig-inputs",
+        "skill:hig-patterns",
+        "skill:makepad-platform",
+        "skill:makepad-reference",
+        "skill:nanobanana-ppt-skills",
+        "skill:new-rails-project",
+        "skill:nodejs-backend-patterns",
+        "skill:nosql-expert",
+        "skill:odoo-upgrade-advisor",
+        "skill:openapi-spec-generation",
+        "skill:pakistan-payments-stack",
+        "skill:pydantic-models-py",
+        "skill:server-management",
+        "skill:similarity-search-patterns",
+        "skill:tavily-web",
+        "skill:theme-factory",
+        "skill:upgrading-expo",
+        "skill:using-neon",
+        "skill:vercel-deployment",
+        "skill:vexor-cli"
+      ]
+    },
+    "3": {
       "label": "Rust + Ai + Typescript",
       "members": [
+        "agent:REVIEWER",
         "agent:ad-security-reviewer",
         "agent:agentic-identity-trust",
+        "agent:architecture-reviewer",
         "agent:cpp-reviewer",
         "agent:design-whimsy-injector",
         "agent:docs-lookup",
@@ -330,16 +615,18 @@
         "agent:marketing-reddit-community-builder",
         "agent:marketing-wechat-official-account",
         "agent:marketing-zhihu-strategist",
+        "agent:plan-challenger",
         "agent:roblox-systems-scripter",
         "agent:rust-engineer",
         "agent:seo-authority-builder",
         "agent:seo-content-auditor",
         "agent:seo-content-writer",
+        "agent:service-mesh-expert",
         "agent:specialized-developer-advocate",
         "agent:support-support-responder",
+        "agent:technical-researcher",
         "agent:threat-modeling-expert",
         "agent:unity-multiplayer-engineer",
-        "agent:vector-database-engineer",
         "agent:windows-infra-admin",
         "skill:autonomous-agents",
         "skill:bevy-ecs-expert",
@@ -353,27 +640,195 @@
         "skill:makepad-basics",
         "skill:makepad-dsl",
         "skill:makepad-layout",
-        "skill:makepad-platform",
-        "skill:makepad-reference",
         "skill:makepad-skills",
         "skill:memory-safety-patterns",
         "skill:rust-async-patterns",
         "skill:rust-pro",
         "skill:search-specialist",
+        "skill:security-bluebook-builder",
         "skill:semgrep-rule-creator",
+        "skill:seo-authority-builder",
         "skill:seo-content-auditor",
         "skill:seo-content-writer",
         "skill:seo-fundamentals",
         "skill:service-mesh-expert",
-        "skill:threat-modeling-expert"
+        "skill:threat-modeling-expert",
+        "skill:uncle-bob-craft"
       ]
     },
-    "3": {
-      "label": "Ai + Typescript + Frontend",
+    "4": {
+      "label": "Typescript + Ai + Devops",
       "members": [
+        "agent:content-marketer",
+        "agent:context-manager",
+        "agent:corporate-training-designer",
+        "agent:coverage-analysis-generator-agent",
+        "agent:crash-analyzer-agent",
+        "agent:crash-analyzer-checker-agent",
+        "agent:data-scientist",
+        "agent:design-image-prompt-engineer",
+        "agent:design-ux-researcher",
+        "agent:devops-sre",
+        "agent:engineering-embedded-firmware-engineer",
+        "agent:game-audio-engineer",
+        "agent:godot-gameplay-scripter",
+        "agent:legal-recommendations",
+        "agent:marketing-app-store-optimizer",
+        "agent:marketing-bilibili-content-strategist",
+        "agent:marketing-china-ecommerce-operator",
+        "agent:marketing-weibo-strategist",
+        "agent:mcp-backend-engineer",
+        "agent:product-behavioral-nudge-engine",
+        "agent:product-sprint-prioritizer",
+        "agent:project-management-project-shepherd",
+        "agent:project-manager-senior",
+        "agent:sales-account-strategist",
+        "agent:seo-content-planner",
+        "agent:seo-content-refresher",
+        "agent:seo-meta-optimizer",
+        "agent:study-abroad-advisor",
+        "agent:supply-chain-strategist",
+        "agent:support-executive-summary-generator",
+        "agent:task-distributor",
+        "agent:testing-performance-benchmarker",
+        "agent:tutorial-engineer",
+        "agent:unity-architect",
+        "agent:ux-researcher",
+        "agent:xr-interface-architect",
+        "agent:zk-steward",
+        "skill:agent-evaluation",
+        "skill:android-jetpack-compose-expert",
+        "skill:ddd-strategic-design",
+        "skill:error-debugging-error-analysis",
+        "skill:error-diagnostics-error-analysis",
+        "skill:godot-4-migration",
+        "skill:helm-chart-scaffolding",
+        "skill:hig-components-controls",
+        "skill:hybrid-search-implementation",
+        "skill:infinite-gratitude",
+        "skill:k8s-manifest-generator",
+        "skill:kotlin-coroutines-expert",
+        "skill:track-management",
+        "skill:unity-ecs-patterns",
+        "skill:vector-index-tuning"
+      ]
+    },
+    "5": {
+      "label": "Typescript + Ai + Devops",
+      "members": [
+        "agent:engineering-sre",
+        "agent:event-sourcing-architect",
+        "agent:java-build-resolver",
+        "agent:julia-pro",
+        "agent:loop-operator",
+        "agent:marketing-content-creator",
+        "agent:marketing-douyin-strategist",
+        "agent:rust-pro",
+        "agent:sre-engineer",
+        "agent:support-analytics-reporter",
+        "agent:team-implementer",
+        "agent:terragrunt-expert",
+        "agent:testing-accessibility-auditor",
+        "agent:ui-visual-validator",
+        "agent:workflow-orchestrator",
+        "skill:ai-agent-development",
+        "skill:application-performance-performance-optimization",
+        "skill:ask-questions-if-underspecified",
+        "skill:blog-writing-guide",
+        "skill:content-marketer",
+        "skill:csharp-pro",
+        "skill:customer-support",
+        "skill:debugger",
+        "skill:design-orchestration",
+        "skill:distributed-debugging-debug-trace",
+        "skill:domain-driven-design",
+        "skill:error-debugging-error-trace",
+        "skill:error-detective",
+        "skill:event-sourcing-architect",
+        "skill:framework-migration-deps-upgrade",
+        "skill:git-pr-workflows-git-workflow",
+        "skill:hig-components-dialogs",
+        "skill:iconsax-library",
+        "skill:llm-application-dev-ai-assistant",
+        "skill:llm-application-dev-prompt-optimize",
+        "skill:microservices-patterns",
+        "skill:observability-monitoring-monitor-setup",
+        "skill:observability-monitoring-slo-implement",
+        "skill:odoo-accounting-setup",
+        "skill:odoo-inventory-optimizer",
+        "skill:ruby-pro",
+        "skill:scala-pro",
+        "skill:seo-cannibalization-detector",
+        "skill:seo-content-planner",
+        "skill:seo-content-refresher",
+        "skill:seo-meta-optimizer",
+        "skill:seo-snippet-hunter",
+        "skill:seo-structure-architect",
+        "skill:team-collaboration-issue",
+        "skill:team-collaboration-standup-notes",
+        "skill:vizcom"
+      ]
+    },
+    "6": {
+      "label": "Javascript + Ai + Frontend",
+      "members": [
+        "agent:03-build",
+        "agent:angular-architect",
+        "agent:build-engineer",
+        "agent:c4-code",
+        "agent:check-gates",
+        "agent:cpp-pro",
+        "agent:csharp-developer",
+        "agent:csharp-pro",
+        "agent:design-brand-guardian",
+        "agent:design-ui-designer",
+        "agent:file-analyzer",
+        "agent:frontend-developer",
+        "agent:frontend-security-coder",
+        "agent:graph-reviewer",
+        "agent:haskell-pro",
+        "agent:java-pro",
+        "agent:javascript-pro",
+        "agent:kotlin-build-resolver",
+        "agent:kotlin-specialist",
+        "agent:marketing-cross-border-ecommerce",
+        "agent:project-scanner",
+        "agent:roblox-avatar-creator",
+        "agent:ruby-pro",
+        "agent:seo-specialist",
+        "agent:seo-structure-architect",
+        "agent:specialized-document-generator",
+        "agent:tour-builder",
+        "agent:typescript-reviewer",
+        "agent:ui-designer",
+        "skill:antigravity-design-expert",
+        "skill:baseline-ui",
+        "skill:canvas-design",
+        "skill:fp-either-ref",
+        "skill:javascript-pro",
+        "skill:javascript-testing-patterns",
+        "skill:llm-prompt-optimizer",
+        "skill:modern-javascript-patterns",
+        "skill:monorepo-management",
+        "skill:odoo-automated-tests",
+        "skill:rag-engineer",
+        "skill:remotion-best-practices",
+        "skill:shader-programming-glsl",
+        "skill:typescript-pro",
+        "skill:verification-before-completion",
+        "skill:web-artifacts-builder",
+        "skill:wiki-architect",
+        "skill:wiki-vitepress"
+      ]
+    },
+    "7": {
+      "label": "Ai + Frontend + Typescript",
+      "members": [
+        "agent:azure-infra-engineer",
         "agent:blockchain-security-auditor",
         "agent:competitive-analyst",
         "agent:database-admin",
+        "agent:devops-engineer",
         "agent:devops-troubleshooter",
         "agent:engineering-data-engineer",
         "agent:engineering-devops-automator",
@@ -381,13 +836,17 @@
         "agent:iot-engineer",
         "agent:it-ops-orchestrator",
         "agent:kubernetes-architect",
+        "agent:m365-admin",
         "agent:observability-engineer",
+        "agent:powershell-7-expert",
         "agent:terraform-engineer",
         "skill:aws-skills",
+        "skill:azure-ai-agents-persistent-java",
         "skill:azure-ai-transcription-py",
         "skill:azure-communication-callingserver-java",
         "skill:azure-cosmos-rust",
         "skill:azure-eventhub-rust",
+        "skill:azure-functions",
         "skill:azure-identity-rust",
         "skill:azure-keyvault-certificates-rust",
         "skill:azure-keyvault-keys-rust",
@@ -406,8 +865,6 @@
         "skill:hybrid-cloud-architect",
         "skill:kubernetes-architect",
         "skill:network-engineer",
-        "skill:nextjs-turbopack",
-        "skill:odoo-backup-strategy",
         "skill:odoo-docker-deployment",
         "skill:solidity-security",
         "skill:sql-pro",
@@ -415,14 +872,57 @@
         "skill:workflow-automation"
       ]
     },
-    "4": {
+    "8": {
+      "label": "Typescript + Devops + Frontend",
+      "members": [
+        "agent:cli-developer",
+        "agent:data-engineer",
+        "agent:docs-architect",
+        "agent:engineering-software-architect",
+        "agent:legal-advisor",
+        "agent:legal-compliance",
+        "agent:llm-architect",
+        "agent:marketing-instagram-curator",
+        "agent:nexus-strategy",
+        "agent:phase-1-strategy",
+        "agent:project-management-experiment-tracker",
+        "agent:prompt-engineer",
+        "agent:refactoring-specialist",
+        "agent:sales-proposal-strategist",
+        "agent:support-finance-tracker",
+        "agent:support-legal-compliance-checker",
+        "agent:testing-evidence-collector",
+        "skill:10-andruia-skill-smith",
+        "skill:busybox-on-windows",
+        "skill:code-refactoring-refactor-clean",
+        "skill:codebase-cleanup-refactor-clean",
+        "skill:context-optimization",
+        "skill:design-md",
+        "skill:docs-architect",
+        "skill:error-diagnostics-error-trace",
+        "skill:fda-food-safety-auditor",
+        "skill:fda-medtech-compliance-auditor",
+        "skill:hig-components-menus",
+        "skill:internal-comms-anthropic",
+        "skill:internal-comms-community",
+        "skill:llm-knowledge-base",
+        "skill:odoo-project-timesheet",
+        "skill:sred-work-summary",
+        "skill:stride-analysis-patterns",
+        "skill:unreal-engine-cpp-pro",
+        "skill:upstash-qstash",
+        "skill:using-superpowers",
+        "skill:wiki-page-writer",
+        "skill:wiki-researcher",
+        "skill:writing-skills"
+      ]
+    },
+    "9": {
       "label": "Typescript + Devops + Ai",
       "members": [
         "agent:05-deliver",
         "agent:accounts-payable-agent",
-        "agent:assemble-reviewer",
         "agent:automation-governance-architect",
-        "agent:c-pro",
         "agent:data-consolidation-agent",
         "agent:debugger",
         "agent:engineering-git-workflow-master",
@@ -433,11 +933,10 @@
         "agent:identity-graph-operator",
         "agent:legal-clauses",
         "agent:mermaid-expert",
-        "agent:oss-hypothesis-checker-agent",
-        "agent:oss-report-generator-agent",
+        "agent:output-evaluator",
+        "agent:phase-6-operate",
         "agent:project-manager",
         "agent:report-distribution-agent",
-        "agent:ruby-pro",
         "agent:sales-automator",
         "agent:scrum-master",
         "agent:seo-cannibalization-detector",
@@ -450,6 +949,8 @@
         "skill:code-simplifier",
         "skill:context-window-management",
         "skill:create-pr",
+        "skill:developer-growth-analysis",
+        "skill:dwarf-expert",
         "skill:fix-review",
         "skill:git-pushing",
         "skill:hierarchical-agent-memory",
@@ -460,7 +961,7 @@
         "skill:wiki-qa"
       ]
     },
-    "5": {
+    "10": {
       "label": "Typescript + Frontend + Ai",
       "members": [
         "agent:powershell-ui-architect",
@@ -470,7 +971,6 @@
         "skill:airtable-automation",
         "skill:android-viewpager2-blank-subtabs",
         "skill:asana-automation",
-        "skill:avalonia-layout-zafiro",
         "skill:changelog-automation",
         "skill:codex-review",
         "skill:competitive-landscape",
@@ -484,13 +984,13 @@
         "skill:lightning-factory-explainer",
         "skill:odoo-ecommerce-configurator",
         "skill:odoo-purchase-workflow",
-        "skill:odoo-qweb-templates",
         "skill:product-manager",
         "skill:professional-proofreader",
         "skill:projection-patterns",
         "skill:protocol-reverse-engineering",
         "skill:react-modernization",
         "skill:risk-metrics-calculation",
+        "skill:screen-reader-testing",
         "skill:seo-keyword-strategist",
         "skill:shopify-automation",
         "skill:skill-improver",
@@ -504,232 +1004,137 @@
         "skill:x-article-publisher-skill"
       ]
     },
-    "6": {
-      "label": "Database + Devops + Typescript",
+    "11": {
+      "label": "Frontend + Typescript + Ai",
       "members": [
-        "agent:ai-engineer",
-        "agent:architect-review",
-        "agent:customer-success-manager",
-        "agent:database-architect",
-        "agent:database-optimizer",
-        "agent:design-inclusive-visuals-specialist",
-        "agent:embedded-systems",
-        "agent:engineering-database-optimizer",
-        "agent:engineering-incident-response-commander",
-        "agent:graphql-architect",
-        "agent:handoff-templates",
-        "agent:hr-pro",
+        "agent:business-analyst",
+        "agent:chaos-engineer",
+        "agent:data-analyst",
+        "agent:database-administrator",
+        "agent:dx-optimizer",
+        "agent:elixir-pro",
         "agent:mobile-app-developer",
-        "agent:paid-media-programmatic-buyer",
-        "agent:phase-0-discovery",
+        "agent:n8n-mcp-tester",
+        "agent:performance-engineer",
+        "agent:postgres-pro",
         "agent:product-feedback-synthesizer",
         "agent:product-manager",
-        "agent:sales-coach",
-        "agent:sales-deal-strategist",
-        "agent:sales-pipeline-analyst",
-        "agent:scientific-literature-researcher",
         "agent:testing-reality-checker",
-        "agent:unreal-world-builder",
-        "agent:xr-cockpit-interaction-specialist",
-        "skill:cloudformation-best-practices",
-        "skill:dwarf-expert",
-        "skill:employment-contract-templates",
+        "skill:agent-memory-systems",
+        "skill:android-ui-verification",
+        "skill:architecture-patterns",
+        "skill:billing-automation",
+        "skill:c-pro",
+        "skill:code-guide-cc",
+        "skill:code-review-excellence",
+        "skill:dbos-golang",
+        "skill:dbt-transformation-patterns",
+        "skill:dx-optimizer",
+        "skill:elixir-pro",
         "skill:executing-plans",
+        "skill:fixing-accessibility",
         "skill:hig-components-search",
-        "skill:hig-foundations",
-        "skill:hig-inputs",
-        "skill:hig-patterns",
-        "skill:java-coding-standards",
+        "skill:lightning-channel-factories",
+        "skill:neon-postgres",
         "skill:odoo-performance-tuner",
         "skill:performance-engineer",
-        "skill:python-performance-optimization",
-        "skill:similarity-search-patterns",
-        "skill:sql-optimization-patterns"
+        "skill:pypict-skill",
+        "skill:react-flow-node-ts",
+        "skill:requesting-code-review",
+        "skill:skill-seekers",
+        "skill:temporal-python-testing",
+        "skill:wcag-audit-patterns"
       ]
     },
-    "7": {
-      "label": "Typescript + Ai + Devops",
-      "members": [
-        "agent:engineering-sre",
-        "agent:event-sourcing-architect",
-        "agent:loop-operator",
-        "agent:marketing-douyin-strategist",
-        "agent:sre-engineer",
-        "agent:support-analytics-reporter",
-        "agent:terragrunt-expert",
-        "agent:workflow-orchestrator",
-        "skill:application-performance-performance-optimization",
-        "skill:blog-writing-guide",
-        "skill:content-marketer",
-        "skill:customer-support",
-        "skill:design-orchestration",
-        "skill:distributed-debugging-debug-trace",
-        "skill:domain-driven-design",
-        "skill:error-detective",
-        "skill:event-sourcing-architect",
-        "skill:hig-components-dialogs",
-        "skill:iconsax-library",
-        "skill:llm-application-dev-ai-assistant",
-        "skill:llm-application-dev-prompt-optimize",
-        "skill:microservices-patterns",
-        "skill:observability-monitoring-monitor-setup",
-        "skill:observability-monitoring-slo-implement",
-        "skill:odoo-accounting-setup",
-        "skill:odoo-inventory-optimizer",
-        "skill:scala-pro",
-        "skill:seo-cannibalization-detector",
-        "skill:seo-content-planner",
-        "skill:seo-content-refresher",
-        "skill:seo-meta-optimizer",
-        "skill:seo-snippet-hunter",
-        "skill:seo-structure-architect",
-        "skill:team-collaboration-standup-notes",
-        "skill:vizcom"
-      ]
-    },
-    "8": {
+    "12": {
       "label": "Frontend + Ai + Devops",
       "members": [
+        "agent:accessibility-tester",
         "agent:cpp-build-resolver",
+        "agent:customer-support",
         "agent:design-visual-storyteller",
-        "agent:engineering-ai-data-remediation-engineer",
-        "agent:engineering-ai-engineer",
-        "agent:function-trace-generator-agent",
         "agent:go-build-resolver",
+        "agent:ios-developer",
+        "agent:macos-spatial-metal-engineer",
         "agent:marketing-podcast-strategist",
+        "agent:mobile-developer",
+        "agent:planner",
         "agent:project-management-studio-operations",
+        "agent:project-management-studio-producer",
+        "agent:quant-analyst",
         "agent:rust-build-resolver",
+        "agent:sales-discovery-coach",
         "agent:terminal-integration-specialist",
+        "agent:visionos-spatial-engineer",
+        "skill:20-andruia-niche-intelligence",
         "skill:ally-health-assistant",
         "skill:cqrs-implementation",
-        "skill:database-design",
-        "skill:exa-search",
+        "skill:expo-deployment",
         "skill:fal-audio",
         "skill:fal-image-edit",
-        "skill:fal-platform",
         "skill:fal-upscale",
         "skill:ffuf-claude-skill",
+        "skill:game-development",
+        "skill:hig-components-content",
+        "skill:hig-platforms",
+        "skill:hig-project-context",
         "skill:nerdzao-elite",
         "skill:nerdzao-elite-gemini-high",
-        "skill:obsidian-clipper-template-creator",
-        "skill:plaid-fintech",
-        "skill:pypict-skill",
         "skill:scientific-skills-hub",
-        "skill:skill-seekers",
         "skill:speed-reader-rsvp",
         "skill:superpowers-lab",
         "skill:vexor",
         "skill:web-design-guidelines",
-        "skill:win11-speckit-update",
-        "skill:zapier-make-patterns"
+        "skill:win11-speckit-update"
       ]
     },
-    "9": {
-      "label": "Typescript + Ai + Devops",
+    "13": {
+      "label": "Typescript + Database + Ai",
       "members": [
-        "agent:content-marketer",
-        "agent:context-manager",
-        "agent:corporate-training-designer",
-        "agent:crash-analyzer-agent",
-        "agent:crash-analyzer-checker-agent",
-        "agent:design-image-prompt-engineer",
-        "agent:engineering-embedded-firmware-engineer",
-        "agent:game-audio-engineer",
-        "agent:legal-recommendations",
-        "agent:marketing-bilibili-content-strategist",
-        "agent:marketing-china-ecommerce-operator",
-        "agent:marketing-weibo-strategist",
-        "agent:project-management-project-shepherd",
-        "agent:project-manager-senior",
-        "agent:sales-account-strategist",
-        "agent:seo-content-planner",
-        "agent:seo-content-refresher",
-        "agent:supply-chain-strategist",
-        "agent:support-executive-summary-generator",
-        "agent:task-distributor",
-        "agent:tutorial-engineer",
-        "agent:xr-interface-architect",
-        "agent:zk-steward",
-        "skill:ddd-strategic-design",
-        "skill:godot-4-migration",
-        "skill:hig-components-controls",
-        "skill:hybrid-search-implementation",
-        "skill:track-management",
-        "skill:unity-ecs-patterns",
-        "skill:vector-index-tuning"
+        "agent:QUICKSTART",
+        "agent:agent-activation-prompts",
+        "agent:ai-engineer",
+        "agent:backend-security-coder",
+        "agent:c-pro",
+        "agent:django-developer",
+        "agent:django-pro",
+        "agent:engineering-ai-engineer",
+        "agent:engineering-code-reviewer",
+        "agent:engineering-rapid-prototyper",
+        "agent:fullstack-developer",
+        "agent:golang-pro",
+        "agent:marketing-carousel-growth-engine",
+        "agent:microservices-architect",
+        "agent:phase-3-build",
+        "agent:sales-coach",
+        "agent:scenario-startup-mvp",
+        "agent:tdd-orchestrator",
+        "skill:async-python-patterns",
+        "skill:backend-security-coder",
+        "skill:data-quality-frameworks",
+        "skill:django-pro",
+        "skill:fastapi-templates",
+        "skill:full-stack-orchestration-full-stack-feature",
+        "skill:go-playwright",
+        "skill:java-coding-standards",
+        "skill:odoo-backup-strategy",
+        "skill:odoo-shopify-integration",
+        "skill:odoo-woocommerce-bridge",
+        "skill:python-testing-patterns",
+        "skill:reverse-engineer",
+        "skill:videodb-skills"
       ]
     },
-    "10": {
-      "label": "Typescript + Javascript + Frontend",
-      "members": [
-        "agent:SKILL",
-        "agent:build-error-resolver",
-        "agent:design-system-architect",
-        "agent:julia-pro",
-        "agent:kotlin-build-resolver",
-        "agent:project-management-jira-workflow-steward",
-        "agent:ui-visual-validator",
-        "skill:animejs-animation",
-        "skill:antigravity-workflows",
-        "skill:bullmq-specialist",
-        "skill:context-management-context-save",
-        "skill:csharp-pro",
-        "skill:design-spells",
-        "skill:expo-deployment",
-        "skill:expo-dev-client",
-        "skill:fal-workflow",
-        "skill:fixing-metadata",
-        "skill:haskell-pro",
-        "skill:inngest",
-        "skill:magic-animator",
-        "skill:magic-ui-generator",
-        "skill:odoo-manufacturing-advisor",
-        "skill:odoo-sales-crm-expert",
-        "skill:performance-profiling",
-        "skill:ruby-pro",
-        "skill:trigger-dev",
-        "skill:webapp-testing"
-      ]
-    },
-    "11": {
-      "label": "Typescript + Devops + Frontend",
-      "members": [
-        "agent:docs-architect",
-        "agent:engineering-software-architect",
-        "agent:godot-gameplay-scripter",
-        "agent:legal-advisor",
-        "agent:phase-1-strategy",
-        "agent:sales-proposal-strategist",
-        "agent:support-finance-tracker",
-        "skill:10-andruia-skill-smith",
-        "skill:architect-review",
-        "skill:busybox-on-windows",
-        "skill:code-documentation-code-explain",
-        "skill:context-optimization",
-        "skill:design-md",
-        "skill:fda-food-safety-auditor",
-        "skill:fda-medtech-compliance-auditor",
-        "skill:hig-components-menus",
-        "skill:internal-comms-anthropic",
-        "skill:internal-comms-community",
-        "skill:odoo-project-timesheet",
-        "skill:openapi-spec-generation",
-        "skill:sred-work-summary",
-        "skill:theme-factory",
-        "skill:unreal-engine-cpp-pro",
-        "skill:upstash-qstash",
-        "skill:using-superpowers",
-        "skill:wiki-page-writer",
-        "skill:wiki-researcher"
-      ]
-    },
-    "12": {
-      "label": "Python + Typescript + Ai",
+    "14": {
+      "label": "Python + Ai + Frontend",
       "members": [
         "agent:agent-organizer",
+        "agent:agents-orchestrator",
         "agent:blender-addon-engineer",
         "agent:chief-of-staff",
+        "agent:engineering-ai-data-remediation-engineer",
         "agent:error-coordinator",
+        "agent:fastapi-pro",
         "agent:knowledge-synthesizer",
         "agent:marketing-short-video-editing-coach",
         "agent:ml-engineer",
@@ -741,414 +1146,206 @@
         "agent:unity-developer",
         "agent:unreal-systems-engineer",
         "skill:avalonia-zafiro-development",
+        "skill:business-analyst",
         "skill:code-documentation-doc-generate",
         "skill:documentation-generation-doc-generate",
-        "skill:google-drive-automation",
-        "skill:google-slides-automation",
+        "skill:google-docs-automation",
+        "skill:hr-pro",
         "skill:imagen",
         "skill:legal-advisor",
         "skill:monorepo-architect",
-        "skill:uv-package-manager"
-      ]
-    },
-    "13": {
-      "label": "Typescript + Devops + Frontend",
-      "members": [
-        "agent:EXECUTIVE-BRIEF",
-        "agent:data-engineer",
-        "agent:elixir-expert",
-        "agent:game-developer",
-        "agent:golang-pro",
-        "agent:nexus-strategy",
-        "agent:performance-monitor",
-        "agent:phase-5-launch",
-        "agent:posix-shell-pro",
-        "agent:product-trend-researcher",
-        "agent:sales-outbound-strategist",
-        "agent:scala-pro",
-        "agent:specialized-model-qa",
-        "skill:backtesting-frameworks",
-        "skill:computer-vision-expert",
-        "skill:fp-option-ref",
-        "skill:fp-pipe-ref",
-        "skill:fp-types-ref",
-        "skill:go-concurrency-patterns",
-        "skill:golang-pro",
-        "skill:llm-knowledge-base",
-        "skill:python-packaging",
-        "skill:writing-plans"
-      ]
-    },
-    "14": {
-      "label": "Typescript + Security + Javascript",
-      "members": [
-        "agent:code-reviewer",
-        "agent:engineering-feishu-integration-developer",
-        "agent:marketing-linkedin-content-creator",
-        "agent:phase-4-hardening",
-        "agent:security-reviewer",
-        "agent:specialized-mcp-builder",
-        "agent:sql-pro",
-        "agent:team-reviewer",
-        "agent:wordpress-master",
-        "skill:apify-influencer-discovery",
-        "skill:chrome-extension-developer",
-        "skill:cloudflare-workers-expert",
-        "skill:conductor-setup",
-        "skill:context-agent",
-        "skill:emblemai-crypto-wallet",
-        "skill:firebase",
-        "skill:gh-review-requests",
-        "skill:nextjs-supabase-auth",
-        "skill:nodejs-backend-patterns",
-        "skill:payment-integration",
-        "skill:software-architecture"
+        "skill:odoo-edi-connector",
+        "skill:podcast-generation",
+        "skill:vector-database-engineer"
       ]
     },
     "15": {
-      "label": "Database + Ai + Devops",
-      "members": [
-        "agent:api-documenter",
-        "agent:architect",
-        "agent:architect-reviewer",
-        "agent:backend-architect-with-memory",
-        "agent:documentation-engineer",
-        "agent:engineering-backend-architect",
-        "agent:game-designer",
-        "agent:go-reviewer",
-        "agent:java-architect",
-        "agent:legacy-modernizer",
-        "agent:php-pro",
-        "agent:research-analyst",
-        "agent:rust-reviewer",
-        "agent:search-specialist",
-        "agent:spring-boot-engineer",
-        "skill:api-patterns",
-        "skill:ddd-tactical-patterns",
-        "skill:graphql",
-        "skill:pakistan-payments-stack",
-        "skill:parallel-agents"
-      ]
-    },
-    "16": {
-      "label": "Typescript + Frontend + Database",
-      "members": [
-        "agent:technical-writer",
-        "skill:agent-memory-systems",
-        "skill:dbos-golang",
-        "skill:dbos-python",
-        "skill:dbos-typescript",
-        "skill:dotnet-backend-patterns",
-        "skill:fastapi-templates",
-        "skill:firecrawl-scraper",
-        "skill:fixing-accessibility",
-        "skill:go-playwright",
-        "skill:google-docs-automation",
-        "skill:lightning-channel-factories",
-        "skill:manifest",
-        "skill:neon-postgres",
-        "skill:odoo-woocommerce-bridge",
-        "skill:pydantic-models-py",
-        "skill:react-flow-node-ts",
-        "skill:salesforce-development",
-        "skill:using-neon"
-      ]
-    },
-    "17": {
-      "label": "Typescript + Swift + Devops",
-      "members": [
-        "agent:customer-support",
-        "agent:engineering-mobile-app-builder",
-        "agent:flutter-expert",
-        "agent:ios-developer",
-        "agent:macos-spatial-metal-engineer",
-        "agent:mobile-developer",
-        "agent:project-management-studio-producer",
-        "agent:quant-analyst",
-        "agent:sales-discovery-coach",
-        "agent:testing-tool-evaluator",
-        "agent:visionos-spatial-engineer",
-        "skill:20-andruia-niche-intelligence",
-        "skill:audit-skills",
-        "skill:game-development",
-        "skill:hig-components-content",
-        "skill:hig-platforms",
-        "skill:hig-project-context",
-        "skill:monitor-assistant"
-      ]
-    },
-    "18": {
-      "label": "Typescript + Ai + Devops",
+      "label": "Frontend + Typescript + Ai",
       "members": [
         "agent:api-designer",
-        "agent:c4-component",
+        "agent:cloud-architect",
         "agent:design-ux-architect",
         "agent:docker-expert",
         "agent:dotnet-core-expert",
         "agent:electron-pro",
         "agent:godot-multiplayer-engineer",
         "agent:incident-responder",
+        "agent:marketing-linkedin-content-creator",
         "agent:paid-media-paid-social-strategist",
-        "agent:paid-media-tracking-specialist",
         "agent:payment-integration",
         "agent:penetration-tester",
         "agent:reference-builder",
         "agent:unity-shader-graph-artist",
+        "skill:anti-reversing-techniques",
         "skill:api-design-principles",
-        "skill:c4-component",
+        "skill:azure-ai-projects-java",
+        "skill:commit",
         "skill:create-branch",
-        "skill:plan-writing"
+        "skill:mcp-server-patterns",
+        "skill:plaid-fintech",
+        "skill:plan-writing",
+        "skill:security-requirement-extraction"
+      ]
+    },
+    "16": {
+      "label": "Typescript + Database + Ai",
+      "members": [
+        "agent:customer-success-manager",
+        "agent:database-optimizer",
+        "agent:design-inclusive-visuals-specialist",
+        "agent:engineering-database-optimizer",
+        "agent:handoff-templates",
+        "agent:hr-pro",
+        "agent:lsp-index-engineer",
+        "agent:paid-media-programmatic-buyer",
+        "agent:phase-0-discovery",
+        "agent:sales-deal-strategist",
+        "agent:sales-pipeline-analyst",
+        "agent:scientific-literature-researcher",
+        "agent:search-specialist",
+        "agent:sql-pro",
+        "agent:unreal-world-builder",
+        "agent:xr-cockpit-interaction-specialist",
+        "skill:clean-code",
+        "skill:cloudformation-best-practices",
+        "skill:conductor-setup",
+        "skill:hig-foundations",
+        "skill:python-performance-optimization",
+        "skill:sql-optimization-patterns"
+      ]
+    },
+    "17": {
+      "label": "Typescript + Ai + Devops",
+      "members": [
+        "agent:arm-cortex-expert",
+        "agent:engineering-frontend-developer",
+        "agent:engineering-wechat-mini-program-developer",
+        "agent:legal-risks",
+        "agent:powershell-5.1-expert",
+        "agent:recruitment-specialist",
+        "agent:roblox-experience-designer",
+        "skill:agentfolio",
+        "skill:brand-guidelines-anthropic",
+        "skill:brand-guidelines-community",
+        "skill:conductor-manage",
+        "skill:ddd-context-mapping",
+        "skill:deep-research",
+        "skill:error-handling-patterns",
+        "skill:odoo-orm-expert",
+        "skill:oss-hunter",
+        "skill:react-native-architecture",
+        "skill:test-fixing",
+        "skill:unsplash-integration",
+        "skill:voice-agents",
+        "skill:x-twitter-scraper"
+      ]
+    },
+    "18": {
+      "label": "Typescript + Ai + Security",
+      "members": [
+        "agent:engineering-mobile-app-builder",
+        "agent:fintech-engineer",
+        "agent:flutter-reviewer",
+        "agent:go-reviewer",
+        "agent:integration-reviewer",
+        "agent:marketing-tiktok-strategist",
+        "agent:paid-media-tracking-specialist",
+        "agent:unreal-technical-artist",
+        "skill:auth-implementation-patterns",
+        "skill:graphql-architect",
+        "skill:grpc-golang",
+        "skill:incident-response-incident-response",
+        "skill:linkedin-automation",
+        "skill:monitor-assistant",
+        "skill:odoo-module-developer",
+        "skill:odoo-security-rules",
+        "skill:square-automation"
       ]
     },
     "19": {
-      "label": "Typescript + Database + Ai",
-      "members": [
-        "agent:data-researcher",
-        "agent:devops-incident-responder",
-        "agent:malware-analyst",
-        "agent:platform-engineer",
-        "agent:scenario-incident-response",
-        "agent:tdd-orchestrator",
-        "agent:team-lead",
-        "skill:architecture",
-        "skill:avalonia-viewmodels-zafiro",
-        "skill:c4-context",
-        "skill:code-refactoring-context-restore",
-        "skill:context-management-context-restore",
-        "skill:database-migrations-sql-migrations",
-        "skill:full-stack-orchestration-full-stack-feature",
-        "skill:minecraft-bukkit-pro",
-        "skill:postgresql-optimization"
-      ]
-    },
-    "20": {
       "label": "Typescript + Ai + Testing",
       "members": [
-        "agent:backend-architect",
-        "agent:coverage-analysis-generator-agent",
-        "agent:data-scientist",
-        "agent:design-ux-researcher",
-        "agent:marketing-app-store-optimizer",
-        "agent:product-sprint-prioritizer",
-        "agent:seo-meta-optimizer",
-        "agent:study-abroad-advisor",
-        "agent:testing-performance-benchmarker",
-        "agent:unity-architect",
-        "agent:ux-researcher",
-        "skill:agent-evaluation",
-        "skill:error-debugging-error-analysis",
-        "skill:error-diagnostics-error-analysis",
-        "skill:infinite-gratitude"
-      ]
-    },
-    "21": {
-      "label": "Python + Typescript + Database",
-      "members": [
-        "agent:QUICKSTART",
-        "agent:agent-activation-prompts",
-        "agent:agents-orchestrator",
-        "agent:marketing-carousel-growth-engine",
-        "agent:microservices-architect",
-        "agent:scenario-startup-mvp",
-        "skill:async-python-patterns",
-        "skill:business-analyst",
-        "skill:data-quality-frameworks",
-        "skill:django-pro",
-        "skill:odoo-edi-connector",
-        "skill:odoo-shopify-integration",
-        "skill:python-testing-patterns",
-        "skill:reverse-engineer",
-        "skill:videodb-skills"
-      ]
-    },
-    "22": {
-      "label": "Typescript + Ai + Devops",
-      "members": [
-        "agent:azure-infra-engineer",
+        "agent:accessibility-expert",
         "agent:conductor-validator",
         "agent:powershell-module-architect",
         "agent:temporal-python-pro",
+        "agent:testing-workflow-optimizer",
         "agent:ui-ux-designer",
         "skill:airflow-dag-patterns",
         "skill:comprehensive-review-pr-enhance",
         "skill:concise-planning",
         "skill:framework-migration-code-migrate",
         "skill:git-pr-workflows-pr-enhance",
+        "skill:php-pro",
         "skill:risk-manager",
         "skill:sales-automator",
+        "skill:salesforce-development",
         "skill:tdd-workflows-tdd-red",
         "skill:terraform-infrastructure"
       ]
     },
-    "23": {
-      "label": "Typescript + Javascript + Ai",
+    "20": {
+      "label": "Python + Ai + Devops",
       "members": [
-        "agent:cpp-pro",
-        "agent:csharp-pro",
-        "agent:frontend-developer",
-        "agent:haskell-pro",
+        "agent:EXECUTIVE-BRIEF",
+        "agent:elixir-expert",
+        "agent:game-developer",
+        "agent:marketing-social-media-strategist",
+        "agent:performance-monitor",
+        "agent:posix-shell-pro",
+        "agent:sales-outbound-strategist",
+        "agent:scala-pro",
+        "agent:specialized-model-qa",
+        "skill:backtesting-frameworks",
+        "skill:computer-vision-expert",
+        "skill:earllm-build",
+        "skill:fp-option-ref",
+        "skill:fp-pipe-ref",
+        "skill:fp-types-ref",
+        "skill:python-packaging",
+        "skill:writing-plans"
+      ]
+    },
+    "21": {
+      "label": "Typescript + Ai + Devops",
+      "members": [
+        "agent:backend-architect",
+        "agent:flutter-expert",
+        "agent:phase-4-hardening",
         "agent:react-specialist",
+        "agent:swift-expert",
+        "agent:team-reviewer",
         "agent:typescript-pro",
         "agent:vue-expert",
         "agent:xr-immersive-developer",
+        "skill:agents-md",
         "skill:ai-product",
-        "skill:fp-either-ref",
-        "skill:monorepo-management",
+        "skill:chrome-extension-developer",
+        "skill:cloudflare-workers-expert",
         "skill:powershell-windows",
-        "skill:verification-before-completion",
-        "skill:wiki-architect"
+        "skill:software-architecture"
       ]
     },
-    "24": {
-      "label": "Typescript + Aws + Ai",
-      "members": [
-        "agent:accessibility-expert",
-        "agent:accessibility-tester",
-        "agent:cloud-architect",
-        "agent:compliance-auditor",
-        "agent:firmware-analyst",
-        "agent:legal-compliance",
-        "agent:legal-terms",
-        "agent:reverse-engineer",
-        "agent:support-legal-compliance-checker",
-        "agent:testing-accessibility-auditor",
-        "skill:anti-reversing-techniques",
-        "skill:screen-reader-testing",
-        "skill:wcag-audit-patterns",
-        "skill:writing-skills"
-      ]
-    },
-    "25": {
+    "22": {
       "label": "Typescript + Database + Ai",
       "members": [
-        "agent:business-analyst",
-        "agent:chaos-engineer",
-        "agent:data-analyst",
-        "agent:elixir-pro",
-        "agent:performance-engineer",
-        "agent:postgres-pro",
-        "skill:android-ui-verification",
-        "skill:dbt-transformation-patterns",
-        "skill:elixir-pro",
-        "skill:hr-pro",
-        "skill:requesting-code-review",
-        "skill:temporal-python-testing",
-        "skill:vector-database-engineer"
+        "agent:database-reviewer",
+        "agent:devops-incident-responder",
+        "agent:malware-analyst",
+        "agent:planning-coordinator",
+        "agent:scenario-incident-response",
+        "agent:team-lead",
+        "skill:avalonia-viewmodels-zafiro",
+        "skill:code-refactoring-context-restore",
+        "skill:code-reviewer",
+        "skill:context-management-context-restore",
+        "skill:database-migrations-sql-migrations",
+        "skill:minecraft-bukkit-pro",
+        "skill:postgres-best-practices",
+        "skill:postgresql-optimization"
       ]
     },
-    "26": {
-      "label": "Typescript + Ai + Devops",
-      "members": [
-        "agent:engineering-frontend-developer",
-        "agent:engineering-wechat-mini-program-developer",
-        "agent:fintech-engineer",
-        "agent:marketing-tiktok-strategist",
-        "agent:offsec-specialist",
-        "agent:recruitment-specialist",
-        "agent:roblox-experience-designer",
-        "skill:auth-implementation-patterns",
-        "skill:ddd-context-mapping",
-        "skill:error-handling-patterns",
-        "skill:odoo-security-rules",
-        "skill:react-native-architecture",
-        "skill:x-twitter-scraper"
-      ]
-    },
-    "27": {
-      "label": "Typescript + Javascript + Ai",
-      "members": [
-        "agent:design-brand-guardian",
-        "agent:design-ui-designer",
-        "agent:graph-reviewer",
-        "agent:marketing-cross-border-ecommerce",
-        "agent:nextjs-developer",
-        "agent:roblox-avatar-creator",
-        "agent:seo-specialist",
-        "agent:seo-structure-architect",
-        "skill:antigravity-design-expert",
-        "skill:llm-prompt-optimizer",
-        "skill:remotion-best-practices",
-        "skill:shader-programming-glsl"
-      ]
-    },
-    "28": {
-      "label": "Typescript + Ai + Devops",
-      "members": [
-        "agent:flutter-reviewer",
-        "agent:powershell-5.1-expert",
-        "skill:agentfolio",
-        "skill:brand-guidelines-anthropic",
-        "skill:brand-guidelines-community",
-        "skill:conductor-manage",
-        "skill:graphql-architect",
-        "skill:incident-response-incident-response",
-        "skill:linkedin-automation",
-        "skill:oss-hunter",
-        "skill:square-automation",
-        "skill:unsplash-integration"
-      ]
-    },
-    "29": {
-      "label": "Typescript + Ai + Testing",
-      "members": [
-        "agent:marketing-content-creator",
-        "agent:planner",
-        "agent:rust-pro",
-        "agent:team-implementer",
-        "skill:ai-agent-development",
-        "skill:ask-questions-if-underspecified",
-        "skill:debugger",
-        "skill:error-debugging-error-trace",
-        "skill:framework-migration-deps-upgrade",
-        "skill:git-pr-workflows-git-workflow",
-        "skill:team-collaboration-issue"
-      ]
-    },
-    "30": {
-      "label": "Typescript + Java + Ai",
-      "members": [
-        "agent:java-build-resolver",
-        "agent:typescript-reviewer",
-        "skill:android-jetpack-compose-expert",
-        "skill:baseline-ui",
-        "skill:java-pro",
-        "skill:javascript-testing-patterns",
-        "skill:kotlin-coroutines-expert",
-        "skill:modern-javascript-patterns",
-        "skill:odoo-automated-tests",
-        "skill:typescript-pro",
-        "skill:web-artifacts-builder"
-      ]
-    },
-    "31": {
-      "label": "Typescript + Ai + Testing",
-      "members": [
-        "agent:llm-architect",
-        "agent:project-management-experiment-tracker",
-        "agent:prompt-engineer",
-        "agent:refactoring-specialist",
-        "agent:testing-evidence-collector",
-        "skill:code-refactoring-refactor-clean",
-        "skill:codebase-cleanup-refactor-clean",
-        "skill:commit",
-        "skill:mcp-server-patterns"
-      ]
-    },
-    "32": {
-      "label": "Typescript + Ai + Security",
-      "members": [
-        "agent:blockchain-developer",
-        "agent:crash-analysis-agent",
-        "agent:level-designer",
-        "agent:marketing-instagram-curator",
-        "agent:narrative-designer",
-        "agent:sales-engineer",
-        "agent:security-auditor",
-        "skill:security-requirement-extraction",
-        "skill:stride-analysis-patterns"
-      ]
-    },
-    "33": {
+    "23": {
       "label": "Typescript + Ai + Security",
       "members": [
         "agent:godot-shader-developer",
@@ -1156,26 +1353,58 @@
         "agent:marketing-seo-specialist",
         "agent:marketing-twitter-engager",
         "agent:marketing-xiaohongshu-specialist",
+        "agent:paid-media-search-query-analyst",
+        "agent:scenario-marketing-campaign",
         "agent:unreal-multiplayer-architect",
         "skill:geo-fundamentals",
         "skill:odoo-l10n-compliance",
         "skill:variant-analysis"
       ]
     },
-    "34": {
+    "24": {
       "label": "Typescript + Ai + Testing",
       "members": [
-        "agent:paid-media-creative-strategist",
-        "agent:paid-media-ppc-strategist",
-        "agent:paid-media-search-query-analyst",
-        "agent:scenario-marketing-campaign",
-        "agent:testing-test-results-analyzer",
-        "skill:accessibility-compliance-accessibility-audit",
-        "skill:security-scanning-security-hardening",
-        "skill:uncle-bob-craft"
+        "agent:blockchain-developer",
+        "agent:compliance-auditor",
+        "agent:crash-analysis-agent",
+        "agent:firmware-analyst",
+        "agent:game-designer",
+        "agent:level-designer",
+        "agent:narrative-designer",
+        "agent:reverse-engineer",
+        "agent:sales-engineer",
+        "agent:security-auditor"
       ]
     },
-    "35": {
+    "25": {
+      "label": "Typescript + Docker + Ai",
+      "members": [
+        "agent:c4-context",
+        "agent:phase-2-foundation",
+        "skill:avalonia-layout-zafiro",
+        "skill:c4-component",
+        "skill:cpp-pro",
+        "skill:kubernetes-deployment",
+        "skill:ml-engineer",
+        "skill:odoo-qweb-templates",
+        "skill:uv-package-manager"
+      ]
+    },
+    "26": {
+      "label": "Python + Typescript + Ai",
+      "members": [
+        "agent:bash-pro",
+        "agent:pytorch-build-resolver",
+        "agent:support-infrastructure-maintainer",
+        "skill:bash-defensive-patterns",
+        "skill:bats-testing-patterns",
+        "skill:e2e-testing-patterns",
+        "skill:frontend-security-coder",
+        "skill:quant-analyst",
+        "skill:webapp-testing"
+      ]
+    },
+    "27": {
       "label": "Typescript + Ai + Security",
       "members": [
         "agent:kotlin-reviewer",
@@ -1184,1722 +1413,1758 @@
         "skill:codebase-cleanup-deps-audit",
         "skill:dependency-management-deps-audit",
         "skill:github-issue-creator",
-        "skill:security-compliance-compliance-check"
+        "skill:security-compliance-compliance-check",
+        "skill:skill-writer"
       ]
     },
-    "36": {
-      "label": "Python + Typescript + Ai",
+    "28": {
+      "label": "Typescript + Javascript + Ai",
       "members": [
-        "agent:arm-cortex-expert",
-        "agent:legal-risks",
-        "agent:unreal-technical-artist",
-        "skill:odoo-orm-expert",
-        "skill:podcast-generation",
-        "skill:test-fixing",
-        "skill:voice-agents"
+        "agent:dotnet-framework-4.8-expert",
+        "agent:loop-monitor",
+        "agent:nextjs-developer",
+        "skill:agent-memory-mcp",
+        "skill:audit-skills",
+        "skill:clerk-auth",
+        "skill:supply-chain-risk-auditor"
       ]
     },
-    "37": {
+    "29": {
       "label": "Python + Typescript + Ai",
       "members": [
         "agent:engineering-threat-detection-engineer",
         "agent:unity-editor-tool-developer",
         "skill:diary",
-        "skill:fastapi-router-py",
         "skill:google-calendar-automation",
-        "skill:google-sheets-automation"
+        "skill:google-sheets-automation",
+        "skill:incident-response-smart-fix"
       ]
     },
-    "38": {
+    "30": {
       "label": "Typescript + Ai + Testing",
       "members": [
-        "agent:c4-context",
-        "agent:kubernetes-specialist",
-        "agent:service-mesh-expert",
-        "skill:cpp-pro",
-        "skill:kubernetes-deployment",
-        "skill:ml-engineer"
-      ]
-    },
-    "39": {
-      "label": "Python + Typescript + Ai",
-      "members": [
-        "agent:bash-pro",
-        "agent:pytorch-build-resolver",
-        "skill:bash-defensive-patterns",
-        "skill:bats-testing-patterns",
-        "skill:e2e-testing-patterns",
-        "skill:quant-analyst"
-      ]
-    },
-    "40": {
-      "label": "Typescript + Database + Ai",
-      "members": [
-        "agent:dx-optimizer",
-        "skill:address-github-comments",
-        "skill:architecture-patterns",
-        "skill:billing-automation",
-        "skill:c-pro",
-        "skill:security-scanning-security-dependencies"
-      ]
-    },
-    "41": {
-      "label": "Typescript + Azure + Ai",
-      "members": [
-        "agent:engineering-solidity-smart-contract-engineer",
-        "agent:government-digital-presales-consultant",
-        "agent:m365-admin",
-        "skill:azure-ai-agents-persistent-java",
-        "skill:azure-ai-projects-java"
-      ]
-    },
-    "42": {
-      "label": "Typescript + Ai + Testing",
-      "members": [
-        "agent:database-administrator",
-        "agent:git-workflow-manager",
-        "agent:specialized-workflow-architect",
-        "skill:comprehensive-review-full-review",
-        "skill:framework-migration-legacy-modernize"
-      ]
-    },
-    "43": {
-      "label": "Typescript + Kubernetes + Ai",
-      "members": [
-        "agent:product-behavioral-nudge-engine",
-        "skill:deep-research",
-        "skill:grpc-golang",
-        "skill:helm-chart-scaffolding",
-        "skill:k8s-manifest-generator"
-      ]
-    },
-    "44": {
-      "label": "Typescript + Ai + Testing",
-      "members": [
+        "agent:implementer",
         "agent:marketing-growth-hacker",
-        "agent:testing-workflow-optimizer",
+        "agent:risk-manager",
         "skill:browser-automation",
         "skill:hig-components-layout",
         "skill:mermaid-expert"
       ]
     },
-    "45": {
-      "label": "Typescript + Javascript + Ai",
+    "31": {
+      "label": "Typescript + Ai + Security",
       "members": [
-        "agent:tooling-engineer",
-        "agent:websocket-engineer",
-        "skill:code-guide-cc",
-        "skill:dx-optimizer",
-        "skill:php-pro"
-      ]
-    },
-    "46": {
-      "label": "Typescript + Javascript + Ai",
-      "members": [
-        "agent:dotnet-framework-4.8-expert",
-        "skill:agent-memory-mcp",
-        "skill:clean-code",
-        "skill:clerk-auth",
-        "skill:supply-chain-risk-auditor"
-      ]
-    },
-    "47": {
-      "label": "Python + Typescript + Ai",
-      "members": [
-        "agent:mlops-engineer",
-        "agent:testing-api-tester",
-        "skill:cicd-automation-workflow-automate",
-        "skill:security-auditor"
-      ]
-    },
-    "48": {
-      "label": "Typescript + Database + Ai",
-      "members": [
-        "agent:database-reviewer",
-        "skill:code-reviewer",
-        "skill:postgres-best-practices",
-        "skill:security-bluebook-builder"
-      ]
-    },
-    "49": {
-      "label": "Typescript + Ai + Devops",
-      "members": [
-        "agent:cli-developer",
-        "skill:docs-architect",
-        "skill:error-diagnostics-error-trace",
-        "skill:skill-writer"
-      ]
-    },
-    "50": {
-      "label": "Typescript + Ai + Testing",
-      "members": [
+        "agent:network-engineer",
+        "agent:powershell-security-hardening",
         "agent:qa-expert",
         "skill:api-documentation",
         "skill:api-testing-observability-api-mock"
       ]
     },
-    "51": {
-      "label": "Python + Typescript + Database",
+    "32": {
+      "label": "Typescript + Go + Ai",
       "members": [
-        "agent:fastapi-pro",
+        "agent:phase-5-launch",
+        "agent:product-trend-researcher",
+        "agent:testing-test-results-analyzer",
+        "skill:go-concurrency-patterns",
+        "skill:golang-pro"
+      ]
+    },
+    "33": {
+      "label": "Python + Typescript + Ai",
+      "members": [
+        "agent:mlops-engineer",
+        "skill:cicd-automation-workflow-automate",
+        "skill:google-drive-automation",
+        "skill:google-slides-automation",
+        "skill:security-auditor"
+      ]
+    },
+    "34": {
+      "label": "Python + Typescript + Ai",
+      "members": [
+        "agent:scenario-enterprise-feature",
+        "skill:circleci-automation",
+        "skill:fastapi-router-py",
+        "skill:hugging-face-tool-builder"
+      ]
+    },
+    "35": {
+      "label": "Typescript + Database + Ai",
+      "members": [
+        "agent:api-documenter",
         "agent:test-automator",
+        "skill:comprehensive-review-full-review",
         "skill:legacy-modernizer"
       ]
     },
-    "52": {
-      "label": "Typescript + Javascript + Ai",
-      "members": [
-        "agent:oss-investigator-gh-archive-agent",
-        "skill:apify-competitor-intelligence",
-        "skill:python-pro"
-      ]
-    },
-    "53": {
+    "36": {
       "label": "Typescript + Ai + Testing",
       "members": [
-        "agent:engineering-autonomous-optimization-architect",
-        "agent:rails-expert",
-        "agent:risk-manager"
+        "agent:engineering-security-engineer",
+        "agent:engineering-solidity-smart-contract-engineer",
+        "agent:offsec-specialist",
+        "skill:parallel-agents"
       ]
     },
-    "54": {
-      "label": "Typescript + Rust + Ai",
+    "37": {
+      "label": "Typescript + Database + Ai",
       "members": [
-        "agent:network-engineer",
-        "skill:seo-authority-builder"
+        "agent:mobile-security-coder",
+        "agent:testing-tool-evaluator",
+        "skill:address-github-comments",
+        "skill:security-scanning-security-dependencies"
       ]
     },
-    "55": {
-      "label": "Typescript + Javascript + Java",
+    "38": {
+      "label": "Typescript + Ai + Testing",
       "members": [
-        "agent:javascript-pro",
-        "skill:springboot-tdd"
+        "agent:paid-media-creative-strategist",
+        "agent:paid-media-ppc-strategist",
+        "skill:accessibility-compliance-accessibility-audit",
+        "skill:security-scanning-security-hardening"
       ]
     },
-    "56": {
-      "label": "Typescript + Javascript + Terraform",
+    "39": {
+      "label": "Typescript + Javascript + Ai",
       "members": [
         "agent:terraform-specialist",
+        "agent:websocket-engineer",
+        "skill:antigravity-workflows",
         "skill:terraform-specialist"
       ]
     },
-    "57": {
-      "label": "Typescript + Database + Ai",
+    "40": {
+      "label": "Typescript + Docker + Ai",
       "members": [
-        "agent:engineering-rapid-prototyper",
-        "agent:tdd-guide"
+        "agent:deployment-engineer",
+        "agent:kubernetes-specialist",
+        "agent:machine-learning-engineer",
+        "agent:security-engineer"
       ]
     },
-    "58": {
+    "41": {
+      "label": "Typescript + Ai + Testing",
+      "members": [
+        "agent:git-workflow-manager",
+        "agent:specialized-workflow-architect",
+        "skill:framework-migration-legacy-modernize"
+      ]
+    },
+    "42": {
+      "label": "Typescript + Javascript + Ai",
+      "members": [
+        "agent:specialized-mcp-builder",
+        "skill:payment-integration",
+        "skill:springboot-tdd"
+      ]
+    },
+    "43": {
+      "label": "Python + Typescript + Javascript",
+      "members": [
+        "agent:e2e-runner",
+        "agent:exploitability-validator-agent"
+      ]
+    },
+    "44": {
+      "label": "Python + Typescript + Database",
+      "members": [
+        "agent:backend-developer",
+        "agent:laravel-specialist"
+      ]
+    },
+    "45": {
+      "label": "Typescript + Ruby + Ai",
+      "members": [
+        "agent:engineering-autonomous-optimization-architect",
+        "agent:rails-expert"
+      ]
+    },
+    "46": {
+      "label": "Python + Typescript + Ai",
+      "members": [
+        "agent:python-pro",
+        "agent:testing-api-tester"
+      ]
+    },
+    "47": {
+      "label": "Python + Typescript + Javascript",
+      "members": [
+        "agent:mcp-developer",
+        "agent:tooling-engineer"
+      ]
+    },
+    "48": {
       "label": "Miscellaneous",
       "members": [
         "skill:007"
       ]
     },
-    "59": {
+    "49": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:2d-games"
+      ]
+    },
+    "50": {
       "label": "Miscellaneous",
       "members": [
         "skill:3d-web-experience"
       ]
     },
-    "60": {
+    "51": {
       "label": "Miscellaneous",
       "members": [
         "skill:ab-test-setup"
       ]
     },
-    "61": {
+    "52": {
       "label": "Miscellaneous",
       "members": [
         "skill:active-directory-attacks"
       ]
     },
-    "62": {
+    "53": {
       "label": "Miscellaneous",
       "members": [
         "skill:activecampaign-automation"
       ]
     },
-    "63": {
+    "54": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:add-sub"
+      ]
+    },
+    "55": {
       "label": "Miscellaneous",
       "members": [
         "skill:advanced-evaluation"
       ]
     },
-    "64": {
+    "56": {
       "label": "Miscellaneous",
       "members": [
         "skill:advogado-criminal"
       ]
     },
-    "65": {
+    "57": {
       "label": "Miscellaneous",
       "members": [
         "skill:advogado-especialista"
       ]
     },
-    "66": {
+    "58": {
       "label": "Miscellaneous",
       "members": [
         "skill:agent-framework-azure-ai-py"
       ]
     },
-    "67": {
+    "59": {
       "label": "Miscellaneous",
       "members": [
         "skill:agent-orchestration-improve-agent"
       ]
     },
-    "68": {
+    "60": {
       "label": "Miscellaneous",
       "members": [
         "skill:agent-orchestration-multi-agent-optimize"
       ]
     },
-    "69": {
+    "61": {
       "label": "Miscellaneous",
       "members": [
         "skill:agent-orchestrator"
       ]
     },
-    "70": {
+    "62": {
       "label": "Miscellaneous",
       "members": [
         "skill:agentic-actions-auditor"
       ]
     },
-    "71": {
+    "63": {
       "label": "Miscellaneous",
       "members": [
         "skill:agentmail"
       ]
     },
-    "72": {
+    "64": {
       "label": "Miscellaneous",
       "members": [
         "skill:agents-v2-py"
       ]
     },
-    "73": {
+    "65": {
       "label": "Miscellaneous",
       "members": [
         "skill:ai-analyzer"
       ]
     },
-    "74": {
+    "66": {
       "label": "Miscellaneous",
       "members": [
         "skill:ai-engineer"
       ]
     },
-    "75": {
+    "67": {
       "label": "Miscellaneous",
       "members": [
         "skill:ai-first-engineering"
       ]
     },
-    "76": {
+    "68": {
       "label": "Miscellaneous",
       "members": [
         "skill:ai-ml"
       ]
     },
-    "77": {
+    "69": {
       "label": "Miscellaneous",
       "members": [
         "skill:ai-regression-testing"
       ]
     },
-    "78": {
+    "70": {
       "label": "Miscellaneous",
       "members": [
         "skill:ai-studio-image"
       ]
     },
-    "79": {
+    "71": {
       "label": "Miscellaneous",
       "members": [
         "skill:ai-wrapper-product"
       ]
     },
-    "80": {
+    "72": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:akf-trust-metadata"
+      ]
+    },
+    "73": {
       "label": "Miscellaneous",
       "members": [
         "skill:algorithmic-art"
       ]
     },
-    "81": {
+    "74": {
       "label": "Miscellaneous",
       "members": [
         "skill:amazon-alexa"
       ]
     },
-    "82": {
+    "75": {
       "label": "Miscellaneous",
       "members": [
         "skill:amplitude-automation"
       ]
     },
-    "83": {
+    "76": {
       "label": "Miscellaneous",
       "members": [
         "skill:analytics-product"
       ]
     },
-    "84": {
+    "77": {
       "label": "Miscellaneous",
       "members": [
         "skill:analytics-tracking"
       ]
     },
-    "85": {
+    "78": {
       "label": "Miscellaneous",
       "members": [
         "skill:andrej-karpathy"
       ]
     },
-    "86": {
+    "79": {
       "label": "Miscellaneous",
       "members": [
         "skill:android-clean-architecture"
       ]
     },
-    "87": {
+    "80": {
       "label": "Miscellaneous",
       "members": [
         "skill:angular-best-practices"
       ]
     },
-    "88": {
+    "81": {
       "label": "Miscellaneous",
       "members": [
         "skill:angular-migration"
       ]
     },
-    "89": {
+    "82": {
       "label": "Miscellaneous",
       "members": [
         "skill:angular-state-management"
       ]
     },
-    "90": {
+    "83": {
       "label": "Miscellaneous",
       "members": [
         "skill:angular-ui-patterns"
       ]
     },
-    "91": {
+    "84": {
       "label": "Miscellaneous",
       "members": [
         "skill:angular"
       ]
     },
-    "92": {
+    "85": {
       "label": "Miscellaneous",
       "members": [
         "skill:api-design"
       ]
     },
-    "93": {
+    "86": {
       "label": "Miscellaneous",
       "members": [
         "skill:api-documentation-generator"
       ]
     },
-    "94": {
+    "87": {
       "label": "Miscellaneous",
       "members": [
         "skill:api-endpoint-builder"
       ]
     },
-    "95": {
+    "88": {
       "label": "Miscellaneous",
       "members": [
         "skill:api-fuzzing-bug-bounty"
       ]
     },
-    "96": {
+    "89": {
       "label": "Miscellaneous",
       "members": [
         "skill:api-security-best-practices"
       ]
     },
-    "97": {
+    "90": {
       "label": "Miscellaneous",
       "members": [
         "skill:apify-actor-development"
       ]
     },
-    "98": {
+    "91": {
       "label": "Miscellaneous",
       "members": [
         "skill:apify-actorization"
       ]
     },
-    "99": {
+    "92": {
       "label": "Miscellaneous",
       "members": [
         "skill:apify-ecommerce"
       ]
     },
-    "100": {
+    "93": {
       "label": "Miscellaneous",
       "members": [
         "skill:apify-ultimate-scraper"
       ]
     },
-    "101": {
+    "94": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:app-store-changelog"
+      ]
+    },
+    "95": {
       "label": "Miscellaneous",
       "members": [
         "skill:app-store-optimization"
       ]
     },
-    "102": {
+    "96": {
       "label": "Miscellaneous",
       "members": [
         "skill:appdeploy"
       ]
     },
-    "103": {
+    "97": {
       "label": "Miscellaneous",
       "members": [
         "skill:architecture-decision-records"
       ]
     },
-    "104": {
+    "98": {
       "label": "Miscellaneous",
       "members": [
         "skill:arm-cortex-expert"
       ]
     },
-    "105": {
+    "99": {
       "label": "Miscellaneous",
       "members": [
         "skill:astropy"
       ]
     },
-    "106": {
+    "100": {
       "label": "Miscellaneous",
       "members": [
         "skill:audio-transcriber"
       ]
     },
-    "107": {
+    "101": {
       "label": "Miscellaneous",
       "members": [
         "skill:audit-context-building"
       ]
     },
-    "108": {
+    "102": {
       "label": "Miscellaneous",
       "members": [
         "skill:auri-core"
       ]
     },
-    "109": {
+    "103": {
       "label": "Miscellaneous",
       "members": [
         "skill:autonomous-agent-patterns"
       ]
     },
-    "110": {
+    "104": {
       "label": "Miscellaneous",
       "members": [
         "skill:aws-cost-cleanup"
       ]
     },
-    "111": {
+    "105": {
       "label": "Miscellaneous",
       "members": [
         "skill:aws-cost-optimizer"
       ]
     },
-    "112": {
+    "106": {
       "label": "Miscellaneous",
       "members": [
         "skill:aws-penetration-testing"
       ]
     },
-    "113": {
+    "107": {
       "label": "Miscellaneous",
       "members": [
         "skill:aws-serverless"
       ]
     },
-    "114": {
+    "108": {
       "label": "Miscellaneous",
       "members": [
         "skill:azd-deployment"
       ]
     },
-    "115": {
+    "109": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-agents-persistent-dotnet"
       ]
     },
-    "116": {
+    "110": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-anomalydetector-java"
       ]
     },
-    "117": {
+    "111": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-contentsafety-java"
       ]
     },
-    "118": {
+    "112": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-contentsafety-py"
       ]
     },
-    "119": {
+    "113": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-contentsafety-ts"
       ]
     },
-    "120": {
+    "114": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-contentunderstanding-py"
       ]
     },
-    "121": {
+    "115": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-document-intelligence-dotnet"
       ]
     },
-    "122": {
+    "116": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-document-intelligence-ts"
       ]
     },
-    "123": {
+    "117": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-formrecognizer-java"
       ]
     },
-    "124": {
+    "118": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-ml-py"
       ]
     },
-    "125": {
+    "119": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-openai-dotnet"
       ]
     },
-    "126": {
+    "120": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-projects-dotnet"
       ]
     },
-    "127": {
+    "121": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-projects-py"
       ]
     },
-    "128": {
+    "122": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-projects-ts"
       ]
     },
-    "129": {
+    "123": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-textanalytics-py"
       ]
     },
-    "130": {
+    "124": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-translation-document-py"
       ]
     },
-    "131": {
+    "125": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-translation-text-py"
       ]
     },
-    "132": {
+    "126": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-translation-ts"
       ]
     },
-    "133": {
+    "127": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-vision-imageanalysis-java"
       ]
     },
-    "134": {
+    "128": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-vision-imageanalysis-py"
       ]
     },
-    "135": {
+    "129": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-voicelive-dotnet"
       ]
     },
-    "136": {
+    "130": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-voicelive-java"
       ]
     },
-    "137": {
+    "131": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-voicelive-py"
       ]
     },
-    "138": {
+    "132": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-ai-voicelive-ts"
       ]
     },
-    "139": {
+    "133": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-appconfiguration-java"
       ]
     },
-    "140": {
+    "134": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-appconfiguration-py"
       ]
     },
-    "141": {
+    "135": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-appconfiguration-ts"
       ]
     },
-    "142": {
+    "136": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-communication-callautomation-java"
       ]
     },
-    "143": {
+    "137": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-communication-chat-java"
       ]
     },
-    "144": {
+    "138": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-communication-common-java"
       ]
     },
-    "145": {
+    "139": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-communication-sms-java"
       ]
     },
-    "146": {
+    "140": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-compute-batch-java"
       ]
     },
-    "147": {
+    "141": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-containerregistry-py"
       ]
     },
-    "148": {
+    "142": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-cosmos-db-py"
       ]
     },
-    "149": {
+    "143": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-cosmos-java"
       ]
     },
-    "150": {
+    "144": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-cosmos-py"
       ]
     },
-    "151": {
+    "145": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-cosmos-ts"
       ]
     },
-    "152": {
+    "146": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-data-tables-java"
       ]
     },
-    "153": {
+    "147": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-data-tables-py"
       ]
     },
-    "154": {
+    "148": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-eventgrid-dotnet"
       ]
     },
-    "155": {
+    "149": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-eventgrid-java"
       ]
     },
-    "156": {
+    "150": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-eventhub-dotnet"
       ]
     },
-    "157": {
+    "151": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-eventhub-java"
       ]
     },
-    "158": {
+    "152": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-eventhub-py"
       ]
     },
-    "159": {
+    "153": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-eventhub-ts"
       ]
     },
-    "160": {
+    "154": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-identity-dotnet"
       ]
     },
-    "161": {
+    "155": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-identity-java"
       ]
     },
-    "162": {
+    "156": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-identity-py"
       ]
     },
-    "163": {
+    "157": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-identity-ts"
       ]
     },
-    "164": {
+    "158": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-keyvault-keys-ts"
       ]
     },
-    "165": {
+    "159": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-keyvault-py"
       ]
     },
-    "166": {
+    "160": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-keyvault-secrets-ts"
       ]
     },
-    "167": {
+    "161": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-maps-search-dotnet"
       ]
     },
-    "168": {
+    "162": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-messaging-webpubsub-java"
       ]
     },
-    "169": {
+    "163": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-messaging-webpubsubservice-py"
       ]
     },
-    "170": {
+    "164": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-mgmt-apicenter-dotnet"
       ]
     },
-    "171": {
+    "165": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-mgmt-apicenter-py"
       ]
     },
-    "172": {
+    "166": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-mgmt-apimanagement-dotnet"
       ]
     },
-    "173": {
+    "167": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-mgmt-apimanagement-py"
       ]
     },
-    "174": {
+    "168": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-mgmt-applicationinsights-dotnet"
       ]
     },
-    "175": {
+    "169": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-mgmt-arizeaiobservabilityeval-dotnet"
       ]
     },
-    "176": {
+    "170": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-mgmt-botservice-dotnet"
       ]
     },
-    "177": {
+    "171": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-mgmt-botservice-py"
       ]
     },
-    "178": {
+    "172": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-mgmt-fabric-dotnet"
       ]
     },
-    "179": {
+    "173": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-mgmt-fabric-py"
       ]
     },
-    "180": {
+    "174": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-mgmt-mongodbatlas-dotnet"
       ]
     },
-    "181": {
+    "175": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-mgmt-weightsandbiases-dotnet"
       ]
     },
-    "182": {
+    "176": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-microsoft-playwright-testing-ts"
       ]
     },
-    "183": {
+    "177": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-monitor-ingestion-java"
       ]
     },
-    "184": {
+    "178": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-monitor-ingestion-py"
       ]
     },
-    "185": {
+    "179": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-monitor-opentelemetry-exporter-java"
       ]
     },
-    "186": {
+    "180": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-monitor-opentelemetry-exporter-py"
       ]
     },
-    "187": {
+    "181": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-monitor-opentelemetry-py"
       ]
     },
-    "188": {
+    "182": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-monitor-opentelemetry-ts"
       ]
     },
-    "189": {
+    "183": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-monitor-query-java"
       ]
     },
-    "190": {
+    "184": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-monitor-query-py"
       ]
     },
-    "191": {
+    "185": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-postgres-ts"
       ]
     },
-    "192": {
+    "186": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-resource-manager-cosmosdb-dotnet"
       ]
     },
-    "193": {
+    "187": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-resource-manager-durabletask-dotnet"
       ]
     },
-    "194": {
+    "188": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-resource-manager-mysql-dotnet"
       ]
     },
-    "195": {
+    "189": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-resource-manager-playwright-dotnet"
       ]
     },
-    "196": {
+    "190": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-resource-manager-postgresql-dotnet"
       ]
     },
-    "197": {
+    "191": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-resource-manager-redis-dotnet"
       ]
     },
-    "198": {
+    "192": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-resource-manager-sql-dotnet"
       ]
     },
-    "199": {
+    "193": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-search-documents-dotnet"
       ]
     },
-    "200": {
+    "194": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-search-documents-py"
       ]
     },
-    "201": {
+    "195": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-search-documents-ts"
       ]
     },
-    "202": {
+    "196": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-security-keyvault-keys-dotnet"
       ]
     },
-    "203": {
+    "197": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-security-keyvault-keys-java"
       ]
     },
-    "204": {
+    "198": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-security-keyvault-secrets-java"
       ]
     },
-    "205": {
+    "199": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-servicebus-dotnet"
       ]
     },
-    "206": {
+    "200": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-servicebus-py"
       ]
     },
-    "207": {
+    "201": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-servicebus-ts"
       ]
     },
-    "208": {
+    "202": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-speech-to-text-rest-py"
       ]
     },
-    "209": {
+    "203": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-storage-blob-java"
       ]
     },
-    "210": {
+    "204": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-storage-blob-py"
       ]
     },
-    "211": {
+    "205": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-storage-blob-ts"
       ]
     },
-    "212": {
+    "206": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-storage-file-datalake-py"
       ]
     },
-    "213": {
+    "207": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-storage-file-share-py"
       ]
     },
-    "214": {
+    "208": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-storage-file-share-ts"
       ]
     },
-    "215": {
+    "209": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-storage-queue-py"
       ]
     },
-    "216": {
+    "210": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-storage-queue-ts"
       ]
     },
-    "217": {
+    "211": {
       "label": "Miscellaneous",
       "members": [
         "skill:azure-web-pubsub-ts"
       ]
     },
-    "218": {
+    "212": {
       "label": "Miscellaneous",
       "members": [
         "skill:backend-architect"
       ]
     },
-    "219": {
+    "213": {
       "label": "Miscellaneous",
       "members": [
         "skill:backend-dev-guidelines"
       ]
     },
-    "220": {
+    "214": {
       "label": "Miscellaneous",
       "members": [
         "skill:backend-development-feature-development"
       ]
     },
-    "221": {
+    "215": {
       "label": "Miscellaneous",
       "members": [
         "skill:backend-patterns"
       ]
     },
-    "222": {
+    "216": {
       "label": "Miscellaneous",
       "members": [
         "skill:bamboohr-automation"
       ]
     },
-    "223": {
+    "217": {
       "label": "Miscellaneous",
       "members": [
         "skill:basecamp-automation"
       ]
     },
-    "224": {
+    "218": {
       "label": "Miscellaneous",
       "members": [
         "skill:bash-linux"
       ]
     },
-    "225": {
+    "219": {
       "label": "Miscellaneous",
       "members": [
         "skill:bash-pro"
       ]
     },
-    "226": {
+    "220": {
       "label": "Miscellaneous",
       "members": [
         "skill:bash-scripting"
       ]
     },
-    "227": {
+    "221": {
       "label": "Miscellaneous",
       "members": [
         "skill:bazel-build-optimization"
       ]
     },
-    "228": {
+    "222": {
       "label": "Miscellaneous",
       "members": [
         "skill:bdi-mental-states"
       ]
     },
-    "229": {
+    "223": {
       "label": "Miscellaneous",
       "members": [
         "skill:beautiful-prose"
       ]
     },
-    "230": {
+    "224": {
       "label": "Miscellaneous",
       "members": [
         "skill:behavioral-modes"
       ]
     },
-    "231": {
+    "225": {
       "label": "Miscellaneous",
       "members": [
         "skill:bill-gates"
       ]
     },
-    "232": {
+    "226": {
       "label": "Miscellaneous",
       "members": [
         "skill:binary-analysis-patterns"
       ]
     },
-    "233": {
+    "227": {
       "label": "Miscellaneous",
       "members": [
         "skill:biopython"
       ]
     },
-    "234": {
+    "228": {
       "label": "Miscellaneous",
       "members": [
         "skill:bitbucket-automation"
       ]
     },
-    "235": {
+    "229": {
       "label": "Miscellaneous",
       "members": [
         "skill:blockchain-developer"
       ]
     },
-    "236": {
+    "230": {
       "label": "Miscellaneous",
       "members": [
         "skill:blockrun"
       ]
     },
-    "237": {
+    "231": {
       "label": "Miscellaneous",
       "members": [
         "skill:box-automation"
       ]
     },
-    "238": {
+    "232": {
       "label": "Miscellaneous",
       "members": [
         "skill:brainstorming"
       ]
     },
-    "239": {
+    "233": {
       "label": "Miscellaneous",
       "members": [
         "skill:brand-voice"
       ]
     },
-    "240": {
+    "234": {
       "label": "Miscellaneous",
       "members": [
         "skill:brevo-automation"
       ]
     },
-    "241": {
+    "235": {
       "label": "Miscellaneous",
       "members": [
         "skill:broken-authentication"
       ]
     },
-    "242": {
+    "236": {
       "label": "Miscellaneous",
       "members": [
         "skill:browser-extension-builder"
       ]
     },
-    "243": {
+    "237": {
       "label": "Miscellaneous",
       "members": [
         "skill:bug-hunter"
       ]
     },
-    "244": {
+    "238": {
       "label": "Miscellaneous",
       "members": [
         "skill:build"
       ]
     },
-    "245": {
+    "239": {
       "label": "Miscellaneous",
       "members": [
         "skill:building-native-ui"
       ]
     },
-    "246": {
+    "240": {
       "label": "Miscellaneous",
       "members": [
         "skill:bun-development"
       ]
     },
-    "247": {
+    "241": {
       "label": "Miscellaneous",
       "members": [
         "skill:burp-suite-testing"
       ]
     },
-    "248": {
+    "242": {
       "label": "Miscellaneous",
       "members": [
         "skill:burpsuite-project-parser"
       ]
     },
-    "249": {
+    "243": {
       "label": "Miscellaneous",
       "members": [
         "skill:c4-architecture-c4-architecture"
       ]
     },
-    "250": {
+    "244": {
       "label": "Miscellaneous",
       "members": [
         "skill:c4-code"
       ]
     },
-    "251": {
+    "245": {
       "label": "Miscellaneous",
       "members": [
         "skill:cal-com-automation"
       ]
     },
-    "252": {
+    "246": {
       "label": "Miscellaneous",
       "members": [
         "skill:calendly-automation"
       ]
     },
-    "253": {
+    "247": {
       "label": "Miscellaneous",
       "members": [
         "skill:canva-automation"
       ]
     },
-    "254": {
+    "248": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:career-ops"
+      ]
+    },
+    "249": {
       "label": "Miscellaneous",
       "members": [
         "skill:carrier-relationship-management"
       ]
     },
-    "255": {
+    "250": {
       "label": "Miscellaneous",
       "members": [
         "skill:cc-skill-backend-patterns"
       ]
     },
-    "256": {
+    "251": {
       "label": "Miscellaneous",
       "members": [
         "skill:cc-skill-clickhouse-io"
       ]
     },
-    "257": {
+    "252": {
       "label": "Miscellaneous",
       "members": [
         "skill:cc-skill-coding-standards"
       ]
     },
-    "258": {
+    "253": {
       "label": "Miscellaneous",
       "members": [
         "skill:cc-skill-frontend-patterns"
       ]
     },
-    "259": {
+    "254": {
       "label": "Miscellaneous",
       "members": [
         "skill:cc-skill-project-guidelines-example"
       ]
     },
-    "260": {
+    "255": {
       "label": "Miscellaneous",
       "members": [
         "skill:cc-skill-security-review"
       ]
     },
-    "261": {
+    "256": {
       "label": "Miscellaneous",
       "members": [
         "skill:chat-widget"
       ]
     },
-    "262": {
+    "257": {
       "label": "Miscellaneous",
       "members": [
         "skill:chrome-mcp-troubleshooting"
       ]
     },
-    "263": {
+    "258": {
       "label": "Miscellaneous",
       "members": [
         "skill:cirq"
       ]
     },
-    "264": {
+    "259": {
       "label": "Miscellaneous",
       "members": [
         "skill:citation-management"
       ]
     },
-    "265": {
+    "260": {
       "label": "Miscellaneous",
       "members": [
         "skill:claimable-postgres"
       ]
     },
-    "266": {
+    "261": {
       "label": "Miscellaneous",
       "members": [
         "skill:clarity-gate"
       ]
     },
-    "267": {
+    "262": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:claude-ally-health"
+      ]
+    },
+    "263": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:claude-scientific-skills"
+      ]
+    },
+    "264": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:claude-speed-reader"
+      ]
+    },
+    "265": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:claude-win11-speckit-update-skill"
+      ]
+    },
+    "266": {
       "label": "Miscellaneous",
       "members": [
         "skill:clickup-automation"
       ]
     },
-    "268": {
+    "267": {
       "label": "Miscellaneous",
       "members": [
         "skill:close-automation"
       ]
     },
-    "269": {
+    "268": {
       "label": "Miscellaneous",
       "members": [
         "skill:cloud-devops"
       ]
     },
-    "270": {
+    "269": {
       "label": "Miscellaneous",
       "members": [
         "skill:cloud-penetration-testing"
       ]
     },
-    "271": {
+    "270": {
       "label": "Miscellaneous",
       "members": [
         "skill:coda-automation"
       ]
     },
-    "272": {
+    "271": {
       "label": "Miscellaneous",
       "members": [
         "skill:code-expert-assistant"
       ]
     },
-    "273": {
+    "272": {
       "label": "Miscellaneous",
       "members": [
         "skill:code-refactoring-tech-debt"
       ]
     },
-    "274": {
+    "273": {
       "label": "Miscellaneous",
       "members": [
         "skill:code-review-ai-ai-review"
       ]
     },
-    "275": {
+    "274": {
       "label": "Miscellaneous",
       "members": [
         "skill:code-review-checklist"
       ]
     },
-    "276": {
+    "275": {
       "label": "Miscellaneous",
       "members": [
         "skill:codebase-audit-pre-push"
       ]
     },
-    "277": {
+    "276": {
       "label": "Miscellaneous",
       "members": [
         "skill:codebase-cleanup-tech-debt"
       ]
     },
-    "278": {
+    "277": {
       "label": "Miscellaneous",
       "members": [
         "skill:coding-standards"
       ]
     },
-    "279": {
+    "278": {
       "label": "Miscellaneous",
       "members": [
         "skill:comfyui-gateway"
       ]
     },
-    "280": {
+    "279": {
       "label": "Miscellaneous",
       "members": [
         "skill:competitor-alternatives"
       ]
     },
-    "281": {
+    "280": {
       "label": "Miscellaneous",
       "members": [
         "skill:compose-multiplatform-patterns"
       ]
     },
-    "282": {
+    "281": {
       "label": "Miscellaneous",
       "members": [
         "skill:computer-use-agents"
       ]
     },
-    "283": {
+    "282": {
       "label": "Miscellaneous",
       "members": [
         "skill:conductor-implement"
       ]
     },
-    "284": {
+    "283": {
       "label": "Miscellaneous",
       "members": [
         "skill:conductor-new-track"
       ]
     },
-    "285": {
+    "284": {
       "label": "Miscellaneous",
       "members": [
         "skill:conductor-revert"
       ]
     },
-    "286": {
+    "285": {
       "label": "Miscellaneous",
       "members": [
         "skill:conductor-status"
       ]
     },
-    "287": {
+    "286": {
       "label": "Miscellaneous",
       "members": [
         "skill:configure-ecc"
       ]
     },
-    "288": {
+    "287": {
       "label": "Miscellaneous",
       "members": [
         "skill:confluence-automation"
       ]
     },
-    "289": {
+    "288": {
       "label": "Miscellaneous",
       "members": [
         "skill:connections-optimizer"
       ]
     },
-    "290": {
+    "289": {
       "label": "Miscellaneous",
       "members": [
         "skill:constant-time-analysis"
       ]
     },
-    "291": {
+    "290": {
       "label": "Miscellaneous",
       "members": [
         "skill:content-creator"
       ]
     },
-    "292": {
+    "291": {
       "label": "Miscellaneous",
       "members": [
         "skill:content-engine"
       ]
     },
-    "293": {
+    "292": {
       "label": "Miscellaneous",
       "members": [
         "skill:context-compression"
       ]
     },
-    "294": {
+    "293": {
       "label": "Miscellaneous",
       "members": [
         "skill:context-degradation"
       ]
     },
-    "295": {
+    "294": {
       "label": "Miscellaneous",
       "members": [
         "skill:context-driven-development"
       ]
     },
-    "296": {
+    "295": {
       "label": "Miscellaneous",
       "members": [
         "skill:context-fundamentals"
       ]
     },
-    "297": {
+    "296": {
       "label": "Miscellaneous",
       "members": [
         "skill:context-guardian"
       ]
     },
-    "298": {
+    "297": {
       "label": "Miscellaneous",
       "members": [
         "skill:context-manager"
       ]
     },
-    "299": {
+    "298": {
       "label": "Miscellaneous",
       "members": [
         "skill:continuous-agent-loop"
       ]
     },
-    "300": {
+    "299": {
       "label": "Miscellaneous",
       "members": [
         "skill:continuous-learning-v2"
       ]
     },
-    "301": {
+    "300": {
       "label": "Miscellaneous",
       "members": [
         "skill:convertkit-automation"
       ]
     },
-    "302": {
+    "301": {
       "label": "Miscellaneous",
       "members": [
         "skill:convex"
       ]
     },
-    "303": {
+    "302": {
       "label": "Miscellaneous",
       "members": [
         "skill:copilot-sdk"
       ]
     },
-    "304": {
+    "303": {
       "label": "Miscellaneous",
       "members": [
         "skill:copy-editing"
       ]
     },
-    "305": {
+    "304": {
       "label": "Miscellaneous",
       "members": [
         "skill:copywriting"
       ]
     },
-    "306": {
+    "305": {
       "label": "Miscellaneous",
       "members": [
         "skill:core-components"
       ]
     },
-    "307": {
+    "306": {
       "label": "Miscellaneous",
       "members": [
         "skill:cost-optimization"
       ]
     },
-    "308": {
+    "307": {
       "label": "Miscellaneous",
       "members": [
         "skill:cpp-coding-standards"
       ]
     },
-    "309": {
+    "308": {
       "label": "Miscellaneous",
       "members": [
         "skill:cpp-testing"
+      ]
+    },
+    "309": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:create-issue-gate"
       ]
     },
     "310": {
@@ -3133,2926 +3398,3076 @@
     "348": {
       "label": "Miscellaneous",
       "members": [
-        "skill:doc-coauthoring"
+        "skill:do"
       ]
     },
     "349": {
       "label": "Miscellaneous",
       "members": [
-        "skill:docker-expert"
+        "skill:doc-coauthoring"
       ]
     },
     "350": {
       "label": "Miscellaneous",
       "members": [
-        "skill:documentation-templates"
+        "skill:docker-expert"
       ]
     },
     "351": {
       "label": "Miscellaneous",
       "members": [
-        "skill:documentation"
+        "skill:documentation-templates"
       ]
     },
     "352": {
       "label": "Miscellaneous",
       "members": [
-        "skill:docusign-automation"
+        "skill:documentation"
       ]
     },
     "353": {
       "label": "Miscellaneous",
       "members": [
-        "skill:docx-official"
+        "skill:docusign-automation"
       ]
     },
     "354": {
       "label": "Miscellaneous",
       "members": [
-        "skill:dotnet-architect"
+        "skill:docx-official"
       ]
     },
     "355": {
       "label": "Miscellaneous",
       "members": [
-        "skill:dotnet-backend"
+        "skill:dotnet-architect"
       ]
     },
     "356": {
       "label": "Miscellaneous",
       "members": [
-        "skill:drizzle-orm-expert"
+        "skill:dotnet-backend"
       ]
     },
     "357": {
       "label": "Miscellaneous",
       "members": [
-        "skill:dropbox-automation"
+        "skill:drizzle-orm-expert"
       ]
     },
     "358": {
       "label": "Miscellaneous",
       "members": [
-        "skill:e2e-testing"
+        "skill:dropbox-automation"
       ]
     },
     "359": {
       "label": "Miscellaneous",
       "members": [
-        "skill:elon-musk"
+        "skill:e2e-testing"
       ]
     },
     "360": {
       "label": "Miscellaneous",
       "members": [
-        "skill:email-ops"
+        "skill:eli5"
       ]
     },
     "361": {
       "label": "Miscellaneous",
       "members": [
-        "skill:email-sequence"
+        "skill:elon-musk"
       ]
     },
     "362": {
       "label": "Miscellaneous",
       "members": [
-        "skill:embedding-strategies"
+        "skill:email-ops"
       ]
     },
     "363": {
       "label": "Miscellaneous",
       "members": [
-        "skill:emergency-card"
+        "skill:email-sequence"
       ]
     },
     "364": {
       "label": "Miscellaneous",
       "members": [
-        "skill:energy-procurement"
+        "skill:embedding-strategies"
       ]
     },
     "365": {
       "label": "Miscellaneous",
       "members": [
-        "skill:enhance-prompt"
+        "skill:emergency-card"
       ]
     },
     "366": {
       "label": "Miscellaneous",
       "members": [
-        "skill:enterprise-agent-ops"
+        "skill:energy-procurement"
       ]
     },
     "367": {
       "label": "Miscellaneous",
       "members": [
-        "skill:environment-setup-guide"
+        "skill:enhance-prompt"
       ]
     },
     "368": {
       "label": "Miscellaneous",
       "members": [
-        "skill:error-debugging-multi-agent-review"
+        "skill:enterprise-agent-ops"
       ]
     },
     "369": {
       "label": "Miscellaneous",
       "members": [
-        "skill:error-diagnostics-smart-debug"
+        "skill:environment-setup-guide"
       ]
     },
     "370": {
       "label": "Miscellaneous",
       "members": [
-        "skill:ethical-hacking-methodology"
+        "skill:error-debugging-multi-agent-review"
       ]
     },
     "371": {
       "label": "Miscellaneous",
       "members": [
-        "skill:eval-harness"
+        "skill:error-diagnostics-smart-debug"
       ]
     },
     "372": {
       "label": "Miscellaneous",
       "members": [
-        "skill:evaluation"
+        "skill:ethical-hacking-methodology"
       ]
     },
     "373": {
       "label": "Miscellaneous",
       "members": [
-        "skill:event-store-design"
+        "skill:eval-harness"
       ]
     },
     "374": {
       "label": "Miscellaneous",
       "members": [
-        "skill:evolution"
+        "skill:evaluation"
       ]
     },
     "375": {
       "label": "Miscellaneous",
       "members": [
-        "skill:expo-api-routes"
+        "skill:event-store-design"
       ]
     },
     "376": {
       "label": "Miscellaneous",
       "members": [
-        "skill:expo-tailwind-setup"
+        "skill:evolution"
       ]
     },
     "377": {
       "label": "Miscellaneous",
       "members": [
-        "skill:fastapi-pro"
+        "skill:expo-api-routes"
       ]
     },
     "378": {
       "label": "Miscellaneous",
       "members": [
-        "skill:favicon"
+        "skill:expo-tailwind-setup"
       ]
     },
     "379": {
       "label": "Miscellaneous",
       "members": [
-        "skill:ffuf-web-fuzzing"
+        "skill:fastapi-pro"
       ]
     },
     "380": {
       "label": "Miscellaneous",
       "members": [
-        "skill:figma-automation"
+        "skill:favicon"
       ]
     },
     "381": {
       "label": "Miscellaneous",
       "members": [
-        "skill:file-organizer"
+        "skill:ffuf-web-fuzzing"
       ]
     },
     "382": {
       "label": "Miscellaneous",
       "members": [
-        "skill:file-path-traversal"
+        "skill:figma-automation"
       ]
     },
     "383": {
       "label": "Miscellaneous",
       "members": [
-        "skill:filesystem-context"
+        "skill:file-organizer"
       ]
     },
     "384": {
       "label": "Miscellaneous",
       "members": [
-        "skill:finishing-a-development-branch"
+        "skill:file-path-traversal"
       ]
     },
     "385": {
       "label": "Miscellaneous",
       "members": [
-        "skill:firmware-analyst"
+        "skill:filesystem-context"
       ]
     },
     "386": {
       "label": "Miscellaneous",
       "members": [
-        "skill:fitness-analyzer"
+        "skill:finishing-a-development-branch"
       ]
     },
     "387": {
       "label": "Miscellaneous",
       "members": [
-        "skill:flutter-expert"
+        "skill:firmware-analyst"
       ]
     },
     "388": {
       "label": "Miscellaneous",
       "members": [
-        "skill:food-database-query"
+        "skill:fitness-analyzer"
       ]
     },
     "389": {
       "label": "Miscellaneous",
       "members": [
-        "skill:form-cro"
+        "skill:flutter-expert"
       ]
     },
     "390": {
       "label": "Miscellaneous",
       "members": [
-        "skill:fp-async"
+        "skill:food-database-query"
       ]
     },
     "391": {
       "label": "Miscellaneous",
       "members": [
-        "skill:fp-backend"
+        "skill:form-cro"
       ]
     },
     "392": {
       "label": "Miscellaneous",
       "members": [
-        "skill:fp-data-transforms"
+        "skill:fp-async"
       ]
     },
     "393": {
       "label": "Miscellaneous",
       "members": [
-        "skill:fp-errors"
+        "skill:fp-backend"
       ]
     },
     "394": {
       "label": "Miscellaneous",
       "members": [
-        "skill:fp-pragmatic"
+        "skill:fp-data-transforms"
       ]
     },
     "395": {
       "label": "Miscellaneous",
       "members": [
-        "skill:fp-react"
+        "skill:fp-errors"
       ]
     },
     "396": {
       "label": "Miscellaneous",
       "members": [
-        "skill:fp-refactor"
+        "skill:fp-pragmatic"
       ]
     },
     "397": {
       "label": "Miscellaneous",
       "members": [
-        "skill:fp-ts-errors"
+        "skill:fp-react"
       ]
     },
     "398": {
       "label": "Miscellaneous",
       "members": [
-        "skill:fp-ts-pragmatic"
+        "skill:fp-refactor"
       ]
     },
     "399": {
       "label": "Miscellaneous",
       "members": [
-        "skill:fp-ts-react"
+        "skill:fp-ts-errors"
       ]
     },
     "400": {
       "label": "Miscellaneous",
       "members": [
-        "skill:free-tool-strategy"
+        "skill:fp-ts-pragmatic"
       ]
     },
     "401": {
       "label": "Miscellaneous",
       "members": [
-        "skill:freshdesk-automation"
+        "skill:fp-ts-react"
       ]
     },
     "402": {
       "label": "Miscellaneous",
       "members": [
-        "skill:freshservice-automation"
+        "skill:free-tool-strategy"
       ]
     },
     "403": {
       "label": "Miscellaneous",
       "members": [
-        "skill:frontend-design"
+        "skill:freshdesk-automation"
       ]
     },
     "404": {
       "label": "Miscellaneous",
       "members": [
-        "skill:frontend-dev-guidelines"
+        "skill:freshservice-automation"
       ]
     },
     "405": {
       "label": "Miscellaneous",
       "members": [
-        "skill:frontend-mobile-development-component-scaffold"
+        "skill:frontend-design"
       ]
     },
     "406": {
       "label": "Miscellaneous",
       "members": [
-        "skill:frontend-mobile-security-xss-scan"
+        "skill:frontend-dev-guidelines"
       ]
     },
     "407": {
       "label": "Miscellaneous",
       "members": [
-        "skill:frontend-patterns"
+        "skill:frontend-mobile-development-component-scaffold"
       ]
     },
     "408": {
       "label": "Miscellaneous",
       "members": [
-        "skill:frontend-slides"
+        "skill:frontend-mobile-security-xss-scan"
       ]
     },
     "409": {
       "label": "Miscellaneous",
       "members": [
-        "skill:frontend-ui-dark-ts"
+        "skill:frontend-patterns"
       ]
     },
     "410": {
       "label": "Miscellaneous",
       "members": [
-        "skill:function-tracing"
+        "skill:frontend-slides"
       ]
     },
     "411": {
       "label": "Miscellaneous",
       "members": [
-        "skill:gcp-cloud-run"
+        "skill:frontend-ui-dark-ts"
       ]
     },
     "412": {
       "label": "Miscellaneous",
       "members": [
-        "skill:gemini-api-integration"
+        "skill:function-tracing"
       ]
     },
     "413": {
       "label": "Miscellaneous",
       "members": [
-        "skill:geoffrey-hinton"
+        "skill:game-design"
       ]
     },
     "414": {
       "label": "Miscellaneous",
       "members": [
-        "skill:gha-security-review"
+        "skill:gcp-cloud-run"
       ]
     },
     "415": {
       "label": "Miscellaneous",
       "members": [
-        "skill:git-advanced-workflows"
+        "skill:gemini-api-integration"
       ]
     },
     "416": {
       "label": "Miscellaneous",
       "members": [
-        "skill:git-hooks-automation"
+        "skill:geoffrey-hinton"
       ]
     },
     "417": {
       "label": "Miscellaneous",
       "members": [
-        "skill:git-pr-workflows-onboard"
+        "skill:gha-security-review"
       ]
     },
     "418": {
       "label": "Miscellaneous",
       "members": [
-        "skill:github-actions-templates"
+        "skill:git-advanced-workflows"
       ]
     },
     "419": {
       "label": "Miscellaneous",
       "members": [
-        "skill:github-automation"
+        "skill:git-hooks-automation"
       ]
     },
     "420": {
       "label": "Miscellaneous",
       "members": [
-        "skill:github-workflow-automation"
+        "skill:git-pr-workflows-onboard"
       ]
     },
     "421": {
       "label": "Miscellaneous",
       "members": [
-        "skill:gitlab-automation"
+        "skill:github-actions-templates"
       ]
     },
     "422": {
       "label": "Miscellaneous",
       "members": [
-        "skill:gitlab-ci-patterns"
+        "skill:github-automation"
       ]
     },
     "423": {
       "label": "Miscellaneous",
       "members": [
-        "skill:gitops-workflow"
+        "skill:github-workflow-automation"
       ]
     },
     "424": {
       "label": "Miscellaneous",
       "members": [
-        "skill:gmail-automation"
+        "skill:github"
       ]
     },
     "425": {
       "label": "Miscellaneous",
       "members": [
-        "skill:go-rod-master"
+        "skill:gitlab-automation"
       ]
     },
     "426": {
       "label": "Miscellaneous",
       "members": [
-        "skill:goal-analyzer"
+        "skill:gitlab-ci-patterns"
       ]
     },
     "427": {
       "label": "Miscellaneous",
       "members": [
-        "skill:golang-patterns"
+        "skill:gitops-workflow"
       ]
     },
     "428": {
       "label": "Miscellaneous",
       "members": [
-        "skill:golang-testing"
+        "skill:gmail-automation"
       ]
     },
     "429": {
       "label": "Miscellaneous",
       "members": [
-        "skill:google-analytics-automation"
+        "skill:go-rod-master"
       ]
     },
     "430": {
       "label": "Miscellaneous",
       "members": [
-        "skill:googlesheets-automation"
+        "skill:goal-analyzer"
       ]
     },
     "431": {
       "label": "Miscellaneous",
       "members": [
-        "skill:grafana-dashboards"
+        "skill:golang-patterns"
       ]
     },
     "432": {
       "label": "Miscellaneous",
       "members": [
-        "skill:growth-engine"
+        "skill:golang-testing"
       ]
     },
     "433": {
       "label": "Miscellaneous",
       "members": [
-        "skill:health-trend-analyzer"
+        "skill:google-analytics-automation"
       ]
     },
     "434": {
       "label": "Miscellaneous",
       "members": [
-        "skill:hosted-agents-v2-py"
+        "skill:googlesheets-automation"
       ]
     },
     "435": {
       "label": "Miscellaneous",
       "members": [
-        "skill:hosted-agents"
+        "skill:grafana-dashboards"
       ]
     },
     "436": {
       "label": "Miscellaneous",
       "members": [
-        "skill:html-injection-testing"
+        "skill:growth-engine"
       ]
     },
     "437": {
       "label": "Miscellaneous",
       "members": [
-        "skill:hubspot-automation"
+        "skill:health-trend-analyzer"
       ]
     },
     "438": {
       "label": "Miscellaneous",
       "members": [
-        "skill:hugging-face-cli"
+        "skill:help"
       ]
     },
     "439": {
       "label": "Miscellaneous",
       "members": [
-        "skill:hugging-face-datasets"
+        "skill:hosted-agents-v2-py"
       ]
     },
     "440": {
       "label": "Miscellaneous",
       "members": [
-        "skill:hugging-face-evaluation"
+        "skill:hosted-agents"
       ]
     },
     "441": {
       "label": "Miscellaneous",
       "members": [
-        "skill:hugging-face-jobs"
+        "skill:html-injection-testing"
       ]
     },
     "442": {
       "label": "Miscellaneous",
       "members": [
-        "skill:hugging-face-model-trainer"
+        "skill:hubspot-automation"
       ]
     },
     "443": {
       "label": "Miscellaneous",
       "members": [
-        "skill:hugging-face-paper-publisher"
+        "skill:hugging-face-cli"
       ]
     },
     "444": {
       "label": "Miscellaneous",
       "members": [
-        "skill:hybrid-cloud-networking"
+        "skill:hugging-face-datasets"
       ]
     },
     "445": {
       "label": "Miscellaneous",
       "members": [
-        "skill:idor-testing"
+        "skill:hugging-face-evaluation"
       ]
     },
     "446": {
       "label": "Miscellaneous",
       "members": [
-        "skill:ilya-sutskever"
+        "skill:hugging-face-jobs"
       ]
     },
     "447": {
       "label": "Miscellaneous",
       "members": [
-        "skill:image-studio"
+        "skill:hugging-face-model-trainer"
       ]
     },
     "448": {
       "label": "Miscellaneous",
       "members": [
-        "skill:incident-responder"
+        "skill:hugging-face-paper-publisher"
       ]
     },
     "449": {
       "label": "Miscellaneous",
       "members": [
-        "skill:incident-runbook-templates"
+        "skill:humanize-chinese"
       ]
     },
     "450": {
       "label": "Miscellaneous",
       "members": [
-        "skill:instagram-automation"
+        "skill:hybrid-cloud-networking"
       ]
     },
     "451": {
       "label": "Miscellaneous",
       "members": [
-        "skill:instagram"
+        "skill:idor-testing"
       ]
     },
     "452": {
       "label": "Miscellaneous",
       "members": [
-        "skill:interactive-portfolio"
+        "skill:ilya-sutskever"
       ]
     },
     "453": {
       "label": "Miscellaneous",
       "members": [
-        "skill:intercom-automation"
+        "skill:image-studio"
       ]
     },
     "454": {
       "label": "Miscellaneous",
       "members": [
-        "skill:inventory-demand-planning"
+        "skill:incident-responder"
       ]
     },
     "455": {
       "label": "Miscellaneous",
       "members": [
-        "skill:ios-developer"
+        "skill:incident-runbook-templates"
       ]
     },
     "456": {
       "label": "Miscellaneous",
       "members": [
-        "skill:issues"
+        "skill:instagram-automation"
       ]
     },
     "457": {
       "label": "Miscellaneous",
       "members": [
-        "skill:istio-traffic-management"
+        "skill:instagram"
       ]
     },
     "458": {
       "label": "Miscellaneous",
       "members": [
-        "skill:iterate-pr"
+        "skill:interactive-portfolio"
       ]
     },
     "459": {
       "label": "Miscellaneous",
       "members": [
-        "skill:iterative-retrieval"
+        "skill:intercom-automation"
       ]
     },
     "460": {
       "label": "Miscellaneous",
       "members": [
-        "skill:javascript-mastery"
+        "skill:internal-comms"
       ]
     },
     "461": {
       "label": "Miscellaneous",
       "members": [
-        "skill:javascript-typescript-typescript-scaffold"
+        "skill:interview-coach"
       ]
     },
     "462": {
       "label": "Miscellaneous",
       "members": [
-        "skill:jira-automation"
+        "skill:inventory-demand-planning"
       ]
     },
     "463": {
       "label": "Miscellaneous",
       "members": [
-        "skill:julia-pro"
+        "skill:ios-developer"
       ]
     },
     "464": {
       "label": "Miscellaneous",
       "members": [
-        "skill:junta-leiloeiros"
+        "skill:issues"
       ]
     },
     "465": {
       "label": "Miscellaneous",
       "members": [
-        "skill:k8s-security-policies"
+        "skill:istio-traffic-management"
       ]
     },
     "466": {
       "label": "Miscellaneous",
       "members": [
-        "skill:kaizen"
+        "skill:iterate-pr"
       ]
     },
     "467": {
       "label": "Miscellaneous",
       "members": [
-        "skill:klaviyo-automation"
+        "skill:iterative-retrieval"
       ]
     },
     "468": {
       "label": "Miscellaneous",
       "members": [
-        "skill:kotlin-coroutines-flows"
+        "skill:javascript-mastery"
       ]
     },
     "469": {
       "label": "Miscellaneous",
       "members": [
-        "skill:kotlin-exposed-patterns"
+        "skill:javascript-typescript-typescript-scaffold"
       ]
     },
     "470": {
       "label": "Miscellaneous",
       "members": [
-        "skill:kotlin-ktor-patterns"
+        "skill:jira-automation"
       ]
     },
     "471": {
       "label": "Miscellaneous",
       "members": [
-        "skill:kotlin-patterns"
+        "skill:jobs"
       ]
     },
     "472": {
       "label": "Miscellaneous",
       "members": [
-        "skill:kotlin-testing"
+        "skill:julia-pro"
       ]
     },
     "473": {
       "label": "Miscellaneous",
       "members": [
-        "skill:kpi-dashboard-design"
+        "skill:junta-leiloeiros"
       ]
     },
     "474": {
       "label": "Miscellaneous",
       "members": [
-        "skill:langchain-architecture"
+        "skill:k8s-security-policies"
       ]
     },
     "475": {
       "label": "Miscellaneous",
       "members": [
-        "skill:langfuse"
+        "skill:kaizen"
       ]
     },
     "476": {
       "label": "Miscellaneous",
       "members": [
-        "skill:langgraph"
+        "skill:keyword-extractor"
       ]
     },
     "477": {
       "label": "Miscellaneous",
       "members": [
-        "skill:laravel-expert"
+        "skill:klaviyo-automation"
       ]
     },
     "478": {
       "label": "Miscellaneous",
       "members": [
-        "skill:laravel-patterns"
+        "skill:kotlin-coroutines-flows"
       ]
     },
     "479": {
       "label": "Miscellaneous",
       "members": [
-        "skill:laravel-security-audit"
+        "skill:kotlin-exposed-patterns"
       ]
     },
     "480": {
       "label": "Miscellaneous",
       "members": [
-        "skill:laravel-tdd"
+        "skill:kotlin-ktor-patterns"
       ]
     },
     "481": {
       "label": "Miscellaneous",
       "members": [
-        "skill:last30days"
+        "skill:kotlin-patterns"
       ]
     },
     "482": {
       "label": "Miscellaneous",
       "members": [
-        "skill:launch-strategy"
+        "skill:kotlin-testing"
       ]
     },
     "483": {
       "label": "Miscellaneous",
       "members": [
-        "skill:learned"
+        "skill:kpi-dashboard-design"
       ]
     },
     "484": {
       "label": "Miscellaneous",
       "members": [
-        "skill:leiloeiro-avaliacao"
+        "skill:langchain-architecture"
       ]
     },
     "485": {
       "label": "Miscellaneous",
       "members": [
-        "skill:leiloeiro-edital"
+        "skill:langfuse"
       ]
     },
     "486": {
       "label": "Miscellaneous",
       "members": [
-        "skill:leiloeiro-ia"
+        "skill:langgraph"
       ]
     },
     "487": {
       "label": "Miscellaneous",
       "members": [
-        "skill:leiloeiro-juridico"
+        "skill:laravel-expert"
       ]
     },
     "488": {
       "label": "Miscellaneous",
       "members": [
-        "skill:leiloeiro-mercado"
+        "skill:laravel-patterns"
       ]
     },
     "489": {
       "label": "Miscellaneous",
       "members": [
-        "skill:leiloeiro-risco"
+        "skill:laravel-security-audit"
       ]
     },
     "490": {
       "label": "Miscellaneous",
       "members": [
-        "skill:linear-automation"
+        "skill:laravel-tdd"
       ]
     },
     "491": {
       "label": "Miscellaneous",
       "members": [
-        "skill:linear-claude-skill"
+        "skill:last30days"
       ]
     },
     "492": {
       "label": "Miscellaneous",
       "members": [
-        "skill:linkedin-cli"
+        "skill:launch-strategy"
       ]
     },
     "493": {
       "label": "Miscellaneous",
       "members": [
-        "skill:linkerd-patterns"
+        "skill:learned"
       ]
     },
     "494": {
       "label": "Miscellaneous",
       "members": [
-        "skill:linux-privilege-escalation"
+        "skill:leiloeiro-avaliacao"
       ]
     },
     "495": {
       "label": "Miscellaneous",
       "members": [
-        "skill:linux-shell-scripting"
+        "skill:leiloeiro-edital"
       ]
     },
     "496": {
       "label": "Miscellaneous",
       "members": [
-        "skill:linux-troubleshooting"
+        "skill:leiloeiro-ia"
       ]
     },
     "497": {
       "label": "Miscellaneous",
       "members": [
-        "skill:llm-app-patterns"
+        "skill:leiloeiro-juridico"
       ]
     },
     "498": {
       "label": "Miscellaneous",
       "members": [
-        "skill:llm-application-dev-langchain-agent"
+        "skill:leiloeiro-mercado"
       ]
     },
     "499": {
       "label": "Miscellaneous",
       "members": [
-        "skill:llm-evaluation"
+        "skill:leiloeiro-risco"
       ]
     },
     "500": {
       "label": "Miscellaneous",
       "members": [
-        "skill:llm-ops"
+        "skill:linear-automation"
       ]
     },
     "501": {
       "label": "Miscellaneous",
       "members": [
-        "skill:llm-wiki"
+        "skill:linear-claude-skill"
       ]
     },
     "502": {
       "label": "Miscellaneous",
       "members": [
-        "skill:local-legal-seo-audit"
+        "skill:linkedin-cli"
       ]
     },
     "503": {
       "label": "Miscellaneous",
       "members": [
-        "skill:logistics-exception-management"
+        "skill:linkerd-patterns"
       ]
     },
     "504": {
       "label": "Miscellaneous",
       "members": [
-        "skill:loki-mode"
+        "skill:linux-privilege-escalation"
       ]
     },
     "505": {
       "label": "Miscellaneous",
       "members": [
-        "skill:m365-agents-dotnet"
+        "skill:linux-shell-scripting"
       ]
     },
     "506": {
       "label": "Miscellaneous",
       "members": [
-        "skill:m365-agents-py"
+        "skill:linux-troubleshooting"
       ]
     },
     "507": {
       "label": "Miscellaneous",
       "members": [
-        "skill:m365-agents-ts"
+        "skill:list-subs"
       ]
     },
     "508": {
       "label": "Miscellaneous",
       "members": [
-        "skill:machine-learning-ops-ml-pipeline"
+        "skill:llm-app-patterns"
       ]
     },
     "509": {
       "label": "Miscellaneous",
       "members": [
-        "skill:mailchimp-automation"
+        "skill:llm-application-dev-langchain-agent"
       ]
     },
     "510": {
       "label": "Miscellaneous",
       "members": [
-        "skill:make-automation"
+        "skill:llm-evaluation"
       ]
     },
     "511": {
       "label": "Miscellaneous",
       "members": [
-        "skill:makepad-animation"
+        "skill:llm-ops"
       ]
     },
     "512": {
       "label": "Miscellaneous",
       "members": [
-        "skill:makepad-deployment"
+        "skill:llm-wiki"
       ]
     },
     "513": {
       "label": "Miscellaneous",
       "members": [
-        "skill:makepad-event-action"
+        "skill:local-legal-seo-audit"
       ]
     },
     "514": {
       "label": "Miscellaneous",
       "members": [
-        "skill:makepad-font"
+        "skill:logistics-exception-management"
       ]
     },
     "515": {
       "label": "Miscellaneous",
       "members": [
-        "skill:makepad-shaders"
+        "skill:loki-mode"
       ]
     },
     "516": {
       "label": "Miscellaneous",
       "members": [
-        "skill:makepad-splash"
+        "skill:m365-agents-dotnet"
       ]
     },
     "517": {
       "label": "Miscellaneous",
       "members": [
-        "skill:makepad-widgets"
+        "skill:m365-agents-py"
       ]
     },
     "518": {
       "label": "Miscellaneous",
       "members": [
-        "skill:malware-analyst"
+        "skill:m365-agents-ts"
       ]
     },
     "519": {
-      "label": "Diagrams",
+      "label": "Miscellaneous",
       "members": [
-        "skill:manim-video"
+        "skill:machine-learning-ops-ml-pipeline"
       ]
     },
     "520": {
       "label": "Miscellaneous",
       "members": [
-        "skill:market-sizing-analysis"
+        "skill:mailchimp-automation"
       ]
     },
     "521": {
       "label": "Miscellaneous",
       "members": [
-        "skill:marketing-ideas"
+        "skill:make-automation"
       ]
     },
     "522": {
       "label": "Miscellaneous",
       "members": [
-        "skill:marketing-psychology"
+        "skill:make-plan"
       ]
     },
     "523": {
       "label": "Miscellaneous",
       "members": [
-        "skill:matematico-tao"
+        "skill:makepad-animation"
       ]
     },
     "524": {
       "label": "Miscellaneous",
       "members": [
-        "skill:matplotlib"
+        "skill:makepad-deployment"
       ]
     },
     "525": {
       "label": "Miscellaneous",
       "members": [
-        "skill:mcp-builder-ms"
+        "skill:makepad-event-action"
       ]
     },
     "526": {
       "label": "Miscellaneous",
       "members": [
-        "skill:mcp-builder"
+        "skill:makepad-font"
       ]
     },
     "527": {
       "label": "Miscellaneous",
       "members": [
-        "skill:memory-forensics"
+        "skill:makepad-shaders"
       ]
     },
     "528": {
       "label": "Miscellaneous",
       "members": [
-        "skill:memory-systems"
+        "skill:makepad-splash"
       ]
     },
     "529": {
       "label": "Miscellaneous",
       "members": [
-        "skill:mental-health-analyzer"
+        "skill:makepad-widgets"
       ]
     },
     "530": {
       "label": "Miscellaneous",
       "members": [
-        "skill:messages-ops"
+        "skill:malware-analyst"
       ]
     },
     "531": {
       "label": "Miscellaneous",
       "members": [
-        "skill:metasploit-framework"
+        "skill:market-sizing-analysis"
       ]
     },
     "532": {
       "label": "Miscellaneous",
       "members": [
-        "skill:micro-saas-launcher"
+        "skill:marketing-ideas"
       ]
     },
     "533": {
       "label": "Miscellaneous",
       "members": [
-        "skill:microsoft-azure-webjobs-extensions-authentication-events-dotnet"
+        "skill:marketing-psychology"
       ]
     },
     "534": {
       "label": "Miscellaneous",
       "members": [
-        "skill:microsoft-teams-automation"
+        "skill:matematico-tao"
       ]
     },
     "535": {
       "label": "Miscellaneous",
       "members": [
-        "skill:miro-automation"
+        "skill:matplotlib"
       ]
     },
     "536": {
       "label": "Miscellaneous",
       "members": [
-        "skill:mixpanel-automation"
+        "skill:mcp-builder-ms"
       ]
     },
     "537": {
       "label": "Miscellaneous",
       "members": [
-        "skill:ml-pipeline-workflow"
+        "skill:mcp-builder"
       ]
     },
     "538": {
       "label": "Miscellaneous",
       "members": [
-        "skill:mlops-engineer"
+        "skill:memory-forensics"
       ]
     },
     "539": {
       "label": "Miscellaneous",
       "members": [
-        "skill:mobile-design"
+        "skill:memory-systems"
       ]
     },
     "540": {
       "label": "Miscellaneous",
       "members": [
-        "skill:mobile-developer"
+        "skill:mental-health-analyzer"
       ]
     },
     "541": {
       "label": "Miscellaneous",
       "members": [
-        "skill:molykit"
+        "skill:messages-ops"
       ]
     },
     "542": {
       "label": "Miscellaneous",
       "members": [
-        "skill:monday-automation"
+        "skill:metasploit-framework"
       ]
     },
     "543": {
       "label": "Miscellaneous",
       "members": [
-        "skill:monetization"
+        "skill:micro-saas-launcher"
       ]
     },
     "544": {
       "label": "Miscellaneous",
       "members": [
-        "skill:moodle-external-api-development"
+        "skill:microsoft-azure-webjobs-extensions-authentication-events-dotnet"
       ]
     },
     "545": {
       "label": "Miscellaneous",
       "members": [
-        "skill:mtls-configuration"
+        "skill:microsoft-teams-automation"
       ]
     },
     "546": {
       "label": "Miscellaneous",
       "members": [
-        "skill:multi-advisor"
+        "skill:miro-automation"
       ]
     },
     "547": {
       "label": "Miscellaneous",
       "members": [
-        "skill:multi-agent-brainstorming"
+        "skill:mixpanel-automation"
       ]
     },
     "548": {
       "label": "Miscellaneous",
       "members": [
-        "skill:multi-agent-patterns"
+        "skill:ml-pipeline-workflow"
       ]
     },
     "549": {
       "label": "Miscellaneous",
       "members": [
-        "skill:multi-cloud-architecture"
+        "skill:mlops-engineer"
       ]
     },
     "550": {
       "label": "Miscellaneous",
       "members": [
-        "skill:multi-platform-apps-multi-platform"
+        "skill:mobile-design"
       ]
     },
     "551": {
       "label": "Miscellaneous",
       "members": [
-        "skill:n8n-code-javascript"
+        "skill:mobile-developer"
       ]
     },
     "552": {
       "label": "Miscellaneous",
       "members": [
-        "skill:n8n-code-python"
+        "skill:molykit"
       ]
     },
     "553": {
       "label": "Miscellaneous",
       "members": [
-        "skill:n8n-expression-syntax"
+        "skill:monday-automation"
       ]
     },
     "554": {
       "label": "Miscellaneous",
       "members": [
-        "skill:n8n-mcp-tools-expert"
+        "skill:monetization"
       ]
     },
     "555": {
       "label": "Miscellaneous",
       "members": [
-        "skill:n8n-node-configuration"
+        "skill:moodle-external-api-development"
       ]
     },
     "556": {
       "label": "Miscellaneous",
       "members": [
-        "skill:n8n-validation-expert"
+        "skill:mtls-configuration"
       ]
     },
     "557": {
       "label": "Miscellaneous",
       "members": [
-        "skill:n8n-workflow-patterns"
+        "skill:multi-advisor"
       ]
     },
     "558": {
       "label": "Miscellaneous",
       "members": [
-        "skill:native-data-fetching"
+        "skill:multi-agent-brainstorming"
       ]
     },
     "559": {
       "label": "Miscellaneous",
       "members": [
-        "skill:nestjs-expert"
+        "skill:multi-agent-patterns"
       ]
     },
     "560": {
       "label": "Miscellaneous",
       "members": [
-        "skill:network-101"
+        "skill:multi-cloud-architecture"
       ]
     },
     "561": {
       "label": "Miscellaneous",
       "members": [
-        "skill:networkx"
+        "skill:multi-platform-apps-multi-platform"
       ]
     },
     "562": {
       "label": "Miscellaneous",
       "members": [
-        "skill:nextjs-best-practices"
+        "skill:n8n-code-javascript"
       ]
     },
     "563": {
       "label": "Miscellaneous",
       "members": [
-        "skill:nft-standards"
+        "skill:n8n-code-python"
       ]
     },
     "564": {
       "label": "Miscellaneous",
       "members": [
-        "skill:nodejs-best-practices"
+        "skill:n8n-expression-syntax"
       ]
     },
     "565": {
       "label": "Miscellaneous",
       "members": [
-        "skill:notebooklm"
+        "skill:n8n-mcp-tools-expert"
       ]
     },
     "566": {
       "label": "Miscellaneous",
       "members": [
-        "skill:notion-automation"
+        "skill:n8n-node-configuration"
       ]
     },
     "567": {
       "label": "Miscellaneous",
       "members": [
-        "skill:notion-template-business"
+        "skill:n8n-validation-expert"
       ]
     },
     "568": {
       "label": "Miscellaneous",
       "members": [
-        "skill:nutrition-analyzer"
+        "skill:n8n-workflow-patterns"
       ]
     },
     "569": {
       "label": "Miscellaneous",
       "members": [
-        "skill:nx-workspace-patterns"
+        "skill:native-data-fetching"
       ]
     },
     "570": {
       "label": "Miscellaneous",
       "members": [
-        "skill:observability-engineer"
+        "skill:nestjs-expert"
       ]
     },
     "571": {
       "label": "Miscellaneous",
       "members": [
-        "skill:occupational-health-analyzer"
+        "skill:network-101"
       ]
     },
     "572": {
       "label": "Miscellaneous",
       "members": [
-        "skill:office-productivity"
+        "skill:networkx"
       ]
     },
     "573": {
       "label": "Miscellaneous",
       "members": [
-        "skill:on-call-handoff-patterns"
+        "skill:nextjs-best-practices"
       ]
     },
     "574": {
       "label": "Miscellaneous",
       "members": [
-        "skill:onboarding-cro"
+        "skill:nft-standards"
       ]
     },
     "575": {
       "label": "Miscellaneous",
       "members": [
-        "skill:one-drive-automation"
+        "skill:nodejs-best-practices"
       ]
     },
     "576": {
       "label": "Miscellaneous",
       "members": [
-        "skill:oral-health-analyzer"
+        "skill:notebooklm"
       ]
     },
     "577": {
       "label": "Miscellaneous",
       "members": [
-        "skill:os-scripting"
+        "skill:notion-automation"
       ]
     },
     "578": {
       "label": "Miscellaneous",
       "members": [
-        "skill:outlook-automation"
+        "skill:notion-template-business"
       ]
     },
     "579": {
       "label": "Miscellaneous",
       "members": [
-        "skill:outlook-calendar-automation"
+        "skill:nutrition-analyzer"
       ]
     },
     "580": {
       "label": "Miscellaneous",
       "members": [
-        "skill:page-cro"
+        "skill:nx-workspace-patterns"
       ]
     },
     "581": {
       "label": "Miscellaneous",
       "members": [
-        "skill:pagerduty-automation"
+        "skill:observability-engineer"
       ]
     },
     "582": {
       "label": "Miscellaneous",
       "members": [
-        "skill:paid-ads"
+        "skill:occupational-health-analyzer"
       ]
     },
     "583": {
       "label": "Miscellaneous",
       "members": [
-        "skill:parallel-debugging"
+        "skill:office-productivity"
       ]
     },
     "584": {
       "label": "Miscellaneous",
       "members": [
-        "skill:paypal-integration"
+        "skill:on-call-handoff-patterns"
       ]
     },
     "585": {
       "label": "Miscellaneous",
       "members": [
-        "skill:paywall-upgrade-cro"
+        "skill:onboarding-cro"
       ]
     },
     "586": {
       "label": "Miscellaneous",
       "members": [
-        "skill:pci-compliance"
+        "skill:one-drive-automation"
       ]
     },
     "587": {
       "label": "Miscellaneous",
       "members": [
-        "skill:pdf-official"
+        "skill:oral-health-analyzer"
       ]
     },
     "588": {
       "label": "Miscellaneous",
       "members": [
-        "skill:pentest-checklist"
+        "skill:orchestrator"
       ]
     },
     "589": {
       "label": "Miscellaneous",
       "members": [
-        "skill:pentest-commands"
+        "skill:os-scripting"
       ]
     },
     "590": {
       "label": "Miscellaneous",
       "members": [
-        "skill:performance-optimizer"
+        "skill:outlook-automation"
       ]
     },
     "591": {
       "label": "Miscellaneous",
       "members": [
-        "skill:performance-testing-review-ai-review"
+        "skill:outlook-calendar-automation"
       ]
     },
     "592": {
       "label": "Miscellaneous",
       "members": [
-        "skill:performance-testing-review-multi-agent-review"
+        "skill:page-cro"
       ]
     },
     "593": {
       "label": "Miscellaneous",
       "members": [
-        "skill:perl-patterns"
+        "skill:pagerduty-automation"
       ]
     },
     "594": {
       "label": "Miscellaneous",
       "members": [
-        "skill:perl-testing"
+        "skill:paid-ads"
       ]
     },
     "595": {
       "label": "Miscellaneous",
       "members": [
-        "skill:personal-tool-builder"
+        "skill:parallel-debugging"
       ]
     },
     "596": {
       "label": "Miscellaneous",
       "members": [
-        "skill:pipedrive-automation"
+        "skill:pause-subs"
       ]
     },
     "597": {
       "label": "Miscellaneous",
       "members": [
-        "skill:plankton-code-quality"
+        "skill:paypal-integration"
       ]
     },
     "598": {
       "label": "Miscellaneous",
       "members": [
-        "skill:planning-with-files"
+        "skill:paywall-upgrade-cro"
       ]
     },
     "599": {
       "label": "Miscellaneous",
       "members": [
-        "skill:playwright-java"
+        "skill:pci-compliance"
       ]
     },
     "600": {
       "label": "Miscellaneous",
       "members": [
-        "skill:playwright-skill"
+        "skill:pdf-official"
       ]
     },
     "601": {
       "label": "Miscellaneous",
       "members": [
-        "skill:plotly"
+        "skill:pentest-checklist"
       ]
     },
     "602": {
       "label": "Miscellaneous",
       "members": [
-        "skill:polars"
+        "skill:pentest-commands"
       ]
     },
     "603": {
       "label": "Miscellaneous",
       "members": [
-        "skill:popup-cro"
+        "skill:performance-optimizer"
       ]
     },
     "604": {
       "label": "Miscellaneous",
       "members": [
-        "skill:posix-shell-pro"
+        "skill:performance-testing-review-ai-review"
       ]
     },
     "605": {
       "label": "Miscellaneous",
       "members": [
-        "skill:postgresql"
+        "skill:performance-testing-review-multi-agent-review"
       ]
     },
     "606": {
       "label": "Miscellaneous",
       "members": [
-        "skill:posthog-automation"
+        "skill:perl-patterns"
       ]
     },
     "607": {
       "label": "Miscellaneous",
       "members": [
-        "skill:postmark-automation"
+        "skill:perl-testing"
       ]
     },
     "608": {
       "label": "Miscellaneous",
       "members": [
-        "skill:postmortem-writing"
+        "skill:personal-tool-builder"
       ]
     },
     "609": {
       "label": "Miscellaneous",
       "members": [
-        "skill:pptx-official"
+        "skill:pipedrive-automation"
       ]
     },
     "610": {
       "label": "Miscellaneous",
       "members": [
-        "skill:pr-writer"
+        "skill:plankton-code-quality"
       ]
     },
     "611": {
       "label": "Miscellaneous",
       "members": [
-        "skill:pricing-strategy"
+        "skill:planning-with-files"
       ]
     },
     "612": {
       "label": "Miscellaneous",
       "members": [
-        "skill:prisma-expert"
+        "skill:playwright-java"
       ]
     },
     "613": {
       "label": "Miscellaneous",
       "members": [
-        "skill:privilege-escalation-methods"
+        "skill:playwright-skill"
       ]
     },
     "614": {
       "label": "Miscellaneous",
       "members": [
-        "skill:product-design"
+        "skill:plotly"
       ]
     },
     "615": {
       "label": "Miscellaneous",
       "members": [
-        "skill:product-inventor"
+        "skill:polars"
       ]
     },
     "616": {
       "label": "Miscellaneous",
       "members": [
-        "skill:product-manager-toolkit"
+        "skill:popup-cro"
       ]
     },
     "617": {
       "label": "Miscellaneous",
       "members": [
-        "skill:production-code-audit"
+        "skill:posix-shell-pro"
       ]
     },
     "618": {
       "label": "Miscellaneous",
       "members": [
-        "skill:production-scheduling"
+        "skill:postgresql"
       ]
     },
     "619": {
       "label": "Miscellaneous",
       "members": [
-        "skill:programmatic-seo"
+        "skill:posthog-automation"
       ]
     },
     "620": {
       "label": "Miscellaneous",
       "members": [
-        "skill:project-development"
+        "skill:postmark-automation"
       ]
     },
     "621": {
       "label": "Miscellaneous",
       "members": [
-        "skill:project-flow-ops"
+        "skill:postmortem-writing"
       ]
     },
     "622": {
       "label": "Miscellaneous",
       "members": [
-        "skill:project-guidelines-example"
+        "skill:pptx-official"
       ]
     },
     "623": {
       "label": "Miscellaneous",
       "members": [
-        "skill:prometheus-configuration"
+        "skill:pr-writer"
       ]
     },
     "624": {
       "label": "Miscellaneous",
       "members": [
-        "skill:prompt-engineer"
+        "skill:pricing-strategy"
       ]
     },
     "625": {
       "label": "Miscellaneous",
       "members": [
-        "skill:prompt-engineering-patterns"
+        "skill:prisma-expert"
       ]
     },
     "626": {
       "label": "Miscellaneous",
       "members": [
-        "skill:prompt-engineering"
+        "skill:privilege-escalation-methods"
       ]
     },
     "627": {
       "label": "Miscellaneous",
       "members": [
-        "skill:prompt-library"
+        "skill:product-design"
       ]
     },
     "628": {
       "label": "Miscellaneous",
       "members": [
-        "skill:pubmed-database"
+        "skill:product-inventor"
       ]
     },
     "629": {
       "label": "Miscellaneous",
       "members": [
-        "skill:python-development-python-scaffold"
+        "skill:product-manager-toolkit"
       ]
     },
     "630": {
       "label": "Miscellaneous",
       "members": [
-        "skill:python-fastapi-development"
+        "skill:production-code-audit"
       ]
     },
     "631": {
       "label": "Miscellaneous",
       "members": [
-        "skill:python-patterns"
+        "skill:production-scheduling"
       ]
     },
     "632": {
       "label": "Miscellaneous",
       "members": [
-        "skill:python-testing"
+        "skill:profile"
       ]
     },
     "633": {
       "label": "Miscellaneous",
       "members": [
-        "skill:qiskit"
+        "skill:programmatic-seo"
       ]
     },
     "634": {
       "label": "Miscellaneous",
       "members": [
-        "skill:quality-nonconformance"
+        "skill:project-development"
       ]
     },
     "635": {
       "label": "Miscellaneous",
       "members": [
-        "skill:radix-ui-design-system"
+        "skill:project-flow-ops"
       ]
     },
     "636": {
       "label": "Miscellaneous",
       "members": [
-        "skill:rag-implementation"
+        "skill:project-guidelines-example"
       ]
     },
     "637": {
       "label": "Miscellaneous",
       "members": [
-        "skill:ralphinho-rfc-pipeline"
+        "skill:prometheus-configuration"
       ]
     },
     "638": {
       "label": "Miscellaneous",
       "members": [
-        "skill:react-flow-architect"
+        "skill:prompt-engineer"
       ]
     },
     "639": {
       "label": "Miscellaneous",
       "members": [
-        "skill:react-nextjs-development"
+        "skill:prompt-engineering-patterns"
       ]
     },
     "640": {
       "label": "Miscellaneous",
       "members": [
-        "skill:react-patterns"
+        "skill:prompt-engineering"
       ]
     },
     "641": {
       "label": "Miscellaneous",
       "members": [
-        "skill:react-state-management"
+        "skill:prompt-library"
       ]
     },
     "642": {
       "label": "Miscellaneous",
       "members": [
-        "skill:react-ui-patterns"
+        "skill:pubmed-database"
       ]
     },
     "643": {
       "label": "Miscellaneous",
       "members": [
-        "skill:readme"
+        "skill:puzzle-activity-planner"
       ]
     },
     "644": {
       "label": "Miscellaneous",
       "members": [
-        "skill:receiving-code-review"
+        "skill:python-development-python-scaffold"
       ]
     },
     "645": {
       "label": "Miscellaneous",
       "members": [
-        "skill:red-team-tactics"
+        "skill:python-fastapi-development"
       ]
     },
     "646": {
       "label": "Miscellaneous",
       "members": [
-        "skill:red-team-tools"
+        "skill:python-patterns"
       ]
     },
     "647": {
       "label": "Miscellaneous",
       "members": [
-        "skill:reddit-automation"
+        "skill:python-testing"
       ]
     },
     "648": {
       "label": "Miscellaneous",
       "members": [
-        "skill:reference-builder"
+        "skill:qiskit"
       ]
     },
     "649": {
       "label": "Miscellaneous",
       "members": [
-        "skill:referral-program"
+        "skill:quality-nonconformance"
       ]
     },
     "650": {
       "label": "Miscellaneous",
       "members": [
-        "skill:rehabilitation-analyzer"
+        "skill:radix-ui-design-system"
       ]
     },
     "651": {
       "label": "Miscellaneous",
       "members": [
-        "skill:remotion"
+        "skill:rag-implementation"
       ]
     },
     "652": {
       "label": "Miscellaneous",
       "members": [
-        "skill:render-automation"
+        "skill:ralphinho-rfc-pipeline"
       ]
     },
     "653": {
       "label": "Miscellaneous",
       "members": [
-        "skill:returns-reverse-logistics"
+        "skill:react-flow-architect"
       ]
     },
     "654": {
       "label": "Miscellaneous",
       "members": [
-        "skill:robius-app-architecture"
+        "skill:react-nextjs-development"
       ]
     },
     "655": {
       "label": "Miscellaneous",
       "members": [
-        "skill:robius-event-action"
+        "skill:react-patterns"
       ]
     },
     "656": {
       "label": "Miscellaneous",
       "members": [
-        "skill:robius-matrix-integration"
+        "skill:react-state-management"
       ]
     },
     "657": {
       "label": "Miscellaneous",
       "members": [
-        "skill:robius-state-management"
+        "skill:react-ui-patterns"
       ]
     },
     "658": {
       "label": "Miscellaneous",
       "members": [
-        "skill:robius-widget-patterns"
+        "skill:readme"
       ]
     },
     "659": {
       "label": "Miscellaneous",
       "members": [
-        "skill:rust-patterns"
+        "skill:receiving-code-review"
       ]
     },
     "660": {
       "label": "Miscellaneous",
       "members": [
-        "skill:rust-testing"
+        "skill:red-team-tactics"
       ]
     },
     "661": {
       "label": "Miscellaneous",
       "members": [
-        "skill:saas-mvp-launcher"
+        "skill:red-team-tools"
       ]
     },
     "662": {
       "label": "Miscellaneous",
       "members": [
-        "skill:saga-orchestration"
+        "skill:reddit-automation"
       ]
     },
     "663": {
       "label": "Miscellaneous",
       "members": [
-        "skill:salesforce-automation"
+        "skill:reference-builder"
       ]
     },
     "664": {
       "label": "Miscellaneous",
       "members": [
-        "skill:sam-altman"
+        "skill:referral-program"
       ]
     },
     "665": {
       "label": "Miscellaneous",
       "members": [
-        "skill:sast-configuration"
+        "skill:reflecting-on-sessions"
       ]
     },
     "666": {
       "label": "Miscellaneous",
       "members": [
-        "skill:scanning-tools"
+        "skill:rehabilitation-analyzer"
       ]
     },
     "667": {
       "label": "Miscellaneous",
       "members": [
-        "skill:scanpy"
+        "skill:remotion"
       ]
     },
     "668": {
       "label": "Miscellaneous",
       "members": [
-        "skill:schema-markup"
+        "skill:remove-sub"
       ]
     },
     "669": {
       "label": "Miscellaneous",
       "members": [
-        "skill:scientific-writing"
+        "skill:render-automation"
       ]
     },
     "670": {
       "label": "Miscellaneous",
       "members": [
-        "skill:scikit-learn"
+        "skill:returns-reverse-logistics"
       ]
     },
     "671": {
       "label": "Miscellaneous",
       "members": [
-        "skill:screenshots"
+        "skill:robius-app-architecture"
       ]
     },
     "672": {
       "label": "Miscellaneous",
       "members": [
-        "skill:scroll-experience"
+        "skill:robius-event-action"
       ]
     },
     "673": {
       "label": "Miscellaneous",
       "members": [
-        "skill:seaborn"
+        "skill:robius-matrix-integration"
       ]
     },
     "674": {
       "label": "Miscellaneous",
       "members": [
-        "skill:secrets-management"
+        "skill:robius-state-management"
       ]
     },
     "675": {
       "label": "Miscellaneous",
       "members": [
-        "skill:security-audit"
+        "skill:robius-widget-patterns"
       ]
     },
     "676": {
       "label": "Miscellaneous",
       "members": [
-        "skill:security-scanning-security-sast"
+        "skill:runpod-compute"
       ]
     },
     "677": {
       "label": "Miscellaneous",
       "members": [
-        "skill:segment-automation"
+        "skill:rust-patterns"
       ]
     },
     "678": {
       "label": "Miscellaneous",
       "members": [
-        "skill:semgrep-rule-variant-creator"
+        "skill:rust-testing"
       ]
     },
     "679": {
       "label": "Miscellaneous",
       "members": [
-        "skill:sendgrid-automation"
+        "skill:saas-mvp-launcher"
       ]
     },
     "680": {
       "label": "Miscellaneous",
       "members": [
-        "skill:senior-architect"
+        "skill:saga-orchestration"
       ]
     },
     "681": {
       "label": "Miscellaneous",
       "members": [
-        "skill:senior-frontend"
+        "skill:salesforce-automation"
       ]
     },
     "682": {
       "label": "Miscellaneous",
       "members": [
-        "skill:senior-fullstack"
+        "skill:sam-altman"
       ]
     },
     "683": {
       "label": "Miscellaneous",
       "members": [
-        "skill:sentry-automation"
+        "skill:sast-configuration"
       ]
     },
     "684": {
       "label": "Miscellaneous",
       "members": [
-        "skill:seo-audit"
+        "skill:scanning-tools"
       ]
     },
     "685": {
       "label": "Miscellaneous",
       "members": [
-        "skill:seo-forensic-incident-response"
+        "skill:scanpy"
       ]
     },
     "686": {
       "label": "Miscellaneous",
       "members": [
-        "skill:service-mesh-observability"
+        "skill:schema-markup"
       ]
     },
     "687": {
       "label": "Miscellaneous",
       "members": [
-        "skill:settings-audit"
+        "skill:scientific-writing"
       ]
     },
     "688": {
       "label": "Miscellaneous",
       "members": [
-        "skill:sexual-health-analyzer"
+        "skill:scikit-learn"
       ]
     },
     "689": {
       "label": "Miscellaneous",
       "members": [
-        "skill:shadcn"
+        "skill:screenshots"
       ]
     },
     "690": {
       "label": "Miscellaneous",
       "members": [
-        "skill:sharp-edges"
+        "skill:scroll-experience"
       ]
     },
     "691": {
       "label": "Miscellaneous",
       "members": [
-        "skill:shellcheck-configuration"
+        "skill:seaborn"
       ]
     },
     "692": {
       "label": "Miscellaneous",
       "members": [
-        "skill:shodan-reconnaissance"
+        "skill:secrets-management"
       ]
     },
     "693": {
       "label": "Miscellaneous",
       "members": [
-        "skill:shopify-development"
+        "skill:security-audit"
       ]
     },
     "694": {
       "label": "Miscellaneous",
       "members": [
-        "skill:signup-flow-cro"
+        "skill:security-scanning-security-sast"
       ]
     },
     "695": {
       "label": "Miscellaneous",
       "members": [
-        "skill:skill-creator-ms"
+        "skill:segment-automation"
       ]
     },
     "696": {
       "label": "Miscellaneous",
       "members": [
-        "skill:skill-creator"
+        "skill:semgrep-rule-variant-creator"
       ]
     },
     "697": {
       "label": "Miscellaneous",
       "members": [
-        "skill:skill-developer"
+        "skill:sendgrid-automation"
       ]
     },
     "698": {
       "label": "Miscellaneous",
       "members": [
-        "skill:skill-installer"
+        "skill:senior-architect"
       ]
     },
     "699": {
       "label": "Miscellaneous",
       "members": [
-        "skill:skill-rails-upgrade"
+        "skill:senior-frontend"
       ]
     },
     "700": {
       "label": "Miscellaneous",
       "members": [
-        "skill:skill-router"
+        "skill:senior-fullstack"
       ]
     },
     "701": {
       "label": "Miscellaneous",
       "members": [
-        "skill:skill-scanner"
+        "skill:sentry-automation"
       ]
     },
     "702": {
       "label": "Miscellaneous",
       "members": [
-        "skill:skill-sentinel"
+        "skill:seo-audit"
       ]
     },
     "703": {
       "label": "Miscellaneous",
       "members": [
-        "skill:skill-stocktake"
+        "skill:seo-forensic-incident-response"
       ]
     },
     "704": {
       "label": "Miscellaneous",
       "members": [
-        "skill:skin-health-analyzer"
+        "skill:service-mesh-observability"
       ]
     },
     "705": {
       "label": "Miscellaneous",
       "members": [
-        "skill:slack-automation"
+        "skill:session-log"
       ]
     },
     "706": {
       "label": "Miscellaneous",
       "members": [
-        "skill:slack-bot-builder"
+        "skill:session-search"
       ]
     },
     "707": {
       "label": "Miscellaneous",
       "members": [
-        "skill:slack-gif-creator"
+        "skill:settings-audit"
       ]
     },
     "708": {
       "label": "Miscellaneous",
       "members": [
-        "skill:sleep-analyzer"
+        "skill:sexual-health-analyzer"
       ]
     },
     "709": {
       "label": "Miscellaneous",
       "members": [
-        "skill:slo-implementation"
+        "skill:shadcn"
       ]
     },
     "710": {
       "label": "Miscellaneous",
       "members": [
-        "skill:smtp-penetration-testing"
+        "skill:sharp-edges"
       ]
     },
     "711": {
       "label": "Miscellaneous",
       "members": [
-        "skill:social-content"
+        "skill:shellcheck-configuration"
       ]
     },
     "712": {
       "label": "Miscellaneous",
       "members": [
-        "skill:social-graph-ranker"
+        "skill:shodan-reconnaissance"
       ]
     },
     "713": {
       "label": "Miscellaneous",
       "members": [
-        "skill:social-orchestrator"
+        "skill:shopify-development"
       ]
     },
     "714": {
       "label": "Miscellaneous",
       "members": [
-        "skill:spark-optimization"
+        "skill:signup-flow-cro"
       ]
     },
     "715": {
       "label": "Miscellaneous",
       "members": [
-        "skill:spec-to-code-compliance"
+        "skill:skill-creator-ms"
       ]
     },
     "716": {
       "label": "Miscellaneous",
       "members": [
-        "skill:springboot-patterns"
+        "skill:skill-creator"
       ]
     },
     "717": {
       "label": "Miscellaneous",
       "members": [
-        "skill:springboot-verification"
+        "skill:skill-developer"
       ]
     },
     "718": {
       "label": "Miscellaneous",
       "members": [
-        "skill:sql-injection-testing"
+        "skill:skill-installer"
       ]
     },
     "719": {
       "label": "Miscellaneous",
       "members": [
-        "skill:sqlmap-database-pentesting"
+        "skill:skill-rails-upgrade"
       ]
     },
     "720": {
       "label": "Miscellaneous",
       "members": [
-        "skill:ssh-penetration-testing"
+        "skill:skill-router"
       ]
     },
     "721": {
       "label": "Miscellaneous",
       "members": [
-        "skill:stability-ai"
+        "skill:skill-scanner"
       ]
     },
     "722": {
       "label": "Miscellaneous",
       "members": [
-        "skill:startup-analyst"
+        "skill:skill-sentinel"
       ]
     },
     "723": {
       "label": "Miscellaneous",
       "members": [
-        "skill:startup-business-analyst-business-case"
+        "skill:skill-stocktake"
       ]
     },
     "724": {
       "label": "Miscellaneous",
       "members": [
-        "skill:startup-business-analyst-financial-projections"
+        "skill:skin-health-analyzer"
       ]
     },
     "725": {
       "label": "Miscellaneous",
       "members": [
-        "skill:startup-business-analyst-market-opportunity"
+        "skill:slack-automation"
       ]
     },
     "726": {
       "label": "Miscellaneous",
       "members": [
-        "skill:startup-financial-modeling"
+        "skill:slack-bot-builder"
       ]
     },
     "727": {
       "label": "Miscellaneous",
       "members": [
-        "skill:statsmodels"
+        "skill:slack-gif-creator"
       ]
     },
     "728": {
       "label": "Miscellaneous",
       "members": [
-        "skill:steve-jobs"
+        "skill:sleep-analyzer"
       ]
     },
     "729": {
       "label": "Miscellaneous",
       "members": [
-        "skill:stitch-loop"
+        "skill:slo-implementation"
       ]
     },
     "730": {
       "label": "Miscellaneous",
       "members": [
-        "skill:stitch-ui-design"
+        "skill:smtp-penetration-testing"
       ]
     },
     "731": {
       "label": "Miscellaneous",
       "members": [
-        "skill:stripe-automation"
+        "skill:social-content"
       ]
     },
     "732": {
       "label": "Miscellaneous",
       "members": [
-        "skill:stripe-integration"
+        "skill:social-graph-ranker"
       ]
     },
     "733": {
       "label": "Miscellaneous",
       "members": [
-        "skill:subagent-driven-development"
+        "skill:social-orchestrator"
       ]
     },
     "734": {
       "label": "Miscellaneous",
       "members": [
-        "skill:supabase-automation"
+        "skill:spark-optimization"
       ]
     },
     "735": {
       "label": "Miscellaneous",
       "members": [
-        "skill:swiftui-expert-skill"
+        "skill:spec-to-code-compliance"
       ]
     },
     "736": {
       "label": "Miscellaneous",
       "members": [
-        "skill:sympy"
+        "skill:springboot-patterns"
       ]
     },
     "737": {
       "label": "Miscellaneous",
       "members": [
-        "skill:systematic-debugging"
+        "skill:springboot-verification"
       ]
     },
     "738": {
       "label": "Miscellaneous",
       "members": [
-        "skill:systems-programming-rust-project"
+        "skill:sql-injection-testing"
       ]
     },
     "739": {
       "label": "Miscellaneous",
       "members": [
-        "skill:tailwind-patterns"
+        "skill:sqlmap-database-pentesting"
       ]
     },
     "740": {
       "label": "Miscellaneous",
       "members": [
-        "skill:tanstack-query-expert"
+        "skill:ssh-penetration-testing"
       ]
     },
     "741": {
       "label": "Miscellaneous",
       "members": [
-        "skill:task-intelligence"
+        "skill:stability-ai"
       ]
     },
     "742": {
       "label": "Miscellaneous",
       "members": [
-        "skill:tcm-constitution-analyzer"
+        "skill:startup-analyst"
       ]
     },
     "743": {
       "label": "Miscellaneous",
       "members": [
-        "skill:tdd-orchestrator"
+        "skill:startup-business-analyst-business-case"
       ]
     },
     "744": {
       "label": "Miscellaneous",
       "members": [
-        "skill:tdd-workflow"
+        "skill:startup-business-analyst-financial-projections"
       ]
     },
     "745": {
       "label": "Miscellaneous",
       "members": [
-        "skill:tdd-workflows-tdd-cycle"
+        "skill:startup-business-analyst-market-opportunity"
       ]
     },
     "746": {
       "label": "Miscellaneous",
       "members": [
-        "skill:tdd-workflows-tdd-refactor"
+        "skill:startup-financial-modeling"
       ]
     },
     "747": {
       "label": "Miscellaneous",
       "members": [
-        "skill:team-composition-analysis"
+        "skill:statsmodels"
       ]
     },
     "748": {
       "label": "Miscellaneous",
       "members": [
-        "skill:telegram-automation"
+        "skill:steve-jobs"
       ]
     },
     "749": {
       "label": "Miscellaneous",
       "members": [
-        "skill:telegram-bot-builder"
+        "skill:stitch-loop"
       ]
     },
     "750": {
       "label": "Miscellaneous",
       "members": [
-        "skill:telegram-mini-app"
+        "skill:stitch-ui-design"
       ]
     },
     "751": {
       "label": "Miscellaneous",
       "members": [
-        "skill:telegram"
+        "skill:stripe-automation"
       ]
     },
     "752": {
       "label": "Miscellaneous",
       "members": [
-        "skill:temporal-golang-pro"
+        "skill:stripe-integration"
       ]
     },
     "753": {
       "label": "Miscellaneous",
       "members": [
-        "skill:temporal-python-pro"
+        "skill:subagent-driven-development"
       ]
     },
     "754": {
       "label": "Miscellaneous",
       "members": [
-        "skill:terraform-module-library"
+        "skill:supabase-automation"
       ]
     },
     "755": {
       "label": "Miscellaneous",
       "members": [
-        "skill:terraform-skill"
+        "skill:swiftui-expert-skill"
       ]
     },
     "756": {
       "label": "Miscellaneous",
       "members": [
-        "skill:test-automator"
+        "skill:sympy"
       ]
     },
     "757": {
       "label": "Miscellaneous",
       "members": [
-        "skill:test-driven-development"
+        "skill:systematic-debugging"
       ]
     },
     "758": {
       "label": "Miscellaneous",
       "members": [
-        "skill:testing-patterns"
+        "skill:systems-programming-rust-project"
       ]
     },
     "759": {
       "label": "Miscellaneous",
       "members": [
-        "skill:testing-qa"
+        "skill:tailwind-patterns"
       ]
     },
     "760": {
       "label": "Miscellaneous",
       "members": [
-        "skill:threejs-animation"
+        "skill:tanstack-query-expert"
       ]
     },
     "761": {
       "label": "Miscellaneous",
       "members": [
-        "skill:threejs-fundamentals"
+        "skill:task-intelligence"
       ]
     },
     "762": {
       "label": "Miscellaneous",
       "members": [
-        "skill:threejs-geometry"
+        "skill:tcm-constitution-analyzer"
       ]
     },
     "763": {
       "label": "Miscellaneous",
       "members": [
-        "skill:threejs-interaction"
+        "skill:tdd-orchestrator"
       ]
     },
     "764": {
       "label": "Miscellaneous",
       "members": [
-        "skill:threejs-lighting"
+        "skill:tdd-workflow"
       ]
     },
     "765": {
       "label": "Miscellaneous",
       "members": [
-        "skill:threejs-loaders"
+        "skill:tdd-workflows-tdd-cycle"
       ]
     },
     "766": {
       "label": "Miscellaneous",
       "members": [
-        "skill:threejs-materials"
+        "skill:tdd-workflows-tdd-refactor"
       ]
     },
     "767": {
       "label": "Miscellaneous",
       "members": [
-        "skill:threejs-postprocessing"
+        "skill:team-composition-analysis"
       ]
     },
     "768": {
       "label": "Miscellaneous",
       "members": [
-        "skill:threejs-shaders"
+        "skill:telegram-automation"
       ]
     },
     "769": {
       "label": "Miscellaneous",
       "members": [
-        "skill:threejs-skills"
+        "skill:telegram-bot-builder"
       ]
     },
     "770": {
       "label": "Miscellaneous",
       "members": [
-        "skill:threejs-textures"
+        "skill:telegram-mini-app"
       ]
     },
     "771": {
       "label": "Miscellaneous",
       "members": [
-        "skill:tiktok-automation"
+        "skill:telegram"
       ]
     },
     "772": {
       "label": "Miscellaneous",
       "members": [
-        "skill:todoist-automation"
+        "skill:temporal-golang-pro"
       ]
     },
     "773": {
       "label": "Miscellaneous",
       "members": [
-        "skill:tool-design"
+        "skill:temporal-python-pro"
       ]
     },
     "774": {
       "label": "Miscellaneous",
       "members": [
-        "skill:top-web-vulnerabilities"
+        "skill:terraform-module-library"
       ]
     },
     "775": {
       "label": "Miscellaneous",
       "members": [
-        "skill:travel-health-analyzer"
+        "skill:terraform-skill"
       ]
     },
     "776": {
       "label": "Miscellaneous",
       "members": [
-        "skill:trello-automation"
+        "skill:test-automator"
       ]
     },
     "777": {
       "label": "Miscellaneous",
       "members": [
-        "skill:turborepo-caching"
+        "skill:test-driven-development"
       ]
     },
     "778": {
       "label": "Miscellaneous",
       "members": [
-        "skill:tutorial-engineer"
+        "skill:testing-patterns"
       ]
     },
     "779": {
       "label": "Miscellaneous",
       "members": [
-        "skill:twilio-communications"
+        "skill:testing-qa"
       ]
     },
     "780": {
       "label": "Miscellaneous",
       "members": [
-        "skill:twitter-automation"
+        "skill:theory-tester"
       ]
     },
     "781": {
       "label": "Miscellaneous",
       "members": [
-        "skill:typescript-expert"
+        "skill:threejs-animation"
       ]
     },
     "782": {
       "label": "Miscellaneous",
       "members": [
-        "skill:ui-ux-designer"
+        "skill:threejs-fundamentals"
       ]
     },
     "783": {
       "label": "Miscellaneous",
       "members": [
-        "skill:ui-ux-pro-max"
+        "skill:threejs-geometry"
       ]
     },
     "784": {
       "label": "Miscellaneous",
       "members": [
-        "skill:ui-visual-validator"
+        "skill:threejs-interaction"
       ]
     },
     "785": {
       "label": "Miscellaneous",
       "members": [
-        "skill:understand-chat"
+        "skill:threejs-lighting"
       ]
     },
     "786": {
       "label": "Miscellaneous",
       "members": [
-        "skill:understand-diff"
+        "skill:threejs-loaders"
       ]
     },
     "787": {
       "label": "Miscellaneous",
       "members": [
-        "skill:understand-explain"
+        "skill:threejs-materials"
       ]
     },
     "788": {
       "label": "Miscellaneous",
       "members": [
-        "skill:uniprot-database"
+        "skill:threejs-postprocessing"
       ]
     },
     "789": {
       "label": "Miscellaneous",
       "members": [
-        "skill:unit-testing-test-generate"
+        "skill:threejs-shaders"
       ]
     },
     "790": {
       "label": "Miscellaneous",
       "members": [
-        "skill:unity-developer"
+        "skill:threejs-skills"
       ]
     },
     "791": {
       "label": "Miscellaneous",
       "members": [
-        "skill:using-git-worktrees"
+        "skill:threejs-textures"
       ]
     },
     "792": {
       "label": "Miscellaneous",
       "members": [
-        "skill:varlock"
+        "skill:tiktok-automation"
       ]
     },
     "793": {
       "label": "Miscellaneous",
       "members": [
-        "skill:vercel-ai-sdk-expert"
+        "skill:todoist-automation"
       ]
     },
     "794": {
       "label": "Miscellaneous",
       "members": [
-        "skill:vercel-automation"
+        "skill:tool-design"
       ]
     },
     "795": {
       "label": "Miscellaneous",
       "members": [
-        "skill:vibe-code-auditor"
+        "skill:top-web-vulnerabilities"
       ]
     },
     "796": {
       "label": "Miscellaneous",
       "members": [
-        "skill:videodb"
+        "skill:travel-health-analyzer"
       ]
     },
     "797": {
       "label": "Miscellaneous",
       "members": [
-        "skill:viral-generator-builder"
+        "skill:trello-automation"
       ]
     },
     "798": {
       "label": "Miscellaneous",
       "members": [
-        "skill:visual-design-foundations"
+        "skill:turborepo-caching"
       ]
     },
     "799": {
       "label": "Miscellaneous",
       "members": [
-        "skill:voice-ai-development"
+        "skill:tutorial-engineer"
       ]
     },
     "800": {
       "label": "Miscellaneous",
       "members": [
-        "skill:voice-ai-engine-development"
+        "skill:twilio-communications"
       ]
     },
     "801": {
       "label": "Miscellaneous",
       "members": [
-        "skill:vulnerability-scanner"
+        "skill:twitter-automation"
       ]
     },
     "802": {
       "label": "Miscellaneous",
       "members": [
-        "skill:warren-buffett"
+        "skill:typescript-expert"
       ]
     },
     "803": {
       "label": "Miscellaneous",
       "members": [
-        "skill:web-performance-optimization"
+        "skill:ui-a11y"
       ]
     },
     "804": {
       "label": "Miscellaneous",
       "members": [
-        "skill:web-scraper"
+        "skill:ui-page"
       ]
     },
     "805": {
       "label": "Miscellaneous",
       "members": [
-        "skill:web3-testing"
+        "skill:ui-tokens"
       ]
     },
     "806": {
       "label": "Miscellaneous",
       "members": [
-        "skill:webflow-automation"
+        "skill:ui-ux-designer"
       ]
     },
     "807": {
       "label": "Miscellaneous",
       "members": [
-        "skill:weightloss-analyzer"
+        "skill:ui-ux-pro-max"
       ]
     },
     "808": {
       "label": "Miscellaneous",
       "members": [
-        "skill:wellally-tech"
+        "skill:ui-visual-validator"
       ]
     },
     "809": {
       "label": "Miscellaneous",
       "members": [
-        "skill:whatsapp-automation"
+        "skill:understand-chat"
       ]
     },
     "810": {
       "label": "Miscellaneous",
       "members": [
-        "skill:whatsapp-cloud-api"
+        "skill:understand-diff"
       ]
     },
     "811": {
       "label": "Miscellaneous",
       "members": [
-        "skill:windows-privilege-escalation"
+        "skill:understand-explain"
       ]
     },
     "812": {
       "label": "Miscellaneous",
       "members": [
-        "skill:wireshark-analysis"
+        "skill:uniprot-database"
       ]
     },
     "813": {
       "label": "Miscellaneous",
       "members": [
-        "skill:wordpress-penetration-testing"
+        "skill:unit-testing-test-generate"
       ]
     },
     "814": {
       "label": "Miscellaneous",
       "members": [
-        "skill:wordpress-plugin-development"
+        "skill:unity-developer"
       ]
     },
     "815": {
       "label": "Miscellaneous",
       "members": [
-        "skill:wordpress-theme-development"
+        "skill:unpause-subs"
       ]
     },
     "816": {
       "label": "Miscellaneous",
       "members": [
-        "skill:wordpress-woocommerce-development"
+        "skill:using-git-worktrees"
       ]
     },
     "817": {
       "label": "Miscellaneous",
       "members": [
-        "skill:wordpress"
+        "skill:ux-audit"
       ]
     },
     "818": {
       "label": "Miscellaneous",
       "members": [
-        "skill:workflow-orchestration-patterns"
+        "skill:varlock"
       ]
     },
     "819": {
       "label": "Miscellaneous",
       "members": [
-        "skill:wrike-automation"
+        "skill:vercel-ai-sdk-expert"
       ]
     },
     "820": {
       "label": "Miscellaneous",
       "members": [
-        "skill:xlsx-official"
+        "skill:vercel-automation"
       ]
     },
     "821": {
       "label": "Miscellaneous",
       "members": [
-        "skill:xss-html-injection"
+        "skill:vibe-code-auditor"
       ]
     },
     "822": {
       "label": "Miscellaneous",
       "members": [
-        "skill:yann-lecun-debate"
+        "skill:videodb"
       ]
     },
     "823": {
       "label": "Miscellaneous",
       "members": [
-        "skill:yann-lecun-filosofia"
+        "skill:viral-generator-builder"
       ]
     },
     "824": {
       "label": "Miscellaneous",
       "members": [
-        "skill:yann-lecun-tecnico"
+        "skill:visual-design-foundations"
       ]
     },
     "825": {
       "label": "Miscellaneous",
       "members": [
-        "skill:yann-lecun"
+        "skill:voice-ai-development"
       ]
     },
     "826": {
       "label": "Miscellaneous",
       "members": [
-        "skill:youtube-automation"
+        "skill:voice-ai-engine-development"
       ]
     },
     "827": {
       "label": "Miscellaneous",
       "members": [
-        "skill:youtube-summarizer"
+        "skill:vulnerability-scanner"
       ]
     },
     "828": {
       "label": "Miscellaneous",
       "members": [
-        "skill:zendesk-automation"
+        "skill:warren-buffett"
       ]
     },
     "829": {
       "label": "Miscellaneous",
       "members": [
-        "skill:zeroize-audit"
+        "skill:web-performance-optimization"
       ]
     },
     "830": {
       "label": "Miscellaneous",
       "members": [
-        "skill:zod-validation-expert"
+        "skill:web-scraper"
       ]
     },
     "831": {
       "label": "Miscellaneous",
       "members": [
-        "skill:zoho-crm-automation"
+        "skill:web3-testing"
       ]
     },
     "832": {
       "label": "Miscellaneous",
       "members": [
-        "skill:zoom-automation"
+        "skill:webflow-automation"
       ]
     },
     "833": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:weightloss-analyzer"
+      ]
+    },
+    "834": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:wellally-tech"
+      ]
+    },
+    "835": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:whatsapp-automation"
+      ]
+    },
+    "836": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:whatsapp-cloud-api"
+      ]
+    },
+    "837": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:windows-privilege-escalation"
+      ]
+    },
+    "838": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:wireshark-analysis"
+      ]
+    },
+    "839": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:wordpress-penetration-testing"
+      ]
+    },
+    "840": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:wordpress-plugin-development"
+      ]
+    },
+    "841": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:wordpress-theme-development"
+      ]
+    },
+    "842": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:wordpress-woocommerce-development"
+      ]
+    },
+    "843": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:wordpress"
+      ]
+    },
+    "844": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:workflow-orchestration-patterns"
+      ]
+    },
+    "845": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:wrike-automation"
+      ]
+    },
+    "846": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:xlsx-official"
+      ]
+    },
+    "847": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:xss-html-injection"
+      ]
+    },
+    "848": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:yann-lecun-debate"
+      ]
+    },
+    "849": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:yann-lecun-filosofia"
+      ]
+    },
+    "850": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:yann-lecun-tecnico"
+      ]
+    },
+    "851": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:yann-lecun"
+      ]
+    },
+    "852": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:youtube-automation"
+      ]
+    },
+    "853": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:youtube-summarizer"
+      ]
+    },
+    "854": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:zendesk-automation"
+      ]
+    },
+    "855": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:zeroize-audit"
+      ]
+    },
+    "856": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:zod-validation-expert"
+      ]
+    },
+    "857": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:zoho-crm-automation"
+      ]
+    },
+    "858": {
+      "label": "Miscellaneous",
+      "members": [
+        "skill:zoom-automation"
+      ]
+    },
+    "859": {
       "label": "Python + Typescript + Javascript",
       "members": [
         "agent:dependency-manager"
       ]
-    },
-    "834": {
-      "label": "Typescript + Ai + Security",
-      "members": [
-        "agent:powershell-security-hardening"
-      ]
     }
   },
-  "total_communities": 835,
-  "generated": "2026-04-09"
+  "total_communities": 860,
+  "generated": "2026-04-13"
 }
