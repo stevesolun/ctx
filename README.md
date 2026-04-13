@@ -245,8 +245,8 @@ The graph is stored at `~/.claude/skill-wiki/graphify-out/`:
 
 ```
 graphify-out/
-  graph.json           # full graph (1,851 nodes, 472K edges) — networkx node-link format
-  communities.json     # 835 detected communities with labels and members
+  graph.json           # full graph (2,167 nodes, 593K edges) - networkx node-link format
+  communities.json     # 860 detected communities with labels and members
   graph-report.md      # god nodes (most connected) + community summary
 ```
 
@@ -263,9 +263,46 @@ graphify-out/
 
 Example: you open a FastAPI project. The tag matcher finds `fastapi-pro`, `fastapi-templates`. The graph walker discovers that `python-fastapi-development`, `pydantic-models-py`, `async-python-patterns`, and `api-security-best-practices` are all heavily connected — and suggests them.
 
+### Interactive Visualization
+
+Visualize any slice of the knowledge graph with the built-in plotly viewer:
+
+```bash
+# Explore around specific skills
+python src/wiki_visualize.py --seed fastapi-pro,docker-expert --hops 1
+
+# Filter by tag
+python src/wiki_visualize.py --tag security --top 30
+
+# Show a community cluster
+python src/wiki_visualize.py --community 0
+
+# Top most-connected nodes
+python src/wiki_visualize.py --top 50 --min-weight 3
+
+# Interactive menu (no args)
+python src/wiki_visualize.py
+```
+
+The full graph (2,167 nodes, 593K edges) is too large to render at once. The viewer requires boundary controls and generates an interactive HTML page with an embedded sidebar filter panel:
+
+- **Search with autocomplete** - type to find nodes, dropdown shows matches with type badges
+- **Type toggles** - show/hide skills or agents independently
+- **Min connections slider** - filter out low-degree nodes in real time
+- **Tag buttons** - click to filter by tag (top 25 shown)
+- **Label toggle** - show/hide node labels for cleaner views
+- **Hover details** - connections count, tags, community ID per node
+- **Community coloring** - nodes colored by detected community
+
+Sample visualizations are included in `graph/`:
+- [viz-overview.html](graph/viz-overview.html) - top 40 most-connected nodes
+- [viz-security.html](graph/viz-security.html) - security-tagged skills
+- [viz-python.html](graph/viz-python.html) - Python ecosystem cluster
+- [viz-ai-agents.html](graph/viz-ai-agents.html) - AI and agent skills
+
 ### View in Obsidian
 
-Open `~/.claude/skill-wiki/` as an Obsidian vault. The graph view shows all 1,851 entities with wikilink connections. Concept pages act as cluster hubs.
+Open `~/.claude/skill-wiki/` as an Obsidian vault. The graph view shows all 2,167 entities with wikilink connections. Concept pages act as cluster hubs.
 
 ---
 
@@ -277,6 +314,8 @@ ctx/
   CLAUDE.md
   install.sh                    # end-to-end deployment script
   skills/skill-router/          # skill-router agent, deployed to ~/.claude/agents/
+  docs/                         # reference documentation
+  graph/                        # pre-built wiki archive + sample visualizations
   src/
     config.json                 # all configurable values
     ctx_config.py               # config singleton
@@ -286,6 +325,7 @@ ctx/
     context-monitor.py          # PostToolUse hook: extract intent signals
     skill_suggest.py            # PostToolUse hook: surface graph suggestions
     skill_loader.py             # load approved skills into session
+    skill_unload.py             # unload skills on user approval
     skill_add.py                # add new skills with auto-convert + wiki ingestion
     skill_add_detector.py       # PostToolUse hook: auto-register new skills
     usage-tracker.py            # Stop hook: update wiki usage stats
@@ -293,6 +333,7 @@ ctx/
     wiki_sync.py                # create/update wiki entity pages
     wiki_batch_entities.py      # batch-generate entity pages for all skills/agents
     wiki_graphify.py            # build knowledge graph + concept pages + wikilinks
+    wiki_visualize.py           # interactive plotly graph visualization
     wiki_lint.py                # find orphans, broken links, stale pages
     wiki_query.py               # query wiki with tag filters and stats
     wiki_orchestrator.py        # master orchestrator: health score + maintenance
