@@ -2,12 +2,12 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-green.svg)](https://python.org)
-[![Skills](https://img.shields.io/badge/Skills-1%2C724-purple.svg)](#)
+[![Skills](https://img.shields.io/badge/Skills-1%2C725-purple.svg)](#)
 [![Agents](https://img.shields.io/badge/Agents-443-orange.svg)](#)
 [![Graph](https://img.shields.io/badge/Knowledge_Graph-593K_edges-red.svg)](#knowledge-graph)
 [![Tests](https://img.shields.io/badge/Tests-163_passing-brightgreen.svg)](#)
 
-Watches what you develop, walks a knowledge graph of **1,724 skills and 443 agents**, and recommends the right ones on the fly - you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+Watches what you develop, walks a knowledge graph of **1,725 skills and 443 agents**, and recommends the right ones on the fly - you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 ---
 
@@ -15,7 +15,7 @@ Watches what you develop, walks a knowledge graph of **1,724 skills and 443 agen
 
 Claude Code skills and agents are powerful, but at scale they become unmanageable:
 
-- **Discovery problem**: With 1,400+ skills, how do you know which ones exist? Which ones are relevant to your current project?
+- **Discovery problem**: With 1,700+ skills, how do you know which ones exist? Which ones are relevant to your current project?
 - **Context budget**: Loading all skills into context wastes tokens and degrades quality. You need exactly the right 10-15 skills and agents per session.
 - **Hidden connections**: A FastAPI skill is useful, but you also need the Pydantic skill, the async Python patterns skill, and the Docker skill. Nobody tells you that.
 - **Skill rot**: Skills you installed 3 months ago and never used are cluttering your context. Stale skills should be flagged and archived.
@@ -33,11 +33,11 @@ The core idea comes from Andrej Karpathy's LLM wiki pattern: instead of re-loadi
 ctx applies that pattern to skill management — and extends it with graph-based discovery:
 
 - A Karpathy 3-layer wiki at `~/.claude/skill-wiki/` is the single source of truth
-- **1,851 entity pages** (1,439 skills + 412 agents) with frontmatter tracking use count, last used date, tags, and status
-- A **knowledge graph** (1,851 nodes, 472K edges, 835 communities) connects skills and agents by shared tags, enabling context-aware recommendations
-- **34 auto-generated concept pages** group related skills into named communities (e.g., "Security + Testing", "Python + Api + Database")
+- **2,168 entity pages** (1,725 skills + 443 agents) with frontmatter tracking use count, last used date, tags, and status
+- A **knowledge graph** (2,168 nodes, 593K edges, 861 communities) connects skills and agents by shared tags, enabling context-aware recommendations
+- **55 auto-generated concept pages** group related skills into named communities (e.g., "Security + Testing", "Python + Api + Database")
 - PostToolUse and Stop hooks update the wiki automatically during each Claude Code session
-- Skills over 180 lines are converted to a gated 5-stage micro-skill pipeline (844 converted) so the router can load them incrementally
+- Skills over 180 lines are converted to a gated 5-stage micro-skill pipeline (952 converted) so the router can load them incrementally
 - At session start, the skill-router scans your project and **recommends** the best-matching skills and agents
 - Mid-session, the context monitor watches every tool call, detects new stack signals, walks the graph, and **recommends** relevant skills and agents in real-time — **nothing loads without your approval**
 
@@ -255,8 +255,8 @@ The graph is stored at `~/.claude/skill-wiki/graphify-out/`:
 
 ```
 graphify-out/
-  graph.json           # full graph (2,167 nodes, 593K edges) - networkx node-link format
-  communities.json     # 860 detected communities with labels and members
+  graph.json           # full graph (2,168 nodes, 593K edges) - networkx node-link format
+  communities.json     # 861 detected communities with labels and members
   graph-report.md      # god nodes (most connected) + community summary
 ```
 
@@ -294,7 +294,7 @@ python src/wiki_visualize.py --top 50 --min-weight 3
 python src/wiki_visualize.py
 ```
 
-The full graph (2,167 nodes, 593K edges) is too large to render at once. The viewer requires boundary controls and generates an interactive HTML page with an embedded sidebar filter panel:
+The full graph (2,168 nodes, 593K edges) is too large to render at once. The viewer requires boundary controls and generates an interactive HTML page with an embedded sidebar filter panel:
 
 ![Knowledge Graph — Top 40 most-connected nodes](graph/viz-overview.png)
 
@@ -321,7 +321,7 @@ Sample visualizations are included in `graph/`:
 
 ### View in Obsidian
 
-Open `~/.claude/skill-wiki/` as an Obsidian vault. The graph view shows all 2,167 entities with wikilink connections. Concept pages act as cluster hubs.
+Open `~/.claude/skill-wiki/` as an Obsidian vault. The graph view shows all 2,168 entities with wikilink connections. Concept pages act as cluster hubs.
 
 ---
 
@@ -375,12 +375,12 @@ ctx/
   index.md                     # all entity pages with one-line summaries
   log.md                       # append-only action log
   catalog.md                   # bulk listing of all skills + agents
-  versions-catalog.md          # 844 dual-version skills (original + pipeline)
+  versions-catalog.md          # 952 dual-version skills (original + pipeline)
   entities/
-    skills/                    # 1,439 entity pages (one per skill)
-    agents/                    # 412 entity pages (one per agent)
-  concepts/                    # 34 auto-generated community concept pages
-  converted/                   # 844 micro-skill pipelines
+    skills/                    # 1,725 entity pages (one per skill)
+    agents/                    # 443 entity pages (one per agent)
+  concepts/                    # 55 auto-generated community concept pages
+  converted/                   # 952 micro-skill pipelines
   graphify-out/                # knowledge graph (graph.json, communities.json)
   raw/scans/                   # per-repo scan results
   .obsidian/                   # Obsidian vault config
