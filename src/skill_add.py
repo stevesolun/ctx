@@ -329,6 +329,7 @@ def main() -> None:
     parser.add_argument("--skill-path", help="Path to a single SKILL.md to add")
     parser.add_argument("--name", help="Skill name (required with --skill-path)")
     parser.add_argument("--scan-dir", help="Directory of skills to batch-add (each subdir with SKILL.md)")
+    parser.add_argument("--skip-existing", action="store_true", help="Skip skills already installed (prevents overwrites)")
     parser.add_argument("--wiki", default=str(cfg.wiki_dir), help="Wiki path")
     parser.add_argument("--skills-dir", default=str(cfg.skills_dir), help="Skills install path")
     args = parser.parse_args()
@@ -373,8 +374,15 @@ def main() -> None:
             print(f"No SKILL.md files found under {scan_root}.", file=sys.stderr)
             sys.exit(0)
 
-    added = converted = errors = 0
-    for source_path, name in candidates:
+    added = converted = skipped = errors = 0
+    total = len(candidates)
+    for i, (source_path, name) in enumerate(candidates, 1):
+        # Skip if already installed and --skip-existing is set
+        if args.skip_existing and (skills_dir / name / "SKILL.md").exists():
+            skipped += 1
+            if skipped <= 5 or skipped % 100 == 0:
+                print(f"  [{i}/{total}] [skipped] {name}")
+            continue
         try:
             result = add_skill(
                 source_path=source_path,
@@ -386,12 +394,12 @@ def main() -> None:
             if result["converted"]:
                 converted += 1
             status = "converted" if result["converted"] else "installed"
-            print(f"  [{status}] {name} -> {result['installed']}")
+            print(f"  [{i}/{total}] [{status}] {name}")
         except Exception as exc:
             errors += 1
-            print(f"  ERROR: {name}: {exc}", file=sys.stderr)
+            print(f"  [{i}/{total}] ERROR: {name}: {exc}", file=sys.stderr)
 
-    print(f"\nDone: {added} added, {converted} converted to pipeline, {errors} errors")
+    print(f"\nDone: {added} added, {converted} converted, {skipped} skipped, {errors} errors")
 
 
 if __name__ == "__main__":
