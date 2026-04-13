@@ -296,19 +296,28 @@ python src/wiki_visualize.py
 
 The full graph (2,167 nodes, 593K edges) is too large to render at once. The viewer requires boundary controls and generates an interactive HTML page with an embedded sidebar filter panel:
 
-- **Search with autocomplete** - type to find nodes, dropdown shows matches with type badges
-- **Type toggles** - show/hide skills or agents independently
-- **Min connections slider** - filter out low-degree nodes in real time
-- **Tag buttons** - click to filter by tag (top 25 shown)
-- **Label toggle** - show/hide node labels for cleaner views
-- **Hover details** - connections count, tags, community ID per node
-- **Community coloring** - nodes colored by detected community
+![Knowledge Graph — Top 40 most-connected nodes](graph/viz-overview.png)
+
+*Top 40 most-connected skills and agents. Sidebar: search with autocomplete, type toggles, min-connections slider, tag filters, label toggle. Nodes colored by community.*
+
+![Security cluster — 25 security-tagged skills](graph/viz-security.png)
+
+*Security-focused cluster: 16 skills + 9 agents. Tag buttons filter by javascript, security, golang, python, etc.*
+
+**Sidebar features:**
+- **Search with autocomplete** — type to find nodes, dropdown shows matches with type badges
+- **Type toggles** — show/hide skills or agents independently
+- **Min connections slider** — filter out low-degree nodes in real time
+- **Tag buttons** — click to filter by tag (top 25 shown)
+- **Label toggle** — show/hide node labels for cleaner views
+- **Hover details** — connections count, tags, community ID per node
+- **Community coloring** — nodes colored by detected community
 
 Sample visualizations are included in `graph/`:
-- [viz-overview.html](graph/viz-overview.html) - top 40 most-connected nodes
-- [viz-security.html](graph/viz-security.html) - security-tagged skills
-- [viz-python.html](graph/viz-python.html) - Python ecosystem cluster
-- [viz-ai-agents.html](graph/viz-ai-agents.html) - AI and agent skills
+- [viz-overview.html](graph/viz-overview.html) — top 40 most-connected nodes
+- [viz-security.html](graph/viz-security.html) — security-tagged skills
+- [viz-python.html](graph/viz-python.html) — Python ecosystem cluster
+- [viz-ai-agents.html](graph/viz-ai-agents.html) — AI and agent skills
 
 ### View in Obsidian
 
