@@ -210,7 +210,11 @@ def build_html_with_filters(G: nx.Graph, pos: dict, title: str = "Knowledge Grap
   #graph {{ flex:1; }}
   h2 {{ font-size:14px; margin:12px 0 6px; color:#94a3b8; text-transform:uppercase; letter-spacing:1px; }}
   .filter-group {{ margin-bottom:12px; }}
-  input[type=text] {{ width:100%; padding:6px 8px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px; font-size:13px; }}
+  input[type=text] {{ width:100%; padding:6px 8px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px; font-size:13px; position:relative; }}
+  #autocomplete {{ position:absolute; left:16px; right:16px; background:#1e293b; border:1px solid #475569; border-top:none; border-radius:0 0 4px 4px; max-height:200px; overflow-y:auto; z-index:10; display:none; }}
+  .ac-item {{ padding:4px 8px; font-size:12px; cursor:pointer; color:#94a3b8; }}
+  .ac-item:hover {{ background:#334155; color:#e2e8f0; }}
+  .ac-item .ac-type {{ font-size:10px; color:#64748b; float:right; }}
   input[type=range] {{ width:100%; accent-color:#6366f1; }}
   label {{ display:block; font-size:12px; margin:2px 0; cursor:pointer; }}
   label:hover {{ color:#818cf8; }}
@@ -232,8 +236,9 @@ def build_html_with_filters(G: nx.Graph, pos: dict, title: str = "Knowledge Grap
   </div>
 
   <h2>Search</h2>
-  <div class="filter-group">
-    <input type="text" id="search" placeholder="Search by name..." oninput="applyFilters()">
+  <div class="filter-group" style="position:relative">
+    <input type="text" id="search" placeholder="Search by name..." oninput="onSearch()" autocomplete="off">
+    <div id="autocomplete"></div>
   </div>
 
   <h2>Node Type</h2>
@@ -266,6 +271,32 @@ const TYPE_COLORS = {{"skill": "#6366f1", "agent": "#f59e0b"}};
 const COMM_COLORS = ["#ef4444","#f97316","#eab308","#22c55e","#06b6d4","#3b82f6","#8b5cf6","#ec4899","#14b8a6","#f43f5e","#84cc16","#0ea5e9","#a855f7","#e11d48","#10b981"];
 
 let activeTags = new Set();
+const allLabels = NODES.map(n => ({{label:n.label, type:n.type}})).sort((a,b) => a.label.localeCompare(b.label));
+
+function onSearch() {{
+  const q = document.getElementById('search').value.toLowerCase();
+  const ac = document.getElementById('autocomplete');
+  if (q.length < 2) {{ ac.style.display='none'; applyFilters(); return; }}
+  const matches = allLabels.filter(n => n.label.toLowerCase().includes(q)).slice(0, 12);
+  if (matches.length === 0) {{ ac.style.display='none'; applyFilters(); return; }}
+  ac.innerHTML = matches.map(m =>
+    '<div class="ac-item" onclick="selectAc(\\'' + m.label.replace(/'/g,"\\\\'") + '\\')">' +
+    m.label + '<span class="ac-type">' + m.type + '</span></div>'
+  ).join('');
+  ac.style.display='block';
+  applyFilters();
+}}
+
+function selectAc(label) {{
+  document.getElementById('search').value = label;
+  document.getElementById('autocomplete').style.display='none';
+  applyFilters();
+}}
+
+document.addEventListener('click', function(e) {{
+  if (!e.target.closest('#search') && !e.target.closest('#autocomplete'))
+    document.getElementById('autocomplete').style.display='none';
+}});
 
 function toggleTag(el) {{
   const tag = el.dataset.tag;
