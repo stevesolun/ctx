@@ -18,6 +18,7 @@ import json
 import os
 import re
 import sys
+import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -106,16 +107,46 @@ def read_json_safe(path: str) -> dict | None:
 
 
 def read_toml_deps(path: str) -> list[str]:
-    """Extract dependency names from pyproject.toml (basic regex, no toml lib needed)."""
+    """Extract dependency names from pyproject.toml.
+
+    Covers PEP 621 ``[project].dependencies`` / ``optional-dependencies`` and
+    Poetry-style ``[tool.poetry].dependencies`` / ``dev-dependencies``. Version
+    specifiers and extras are stripped via PEP 508 splitting.
+    """
     try:
-        with open(path) as f:
-            content = f.read()
-        # Match dependencies = [...] and [project.dependencies] style
-        deps = re.findall(r'["\']([a-zA-Z0-9_-]+)(?:\[.*?\])?(?:>=|<=|==|~=|!=|>|<|,|\s)*["\']', content)
-        return [d.lower() for d in deps]
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
     except Exception as exc:
         print(f"Warning: failed to read TOML deps from {path}: {exc}", file=sys.stderr)
         return []
+
+    raw: list[str] = []
+
+    project = data.get("project", {})
+    if isinstance(project, dict):
+        deps = project.get("dependencies", [])
+        if isinstance(deps, list):
+            raw.extend(d for d in deps if isinstance(d, str))
+        opt = project.get("optional-dependencies", {})
+        if isinstance(opt, dict):
+            for group in opt.values():
+                if isinstance(group, list):
+                    raw.extend(d for d in group if isinstance(d, str))
+
+    poetry = data.get("tool", {}).get("poetry", {}) if isinstance(data.get("tool"), dict) else {}
+    if isinstance(poetry, dict):
+        for key in ("dependencies", "dev-dependencies"):
+            deps = poetry.get(key, {})
+            if isinstance(deps, dict):
+                raw.extend(k for k in deps.keys() if isinstance(k, str) and k.lower() != "python")
+
+    # PEP 508: strip ``[extras]``, version specifiers, and environment markers.
+    names: list[str] = []
+    for spec in raw:
+        name = re.split(r"[\s\[><=!~;,]", spec, 1)[0].strip()
+        if name:
+            names.append(name.lower())
+    return names
 
 
 def read_requirements(path: str) -> list[str]:

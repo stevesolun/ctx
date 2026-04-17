@@ -279,10 +279,19 @@ function onSearch() {{
   if (q.length < 2) {{ ac.style.display='none'; applyFilters(); return; }}
   const matches = allLabels.filter(n => n.label.toLowerCase().includes(q)).slice(0, 12);
   if (matches.length === 0) {{ ac.style.display='none'; applyFilters(); return; }}
-  ac.innerHTML = matches.map(m =>
-    '<div class="ac-item" onclick="selectAc(\\'' + m.label.replace(/'/g,"\\\\'") + '\\')">' +
-    m.label + '<span class="ac-type">' + m.type + '</span></div>'
-  ).join('');
+  // Build DOM nodes with textContent to prevent XSS (labels may contain <,>,&,",').
+  while (ac.firstChild) ac.removeChild(ac.firstChild);
+  for (const m of matches) {{
+    const item = document.createElement('div');
+    item.className = 'ac-item';
+    item.appendChild(document.createTextNode(m.label));
+    const typeSpan = document.createElement('span');
+    typeSpan.className = 'ac-type';
+    typeSpan.textContent = m.type;
+    item.appendChild(typeSpan);
+    item.addEventListener('click', () => selectAc(m.label));
+    ac.appendChild(item);
+  }}
   ac.style.display='block';
   applyFilters();
 }}

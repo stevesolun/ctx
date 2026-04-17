@@ -208,8 +208,8 @@ def main() -> None:
 
     wiki_dir = Path(args.wiki)
     if not wiki_dir.exists():
-        print(f"Wiki not initialized at {wiki_dir}. Run wiki_sync.py --init first.", file=__import__("sys").stderr)
-        __import__("sys").exit(1)
+        print(f"Wiki not initialized at {wiki_dir}. Run wiki_sync.py --init first.", file=sys.stderr)
+        sys.exit(1)
 
     stats = build_catalog(
         wiki_dir=wiki_dir,

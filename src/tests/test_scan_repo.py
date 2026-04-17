@@ -194,13 +194,7 @@ class TestReadJsonSafe:
 
 
 class TestReadTomlDeps:
-    """test_read_toml_deps -- extracts dep names from pyproject.toml (regex-based).
-
-    NOTE: the current regex only matches bare names like ``"fastapi"`` — deps with
-    version specifiers like ``"fastapi>=0.100"`` are silently dropped. These tests
-    lock in that behavior rather than the desired behavior. See issue: regex in
-    scan_repo.read_toml_deps is too strict for PEP 508-style version pins.
-    """
+    """test_read_toml_deps -- extracts dep names from pyproject.toml (tomllib-based)."""
 
     def test_extracts_bare_deps_lowercased(self, tmp_path: Path) -> None:
         p = _write(tmp_path / "pyproject.toml", """
@@ -212,16 +206,62 @@ dependencies = ["FastAPI", "pydantic", "SQLAlchemy"]
         assert "pydantic" in deps
         assert "sqlalchemy" in deps
 
-    def test_version_pinned_deps_currently_dropped(self, tmp_path: Path) -> None:
-        # Documents the known limitation: version-pinned deps are NOT extracted.
-        # If the regex is ever fixed, this test should be updated/removed.
+    def test_extracts_version_pinned_deps(self, tmp_path: Path) -> None:
         p = _write(tmp_path / "pyproject.toml", """
 [project]
-dependencies = ["fastapi>=0.100", "pydantic"]
+dependencies = [
+    "fastapi>=0.100",
+    "pydantic==2.5.0",
+    "requests<3",
+    "numpy[extra]>=1.20",
+    'package-with-marker>=1.0; python_version>="3.10"',
+]
 """)
         deps = sr.read_toml_deps(str(p))
-        assert "fastapi" not in deps
+        assert "fastapi" in deps
         assert "pydantic" in deps
+        assert "requests" in deps
+        assert "numpy" in deps
+        assert "package-with-marker" in deps
+
+    def test_extracts_optional_deps(self, tmp_path: Path) -> None:
+        p = _write(tmp_path / "pyproject.toml", """
+[project]
+dependencies = ["core-dep"]
+
+[project.optional-dependencies]
+test = ["pytest>=7", "pytest-cov"]
+dev = ["black"]
+""")
+        deps = sr.read_toml_deps(str(p))
+        assert "core-dep" in deps
+        assert "pytest" in deps
+        assert "pytest-cov" in deps
+        assert "black" in deps
+
+    def test_extracts_poetry_deps(self, tmp_path: Path) -> None:
+        p = _write(tmp_path / "pyproject.toml", """
+[tool.poetry]
+name = "x"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.100"
+pydantic = "^2.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.0"
+""")
+        deps = sr.read_toml_deps(str(p))
+        assert "fastapi" in deps
+        assert "pydantic" in deps
+        assert "pytest" in deps
+        # The "python" version spec is stripped (it's the interpreter, not a dep).
+        assert "python" not in deps
+
+    def test_invalid_toml_returns_empty(self, tmp_path: Path) -> None:
+        p = _write(tmp_path / "broken.toml", "this is = not valid { toml")
+        assert sr.read_toml_deps(str(p)) == []
 
     def test_missing_file_returns_empty(self, tmp_path: Path) -> None:
         assert sr.read_toml_deps(str(tmp_path / "ghost.toml")) == []
@@ -314,10 +354,9 @@ class TestDetectStackFrameworks:
     """test_detect_stack_frameworks -- framework detection via deps and config files."""
 
     def test_fastapi_detected_from_pyproject(self, tmp_path: Path) -> None:
-        # Use bare name — read_toml_deps regex doesn't handle version pins.
         cfg = _write(tmp_path / "pyproject.toml", """
 [project]
-dependencies = ["fastapi"]
+dependencies = ["fastapi>=0.100"]
 """)
         signals = _make_signals(config_files=[str(cfg)])
         profile = sr.detect_stack(str(tmp_path), signals)
@@ -595,9 +634,10 @@ class TestEndToEndFastApiRepo:
 
     def test_profile_matches_expected_stack(self, tmp_path: Path) -> None:
         repo = tmp_path / "fake-api"
-        # requirements.txt parses version specs correctly; pyproject.toml regex
-        # does not — use requirements.txt here for the end-to-end framework probe.
-        _write(repo / "requirements.txt", "fastapi>=0.100\nsqlalchemy>=2\npydantic>=2\n")
+        _write(repo / "pyproject.toml", """
+[project]
+dependencies = ["fastapi>=0.100", "sqlalchemy>=2", "pydantic>=2"]
+""")
         _write(repo / "Dockerfile", "FROM python:3.11")
         _write(repo / "pytest.ini", "[pytest]\n")
         _write(repo / "app" / "main.py", "from fastapi import FastAPI\napp = FastAPI()")
