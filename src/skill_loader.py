@@ -19,6 +19,8 @@ import os
 import sys
 from pathlib import Path
 
+from wiki_utils import validate_skill_name
+
 SKILLS_DIR = Path(os.path.expanduser("~/.claude/skills"))
 AGENTS_DIR = Path(os.path.expanduser("~/.claude/agents"))
 WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki"))
@@ -26,21 +28,40 @@ PENDING_SKILLS = Path(os.path.expanduser("~/.claude/pending-skills.json"))
 MANIFEST_PATH = Path(os.path.expanduser("~/.claude/skill-manifest.json"))
 
 
+def _resolved_under(candidate: Path, base: Path) -> bool:
+    """True only if candidate.resolve() stays under base.resolve()."""
+    try:
+        candidate.resolve(strict=False).relative_to(base.resolve(strict=False))
+        return True
+    except (ValueError, OSError):
+        return False
+
+
 def find_skill(name: str) -> dict | None:
-    """Find a skill file by name. Returns {type, name, path} or None."""
-    # Check skills directory
+    """Find a skill file by name. Returns {type, name, path} or None.
+
+    Hardened against path traversal (CWE-22): ``name`` is validated against an
+    allowlist before any filesystem access, and every candidate path must
+    resolve inside its intended base directory.
+    """
+    try:
+        validate_skill_name(name)
+    except ValueError:
+        return None
+
     skill_path = SKILLS_DIR / name / "SKILL.md"
-    if skill_path.exists():
+    if _resolved_under(skill_path, SKILLS_DIR) and skill_path.exists():
         return {"type": "skill", "name": name, "path": str(skill_path)}
 
-    # Check agents (top-level)
     agent_path = AGENTS_DIR / f"{name}.md"
-    if agent_path.exists():
+    if _resolved_under(agent_path, AGENTS_DIR) and agent_path.exists():
         return {"type": "agent", "name": name, "path": str(agent_path)}
 
-    # Check agents (nested in subdirectories)
+    # Nested agents: name is validated (no separators/metachars), so the rglob
+    # pattern is a plain filename. Each match is still re-checked for containment.
     for md_file in AGENTS_DIR.rglob(f"{name}.md"):
-        return {"type": "agent", "name": name, "path": str(md_file)}
+        if _resolved_under(md_file, AGENTS_DIR):
+            return {"type": "agent", "name": name, "path": str(md_file)}
 
     return None
 
