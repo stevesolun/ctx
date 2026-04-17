@@ -23,13 +23,16 @@ WIKI_DIR="$CLAUDE_DIR/skill-wiki"
 AGENTS_DIR="$CLAUDE_DIR/agents"
 SKILLS_DIR="$CLAUDE_DIR/skills"
 
-# Resolve ctx/ dir (where this script lives)
+# Resolve ctx/ dir. Accepts: no args, `--ctx-dir PATH`, or positional PATH.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CTX_DIR="${1:-$SCRIPT_DIR}"
-SRC_DIR="$CTX_DIR/src"
 if [[ "${1:-}" == "--ctx-dir" && -n "${2:-}" ]]; then
   CTX_DIR="$2"
+elif [[ -n "${1:-}" && "${1:-}" != --* ]]; then
+  CTX_DIR="$1"
+else
+  CTX_DIR="$SCRIPT_DIR"
 fi
+SRC_DIR="$CTX_DIR/src"
 
 PYTHON="${PYTHON:-python3}"
 # Windows: try 'python' if python3 not found
