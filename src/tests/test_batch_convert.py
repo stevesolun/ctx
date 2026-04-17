@@ -1,5 +1,5 @@
 """
-tests/test_convert_and_add.py — pytest suite for the micro-skills conversion pipeline.
+tests/test_batch_convert.py -- pytest suite for the batch_convert module (micro-skills conversion pipeline).
 
 Covers:
   - classify_section  (scope / gate / build / deliver)
