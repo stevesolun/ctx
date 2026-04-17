@@ -27,7 +27,7 @@ SKILLS_DIR="$CLAUDE_DIR/skills"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CTX_DIR="${1:-$SCRIPT_DIR}"
 SRC_DIR="$CTX_DIR/src"
-if [[ "$1" == "--ctx-dir" && -n "${2:-}" ]]; then
+if [[ "${1:-}" == "--ctx-dir" && -n "${2:-}" ]]; then
   CTX_DIR="$2"
 fi
 
@@ -70,6 +70,10 @@ if [[ -d "$ROUTER_SRC" ]]; then
   log "Step 3: Deploying skill-router to $ROUTER_DST"
   mkdir -p "$ROUTER_DST"
   cp -r "$ROUTER_SRC/." "$ROUTER_DST/"
+  # Claude Code's /agents command only auto-discovers top-level .md files in
+  # ~/.claude/agents/, so emit a sibling skill-router.md alongside the directory.
+  # The directory is kept so references/*.md links from SKILL.md still resolve.
+  cp "$ROUTER_SRC/SKILL.md" "$AGENTS_DIR/skill-router.md"
   ok "skill-router deployed"
 else
   warn "skills/skill-router/ not found in $CTX_DIR — skipping router deploy"
