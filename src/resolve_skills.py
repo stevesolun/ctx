@@ -157,8 +157,19 @@ PRIORITY_BASE = {
     "pytest": 5, "jest": 5,
 }
 
+# Intent-boost tuning: priority bump per matching signal, capped by repeat count.
+# Effective max boost = INTENT_BOOST_PER_SIGNAL * INTENT_BOOST_COUNT_CAP.
+INTENT_BOOST_PER_SIGNAL = 5
+INTENT_BOOST_COUNT_CAP = 3
 
-def resolve(profile: dict, available: dict, overrides: dict, max_skills: int = 15) -> dict:
+
+def resolve(
+    profile: dict,
+    available: dict,
+    overrides: dict,
+    max_skills: int = 15,
+    intent_signals: dict[str, int] | None = None,
+) -> dict:
     """Resolve stack profile to skill manifest."""
     manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -223,6 +234,12 @@ def resolve(profile: dict, available: dict, overrides: dict, max_skills: int = 1
 
         if override.get("never_load") and skill_name in needed:
             del needed[skill_name]
+
+    # Apply mid-session intent boosts BEFORE conflict resolution and capping,
+    # so intent can influence which skill wins a conflict and which skills
+    # survive the max_skills cut-off.
+    if intent_signals:
+        apply_intent_boosts(needed, intent_signals, available, manifest)
 
     # Resolve conflicts
     for conflict_set, conflict_type in CONFLICTS:
@@ -320,14 +337,34 @@ def read_intent_signals(intent_log_path: str) -> dict[str, int]:
     return counts
 
 
-def apply_intent_boosts(needed: dict[str, dict], intent_signals: dict[str, int]) -> None:
-    """Boost priority of skills that match today's intent signals (+5 per matching signal)."""
+def apply_intent_boosts(
+    needed: dict[str, dict],
+    intent_signals: dict[str, int],
+    available: dict[str, dict],
+    manifest: dict,
+) -> None:
+    """Apply today's intent signals to the resolve state.
+
+    For each signal, each mapped skill is handled as follows:
+      - If already in `needed`: its priority is boosted by
+        INTENT_BOOST_PER_SIGNAL * min(count, INTENT_BOOST_COUNT_CAP).
+      - Else if installed (in `available`) but not needed: it is appended to
+        `manifest["suggestions"]` so downstream tooling can surface it.
+
+    Mutates `needed` and `manifest` in place.
+    """
     for signal, count in intent_signals.items():
-        # Map signal → skill names (reuse STACK_SKILL_MAP)
-        skill_names = STACK_SKILL_MAP.get(signal, [signal])
+        skill_names = STACK_SKILL_MAP.get(signal, [])
+        boost = INTENT_BOOST_PER_SIGNAL * min(count, INTENT_BOOST_COUNT_CAP)
         for skill_name in skill_names:
             if skill_name in needed:
-                needed[skill_name]["priority"] += 5 * min(count, 3)  # cap boost at 15
+                needed[skill_name]["priority"] += boost
+            elif skill_name in available:
+                manifest["suggestions"].append({
+                    "skill": skill_name,
+                    "reason": f"Intent signal '{signal}' detected {count}x today",
+                    "install_from": available[skill_name].get("path", "local"),
+                })
 
 
 def main():
@@ -369,21 +406,8 @@ def main():
     if intent_signals:
         print(f"Intent signals today: {dict(list(intent_signals.items())[:5])} ...")
 
-    # Resolve
-    manifest = resolve(profile, available, overrides, args.max_skills)
-
-    # Apply intent boosts post-resolve (reopen needed dict isn't accessible — re-resolve with boosts)
-    # Simple approach: if intent signals point to skills NOT in load list, add suggestions
-    loaded_names = {e["skill"] for e in manifest["load"]}
-    for signal, count in intent_signals.items():
-        skill_names = STACK_SKILL_MAP.get(signal, [])
-        for skill_name in skill_names:
-            if skill_name not in loaded_names and skill_name in available:
-                manifest["suggestions"].append({
-                    "skill": skill_name,
-                    "reason": f"Intent signal '{signal}' detected {count}x today",
-                    "install_from": available[skill_name].get("path", "local"),
-                })
+    # Resolve (intent_signals flow through resolve → apply_intent_boosts)
+    manifest = resolve(profile, available, overrides, args.max_skills, intent_signals)
 
     # Write manifest
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
