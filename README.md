@@ -361,7 +361,6 @@ ctx/
     versions_catalog.py         # build versions-catalog.md for dual-version skills
     link_conversions.py         # link entity pages to converted pipelines
     inject_hooks.py             # merge hooks into ~/.claude/settings.json
-    skill_transformer.py        # interactive skill conversion tool
     tests/                      # 163 pytest tests
 ```
 
