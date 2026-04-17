@@ -50,3 +50,15 @@ CLAUDE.md
 # Secrets / config overrides
 skill-system-config.json
 .env.local
+
+# Strix security scanner (local venv, instructions, output)
+.strix-venv/
+.strix-instructions.txt
+.strix-output/
+.strix-run.log
+.strix-preview-wiki/
+.imported-deployed/
+strix_runs/
+
+# Test coverage
+.coverage

@@ -1,0 +1,312 @@
+{
+  "upstream": "https://github.com/usestrix/strix",
+  "upstream_revision": "15c95718e600897a2a532a613a1c8fa6b712b144",
+  "upstream_date": "2026-04-13",
+  "license": "Apache-2.0",
+  "total_skills": 38,
+  "total_patterns": 5,
+  "total": 43,
+  "entries": [
+    {
+      "name": "root-agent",
+      "description": "Orchestration layer that coordinates specialized subagents for security assessments",
+      "category": "coordination",
+      "source_path": "skills/coordination/root_agent.md",
+      "lines": 92
+    },
+    {
+      "name": "source-aware-whitebox",
+      "description": "Coordination playbook for source-aware white-box testing with static triage and dynamic validation",
+      "category": "coordination",
+      "source_path": "skills/coordination/source_aware_whitebox.md",
+      "lines": 68
+    },
+    {
+      "name": "source-aware-sast",
+      "description": "Practical source-aware SAST and AST playbook for semgrep, ast-grep, gitleaks, and trivy fs",
+      "category": "custom",
+      "source_path": "skills/custom/source_aware_sast.md",
+      "lines": 167
+    },
+    {
+      "name": "fastapi",
+      "description": "Security testing playbook for FastAPI applications covering ASGI, dependency injection, and API vulnerabilities",
+      "category": "frameworks",
+      "source_path": "skills/frameworks/fastapi.md",
+      "lines": 191
+    },
+    {
+      "name": "nestjs",
+      "description": "Security testing playbook for NestJS applications covering guards, pipes, decorators, module boundaries, and multi-transport auth",
+      "category": "frameworks",
+      "source_path": "skills/frameworks/nestjs.md",
+      "lines": 225
+    },
+    {
+      "name": "nextjs",
+      "description": "Security testing playbook for Next.js covering App Router, Server Actions, RSC, and Edge runtime vulnerabilities",
+      "category": "frameworks",
+      "source_path": "skills/frameworks/nextjs.md",
+      "lines": 228
+    },
+    {
+      "name": "graphql",
+      "description": "GraphQL security testing covering introspection, resolver injection, batching attacks, and authorization bypass",
+      "category": "protocols",
+      "source_path": "skills/protocols/graphql.md",
+      "lines": 276
+    },
+    {
+      "name": "deep",
+      "description": "Exhaustive security assessment with maximum coverage, depth, and vulnerability chaining",
+      "category": "scan_modes",
+      "source_path": "skills/scan_modes/deep.md",
+      "lines": 163
+    },
+    {
+      "name": "quick",
+      "description": "Time-boxed rapid assessment targeting high-impact vulnerabilities",
+      "category": "scan_modes",
+      "source_path": "skills/scan_modes/quick.md",
+      "lines": 70
+    },
+    {
+      "name": "standard",
+      "description": "Balanced security assessment with systematic methodology and full attack surface coverage",
+      "category": "scan_modes",
+      "source_path": "skills/scan_modes/standard.md",
+      "lines": 101
+    },
+    {
+      "name": "firebase-firestore",
+      "description": "Firebase/Firestore security testing covering security rules, Cloud Functions, and client-side trust issues",
+      "category": "technologies",
+      "source_path": "skills/technologies/firebase_firestore.md",
+      "lines": 211
+    },
+    {
+      "name": "supabase",
+      "description": "Supabase security testing covering Row Level Security, PostgREST, Edge Functions, and service key exposure",
+      "category": "technologies",
+      "source_path": "skills/technologies/supabase.md",
+      "lines": 268
+    },
+    {
+      "name": "ffuf",
+      "description": "ffuf fuzzing syntax with matcher/filter strategy and non-interactive defaults.",
+      "category": "tooling",
+      "source_path": "skills/tooling/ffuf.md",
+      "lines": 66
+    },
+    {
+      "name": "httpx",
+      "description": "ProjectDiscovery httpx probing syntax, exact probe flags, and automation-safe output patterns.",
+      "category": "tooling",
+      "source_path": "skills/tooling/httpx.md",
+      "lines": 77
+    },
+    {
+      "name": "katana",
+      "description": "Katana crawler syntax, depth/js/known-files behavior, and stable concurrency controls.",
+      "category": "tooling",
+      "source_path": "skills/tooling/katana.md",
+      "lines": 76
+    },
+    {
+      "name": "naabu",
+      "description": "Naabu port-scanning syntax with host input, scan-type, verification, and rate controls.",
+      "category": "tooling",
+      "source_path": "skills/tooling/naabu.md",
+      "lines": 68
+    },
+    {
+      "name": "nmap",
+      "description": "Canonical Nmap CLI syntax, two-pass scanning workflow, and sandbox-safe bounded scan patterns.",
+      "category": "tooling",
+      "source_path": "skills/tooling/nmap.md",
+      "lines": 66
+    },
+    {
+      "name": "nuclei",
+      "description": "Exact Nuclei command structure, template selection, and bounded high-throughput execution controls.",
+      "category": "tooling",
+      "source_path": "skills/tooling/nuclei.md",
+      "lines": 67
+    },
+    {
+      "name": "semgrep",
+      "description": "Exact Semgrep CLI structure, metrics-off scanning, scoped ruleset selection, and automation-safe output patterns.",
+      "category": "tooling",
+      "source_path": "skills/tooling/semgrep.md",
+      "lines": 72
+    },
+    {
+      "name": "sqlmap",
+      "description": "sqlmap target syntax, non-interactive execution, and common validation/enumeration workflows.",
+      "category": "tooling",
+      "source_path": "skills/tooling/sqlmap.md",
+      "lines": 67
+    },
+    {
+      "name": "subfinder",
+      "description": "Subfinder passive subdomain enumeration syntax, source controls, and pipeline-ready output patterns.",
+      "category": "tooling",
+      "source_path": "skills/tooling/subfinder.md",
+      "lines": 66
+    },
+    {
+      "name": "authentication-jwt",
+      "description": "JWT and OIDC security testing covering token forgery, algorithm confusion, and claim manipulation",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/authentication_jwt.md",
+      "lines": 156
+    },
+    {
+      "name": "broken-function-level-authorization",
+      "description": "BFLA testing for action-level authorization failures across endpoints, admin functions, and API operations",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/broken_function_level_authorization.md",
+      "lines": 154
+    },
+    {
+      "name": "business-logic",
+      "description": "Business logic testing for workflow bypass, state manipulation, and domain invariant violations",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/business_logic.md",
+      "lines": 178
+    },
+    {
+      "name": "csrf",
+      "description": "CSRF testing covering token bypass, SameSite cookies, CORS misconfigurations, and state-changing request abuse",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/csrf.md",
+      "lines": 198
+    },
+    {
+      "name": "idor",
+      "description": "IDOR/BOLA testing for object-level authorization failures and cross-account data access",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/idor.md",
+      "lines": 213
+    },
+    {
+      "name": "information-disclosure",
+      "description": "Information disclosure testing covering error messages, debug endpoints, metadata leakage, and source exposure",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/information_disclosure.md",
+      "lines": 183
+    },
+    {
+      "name": "insecure-file-uploads",
+      "description": "File upload security testing covering extension bypass, content-type manipulation, and path traversal",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/insecure_file_uploads.md",
+      "lines": 188
+    },
+    {
+      "name": "mass-assignment",
+      "description": "Mass assignment testing for unauthorized field binding and privilege escalation via API parameters",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/mass_assignment.md",
+      "lines": 153
+    },
+    {
+      "name": "open-redirect",
+      "description": "Open redirect testing for phishing pivots, OAuth token theft, and allowlist bypass",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/open_redirect.md",
+      "lines": 165
+    },
+    {
+      "name": "path-traversal-lfi-rfi",
+      "description": "Path traversal and file inclusion testing for local/remote file access and code execution",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/path_traversal_lfi_rfi.md",
+      "lines": 190
+    },
+    {
+      "name": "race-conditions",
+      "description": "Race condition testing for TOCTOU bugs, double-spend, and concurrent state manipulation",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/race_conditions.md",
+      "lines": 181
+    },
+    {
+      "name": "rce",
+      "description": "RCE testing covering command injection, deserialization, template injection, and code evaluation",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/rce.md",
+      "lines": 238
+    },
+    {
+      "name": "sql-injection",
+      "description": "SQL injection testing covering union, blind, error-based, and ORM bypass techniques",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/sql_injection.md",
+      "lines": 190
+    },
+    {
+      "name": "ssrf",
+      "description": "SSRF testing for cloud metadata access, internal service discovery, and protocol smuggling",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/ssrf.md",
+      "lines": 181
+    },
+    {
+      "name": "subdomain-takeover",
+      "description": "Subdomain takeover testing for dangling DNS records and unclaimed cloud resources",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/subdomain_takeover.md",
+      "lines": 158
+    },
+    {
+      "name": "xss",
+      "description": "XSS testing covering reflected, stored, and DOM-based vectors with CSP bypass techniques",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/xss.md",
+      "lines": 206
+    },
+    {
+      "name": "xxe",
+      "description": "XXE testing for external entity injection, file disclosure, and SSRF via XML parsers",
+      "category": "vulnerabilities",
+      "source_path": "skills/vulnerabilities/xxe.md",
+      "lines": 220
+    },
+    {
+      "name": "orchestrator-worker-pattern",
+      "description": "Hierarchical agent pattern \u2014 a root orchestrator decomposes work and spawns specialized workers with focused context",
+      "category": "agent-patterns",
+      "source_path": "agent-patterns/orchestrator-worker-pattern.md",
+      "lines": 54
+    },
+    {
+      "name": "sandboxed-tool-runtime",
+      "description": "Agent tool execution should happen inside a disposable container, not the host \u2014 isolation by default, not opt-in",
+      "category": "agent-patterns",
+      "source_path": "agent-patterns/sandboxed-tool-runtime.md",
+      "lines": 52
+    },
+    {
+      "name": "scan-mode-as-skill",
+      "description": "Operational modes (quick/standard/deep) should be first-class skills, not hard-coded branching \u2014 each mode defines its own phases, priorities, and completion criteria",
+      "category": "agent-patterns",
+      "source_path": "agent-patterns/scan-mode-as-skill.md",
+      "lines": 57
+    },
+    {
+      "name": "shared-wiki-memory-pattern",
+      "description": "Multi-agent systems need a shared, append-only memory \u2014 one canonical note per entity, updated by every agent that touches it",
+      "category": "agent-patterns",
+      "source_path": "agent-patterns/shared-wiki-memory-pattern.md",
+      "lines": 47
+    },
+    {
+      "name": "skill-injection-pattern",
+      "description": "Load up to N specialized skills into an agent at spawn time \u2014 dynamically tailor expertise per subtask",
+      "category": "agent-patterns",
+      "source_path": "agent-patterns/skill-injection-pattern.md",
+      "lines": 61
+    }
+  ]
+}
