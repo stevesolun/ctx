@@ -26,12 +26,23 @@ Usage:
 """
 
 import argparse
+import html
 import json
 import math
 import os
 import sys
 from collections import defaultdict
 from pathlib import Path
+
+
+def _safe_json_for_script(obj) -> str:
+    """Serialize ``obj`` so it can be safely embedded inside an HTML ``<script>``.
+
+    ``json.dumps`` does not escape ``</``, so a payload containing ``</script>``
+    would terminate the script block. Replace ``</`` with ``<\\/`` (a
+    JavaScript-legal and JSON-legal representation of the same string).
+    """
+    return json.dumps(obj).replace("</", "<\\/")
 
 try:
     import networkx as nx
@@ -198,10 +209,11 @@ def build_html_with_filters(G: nx.Graph, pos: dict, title: str = "Knowledge Grap
             })
 
     top_tags = sorted(tag_counts.items(), key=lambda x: -x[1])[:25]
+    safe_title = html.escape(title)
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
-<title>{title}</title>
+<title>{safe_title}</title>
 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
@@ -228,7 +240,7 @@ def build_html_with_filters(G: nx.Graph, pos: dict, title: str = "Knowledge Grap
 </style>
 </head><body>
 <div id="sidebar">
-  <div id="title">{title}</div>
+  <div id="title">{safe_title}</div>
   <div class="stat" id="stat-line">Loading...</div>
   <div class="legend">
     <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div>Skills</div>
@@ -254,7 +266,7 @@ def build_html_with_filters(G: nx.Graph, pos: dict, title: str = "Knowledge Grap
 
   <h2>Tags</h2>
   <div class="filter-group" id="tag-filters">
-    {''.join(f'<span class="tag-btn" onclick="toggleTag(this)" data-tag="{t}">{t} ({c})</span>' for t, c in top_tags)}
+    {''.join(f'<span class="tag-btn" onclick="toggleTag(this)" data-tag="{html.escape(t, quote=True)}">{html.escape(t)} ({c})</span>' for t, c in top_tags)}
   </div>
 
   <h2>Labels</h2>
@@ -265,10 +277,12 @@ def build_html_with_filters(G: nx.Graph, pos: dict, title: str = "Knowledge Grap
 <div id="graph"></div>
 
 <script>
-const NODES = {json.dumps(nodes_data)};
-const EDGES = {json.dumps(edges_data)};
+const NODES = {_safe_json_for_script(nodes_data)};
+const EDGES = {_safe_json_for_script(edges_data)};
 const TYPE_COLORS = {{"skill": "#6366f1", "agent": "#f59e0b"}};
 const COMM_COLORS = ["#ef4444","#f97316","#eab308","#22c55e","#06b6d4","#3b82f6","#8b5cf6","#ec4899","#14b8a6","#f43f5e","#84cc16","#0ea5e9","#a855f7","#e11d48","#10b981"];
+
+function esc(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }}
 
 let activeTags = new Set();
 const allLabels = NODES.map(n => ({{label:n.label, type:n.type}})).sort((a,b) => a.label.localeCompare(b.label));
@@ -360,7 +374,7 @@ function applyFilters() {{
       text: tn.map(n=>n.label),
       textposition: 'top center',
       textfont: {{ size: 7, color: '#94a3b8' }},
-      hovertext: tn.map(n => '<b>'+n.label+'</b><br>Type: '+n.type+'<br>Connections: '+n.degree+'<br>Tags: '+n.tags.slice(0,5).join(', ')+'<br>Community: '+n.community),
+      hovertext: tn.map(n => '<b>'+esc(n.label)+'</b><br>Type: '+esc(n.type)+'<br>Connections: '+n.degree+'<br>Tags: '+esc(n.tags.slice(0,5).join(', '))+'<br>Community: '+n.community),
       hoverinfo: 'text'
     }});
   }});
@@ -436,8 +450,8 @@ def build_figure(G: nx.Graph, pos: dict, title: str = "Knowledge Graph") -> go.F
         hover_texts = []
         for n in type_nodes:
             data = G.nodes[n]
-            label = data.get("label", n.split(":", 1)[-1])
-            tags = ", ".join(data.get("tags", [])[:5])
+            label = html.escape(data.get("label", n.split(":", 1)[-1]))
+            tags = html.escape(", ".join(data.get("tags", [])[:5]))
             degree = G.degree(n)
             cid = node_community.get(n, -1)
             hover_texts.append(
