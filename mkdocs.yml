@@ -104,3 +104,5 @@ nav:
       - Skill health: skills-health.md
       - Memory anchoring: memory-anchor.md
   - Roadmap: roadmap/toolbox.md
+  - Analysis:
+      - LLM-Wiki-v2 gist review: llm-wiki-v2-analysis.md
