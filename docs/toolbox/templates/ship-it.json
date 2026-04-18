@@ -1,0 +1,33 @@
+{
+  "description": "Professional council of 7 experts for end-of-feature review",
+  "pre": [],
+  "post": [
+    "code-reviewer",
+    "security-reviewer",
+    "architect-review",
+    "test-automator",
+    "performance-engineer",
+    "accessibility-tester",
+    "docs-lookup"
+  ],
+  "scope": {
+    "projects": ["*"],
+    "signals": ["python", "typescript", "rust", "go", "java"],
+    "analysis": "dynamic"
+  },
+  "trigger": {
+    "slash": true,
+    "pre_commit": true,
+    "session_end": true,
+    "file_save": null
+  },
+  "budget": {
+    "max_tokens": 200000,
+    "max_seconds": 420
+  },
+  "dedup": {
+    "window_seconds": 600,
+    "policy": "fresh"
+  },
+  "guardrail": false
+}
