@@ -40,6 +40,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
 
+try:
+    from _file_lock import file_lock
+except ImportError:  # pragma: no cover
+    sys.path.insert(0, str(Path(__file__).parent))
+    from _file_lock import file_lock  # type: ignore[no-redef]
+
 
 # ── Paths & config defaults ────────────────────────────────────────────────
 
@@ -435,18 +441,19 @@ def _heal_manifest(manifest_path: Path,
     orphan_set = set(orphans)
     if not orphan_set:
         return ()
-    data = _load_json(manifest_path)
-    if not data:
-        return ()
-    loads = data.get("load") or []
-    kept = [
-        item for item in loads
-        if not (isinstance(item, dict) and item.get("skill") in orphan_set)
-    ]
-    if len(kept) == len(loads):
-        return ()
-    data["load"] = kept
-    _atomic_write(manifest_path, json.dumps(data, indent=2))
+    with file_lock(manifest_path):
+        data = _load_json(manifest_path)
+        if not data:
+            return ()
+        loads = data.get("load") or []
+        kept = [
+            item for item in loads
+            if not (isinstance(item, dict) and item.get("skill") in orphan_set)
+        ]
+        if len(kept) == len(loads):
+            return ()
+        data["load"] = kept
+        _atomic_write(manifest_path, json.dumps(data, indent=2))
     return tuple(sorted(orphan_set))
 
 
@@ -455,23 +462,24 @@ def _heal_pending(pending_path: Path,
     orphan_set = set(orphans)
     if not orphan_set:
         return ()
-    data = _load_json(pending_path)
-    if not data:
-        return ()
-    suggestions = data.get("graph_suggestions") or []
-    kept_suggestions = [
-        item for item in suggestions
-        if not (isinstance(item, dict) and item.get("name") in orphan_set)
-    ]
-    unmatched = data.get("unmatched_signals") or []
-    kept_unmatched = [s for s in unmatched if s not in orphan_set]
+    with file_lock(pending_path):
+        data = _load_json(pending_path)
+        if not data:
+            return ()
+        suggestions = data.get("graph_suggestions") or []
+        kept_suggestions = [
+            item for item in suggestions
+            if not (isinstance(item, dict) and item.get("name") in orphan_set)
+        ]
+        unmatched = data.get("unmatched_signals") or []
+        kept_unmatched = [s for s in unmatched if s not in orphan_set]
 
-    if (len(kept_suggestions) == len(suggestions)
-            and len(kept_unmatched) == len(unmatched)):
-        return ()
-    data["graph_suggestions"] = kept_suggestions
-    data["unmatched_signals"] = kept_unmatched
-    _atomic_write(pending_path, json.dumps(data, indent=2))
+        if (len(kept_suggestions) == len(suggestions)
+                and len(kept_unmatched) == len(unmatched)):
+            return ()
+        data["graph_suggestions"] = kept_suggestions
+        data["unmatched_signals"] = kept_unmatched
+        _atomic_write(pending_path, json.dumps(data, indent=2))
     return tuple(sorted(orphan_set))
 
 

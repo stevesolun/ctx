@@ -32,6 +32,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -39,6 +40,22 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
+
+_PLAN_HASH_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _validate_plan_hash(raw: str) -> str:
+    """Guard against path traversal via untrusted plan_hash values.
+
+    Production hashes are 16-char sha256 prefixes, but we accept any
+    filename-safe alphanumeric/dash/underscore token up to 64 chars so that
+    tests and manual CLI usage can use friendly identifiers. The character
+    class explicitly excludes '/', '\\', '.', ':' and whitespace — the
+    payload characters required for any path-traversal payload.
+    """
+    if not isinstance(raw, str) or not _PLAN_HASH_RE.fullmatch(raw):
+        raise ValueError(f"invalid plan_hash: {raw!r}")
+    return raw
 
 try:
     from toolbox_config import Toolbox, merged
@@ -167,6 +184,7 @@ def _runs_dir() -> Path:
 
 def _find_cached_plan(plan_hash: str, window_seconds: int,
                       now: float | None = None) -> RunPlan | None:
+    _validate_plan_hash(plan_hash)
     target = _runs_dir() / f"{plan_hash}.json"
     if not target.exists():
         return None
@@ -183,6 +201,7 @@ def _find_cached_plan(plan_hash: str, window_seconds: int,
 
 
 def _plan_from_dict(raw: dict, source: str) -> RunPlan:
+    plan_hash = _validate_plan_hash(str(raw.get("plan_hash", "")))
     return RunPlan(
         toolbox=str(raw["toolbox"]),
         agents=tuple(raw.get("agents", ())),
@@ -192,7 +211,7 @@ def _plan_from_dict(raw: dict, source: str) -> RunPlan:
         budget_seconds=int(raw.get("budget_seconds", 0)),
         guardrail=bool(raw.get("guardrail", False)),
         created_at=float(raw.get("created_at", 0)),
-        plan_hash=str(raw.get("plan_hash", "")),
+        plan_hash=plan_hash,
         source=source,
     )
 
@@ -213,6 +232,7 @@ def _atomic_write(path: Path, text: str) -> None:
 
 
 def persist_plan(plan: RunPlan) -> Path:
+    _validate_plan_hash(plan.plan_hash)
     target = _runs_dir() / f"{plan.plan_hash}.json"
     _atomic_write(target, json.dumps(plan.to_dict(), indent=2) + "\n")
     return target

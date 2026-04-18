@@ -34,6 +34,8 @@ try:  # module-run vs repo-run import dance \u2014 same pattern as sibling modul
         Toolbox,
         ToolboxSet,
         _HAS_YAML,
+        _load_json,
+        _load_yaml,
         global_config_path,
         load_global,
         load_repo,
@@ -48,6 +50,8 @@ except ImportError:  # pragma: no cover
         Toolbox,
         ToolboxSet,
         _HAS_YAML,
+        _load_json,
+        _load_yaml,
         global_config_path,
         load_global,
         load_repo,
@@ -216,9 +220,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
             return 1
         try:
             if path.suffix.lower() in {".yaml", ".yml"}:
-                tset = load_repo(path.parent)  # not quite \u2014 but same loader
+                raw = _load_yaml(path)
             else:
-                tset = load_global(path)
+                raw = _load_json(path)
+            tset = ToolboxSet.from_dict(raw) if raw else ToolboxSet.empty()
         except ValueError as exc:
             _print_err(f"INVALID: {exc}")
             return 2

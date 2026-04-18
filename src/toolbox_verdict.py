@@ -37,6 +37,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -44,8 +45,30 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Iterable, Sequence
 
+try:
+    from _file_lock import file_lock
+except ImportError:  # pragma: no cover
+    sys.path.insert(0, str(Path(__file__).parent))
+    from _file_lock import file_lock  # type: ignore[no-redef]
+
 
 RUNS_DIR = Path(os.path.expanduser("~/.claude/toolbox-runs"))
+
+_PLAN_HASH_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _validate_plan_hash(raw: str) -> str:
+    """Guard against path traversal via untrusted plan_hash values.
+
+    Excludes '/', '\\', '.', ':' and whitespace — all payload characters
+    required for path-traversal attacks. Accepts any alphanumeric/dash/
+    underscore token up to 64 chars so that tests and manual CLI usage
+    can use friendly identifiers (e.g. "plan-1") alongside real 16-char
+    sha256 prefixes used in production.
+    """
+    if not isinstance(raw, str) or not _PLAN_HASH_RE.fullmatch(raw):
+        raise ValueError(f"invalid plan_hash: {raw!r}")
+    return raw
 
 LEVELS = ("LOW", "MEDIUM", "HIGH", "CRITICAL")
 _LEVEL_RANK = {level: i for i, level in enumerate(LEVELS)}
@@ -147,8 +170,9 @@ class Verdict:
             level = _escalate_level(findings)
         created = float(raw.get("created_at", 0) or 0)
         updated = float(raw.get("updated_at", created) or created)
+        plan_hash = _validate_plan_hash(str(raw.get("plan_hash", "")))
         return Verdict(
-            plan_hash=str(raw.get("plan_hash", "")),
+            plan_hash=plan_hash,
             level=level,
             summary=str(raw.get("summary", "")),
             findings=findings,
@@ -190,6 +214,7 @@ def _runs_dir() -> Path:
 
 
 def verdict_path(plan_hash: str) -> Path:
+    _validate_plan_hash(plan_hash)
     return _runs_dir() / f"{plan_hash}.verdict.json"
 
 
@@ -303,30 +328,34 @@ def record_finding(
     updated verdict; persists by default.
     """
     current_time = now if now is not None else time.time()
-    existing = load_verdict(plan_hash)
+    # Serialize read-modify-write so concurrent agent sessions recording
+    # findings for the same plan_hash do not clobber each other.
+    target = verdict_path(plan_hash)
+    with file_lock(target):
+        existing = load_verdict(plan_hash)
 
-    if existing is None:
-        merged_findings = (finding,)
-        created = current_time
-    else:
-        merged = {f.id: f for f in existing.findings}
-        merged[finding.id] = finding
-        merged_findings = tuple(merged.values())
-        created = existing.created_at
+        if existing is None:
+            merged_findings = (finding,)
+            created = current_time
+        else:
+            merged = {f.id: f for f in existing.findings}
+            merged[finding.id] = finding
+            merged_findings = tuple(merged.values())
+            created = existing.created_at
 
-    level = _escalate_level(merged_findings)
-    summary = _summarise(merged_findings)
+        level = _escalate_level(merged_findings)
+        summary = _summarise(merged_findings)
 
-    verdict = Verdict(
-        plan_hash=plan_hash,
-        level=level,
-        summary=summary,
-        findings=merged_findings,
-        created_at=created,
-        updated_at=current_time,
-    )
-    if persist:
-        save_verdict(verdict)
+        verdict = Verdict(
+            plan_hash=plan_hash,
+            level=level,
+            summary=summary,
+            findings=merged_findings,
+            created_at=created,
+            updated_at=current_time,
+        )
+        if persist:
+            save_verdict(verdict)
     return verdict
 
 
