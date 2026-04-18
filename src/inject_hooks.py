@@ -158,8 +158,8 @@ def main() -> None:
     settings_path.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
 
     print(f"Hooks injected into {settings_path}")
-    print(f"  PostToolUse: context_monitor + skill-add-detector + skill-suggest")
-    print(f"  Stop: usage_tracker")
+    print("  PostToolUse: context_monitor + skill-add-detector + skill-suggest")
+    print("  Stop: usage_tracker")
 
 
 if __name__ == "__main__":

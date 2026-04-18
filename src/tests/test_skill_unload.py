@@ -87,7 +87,7 @@ def test_set_frontmatter_field_sanitizes_newlines(fake_home):
     # Verify the injected content stays on the status line (single YAML key),
     # NOT as a standalone "malicious: true" key on its own line.
     lines = text.splitlines()
-    standalone_malicious = [l for l in lines if l.strip() == "malicious: true"]
+    standalone_malicious = [ln for ln in lines if ln.strip() == "malicious: true"]
     assert standalone_malicious == [], f"found rogue standalone YAML key: {standalone_malicious}"
 
 

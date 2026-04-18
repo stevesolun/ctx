@@ -47,10 +47,9 @@ import json
 import os
 import re
 import subprocess
-import sys
 import tempfile
 from collections import Counter
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from itertools import combinations
 from pathlib import Path
 from typing import Iterable

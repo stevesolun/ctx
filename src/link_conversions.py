@@ -16,7 +16,6 @@ Scans ~/.claude/skill-wiki/converted/ for all converted skill directories and:
 """
 
 import argparse
-import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -72,8 +71,6 @@ def _set_field(content: str, key: str, value: str) -> str:
     # Field not present -- insert before closing ---
     fm_match = _FM_PATTERN.match(content)
     if fm_match:
-        end = fm_match.end() - len("---\n")
-        # Normalise CRLF
         insert_pos = content.index("---\n", fm_match.start() + 4)
         return content[:insert_pos] + f"{replacement}\n" + content[insert_pos:]
 
@@ -244,14 +241,12 @@ def update_index(wiki: Path, new_skills: list[str]) -> None:
 
     # Locate the ## Skills insertion point
     insert_idx: int | None = None
-    next_section_idx: int | None = None
     in_skills = False
     for i, line in enumerate(lines):
         if line.strip() == "## Skills":
             insert_idx = i + 1
             in_skills = True
         elif in_skills and line.startswith("## "):
-            next_section_idx = i
             break
 
     if insert_idx is None:

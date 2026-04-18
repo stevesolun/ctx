@@ -6,8 +6,11 @@
 [![Agents](https://img.shields.io/badge/Agents-443-orange.svg)](#)
 [![Graph](https://img.shields.io/badge/Knowledge_Graph-642K_edges-red.svg)](#knowledge-graph)
 [![Tests](https://img.shields.io/badge/Tests-519_passing-brightgreen.svg)](#)
+[![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
 Watches what you develop, walks a knowledge graph of **1,768 skills and 443 agents**, and recommends the right ones on the fly - you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+
+**Full documentation**: <https://stevesolun.github.io/ctx/>
 
 ---
 
@@ -42,6 +45,51 @@ ctx applies that pattern to skill management — and extends it with graph-based
 - Mid-session, the context monitor watches every tool call, detects new stack signals, walks the graph, and **recommends** relevant skills and agents in real-time — **nothing loads without your approval**
 
 The result: you always know what skills and agents are available for your current task. The graph reveals hidden connections. The wiki learns from your usage. Stale ones are flagged. New ones self-ingest.
+
+---
+
+## Pre/Post-Dev Toolbox (Councils, Verdicts, Guardrails)
+
+Beyond recommendations, ctx ships a **toolbox** system that runs curated councils of skills and agents at defined workflow moments — session-start, file-save, pre-commit, session-end, or an explicit `/toolbox run`. Each toolbox is a named declaration, not a hand-loaded set.
+
+- **Councils**: `src/council_runner.py` turns a toolbox declaration into a `RunPlan` — scoped to the current diff, the graph blast radius around changed files, or the full repo, with dedup and a token budget.
+- **Verdicts**: `src/toolbox_verdict.py` is the finding ledger. Findings are merged by stable id, escalated to the max level, and persisted as a sibling of the run plan. `HIGH` / `CRITICAL` findings block `git commit` until cleared.
+- **Retrospectives + explainability**: every verdict can render its own retrospective summary with evidence trails (file:line:note) and agent attribution.
+- **Starter toolboxes**: 5 shipping presets — `review`, `ship-it`, `security-sweep`, `docs-audit`, `refactor-safety`. See [`docs/toolbox/starters.md`](https://stevesolun.github.io/ctx/toolbox/starters/).
+- **Behavior miner + intent interview**: `src/behavior_miner.py` observes your Claude sessions and suggests personalized toolbox configs; `src/intent_interview.py` walks you through `toolbox init` interactively.
+
+Docs: <https://stevesolun.github.io/ctx/toolbox/>
+
+## Skill Health + Self-Healing Catalog
+
+The skill and agent catalog grows fast. `src/skill_health.py` audits it:
+
+- structural checks: missing SKILL.md, unreadable files, missing or malformed frontmatter, empty bodies, files over the 180-line threshold,
+- drift detection: entries in `~/.claude/skill-manifest.json` or `~/.claude/pending-skills.json` with no matching on-disk entity,
+- self-healing: `skill_health.py heal` atomically rewrites those JSON files to drop orphans. **SKILL.md files are never modified** by the healer.
+
+```bash
+python src/skill_health.py dashboard         # human report
+python src/skill_health.py check --strict    # CI gate (exit 2 on error)
+python src/skill_health.py heal              # drop orphans from manifest + pending
+```
+
+Docs: <https://stevesolun.github.io/ctx/skills-health/>
+
+## Diff-Aware Memory Anchoring
+
+Claude's auto-memory accumulates file references that rot as the code moves. `src/memory_anchor.py` scans `~/.claude/projects/<slug>/memory/*.md` and flags any backtick-wrapped file reference that no longer resolves against the repo.
+
+- conservative heuristic: only backtick code spans with a known extension or slash-plus-dotted-tail qualify (no prose, no function names, no commit hashes),
+- resolution order: absolute path → `repo_root/path` → `repo_root/src/path` → tilde-expanded,
+- CI gate: `check --strict` exits 2 when any reference is dead.
+
+```bash
+python src/memory_anchor.py dashboard
+python src/memory_anchor.py check --strict
+```
+
+Docs: <https://stevesolun.github.io/ctx/memory-anchor/>
 
 ---
 
@@ -247,6 +295,47 @@ python src/wiki_graphify.py                 # rebuild graph + concepts + wikilin
 python src/wiki_orchestrator.py --sync
 ```
 
+### Run a toolbox council
+
+```bash
+python src/toolbox.py run review              # run the 'review' preset
+python src/toolbox.py run ship-it             # full pre-ship council
+python src/toolbox.py init                    # interactive toolbox setup
+python src/council_runner.py list --limit 10  # inspect recent plans
+python src/toolbox_verdict.py retro <hash>    # retrospective for a plan
+```
+
+### Catalog + memory health
+
+```bash
+python src/skill_health.py dashboard          # skill/agent catalog report
+python src/skill_health.py heal               # drop orphaned manifest/pending entries
+python src/memory_anchor.py check --strict    # fail if any dead refs in auto-memory
+```
+
+---
+
+## Documentation
+
+Full documentation is published via MkDocs Material at
+<https://stevesolun.github.io/ctx/>. Key sections:
+
+- [Toolbox overview](https://stevesolun.github.io/ctx/toolbox/) — lifecycle, scope modes, declarations
+- [Council runner](https://stevesolun.github.io/ctx/toolbox/council-runner/) — RunPlan, dedup, graph-blast
+- [Verdicts & guardrails](https://stevesolun.github.io/ctx/toolbox/verdicts/) — finding ledger, level escalation, `HIGH`/`CRITICAL` blocking
+- [Skill health](https://stevesolun.github.io/ctx/skills-health/) — issue codes, drift detection, self-healing scope
+- [Memory anchoring](https://stevesolun.github.io/ctx/memory-anchor/) — backtick-span heuristic, resolution order
+- [Skill router](https://stevesolun.github.io/ctx/skill-router/) — stack signatures, skill-stack matrix
+- [Starter toolboxes](https://stevesolun.github.io/ctx/toolbox/starters/) — 5 shipping presets
+
+To build the docs locally:
+
+```bash
+pip install -r requirements-docs.txt
+mkdocs serve            # live-reload on http://127.0.0.1:8000
+mkdocs build --strict   # CI-grade build (fails on broken links / nav gaps)
+```
+
 ---
 
 ## Knowledge Graph
@@ -361,7 +450,25 @@ ctx/
     versions_catalog.py         # build versions-catalog.md for dual-version skills
     link_conversions.py         # link entity pages to converted pipelines
     inject_hooks.py             # merge hooks into ~/.claude/settings.json
-    tests/                      # 519 pytest tests
+
+    # Pre/Post-Dev Toolbox (councils + verdicts + guardrails)
+    toolbox.py                  # /toolbox CLI entry (run, init, list)
+    toolbox_config.py           # load + merge toolbox declarations
+    toolbox_hooks.py            # session-start / file-save / pre-commit / session-end
+    toolbox_verdict.py          # finding ledger + merge-by-id + guardrail enforcement
+    council_runner.py           # plan builder (scope, dedup, graph-blast, budget)
+    behavior_miner.py           # mine sessions for toolbox suggestions
+    intent_interview.py         # interactive `toolbox init`
+
+    # Health + memory
+    skill_health.py             # catalog health dashboard + self-healing
+    memory_anchor.py            # diff-aware memory anchoring
+
+    # Docs + ops
+    update_repo_stats.py        # pre-commit hook: keep README numbers fresh
+    import_strix_skills.py      # import Strix pentest skills under Apache-2.0
+    flatten_agents.py           # flatten agent directory layouts
+    tests/                      # 519 pytest tests across 24 modules
 ```
 
 ---

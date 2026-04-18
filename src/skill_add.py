@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from batch_convert import convert_skill  # noqa: E402
 from ctx_config import cfg  # noqa: E402
-from wiki_sync import append_log, ensure_wiki, update_index, upsert_skill_page  # noqa: E402
+from wiki_sync import append_log, ensure_wiki, update_index  # noqa: E402
 from wiki_utils import validate_skill_name  # noqa: E402
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")

@@ -16,7 +16,6 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import re
 import sys
@@ -63,8 +62,8 @@ def build_versions_catalog(wiki_dir: Path, dual_version_skills: list[dict]) -> s
     lines = [
         "# Skill Versions Catalog",
         "",
-        f"> Dual-version skills: both original and micro-skills-transformed versions available.",
-        f"> Default: **transformed** (micro-skills pipeline). Users can switch per-skill.",
+        "> Dual-version skills: both original and micro-skills-transformed versions available.",
+        "> Default: **transformed** (micro-skills pipeline). Users can switch per-skill.",
         f"> Last updated: {TODAY} | Total dual-version skills: {len(dual_version_skills)}",
         "",
         "## How to Change Version Preference",

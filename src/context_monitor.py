@@ -12,7 +12,6 @@ If >=3 unmatched signals detected, writes ~/.claude/pending-skills.json.
 import argparse
 import json
 import os
-import re
 import sys
 import tempfile
 from datetime import datetime, timezone

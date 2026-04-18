@@ -102,7 +102,6 @@ def _trigger_matches(tb: Toolbox, event: str, file_path: str | None) -> bool:
 def _select_toolboxes(event: str, file_path: str | None,
                       repo_root: Path | None) -> list[Toolbox]:
     tset = merged(repo_root=repo_root)
-    active_set = set(tset.active)
     out: list[Toolbox] = []
     for name in tset.active:
         tb = tset.toolboxes.get(name)
