@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# pre-commit -- keep README numbers in sync with reality.
+#
+# Enable with:   git config core.hooksPath .githooks
+# Disable with:  git config --unset core.hooksPath
+#
+# On every commit this regenerates skill/agent/graph/test counts in README.md
+# from authoritative sources. If README changed, it's re-staged so the fix
+# rides along with the commit that caused the drift.
+#
+# Behaviour on failure is *permissive*: if the updater can't resolve a number
+# (e.g. wiki isn't deployed), it warns and leaves that line untouched. The
+# commit is never blocked by this hook.
+
+set -u
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+UPDATER="$REPO_ROOT/src/update_repo_stats.py"
+
+if [[ ! -f "$UPDATER" ]]; then
+  # Updater was removed — nothing to do, let the commit through.
+  exit 0
+fi
+
+PYTHON="${PYTHON:-python3}"
+command -v "$PYTHON" >/dev/null 2>&1 || PYTHON="python"
+
+# Run the updater. Capture stderr so we can surface warnings without aborting.
+if ! "$PYTHON" "$UPDATER" 2> >(sed 's/^/[pre-commit stats] /' >&2); then
+  echo "[pre-commit stats] updater failed — continuing without README refresh" >&2
+  exit 0
+fi
+
+# If README changed, add it to the commit so the drift fix lands with the
+# commit that triggered it.
+if ! git diff --quiet -- README.md; then
+  git add README.md
+  echo "[pre-commit stats] README.md refreshed and re-staged"
+fi
+
+exit 0
