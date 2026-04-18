@@ -5,7 +5,7 @@
 [![Skills](https://img.shields.io/badge/Skills-1%2C768-purple.svg)](#)
 [![Agents](https://img.shields.io/badge/Agents-443-orange.svg)](#)
 [![Graph](https://img.shields.io/badge/Knowledge_Graph-642K_edges-red.svg)](#knowledge-graph)
-[![Tests](https://img.shields.io/badge/Tests-357_passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-384_passing-brightgreen.svg)](#)
 
 Watches what you develop, walks a knowledge graph of **1,768 skills and 443 agents**, and recommends the right ones on the fly - you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
@@ -361,7 +361,7 @@ ctx/
     versions_catalog.py         # build versions-catalog.md for dual-version skills
     link_conversions.py         # link entity pages to converted pipelines
     inject_hooks.py             # merge hooks into ~/.claude/settings.json
-    tests/                      # 357 pytest tests
+    tests/                      # 384 pytest tests
 ```
 
 ---
