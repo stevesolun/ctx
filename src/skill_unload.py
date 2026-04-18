@@ -17,7 +17,10 @@ import json
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
+
+from wiki_utils import validate_skill_name
 
 CLAUDE_DIR = Path(os.path.expanduser("~/.claude"))
 MANIFEST_PATH = CLAUDE_DIR / "skill-manifest.json"
@@ -25,6 +28,27 @@ PENDING_UNLOAD = CLAUDE_DIR / "pending-unload.json"
 WIKI_DIR = CLAUDE_DIR / "skill-wiki"
 SKILL_ENTITIES = WIKI_DIR / "entities" / "skills"
 AGENT_ENTITIES = WIKI_DIR / "entities" / "agents"
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write text atomically: temp file in same dir, then os.replace()."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _sanitize_yaml_value(value: str) -> str:
+    """Strip newlines/CRs so a value can't inject extra YAML keys."""
+    return value.replace("\r", " ").replace("\n", " ").strip()
 
 
 def load_manifest() -> dict:
@@ -37,28 +61,43 @@ def load_manifest() -> dict:
 
 
 def save_manifest(manifest: dict) -> None:
-    MANIFEST_PATH.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    _atomic_write_text(MANIFEST_PATH, json.dumps(manifest, indent=2))
 
 
 def set_frontmatter_field(filepath: Path, field: str, value: str) -> bool:
-    """Set a YAML frontmatter field in a wiki entity page. Returns True if changed."""
+    """Set a YAML frontmatter field in a wiki entity page. Returns True if changed.
+
+    Hardened: ``field`` is re-escaped before regex use (prevents ReDoS and
+    regex-injection via caller-controlled field names); ``value`` is sanitized
+    to strip newlines that would inject extra YAML keys.
+    """
     if not filepath.exists():
         return False
+    safe_value = _sanitize_yaml_value(value)
+    escaped_field = re.escape(field)
     content = filepath.read_text(encoding="utf-8", errors="replace")
-    pattern = rf"^{field}:\s*.+$"
-    replacement = f"{field}: {value}"
+    pattern = rf"^{escaped_field}:\s*.+$"
+    replacement = f"{field}: {safe_value}"
     new_content, count = re.subn(pattern, replacement, content, count=1, flags=re.MULTILINE)
     if count == 0:
-        # Field doesn't exist — add it after the last frontmatter field
-        new_content = re.sub(r"(---\n)", rf"\1{field}: {value}\n", content, count=1)
+        # Field doesn't exist — add it after the opening frontmatter delimiter.
+        new_content = re.sub(r"(---\n)", rf"\1{field}: {safe_value}\n", content, count=1)
     if new_content != content:
-        filepath.write_text(new_content, encoding="utf-8")
+        _atomic_write_text(filepath, new_content)
         return True
     return False
 
 
 def find_entity_page(name: str) -> Path | None:
-    """Find entity page for a skill or agent by name."""
+    """Find entity page for a skill or agent by name.
+
+    Hardened against path traversal (CWE-22): name is validated against
+    ``SAFE_NAME_RE`` before any filesystem access.
+    """
+    try:
+        validate_skill_name(name)
+    except ValueError:
+        return None
     skill_page = SKILL_ENTITIES / f"{name}.md"
     if skill_page.exists():
         return skill_page
@@ -75,7 +114,7 @@ def clear_pending_unload(names: list[str]) -> None:
     try:
         data = json.loads(PENDING_UNLOAD.read_text(encoding="utf-8"))
         data["suggestions"] = [s for s in data.get("suggestions", []) if s["name"] not in names]
-        PENDING_UNLOAD.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        _atomic_write_text(PENDING_UNLOAD, json.dumps(data, indent=2))
     except Exception as exc:
         print(f"Warning: failed to clear pending unload: {exc}", file=sys.stderr)
 
@@ -191,8 +230,15 @@ def main() -> None:
         return
 
     if args.restore:
-        names = [n.strip() for n in args.restore.split(",")]
-        restore_load(names)
+        raw_names = [n.strip() for n in args.restore.split(",")]
+        valid: list[str] = []
+        for n in raw_names:
+            try:
+                valid.append(validate_skill_name(n))
+            except ValueError as exc:
+                print(f"Skipping invalid name {n!r}: {exc}", file=sys.stderr)
+        if valid:
+            restore_load(valid)
         return
 
     names: list[str] = []
@@ -207,6 +253,17 @@ def main() -> None:
 
     if not names:
         parser.print_help()
+        sys.exit(1)
+
+    # Reject any name that doesn't match the allowlist before we touch the FS.
+    safe_names: list[str] = []
+    for n in names:
+        try:
+            safe_names.append(validate_skill_name(n))
+        except ValueError as exc:
+            print(f"Skipping invalid name {n!r}: {exc}", file=sys.stderr)
+    names = safe_names
+    if not names:
         sys.exit(1)
 
     # Unload from current session manifest

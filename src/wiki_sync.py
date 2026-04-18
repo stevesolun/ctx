@@ -266,7 +266,6 @@ def update_index(wiki_path: str, new_skills: list[str]) -> None:
             insert_idx += 1
 
     # Update total count
-    import re
     skill_count = sum(1 for l in lines if "[[entities/skills/" in l)
     for i, line in enumerate(lines):
         if "Total pages:" in line:

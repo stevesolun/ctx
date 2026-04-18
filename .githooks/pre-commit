@@ -1,41 +1,96 @@
 #!/usr/bin/env bash
-# pre-commit -- keep README numbers in sync with reality.
+# pre-commit -- keep README numbers and wiki tarball in sync with reality.
 #
 # Enable with:   git config core.hooksPath .githooks
 # Disable with:  git config --unset core.hooksPath
 #
-# On every commit this regenerates skill/agent/graph/test counts in README.md
-# from authoritative sources. If README changed, it's re-staged so the fix
-# rides along with the commit that caused the drift.
+# Two stages run on every commit:
 #
-# Behaviour on failure is *permissive*: if the updater can't resolve a number
-# (e.g. wiki isn't deployed), it warns and leaves that line untouched. The
-# commit is never blocked by this hook.
+#   1. Stat refresh: regenerate skill/agent/graph/test counts in README.md
+#      from authoritative sources. Re-stages README.md if it drifted.
+#
+#   2. Wiki rebuild (only when skills/ or agents/ changed in this commit):
+#      rebuild entity pages + knowledge graph, repack the wiki tarball at
+#      graph/wiki-graph.tar.gz, and re-stage it so the committed state of
+#      the repo always matches the deployed wiki.
+#
+# Behaviour on failure is *permissive*: if a tool can't resolve something
+# (wiki not deployed, pytest missing, tar unavailable), it warns and leaves
+# the affected file untouched. The commit is never blocked.
 
 set -u
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 UPDATER="$REPO_ROOT/src/update_repo_stats.py"
-
-if [[ ! -f "$UPDATER" ]]; then
-  # Updater was removed — nothing to do, let the commit through.
-  exit 0
-fi
+WIKI_DIR="$HOME/.claude/skill-wiki"
+TARBALL="$REPO_ROOT/graph/wiki-graph.tar.gz"
 
 PYTHON="${PYTHON:-python3}"
 command -v "$PYTHON" >/dev/null 2>&1 || PYTHON="python"
 
-# Run the updater. Capture stderr so we can surface warnings without aborting.
-if ! "$PYTHON" "$UPDATER" 2> >(sed 's/^/[pre-commit stats] /' >&2); then
-  echo "[pre-commit stats] updater failed — continuing without README refresh" >&2
-  exit 0
+log() { echo "[pre-commit] $*" >&2; }
+
+# ── Stage 1: README stat refresh ──────────────────────────────────────────────
+if [[ -f "$UPDATER" ]]; then
+  if ! "$PYTHON" "$UPDATER" 2> >(sed 's/^/[pre-commit stats] /' >&2); then
+    log "stats updater failed — continuing without README refresh"
+  elif ! git diff --quiet -- README.md; then
+    git add README.md
+    log "README.md refreshed and re-staged"
+  fi
 fi
 
-# If README changed, add it to the commit so the drift fix lands with the
-# commit that triggered it.
-if ! git diff --quiet -- README.md; then
-  git add README.md
-  echo "[pre-commit stats] README.md refreshed and re-staged"
+# ── Stage 2: Wiki tarball refresh ─────────────────────────────────────────────
+# Only run if this commit touches skills/ or agents/ (staged changes), or if
+# the tarball itself is already staged (force-rebuild signal).
+STAGED_CHANGES=$(git diff --cached --name-only)
+NEEDS_WIKI_REBUILD=0
+if echo "$STAGED_CHANGES" | grep -qE '^(skills|agents)/' ; then
+  NEEDS_WIKI_REBUILD=1
+fi
+if echo "$STAGED_CHANGES" | grep -qE '^graph/wiki-graph\.tar\.gz$' ; then
+  NEEDS_WIKI_REBUILD=1
+fi
+
+if [[ $NEEDS_WIKI_REBUILD -eq 1 ]]; then
+  if [[ ! -d "$WIKI_DIR" ]]; then
+    log "skills/agents changed but wiki not deployed at $WIKI_DIR — skipping rebuild"
+  else
+    log "skills/agents changed — rebuilding wiki + graph + tarball"
+
+    # Regenerate entity pages + graph. These two scripts already warn but
+    # don't abort on individual failures.
+    if ! "$PYTHON" "$REPO_ROOT/src/wiki_batch_entities.py" --all \
+         2> >(sed 's/^/[pre-commit wiki] /' >&2); then
+      log "entity regen failed — continuing"
+    fi
+    if ! "$PYTHON" "$REPO_ROOT/src/wiki_graphify.py" \
+         2> >(sed 's/^/[pre-commit wiki] /' >&2); then
+      log "graph rebuild failed — continuing"
+    fi
+
+    # Repack the tarball. We exclude .obsidian, .trash, and venv artifacts.
+    # Working dir = $WIKI_DIR's parent so the tarball contents are relative
+    # to skill-wiki/.
+    if command -v tar >/dev/null 2>&1; then
+      mkdir -p "$(dirname "$TARBALL")"
+      ( cd "$WIKI_DIR" && tar czf "$TARBALL" \
+          --exclude='.obsidian' \
+          --exclude='.trash' \
+          --exclude='__pycache__' \
+          . ) \
+        && { git add "$TARBALL"; log "wiki tarball rebuilt and re-staged ($(du -h "$TARBALL" | cut -f1))"; } \
+        || log "tar repack failed — tarball left as-is"
+    else
+      log "tar not available — skipping tarball repack"
+    fi
+
+    # Refresh README stats again (counts likely changed).
+    if [[ -f "$UPDATER" ]]; then
+      "$PYTHON" "$UPDATER" 2>/dev/null || true
+      git diff --quiet -- README.md || { git add README.md; log "README refreshed after wiki rebuild"; }
+    fi
+  fi
 fi
 
 exit 0

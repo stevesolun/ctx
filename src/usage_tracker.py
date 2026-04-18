@@ -19,11 +19,28 @@ import json
 import os
 import re
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from wiki_utils import SAFE_NAME_RE, parse_frontmatter as _read_frontmatter  # noqa: E402
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write text atomically via temp file + os.replace()."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 try:
     from ctx_config import cfg as _cfg
@@ -119,10 +136,12 @@ def read_loaded_skills() -> list[str]:
 
 
 def _set_frontmatter_field(content: str, field: str, value: str) -> str:
-    """Replace a frontmatter field value."""
+    """Replace a frontmatter field value. Field is escaped to prevent ReDoS."""
+    escaped = re.escape(field)
+    safe_value = str(value).replace("\r", " ").replace("\n", " ")
     return re.sub(
-        rf"^({field}:\s*)(.+)$",
-        lambda m: f"{m.group(1)}{value}",
+        rf"^({escaped}:\s*)(.+)$",
+        lambda m: f"{m.group(1)}{safe_value}",
         content,
         flags=re.MULTILINE,
     )
@@ -131,8 +150,8 @@ def _set_frontmatter_field(content: str, field: str, value: str) -> str:
 PENDING_UNLOAD = CLAUDE_DIR / "pending-unload.json"
 
 
-def _queue_unload_suggestion(skill_name: str, session_count: int, use_count: int) -> None:
-    """Add a skill to the pending-unload list for user approval."""
+def _queue_unload_suggestion(skill_name: str, session_count: int, use_count: int) -> bool:
+    """Add a skill to the pending-unload list. Returns True if newly queued."""
     pending: dict = {"suggestions": [], "generated_at": ""}
     if PENDING_UNLOAD.exists():
         try:
@@ -141,7 +160,8 @@ def _queue_unload_suggestion(skill_name: str, session_count: int, use_count: int
             pending = {"suggestions": [], "generated_at": ""}
 
     existing_names = {s["name"] for s in pending.get("suggestions", [])}
-    if skill_name not in existing_names:
+    newly_queued = skill_name not in existing_names
+    if newly_queued:
         pending.setdefault("suggestions", []).append({
             "name": skill_name,
             "reason": f"Loaded {session_count} sessions, used {use_count} times",
@@ -149,21 +169,30 @@ def _queue_unload_suggestion(skill_name: str, session_count: int, use_count: int
             "use_count": use_count,
         })
     pending["generated_at"] = datetime.now(timezone.utc).isoformat()
-    PENDING_UNLOAD.write_text(json.dumps(pending, indent=2), encoding="utf-8")
+    _atomic_write_text(PENDING_UNLOAD, json.dumps(pending, indent=2))
+    return newly_queued
 
 
-def update_skill_page(skill_name: str, used: bool, session_count_bump: bool = True) -> bool:
+def update_skill_page(
+    skill_name: str, used: bool, session_count_bump: bool = True
+) -> tuple[bool, bool]:
     """
     Update wiki entity page for a skill.
-    Returns True if page existed and was updated.
+
+    Returns (updated, queued_for_unload):
+      - updated: True if the wiki page existed and was rewritten.
+      - queued_for_unload: True if this call newly queued a stale-suggestion
+        into pending-unload.json (so callers can count stale detections
+        without re-reading the page).
     """
     if not SAFE_NAME_RE.match(skill_name):
         print(f"Warning: skipping invalid skill name: {skill_name!r}", file=sys.stderr)
-        return False
+        return False, False
     page_path = ENTITIES_DIR / f"{skill_name}.md"
     if not page_path.exists():
-        return False
+        return False, False
 
+    queued = False
     try:
         content = page_path.read_text(encoding="utf-8")
         meta = _read_frontmatter(content)
@@ -186,13 +215,13 @@ def update_skill_page(skill_name: str, used: bool, session_count_bump: bool = Tr
             session_count = int(str(meta.get("session_count", "0")))
             use_count = int(str(meta.get("use_count", "0")))
             if session_count >= STALE_THRESHOLD and use_count == 0:
-                _queue_unload_suggestion(skill_name, session_count, use_count)
+                queued = _queue_unload_suggestion(skill_name, session_count, use_count)
 
-        page_path.write_text(content, encoding="utf-8")
-        return True
+        _atomic_write_text(page_path, content)
+        return True, queued
     except Exception as exc:
         print(f"Warning: failed to update skill page {skill_name}: {exc}", file=sys.stderr)
-        return False
+        return False, False
 
 
 def append_wiki_log(loaded_count: int, used_skills: set[str], stale_count: int) -> None:
@@ -271,15 +300,11 @@ def main() -> None:
 
     for skill_name in loaded_skills:
         skill_used = skill_name in used_skills
-        if update_skill_page(skill_name, used=skill_used):
+        updated, queued = update_skill_page(skill_name, used=skill_used)
+        if updated:
             updated_count += 1
-            if not skill_used:
-                # Check if it got marked stale
-                page_path = Path(args.wiki) / "entities" / "skills" / f"{skill_name}.md"
-                if page_path.exists():
-                    content = page_path.read_text(encoding="utf-8")
-                    if "status: stale" in content:
-                        stale_count += 1
+            if queued:
+                stale_count += 1
 
     append_wiki_log(len(loaded_skills), used_skills, stale_count)
     truncate_intent_log()

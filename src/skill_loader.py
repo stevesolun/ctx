@@ -17,9 +17,26 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 from wiki_utils import validate_skill_name
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write text atomically via temp file + os.replace()."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 SKILLS_DIR = Path(os.path.expanduser("~/.claude/skills"))
 AGENTS_DIR = Path(os.path.expanduser("~/.claude/agents"))
@@ -78,7 +95,7 @@ def update_manifest(name: str) -> None:
     loaded_names = {e["skill"] for e in manifest.get("load", [])}
     if name not in loaded_names:
         manifest["load"].append({"skill": name, "source": "user-approved"})
-        MANIFEST_PATH.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        _atomic_write_text(MANIFEST_PATH, json.dumps(manifest, indent=2))
 
 
 def clear_pending(names: list[str]) -> None:
@@ -93,7 +110,7 @@ def clear_pending(names: list[str]) -> None:
         ]
         unmatched = pending.get("unmatched_signals", [])
         pending["unmatched_signals"] = [s for s in unmatched if s not in names]
-        PENDING_SKILLS.write_text(json.dumps(pending, indent=2), encoding="utf-8")
+        _atomic_write_text(PENDING_SKILLS, json.dumps(pending, indent=2))
     except Exception as exc:
         print(f"Warning: failed to clear pending: {exc}", file=sys.stderr)
 

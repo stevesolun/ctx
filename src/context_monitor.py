@@ -14,9 +14,26 @@ import json
 import os
 import re
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write text atomically via temp file + os.replace(). Safe under concurrent hook invocations."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 try:
     from ctx_config import cfg as _cfg
@@ -231,8 +248,7 @@ def write_pending_skills(unmatched: list[str]) -> None:
         "suggestion": suggestion_text,
         "graph_suggestions": graph_suggestions,
     }
-    with open(PENDING_SKILLS, "w", encoding="utf-8") as f:
-        json.dump(pending, f, indent=2)
+    _atomic_write_text(PENDING_SKILLS, json.dumps(pending, indent=2))
 
 
 def load_recent_unmatched_count() -> int:

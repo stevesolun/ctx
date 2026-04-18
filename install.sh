@@ -82,6 +82,14 @@ else
   warn "skills/skill-router/ not found in $CTX_DIR — skipping router deploy"
 fi
 
+# ── Step 3b: Flatten nested agents → top-level siblings ──────────────────────
+# Claude Code's /agents Library tab only discovers top-level .md files. Agents
+# nested inside category subdirs (design/, engineering/, etc.) are invisible
+# unless a sibling copy exists at the top level.
+log "Step 3b: Flattening nested agents to top-level siblings"
+"$PYTHON" "$SRC_DIR/flatten_agents.py" --apply
+ok "Nested agents flattened"
+
 # ── Step 4: Inject hooks into settings.json ───────────────────────────────────
 log "Step 4: Injecting hooks into $CLAUDE_DIR/settings.json"
 "$PYTHON" "$SRC_DIR/inject_hooks.py" \

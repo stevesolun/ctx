@@ -22,9 +22,26 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write text atomically via temp file + os.replace()."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 sys.path.insert(0, str(Path(__file__).parent))
 from ctx_config import cfg  # noqa: E402
@@ -292,12 +309,13 @@ def convert_skill(skill_path: Path, output_dir: Path | None = None) -> dict:
 
     # ── Write pipeline files ──────────────────────────────────────────────
 
-    # Preserve original — copy first, then remove, so a crash never
-    # leaves the skill without any SKILL.md on disk.
+    # Preserve original. We do NOT unlink skill_path until the new SKILL.md
+    # has been written atomically below — this guarantees the skill directory
+    # always contains a valid SKILL.md, even if the process is killed mid-
+    # conversion (data-loss protection).
     original_path = output_dir / "SKILL.md.original"
     if not original_path.exists():
         shutil.copy2(skill_path, original_path)
-    skill_path.unlink(missing_ok=True)
 
     # 01-scope.md
     scope_text = "\n\n".join(scope_parts)
@@ -403,7 +421,12 @@ Read `failure-log.md` before starting. Every pattern is a mandatory constraint.
 - Step 4 (Check) is the hard gate. "Mostly yes" counts as NO.
 - On Check failure: fix, re-run full checklist, append pattern to `failure-log.md`.
 """
-    (output_dir / "SKILL.md").write_text(orchestrator.strip() + "\n", encoding="utf-8")
+    # Atomic write — this is what replaces the original SKILL.md in-place.
+    # Only after this succeeds do we remove any lingering original at a
+    # different path (out-of-place conversion).
+    _atomic_write_text(output_dir / "SKILL.md", orchestrator.strip() + "\n")
+    if skill_path.resolve() != (output_dir / "SKILL.md").resolve() and skill_path.exists():
+        skill_path.unlink()
 
     # Count total pipeline files and max line count
     all_pipeline_files = list(refs_dir.glob("*.md")) + [

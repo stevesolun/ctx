@@ -79,8 +79,10 @@ def register_skill_in_catalog(file_path: str, skill_name: str, lines: int) -> No
     if not CATALOG_PATH.exists():
         return
     content = CATALOG_PATH.read_text(encoding="utf-8")
-    # Check if already in catalog
-    if skill_name in content:
+    # Match against the structured table row (e.g. "| fastapi-pro |"), NOT a
+    # naive substring — otherwise a skill named "react" would be skipped if
+    # catalog rows mention "react-pro" or paths containing "react".
+    if f"| {skill_name} |" in content:
         return
     over_flag = "⚠" if lines > 180 else ""
     entry = f"| {skill_name} | skill | {lines} | {over_flag} | `{file_path}` |"

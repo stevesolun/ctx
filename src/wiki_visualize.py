@@ -214,7 +214,10 @@ def build_html_with_filters(G: nx.Graph, pos: dict, title: str = "Knowledge Grap
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <title>{safe_title}</title>
-<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<!-- Pinned to an explicit version (not -latest) so served content can't change
+     silently. A real SRI hash would be better but must be generated from the
+     published release — see https://cdn.plot.ly/ for hashes. -->
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" crossorigin="anonymous"></script>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
   body {{ display:flex; height:100vh; background:#0f172a; color:#e2e8f0; font-family:system-ui; }}
