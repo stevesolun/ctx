@@ -21,7 +21,11 @@ Checks:
 
 from __future__ import annotations
 
-import argparse, io, json, os, re, sys
+import argparse
+import io
+import json
+import re
+import sys
 
 # Windows cp1252 cannot encode emoji — force UTF-8 output
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
@@ -30,11 +34,10 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 from ctx_config import cfg  # noqa: E402
-from wiki_utils import FRONTMATTER_RE, parse_frontmatter as _parse_frontmatter  # noqa: E402
+from wiki_utils import parse_frontmatter as _parse_frontmatter  # noqa: E402
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*)?\]\]")
 REQUIRED_FM_KEYS = {"title", "created", "updated", "type", "tags"}
@@ -267,7 +270,7 @@ def fix_index(wiki: Path, missing_slugs: list[str]) -> int:
             (h for key, h in section_map.items() if key in slug), "## Skills"
         )
         insert_at = next(
-            (i + 1 for i, l in enumerate(lines) if l.strip() == section), len(lines)
+            (i + 1 for i, ln in enumerate(lines) if ln.strip() == section), len(lines)
         )
         lines.insert(insert_at, entry)
         content = "\n".join(lines)
@@ -369,7 +372,7 @@ def main() -> None:
             if added:
                 print(f"[fix] Added {added} entries to index.md")
             if rotated:
-                print(f"[fix] Rotated log.md; archive written to wiki root")
+                print("[fix] Rotated log.md; archive written to wiki root")
 
     if args.json:
         print_json_output(result)

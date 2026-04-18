@@ -14,7 +14,6 @@ If >180 lines: prints a prompt asking the user if they want to convert.
 
 import json
 import os
-import re
 import sys
 from pathlib import Path
 

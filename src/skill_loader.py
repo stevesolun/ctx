@@ -137,7 +137,7 @@ def show_pending() -> None:
     if unmatched:
         print(f"  Unmatched signals: {', '.join(unmatched)}")
     if graph:
-        print(f"\n  Graph-suggested skills/agents:")
+        print("\n  Graph-suggested skills/agents:")
         for s in graph:
             tags = ", ".join(s.get("matching_tags", []))
             print(f"    - {s['name']} [{s['type']}] score={s.get('score', '?')} ({tags})")

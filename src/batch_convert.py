@@ -23,7 +23,6 @@ import re
 import shutil
 import sys
 import tempfile
-import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -86,7 +85,6 @@ REFERENCE_INDICATORS = re.compile(
 def classify_section(header: str, body: str) -> str:
     """Classify a markdown section into a pipeline stage."""
     combined = f"{header}\n{body}"
-    body_lower = body.lower()
 
     # Strong gate signals first — "avoid", "ensure", "never"
     gate_hits = len(GATE_KEYWORDS.findall(combined))
@@ -287,11 +285,11 @@ def convert_skill(skill_path: Path, output_dir: Path | None = None) -> dict:
     if not scope_parts:
         scope_parts.append(f"# Step 1: Scope\n\nExtract constraints from the request for {skill_name}.")
     if not plan_parts:
-        plan_parts.append(f"# Step 2: Plan\n\nDesign the approach. Map components to constraints.")
+        plan_parts.append("# Step 2: Plan\n\nDesign the approach. Map components to constraints.")
     if not build_parts:
-        build_parts.append(f"# Step 3: Build\n\nExecute the plan, building each component in order.")
+        build_parts.append("# Step 3: Build\n\nExecute the plan, building each component in order.")
     if not deliver_parts:
-        deliver_parts.append(f"# Step 5: Deliver\n\nFinalize and present the output.")
+        deliver_parts.append("# Step 5: Deliver\n\nFinalize and present the output.")
 
     # Generate gate questions from gate_parts if extraction found none
     if not all_gate_questions and gate_parts:

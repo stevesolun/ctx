@@ -73,10 +73,6 @@ def test_scope_full_without_git_returns_empty(seeded_tset, tmp_path: Path):
 
 
 def test_scope_graph_blast_expands_one_hop():
-    tb = tc.Toolbox(
-        name="t", post=("code-reviewer",),
-        scope=tc.Scope(analysis="graph-blast"),
-    )
     edges = {"a.py": {"b.py", "c.py"}, "b.py": {"d.py"}}
     # Explicit files path doesn't use edges, so test helper directly
     result = cr._graph_blast_files(["a.py"], edges)

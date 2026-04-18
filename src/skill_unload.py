@@ -207,7 +207,7 @@ def list_never_load() -> None:
     print(f"Permanently suppressed ({len(suppressed)}):\n")
     for name in sorted(suppressed):
         print(f"  - {name}")
-    print(f"\nTo restore: python src/skill_unload.py --restore <name>")
+    print("\nTo restore: python src/skill_unload.py --restore <name>")
 
 
 def main() -> None:

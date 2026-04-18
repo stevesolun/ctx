@@ -493,7 +493,6 @@ def run_status(wiki_dir: Path) -> None:
         sys.exit(1)
 
     pages = _entity_pages(wiki_dir)
-    now = datetime.now(timezone.utc)
     stale = sum(
         1 for p in pages
         if _is_stale(_parse_frontmatter(

@@ -593,7 +593,7 @@ The full graph is too large to render. Choose a view:
         print(f"\nFull graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
         print(f"  Skills: {skills}, Agents: {agents}")
         top = sorted(G.nodes(), key=lambda n: G.degree(n), reverse=True)[:10]
-        print(f"\nTop 10 by connections:")
+        print("\nTop 10 by connections:")
         for n in top:
             print(f"  {G.nodes[n].get('label', n)} ({G.degree(n)} connections)")
         print(f"\nTop tags: {', '.join(f'{t}({c})' for t, c in tags[:15])}")
@@ -674,7 +674,7 @@ def main() -> None:
         agents = sum(1 for _, d in G.nodes(data=True) if d.get("type") == "agent")
         print(f"  Skills: {skills}, Agents: {agents}")
         top = sorted(G.nodes(), key=lambda n: G.degree(n), reverse=True)[:10]
-        print(f"\nTop 10 by connections:")
+        print("\nTop 10 by connections:")
         for n in top:
             print(f"  {G.nodes[n].get('label', n)} ({G.degree(n)} connections)")
         communities = load_communities()
