@@ -70,6 +70,8 @@ class Config:
         tracker = raw.get("usage_tracker", {})
         transformer = raw.get("skill_transformer", {})
         router = raw.get("skill_router", {})
+        intake = raw.get("intake", {})
+        intake_emb = intake.get("embedding", {}) if isinstance(intake, dict) else {}
         bsitter = raw.get("babysitter", {})
 
         # ── Paths ──────────────────────────────────────────────────────────
@@ -126,6 +128,37 @@ class Config:
             "marketplace", "registry", "versioning", "compatibility",
         ])
 
+        # ── Intake Gate ────────────────────────────────────────────────────
+        # Phase 2 similarity/structure gate for skill_add / agent_add.
+        # When disabled, callers should skip the gate entirely — the
+        # thresholds here only apply when ``intake_enabled`` is True.
+        self.intake_enabled: bool = bool(intake.get("enabled", True))
+        self.intake_dup_threshold: float = float(intake.get("dup_threshold", 0.93))
+        self.intake_near_dup_threshold: float = float(
+            intake.get("near_dup_threshold", 0.85)
+        )
+        self.intake_min_neighbors: int = int(intake.get("min_neighbors", 0))
+        self.intake_min_neighbor_score: float = float(
+            intake.get("min_neighbor_score", 0.30)
+        )
+        self.intake_min_body_chars: int = int(intake.get("min_body_chars", 120))
+        self.intake_cache_root: Path = Path(
+            _expand(intake.get("cache_root", "~/.claude/skills/_embeddings"))
+        )
+        self.intake_backend: str = str(
+            intake_emb.get("backend", "sentence-transformers")
+        )
+        # ``None``-valued keys flow through unchanged so downstream
+        # factories can distinguish "use backend default" (None) from
+        # "forced empty string" (never).
+        model = intake_emb.get("model")
+        self.intake_model: str | None = model if isinstance(model, str) else None
+        base_url = intake_emb.get("base_url")
+        self.intake_base_url: str | None = (
+            base_url if isinstance(base_url, str) else None
+        )
+        self.intake_allow_remote: bool = bool(intake_emb.get("allow_remote", False))
+
         # ── Babysitter ─────────────────────────────────────────────────────
         self.babysitter_plugin_root: str = bsitter.get("plugin_root", "")
         self.babysitter_runs_dir: str = bsitter.get("runs_dir", ".a5c/runs")
@@ -146,6 +179,35 @@ class Config:
         """Return all skill directories (primary + extra)."""
         dirs = [self.skills_dir, self.agents_dir] + self.extra_skill_dirs
         return [d for d in dirs if d.exists()]
+
+    def build_intake_config(self) -> Any:
+        """Construct an ``intake_gate.IntakeConfig`` from these settings.
+
+        Lazy-imported so ``ctx_config`` stays free of the numpy / embedding
+        dependency graph when callers don't need the intake gate.
+        """
+        from intake_gate import IntakeConfig  # noqa: PLC0415
+        return IntakeConfig(
+            dup_threshold=self.intake_dup_threshold,
+            near_dup_threshold=self.intake_near_dup_threshold,
+            min_neighbors=self.intake_min_neighbors,
+            min_neighbor_score=self.intake_min_neighbor_score,
+            min_body_chars=self.intake_min_body_chars,
+        )
+
+    def build_intake_embedder(self) -> Any:
+        """Construct the configured embedding backend.
+
+        Lazy-imported for the same reason as ``build_intake_config``.
+        Callers pay the heavy-model cost only when they ask for it.
+        """
+        from embedding_backend import get_embedder  # noqa: PLC0415
+        return get_embedder(
+            backend=self.intake_backend,
+            model=self.intake_model,
+            base_url=self.intake_base_url,
+            allow_remote=self.intake_allow_remote,
+        )
 
 
 # Singleton instance — import this
