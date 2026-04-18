@@ -105,6 +105,5 @@ nav:
       - Memory anchoring: memory-anchor.md
   - Roadmap:
       - Toolbox: roadmap/toolbox.md
-      - Skill quality scoring: roadmap/skill-quality-scoring.md
   - Analysis:
       - LLM-Wiki-v2 gist review: llm-wiki-v2-analysis.md
