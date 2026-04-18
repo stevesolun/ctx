@@ -100,4 +100,7 @@ nav:
       - Stack signatures: stack-signatures.md
       - Skill-stack matrix: skill-stack-matrix.md
       - Marketplace registry: marketplace-registry.md
+  - Health:
+      - Skill health: skills-health.md
+      - Memory anchoring: memory-anchor.md
   - Roadmap: roadmap/toolbox.md
