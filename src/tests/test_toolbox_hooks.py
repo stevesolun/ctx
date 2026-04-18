@@ -105,6 +105,32 @@ def force_scope(monkeypatch: pytest.MonkeyPatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def isolate_profile_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """
+    Prevent any session-end test from writing to the real
+    ~/.claude/user-profile.json. The digest is informational; tests only
+    need to verify it appears, not that it persists to the user's home.
+    """
+    monkeypatch.setattr(
+        th, "save_profile", lambda profile, path=None: tmp_path / "p.json"
+    )
+
+
+def _toolbox_emission_lines(output: str) -> list[dict]:
+    """Extract just the JSON toolbox emissions (ignore digest lines)."""
+    lines = []
+    for raw in output.splitlines():
+        raw = raw.strip()
+        if not raw or not raw.startswith("{"):
+            continue
+        try:
+            lines.append(json.loads(raw))
+        except json.JSONDecodeError:
+            continue
+    return lines
+
+
 # ── _trigger_matches ────────────────────────────────────────────────────────
 
 
@@ -190,10 +216,38 @@ def test_run_trigger_session_end_matches_only_flagged(
     buf = io.StringIO()
     rc = th.run_trigger("session-end", stream=buf)
     assert rc == 0
-    lines = [ln for ln in buf.getvalue().splitlines() if ln]
-    assert len(lines) == 1
-    payload = json.loads(lines[0])
-    assert payload["toolbox"] == "session-end-box"
+    payloads = _toolbox_emission_lines(buf.getvalue())
+    assert len(payloads) == 1
+    assert payloads[0]["toolbox"] == "session-end-box"
+
+
+def test_run_trigger_session_end_emits_digest(
+    tmp_path, tmp_runs, monkeypatch, force_scope
+):
+    """session-end should append a behaviour-miner digest line."""
+    # Empty toolbox set => no council emissions, just the digest.
+    empty = tc.ToolboxSet(toolboxes={}, active=())
+    g_path = tmp_path / "global.json"
+    tc.save_global(empty, g_path)
+    monkeypatch.setattr(tc, "global_config_path", lambda: g_path)
+
+    # Stub build_profile to return a controlled profile so the test does
+    # not depend on intent-log / git history on the host.
+    from behavior_miner import BehaviorProfile
+
+    stub = BehaviorProfile(
+        total_intent_events=0, total_commits=0,
+        co_invocation_pairs=(), skill_cadence=(),
+        file_types=(), commit_types=(), suggestions=(),
+        generated_at=0,
+    )
+    monkeypatch.setattr(th, "build_profile", lambda repo_root=None: stub)
+
+    buf = io.StringIO()
+    rc = th.run_trigger("session-end", stream=buf)
+    assert rc == 0
+    out = buf.getvalue()
+    assert "[toolbox]" in out
 
 
 def test_run_trigger_pre_commit_emits_without_verdict(
@@ -315,9 +369,9 @@ def test_run_trigger_multiple_matches_emit_multiple_lines(
     buf = io.StringIO()
     rc = th.run_trigger("session-end", stream=buf)
     assert rc == 0
-    lines = [ln for ln in buf.getvalue().splitlines() if ln]
-    assert len(lines) == 2
-    names = {json.loads(ln)["toolbox"] for ln in lines}
+    payloads = _toolbox_emission_lines(buf.getvalue())
+    assert len(payloads) == 2
+    names = {p["toolbox"] for p in payloads}
     assert names == {"a", "b"}
 
 
@@ -347,9 +401,9 @@ def test_run_trigger_inactive_toolboxes_are_skipped(
     buf = io.StringIO()
     rc = th.run_trigger("session-end", stream=buf)
     assert rc == 0
-    lines = [ln for ln in buf.getvalue().splitlines() if ln]
-    assert len(lines) == 1
-    assert json.loads(lines[0])["toolbox"] == "live"
+    payloads = _toolbox_emission_lines(buf.getvalue())
+    assert len(payloads) == 1
+    assert payloads[0]["toolbox"] == "live"
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────

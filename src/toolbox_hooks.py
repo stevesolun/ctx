@@ -43,10 +43,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 try:
+    from behavior_miner import build_profile, format_digest, save_profile
     from council_runner import build_plan, persist_plan
     from toolbox_config import Toolbox, merged
 except ImportError:  # pragma: no cover
     sys.path.insert(0, str(Path(__file__).parent))
+    from behavior_miner import (  # type: ignore[no-redef]
+        build_profile, format_digest, save_profile,
+    )
     from council_runner import build_plan, persist_plan  # type: ignore[no-redef]
     from toolbox_config import Toolbox, merged  # type: ignore[no-redef]
 
@@ -168,6 +172,21 @@ def run_trigger(event: str,
                     verdict = {}
                 if verdict.get("level") in {"HIGH", "CRITICAL"}:
                     guardrail_violation = True
+
+    # At session-end, also emit a behaviour-miner digest so the user sees any
+    # newly-surfaced toolbox suggestions alongside the council plans. The
+    # digest is informational only — it never blocks or changes the return
+    # code. Failures here are silent by design: a miner crash must not leak
+    # into the session-end hook.
+    if event == "session-end":
+        try:
+            profile = build_profile(repo_root=repo_root)
+            save_profile(profile)
+            digest = format_digest(profile)
+            if digest:
+                print(digest, file=stream)
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"[toolbox] digest skipped: {exc}", file=sys.stderr)
 
     return 2 if guardrail_violation else 0
 
