@@ -5,3 +5,8 @@
 mkdocs==1.6.1
 mkdocs-material==9.5.44
 pymdown-extensions==10.12
+# Pin Pygments below 2.20 — 2.20.0 broke pymdownx.highlight by rejecting
+# filename=None inside pygments.formatters.html.HtmlFormatter, which causes
+# `mkdocs build --strict` to fail on any code fence. Lift this pin once
+# pymdown-extensions releases a version that passes filename='' explicitly.
+Pygments==2.19.2
