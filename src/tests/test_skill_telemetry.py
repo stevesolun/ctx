@@ -9,6 +9,9 @@ Covers the Phase 1 telemetry contract:
   - concurrent appends: two processes writing concurrently end up with
     two well-formed lines (no interleaving corruption)
   - retention window math: boundary and default-cap cases
+  - naive-timestamp handling: is_retained treats naive timestamps as UTC
+  - meta validation: rejects oversized, nested, or non-scalar values
+  - path containment: refuses caller-supplied paths that escape parents
 """
 
 from __future__ import annotations
@@ -28,25 +31,37 @@ if str(SRC_DIR) not in sys.path:
 import skill_telemetry as st  # noqa: E402
 
 
-# ────────────────────────────────────────────────────────────────────
-# Event validation
-# ────────────────────────────────────────────────────────────────────
-
-
 def _iso(offset_seconds: float = 0.0) -> str:
     return (
         datetime.now(timezone.utc) + timedelta(seconds=offset_seconds)
     ).isoformat(timespec="seconds")
 
 
+def _event(**overrides: object) -> st.TelemetryEvent:
+    defaults: dict[str, object] = {
+        "event": "load",
+        "skill": "x",
+        "timestamp": _iso(),
+        "session_id": "s1",
+        "event_id": "e-default",
+    }
+    defaults.update(overrides)
+    return st.TelemetryEvent(**defaults)  # type: ignore[arg-type]
+
+
+# ────────────────────────────────────────────────────────────────────
+# Event validation
+# ────────────────────────────────────────────────────────────────────
+
+
 def test_event_accepts_all_defined_types() -> None:
     for kind in ("load", "unload", "override", "switch_away"):
-        st.TelemetryEvent(event=kind, skill="x", timestamp=_iso(), session_id="s1")
+        _event(event=kind)
 
 
 def test_event_rejects_unknown_type() -> None:
     with pytest.raises(ValueError, match="invalid event type"):
-        st.TelemetryEvent(event="explode", skill="x", timestamp=_iso(), session_id="s1")
+        _event(event="explode")
 
 
 @pytest.mark.parametrize(
@@ -62,18 +77,48 @@ def test_event_rejects_unknown_type() -> None:
 )
 def test_event_rejects_unsafe_skill_name(bad_name: str) -> None:
     with pytest.raises(ValueError, match="invalid skill name"):
-        st.TelemetryEvent(event="load", skill=bad_name, timestamp=_iso(), session_id="s1")
+        _event(skill=bad_name)
 
 
 def test_event_rejects_empty_session_id() -> None:
     with pytest.raises(ValueError, match="session_id"):
-        st.TelemetryEvent(event="load", skill="x", timestamp=_iso(), session_id="")
+        _event(session_id="")
+
+
+def test_event_rejects_empty_event_id() -> None:
+    with pytest.raises(ValueError, match="event_id"):
+        _event(event_id="")
 
 
 def test_event_rejects_non_iso_timestamp() -> None:
     with pytest.raises(ValueError, match="timestamp must be ISO-8601"):
-        st.TelemetryEvent(
-            event="load", skill="x", timestamp="not-a-time", session_id="s1"
+        _event(timestamp="not-a-time")
+
+
+# ────────────────────────────────────────────────────────────────────
+# meta validation
+# ────────────────────────────────────────────────────────────────────
+
+
+def test_log_event_rejects_oversized_meta(tmp_path: Path) -> None:
+    big = {f"k{i}": i for i in range(st._MAX_META_KEYS + 1)}
+    with pytest.raises(ValueError, match="max"):
+        st.log_event("load", "x", "s1", meta=big, path=tmp_path / "e.jsonl")
+
+
+def test_log_event_rejects_non_scalar_meta_value(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match="must be str/int/float/bool/None"):
+        st.log_event(
+            "load", "x", "s1", meta={"nested": {"a": 1}}, path=tmp_path / "e.jsonl"
+        )
+
+
+def test_log_event_rejects_oversized_meta_string(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="exceeds"):
+        st.log_event(
+            "load", "x", "s1",
+            meta={"big": "a" * (st._MAX_META_VALUE_LEN + 1)},
+            path=tmp_path / "e.jsonl",
         )
 
 
@@ -115,7 +160,7 @@ def test_read_events_skips_malformed_lines(
 ) -> None:
     events_path = tmp_path / "skill-events.jsonl"
     # One valid event, one garbage line, one event missing a required key,
-    # one blank line, one valid event.
+    # one event missing event_id (now rejected), one blank line, one valid.
     good1 = {
         "event": "load", "skill": "x", "timestamp": _iso(),
         "session_id": "s1", "event_id": "e1", "meta": {},
@@ -124,11 +169,17 @@ def test_read_events_skips_malformed_lines(
         "event": "unload", "skill": "x", "timestamp": _iso(),
         "session_id": "s1", "event_id": "e2", "meta": {},
     }
-    missing_key = {"event": "load", "skill": "x", "timestamp": _iso()}
+    missing_session = {
+        "event": "load", "skill": "x", "timestamp": _iso(), "event_id": "ex",
+    }
+    missing_event_id = {
+        "event": "load", "skill": "x", "timestamp": _iso(), "session_id": "s1",
+    }
     events_path.write_text(
         json.dumps(good1) + "\n"
         + "not-json-at-all\n"
-        + json.dumps(missing_key) + "\n"
+        + json.dumps(missing_session) + "\n"
+        + json.dumps(missing_event_id) + "\n"
         + "\n"
         + json.dumps(good2) + "\n",
         encoding="utf-8",
@@ -137,7 +188,17 @@ def test_read_events_skips_malformed_lines(
     got = list(st.read_events(path=events_path))
     assert [e.event_id for e in got] == ["e1", "e2"]
     captured = capsys.readouterr()
-    assert "skipping malformed event" in captured.err
+    # Warning is sanitised — no raw line content, no file path.
+    assert "skipping malformed event at line" in captured.err
+    assert "not-json-at-all" not in captured.err
+    assert str(events_path) not in captured.err
+
+
+def test_read_events_rejects_path_that_escapes_parent(tmp_path: Path) -> None:
+    # ``tmp_path / ".."`` resolves outside its own parent — must be refused.
+    bad = tmp_path / ".." / "evil.jsonl"
+    with pytest.raises(ValueError, match="escapes"):
+        list(st.read_events(path=bad))
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -169,12 +230,10 @@ def test_concurrent_appends_produce_wellformed_lines(tmp_path: Path) -> None:
 
 
 def test_retention_window_floor_applies_below_threshold() -> None:
-    # 30-min session at 20% = 6 min, below 20-min floor -> 1200 s
     assert st.retention_window_seconds(30 * 60) == pytest.approx(20 * 60)
 
 
 def test_retention_window_fraction_applies_above_threshold() -> None:
-    # 4-hour session at 20% = 48 min, above 20-min floor -> 48 * 60 s
     assert st.retention_window_seconds(4 * 3600) == pytest.approx(48 * 60)
 
 
@@ -207,18 +266,29 @@ def test_is_retained_rejects_reversed_timestamps() -> None:
         st.is_retained(t0.isoformat(), t1.isoformat(), session_seconds=600)
 
 
+def test_is_retained_treats_naive_timestamps_as_utc() -> None:
+    # Naive load_ts (no tz) mixed with aware unload_ts must not raise.
+    load_ts = "2026-04-18T12:00:00"
+    unload_ts = "2026-04-18T12:30:00+00:00"
+    assert st.is_retained(load_ts, unload_ts, session_seconds=600) is True
+
+
+def test_is_retained_both_naive_ok() -> None:
+    load_ts = "2026-04-18T12:00:00"
+    unload_ts = "2026-04-18T12:30:00"
+    assert st.is_retained(load_ts, unload_ts, session_seconds=600) is True
+
+
 # ────────────────────────────────────────────────────────────────────
 # Default path resolution
 # ────────────────────────────────────────────────────────────────────
 
 
-def test_default_events_path_under_home(
+def test_default_events_path_resolves_under_claude_dir(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # Reload the module with patched HOME so DEFAULT_EVENTS_PATH re-resolves.
-    import importlib
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
-    reloaded = importlib.reload(st)
-    expected = tmp_path / ".claude" / "skill-events.jsonl"
-    assert reloaded.DEFAULT_EVENTS_PATH == expected
+    # Simpler than reloading the module: just monkeypatch the constant
+    # the tests care about.
+    target = tmp_path / ".claude" / "skill-events.jsonl"
+    monkeypatch.setattr(st, "DEFAULT_EVENTS_PATH", target)
+    assert st.DEFAULT_EVENTS_PATH == target

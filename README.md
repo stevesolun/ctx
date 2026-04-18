@@ -5,7 +5,7 @@
 [![Skills](https://img.shields.io/badge/Skills-1%2C768-purple.svg)](#)
 [![Agents](https://img.shields.io/badge/Agents-443-orange.svg)](#)
 [![Graph](https://img.shields.io/badge/Knowledge_Graph-642K_edges-red.svg)](#knowledge-graph)
-[![Tests](https://img.shields.io/badge/Tests-618_passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-666_passing-brightgreen.svg)](#)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
 Watches what you develop, walks a knowledge graph of **1,768 skills and 443 agents**, and recommends the right ones on the fly - you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
@@ -491,7 +491,7 @@ ctx/
     update_repo_stats.py        # pre-commit hook: keep README numbers fresh
     import_strix_skills.py      # import Strix pentest skills under Apache-2.0
     flatten_agents.py           # flatten agent directory layouts
-    tests/                      # 618 pytest tests across 25 modules
+    tests/                      # 666 pytest tests across 25 modules
 ```
 
 ---
