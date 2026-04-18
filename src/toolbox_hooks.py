@@ -145,7 +145,14 @@ def run_trigger(event: str,
         except KeyError:
             continue  # toolbox disappeared between selection and build
 
-        plan_file = str(persist_plan(plan))
+        try:
+            plan_file = str(persist_plan(plan))
+        except OSError as exc:
+            print(
+                f"persist_plan failed for {tb.name}: {exc}",
+                file=sys.stderr,
+            )
+            return 1
         emission = TriggerEmission(
             trigger=event,
             toolbox=tb.name,
