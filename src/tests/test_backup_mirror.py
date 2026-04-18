@@ -211,6 +211,94 @@ def test_restore_target_resolution_rejects_unknown_layout():
         bm._resolve_restore_target("random/garbage/path.txt", Path("/home"))
 
 
+# ── Security hardening: manifest path traversal ─────────────────────────────
+
+
+@pytest.mark.parametrize("bad_dest", [
+    "",
+    "..",
+    "../escape",
+    "../../etc/passwd",
+    "foo/../bar",
+    "a\\b",             # backslash forbidden
+    "/absolute/path",
+    "has\x00null",
+    "memory/../foo",
+])
+def test_validate_manifest_dest_rejects_traversal(bad_dest):
+    with pytest.raises(ValueError):
+        bm._validate_manifest_dest(bad_dest)
+
+
+@pytest.mark.parametrize("good_dest", [
+    "settings.json",
+    "agents/reviewer.md",
+    "skills/brainstorming/SKILL.md",
+    "memory/demo-slug/user_role.md",
+])
+def test_validate_manifest_dest_accepts_valid(good_dest):
+    p = bm._validate_manifest_dest(good_dest)
+    assert ".." not in p.parts
+
+
+def test_verify_flags_tampered_manifest_dest(fake_home):
+    """A tampered manifest with a traversal dest must fail verification."""
+    _seed_home(fake_home)
+    snap = bm.create_snapshot()
+    manifest = json.loads((snap / "manifest.json").read_text())
+    manifest["entries"].append({
+        "source": "/tmp/evil",
+        "dest": "../../etc/passwd",
+        "size": 10,
+        "sha256": "0" * 64,
+        "skipped": None,
+    })
+    (snap / "manifest.json").write_text(json.dumps(manifest))
+    report = bm.verify_snapshot(snap)
+    assert not report.ok
+    assert "../../etc/passwd" in report.hash_mismatch
+
+
+def test_restore_refuses_tampered_manifest_dest(fake_home):
+    """Restore must refuse to run when the manifest contains a traversal dest."""
+    _seed_home(fake_home)
+    snap = bm.create_snapshot()
+    manifest = json.loads((snap / "manifest.json").read_text())
+    manifest["entries"].append({
+        "source": "/tmp/evil",
+        "dest": "../../etc/passwd",
+        "size": 10,
+        "sha256": "0" * 64,
+        "skipped": None,
+    })
+    (snap / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(RuntimeError, match="failed verification"):
+        bm.restore_snapshot(snap, claude_home=fake_home)
+
+
+def test_resolve_restore_target_rejects_traversal():
+    for bad in ("../../etc/passwd", "memory/../../escape/file.md",
+                "/absolute/path.md", "agents/../../../escape.md"):
+        with pytest.raises(ValueError):
+            bm._resolve_restore_target(bad, Path("/tmp/home"))
+
+
+def test_prune_refuses_symlink_outside_backups(fake_home, tmp_path):
+    """Prune must not follow a symlinked dir out of backups_dir."""
+    if sys.platform == "win32":
+        pytest.skip("symlink creation often requires admin on Windows")
+    _seed_home(fake_home)
+    bm.create_snapshot(now=1.0)
+    # Plant a symlink inside backups_dir pointing outside.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "canary.txt").write_text("must-not-be-deleted")
+    (bm.BACKUPS_DIR / "99999999T999999Z.evil").symlink_to(outside)
+    bm.prune_snapshots(keep=0)
+    # Canary still exists -- symlinked dir was not removed.
+    assert (outside / "canary.txt").exists()
+
+
 # ── prune_snapshots ─────────────────────────────────────────────────────────
 
 

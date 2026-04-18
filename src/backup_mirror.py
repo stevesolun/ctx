@@ -56,6 +56,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat as _stat
 import sys
 import tempfile
 import time
@@ -165,6 +166,10 @@ def _sha256_bytes(data: bytes) -> str:
 
 
 def _sha256_file(path: Path) -> str:
+    # Reject symlinks before reading so verify never hashes a file the
+    # attacker has pointed out of the snapshot.
+    if path.is_symlink():
+        raise ValueError(f"refusing to hash symlink: {path}")
     h = hashlib.sha256()
     with open(path, "rb") as fh:
         while True:
@@ -176,11 +181,18 @@ def _sha256_file(path: Path) -> str:
 
 
 def _atomic_copy(src: Path, dest: Path) -> None:
+    # Refuse to follow a source symlink: a race between our stat() and
+    # copy2() could otherwise let an attacker substitute the file.
+    if src.is_symlink():
+        raise ValueError(f"refusing to copy symlink: {src}")
     dest.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=dest.name + ".", dir=str(dest.parent))
     try:
         os.close(fd)
-        shutil.copy2(str(src), tmp)
+        # copy2 calls open(); after the symlink check above, opening the
+        # regular file is safe on POSIX. On Windows, symlinks require
+        # privilege so this is additionally defended by ACL.
+        shutil.copy2(str(src), tmp, follow_symlinks=False)
         os.replace(tmp, dest)
     except Exception:
         try:
@@ -188,6 +200,33 @@ def _atomic_copy(src: Path, dest: Path) -> None:
         except OSError:
             pass
         raise
+
+
+def _contained(candidate: Path, base: Path) -> bool:
+    """True only if ``candidate`` resolves under ``base`` (no traversal)."""
+    try:
+        candidate.resolve(strict=False).relative_to(base.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
+
+
+# Manifest ``dest`` values must be forward-slash relative paths with no
+# traversal components. We reject anything that could let a tampered
+# manifest point verify or restore at a file outside the snapshot.
+def _validate_manifest_dest(dest_rel: str) -> Path:
+    if not isinstance(dest_rel, str) or not dest_rel:
+        raise ValueError(f"invalid manifest dest: {dest_rel!r}")
+    if "\x00" in dest_rel or "\\" in dest_rel:
+        raise ValueError(f"invalid manifest dest: {dest_rel!r}")
+    # Reject leading slashes explicitly: on Windows, Path("/abs/x")
+    # reports is_absolute() == False, so the check below isn't enough.
+    if dest_rel.startswith("/"):
+        raise ValueError(f"invalid manifest dest: {dest_rel!r}")
+    p = Path(dest_rel)
+    if p.is_absolute() or ".." in p.parts or any(part == "" for part in p.parts):
+        raise ValueError(f"invalid manifest dest: {dest_rel!r}")
+    return p
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -259,9 +298,10 @@ def create_snapshot(backups_dir: Path | None = None,
 
 
 def _capture_file(src: Path, snap_path: Path, dest_rel: str) -> ManifestEntry:
-    dest = snap_path / dest_rel
+    # Use lstat() so a symlink is classified rather than traversed. Files
+    # that resolve to a symlink are recorded but not copied.
     try:
-        size = src.stat().st_size
+        st = os.lstat(src)
     except OSError:
         return ManifestEntry(
             source=str(src),
@@ -270,6 +310,15 @@ def _capture_file(src: Path, snap_path: Path, dest_rel: str) -> ManifestEntry:
             sha256=None,
             skipped="stat_failed",
         )
+    if _stat.S_ISLNK(st.st_mode):
+        return ManifestEntry(
+            source=str(src),
+            dest=dest_rel,
+            size=int(st.st_size),
+            sha256=None,
+            skipped="symlink",
+        )
+    size = int(st.st_size)
     if size > MAX_FILE_BYTES:
         return ManifestEntry(
             source=str(src),
@@ -278,9 +327,10 @@ def _capture_file(src: Path, snap_path: Path, dest_rel: str) -> ManifestEntry:
             sha256=None,
             skipped="too_large",
         )
+    dest = snap_path / dest_rel
     try:
         _atomic_copy(src, dest)
-    except OSError:
+    except (OSError, ValueError):
         return ManifestEntry(
             source=str(src),
             dest=dest_rel,
@@ -355,19 +405,34 @@ def verify_snapshot(snap_path: Path) -> VerifyReport:
     skipped: list[str] = []
     checked = 0
     for raw in entries:
-        dest_rel = str(raw.get("dest") or "")
+        dest_rel_raw = str(raw.get("dest") or "")
         expected = raw.get("sha256")
         skip_reason = raw.get("skipped")
         if skip_reason:
-            skipped.append(f"{dest_rel}: {skip_reason}")
+            skipped.append(f"{dest_rel_raw}: {skip_reason}")
+            continue
+        # A tampered manifest could set dest to "../../etc/passwd".
+        # Validate first; treat any escape attempt as a mismatch finding
+        # so verify.ok stays False and restore refuses.
+        try:
+            dest_rel = _validate_manifest_dest(dest_rel_raw)
+        except ValueError:
+            mismatch.append(dest_rel_raw)
             continue
         file_path = snap_path / dest_rel
-        if not file_path.is_file():
-            missing.append(dest_rel)
+        if not _contained(file_path, snap_path):
+            mismatch.append(dest_rel_raw)
             continue
-        actual = _sha256_file(file_path)
+        if not file_path.is_file() or file_path.is_symlink():
+            missing.append(str(dest_rel))
+            continue
+        try:
+            actual = _sha256_file(file_path)
+        except ValueError:
+            mismatch.append(str(dest_rel))
+            continue
         if actual != expected:
-            mismatch.append(dest_rel)
+            mismatch.append(str(dest_rel))
         checked += 1
     return VerifyReport(
         snapshot_id=str(manifest.get("snapshot_id") or snap_path.name),
@@ -414,13 +479,22 @@ def restore_snapshot(snap_path: Path,
     restored: list[str] = []
     skipped: list[str] = []
     for raw in entries:
-        dest_rel = str(raw.get("dest") or "")
+        dest_rel_raw = str(raw.get("dest") or "")
         if raw.get("skipped"):
-            skipped.append(dest_rel)
+            skipped.append(dest_rel_raw)
             continue
-        src = snap_path / dest_rel
-        # Map snapshot layout back onto CLAUDE_HOME.
-        target = _resolve_restore_target(dest_rel, claude_home)
+        # verify_snapshot already rejected any manifest entry that failed
+        # validation or containment, so re-validation here is belt-and-
+        # braces — but cheap and defense-in-depth.
+        dest_rel_path = _validate_manifest_dest(dest_rel_raw)
+        src = snap_path / dest_rel_path
+        if not _contained(src, snap_path):
+            raise ValueError(f"snapshot source escapes snapshot root: {dest_rel_raw!r}")
+        target = _resolve_restore_target(dest_rel_raw, claude_home)
+        if not _contained(target, claude_home):
+            raise ValueError(
+                f"restore target escapes claude_home: {dest_rel_raw!r}"
+            )
         if not dry_run:
             _atomic_copy(src, target)
         restored.append(str(target))
@@ -435,11 +509,11 @@ def restore_snapshot(snap_path: Path,
 def _resolve_restore_target(dest_rel: str, claude_home: Path) -> Path:
     """
     Snapshot layout -> live layout. Inverse of the mapping used in
-    create_snapshot.
+    create_snapshot. Rejects any dest that doesn't match a known layout
+    or that contains traversal segments.
     """
-    parts = Path(dest_rel).parts
-    if not parts:
-        raise ValueError(f"empty dest: {dest_rel!r}")
+    rel_path = _validate_manifest_dest(dest_rel)
+    parts = rel_path.parts
 
     # Top-level JSON files.
     if dest_rel in TOP_FILES:
@@ -448,6 +522,11 @@ def _resolve_restore_target(dest_rel: str, claude_home: Path) -> Path:
     # memory/<slug>/<rel...>
     if parts[0] == "memory" and len(parts) >= 3:
         slug = parts[1]
+        # Slug must be a single filename component with no separators or
+        # traversal markers. (_validate_manifest_dest already rejected
+        # ".." segments, but guard against e.g. a slug containing ":".)
+        if "/" in slug or "\\" in slug or slug in {".", ".."}:
+            raise ValueError(f"invalid memory slug in dest: {dest_rel!r}")
         rel = Path(*parts[2:])
         return claude_home / "projects" / slug / "memory" / rel
 
@@ -472,7 +551,12 @@ def prune_snapshots(keep: int,
     to_remove = snaps[keep:]
     removed: list[str] = []
     for snap in to_remove:
-        shutil.rmtree(snap.path, ignore_errors=True)
+        snap_path = Path(snap.path)
+        # Refuse to rmtree a symlinked child (would follow out of backups)
+        # or any path that does not resolve inside backups_dir.
+        if snap_path.is_symlink() or not _contained(snap_path, backups_dir):
+            continue
+        shutil.rmtree(snap_path, ignore_errors=True)
         removed.append(snap.snapshot_id)
     return tuple(removed)
 
