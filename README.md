@@ -5,7 +5,7 @@
 [![Skills](https://img.shields.io/badge/Skills-1%2C768-purple.svg)](#)
 [![Agents](https://img.shields.io/badge/Agents-443-orange.svg)](#)
 [![Graph](https://img.shields.io/badge/Knowledge_Graph-642K_edges-red.svg)](#knowledge-graph)
-[![Tests](https://img.shields.io/badge/Tests-552_passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-579_passing-brightgreen.svg)](#)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
 Watches what you develop, walks a knowledge graph of **1,768 skills and 443 agents**, and recommends the right ones on the fly - you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
@@ -90,6 +90,27 @@ python src/memory_anchor.py check --strict
 ```
 
 Docs: <https://stevesolun.github.io/ctx/memory-anchor/>
+
+---
+
+## Backup Mirror (Disaster Recovery)
+
+Hooks, heals, and merges all mutate the files Claude uses to reason. `src/backup_mirror.py` keeps a timestamped, content-addressed mirror of the critical state under `~/.claude/backups/<snapshot_id>/` so a bad run never costs you your settings, memories, skill manifest, or pending suggestions.
+
+- Captured: `~/.claude/settings.json`, `skill-manifest.json`, `pending-skills.json`, `agents/**`, `skills/**`, and per-project `projects/<slug>/memory/**`.
+- Each file is SHA-256 hashed into `manifest.json`; `restore` refuses to run on a tampered snapshot and points you at `verify`.
+- Atomic copies (tempfile + `os.replace`) mean a crashed snapshot never leaves half-written files.
+- Per-file 5 MB cap keeps a rogue log from ballooning the mirror.
+
+```bash
+python src/backup_mirror.py create              # take a snapshot
+python src/backup_mirror.py list                # newest-first
+python src/backup_mirror.py verify              # re-hash the latest
+python src/backup_mirror.py restore --dry-run   # preview a restore
+python src/backup_mirror.py prune --keep 7      # keep 7 newest
+```
+
+If a hook or heal leaves Claude's state inconsistent, run `verify` on the latest snapshot; if clean, `restore` rolls `~/.claude` back to that point.
 
 ---
 
@@ -460,15 +481,17 @@ ctx/
     behavior_miner.py           # mine sessions for toolbox suggestions
     intent_interview.py         # interactive `toolbox init`
 
-    # Health + memory
+    # Health + memory + disaster recovery
     skill_health.py             # catalog health dashboard + self-healing
     memory_anchor.py            # diff-aware memory anchoring
+    backup_mirror.py            # timestamped SHA-256 mirror of ~/.claude state
+    _file_lock.py               # cross-platform advisory file lock (TOCTOU guard)
 
     # Docs + ops
     update_repo_stats.py        # pre-commit hook: keep README numbers fresh
     import_strix_skills.py      # import Strix pentest skills under Apache-2.0
     flatten_agents.py           # flatten agent directory layouts
-    tests/                      # 552 pytest tests across 24 modules
+    tests/                      # 579 pytest tests across 25 modules
 ```
 
 ---
