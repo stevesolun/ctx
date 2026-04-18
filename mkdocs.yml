@@ -1,0 +1,103 @@
+# MkDocs Material configuration for the ctx skill-router + toolbox docs.
+#
+# Build:    python -m mkdocs build --strict
+# Serve:    python -m mkdocs serve
+# Publish:  handled by .github/workflows/docs.yml on push to main.
+site_name: ctx
+site_description: >-
+  Skill router, pre/post dev toolbox, behavior miner, and verdict guardrails
+  for a repo-aware Claude Code workflow.
+site_url: https://stevesolun.github.io/ctx/
+repo_url: https://github.com/stevesolun/ctx
+repo_name: stevesolun/ctx
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: site
+
+strict: true
+
+# SKILL.md lives in docs/ for historical reasons but doesn't belong
+# in the rendered nav — the skill-router section summarizes it.
+not_in_nav: |
+  SKILL.md
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Toolbox:
+      - Overview: toolbox/index.md
+      - Configuration: toolbox/configuration.md
+      - Starter toolboxes: toolbox/starters.md
+      - Council runner: toolbox/council-runner.md
+      - Hooks & triggers: toolbox/hooks.md
+      - Behavior miner: toolbox/behavior-miner.md
+      - Intent interview: toolbox/intent-interview.md
+      - Verdicts & guardrails: toolbox/verdicts.md
+  - Skill router:
+      - Overview: skill-router/index.md
+      - Stack signatures: stack-signatures.md
+      - Skill-stack matrix: skill-stack-matrix.md
+      - Marketplace registry: marketplace-registry.md
+  - Roadmap: roadmap/toolbox.md

@@ -62,3 +62,6 @@ strix_runs/
 
 # Test coverage
 .coverage
+
+# MkDocs build output
+/site/

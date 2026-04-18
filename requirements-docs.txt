@@ -1,0 +1,7 @@
+# Pinned dependencies for the MkDocs Material documentation site.
+# Used by .github/workflows/docs.yml for the GitHub Pages deploy.
+# Keep this file minimal — runtime deps belong elsewhere.
+
+mkdocs==1.6.1
+mkdocs-material==9.5.44
+pymdown-extensions==10.12
