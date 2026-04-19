@@ -33,6 +33,10 @@ SKILL_ENTITIES = WIKI_DIR / "entities" / "skills"
 AGENT_ENTITIES = WIKI_DIR / "entities" / "agents"
 CONCEPTS_DIR = WIKI_DIR / "concepts"
 GRAPH_OUT = WIKI_DIR / "graphify-out"
+# Source of truth for per-node quality: sidecars produced by
+# ``src/skill_quality.py``. Graph nodes get ``quality_score`` and
+# ``quality_grade`` attached when a matching sidecar exists.
+QUALITY_SIDECAR_DIR = Path(os.path.expanduser("~/.claude/skill-quality"))
 
 
 def parse_frontmatter(filepath: Path) -> dict:
@@ -84,9 +88,47 @@ def build_graph() -> tuple[nx.Graph, dict[str, dict]]:
                     G.add_edge(n1, n2, weight=1, shared_tags=[tag])
                     edge_count += 1
 
+    _attach_quality_attrs(G, QUALITY_SIDECAR_DIR)
+
     print(f"Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
     print(f"Tag index: {len(tag_index)} unique tags")
     return G, entities
+
+
+def _attach_quality_attrs(G: nx.Graph, sidecar_dir: Path) -> int:
+    """Decorate graph nodes with quality score + grade from sidecar JSONs.
+
+    The sidecar directory is the source of truth for quality data; this
+    function just mirrors ``quality_score`` and ``quality_grade`` onto
+    matching graph nodes so downstream consumers (graph export, Obsidian
+    graph view coloring) see one consistent number. Nodes without a
+    sidecar keep their default values so the attribute is always present.
+    """
+    attached = 0
+    # Default attrs so callers can always read the key without KeyError.
+    for nid in G.nodes():
+        G.nodes[nid].setdefault("quality_score", None)
+        G.nodes[nid].setdefault("quality_grade", None)
+
+    if not sidecar_dir.is_dir():
+        return 0
+
+    for path in sidecar_dir.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        slug = data.get("slug")
+        subject_type = data.get("subject_type", "skill")
+        if not slug:
+            continue
+        node_id = f"{subject_type}:{slug}"
+        if node_id not in G:
+            continue
+        G.nodes[node_id]["quality_score"] = float(data.get("score", 0.0))
+        G.nodes[node_id]["quality_grade"] = data.get("grade")
+        attached += 1
+    return attached
 
 
 def detect_communities(G: nx.Graph) -> dict[int, list[str]]:
