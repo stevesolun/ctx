@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -661,10 +662,31 @@ def _git_diff_preview(path: Path, *, max_lines: int = 40) -> str:
     We call git from inside the repo root so the relative path resolves.
     Return value is purely informational; absence of git or a history
     for this path is not an error.
+
+    Strix finding vuln-0003 (Git Textconv RCE): ``git log -p`` on
+    repository-controlled content honors ``.gitattributes`` +
+    ``diff.<name>.textconv`` hooks, which can execute arbitrary commands
+    set by a malicious repo author. Disarm by:
+      - ``--no-textconv``  — skip diff.textconv drivers entirely
+      - ``--no-ext-diff``  — skip user-configured external diff tools
+      - ``-c diff.external=`` — belt-and-braces env-reset
+      - ``-c core.attributesfile=/dev/null`` — ignore any user-level
+        gitattributes that might pull in a textconv indirectly
     """
     try:
         proc = subprocess.run(
-            ["git", "log", "-p", "--max-count=1", "--", str(path)],
+            [
+                "git",
+                "-c", "diff.external=",
+                "-c", "core.attributesfile=" + (os.devnull or "/dev/null"),
+                "log",
+                "-p",
+                "--no-textconv",
+                "--no-ext-diff",
+                "--max-count=1",
+                "--",
+                str(path),
+            ],
             capture_output=True, text=True, timeout=15, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):

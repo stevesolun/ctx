@@ -154,6 +154,31 @@ class BackupConfig:
 # ── Loader ──────────────────────────────────────────────────────────────────
 
 
+def _validate_tree_path(value: str, *, field: str) -> str:
+    """Reject tree src/dest values that would escape their trust boundary.
+
+    Strix finding vuln-0002 (Backup Configuration Path Traversal): the
+    user-owned ``~/.claude/backup-config.json`` could supply
+    ``trees[].src = "../../etc"`` (reads outside ~/.claude) or
+    ``trees[].dest = "../../tmp/evil"`` (writes outside the snapshot
+    root). We reject absolute paths and any path containing ``..`` at
+    any segment, and forbid drive letters / UNC prefixes on Windows.
+    """
+    if not value:
+        raise ValueError(f"{field} must be a non-empty string")
+    parts = Path(value).parts
+    if ".." in parts:
+        raise ValueError(f"{field}: {value!r} contains '..' — path traversal denied")
+    if value.startswith(("/", "\\")):
+        raise ValueError(f"{field}: {value!r} is absolute — only repo-relative paths allowed")
+    # Windows drive letter (C:\) or UNC share (\\server)
+    if len(value) >= 2 and value[1] == ":":
+        raise ValueError(f"{field}: {value!r} contains a drive letter — rejected")
+    if value.startswith("\\\\"):
+        raise ValueError(f"{field}: {value!r} is a UNC path — rejected")
+    return value
+
+
 def _coerce_trees(raw: Any, default: tuple[BackupTree, ...]) -> tuple[BackupTree, ...]:
     if raw is None:
         return default
@@ -167,6 +192,18 @@ def _coerce_trees(raw: Any, default: tuple[BackupTree, ...]) -> tuple[BackupTree
         if not src:
             continue
         dest = str(entry.get("dest") or src).strip()
+        # Validate before constructing — a malformed user-override
+        # should not land in the tuple of "trusted" trees.
+        try:
+            _validate_tree_path(src, field="trees[].src")
+            _validate_tree_path(dest, field="trees[].dest")
+        except ValueError as exc:
+            # Skip the malformed entry with a visible log line; do not
+            # silently degrade to the default (that would obscure a
+            # misconfig). Write to stderr so the CLI flags it.
+            import sys as _sys  # local import avoids top-level noise
+            print(f"[backup-config] ignoring tree entry: {exc}", file=_sys.stderr)
+            continue
         out.append(BackupTree(src=src, dest=dest))
     return tuple(out)
 
