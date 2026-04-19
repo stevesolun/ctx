@@ -260,22 +260,62 @@ def _atomic_write_text(path: Path, text: str) -> None:
 # ── Create ──────────────────────────────────────────────────────────────────
 
 
-def _new_snapshot_id(now: float | None = None) -> str:
+# Filesystem-safe reason slug: reasons flow into directory names, so we
+# strip anything that could break Windows paths or create traversal.
+_REASON_SAFE_CHARS = "-_."
+
+
+def _sanitize_reason(raw: str) -> str:
+    """Make ``raw`` safe to embed in a directory name. Caps at 40 chars."""
+    cleaned = "".join(
+        c if (c.isalnum() or c in _REASON_SAFE_CHARS) else "-"
+        for c in raw.lower()
+    )
+    # Collapse runs of '-' so "edit//settings" doesn't produce "edit----"
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    return cleaned.strip("-_.")[:40]
+
+
+def _new_snapshot_id(now: float | None = None,
+                     reason: str | None = None) -> str:
+    """Build snapshot directory name from SNAPSHOT_FMT + NAME_FORMAT + reason.
+
+    Timestamp gets microsecond precision to avoid collisions under
+    back-to-back automation. Reason is sanitised to keep the name
+    filesystem-safe; when a reason is supplied but the configured
+    ``name_format`` lacks ``{reason}``, the slug is appended with an
+    underscore separator.
+    """
     ts = now if now is not None else time.time()
     base = time.strftime(SNAPSHOT_FMT, time.gmtime(ts))
-    # Append microseconds so back-to-back snapshots don't collide.
     micro = int((ts - int(ts)) * 1_000_000)
-    return f"{base[:-1]}.{micro:06d}Z"
+    stamp = f"{base[:-1]}.{micro:06d}Z" if base.endswith("Z") else f"{base}.{micro:06d}"
+
+    safe_reason = _sanitize_reason(reason) if reason else ""
+    fmt = _CFG.name_format
+    name = fmt.format_map({"timestamp": stamp, "reason": safe_reason})
+    if safe_reason and "{reason}" not in fmt:
+        name = f"{name}_{safe_reason}"
+    # Trim dangling separator from an unused {reason} placeholder.
+    return name.rstrip("-_.")
 
 
 def create_snapshot(backups_dir: Path | None = None,
-                    now: float | None = None) -> Path:
-    """Produce a fresh backup snapshot and return its directory."""
+                    now: float | None = None,
+                    reason: str | None = None) -> Path:
+    """Produce a fresh backup snapshot and return its directory.
+
+    ``reason`` is an optional label appended to the snapshot folder so
+    operators can tell why a snapshot was taken (e.g. ``"post-edit"``,
+    ``"pre-restore"``, ``"manual"``). Sanitised internally so callers
+    can pass arbitrary strings without worrying about path escapes.
+    """
     # Read module globals at call time so monkeypatches apply.
     backups_dir = backups_dir if backups_dir is not None else BACKUPS_DIR
     claude_home = CLAUDE_HOME
     backups_dir.mkdir(parents=True, exist_ok=True)
-    snap_id = _new_snapshot_id(now)
+    snap_id = _new_snapshot_id(now, reason)
     snap_path = backups_dir / snap_id
     snap_path.mkdir(parents=True, exist_ok=False)
 
@@ -301,6 +341,7 @@ def create_snapshot(backups_dir: Path | None = None,
         "snapshot_id": snap_id,
         "created_at": now if now is not None else time.time(),
         "claude_home": str(claude_home),
+        "reason": reason or None,
         "entries": [e.to_dict() for e in entries],
     }
     _atomic_write_text(
@@ -574,6 +615,56 @@ def prune_snapshots(keep: int,
     return tuple(removed)
 
 
+# ── Snapshot-if-changed ─────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class SnapshotIfChangedResult:
+    """Outcome of a snapshot-if-changed run."""
+
+    snapshot_path: Path | None   # None when no snapshot was taken
+    report: "ChangeReport"        # type imported lazily below
+    reason: str | None
+
+    def to_dict(self) -> dict:
+        return {
+            "snapshot_path": str(self.snapshot_path) if self.snapshot_path else None,
+            "reason": self.reason,
+            "report": self.report.to_dict(),
+        }
+
+
+def snapshot_if_changed(reason: str | None = None,
+                        backups_dir: Path | None = None,
+                        now: float | None = None) -> SnapshotIfChangedResult:
+    """Take a new snapshot iff at least one tracked file has changed.
+
+    Compares current SHA-256 hashes of all files under the active
+    BackupConfig (top_files + trees + optional memory glob) against the
+    most-recent existing snapshot's manifest. Returns a
+    :class:`SnapshotIfChangedResult` whose ``snapshot_path`` is ``None``
+    when nothing has changed — making this cheap to call from a hook
+    that fires on every tool invocation.
+    """
+    from change_detector import detect_changes  # noqa: PLC0415
+
+    backups_dir = backups_dir if backups_dir is not None else BACKUPS_DIR
+    snaps = list_snapshots(backups_dir) if backups_dir.is_dir() else []
+    last_path = Path(snaps[0].path) if snaps else None
+
+    report = detect_changes(_CFG, CLAUDE_HOME, last_path)
+
+    if not report.has_changes and last_path is not None:
+        return SnapshotIfChangedResult(
+            snapshot_path=None, report=report, reason=reason,
+        )
+
+    snap_path = create_snapshot(backups_dir=backups_dir, now=now, reason=reason)
+    return SnapshotIfChangedResult(
+        snapshot_path=snap_path, report=report, reason=reason,
+    )
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 
@@ -591,8 +682,28 @@ def _resolve_snapshot_arg(arg: str | None,
 
 
 def cmd_create(args: argparse.Namespace) -> int:
-    snap_path = create_snapshot()
+    reason = getattr(args, "reason", None)
+    snap_path = create_snapshot(reason=reason)
     print(str(snap_path))
+    return 0
+
+
+def cmd_snapshot_if_changed(args: argparse.Namespace) -> int:
+    reason = getattr(args, "reason", None)
+    result = snapshot_if_changed(reason=reason)
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2, default=str))
+        return 0
+    if result.snapshot_path is None:
+        baseline = result.report.baseline_snapshot or "none"
+        print(f"[snapshot-if-changed] no changes since {baseline}")
+        return 0
+    rpt = result.report
+    print(
+        f"[snapshot-if-changed] {result.snapshot_path.name} "
+        f"new={len(rpt.new)} changed={len(rpt.changed)} "
+        f"removed={len(rpt.removed)} unchanged={rpt.unchanged}"
+    )
     return 0
 
 
@@ -667,7 +778,18 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     c = sub.add_parser("create", help="Take a new snapshot.")
+    c.add_argument("--reason", default=None,
+                   help="Short label appended to snapshot folder name.")
     c.set_defaults(func=cmd_create)
+
+    sic = sub.add_parser(
+        "snapshot-if-changed",
+        help="Snapshot only if any tracked file changed since the last one.",
+    )
+    sic.add_argument("--reason", default=None,
+                     help="Short label appended to snapshot folder name.")
+    sic.add_argument("--json", action="store_true")
+    sic.set_defaults(func=cmd_snapshot_if_changed)
 
     ls = sub.add_parser("list", help="List snapshots newest-first.")
     ls.add_argument("--json", action="store_true")
