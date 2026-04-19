@@ -844,6 +844,19 @@ def cmd_restore(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_watchdog(args: argparse.Namespace) -> int:
+    from backup_watchdog import run_watchdog  # noqa: PLC0415
+    max_iters = 1 if args.once else None
+    stats = run_watchdog(
+        interval=args.interval,
+        reason_prefix=args.reason_prefix,
+        max_iterations=max_iters,
+    )
+    if args.json:
+        print(json.dumps(stats.to_dict(), indent=2))
+    return 0
+
+
 def cmd_prune(args: argparse.Namespace) -> int:
     if args.policy:
         plan = prune_by_policy(dry_run=args.dry_run)
@@ -904,6 +917,20 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--snapshot", default="latest")
     r.add_argument("--dry-run", action="store_true")
     r.set_defaults(func=cmd_restore)
+
+    wd = sub.add_parser(
+        "watchdog",
+        help="Poll ~/.claude on an interval and snapshot on change.",
+    )
+    wd.add_argument("--interval", type=float, default=60.0,
+                    help="Seconds between polls (clamped to [5, 3600]).")
+    wd.add_argument("--reason-prefix", default="watchdog",
+                    help="Prefix for the --reason label on each snapshot.")
+    wd.add_argument("--once", action="store_true",
+                    help="Run exactly one tick and exit.")
+    wd.add_argument("--json", action="store_true",
+                    help="Print run stats as JSON on exit.")
+    wd.set_defaults(func=cmd_watchdog)
 
     pr = sub.add_parser(
         "prune",
