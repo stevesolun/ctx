@@ -1,53 +1,90 @@
+---
+hide:
+  - navigation
+---
+
 # ctx
 
-**Repo-aware skill routing, a pre/post-dev toolbox, a behavior miner, and
-guardrail verdicts — all wired into Claude Code.**
+**Skill & agent recommendation and management for Claude Code.** ctx
+watches what you develop, walks a knowledge graph of **1,768 skills and
+443 agents**, and recommends the right ones on the fly — you decide what
+loads and unloads. Powered by a Karpathy-style LLM wiki with persistent
+memory that gets smarter every session.
 
-ctx turns Claude Code from a single-shot assistant into a workflow with
-memory. It watches which skills and agents you actually use, which files you
-touch, which commits you make; it proposes bundles tailored to that pattern;
-and it blocks pre-commit when the council it runs raises a HIGH or CRITICAL
-finding.
+Claude Code skills and agents are powerful, but at scale they become
+unmanageable: discovery is hard past 1,700+ skills, loading everything
+wastes context, related skills have hidden dependencies, and stale skills
+rot silently. ctx treats the library as a **knowledge graph with
+persistent memory** instead of a flat directory — a 3-layer wiki at
+`~/.claude/skill-wiki/`, a 642K-edge graph linking skills by shared tags
+and stack signals, and session hooks that update the wiki automatically
+as you work. Nothing loads without your approval.
 
-## What this project ships
+!!! tip "Install in two commands"
 
-| Layer | Module | Purpose |
-|---|---|---|
-| **Skill router** | [`scan_repo.py`](https://github.com/stevesolun/ctx/blob/main/src/scan_repo.py) | Scan the active repo, detect stack, choose relevant skills/agents |
-| **Toolbox config** | [`toolbox_config.py`](https://github.com/stevesolun/ctx/blob/main/src/toolbox_config.py) | Global + per-repo config merge (`~/.claude/toolboxes.json` + `.toolbox.yaml`) |
-| **Toolbox CLI** | [`toolbox.py`](https://github.com/stevesolun/ctx/blob/main/src/toolbox.py) | `list`, `show`, `activate`, `init`, `export`, `import` |
-| **Council runner** | [`council_runner.py`](https://github.com/stevesolun/ctx/blob/main/src/council_runner.py) | Token/time budgets, dedup policy, graph-informed scope |
-| **Hooks** | [`toolbox_hooks.py`](https://github.com/stevesolun/ctx/blob/main/src/toolbox_hooks.py) | `session-start`, `pre-commit`, `session-end`, `file-save` |
-| **Behavior miner** | [`behavior_miner.py`](https://github.com/stevesolun/ctx/blob/main/src/behavior_miner.py) | Co-invocation, cadence, file-type, commit-type signals |
-| **Intent interview** | [`intent_interview.py`](https://github.com/stevesolun/ctx/blob/main/src/intent_interview.py) | State detection + interview flow |
-| **Verdict guardrail** | [`toolbox_verdict.py`](https://github.com/stevesolun/ctx/blob/main/src/toolbox_verdict.py) | Record findings, escalate level, block on HIGH/CRITICAL |
+    ```bash
+    git clone https://github.com/stevesolun/ctx.git && cd ctx
+    pip install -e .
+    ```
 
-## Quick links
+    Optional extras: `pip install -e ".[embeddings]"` for the semantic
+    embedding backend, `pip install -e ".[dev]"` for the test + lint
+    toolchain. Then `./install.sh python` (or `typescript` / `golang` /
+    `swift` / `php`) to sync the language rule set.
 
-- **[Toolbox overview](toolbox/index.md)** — what a toolbox is, how it's declared, how it runs.
-- **[Starter toolboxes](toolbox/starters.md)** — `ship-it`, `security-sweep`, `refactor-safety`, `docs-review`, `fresh-repo-init`.
-- **[Verdicts & guardrails](toolbox/verdicts.md)** — how the council blocks a bad commit with evidence.
-- **[Skill router overview](skill-router/index.md)** — how the router picks skills from the active repo's stack.
-- **[Skill health](skills-health.md)** — the four-signal quality score and where it surfaces.
+## Start here
 
-## Install
+<div class="grid cards" markdown>
 
-```bash
-git clone https://github.com/stevesolun/ctx.git
-cd ctx
-pip install -e .               # core
-pip install -e ".[embeddings]" # optional: semantic embedding backend
-pip install -e ".[dev]"        # optional: pytest, mypy, ruff
-./install.sh python            # rules for your language (typescript / golang / swift / php)
-```
+-   **Toolbox**
 
-## Releases
+    ---
 
-- **v0.5.0-rc1** — first open-source release candidate. MIT-licensed,
-  CI-matrixed (Ubuntu + Windows × Python 3.11/3.12), 1,316 tests passing,
-  installable via `pip install -e .`. Hardened against RCE/shell
-  injection, path traversal, and race conditions in atomic writes. Full
-  notes in [CHANGELOG.md](https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md).
+    Curated councils of skills and agents that fire at session-start,
+    file-save, pre-commit, and session-end. Blocks `git commit` on
+    HIGH/CRITICAL findings. 5 starter toolboxes ship out of the box.
+
+    [:octicons-arrow-right-24: Toolbox overview](toolbox/index.md) ·
+    [Starter toolboxes](toolbox/starters.md) ·
+    [Verdicts & guardrails](toolbox/verdicts.md)
+
+-   **Skill router**
+
+    ---
+
+    Scans the active repo, detects the stack from file signatures,
+    walks the skill-stack matrix, and loads exactly the skills that
+    apply — no more, no fewer.
+
+    [:octicons-arrow-right-24: Router overview](skill-router/index.md) ·
+    [Stack signatures](stack-signatures.md) ·
+    [Skill-stack matrix](skill-stack-matrix.md)
+
+-   **Health & quality**
+
+    ---
+
+    Structural health checks (missing frontmatter, orphan manifest
+    entries, line-count drift) plus the four-signal quality score
+    (telemetry · intake · graph · routing) that grades every skill
+    A/B/C/D/F.
+
+    [:octicons-arrow-right-24: Skill health](skills-health.md) ·
+    [Memory anchoring](memory-anchor.md) ·
+    [Lifecycle dashboard](skill-lifecycle-and-dashboard.md)
+
+-   **Releases**
+
+    ---
+
+    **v0.5.0-rc1** — first open-source release candidate. MIT, CI-matrixed
+    (Ubuntu + Windows × Python 3.11/3.12), 1,316 tests passing. Hardened
+    against RCE, path traversal, and atomic-write races.
+
+    [:octicons-arrow-right-24: CHANGELOG](https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md) ·
+    [Repository](https://github.com/stevesolun/ctx)
+
+</div>
 
 ## Principles
 
