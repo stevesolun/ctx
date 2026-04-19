@@ -123,10 +123,12 @@ from your usage. Stale ones are flagged. New ones self-ingest.
 
     ---
 
-    **v0.5.0-rc1** — first open-source release candidate. MIT,
-    CI-matrixed (Ubuntu + Windows × Python 3.11/3.12), 1,316 tests
-    passing. Hardened against RCE, path traversal, and atomic-write
-    races.
+    **v0.5.0 GA** — first stable release. Installable via
+    `pip install claude-ctx`. MIT, CI-matrixed (Ubuntu + Windows ×
+    Python 3.11/3.12), 1,360 tests passing. Ships 10 console scripts
+    including `ctx-init`, `ctx-monitor` (local dashboard with graph +
+    wiki + load/unload), plus the 11.7 MB pre-built wiki tarball.
+    Hardened across four Strix-audited security findings.
 
     [:octicons-arrow-right-24: CHANGELOG](https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md) ·
     [Repository](https://github.com/stevesolun/ctx)

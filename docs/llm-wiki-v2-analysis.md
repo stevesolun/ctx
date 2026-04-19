@@ -92,7 +92,7 @@ Confidence as a float-per-fact is a siren song. It encodes an implied precision 
 
 ### #3 "582-node graph is tiny"
 
-Not a gap, a taste difference. ctx's graph is currently 2,168 nodes / 593K edges across 861 communities — substantially larger than the gist's — but "bigger is better" is the wrong frame. The right frame is **connectivity**: edges per node, community modularity, orphan rate. ctx already measures all three in `wiki_orchestrator.health_score`.
+Not a gap, a taste difference. ctx's graph is currently 2,211 nodes / 642K edges across 865 communities — substantially larger than the gist's — but "bigger is better" is the wrong frame. The right frame is **connectivity**: edges per node, community modularity, orphan rate. ctx already measures all three in `wiki_orchestrator.health_score`.
 
 ---
 
