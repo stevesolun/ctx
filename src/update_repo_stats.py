@@ -30,8 +30,83 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 README = REPO_ROOT / "README.md"
 
 
+def _read_graph_from_tarball() -> dict[str, int | None] | None:
+    """Read graph + counts from the shipped ``graph/wiki-graph.tar.gz``.
+
+    The tarball is the canonical source of the numbers published in
+    README + docs — it's what ships in releases, and it doesn't drift
+    when the user's local ``~/.claude/skill-wiki/`` gets rebuilt with
+    narrower tag extraction. When this function returns a non-None
+    value, callers should prefer it over the local wiki.
+    """
+    import tarfile
+    tarball = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
+    if not tarball.exists():
+        return None
+    stats: dict[str, int | None] = {
+        "nodes": None, "edges": None,
+        "skills": None, "agents": None, "communities": None,
+    }
+    try:
+        with tarfile.open(tarball, "r:gz") as tf:
+            members = tf.getnames()
+            # Count entity pages directly from the archive index.
+            s = a = 0
+            for name in members:
+                if "entities/skills/" in name and name.endswith(".md"):
+                    s += 1
+                elif "entities/agents/" in name and name.endswith(".md"):
+                    a += 1
+            stats["skills"], stats["agents"] = s, a
+            # Graph + communities are smaller files — extract to read.
+            for path in ("graphify-out/graph.json", "graphify-out/communities.json"):
+                member = next((m for m in members if m.rstrip("/").endswith(path)), None)
+                if member is None:
+                    continue
+                f = tf.extractfile(member)
+                if f is None:
+                    continue
+                body = json.loads(f.read().decode("utf-8"))
+                if path.endswith("graph.json"):
+                    stats["nodes"] = len(body.get("nodes", []))
+                    edges_key = next((k for k in ("edges", "links") if k in body), None)
+                    if edges_key:
+                        stats["edges"] = len(body[edges_key])
+                else:
+                    if isinstance(body, dict):
+                        stats["communities"] = (
+                            body.get("total_communities")
+                            or len(body.get("communities", []))
+                        )
+                    elif isinstance(body, list):
+                        stats["communities"] = len(body)
+    except (tarfile.TarError, OSError, json.JSONDecodeError):
+        return None
+    # Require at least nodes + skills to consider the tarball reading
+    # authoritative; otherwise fall back to the live wiki.
+    if stats["nodes"] and stats["skills"]:
+        return stats
+    return None
+
+
 def read_graph_stats() -> dict:
-    """Return {nodes, edges, skills, agents, communities} from authoritative sources."""
+    """Return {nodes, edges, skills, agents, communities} from authoritative sources.
+
+    Priority:
+      1. ``graph/wiki-graph.tar.gz`` — the tarball that ships in
+         releases. Pinned and canonical.
+      2. ``~/.claude/skill-wiki/graphify-out/graph.json`` — the user's
+         live wiki. Used only when the tarball isn't present (e.g. a
+         bare clone without the release asset downloaded).
+
+    Without this priority the pre-commit hook silently rewrites README
+    badges from whatever the user last re-graphified — which can be a
+    sparse experimental rebuild, not the published numbers.
+    """
+    tarball_stats = _read_graph_from_tarball()
+    if tarball_stats is not None:
+        return tarball_stats
+
     home = Path.home()
     graph_json = home / ".claude/skill-wiki/graphify-out/graph.json"
     communities_repo = REPO_ROOT / "graph/communities.json"

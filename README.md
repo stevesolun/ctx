@@ -7,7 +7,7 @@
 [![Graph](https://img.shields.io/badge/Graph-2,211_nodes_/_642K_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
-Watches what you develop, walks a knowledge graph of **1,769 skills and 443 agents** (2,212 nodes, 885 edges, 865 communities), and recommends the right ones on the fly — you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+Watches what you develop, walks a knowledge graph of **1,768 skills and 443 agents** (2,211 nodes, 642K edges, 865 communities), and recommends the right ones on the fly — you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 ## Why it exists
 
