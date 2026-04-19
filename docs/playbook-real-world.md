@@ -14,16 +14,16 @@ fresh. First project on ctx: a **PCI-compliant checkout microservice**
 (FastAPI + SQLAlchemy + PostgreSQL + Stripe + pytest). Target: working
 endpoint + council-signed commit by end of day.
 
-She has `~/.claude/skills/` with 1,768 skills and `~/.claude/agents/`
-with 443 agents pre-installed (extracted from `graph/wiki-graph.tar.gz`).
-Graph is pre-built (2,211 nodes / 642K edges / 865 communities). She has
+She has `~/.claude/skills/` with 1,789 skills and `~/.claude/agents/`
+with 464 agents pre-installed (extracted from `graph/wiki-graph.tar.gz`).
+Graph is pre-built (2,253 nodes / 454K edges / 93 communities). She has
 never run ctx before.
 
 ## Environment precondition
 
 ```
-~/.claude/skill-wiki/graphify-out/graph.json   # pre-built, 642K edges
-~/.claude/skill-wiki/entities/                 # 2,211 entity pages
+~/.claude/skill-wiki/graphify-out/graph.json   # pre-built, 454K edges
+~/.claude/skill-wiki/entities/                 # 2,253 entity pages
 ~/.claude/skill-wiki/converted/                # 952 compressed skills
 ~/.claude/skill-quality/                       # 1,891 sidecars
 ```
