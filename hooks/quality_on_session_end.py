@@ -141,13 +141,20 @@ def _touched_slugs_since(cutoff: datetime, events_path: Path) -> list[str]:
     return list(seen.keys())[:_MAX_SLUGS_PER_RUN]
 
 
-def _invoke_recompute(slugs: list[str]) -> int:
+def _invoke_recompute(slugs: list[str], session_id: str | None = None) -> int:
     if not slugs:
         return 0
     script = SRC / "skill_quality.py"
     if not script.is_file():
         print(f"[quality_on_session_end] missing {script}", file=sys.stderr)
         return 0
+    # Propagate session_id via environment so the per-slug
+    # skill.score_updated audit rows carry it. Without this the
+    # dashboard's per-session timeline drops the middle event in the
+    # load -> score_updated -> unload triad.
+    env = dict(os.environ)
+    if session_id:
+        env["CTX_SESSION_ID"] = session_id
     try:
         result = subprocess.run(
             [sys.executable, str(script), "recompute",
@@ -156,6 +163,7 @@ def _invoke_recompute(slugs: list[str]) -> int:
             text=True,
             timeout=120,
             check=False,
+            env=env,
         )
         if result.stderr.strip():
             print(result.stderr.strip(), file=sys.stderr)
@@ -171,7 +179,18 @@ def main() -> int:
     now = datetime.now(timezone.utc)
     cutoff = _read_cutoff()
     slugs = _touched_slugs_since(cutoff, _EVENTS_PATH)
-    _invoke_recompute(slugs)
+
+    # Resolve session_id up-front so it can flow into both the
+    # recompute subprocess (via CTX_SESSION_ID env) AND the session.ended
+    # audit record below. Previously the score_updated rows had no
+    # session_id, breaking the dashboard's per-session timeline.
+    session_id: str | None = None
+    if isinstance(payload, dict):
+        session_id = payload.get("session_id") or payload.get("sessionId")
+    if not session_id:
+        session_id = f"session-{now.strftime('%Y%m%dT%H%M%SZ')}"
+
+    _invoke_recompute(slugs, session_id=session_id)
     _write_state(now)
 
     # Unified audit: one line per session boundary + rotate if big.
@@ -186,14 +205,8 @@ def main() -> int:
             sys.path.insert(0, str(_SRC))
         from ctx_audit_log import log_session_event, rotate_if_needed
 
-        session_id = None
-        if isinstance(payload, dict):
-            session_id = payload.get("session_id") or payload.get("sessionId")
-        if not session_id:
-            # Fall back to a synthetic id so the event still carries
-            # something investigators can correlate with skill-events.
-            session_id = f"session-{now.strftime('%Y%m%dT%H%M%SZ')}"
-
+        # session_id resolved above — reuse it so the audit record
+        # agrees with the CTX_SESSION_ID that score_updated rows carry.
         log_session_event(
             "session.ended", session_id, actor="hook",
             meta={"recomputed_slugs": len(slugs), "cutoff": cutoff.isoformat()},

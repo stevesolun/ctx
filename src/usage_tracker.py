@@ -119,15 +119,46 @@ def read_loaded_skills() -> list[str]:
 
 
 def _set_frontmatter_field(content: str, field: str, value: str) -> str:
-    """Replace a frontmatter field value. Field is escaped to prevent ReDoS."""
+    """Set a frontmatter field, inserting it if missing.
+
+    The previous regex-only implementation silently no-op'd when the
+    field wasn't already present in frontmatter — which meant that a
+    wiki entity page without ``session_count: 0`` pre-written could
+    never accumulate the session_count bump, and the staleness →
+    pending-unload gate at
+    ``session_count >= STALE_THRESHOLD and use_count == 0`` never
+    fired. The random-load-unload playbook caught this directly.
+
+    If the field is already in frontmatter → replace its value.
+    If not → insert ``field: value`` at the end of the frontmatter
+    block (before the closing ``---``). If there's no frontmatter
+    block at all → return content unchanged (callers expect this to
+    be a no-op on pages without frontmatter).
+    """
     escaped = re.escape(field)
     safe_value = str(value).replace("\r", " ").replace("\n", " ")
-    return re.sub(
-        rf"^({escaped}:\s*)(.+)$",
+    pattern = rf"^({escaped}:\s*)(.+)$"
+
+    # Replace first — the common path once the field exists.
+    new_content, n = re.subn(
+        pattern,
         lambda m: f"{m.group(1)}{safe_value}",
         content,
         flags=re.MULTILINE,
     )
+    if n > 0:
+        return new_content
+
+    # Field missing — try to insert it inside the first frontmatter block.
+    # Frontmatter in our wiki is ``---\n...yaml...\n---\n`` at the top of
+    # the file. Match only the FIRST such block (re.DOTALL-limited to
+    # the initial chunk).
+    fm_match = re.match(r"(^---\n)(.*?)(\n---\s*\n)", content, flags=re.DOTALL)
+    if fm_match is None:
+        return content  # no frontmatter to extend
+    prefix, body, suffix = fm_match.group(1), fm_match.group(2), fm_match.group(3)
+    new_body = body + (f"\n{field}: {safe_value}" if body else f"{field}: {safe_value}")
+    return prefix + new_body + suffix + content[fm_match.end():]
 
 
 PENDING_UNLOAD = CLAUDE_DIR / "pending-unload.json"

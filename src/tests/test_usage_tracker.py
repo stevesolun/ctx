@@ -167,9 +167,22 @@ class TestSetFrontmatterField:
         assert "use_count: 5" in result
         assert "use_count: 0" not in result
 
-    def test_field_not_present_leaves_content_unchanged(self):
+    def test_field_not_present_is_inserted_into_frontmatter(self):
+        """The prior implementation silently no-op'd when the field was
+        missing — which meant session_count never persisted on pages
+        without it and the staleness gate never fired. New behavior:
+        insert the field at the end of the frontmatter block."""
         content = "---\ntitle: react\n---\n# body\n"
-        result = _set_frontmatter_field(content, "nonexistent_field", "value")
+        result = _set_frontmatter_field(content, "session_count", "1")
+        assert result != content
+        assert "session_count: 1" in result
+        assert result.startswith("---\n")
+        assert "# body" in result
+
+    def test_insert_skipped_when_no_frontmatter(self):
+        content = "no frontmatter here\n"
+        result = _set_frontmatter_field(content, "session_count", "0")
+        # No block to extend — leave content alone.
         assert result == content
 
     def test_multiline_content_only_replaces_target(self):
