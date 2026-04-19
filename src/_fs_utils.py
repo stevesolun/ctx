@@ -73,12 +73,17 @@ def atomic_write_json(path: Path, obj: Any, indent: int | None = 2) -> None:
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 
-def _replace_with_retry(src: str, dst: Path, *, attempts: int = 3, delay: float = 0.05) -> None:
+def _replace_with_retry(src: str, dst: Path, *, attempts: int = 10, delay: float = 0.05) -> None:
     """Call ``os.replace(src, dst)``, retrying on ``PermissionError``.
 
     On POSIX, ``os.replace`` is a single atomic syscall.  On Windows it can
-    raise ``PermissionError`` when another process holds the destination open.
+    raise ``PermissionError`` when another process or thread holds the
+    destination open — or even just a transient AV/indexer read handle.
     We retry *attempts* times, sleeping *delay* seconds between each try.
+
+    Defaults (10 * 50ms = 500ms max) were tuned after CI flakes under
+    8-thread concurrent writes on windows-latest; 3 * 50ms was not enough
+    under load. 500ms total is still fast for interactive work.
     """
     last_exc: Exception | None = None
     for _ in range(attempts):
