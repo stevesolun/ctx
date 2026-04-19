@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-ctx"
-version = "0.5.0-rc10"
+version = "0.5.0-rc11"
 description = "Skill and agent recommendation system for Claude Code — knowledge graph, wiki, and intake quality gates"
 authors = [{ name = "Steve Solun" }]
 license = { text = "MIT" }
