@@ -140,14 +140,29 @@ no real changes does zero disk writes.
 
 ### Running it as a background service
 
-- **Linux (systemd)** — create a user unit that runs
-  `python .../backup_mirror.py watchdog --interval 60` with
-  `Restart=always`.
-- **macOS (launchd)** — drop a LaunchAgent plist into
-  `~/Library/LaunchAgents/`.
-- **Windows (Task Scheduler)** — create a task that runs
-  `watchdog --once` on a 1-minute trigger, or a continuous task with
-  `--interval 60`.
+Ready-to-use service manifests live under [docs/services/](services/).
+Each one expects you to edit a handful of paths — there's no installer
+that guesses where you keep the checkout.
+
+- **Linux (systemd user unit)** —
+  [`docs/services/systemd/claude-backup-watchdog.service`](services/systemd/claude-backup-watchdog.service).
+  Copy to `~/.config/systemd/user/`, set `CTX_REPO`, then
+  `systemctl --user enable --now claude-backup-watchdog.service`.
+- **macOS (launchd agent)** —
+  [`docs/services/macos/com.claude.backup.watchdog.plist`](services/macos/com.claude.backup.watchdog.plist).
+  Edit the `ProgramArguments` paths, drop into
+  `~/Library/LaunchAgents/`, then
+  `launchctl load -w ~/Library/LaunchAgents/com.claude.backup.watchdog.plist`.
+- **Windows (Task Scheduler installer)** —
+  [`docs/services/windows/install-backup-watchdog.ps1`](services/windows/install-backup-watchdog.ps1).
+  Run `pwsh -File docs/services/windows/install-backup-watchdog.ps1`
+  from the repo root; it detects Python on PATH, registers a
+  `ClaudeBackupWatchdog` scheduled task that runs at logon, and kicks
+  off the first tick. `-Uninstall` removes it.
+
+All three manifests assume the watchdog runs as an **unprivileged
+user** — no admin/root — because it only reads `~/.claude/` and writes
+`~/.claude/backups/`.
 
 The watchdog stops cleanly on SIGINT/SIGTERM, flushes its stats line
 to stderr, and exits 0. Pair it with the hook: the hook handles

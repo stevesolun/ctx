@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchAgent for the ctx backup watchdog (macOS).
+
+  Install:
+    1. Edit the two path strings below so CTX_REPO matches your
+       checkout and PYTHON matches your interpreter (e.g. the one from
+       `which python3` or a venv).
+    2. cp docs/services/macos/com.claude.backup.watchdog.plist \
+          ~/Library/LaunchAgents/
+    3. launchctl load -w ~/Library/LaunchAgents/com.claude.backup.watchdog.plist
+
+  Tail logs:
+    tail -f ~/Library/Logs/claude-backup-watchdog.log
+
+  Unload:
+    launchctl unload ~/Library/LaunchAgents/com.claude.backup.watchdog.plist
+
+  The agent runs in the user session (not at boot) and restarts on crash.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.claude.backup.watchdog</string>
+
+  <!-- EDIT THIS: python interpreter + repo path -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/YOUR_USER/ctx/src/backup_mirror.py</string>
+    <string>watchdog</string>
+    <string>--interval</string>
+    <string>60</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Relaunch on crash with a short backoff so we don't busy-loop. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOUR_USER/Library/Logs/claude-backup-watchdog.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOUR_USER/Library/Logs/claude-backup-watchdog.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
