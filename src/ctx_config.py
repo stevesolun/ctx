@@ -135,7 +135,7 @@ class Config:
         self.intake_enabled: bool = bool(intake.get("enabled", True))
         self.intake_dup_threshold: float = float(intake.get("dup_threshold", 0.93))
         self.intake_near_dup_threshold: float = float(
-            intake.get("near_dup_threshold", 0.85)
+            intake.get("near_dup_threshold", 0.80)
         )
         self.intake_min_neighbors: int = int(intake.get("min_neighbors", 0))
         self.intake_min_neighbor_score: float = float(

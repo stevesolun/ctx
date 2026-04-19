@@ -15,7 +15,7 @@ into the wiki. Runs three families of checks:
      - Embed the candidate once, rank against the pre-built corpus
      - ``duplicate``: top score >= ``dup_threshold`` (default 0.93)
      - ``near-duplicate``: top score in
-       ``[near_dup_threshold, dup_threshold)`` (default 0.85)
+       ``[near_dup_threshold, dup_threshold)`` (default 0.80)
 
   3. Connectivity check (M2.5)
      - When enabled, require ``min_neighbors`` rows scoring at least
@@ -50,15 +50,17 @@ from wiki_utils import parse_frontmatter_and_body  # noqa: E402
 
 Severity = Literal["warn", "fail"]
 
-# Default thresholds. Rationale:
+# Default thresholds. Rationale (tuned M2.10 against the 70-pair fixture
+# corpus — see scripts/tune_similarity_thresholds.py for the sweep):
 #   dup       0.93  two subjects that are this close on MiniLM embeddings
 #                   overlap heavily in topic AND phrasing — one shadows
 #                   the other at routing time, so we refuse the later
 #                   one and ask the caller to merge.
-#   near_dup  0.85  strong topical overlap without lexical identity.
-#                   Safe to warn and let the user decide.
+#   near_dup  0.80  sits centrally in the empirical gap between
+#                   adversarial pairs (max 0.76) and genuine near-dupes
+#                   (min 0.82). Delivers P=1.00 / R=1.00 on the corpus.
 _DEFAULT_DUP_THRESHOLD = 0.93
-_DEFAULT_NEAR_DUP_THRESHOLD = 0.85
+_DEFAULT_NEAR_DUP_THRESHOLD = 0.80
 
 # Connectivity: off by default (min_neighbors=0). When enabled, we want
 # the candidate to land in a non-empty neighborhood — a wikilink target
@@ -92,8 +94,8 @@ class IntakeConfig:
     """Thresholds for the intake gate.
 
     Immutable by design — callers that want different thresholds pass
-    a fresh instance instead of mutating a shared one. Defaults match
-    the numbers in the Phase 2 plan (dup=0.93, near-dup=0.85).
+    a fresh instance instead of mutating a shared one. Defaults are
+    tuned against the M2.10 fixture corpus (dup=0.93, near-dup=0.80).
     """
 
     dup_threshold: float = _DEFAULT_DUP_THRESHOLD
