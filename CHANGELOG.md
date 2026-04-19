@@ -3,6 +3,27 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.1] — 2026-04-20
+
+Point release. Same day as the GA cut, issued to correct one
+behavior: the pre-commit stats hook was silently rewriting README
+numbers from the user's *live* `~/.claude/skill-wiki/` — which can be
+a locally-rebuilt sparse graph — rather than from the shipped
+`graph/wiki-graph.tar.gz`. The tag `v0.5.0` therefore pointed at a
+commit whose README showed the user's local 885-edge rebuild instead
+of the canonical 642,468-edge shipped graph.
+
+### Fixed
+
+- **`src/update_repo_stats.py` source of truth**: the stats refresher
+  now reads node/edge/skill/agent/community counts from
+  `graph/wiki-graph.tar.gz` first (the pinned release asset), and
+  only falls back to `~/.claude/skill-wiki/` when the tarball is
+  absent. Counts no longer drift across developer machines.
+- **README badges + tagline**: restored the authoritative numbers
+  (1,768 skills · 443 agents · 2,211 nodes · 642K edges · 865
+  communities) that the v0.5.0 commit accidentally clobbered.
+
 ## [0.5.0] — 2026-04-20
 
 First stable release. MIT-licensed, CI-matrixed (ubuntu-latest +
@@ -272,5 +293,6 @@ pass. Full test suite: **1316 passed, 2 skipped**.
 - 5 dead imports removed (`os`, `Mapping`, `timedelta` from
   `ctx_lifecycle`; `Path` from `intake_gate`, `intake_pipeline`).
 
+[0.5.1]: https://github.com/stevesolun/ctx/releases/tag/v0.5.1
 [0.5.0]: https://github.com/stevesolun/ctx/releases/tag/v0.5.0
 [0.5.0-rc1]: https://github.com/stevesolun/ctx/releases/tag/v0.5.0-rc1
