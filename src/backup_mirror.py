@@ -64,31 +64,39 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
+# backup_config is the single source of truth for what/where/how we
+# mirror. The module globals below (TOP_FILES, TREE_SOURCES, etc.) are
+# derived from it at import time and kept as tuples so tests and hot
+# paths can continue to monkeypatch or iterate them directly without
+# paying a per-call config read.
+from backup_config import BackupConfig, from_ctx_config
+
 
 CLAUDE_HOME = Path(os.path.expanduser("~/.claude"))
-BACKUPS_DIR = CLAUDE_HOME / "backups"
 
-# Top-level JSON files we always mirror if present.
-TOP_FILES: tuple[str, ...] = (
-    "settings.json",
-    "skill-manifest.json",
-    "pending-skills.json",
-)
+_CFG: BackupConfig = from_ctx_config()
+BACKUPS_DIR = _CFG.snapshot_dir_resolved()
+
+# Top-level files we mirror if present. Populated from BackupConfig so
+# the user can extend the set via src/config.json::backup.top_files or
+# ~/.claude/backup-config.json without editing source.
+TOP_FILES: tuple[str, ...] = _CFG.top_files
 
 # Per-file cap: anything larger is manifested but not copied.
-MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB
+MAX_FILE_BYTES: int = _CFG.max_file_bytes
 
 # Directories inside ~/.claude that we copy as trees.
-TREE_SOURCES: tuple[tuple[str, str], ...] = (
-    # (relative source under CLAUDE_HOME, relative destination in snapshot)
-    ("agents", "agents"),
-    ("skills", "skills"),
+TREE_SOURCES: tuple[tuple[str, str], ...] = tuple(
+    (t.src, t.dest) for t in _CFG.trees
 )
+
+# True when projects/*/memory should be walked and mirrored.
+MEMORY_GLOB: bool = _CFG.memory_glob
 
 # Snapshot ID is a UTC timestamp so lexical sort == chronological sort.
 # Microsecond suffix avoids collisions when snapshots are taken in quick
 # succession (e.g. test runs or scripted automation).
-SNAPSHOT_FMT = "%Y%m%dT%H%M%SZ"
+SNAPSHOT_FMT: str = _CFG.timestamp_format
 
 
 # ── Data model ──────────────────────────────────────────────────────────────
@@ -141,7 +149,12 @@ def _iter_memory_files() -> Iterable[tuple[str, Path]]:
     """
     Walk ~/.claude/projects/<slug>/memory and yield (slug, path) pairs so
     the mirror preserves per-project memory grouping.
+
+    Skipped entirely when MEMORY_GLOB is False (``backup.memory_glob`` in
+    config). Existing callers get the original behaviour by default.
     """
+    if not MEMORY_GLOB:
+        return
     projects = CLAUDE_HOME / "projects"
     if not projects.is_dir():
         return
