@@ -13,14 +13,14 @@ that gets smarter every session.
 !!! tip "Install"
 
     ```bash
-    git clone https://github.com/stevesolun/ctx.git && cd ctx
-    pip install -e .
+    pip install claude-ctx
     ```
 
-    Optional: `pip install -e ".[embeddings]"` (semantic backend),
-    `pip install -e ".[dev]"` (test + lint toolchain). Then
-    `./install.sh python` (or `typescript` / `golang` / `swift` / `php`)
-    to install the language rule set.
+    Optional extras: `pip install "claude-ctx[embeddings]"` for the
+    semantic backend, `pip install "claude-ctx[dev]"` for the
+    pytest/mypy/ruff toolchain. After install the `ctx-scan-repo`,
+    `ctx-skill-quality`, `ctx-skill-health`, and `ctx-toolbox` console
+    scripts are on PATH.
 
 ## Why this exists
 

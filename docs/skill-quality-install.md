@@ -70,7 +70,7 @@ shutdown.
 Run once after install so every installed skill has a baseline score:
 
 ```bash
-python src/skill_quality.py recompute --all
+ctx-skill-quality recompute --all
 ```
 
 This walks `~/.claude/skills/*/SKILL.md` and `~/.claude/agents/*.md`,
@@ -81,19 +81,19 @@ corpus size and disk.
 
 ```bash
 # Full recompute (use sparingly; the Stop hook handles incrementals).
-python src/skill_quality.py recompute --all
+ctx-skill-quality recompute --all
 
 # One slug.
-python src/skill_quality.py recompute --slug python-testing
+ctx-skill-quality recompute --slug python-testing
 
 # Show the most recent score.
-python src/skill_quality.py show python-testing
+ctx-skill-quality show python-testing
 
 # Signal-by-signal breakdown with evidence.
-python src/skill_quality.py explain python-testing
+ctx-skill-quality explain python-testing
 
 # List every slug with its grade, filtered.
-python src/skill_quality.py list --grade D
+ctx-skill-quality list --grade D
 ```
 
 All verbs accept `--json` for piping into other tools.
@@ -167,5 +167,5 @@ reason.
   `persist_quality` is idempotent via the HTML-comment markers. If it
   does, delete both blocks and rerun `recompute`; the first pass will
   re-emit exactly one.
-- **Graph view shows no color.** Run `python src/wiki_graphify.py
+- **Graph view shows no color.** Run `python -m wiki_graphify
   --graph-only` to rebuild; it reads sidecars fresh on every build.

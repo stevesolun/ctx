@@ -40,16 +40,16 @@ which lets dedup work across triggers without any additional state.
 
 ```bash
 # Build and persist a plan for the named toolbox
-python src/council_runner.py build ship-it
+python -m council_runner build ship-it
 
 # Build without persisting (useful for inspection)
-python src/council_runner.py build ship-it --dry-run
+python -m council_runner build ship-it --dry-run
 
 # Show a previously persisted plan
-python src/council_runner.py show <plan_hash>
+python -m council_runner show <plan_hash>
 
 # List recent plans
-python src/council_runner.py list --limit 10
+python -m council_runner list --limit 10
 ```
 
 ## Budget estimation

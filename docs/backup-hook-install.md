@@ -67,7 +67,7 @@ Notes:
 If nothing shows up, run the verb manually to isolate the failure:
 
 ```bash
-python src/backup_mirror.py snapshot-if-changed --reason smoke-test --json
+python -m backup_mirror snapshot-if-changed --reason smoke-test --json
 ```
 
 The JSON output tells you which files the detector considered new,
@@ -103,10 +103,10 @@ The same verb is available as a one-shot command:
 
 ```bash
 # snapshot only when something changed
-python src/backup_mirror.py snapshot-if-changed --reason manual-check
+python -m backup_mirror snapshot-if-changed --reason manual-check
 
 # force an unconditional snapshot with a reason label
-python src/backup_mirror.py create --reason pre-upgrade
+python -m backup_mirror create --reason pre-upgrade
 ```
 
 Both land under `~/.claude/backups/<timestamp>__<reason>/` and write a
@@ -123,7 +123,7 @@ For that gap, run the polling watchdog — a simple loop that calls
 `snapshot-if-changed` every N seconds:
 
 ```bash
-python src/backup_mirror.py watchdog --interval 60
+python -m backup_mirror watchdog --interval 60
 ```
 
 Flags:
@@ -198,13 +198,13 @@ To override per user, add a partial config at
 
 ```bash
 # Dry-run the configured policy — no deletions, JSON report.
-python src/backup_mirror.py prune --policy --dry-run --json
+python -m backup_mirror prune --policy --dry-run --json
 
 # Apply the configured policy for real.
-python src/backup_mirror.py prune --policy
+python -m backup_mirror prune --policy
 
 # Legacy mode (still works): keep only the N newest.
-python src/backup_mirror.py prune --keep 20
+python -m backup_mirror prune --keep 20
 ```
 
 The policy output tells you which snapshots were kept by `keep_latest`

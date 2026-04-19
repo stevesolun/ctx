@@ -71,7 +71,7 @@ council runs. If `level in {"HIGH", "CRITICAL"}` and the toolbox has
 
 ```bash
 # Record a finding
-python src/toolbox_verdict.py record \
+python -m toolbox_verdict record \
   --plan-hash abc123 \
   --level HIGH \
   --title "SQL injection in users.py" \
@@ -80,22 +80,22 @@ python src/toolbox_verdict.py record \
   --rationale "req.form values flow into raw SQL"
 
 # Show the verdict
-python src/toolbox_verdict.py show --plan-hash abc123
+python -m toolbox_verdict show --plan-hash abc123
 
 # JSON payload for piping
-python src/toolbox_verdict.py show --plan-hash abc123 --json
+python -m toolbox_verdict show --plan-hash abc123 --json
 
 # Recent verdicts (retrospective)
-python src/toolbox_verdict.py retro --limit 10
+python -m toolbox_verdict retro --limit 10
 
 # Only HIGH/CRITICAL
-python src/toolbox_verdict.py retro --min-level HIGH
+python -m toolbox_verdict retro --min-level HIGH
 
 # Pretty-print the evidence chain
-python src/toolbox_verdict.py explain --plan-hash abc123
+python -m toolbox_verdict explain --plan-hash abc123
 
 # Remove a single finding
-python src/toolbox_verdict.py clear --plan-hash abc123 --id <id>
+python -m toolbox_verdict clear --plan-hash abc123 --id <id>
 ```
 
 ## Evidence parsing
