@@ -43,7 +43,68 @@ from toolbox_config import (
     save_global,
 )
 
+# Location of the starter templates in the dev source tree. When the
+# package is installed via pip, this path does NOT exist — we fall back
+# to the inlined ``_EMBEDDED_TEMPLATES`` constant below so ``ctx-toolbox
+# init`` works out of the box from PyPI without any data-file packaging.
 TEMPLATES_DIR = Path(__file__).parent.parent / "docs" / "toolbox" / "templates"
+
+# Starter templates embedded as a constant so the installed wheel is
+# self-contained. Kept in sync with docs/toolbox/templates/*.json via
+# ``python -m update_repo_stats`` or a manual re-paste when the JSON
+# files change — the dev-tree JSON files remain the authoring source.
+_EMBEDDED_TEMPLATES: dict[str, dict] = {
+    "docs-review": {
+        "description": "Documentation pass: accuracy, completeness, clarity, and API parity",
+        "pre": ["docs-lookup"],
+        "post": ["technical-writer", "docs-architect", "api-documenter", "tutorial-engineer"],
+        "scope": {"projects": ["*"], "signals": ["documentation"], "analysis": "diff"},
+        "trigger": {"slash": True, "pre_commit": False, "session_end": False, "file_save": "**/*.md"},
+        "budget": {"max_tokens": 120000, "max_seconds": 240},
+        "dedup": {"window_seconds": 300, "policy": "cached"},
+        "guardrail": False,
+    },
+    "fresh-repo-init": {
+        "description": "New-repo bootstrap: run the intent interview, scaffold plan, pick initial toolbox",
+        "pre": [],
+        "post": ["planner", "architect", "tdd-guide"],
+        "scope": {"projects": ["*"], "signals": [], "analysis": "diff"},
+        "trigger": {"slash": True, "pre_commit": False, "session_end": False, "file_save": None},
+        "budget": {"max_tokens": 100000, "max_seconds": 300},
+        "dedup": {"window_seconds": 0, "policy": "fresh"},
+        "guardrail": False,
+    },
+    "refactor-safety": {
+        "description": "Graph-informed refactor review with regression and dead-code checks",
+        "pre": ["architect-review", "refactor-cleaner"],
+        "post": ["architect-review", "refactor-cleaner", "code-reviewer", "test-automator", "dependency-manager"],
+        "scope": {"projects": ["*"], "signals": [], "analysis": "graph-blast"},
+        "trigger": {"slash": True, "pre_commit": False, "session_end": True, "file_save": None},
+        "budget": {"max_tokens": 180000, "max_seconds": 360},
+        "dedup": {"window_seconds": 900, "policy": "cached"},
+        "guardrail": False,
+    },
+    "security-sweep": {
+        "description": "Full-repo security audit with blocking guardrail on HIGH findings",
+        "pre": [],
+        "post": ["security-reviewer", "security-auditor", "penetration-tester", "compliance-auditor", "threat-detection-engineer"],
+        "scope": {"projects": ["*"], "signals": ["security", "auth", "crypto"], "analysis": "full"},
+        "trigger": {"slash": True, "pre_commit": True, "session_end": False, "file_save": "**/auth/**"},
+        "budget": {"max_tokens": 300000, "max_seconds": 600},
+        "dedup": {"window_seconds": 0, "policy": "fresh"},
+        "guardrail": True,
+    },
+    "ship-it": {
+        "description": "Professional council of 7 experts for end-of-feature review",
+        "pre": [],
+        "post": ["code-reviewer", "security-reviewer", "architect-review", "test-automator", "performance-engineer", "accessibility-tester", "docs-lookup"],
+        "scope": {"projects": ["*"], "signals": ["python", "typescript", "rust", "go", "java"], "analysis": "dynamic"},
+        "trigger": {"slash": True, "pre_commit": True, "session_end": True, "file_save": None},
+        "budget": {"max_tokens": 200000, "max_seconds": 420},
+        "dedup": {"window_seconds": 600, "policy": "fresh"},
+        "guardrail": False,
+    },
+}
 
 
 def _print_err(msg: str) -> None:
@@ -51,10 +112,15 @@ def _print_err(msg: str) -> None:
 
 
 def _load_template(name: str) -> dict:
+    # Prefer the on-disk file in the dev source tree (so edits to the JSON
+    # are picked up immediately), then fall back to the embedded copy so
+    # installed wheels work without the docs/ subtree.
     path = TEMPLATES_DIR / f"{name}.json"
-    if not path.exists():
-        raise FileNotFoundError(f"Template not found: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+    if name in _EMBEDDED_TEMPLATES:
+        return dict(_EMBEDDED_TEMPLATES[name])
+    raise FileNotFoundError(f"Template not found: {name}")
 
 
 def cmd_list(args: argparse.Namespace) -> int:
