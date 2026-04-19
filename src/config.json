@@ -116,6 +116,20 @@
     "paths": {
       "sidecar_dir": "~/.claude/skill-quality",
       "router_trace": "~/.claude/router-trace.jsonl"
+    },
+    "lifecycle": {
+      "_comment": "Asymmetric lifecycle gates. Demotions happen automatically from a D-streak; archive requires the skill to sit in _demoted long enough; delete requires typed-slug confirmation. See src/ctx_lifecycle.py.",
+      "archive_threshold_days": 14.0,
+      "delete_threshold_days": 60.0,
+      "consecutive_d_to_demote": 2,
+      "demoted_subdir": "_demoted",
+      "archive_subdir": "_archive",
+      "history_max": 20
+    },
+    "dashboard": {
+      "_comment": "KPI dashboard rendering knobs. See src/kpi_dashboard.py.",
+      "default_top_n": 10,
+      "report_path": "~/.claude/skill-quality/kpi.md"
     }
   }
 }
