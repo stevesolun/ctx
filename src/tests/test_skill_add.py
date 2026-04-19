@@ -248,6 +248,46 @@ class TestBuildEntityPage:
         assert content.startswith("---\n")
         assert "\n---\n" in content
 
+    def test_source_local_by_default(self):
+        content = self._call()
+        assert "source: local" in content
+
+    def test_tank_metadata_sets_source(self):
+        content = self._call(
+            tank_metadata={
+                "source": "tank",
+                "tank_name": "@tank/nextjs",
+                "tank_version": "1.2.0",
+                "tank_integrity": "sha512-abcdef==",
+                "tank_scan_verdict": "pass",
+                "tank_audit_score": 9.7,
+                "tank_published_at": "2026-03-12T08:22:41Z",
+            }
+        )
+        assert "source: tank" in content
+        assert ("tank_name: '@tank/nextjs'" in content) or ('tank_name: "@tank/nextjs"' in content)
+        assert "tank_version: 1.2.0" in content
+        assert "sha512-abcdef" in content
+        assert "tank_scan_verdict: pass" in content
+        assert "tank_audit_score: 9.7" in content
+
+    def test_tank_metadata_none_values_omitted(self):
+        content = self._call(
+            tank_metadata={
+                "source": "tank",
+                "tank_name": "@tank/foo",
+                "tank_version": "1.0.0",
+                "tank_integrity": None,
+                "tank_scan_verdict": None,
+                "tank_audit_score": None,
+                "tank_audit_status": None,
+                "tank_published_at": None,
+            }
+        )
+        assert "tank_integrity" not in content
+        assert "tank_scan_verdict" not in content
+        assert "tank_audit_score" not in content
+
 
 # ---------------------------------------------------------------------------
 # write_entity_page

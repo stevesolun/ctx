@@ -3,12 +3,16 @@
 skill_add.py -- Add new skills with automatic micro-skill conversion and wiki ingestion.
 
 Usage:
-    # Single skill
+    # Single skill from a local SKILL.md
     python skill_add.py --skill-path /path/to/SKILL.md --name my-skill \
         --wiki ~/.claude/skill-wiki --skills-dir ~/.claude/skills
 
     # Batch from directory
     python skill_add.py --scan-dir /path/to/new-skills/ \
+        --wiki ~/.claude/skill-wiki --skills-dir ~/.claude/skills
+
+    # Pull from the Tank registry (https://tankpkg.dev) — requires tank-sdk
+    python skill_add.py --tank @tank/nextjs@1.2.0 \
         --wiki ~/.claude/skill-wiki --skills-dir ~/.claude/skills
 """
 
@@ -96,11 +100,14 @@ def build_entity_page(
     pipeline_path: Path | None,
     related: list[str],
     scan_sources: list[str],
+    tank_metadata: dict | None = None,
 ) -> str:
     """Render the full entity page markdown for a skill."""
     pipeline_path_str = (
         f"converted/{name}/" if has_pipeline else "null"
     )
+
+    source_value = tank_metadata.get("source") if tank_metadata else "local"
 
     fm_dict: dict = {
         "title": name,
@@ -109,7 +116,7 @@ def build_entity_page(
         "type": "skill",
         "status": "installed",
         "tags": tags,
-        "source": "local",
+        "source": source_value,
         "original_path": str(original_path),
         "original_lines": line_count,
         "has_pipeline": has_pipeline,
@@ -121,6 +128,19 @@ def build_entity_page(
         "avg_session_rating": None,
         "notes": "",
     }
+    if tank_metadata:
+        for key in (
+            "tank_name",
+            "tank_version",
+            "tank_integrity",
+            "tank_scan_verdict",
+            "tank_audit_score",
+            "tank_audit_status",
+            "tank_published_at",
+        ):
+            value = tank_metadata.get(key)
+            if value is not None:
+                fm_dict[key] = value
     if scan_sources:
         fm_dict["sources"] = scan_sources
 
@@ -244,10 +264,15 @@ def add_skill(
     name: str,
     wiki_path: Path,
     skills_dir: Path,
+    tank_metadata: dict | None = None,
 ) -> dict:
     """Add a single skill: install, convert if needed, ingest into wiki.
 
     Returns a result dict with keys: name, installed, converted, is_new_page.
+
+    When ``tank_metadata`` is provided (see ``sources.tank_source.fetch_from_tank``),
+    Tank-specific provenance (scan verdict, audit score, integrity, publish
+    date) is recorded in the entity page frontmatter.
     """
     validate_skill_name(name)
 
@@ -313,6 +338,7 @@ def add_skill(
         pipeline_path=pipeline_path,
         related=related,
         scan_sources=scan_sources,
+        tank_metadata=tank_metadata,
     )
     is_new = write_entity_page(wiki_path, name, page_content)
 
@@ -345,6 +371,19 @@ def main() -> None:
     parser.add_argument("--skill-path", help="Path to a single SKILL.md to add")
     parser.add_argument("--name", help="Skill name (required with --skill-path)")
     parser.add_argument("--scan-dir", help="Directory of skills to batch-add (each subdir with SKILL.md)")
+    parser.add_argument(
+        "--tank",
+        metavar="REF",
+        help="Pull a skill from the Tank registry (e.g. @tank/nextjs or @tank/nextjs@1.2.0). Requires tank-sdk.",
+    )
+    parser.add_argument(
+        "--tank-registry",
+        help="Override the Tank registry URL (defaults to ~/.tank/config.json or https://www.tankpkg.dev)",
+    )
+    parser.add_argument(
+        "--tank-token",
+        help="Override the Tank auth token (defaults to ~/.tank/config.json or $TANK_TOKEN)",
+    )
     parser.add_argument("--skip-existing", action="store_true", help="Skip skills already installed (prevents overwrites)")
     parser.add_argument("--wiki", default=str(cfg.wiki_dir), help="Wiki path")
     parser.add_argument("--skills-dir", default=str(cfg.skills_dir), help="Skills install path")
@@ -356,13 +395,18 @@ def main() -> None:
     ensure_wiki(str(wiki_path))
     skills_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.skill_path and args.scan_dir:
-        print("Error: use --skill-path or --scan-dir, not both.", file=sys.stderr)
+    mode_flags = [bool(args.skill_path), bool(args.scan_dir), bool(args.tank)]
+    if sum(mode_flags) > 1:
+        print("Error: use exactly one of --skill-path, --scan-dir, or --tank.", file=sys.stderr)
         sys.exit(1)
 
-    if not args.skill_path and not args.scan_dir:
-        print("Error: --skill-path or --scan-dir is required.", file=sys.stderr)
+    if not any(mode_flags):
+        print("Error: --skill-path, --scan-dir, or --tank is required.", file=sys.stderr)
         sys.exit(1)
+
+    if args.tank:
+        _run_tank_fetch(args, wiki_path, skills_dir)
+        return
 
     # Build the list of (source_path, name) pairs to process
     candidates: list[tuple[Path, str]] = []
@@ -416,6 +460,52 @@ def main() -> None:
             print(f"  [{i}/{total}] ERROR: {name}: {exc}", file=sys.stderr)
 
     print(f"\nDone: {added} added, {converted} converted, {skipped} skipped, {errors} errors")
+
+
+def _run_tank_fetch(args: argparse.Namespace, wiki_path: Path, skills_dir: Path) -> None:
+    import shutil
+
+    from sources.tank_source import TankFetchError, fetch_from_tank
+
+    try:
+        skill_md, metadata = fetch_from_tank(
+            args.tank,
+            registry_url=args.tank_registry,
+            token=args.tank_token,
+        )
+    except TankFetchError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as exc:
+        print(f"Error: failed to fetch {args.tank!r}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    cleanup_dir = metadata.pop("_tank_cleanup_dir", None)
+    try:
+        slug = metadata["tank_slug"]
+        if args.skip_existing and (skills_dir / slug / "SKILL.md").exists():
+            print(f"  [skipped] {slug} (already installed)")
+            return
+
+        try:
+            result = add_skill(
+                source_path=skill_md,
+                name=slug,
+                wiki_path=wiki_path,
+                skills_dir=skills_dir,
+                tank_metadata=metadata,
+            )
+        except Exception as exc:
+            print(f"Error: {slug}: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        status = "converted" if result["converted"] else "installed"
+        provenance = metadata.get("tank_name", "")
+        version = metadata.get("tank_version", "")
+        print(f"  [{status}] {slug} ← {provenance}@{version}")
+    finally:
+        if cleanup_dir:
+            shutil.rmtree(cleanup_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

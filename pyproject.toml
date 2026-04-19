@@ -41,6 +41,9 @@ embeddings = [
     "sentence-transformers>=2,<4",
     "torch>=2,<3",
 ]
+tank = [
+    "tank-sdk>=0.14.0",
+]
 
 [tool.setuptools]
 # src/ holds ~55 flat top-level modules (scan_repo.py, skill_quality.py, …),
@@ -108,7 +111,8 @@ py-modules = [
 ]
 # Do NOT ship the test suite to PyPI. The previous build inadvertently
 # bundled src/tests/ because it was the only directory with __init__.py.
-packages = []
+# `sources/` is a real package (optional Tank integration, gated by [tank] extra).
+packages = ["sources"]
 
 [tool.setuptools.package-data]
 "*" = ["config.json", "skill-registry.json"]
