@@ -34,7 +34,11 @@ Commands:
         overwrites live files; with --dry-run it prints what would change.
 
     python src/backup_mirror.py prune --keep <N>
-        Delete all but the N newest snapshots.
+        Delete all but the N newest snapshots. Legacy mode.
+
+    python src/backup_mirror.py prune --policy [--dry-run] [--json]
+        Apply the configured retention policy (keep_latest + keep_daily).
+        ``--dry-run`` reports what would be removed without deleting.
 
 Design notes:
 
@@ -596,23 +600,91 @@ def _resolve_restore_target(dest_rel: str, claude_home: Path) -> Path:
 # ── Prune ───────────────────────────────────────────────────────────────────
 
 
+def _delete_snapshot_dirs(
+    snaps_to_remove: Iterable[SnapshotInfo],
+    backups_dir: Path,
+) -> list[str]:
+    """Actually delete snapshot directories. Returns IDs successfully removed.
+
+    Refuses to rmtree a symlinked child (which would follow out of
+    backups_dir) or any path that fails the containment check.
+    """
+    removed: list[str] = []
+    for snap in snaps_to_remove:
+        snap_path = Path(snap.path)
+        if snap_path.is_symlink() or not _contained(snap_path, backups_dir):
+            continue
+        shutil.rmtree(snap_path, ignore_errors=True)
+        removed.append(snap.snapshot_id)
+    return removed
+
+
 def prune_snapshots(keep: int,
                     backups_dir: Path | None = None) -> tuple[str, ...]:
+    """Legacy prune: keep only the ``keep`` newest snapshots.
+
+    Retained for backward compatibility. New callers should prefer
+    :func:`prune_by_policy`, which honours both ``keep_latest`` and
+    ``keep_daily`` from the active :class:`BackupRetention`.
+    """
     if keep < 0:
         raise ValueError(f"keep must be >= 0, got {keep}")
     backups_dir = backups_dir if backups_dir is not None else BACKUPS_DIR
     snaps = list_snapshots(backups_dir)
     to_remove = snaps[keep:]
-    removed: list[str] = []
-    for snap in to_remove:
-        snap_path = Path(snap.path)
-        # Refuse to rmtree a symlinked child (would follow out of backups)
-        # or any path that does not resolve inside backups_dir.
-        if snap_path.is_symlink() or not _contained(snap_path, backups_dir):
-            continue
-        shutil.rmtree(snap_path, ignore_errors=True)
-        removed.append(snap.snapshot_id)
-    return tuple(removed)
+    return tuple(_delete_snapshot_dirs(to_remove, backups_dir))
+
+
+def prune_by_policy(
+    retention: "BackupRetention | None" = None,
+    backups_dir: Path | None = None,
+    *,
+    dry_run: bool = False,
+    now: float | None = None,
+) -> "RetentionPlan":
+    """Prune snapshots according to the configured retention policy.
+
+    Parameters
+    ----------
+    retention
+        Retention policy to apply. Defaults to ``_CFG.retention``.
+    backups_dir
+        Root to prune. Defaults to ``BACKUPS_DIR``.
+    dry_run
+        When True, compute the plan but delete nothing.
+    now
+        Clock override (seconds since epoch) for deterministic tests.
+
+    Returns
+    -------
+    RetentionPlan
+        Structured plan showing what was kept and what was (or would
+        have been) deleted.
+    """
+    from backup_retention import RetentionPlan, plan_prune  # noqa: PLC0415
+
+    policy = retention if retention is not None else _CFG.retention
+    backups_dir = backups_dir if backups_dir is not None else BACKUPS_DIR
+    snaps = list_snapshots(backups_dir)
+    plan = plan_prune(snaps, policy, now=now)
+
+    if dry_run:
+        return plan
+
+    by_id = {s.snapshot_id: s for s in snaps}
+    to_remove = [by_id[i] for i in plan.delete if i in by_id]
+    removed = _delete_snapshot_dirs(to_remove, backups_dir)
+    # Any snapshot in plan.delete that we refused to touch (symlink or
+    # containment failure) stays on disk — surface that honestly by
+    # trimming the plan's delete list to what actually happened.
+    actually_removed = set(removed)
+    pruned_delete = tuple(i for i in plan.delete if i in actually_removed)
+    return RetentionPlan(
+        keep=plan.keep,
+        delete=pruned_delete,
+        protected_by_latest=plan.protected_by_latest,
+        protected_by_daily=plan.protected_by_daily,
+    )
 
 
 # ── Snapshot-if-changed ─────────────────────────────────────────────────────
@@ -660,6 +732,13 @@ def snapshot_if_changed(reason: str | None = None,
         )
 
     snap_path = create_snapshot(backups_dir=backups_dir, now=now, reason=reason)
+    # Auto-apply retention so the hook cannot fill the disk with
+    # snapshot folders. Pruning failures must not propagate — a
+    # successful snapshot is still a success.
+    try:
+        prune_by_policy(backups_dir=backups_dir, now=now)
+    except (OSError, ValueError) as exc:
+        print(f"[snapshot-if-changed] prune skipped: {exc}", file=sys.stderr)
     return SnapshotIfChangedResult(
         snapshot_path=snap_path, report=report, reason=reason,
     )
@@ -766,6 +845,26 @@ def cmd_restore(args: argparse.Namespace) -> int:
 
 
 def cmd_prune(args: argparse.Namespace) -> int:
+    if args.policy:
+        plan = prune_by_policy(dry_run=args.dry_run)
+        if args.json:
+            payload = plan.to_dict()
+            payload["dry_run"] = bool(args.dry_run)
+            print(json.dumps(payload, indent=2))
+            return 0
+        prefix = "[prune:dry-run]" if args.dry_run else "[prune]"
+        print(
+            f"{prefix} kept={len(plan.keep)} removed={len(plan.delete)} "
+            f"(latest={len(plan.protected_by_latest)} "
+            f"daily={len(plan.protected_by_daily)})"
+        )
+        for r in plan.delete:
+            print(f"  {'would remove' if args.dry_run else 'removed'} {r}")
+        return 0
+
+    if args.keep is None:
+        print("prune requires either --policy or --keep N", file=sys.stderr)
+        return 2
     removed = prune_snapshots(args.keep)
     for r in removed:
         print(f"removed {r}")
@@ -806,8 +905,19 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--dry-run", action="store_true")
     r.set_defaults(func=cmd_restore)
 
-    pr = sub.add_parser("prune", help="Keep only the N newest snapshots.")
-    pr.add_argument("--keep", type=int, required=True)
+    pr = sub.add_parser(
+        "prune",
+        help="Delete old snapshots. Use --policy for configured retention "
+             "(keep_latest + keep_daily) or --keep N for legacy mode.",
+    )
+    pr.add_argument("--keep", type=int, default=None,
+                    help="Legacy: keep only the N newest snapshots.")
+    pr.add_argument("--policy", action="store_true",
+                    help="Apply retention policy from config.")
+    pr.add_argument("--dry-run", action="store_true",
+                    help="Report what would be pruned; delete nothing.")
+    pr.add_argument("--json", action="store_true",
+                    help="Emit plan as JSON. Only with --policy.")
     pr.set_defaults(func=cmd_prune)
 
     return p
