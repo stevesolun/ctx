@@ -155,6 +155,11 @@ def _iter_quality_slugs(sidecar_dir: Path) -> list[str]:
         name = path.name
         if name.endswith(".lifecycle.json"):
             continue
+        # Skip internal state files (dotfiles like .hook-state.json) —
+        # they share the sidecar directory but are not entity slugs and
+        # fail the strict slug validator downstream.
+        if name.startswith("."):
+            continue
         out.append(path.stem)
     return out
 

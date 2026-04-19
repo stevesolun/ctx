@@ -53,7 +53,12 @@ def load_graph(path: Path | None = None) -> nx.Graph:
                 sorted(_EDGE_KEYS),
             )
             return nx.Graph()
-        return node_link_graph(data)
+        # NetworkX 2.x wrote edges under "links"; NetworkX 3.x defaults to
+        # "edges" and errors out when the schema doesn't match. Detect
+        # which schema the file actually uses and pass it explicitly so
+        # both old and new graph.json files round-trip cleanly.
+        edges_key = "links" if "links" in data else "edges"
+        return node_link_graph(data, edges=edges_key)
     except json.JSONDecodeError as exc:
         logger.warning("graph.json is not valid JSON (%s); returning empty graph", exc)
     except UnicodeDecodeError as exc:
