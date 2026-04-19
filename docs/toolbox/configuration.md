@@ -116,19 +116,19 @@ the commit) if level is `HIGH` or `CRITICAL`. See
 
 ```bash
 # List all toolboxes, both layers merged
-python src/toolbox.py list
+ctx-toolbox list
 
 # Show resolved config for one toolbox
-python src/toolbox.py show ship-it
+ctx-toolbox show ship-it
 
 # Activate a starter preset
-python src/toolbox.py activate ship-it
+ctx-toolbox activate ship-it
 
 # Export merged config
-python src/toolbox.py export > my-toolboxes.yaml
+ctx-toolbox export > my-toolboxes.yaml
 
 # Import from file
-python src/toolbox.py import my-toolboxes.yaml
+ctx-toolbox import my-toolboxes.yaml
 ```
 
 ## Validation

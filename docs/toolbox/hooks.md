@@ -48,19 +48,16 @@ The `2` exit from `pre-commit` is what actually blocks `git commit`.
 
 ## Installation
 
-The install script wires hooks into `.githooks/` and `~/.claude/hooks.json`:
-
-```bash
-./install.sh python
-```
-
-Manual wire-up:
+`pip install claude-ctx` exposes `ctx-toolbox` on PATH; wire it into
+`.githooks/pre-commit` directly:
 
 ```bash
 # .githooks/pre-commit
 #!/bin/sh
-python src/toolbox_hooks.py run --event pre-commit
+ctx-toolbox run --event pre-commit
 ```
+
+Then point git at the directory once: `git config core.hooksPath .githooks`.
 
 Then `git config core.hooksPath .githooks`.
 

@@ -82,15 +82,15 @@ Best for: `git init` followed by `toolbox init`.
 
 ```bash
 # Pick starters interactively
-python src/intent_interview.py init
+python -m intent_interview init
 
 # Non-interactive preset
-python src/intent_interview.py init --preset existing --apply
-python src/intent_interview.py init --preset docs-heavy --apply
-python src/intent_interview.py init --preset security-first --apply
+python -m intent_interview init --preset existing --apply
+python -m intent_interview init --preset docs-heavy --apply
+python -m intent_interview init --preset security-first --apply
 
 # Activate a specific starter directly
-python src/toolbox.py activate ship-it
+ctx-toolbox activate ship-it
 ```
 
 See [Intent interview](intent-interview.md) for the full flow.

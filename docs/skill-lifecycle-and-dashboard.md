@@ -36,8 +36,8 @@ existing non-empty value — human edits win.
 Run once after the scorer has seeded the sidecars:
 
 ```bash
-python src/skill_category.py backfill --dry-run
-python src/skill_category.py backfill            # apply
+python -m skill_category backfill --dry-run
+python -m skill_category backfill            # apply
 ```
 
 Unresolved slugs (no tag matched the taxonomy) are listed for manual
@@ -50,21 +50,21 @@ only the safe tiers (Watch + Demote).
 
 ```bash
 # List every pending transition; no writes.
-python src/ctx_lifecycle.py review --dry-run
+python -m ctx_lifecycle review --dry-run
 
 # Apply all Watch/Demote transitions without prompting.
-python src/ctx_lifecycle.py review --auto
+python -m ctx_lifecycle review --auto
 
 # Archive a specific slug. Requires the demoted aging threshold to have passed.
-python src/ctx_lifecycle.py archive <slug>
+python -m ctx_lifecycle archive <slug>
 
 # Delete archived slugs that exceeded the delete threshold.
 # Requires typed-slug confirmation per entry even with --auto.
-python src/ctx_lifecycle.py purge
+python -m ctx_lifecycle purge
 
 # List archived slugs with optional diffs, or restore one.
-python src/ctx_lifecycle.py review-archived --show-diff
-python src/ctx_lifecycle.py review-archived --restore <slug>
+python -m ctx_lifecycle review-archived --show-diff
+python -m ctx_lifecycle review-archived --restore <slug>
 ```
 
 Filesystem moves: demote → `<skills_dir>/_demoted/<slug>/`, archive →
@@ -90,16 +90,16 @@ fallback), and emits Markdown or JSON.
 
 ```bash
 # Dump Markdown to stdout.
-python src/kpi_dashboard.py render
+python -m kpi_dashboard render
 
 # Persist to a file — good target for the cron / pre-push hook.
-python src/kpi_dashboard.py render --out ~/.claude/skill-quality/kpi.md
+python -m kpi_dashboard render --out ~/.claude/skill-quality/kpi.md
 
 # Machine-readable.
-python src/kpi_dashboard.py render --json --out kpi.json
+python -m kpi_dashboard render --json --out kpi.json
 
 # Terse one-screen summary.
-python src/kpi_dashboard.py summary
+python -m kpi_dashboard summary
 ```
 
 ### What's in the report

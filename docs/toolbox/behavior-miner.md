@@ -54,7 +54,7 @@ anything new. Example output:
 [behavior-miner] 2 suggestions:
   - bundle:reviewers-pair  (4 co-invocations)
     → add to 'review' toolbox:
-       python src/toolbox.py add review --post code-reviewer,security-reviewer
+       ctx-toolbox add review --post code-reviewer,security-reviewer
   - promote:python-patterns  (loaded in 12/12 sessions)
     → promote to 'pre' in your default toolbox
 ```
@@ -66,16 +66,16 @@ or accepts the suggestion via `toolbox init --accept <id>`.
 
 ```bash
 # Rebuild the profile from scratch (scans ~/.claude/history/)
-python src/behavior_miner.py build
+python -m behavior_miner build
 
 # Show current suggestions
-python src/behavior_miner.py show
+python -m behavior_miner show
 
 # Print digest (same output as session-end hook)
-python src/behavior_miner.py digest
+python -m behavior_miner digest
 
 # Drop a suggestion (noise reduction)
-python src/behavior_miner.py dismiss bundle:reviewers-pair
+python -m behavior_miner dismiss bundle:reviewers-pair
 ```
 
 ## Privacy

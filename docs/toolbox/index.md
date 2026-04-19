@@ -53,7 +53,7 @@ toolboxes:
 Run it manually:
 
 ```bash
-python src/toolbox.py run review
+ctx-toolbox run review
 ```
 
 Or let the `pre-commit` hook fire it automatically — see

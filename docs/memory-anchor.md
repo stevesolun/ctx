@@ -54,16 +54,16 @@ If any candidate hits, the ref is *live*; otherwise *dead*.
 
 ```bash
 # JSON report for downstream tooling
-python src/memory_anchor.py scan
+python -m memory_anchor scan
 
 # Human dashboard
-python src/memory_anchor.py dashboard
+python -m memory_anchor dashboard
 
 # CI gate: exit 2 if any dead references remain
-python src/memory_anchor.py check --strict
+python -m memory_anchor check --strict
 
 # Override repo / memory roots
-python src/memory_anchor.py check --strict \
+python -m memory_anchor check --strict \
   --repo-root /path/to/repo \
   --memory-root /path/to/project/memory
 ```

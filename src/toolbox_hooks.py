@@ -85,8 +85,10 @@ def _trigger_matches(tb: Toolbox, event: str, file_path: str | None) -> bool:
     if event == "file-save":
         if not t.file_save or not file_path:
             return False
-        # Normalize to forward slashes for cross-platform glob compatibility
-        normalized = file_path.replace(os.sep, "/")
+        # Normalize backslashes unconditionally — a Windows path can arrive on
+        # a Linux runner (via config, JSON, or cross-platform tooling), where
+        # os.sep is '/' and the replace would be a no-op.
+        normalized = file_path.replace("\\", "/")
         return fnmatch.fnmatch(normalized, t.file_save)
     return False
 

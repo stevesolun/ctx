@@ -36,7 +36,7 @@ touch.
 ## Self-healing
 
 ```bash
-python src/skill_health.py heal
+ctx-skill-health heal
 ```
 
 - drops orphaned entries from `skill-manifest.json`
@@ -50,16 +50,16 @@ If nothing needs healing, prints `[heal] nothing to do.` and exits 0.
 
 ```bash
 # Emit a full JSON report
-python src/skill_health.py scan
+ctx-skill-health scan
 
 # Pretty dashboard
-python src/skill_health.py dashboard
+ctx-skill-health dashboard
 
 # CI gate: exit 2 if any error-severity issue or drift is present
-python src/skill_health.py check --strict
+ctx-skill-health check --strict
 
 # Apply safe autofixes to manifest + pending
-python src/skill_health.py heal
+ctx-skill-health heal
 ```
 
 ## Data model

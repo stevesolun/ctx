@@ -48,19 +48,19 @@ stray extension match.
 
 ```bash
 # Default: interactive, dry-run (no write)
-python src/intent_interview.py init
+python -m intent_interview init
 
 # Detect state only
-python src/intent_interview.py detect
+python -m intent_interview detect
 
 # Preset flows (no prompts)
-python src/intent_interview.py init --preset blank --apply
-python src/intent_interview.py init --preset existing --apply
-python src/intent_interview.py init --preset docs-heavy --apply
-python src/intent_interview.py init --preset security-first --apply
+python -m intent_interview init --preset blank --apply
+python -m intent_interview init --preset existing --apply
+python -m intent_interview init --preset docs-heavy --apply
+python -m intent_interview init --preset security-first --apply
 
 # Fully structured (CI / scripted setup)
-python src/intent_interview.py init \
+python -m intent_interview init \
   --non-interactive \
   --starters ship-it,security-sweep \
   --suggestions 1,2 \
