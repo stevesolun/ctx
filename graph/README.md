@@ -1,6 +1,8 @@
 # Knowledge Graph
 
-Pre-built knowledge graph of **2,211 nodes** (1,768 skills + 443 agents) with **642,468 edges** across **865 communities**.
+Pre-built knowledge graph of **2,235 nodes** (1,789 skills + 446 agents) with **448,799 edges** across **95 communities**. Average degree 414.8, max degree 1,144, **191,770 skill↔agent cross-type edges**. Every node is reproducibly derived from the YAML `tags:` list plus slug-token pseudo-tags (stop-word-filtered). Rebuild with `ctx-wiki-graphify`.
+
+> v0.5.x shipped a stale `graph.json` with 642K edges from a build path that no longer exists. When the live build ran it silently produced only 861 edges because of a `DENSE_TAG_THRESHOLD=20` regression that dropped every tag with more than 20 nodes. v0.6.0 fixes the threshold, adds slug-token semantic edges, teaches `parse_frontmatter` to read multi-line YAML lists, and ships a reproducible 448K-edge graph.
 
 ## Files
 
@@ -17,12 +19,12 @@ Pre-built knowledge graph of **2,211 nodes** (1,768 skills + 443 agents) with **
 
 ### What's inside `wiki-graph.tar.gz`
 
-- `entities/skills/` — **1,768** skill entity pages with YAML frontmatter
-- `entities/agents/` — **443** agent entity pages
-- `concepts/` — **61** auto-generated community concept pages
-- `converted/` — **952** micro-skill pipelines (5-stage gated format)
-- `graphify-out/graph.json` — full knowledge graph (2,211 nodes, 642,468 edges)
-- `graphify-out/communities.json` — community detection results (865 communities)
+- `entities/skills/` — **1,789** skill entity pages with YAML frontmatter
+- `entities/agents/` — **446** agent entity pages
+- `concepts/` — **74** auto-generated community concept pages
+- `converted/` — **956** micro-skill pipelines (5-stage gated format)
+- `graphify-out/graph.json` — full knowledge graph (2,235 nodes, 448,799 edges)
+- `graphify-out/communities.json` — community detection results (95 communities)
 - `catalog.md` — bulk listing of all skills and agents
 - `SCHEMA.md`, `index.md`, `log.md` — wiki infrastructure
 - `.obsidian/` — Obsidian vault config, so the extracted tree opens as a graph directly in Obsidian

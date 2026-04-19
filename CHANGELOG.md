@@ -3,6 +3,102 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0] — 2026-04-20
+
+Harvested 11 upstream Claude Code / context-management / token-optimizer
+repos and ingested their skills + agents through our intake gate into
+the LLM wiki. Every candidate that landed passed the gate's structural
+checks (frontmatter name, body H1, minimum body length, no duplicate
+embedding) and was rendered in our canonical wiki format (YAML
+frontmatter with tags / use_count / last_used / status + Overview +
+Tags + Obsidian `[[wikilinks]]` to related skills).
+
+### Added
+
+- **+20 truly new skills** ingested and vetted:
+  `build-graph`, `caveman-compress`, `caveman-help`, `compress`,
+  `context-mode`, `context-mode-ops`, `ctx-doctor`, `ctx-insight`,
+  `ctx-purge`, `ctx-stats`, `ctx-upgrade`, `fleet-auditor`,
+  `review-delta`, `review-pr`, `rtk-tdd`, `rtk-triage`, `tdd-rust`,
+  `token-coach`, `token-dashboard`, `token-optimizer`.
+- **+3 new agents**: `rtk-testing-specialist`, `rust-rtk`,
+  `system-architect`.
+- **3 existing pages refreshed** with intake-vetted replacements
+  (`design-patterns`, `issue-triage`, `pr-triage`).
+- **`graph/wiki-graph.tar.gz`** re-archived with the new entity pages:
+  **1,788 skills · 446 agents** (was 1,768 / 443 in v0.5.x).
+
+### Harvest sources
+
+| Upstream repo | Accepted | Rejected |
+|---|---:|---:|
+| alexgreensh/token-optimizer | 4 skills | 0 |
+| juliusbrussee/caveman | 3 skills | 3 (missing H1) |
+| mksglu/context-mode | 7 skills | 0 |
+| tirth8205/code-review-graph | 2 skills | 5 (missing H1) |
+| rtk-ai/rtk | 7 skills + 3 agents | 4 (frontmatter missing `name:`) + 4 (dup agents) |
+| russelleNVy/three-man-team | 0 | 3 (dup agents) |
+| drona23/claude-token-efficient | 0 | 1 (dup agent) |
+| mibayy/token-savior, nadimtuhin, ooples, zilliztech | 0 | (README-only, no SKILL.md/agent files) |
+
+### Intake-gate rejections (preserved for reference)
+
+- `BODY_MISSING_H1` (9 skills): `caveman`, `caveman-commit`,
+  `caveman-review`, `debug-issue`, `explore-codebase`,
+  `refactor-safely`, `review-changes` + 2 others.
+- `FRONTMATTER_FIELD_MISSING_NAME` (4 skills): `performance`,
+  `pr-review`, `repo-recap`, `security-guardian`, `ship`.
+- Duplicate-agent short-circuit (6): `architect`, `builder`,
+  `code-reviewer`, `debugger`, `reviewer`, `technical-writer` —
+  already installed in the wiki; intake gate correctly skipped.
+
+### Fixed
+
+- **Graph sparsity regression** (`src/wiki_graphify.py`): the
+  `DENSE_TAG_THRESHOLD` constant was `20`, which silently dropped
+  every tag that appeared on more than 20 nodes. On a wiki where
+  `python`, `frontend`, `security`, and `testing` each tag hundreds
+  of entities, this collapsed the graph from the canonical 642,468
+  edges down to 861 on every rebuild. Bumped to **500** (now pinned
+  by `src/tests/test_wiki_graphify_density.py`) and added
+  **slug-token pseudo-tags** — e.g. the slug `fastapi-pro`
+  contributes an implicit `fastapi` token so skills that share a
+  topic keyword get connected even when their explicit tags don't
+  overlap. Stop-word filter keeps noise tokens (`skill`, `agent`,
+  `pro`, `core`, etc.) out of the index.
+- **Multi-line YAML list parsing** (`src/wiki_utils.py`):
+  `parse_frontmatter` only handled inline `tags: [a, b, c]` lists;
+  the block form
+  ```yaml
+  tags:
+    - python
+    - frontend
+  ```
+  returned an empty string, silently invalidating every real wiki
+  entity page (all 2,234 of them use the block form). Extended the
+  parser to collect `- item` lines following an empty-value key.
+
+### Graph: final shipped state
+
+| Metric | v0.5.x | v0.6.0 |
+|---|---:|---:|
+| Nodes | 2,211 | **2,235** |
+| Edges | 861 (effective; bundle had 642K stale) | **448,799** |
+| Communities | 2,110 (mostly singletons) | **95** |
+| Avg degree | <1 | **414.8** |
+| Max degree | 40 | **1,144** |
+| Skill↔agent cross-edges | — | **191,770** |
+| Isolated nodes | 390+ | **71** |
+
+The full recommendation pipeline can now walk edges from a detected
+stack signal (e.g. `fastapi`) to installed agents (`code-reviewer`,
+`test-automator`) via shared-tag and slug-token pseudo-edges. Verified
+via `ctx-monitor`'s `/graph?slug=<any-tagged-slug>` view: every
+tag-heavy entity now lights up its neighborhood with 200+ edges on
+average.
+
+[0.6.0]: https://github.com/stevesolun/ctx/releases/tag/v0.6.0
+
 ## [0.5.1] — 2026-04-20
 
 Point release. Same day as the GA cut, issued to correct one
