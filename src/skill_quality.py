@@ -819,6 +819,9 @@ def persist_quality(
 
     # Best-effort audit: one line per score refresh so postmortem
     # scripts can trace why a sidecar changed at a specific instant.
+    # Session attribution comes from ``CTX_SESSION_ID`` in the env —
+    # quality_on_session_end.py exports this before invoking recompute
+    # so the monitor's per-session timeline can filter by session_id.
     try:
         from ctx_audit_log import log  # local import, no CLI dep
         subject_type = "agent" if score.subject_type == "agent" else "skill"
@@ -826,6 +829,7 @@ def persist_quality(
         log(
             event, subject_type=subject_type, subject=score.slug,
             actor="hook",
+            session_id=os.environ.get("CTX_SESSION_ID"),
             meta={
                 "grade": score.grade,
                 "raw_score": round(score.raw_score, 4),

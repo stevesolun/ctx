@@ -105,7 +105,18 @@ def clear_pending_unload(names: list[str]) -> None:
 
 
 def unload_from_session(names: list[str]) -> list[str]:
-    """Remove skills/agents from the current session manifest."""
+    """Remove skills/agents from the current session manifest.
+
+    Emits one ``unload`` line per removed skill to
+    ``~/.claude/skill-events.jsonl`` and one ``skill.unloaded`` record
+    to the unified audit log. The random-load-unload playbook caught
+    that loads flowed through skill-events.jsonl but unloads didn't,
+    making the two halves of the lifecycle asymmetric at the ground-
+    truth log level. Fix both at the single choke point.
+    """
+    import uuid
+    from datetime import datetime, timezone
+
     manifest = load_manifest()
     removed: list[str] = []
     remaining = []
@@ -117,6 +128,38 @@ def unload_from_session(names: list[str]) -> list[str]:
             remaining.append(entry)
     manifest["load"] = remaining
     save_manifest(manifest)
+
+    # Emit ground-truth unload events. Best-effort — a disk failure on
+    # the event log must not block the manifest save above.
+    if removed:
+        events_path = CLAUDE_DIR / "skill-events.jsonl"
+        session_id = os.environ.get("CTX_SESSION_ID") or f"unload-{uuid.uuid4().hex[:8]}"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        try:
+            events_path.parent.mkdir(parents=True, exist_ok=True)
+            with events_path.open("a", encoding="utf-8") as fh:
+                for slug in removed:
+                    fh.write(json.dumps({
+                        "event": "unload",
+                        "event_id": uuid.uuid4().hex,
+                        "meta": {"source": "skill_unload"},
+                        "session_id": session_id,
+                        "skill": slug,
+                        "timestamp": now_iso,
+                    }) + "\n")
+        except OSError as exc:
+            print(f"Warning: failed to log unload events: {exc}", file=sys.stderr)
+        try:
+            from ctx_audit_log import log_skill_event
+            for slug in removed:
+                log_skill_event(
+                    "skill.unloaded", slug,
+                    actor="cli", session_id=session_id,
+                    meta={"via": "skill_unload"},
+                )
+        except Exception:  # noqa: BLE001 — audit best-effort
+            pass
+
     return removed
 
 

@@ -34,9 +34,20 @@ untested.
 4. `~/.claude/settings.json` has all rc7 hooks wired
    (PostToolUse: context_monitor + skill_add_detector + skill_suggest
    + backup_on_change; Stop: usage_tracker + quality_on_session_end).
-5. Stale-threshold override for the test run:
-   `export CTX_STALE_THRESHOLD_SESSIONS=3` (default is 30 —
-   too slow to observe in one sitting).
+5. Stale-threshold override for the test run. Write it into
+   `~/.claude/skill-system-config.json` — there is no env var
+   shortcut; the threshold only comes from config:
+   ```bash
+   python -c "
+   import json, os
+   from pathlib import Path
+   p = Path(os.path.expanduser('~/.claude/skill-system-config.json'))
+   cfg = json.loads(p.read_text()) if p.exists() else {}
+   cfg.setdefault('usage_tracker', {})['stale_threshold_sessions'] = 3
+   p.write_text(json.dumps(cfg, indent=2))
+   "
+   ```
+   Default is 30 — too slow to observe in one sitting.
 6. `ctx-monitor serve --port 8765` running in a background tab.
 
 ## The scenario
@@ -44,7 +55,8 @@ untested.
 ### Step 1 — Pick a random candidate
 
 Pick a skill whose sidecar has:
-- `hard_floor: "never_loaded_stale"` (truly unused), AND
+- `hard_floor: "never_loaded_stale"` — these all map to **grade D**
+  (grade F is reserved for `intake_fail`), AND
 - `intake.score >= 0.8` (structurally valid), AND
 - not a meta-skill (`skill-router`, `file-reading`, etc.).
 
@@ -60,8 +72,8 @@ rows = json.load(sys.stdin)['rows'] if isinstance(json.load(sys.stdin), dict) \
 
 Record the picked slug. Call it `$TARGET`.
 
-**Expected**: $TARGET has `grade=F`, `load_count=0`,
-`never_loaded=True`.
+**Expected**: $TARGET has `grade=D`, `load_count=0`,
+`never_loaded=True`, `hard_floor=never_loaded_stale`.
 
 ### Step 2 — Inject a stack signal that should surface $TARGET
 
