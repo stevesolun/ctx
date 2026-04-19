@@ -27,15 +27,27 @@ finding.
 - **[Toolbox overview](toolbox/index.md)** — what a toolbox is, how it's declared, how it runs.
 - **[Starter toolboxes](toolbox/starters.md)** — `ship-it`, `security-sweep`, `refactor-safety`, `docs-review`, `fresh-repo-init`.
 - **[Verdicts & guardrails](toolbox/verdicts.md)** — how the council blocks a bad commit with evidence.
-- **[Roadmap](roadmap/toolbox.md)** — current phase, shipped work, what's next.
+- **[Skill router overview](skill-router/index.md)** — how the router picks skills from the active repo's stack.
+- **[Skill health](skills-health.md)** — the four-signal quality score and where it surfaces.
 
 ## Install
 
 ```bash
 git clone https://github.com/stevesolun/ctx.git
 cd ctx
-./install.sh python          # or typescript / golang / swift / php
+pip install -e .               # core
+pip install -e ".[embeddings]" # optional: semantic embedding backend
+pip install -e ".[dev]"        # optional: pytest, mypy, ruff
+./install.sh python            # rules for your language (typescript / golang / swift / php)
 ```
+
+## Releases
+
+- **v0.5.0-rc1** — first open-source release candidate. MIT-licensed,
+  CI-matrixed (Ubuntu + Windows × Python 3.11/3.12), 1,316 tests passing,
+  installable via `pip install -e .`. Hardened against RCE/shell
+  injection, path traversal, and race conditions in atomic writes. Full
+  notes in [CHANGELOG.md](https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md).
 
 ## Principles
 

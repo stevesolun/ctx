@@ -101,3 +101,8 @@ class HealthReport:
 
 - [Memory anchoring](memory-anchor.md) — dead-reference detection for
   auto-memory notes.
+- `src/skill_quality.py` (v0.5.0+) — the four-signal quality scorer
+  (telemetry 0.40, intake 0.20, graph 0.25, routing 0.15) that writes
+  per-entity sidecars and surfaces A/B/C/D/F grades. The `skill_health`
+  CLI above focuses on *structural* correctness; `skill_quality`
+  focuses on *behavioral* quality over time.
