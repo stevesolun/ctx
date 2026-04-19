@@ -33,8 +33,6 @@ require sentence-transformers. Production code never touches the reset.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from corpus_cache import CorpusCache
 from cosine_ranker import CosineRanker
 from ctx_config import cfg

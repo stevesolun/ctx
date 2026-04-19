@@ -19,27 +19,11 @@ import json
 import os
 import re
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from _fs_utils import atomic_write_text as _atomic_write_text
 from wiki_utils import SAFE_NAME_RE, parse_frontmatter as _read_frontmatter
-
-
-def _atomic_write_text(path: Path, text: str) -> None:
-    """Write text atomically via temp file + os.replace()."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 try:
     from ctx_config import cfg as _cfg

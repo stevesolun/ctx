@@ -17,9 +17,9 @@ import json
 import os
 import re
 import sys
-import tempfile
 from pathlib import Path
 
+from _fs_utils import atomic_write_text as _atomic_write_text
 from wiki_utils import validate_skill_name
 
 CLAUDE_DIR = Path(os.path.expanduser("~/.claude"))
@@ -29,21 +29,6 @@ WIKI_DIR = CLAUDE_DIR / "skill-wiki"
 SKILL_ENTITIES = WIKI_DIR / "entities" / "skills"
 AGENT_ENTITIES = WIKI_DIR / "entities" / "agents"
 
-
-def _atomic_write_text(path: Path, text: str) -> None:
-    """Write text atomically: temp file in same dir, then os.replace()."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 
 def _sanitize_yaml_value(value: str) -> str:

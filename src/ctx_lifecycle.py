@@ -31,30 +31,24 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
-import re
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
+from _fs_utils import atomic_write_text as _atomic_write
 from skill_quality import (
     QualityScore,
     default_sidecar_dir,
     load_quality,
     sidecar_path,
 )
+from wiki_utils import SAFE_NAME_RE as _SLUG_RE
 
 _logger = logging.getLogger(__name__)
-
-# ────────────────────────────────────────────────────────────────────
-# Slug regex (same as skill_quality for path-traversal safety)
-# ────────────────────────────────────────────────────────────────────
-
-_SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\-\.]{0,127}$")
 
 
 def _ensure_safe_slug(slug: str) -> str:
@@ -171,13 +165,6 @@ def lifecycle_sidecar_path(slug: str, *, sidecar_dir: Path | None = None) -> Pat
     _ensure_safe_slug(slug)
     root = sidecar_dir if sidecar_dir is not None else default_sidecar_dir()
     return root / f"{slug}.lifecycle.json"
-
-
-def _atomic_write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
 
 
 def save_lifecycle_state(

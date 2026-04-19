@@ -34,13 +34,13 @@ import argparse
 import json
 import os
 import sys
-import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
 
 from _file_lock import file_lock
+from _fs_utils import atomic_write_text as _atomic_write
 
 
 # ── Paths & config defaults ────────────────────────────────────────────────
@@ -402,21 +402,6 @@ def format_dashboard(report: HealthReport) -> str:
 
 
 # ── Self-healing ───────────────────────────────────────────────────────────
-
-
-def _atomic_write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 
 @dataclass(frozen=True)

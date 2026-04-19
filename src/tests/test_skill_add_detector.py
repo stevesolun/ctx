@@ -2,7 +2,7 @@
 test_skill_add_detector.py -- Tests for skill_add_detector path-traversal fix.
 
 Covers:
-  - validate_skill_name: accepts valid names, rejects traversal / invalid chars
+  - validate_user_supplied_slug: accepts valid names, rejects traversal / invalid chars
   - main() path: traversal in file_path is neutralised before name extraction
   - is_in_skill_dir: containment check works as expected
 """
@@ -22,7 +22,7 @@ import skill_add_detector as sad  # noqa: E402
 
 
 # ────────────────────────────────────────────────────────────────────
-# validate_skill_name
+# validate_user_supplied_slug
 # ────────────────────────────────────────────────────────────────────
 
 
@@ -38,7 +38,7 @@ import skill_add_detector as sad  # noqa: E402
     ],
 )
 def test_validate_skill_name_accepts_valid(valid: str) -> None:
-    assert sad.validate_skill_name(valid) == valid
+    assert sad.validate_user_supplied_slug(valid) == valid
 
 
 @pytest.mark.parametrize(
@@ -57,7 +57,7 @@ def test_validate_skill_name_accepts_valid(valid: str) -> None:
 )
 def test_validate_skill_name_rejects_invalid(bad: str) -> None:
     with pytest.raises(ValueError, match="invalid skill name"):
-        sad.validate_skill_name(bad)
+        sad.validate_user_supplied_slug(bad)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -78,7 +78,7 @@ def test_traversal_path_rejected_by_validate(tmp_path: Path) -> None:
     # The raw name from a traversal should either be invalid or at minimum
     # we verify the resolve-then-validate flow works end-to-end.
     try:
-        result = sad.validate_skill_name(raw_name)
+        result = sad.validate_user_supplied_slug(raw_name)
         # If the name happened to be valid (e.g. "etc"), verify it's the real
         # resolved name — no traversal components remain.
         assert ".." not in result
@@ -91,7 +91,7 @@ def test_traversal_path_rejected_by_validate(tmp_path: Path) -> None:
 def test_validate_blocks_traversal_in_name_directly() -> None:
     """A name that looks like a traversal is rejected before any FS access."""
     with pytest.raises(ValueError, match="invalid skill name"):
-        sad.validate_skill_name("../etc")
+        sad.validate_user_supplied_slug("../etc")
 
 
 # ────────────────────────────────────────────────────────────────────

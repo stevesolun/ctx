@@ -10,6 +10,19 @@ Called by PostToolUse hook:
 
 If >180 lines: prints a prompt asking the user if they want to convert.
 (The message appears in Claude's console output — Claude will see it and can relay to user.)
+
+Two-tier slug validation model
+-------------------------------
+Tier 1 — lenient, for files already on disk (``wiki_utils.validate_skill_name``):
+    Pattern: ``^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$``
+    Allows uppercase, underscores, and dots so legacy installed skill names
+    continue to work during re-ingestion and wiki-sync.
+
+Tier 2 — strict, for user-supplied input (``validate_user_supplied_slug`` here):
+    Pattern: ``^[a-z0-9][a-z0-9-]{0,63}$``
+    Lowercase + hyphens only, 64-char max.  Used whenever an attacker could
+    control the skill name (hook-detected writes, CLI --add, path extraction).
+    Stricter than Tier 1 to minimise attack surface on newly-created entries.
 """
 
 import json
@@ -40,12 +53,16 @@ except ImportError:
 _SKILL_DIR_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
-def validate_skill_name(name: str) -> str:
-    """Validate and return a skill directory name.
+def validate_user_supplied_slug(name: str) -> str:
+    """Tier-2 (strict) validator for user-supplied skill slugs.
 
-    Raises ValueError if the name does not match the canonical slug pattern.
-    This prevents attacker-controlled path components from being used in
-    downstream filesystem operations.
+    Enforces the canonical slug contract for newly-created entries:
+    lowercase alphanumeric + hyphens only, 64-char max.  Raises
+    ``ValueError`` if the name does not match, preventing attacker-controlled
+    path components from reaching downstream filesystem operations.
+
+    For files already accepted on disk use
+    ``wiki_utils.validate_skill_name`` (Tier-1, lenient).
     """
     if not isinstance(name, str) or not _SKILL_DIR_RE.match(name):
         raise ValueError(
@@ -197,7 +214,7 @@ def main() -> None:
     resolved_path = Path(file_path).resolve()
     raw_name = resolved_path.parent.name
     try:
-        skill_name = validate_skill_name(raw_name)
+        skill_name = validate_user_supplied_slug(raw_name)
     except ValueError:
         sys.exit(0)
     lines = count_lines(file_path)

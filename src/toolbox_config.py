@@ -21,10 +21,11 @@ from __future__ import annotations
 import json
 import os
 import sys
-import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
+
+from _fs_utils import atomic_write_text as _atomic_write
 
 try:
     import yaml  # type: ignore[import-untyped]
@@ -303,20 +304,6 @@ def merged(repo_root: Path | None = None,
 
 
 # ── Persistence ─────────────────────────────────────────────────────────────
-
-def _atomic_write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 
 def save_global(tset: ToolboxSet, path: Path | None = None) -> None:
