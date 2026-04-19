@@ -9,9 +9,9 @@
 2. [Web Frameworks](#web-frameworks)
 3. [AI/ML Frameworks](#aiml-frameworks)
 4. [Infrastructure](#infrastructure)
-5. [Data & Storage](#data--storage)
+5. [Data & Storage](#data-storage)
 6. [Testing](#testing)
-7. [Build & Package](#build--package)
+7. [Build & Package](#build-package)
 8. [Documentation](#documentation)
 9. [AI/Agent Tooling](#aiagent-tooling)
 
