@@ -300,11 +300,53 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run(args: argparse.Namespace) -> int:
+    """Fire a toolbox trigger event — thin alias to toolbox_hooks.run_trigger.
+
+    Exists because the README / docs / playbook all reference
+    ``ctx-toolbox run --event pre-commit``, but the trigger runner lives
+    in ``toolbox_hooks.py``. Keeping a user-facing ``run`` subcommand
+    here means the top-level ``ctx-toolbox`` CLI is the single entry
+    point for every toolbox operation.
+    """
+    from toolbox_hooks import run_trigger  # local import — avoids circular
+    file_path = args.file_path or None
+    repo_root = Path(args.repo).resolve() if args.repo else None
+    return run_trigger(args.event, file_path=file_path, repo_root=repo_root)
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    """Print a compact status summary — active toolboxes + config paths."""
+    tset = merged()
+    active = sorted(tset.active)
+    print(f"Global config: {global_config_path()}")
+    print(f"Repo config:   {repo_config_path()}")
+    print(f"Toolboxes:     {len(tset.toolboxes)} total, {len(active)} active")
+    if active:
+        print(f"Active:        {', '.join(active)}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="toolbox", description=__doc__.splitlines()[1])
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("list", help="List available toolboxes").set_defaults(func=cmd_list)
+    sub.add_parser("status", help="Show active toolboxes + config paths").set_defaults(func=cmd_status)
+
+    sp = sub.add_parser(
+        "run",
+        help="Fire a toolbox trigger event (session-start / session-end / pre-commit / file-save / slash)",
+    )
+    sp.add_argument("--event", required=True,
+                    choices=["session-start", "session-end", "pre-commit",
+                             "file-save", "slash"],
+                    help="Trigger event to fire")
+    sp.add_argument("--file-path", default=None,
+                    help="File path for file-save events")
+    sp.add_argument("--repo", default=None,
+                    help="Repo root (defaults to current working dir)")
+    sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("show", help="Show one toolbox")
     sp.add_argument("name")
