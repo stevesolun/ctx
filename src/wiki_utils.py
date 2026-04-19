@@ -10,12 +10,32 @@ wiki_query, usage_tracker, and wiki_lint.
 import re
 from typing import Any
 
+__all__ = [
+    "SAFE_NAME_RE",
+    "FRONTMATTER_RE",
+    "validate_skill_name",
+    "parse_frontmatter",
+    "parse_frontmatter_and_body",
+]
+
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$")
 
 
 def validate_skill_name(name: str) -> str:
-    """Validate a skill name is safe for path construction. Returns the name or raises."""
+    """Tier-1 (lenient) validator for skill names already accepted on disk.
+
+    Accepts the full legacy character set: uppercase, underscores, and dots
+    are all permitted so that existing installed skill directories are not
+    rejected during re-ingestion or wiki-sync operations.
+
+    Pattern: ``^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$``
+
+    For *user-supplied* slugs (new entries submitted via the hook or CLI)
+    use ``skill_add_detector.validate_user_supplied_slug`` instead, which
+    enforces the stricter Tier-2 contract (lowercase, hyphens only, 64-char
+    max) to minimise attack surface on newly-created entries.
+    """
     if not SAFE_NAME_RE.match(name):
         raise ValueError(
             f"Invalid skill name {name!r}: must be 1-128 alphanumeric/underscore/dot/hyphen chars, "

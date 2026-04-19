@@ -23,12 +23,12 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import re
 import sys
 from pathlib import Path
 from typing import Any, Iterable
 
+from _fs_utils import atomic_write_text as _atomic_write
 from wiki_utils import parse_frontmatter_and_body
 
 _logger = logging.getLogger(__name__)
@@ -250,12 +250,6 @@ def backfill_file(path: Path, *, dry_run: bool) -> str:
     if not dry_run:
         _atomic_write(path, new_text)
     return f"filled:{category}"
-
-
-def _atomic_write(path: Path, text: str) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
 
 
 def backfill_corpus(

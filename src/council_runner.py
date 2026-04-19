@@ -35,11 +35,12 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
+
+from _fs_utils import atomic_write_text as _atomic_write
 
 _PLAN_HASH_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
@@ -211,20 +212,6 @@ def _plan_from_dict(raw: dict, source: str) -> RunPlan:
         source=source,
     )
 
-
-def _atomic_write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 
 def persist_plan(plan: RunPlan) -> Path:

@@ -47,12 +47,13 @@ import json
 import os
 import re
 import subprocess
-import tempfile
 from collections import Counter
 from dataclasses import asdict, dataclass
 from itertools import combinations
 from pathlib import Path
 from typing import Iterable
+
+from _fs_utils import atomic_write_text as _atomic_write
 
 
 INTENT_LOG = Path(os.path.expanduser("~/.claude/intent-log.jsonl"))
@@ -361,21 +362,6 @@ def build_profile(
 
 
 # ── Persistence ─────────────────────────────────────────────────────────────
-
-
-def _atomic_write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 
 def save_profile(profile: BehaviorProfile, path: Path | None = None) -> Path:

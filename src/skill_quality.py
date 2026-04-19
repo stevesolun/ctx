@@ -57,7 +57,8 @@ from quality_signals import (
     routing_signal,
     telemetry_signal,
 )
-from wiki_utils import parse_frontmatter_and_body
+from _fs_utils import atomic_write_text as _atomic_write
+from wiki_utils import SAFE_NAME_RE as _SLUG_RE, parse_frontmatter_and_body
 
 _logger = logging.getLogger(__name__)
 
@@ -99,11 +100,6 @@ _DEFAULT_GRADE_THRESHOLDS: dict[str, float] = {
 _DEFAULT_STALE_THRESHOLD_DAYS: float = 30.0
 _DEFAULT_RECENT_WINDOW_DAYS: float = 14.0
 _DEFAULT_MIN_BODY_CHARS: int = 120
-
-
-# Slug regex mirrors ``skill_telemetry._SKILL_NAME_RE`` so the same
-# canonical identifier survives round-trips between the two modules.
-_SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\-\.]{0,127}$")
 
 
 def _ensure_safe_slug(slug: str) -> str:
@@ -623,13 +619,6 @@ def extract_signals_for_slug(
 _QUALITY_SECTION_HEADER = "## Quality"
 _QUALITY_SECTION_BEGIN = "<!-- quality:begin -->"
 _QUALITY_SECTION_END = "<!-- quality:end -->"
-
-
-def _atomic_write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
 
 
 def _render_quality_section(score: QualityScore) -> str:

@@ -18,10 +18,10 @@ import json
 import logging
 import os
 import sys
-import tempfile
 import uuid
 from pathlib import Path
 
+from _fs_utils import atomic_write_text as _atomic_write_text
 from wiki_utils import validate_skill_name
 
 _logger = logging.getLogger(__name__)
@@ -29,21 +29,6 @@ _logger = logging.getLogger(__name__)
 # Stable session ID for this process invocation; groups all loads in one run.
 _SESSION_ID: str = uuid.uuid4().hex
 
-
-def _atomic_write_text(path: Path, text: str) -> None:
-    """Write text atomically via temp file + os.replace()."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 SKILLS_DIR = Path(os.path.expanduser("~/.claude/skills"))
 AGENTS_DIR = Path(os.path.expanduser("~/.claude/agents"))

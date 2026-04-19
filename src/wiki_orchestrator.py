@@ -24,19 +24,7 @@ from typing import Any
 from ctx_config import cfg
 from wiki_utils import parse_frontmatter as _parse_frontmatter
 
-try:
-    from skill_add_detector import validate_skill_name as _validate_skill_name
-except ImportError:  # pragma: no cover
-    import re as _re
-    _SKILL_DIR_RE = _re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-
-    def _validate_skill_name(name: str) -> str:  # type: ignore[misc]
-        if not isinstance(name, str) or not _SKILL_DIR_RE.match(name):
-            raise ValueError(
-                f"invalid skill name extracted from path: {name!r} "
-                f"(must match {_SKILL_DIR_RE.pattern})"
-            )
-        return name
+from skill_add_detector import validate_user_supplied_slug as _validate_skill_name
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 SCRIPT_DIR = Path(__file__).parent
