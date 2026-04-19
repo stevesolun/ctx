@@ -74,8 +74,15 @@ if [[ $NEEDS_WIKI_REBUILD -eq 1 ]]; then
     # to skill-wiki/.
     if command -v tar >/dev/null 2>&1; then
       mkdir -p "$(dirname "$TARBALL")"
-      ( cd "$WIKI_DIR" && tar czf "$TARBALL" \
-          --exclude='.obsidian' \
+      # --force-local: GNU tar on Windows/MSYS otherwise parses the
+      # colon in ``c:/path`` as a host:path remote-tar spec and fails
+      # with "Cannot connect to c: resolve failed". This flag tells
+      # tar the path is always local regardless of any colon it contains.
+      #
+      # .obsidian is intentionally included — graph/README documents
+      # that the tarball opens directly as an Obsidian vault. Dropping
+      # it silently removes a shipped feature.
+      ( cd "$WIKI_DIR" && tar --force-local -czf "$TARBALL" \
           --exclude='.trash' \
           --exclude='__pycache__' \
           . ) \
