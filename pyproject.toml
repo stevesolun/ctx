@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-ctx"
-version = "0.5.0-rc1"
+version = "0.5.0-rc2"
 description = "Skill and agent recommendation system for Claude Code — knowledge graph, wiki, and intake quality gates"
 authors = [{ name = "Steve Solun" }]
 license = { text = "MIT" }
@@ -43,10 +43,75 @@ embeddings = [
 ]
 
 [tool.setuptools]
+# src/ holds ~55 flat top-level modules (scan_repo.py, skill_quality.py, …),
+# not a proper package tree. `packages.find` only discovers directories with
+# __init__.py, so the earlier config packaged only `tests/` and shipped a
+# broken wheel. List every runtime module explicitly via py-modules and tell
+# setuptools to look for them under src/.
 package-dir = {"" = "src"}
+py-modules = [
+    "_file_lock",
+    "_fs_utils",
+    "agent_add",
+    "backup_config",
+    "backup_mirror",
+    "backup_retention",
+    "backup_watchdog",
+    "batch_convert",
+    "behavior_miner",
+    "catalog_builder",
+    "change_detector",
+    "context_monitor",
+    "corpus_cache",
+    "cosine_ranker",
+    "council_runner",
+    "ctx_config",
+    "ctx_lifecycle",
+    "embedding_backend",
+    "flatten_agents",
+    "import_strix_skills",
+    "inject_hooks",
+    "intake_gate",
+    "intake_pipeline",
+    "intent_interview",
+    "kpi_dashboard",
+    "link_conversions",
+    "memory_anchor",
+    "quality_signals",
+    "resolve_graph",
+    "resolve_skills",
+    "scan_repo",
+    "skill_add",
+    "skill_add_detector",
+    "skill_category",
+    "skill_health",
+    "skill_loader",
+    "skill_quality",
+    "skill_suggest",
+    "skill_telemetry",
+    "skill_unload",
+    "toolbox",
+    "toolbox_config",
+    "toolbox_hooks",
+    "toolbox_verdict",
+    "update_repo_stats",
+    "usage_tracker",
+    "versions_catalog",
+    "wiki_batch_entities",
+    "wiki_graphify",
+    "wiki_lint",
+    "wiki_orchestrator",
+    "wiki_query",
+    "wiki_sync",
+    "wiki_utils",
+    "wiki_visualize",
+]
+# Do NOT ship the test suite to PyPI. The previous build inadvertently
+# bundled src/tests/ because it was the only directory with __init__.py.
+packages = []
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools.package-data]
+"*" = ["config.json", "skill-registry.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["src/tests"]
