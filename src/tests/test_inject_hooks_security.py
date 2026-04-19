@@ -122,10 +122,28 @@ class TestNoShellInjectionVars:
 
 
 class TestStopHooks:
+    def _stop_commands(self, hooks: dict) -> list[str]:
+        """Flatten both legacy (flat) + current ({"hooks":[...]} matcher)
+        Stop-hook shapes into a list of command strings. The current
+        generator produces the matcher shape (required by Claude Code's
+        schema) but we accept both so legacy settings.json files that
+        still use the flat shape don't make the assertions drift.
+        """
+        out: list[str] = []
+        for entry in hooks.get("Stop", []):
+            if not isinstance(entry, dict):
+                continue
+            if "command" in entry:
+                out.append(entry["command"])
+            for sub in entry.get("hooks", []):
+                if isinstance(sub, dict) and "command" in sub:
+                    out.append(sub["command"])
+        return out
+
     def test_stop_contains_usage_tracker(self, tmp_path: Path) -> None:
         ctx_dir = str(tmp_path / "ctx")
         hooks = make_hooks(ctx_dir)
-        stop_cmds = [e["command"] for e in hooks.get("Stop", []) if "command" in e]
+        stop_cmds = self._stop_commands(hooks)
         assert any("usage_tracker.py" in c for c in stop_cmds), (
             f"usage_tracker.py not found in Stop hooks: {stop_cmds}"
         )
@@ -133,7 +151,7 @@ class TestStopHooks:
     def test_stop_contains_quality_on_session_end(self, tmp_path: Path) -> None:
         ctx_dir = str(tmp_path / "ctx")
         hooks = make_hooks(ctx_dir)
-        stop_cmds = [e["command"] for e in hooks.get("Stop", []) if "command" in e]
+        stop_cmds = self._stop_commands(hooks)
         assert any("quality_on_session_end.py" in c for c in stop_cmds), (
             f"quality_on_session_end.py not found in Stop hooks: {stop_cmds}"
         )
@@ -144,8 +162,7 @@ class TestStopHooks:
         _run_inject(ctx_dir, settings_path)
 
         data = json.loads(settings_path.read_text(encoding="utf-8"))
-        stop_entries = data.get("hooks", {}).get("Stop", [])
-        stop_cmds = [e.get("command", "") for e in stop_entries if isinstance(e, dict)]
+        stop_cmds = self._stop_commands(data.get("hooks", {}))
 
         assert any("usage_tracker.py" in c for c in stop_cmds), (
             f"usage_tracker.py missing from persisted Stop hooks: {stop_cmds}"
@@ -155,11 +172,12 @@ class TestStopHooks:
         )
 
     def test_stop_hook_count_is_two(self, tmp_path: Path) -> None:
+        """Both Stop hook commands must be present (usage_tracker + quality)."""
         ctx_dir = str(tmp_path / "ctx")
         hooks = make_hooks(ctx_dir)
-        stop_entries = hooks.get("Stop", [])
-        assert len(stop_entries) == 2, (
-            f"Expected exactly 2 Stop entries; got {len(stop_entries)}: {stop_entries}"
+        stop_cmds = self._stop_commands(hooks)
+        assert len(stop_cmds) == 2, (
+            f"Expected exactly 2 Stop commands; got {len(stop_cmds)}: {stop_cmds}"
         )
 
 

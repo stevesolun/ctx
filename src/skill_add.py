@@ -335,6 +335,32 @@ def add_skill(
         log_details.append(f"Pipeline: {pipeline_path}")
     append_log(str(wiki_path), "add-skill", name, log_details)
 
+    # Append to the unified audit log so post-hoc investigations can
+    # reconstruct every add/convert/install event without mining
+    # per-subsystem log files. See src/ctx_audit_log.py.
+    try:
+        from ctx_audit_log import log_skill_event
+        log_skill_event(
+            "skill.added" if is_new else "skill.installed",
+            name,
+            actor="cli",
+            meta={
+                "source": str(source_path),
+                "installed": str(installed_path),
+                "lines": line_count,
+                "converted": converted,
+                "tags": tags,
+                "related": related,
+            },
+        )
+        if converted:
+            log_skill_event(
+                "skill.converted", name, actor="cli",
+                meta={"pipeline": str(pipeline_path)},
+            )
+    except Exception:  # noqa: BLE001 — audit is best-effort
+        pass
+
     return {"name": name, "installed": str(installed_path), "converted": converted, "is_new_page": is_new}
 
 

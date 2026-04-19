@@ -157,7 +157,8 @@ def _queue_unload_suggestion(skill_name: str, session_count: int, use_count: int
 
 
 def update_skill_page(
-    skill_name: str, used: bool, session_count_bump: bool = True
+    skill_name: str, used: bool, session_count_bump: bool = True,
+    *, wiki_dir: Path | None = None,
 ) -> tuple[bool, bool]:
     """
     Update wiki entity page for a skill.
@@ -167,11 +168,18 @@ def update_skill_page(
       - queued_for_unload: True if this call newly queued a stale-suggestion
         into pending-unload.json (so callers can count stale detections
         without re-reading the page).
+
+    Pass ``wiki_dir`` to target a non-default wiki; falls back to the
+    module-level ``ENTITIES_DIR`` for backward compatibility. Strix
+    vuln-0004: previously the ``--wiki`` CLI flag only gated the
+    existence check, then this function ignored it and silently wrote
+    into ``WIKI_DIR``.
     """
     if not SAFE_NAME_RE.match(skill_name):
         print(f"Warning: skipping invalid skill name: {skill_name!r}", file=sys.stderr)
         return False, False
-    page_path = ENTITIES_DIR / f"{skill_name}.md"
+    entities_dir = (wiki_dir / "entities" / "skills") if wiki_dir else ENTITIES_DIR
+    page_path = entities_dir / f"{skill_name}.md"
     if not page_path.exists():
         return False, False
 
@@ -207,9 +215,15 @@ def update_skill_page(
         return False, False
 
 
-def append_wiki_log(loaded_count: int, used_skills: set[str], stale_count: int) -> None:
-    """Append session summary to wiki log.md."""
-    if not LOG_PATH.exists():
+def append_wiki_log(loaded_count: int, used_skills: set[str], stale_count: int,
+                    *, wiki_dir: Path | None = None) -> None:
+    """Append session summary to wiki log.md.
+
+    Honors ``wiki_dir`` if provided so Strix vuln-0004 (``--wiki`` flag
+    silently ignored) is closed end-to-end.
+    """
+    log_path = (wiki_dir / "log.md") if wiki_dir else LOG_PATH
+    if not log_path.exists():
         return
 
     entry = (
@@ -221,7 +235,7 @@ def append_wiki_log(loaded_count: int, used_skills: set[str], stale_count: int) 
     if used_skills:
         entry += f"- Used: {', '.join(sorted(used_skills))}\n"
 
-    with open(LOG_PATH, "a", encoding="utf-8") as f:
+    with open(log_path, "a", encoding="utf-8") as f:
         f.write(entry)
 
 
@@ -281,15 +295,21 @@ def main() -> None:
     stale_count = 0
     updated_count = 0
 
+    # Pass wiki_dir through so --wiki actually routes writes to the
+    # caller-chosen tree instead of silently landing in WIKI_DIR. A
+    # non-default --wiki is now honored end-to-end (Strix vuln-0004).
+    wiki_override = wiki_dir if wiki_dir != WIKI_DIR else None
     for skill_name in loaded_skills:
         skill_used = skill_name in used_skills
-        updated, queued = update_skill_page(skill_name, used=skill_used)
+        updated, queued = update_skill_page(skill_name, used=skill_used,
+                                            wiki_dir=wiki_override)
         if updated:
             updated_count += 1
             if queued:
                 stale_count += 1
 
-    append_wiki_log(len(loaded_skills), used_skills, stale_count)
+    append_wiki_log(len(loaded_skills), used_skills, stale_count,
+                    wiki_dir=wiki_override)
     truncate_intent_log()
 
     print(

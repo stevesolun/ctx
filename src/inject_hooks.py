@@ -92,14 +92,23 @@ def make_hooks(ctx_dir: str) -> dict:
                 ],
             },
         ],
+        # Stop hooks need the same {"hooks": [...]} wrapper as PostToolUse —
+        # Claude Code's schema is consistent across events. The previous
+        # flat form made the live-load verification agent discover that
+        # quality_on_session_end.py never actually fires on session close
+        # (only manually). This shape validates against the schema.
         "Stop": [
             {
-                "type": "command",
-                "command": tracker_cmd,
-            },
-            {
-                "type": "command",
-                "command": quality_cmd,
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": tracker_cmd,
+                    },
+                    {
+                        "type": "command",
+                        "command": quality_cmd,
+                    },
+                ],
             },
         ],
     }

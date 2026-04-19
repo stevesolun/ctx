@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-ctx"
-version = "0.5.0-rc6"
+version = "0.5.0-rc7"
 description = "Skill and agent recommendation system for Claude Code — knowledge graph, wiki, and intake quality gates"
 authors = [{ name = "Steve Solun" }]
 license = { text = "MIT" }
@@ -65,6 +65,7 @@ py-modules = [
     "corpus_cache",
     "cosine_ranker",
     "council_runner",
+    "ctx_audit_log",
     "ctx_config",
     "ctx_lifecycle",
     "embedding_backend",

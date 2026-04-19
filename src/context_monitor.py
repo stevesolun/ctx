@@ -202,7 +202,14 @@ def graph_suggest(unmatched_tags: list[str]) -> list[dict]:
         from networkx.readwrite import node_link_graph
         import math
         with open(graph_path, encoding="utf-8") as f:
-            G = node_link_graph(json.load(f))
+            data = json.load(f)
+        # Auto-detect NetworkX 2.x "links" vs 3.x "edges" schema. Same
+        # bug that took out resolve_graph.py + wiki_visualize.py until
+        # rc4 — context_monitor has its own copy and silently returned
+        # [] graph_suggestions with a "Warning: graph suggest error:
+        # 'links'" on every PostToolUse call.
+        edges_key = "links" if isinstance(data, dict) and "links" in data else "edges"
+        G = node_link_graph(data, edges=edges_key)
         tag_set = set(unmatched_tags)
         scores: dict[str, float] = {}
         for nid, data in G.nodes(data=True):

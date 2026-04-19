@@ -837,6 +837,37 @@ def _apply_one(
     save_lifecycle_state(new_state, sidecar_dir=sources.sidecar_dir)
     states[proposal.slug] = new_state
     print(f"  ✓ {proposal.target_state}: {proposal.slug}")
+
+    # Unified audit log entry. target_state is one of
+    # active / watch / demote / archive / delete — map to the
+    # {skill,agent}.<verb> event vocabulary. Restore is the special
+    # case where target is active coming from archive.
+    try:
+        from ctx_audit_log import log
+        verb_map = {
+            "active": "restored" if proposal.current_state == "archive" else "added",
+            "watch": "watched",
+            "demote": "demoted",
+            "archive": "archived",
+            "delete": "deleted",
+        }
+        verb = verb_map.get(proposal.target_state)
+        if verb:
+            subject_type = proposal.subject_type if proposal.subject_type in ("skill", "agent") else "skill"
+            log(
+                f"{subject_type}.{verb}",
+                subject_type=subject_type,
+                subject=proposal.slug,
+                actor="lifecycle",
+                meta={
+                    "from": proposal.current_state,
+                    "to": proposal.target_state,
+                    "reason": proposal.reason,
+                },
+            )
+    except Exception:  # noqa: BLE001 — audit best-effort
+        pass
+
     return 1
 
 
