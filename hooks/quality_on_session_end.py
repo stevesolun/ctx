@@ -167,12 +167,41 @@ def _invoke_recompute(slugs: list[str]) -> int:
 
 
 def main() -> int:
-    _load_payload()  # consume stdin even if we don't use it
+    payload = _load_payload()  # consume stdin even if we don't use it
     now = datetime.now(timezone.utc)
     cutoff = _read_cutoff()
     slugs = _touched_slugs_since(cutoff, _EVENTS_PATH)
     _invoke_recompute(slugs)
     _write_state(now)
+
+    # Unified audit: one line per session boundary + rotate if big.
+    # Guarded with try/except because a hook that fails on audit is
+    # worse than one that runs without telemetry.
+    try:
+        # ctx_audit_log lives in src/. Add src/ to path so this hook
+        # (which runs out of hooks/) can import it regardless of whether
+        # the user is on the editable install or the pip-installed copy.
+        _SRC = Path(__file__).parent.parent / "src"
+        if str(_SRC) not in sys.path:
+            sys.path.insert(0, str(_SRC))
+        from ctx_audit_log import log_session_event, rotate_if_needed
+
+        session_id = None
+        if isinstance(payload, dict):
+            session_id = payload.get("session_id") or payload.get("sessionId")
+        if not session_id:
+            # Fall back to a synthetic id so the event still carries
+            # something investigators can correlate with skill-events.
+            session_id = f"session-{now.strftime('%Y%m%dT%H%M%SZ')}"
+
+        log_session_event(
+            "session.ended", session_id, actor="hook",
+            meta={"recomputed_slugs": len(slugs), "cutoff": cutoff.isoformat()},
+        )
+        rotate_if_needed()
+    except Exception:  # noqa: BLE001 — audit is advisory
+        pass
+
     # Always exit 0: hook errors must not stall session shutdown.
     return 0
 

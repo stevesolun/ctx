@@ -817,6 +817,24 @@ def persist_quality(
     if body_result is not None:
         written["wiki_body"] = body_result
 
+    # Best-effort audit: one line per score refresh so postmortem
+    # scripts can trace why a sidecar changed at a specific instant.
+    try:
+        from ctx_audit_log import log  # local import, no CLI dep
+        subject_type = "agent" if score.subject_type == "agent" else "skill"
+        event = f"{subject_type}.score_updated"
+        log(
+            event, subject_type=subject_type, subject=score.slug,
+            actor="hook",
+            meta={
+                "grade": score.grade,
+                "raw_score": round(score.raw_score, 4),
+                "hard_floor": score.hard_floor,
+            },
+        )
+    except Exception:  # noqa: BLE001 — audit must never break scoring
+        pass
+
     return written
 
 
