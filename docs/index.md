@@ -5,8 +5,8 @@ hide:
 
 # ctx — Skill & Agent Recommendation and Management for Claude Code
 
-Watches what you develop, walks a knowledge graph of **1,768 skills and
-443 agents**, and recommends the right ones on the fly — you decide what
+Watches what you develop, walks a knowledge graph of **1,789 skills and
+464 agents**, and recommends the right ones on the fly — you decide what
 to load and unload. Powered by a Karpathy LLM wiki with persistent memory
 that gets smarter every session.
 
@@ -57,17 +57,17 @@ graph-based discovery:
 
 - A Karpathy 3-layer wiki at `~/.claude/skill-wiki/` is the single source
   of truth.
-- **2,211 entity pages** (1,768 skills + 443 agents) with frontmatter
+- **2,253 entity pages** (1,789 skills + 464 agents) with frontmatter
   tracking use count, last used date, tags, and status.
-- A **knowledge graph** (2,211 nodes, 642K edges, 865 communities)
+- A **knowledge graph** (2,253 nodes, 454K edges, 93 communities)
   connects skills and agents by shared tags, enabling context-aware
   recommendations.
-- **61 auto-generated concept pages** group related skills into named
+- **74 auto-generated concept pages** group related skills into named
   communities (e.g., *Security + Testing*, *Python + API + Database*).
 - PostToolUse and Stop hooks update the wiki automatically during each
   Claude Code session.
 - Skills over 180 lines are converted to a gated 5-stage micro-skill
-  pipeline (952 converted) so the router can load them incrementally.
+  pipeline (956 converted) so the router can load them incrementally.
 - At session start, the skill-router scans your project and
   **recommends** the best-matching skills and agents.
 - Mid-session, the context monitor watches every tool call, detects new
@@ -123,12 +123,12 @@ from your usage. Stale ones are flagged. New ones self-ingest.
 
     ---
 
-    **v0.5.0 GA** — first stable release. Installable via
-    `pip install claude-ctx`. MIT, CI-matrixed (Ubuntu + Windows ×
-    Python 3.11/3.12), 1,360 tests passing. Ships 10 console scripts
-    including `ctx-init`, `ctx-monitor` (local dashboard with graph +
-    wiki + load/unload), plus the 11.7 MB pre-built wiki tarball.
-    Hardened across four Strix-audited security findings.
+    **v0.6.1** — MIT, CI-matrixed (Ubuntu + Windows × Python 3.11/3.12),
+    1,363 tests passing. Ships 10 console scripts including `ctx-init`
+    and `ctx-monitor` (local dashboard with graph + wiki + load/unload)
+    plus the 9.6 MB pre-built wiki tarball with **2,253 nodes /
+    454,719 edges / 93 communities**. Hardened across four Strix-audited
+    security findings.
 
     [:octicons-arrow-right-24: CHANGELOG](https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md) ·
     [Repository](https://github.com/stevesolun/ctx)

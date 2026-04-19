@@ -29,7 +29,7 @@ untested.
 ## Preconditions
 
 1. `claude-ctx` 0.5.0-rc8 installed from PyPI.
-2. `~/.claude/skill-wiki/` pre-built (2,211 nodes, 642K edges).
+2. `~/.claude/skill-wiki/` pre-built (2,253 nodes, 454K edges).
 3. `~/.claude/skills/` has ≥ 1,500 skills installed.
 4. `~/.claude/settings.json` has all rc7 hooks wired
    (PostToolUse: context_monitor + skill_add_detector + skill_suggest

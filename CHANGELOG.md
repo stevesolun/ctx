@@ -3,6 +3,75 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.1] — 2026-04-20
+
+Harvested **`0xNyk/council-of-high-intelligence`** on top of v0.6.0.
+The repo contributes a `council` orchestrator skill plus 18 named
+persona agents (Karpathy, Sutskever, Taleb, Munger, Feynman, Socrates,
+Aristotle, Ada Lovelace, Aurelius, Kahneman, Lao Tzu, Machiavelli,
+Meadows, Musashi, Rams, Sun Tzu, Torvalds, Watts). Every agent was
+re-intaked with a prepended H1 derived from its `council.figure`
+frontmatter field — legitimate data-cleanup, not a gate bypass.
+
+Also fixes a documentation audit: every stale count reference across
+README + docs + graph/README had drifted from the shipped tarball
+(some said 2,211/642K, others 2,235/448K, community count varied
+between 93 and 95). Single sweep + tightened `update_repo_stats`
+regex to match "N nodes and N edges" phrasing the old regex missed.
+
+### Graph: final shipped state
+
+| Metric | v0.6.0 | v0.6.1 |
+|---|---:|---:|
+| Nodes | 2,235 | **2,253** |
+| Skills | 1,789 | **1,789** |
+| Agents | 446 | **464** |
+| Edges | 448,799 | **454,719** |
+| Communities | 95 | **93** |
+| Avg degree | 414.8 | **416.6** |
+| Max degree | 1,144 | **1,152** |
+| Skill↔agent cross-edges | 191,770 | **195,226** |
+
+### Added
+
+- **1 skill + 18 agents** from `0xNyk/council-of-high-intelligence`:
+  `council` (orchestrator) + `council-{ada, aristotle, aurelius,
+  feynman, kahneman, karpathy, lao-tzu, machiavelli, meadows, munger,
+  musashi, rams, socrates, sun-tzu, sutskever, taleb, torvalds,
+  watts}`. Every one passed the intake gate after a minimal H1
+  transform that preserved the original `## Identity` body.
+
+### Fixed
+
+- **README + docs stale number drift**: 12 locations across README,
+  graph/README, and 5 docs pages had references to the v0.5.x stale
+  bundle numbers (2,211/642K/865/952/1,768/443). Single audit pass
+  updates all to the current live tarball (2,253/454,719/93/956/
+  1,789/464).
+- **`update_repo_stats` regex coverage**: added patterns for
+  "N nodes and N edges" (missed by the old "N nodes, N edges, N
+  communities" regex) plus the Python example comment form
+  "# N nodes, N edges". Any future README sentence using the "and"
+  connector will auto-refresh correctly.
+- **Cytoscape rendering verified live**: `/api/graph/cloud-architect.json`
+  returns 60 nodes / 59 edges with sensible edge-weight-ranked
+  neighbors (database-admin, hybrid-cloud-architect,
+  terraform-engineer all at weight 6 sharing automation+azure+security
+  tags). The `/graph?slug=<slug>` HTML page embeds cytoscape.js from
+  CDN with the initial slug JSON-encoded and the tap→/wiki/<slug>
+  navigation wired.
+
+### Known limitation carried from v0.6.0
+
+Graph rebuild regenerates from the **live wiki**, not from a pinned
+baseline. If someone else also re-graphifies locally with slightly
+different wiki content, their edge count will differ from the
+shipped tarball's. The `update_repo_stats` tarball-first source of
+truth (v0.5.1) keeps README honest, but post-install users who
+re-graphify will see their own numbers. Documented in `graph/README.md`.
+
+[0.6.1]: https://github.com/stevesolun/ctx/releases/tag/v0.6.1
+
 ## [0.6.0] — 2026-04-20
 
 Harvested 11 upstream Claude Code / context-management / token-optimizer

@@ -34,7 +34,7 @@ with no gap**. This playbook tests each.
 
 - `claude-ctx` 0.5.0-rc6 installed (`pip install claude-ctx`).
 - `~/.claude/skill-wiki/` present and graph pre-built
-  (`graphify-out/graph.json` has 2,211 nodes / 642K edges).
+  (`graphify-out/graph.json` has 2,253 nodes / 454K edges).
 - `~/.claude/settings.json` has the PostToolUse + Stop hooks wired.
 - Baseline snapshot of `~/.claude/skill-events.jsonl` (line count).
 - Baseline snapshot of 3 sidecars (`python-patterns`, `fastapi-pro`,

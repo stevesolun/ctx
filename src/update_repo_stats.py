@@ -254,6 +254,18 @@ def build_replacements(stats: dict, tests: int | None, converted: int | None) ->
         # where the comma is URL-encoded as %2C and slash is %2F / literal.
         reps.append((re.compile(r"badge/Graph-[\w.%,/_-]+_edges-"),
                      f"badge/Graph-{n:,}_nodes_/_{e_fmt}_edges-".replace(",", "%2C")))
+        # "A pre-built knowledge graph of 2,211 nodes and 642K edges"
+        # style phrasing. Caught a stale v0.6.0 README sentence that
+        # the older regex only matched on "nodes, edges, communities".
+        reps.append((
+            re.compile(r"([\d,]+)\s+nodes\s+and\s+[\w.]+\s+edges"),
+            f"{n:,} nodes and {e_fmt} edges",
+        ))
+        # Graph.json inline Python example: "# 2,211 nodes, 642,468 edges"
+        reps.append((
+            re.compile(r"#\s*([\d,]+)\s+nodes,\s*([\d,]+)\s+edges"),
+            f"# {n:,} nodes, {e:,} edges",
+        ))
         # "2,211 nodes, 642K edges, 865 communities"
         reps.append((re.compile(r"([\d,]+)\s+nodes,\s+[\w.]+\s+edges,\s+([\d,]+)\s+communities"),
                      f"{n:,} nodes, {e_fmt} edges, {stats['communities']:,} communities"))
