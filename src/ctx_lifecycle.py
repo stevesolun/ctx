@@ -552,7 +552,10 @@ def _iter_sidecars(sidecar_dir: Path) -> list[Path]:
         return []
     return [
         p for p in sorted(sidecar_dir.glob("*.json"))
-        if not p.name.endswith(".lifecycle.json")
+        # Dotfiles (e.g. .hook-state.json) are internal state, not slugs;
+        # lifecycle sidecars have their own iterator.
+        if not p.name.startswith(".")
+        and not p.name.endswith(".lifecycle.json")
     ]
 
 

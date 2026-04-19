@@ -76,7 +76,12 @@ def load_graph() -> nx.Graph:
         print(f"Error: {GRAPH_PATH} not found. Run wiki_graphify.py first.", file=sys.stderr)
         sys.exit(1)
     with open(GRAPH_PATH, encoding="utf-8") as f:
-        return node_link_graph(json.load(f))
+        data = json.load(f)
+    # Auto-detect NetworkX 2.x "links" vs 3.x "edges" schema — graph.json
+    # was written with the legacy key on build machines that had the old
+    # networkx, and node_link_graph raises without an explicit edges=.
+    edges_key = "links" if isinstance(data, dict) and "links" in data else "edges"
+    return node_link_graph(data, edges=edges_key)
 
 
 def load_communities() -> dict:
