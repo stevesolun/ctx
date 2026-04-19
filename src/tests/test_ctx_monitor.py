@@ -207,6 +207,122 @@ def test_perform_unload_rejects_invalid_slug() -> None:
     assert "invalid slug" in msg
 
 
+def test_parse_frontmatter_basic() -> None:
+    text = "---\nname: python-patterns\nuse_count: 3\n---\n# Body\n\nhello"
+    meta, body = cm._parse_frontmatter(text)
+    assert meta == {"name": "python-patterns", "use_count": "3"}
+    assert body.startswith("# Body")
+
+
+def test_parse_frontmatter_missing_returns_empty_meta() -> None:
+    text = "# No frontmatter\n\nBody only."
+    meta, body = cm._parse_frontmatter(text)
+    assert meta == {}
+    assert body == text
+
+
+def test_wiki_entity_path_rejects_unsafe_slug(fake_claude: Path) -> None:
+    assert cm._wiki_entity_path("../../etc/passwd") is None
+    assert cm._wiki_entity_path("path/with/slash") is None
+    # Absent slug returns None but doesn't raise.
+    assert cm._wiki_entity_path("no-such-skill") is None
+
+
+def test_wiki_entity_path_finds_skill_page(fake_claude: Path) -> None:
+    skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
+    skills_dir.mkdir(parents=True)
+    target = skills_dir / "python-patterns.md"
+    target.write_text("---\nname: python-patterns\n---\n# body\n",
+                      encoding="utf-8")
+    assert cm._wiki_entity_path("python-patterns") == target
+
+
+def test_render_wiki_entity_with_real_page(fake_claude: Path) -> None:
+    skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "python-patterns.md").write_text(
+        "---\nname: python-patterns\nuse_count: 2\n---\n# Python patterns\n\nBody text.",
+        encoding="utf-8",
+    )
+    html_out = cm._render_wiki_entity("python-patterns")
+    assert "python-patterns" in html_out
+    assert "Python patterns" in html_out or "Body text" in html_out
+    assert "use_count" in html_out  # frontmatter table
+
+
+def test_render_wiki_entity_missing_slug(fake_claude: Path) -> None:
+    out = cm._render_wiki_entity("nope-not-here")
+    assert "No wiki page" in out
+
+
+def test_render_graph_emits_cytoscape_mount() -> None:
+    html_out = cm._render_graph("python-patterns")
+    assert "id='cy'" in html_out
+    assert "cytoscape" in html_out
+    # Initial slug must be embedded as JSON literal so the JS picks it up.
+    assert "\"python-patterns\"" in html_out
+
+
+def test_graph_neighborhood_rejects_unsafe_slug() -> None:
+    result = cm._graph_neighborhood("../../evil")
+    assert result == {"nodes": [], "edges": [], "center": None}
+
+
+def test_graph_neighborhood_empty_when_graph_absent(monkeypatch) -> None:
+    # Force load_graph to raise so the helper returns the empty shape
+    # deterministically, independent of whether the user's graph is built.
+    import ctx_monitor as cm_mod
+
+    def _bad(*_a, **_k):
+        raise RuntimeError("no graph")
+
+    # resolve_graph may be imported lazily inside _graph_neighborhood — force
+    # the import to yield a stub that raises.
+    import sys
+    fake = type("M", (), {"load_graph": _bad})
+    monkeypatch.setitem(sys.modules, "resolve_graph", fake)
+    result = cm_mod._graph_neighborhood("python-patterns")
+    assert result == {"nodes": [], "edges": [], "center": None}
+
+
+def test_render_home_shows_stat_grid_even_with_no_sessions(fake_claude: Path) -> None:
+    """The previous home page was near-blank when the user had no sessions.
+    The rc11 layout must show the six stat cards + grade pills + empty-state
+    messages so the page never feels empty."""
+    html_out = cm._render_home()
+    # Six stat-card titles must all be present regardless of data volume.
+    for label in ("Currently loaded", "Sidecars", "Wiki entities",
+                  "Knowledge graph", "Audit events", "Sessions"):
+        assert label in html_out
+    # Links into each section.
+    for href in ("/loaded", "/skills", "/graph", "/logs", "/events", "/sessions"):
+        assert href in html_out
+    # Grade pills always render (values may be zero).
+    for grade in ("A", "B", "C", "D", "F"):
+        assert f"grade-{grade}" in html_out
+    # Empty-state copy kicks in when there are no sessions / audit entries.
+    assert "No sessions recorded" in html_out or "Recent sessions" in html_out
+
+
+def test_render_skills_emits_sidebar_filters(fake_claude: Path) -> None:
+    _write_sidecar(fake_claude, "a", {"slug": "a", "grade": "A", "raw_score": 0.9,
+                                       "subject_type": "skill"})
+    _write_sidecar(fake_claude, "b", {"slug": "b", "grade": "F", "raw_score": 0.1,
+                                       "subject_type": "agent",
+                                       "hard_floor": "intake_fail"})
+    html_out = cm._render_skills()
+    # Sidebar must expose a text search + grade checkboxes + type checkboxes.
+    assert "id='skill-search'" in html_out
+    assert "class='grade-filter'" in html_out
+    assert "class='type-filter'" in html_out
+    # Cards, not a legacy table-row element.
+    assert "class='skill-card'" in html_out
+    # Per-card links to sidecar/wiki/graph drill-downs.
+    assert ">sidecar</a>" in html_out
+    assert ">wiki</a>" in html_out
+    assert ">graph</a>" in html_out
+
+
 def test_cli_argparser_exposes_serve() -> None:
     # argparse should not raise; subcommand "serve" is required
     with pytest.raises(SystemExit):

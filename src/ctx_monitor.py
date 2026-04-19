@@ -72,6 +72,43 @@ def _sidecar_dir() -> Path:
     return _claude_dir() / "skill-quality"
 
 
+def _wiki_dir() -> Path:
+    return _claude_dir() / "skill-wiki"
+
+
+def _wiki_entity_path(slug: str) -> Path | None:
+    """Resolve a slug to its wiki entity page under skills/ or agents/.
+
+    Wiki layout: ``entities/skills/<slug>.md`` or ``entities/agents/<slug>.md``.
+    Returns the first match, or ``None`` if neither exists.
+    """
+    # Validate slug so a crafted request can't escape the wiki tree.
+    if not _SAFE_SLUG_RE.match(slug):
+        return None
+    for sub in ("skills", "agents"):
+        p = _wiki_dir() / "entities" / sub / f"{slug}.md"
+        if p.exists():
+            return p
+    return None
+
+
+def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
+    """Split ``---\\n...\\n---\\n`` frontmatter from body. Minimal parser
+    that treats each top-level ``key: value`` as a string — no nested
+    YAML, because our wiki pages don't use it.
+    """
+    m = __import__("re").match(r"^---\n(.*?)\n---\s*\n?", text, flags=__import__("re").DOTALL)
+    if m is None:
+        return {}, text
+    meta: dict[str, str] = {}
+    for line in m.group(1).splitlines():
+        if ":" not in line:
+            continue
+        k, _, v = line.partition(":")
+        meta[k.strip()] = v.strip()
+    return meta, text[m.end():]
+
+
 def _read_manifest() -> dict:
     """Return the current ~/.claude/skill-manifest.json or an empty shell."""
     path = _manifest_path()
@@ -271,20 +308,138 @@ def _layout(title: str, body: str) -> str:
         "<div class='nav'>"
         "<a href='/'>Home</a>"
         "<a href='/loaded'>Loaded</a>"
-        "<a href='/sessions'>Sessions</a>"
         "<a href='/skills'>Skills</a>"
+        "<a href='/graph'>Graph</a>"
+        "<a href='/sessions'>Sessions</a>"
         "<a href='/logs'>Logs</a>"
-        "<a href='/events'>Live events</a>"
+        "<a href='/events'>Live</a>"
         "</div>"
         + body
         + "</body></html>"
     )
 
 
+# ─── Graph neighborhood (for /graph) ────────────────────────────────────────
+
+
+def _graph_neighborhood(slug: str, hops: int = 1, limit: int = 40) -> dict:
+    """Return cytoscape-shaped {nodes, edges} for the N-hop neighborhood.
+
+    Uses ``resolve_graph.load_graph`` so the NetworkX 'links' vs 'edges'
+    schema is handled centrally. Returns an empty shape if the graph
+    hasn't been built or the slug isn't a node.
+    """
+    if not _SAFE_SLUG_RE.match(slug):
+        return {"nodes": [], "edges": [], "center": None}
+    try:
+        from resolve_graph import load_graph as _lg  # type: ignore
+        G = _lg()
+    except Exception:  # noqa: BLE001 — graph is advisory; blank on error
+        return {"nodes": [], "edges": [], "center": None}
+    if G.number_of_nodes() == 0:
+        return {"nodes": [], "edges": [], "center": None}
+
+    center = None
+    for prefix in ("skill:", "agent:"):
+        candidate = f"{prefix}{slug}"
+        if candidate in G:
+            center = candidate
+            break
+    if center is None:
+        return {"nodes": [], "edges": [], "center": None}
+
+    nodes_out: dict[str, dict] = {}
+    edges_out: list[dict] = []
+    frontier = [center]
+    seen: set[str] = {center}
+
+    def _add_node(nid: str, depth: int) -> None:
+        if nid in nodes_out:
+            return
+        data = G.nodes.get(nid, {})
+        label = data.get("label", nid.split(":", 1)[-1])
+        ntype = data.get("type") or ("agent" if nid.startswith("agent:") else "skill")
+        nodes_out[nid] = {
+            "data": {
+                "id": nid,
+                "label": label,
+                "type": ntype,
+                "depth": depth,
+                "tags": data.get("tags", [])[:6],
+            },
+        }
+
+    _add_node(center, 0)
+
+    for depth in range(1, hops + 1):
+        next_frontier: list[str] = []
+        for nid in frontier:
+            # Sort neighbors by edge weight so we pick the strongest
+            # connections first under the ``limit`` cap.
+            neighbors = sorted(
+                G[nid].items(),
+                key=lambda kv: -kv[1].get("weight", 1),
+            )
+            for other, edata in neighbors:
+                if len(nodes_out) >= limit:
+                    break
+                _add_node(other, depth)
+                edges_out.append({
+                    "data": {
+                        "id": f"{nid}__{other}",
+                        "source": nid,
+                        "target": other,
+                        "weight": edata.get("weight", 1),
+                        "shared_tags": edata.get("shared_tags", [])[:4],
+                    },
+                })
+                if other not in seen:
+                    seen.add(other)
+                    next_frontier.append(other)
+            if len(nodes_out) >= limit:
+                break
+        frontier = next_frontier
+        if len(nodes_out) >= limit:
+            break
+
+    return {
+        "nodes": list(nodes_out.values()),
+        "edges": edges_out,
+        "center": center,
+    }
+
+
+def _graph_stats() -> dict:
+    """Top-line graph stats for the home page. Cached per-request."""
+    try:
+        from resolve_graph import load_graph as _lg  # type: ignore
+        G = _lg()
+    except Exception:  # noqa: BLE001
+        return {"nodes": 0, "edges": 0, "available": False}
+    return {
+        "nodes": G.number_of_nodes(),
+        "edges": G.number_of_edges(),
+        "available": G.number_of_nodes() > 0,
+    }
+
+
+def _wiki_stats() -> dict:
+    base = _wiki_dir() / "entities"
+    skills = len(list((base / "skills").glob("*.md"))) if (base / "skills").is_dir() else 0
+    agents = len(list((base / "agents").glob("*.md"))) if (base / "agents").is_dir() else 0
+    return {"skills": skills, "agents": agents, "total": skills + agents}
+
+
 def _render_home() -> str:
     sessions = _summarize_sessions()
     grades = _grade_distribution()
     recent = sessions[:10]
+    gstats = _graph_stats()
+    wstats = _wiki_stats()
+    audit_lines = sum(1 for _ in _audit_log_path().open(encoding="utf-8")) \
+        if _audit_log_path().exists() else 0
+    manifest = _read_manifest()
+    recent_audit = _read_jsonl(_audit_log_path(), limit=10)
 
     rows = []
     for s in recent:
@@ -300,21 +455,67 @@ def _render_home() -> str:
             f"</tr>"
         )
 
+    audit_rows = "".join(
+        f"<tr><td class='muted'>{html.escape((r.get('ts') or '')[-8:])}</td>"
+        f"<td><span class='pill'>{html.escape(r.get('event', ''))}</span></td>"
+        f"<td><a href='/wiki/{html.escape(r.get('subject',''))}'><code>{html.escape(r.get('subject',''))}</code></a></td>"
+        f"</tr>"
+        for r in reversed(recent_audit)
+    )
+
     body = (
         "<h1>ctx monitor</h1>"
-        "<div class='card'><strong>Sidecar grades:</strong> "
+        # ── Stat grid ────────────────────────────────────────────────
+        "<div style='display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr));"
+        " gap:0.8rem; margin-bottom:1.25rem;'>"
+        + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Currently loaded</div>"
+        f"<div style='font-size:1.6rem; font-weight:600;'>{len(manifest.get('load', []))}</div>"
+        f"<a href='/loaded'>manage →</a></div>"
+        + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Sidecars</div>"
+        f"<div style='font-size:1.6rem; font-weight:600;'>{sum(grades.values())}</div>"
+        f"<a href='/skills'>browse →</a></div>"
+        + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Wiki entities</div>"
+        f"<div style='font-size:1.6rem; font-weight:600;'>{wstats['total']}</div>"
+        f"<span class='muted' style='font-size:0.75rem;'>"
+        f"{wstats['skills']} skills · {wstats['agents']} agents</span></div>"
+        + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Knowledge graph</div>"
+        f"<div style='font-size:1.6rem; font-weight:600;'>{gstats['nodes']}</div>"
+        f"<span class='muted' style='font-size:0.75rem;'>{gstats['edges']:,} edges</span>"
+        f" · <a href='/graph'>explore →</a></div>"
+        + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Audit events</div>"
+        f"<div style='font-size:1.6rem; font-weight:600;'>{audit_lines}</div>"
+        f"<a href='/logs'>view →</a> · <a href='/events'>live →</a></div>"
+        + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Sessions</div>"
+        f"<div style='font-size:1.6rem; font-weight:600;'>{len(sessions)}</div>"
+        f"<a href='/sessions'>browse →</a></div>"
+        + "</div>"
+        # ── Grade distribution ────────────────────────────────────────
+        "<div class='card'><strong>Skill quality grades:</strong> "
         + "".join(
             f"<span class='pill grade-{g}'>{g}: {n}</span> "
             for g, n in grades.items()
         )
         + f"<span class='muted'> · total {sum(grades.values())}</span>"
         "</div>"
+        # ── Two-column: recent sessions + recent audit ────────────────
+        "<div style='display:grid; grid-template-columns:2fr 1fr; gap:1rem;'>"
         f"<div class='card'><strong>Recent sessions</strong> ({len(sessions)} total)"
-        "<table>"
-        "<tr><th>Session</th><th>Last seen</th><th>Skills loaded</th>"
-        "<th>Skills unloaded</th><th>Agents loaded</th><th>Score updates</th></tr>"
-        + "".join(rows)
-        + "</table></div>"
+        + ("<table>"
+           "<tr><th>Session</th><th>Last seen</th><th>Load</th>"
+           "<th>Unload</th><th>Agents</th><th>Scores</th></tr>"
+           + "".join(rows)
+           + "</table>" if recent else
+           "<p class='muted'>No sessions recorded yet. Hooks start logging "
+           "once you run a Claude Code session with ctx installed.</p>")
+        + "</div>"
+        f"<div class='card'><strong>Latest audit events</strong>"
+        + ("<table>"
+           "<tr><th>Time</th><th>Event</th><th>Subject</th></tr>"
+           + audit_rows
+           + "</table>" if recent_audit else
+           "<p class='muted'>No audit events yet.</p>")
+        + "</div>"
+        "</div>"
     )
     return _layout("Home", body)
 
@@ -385,23 +586,111 @@ def _render_session_detail(session_id: str) -> str:
 def _render_skills() -> str:
     sidecars = _all_sidecars()
     sidecars.sort(key=lambda s: (s.get("grade", "F"), -s.get("raw_score", 0.0)))
-    rows = "".join(
-        f"<tr>"
-        f"<td><a href='/skill/{html.escape(s.get('slug', ''))}'><code>{html.escape(s.get('slug', ''))}</code></a></td>"
-        f"<td><span class='pill grade-{html.escape(s.get('grade', 'F'))}'>{html.escape(s.get('grade', 'F'))}</span></td>"
-        f"<td>{s.get('raw_score', 0.0):.3f}</td>"
-        f"<td class='muted'>{html.escape(s.get('hard_floor') or '')}</td>"
-        f"<td class='muted'>{html.escape(s.get('subject_type', ''))}</td>"
-        f"</tr>"
+
+    # Sidebar stats for the filter UI.
+    grade_counts = {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
+    type_counts = {"skill": 0, "agent": 0}
+    for sc in sidecars:
+        grade_counts[sc.get("grade", "F")] = grade_counts.get(sc.get("grade", "F"), 0) + 1
+        st = sc.get("subject_type", "skill")
+        type_counts[st] = type_counts.get(st, 0) + 1
+
+    cards = "".join(
+        f"<div class='skill-card' data-slug='{html.escape(s.get('slug', ''))}' "
+        f"data-grade='{html.escape(s.get('grade', 'F'))}' "
+        f"data-type='{html.escape(s.get('subject_type', 'skill'))}' "
+        f"data-floor='{html.escape(s.get('hard_floor') or '')}' "
+        f"style='border:1px solid #e5e7eb; border-radius:6px; padding:0.7rem 0.9rem; "
+        f"display:flex; flex-direction:column; gap:0.3rem;'>"
+        f"<div style='display:flex; justify-content:space-between; align-items:center;'>"
+        f"<code style='font-size:0.85rem;'>{html.escape(s.get('slug', ''))}</code>"
+        f"<span class='pill grade-{html.escape(s.get('grade', 'F'))}'>{html.escape(s.get('grade', 'F'))}</span>"
+        f"</div>"
+        f"<div class='muted' style='font-size:0.78rem;'>"
+        f"score {s.get('raw_score', 0.0):.3f} · {html.escape(s.get('subject_type', 'skill'))}"
+        f"{' · ' + html.escape(s.get('hard_floor','')) if s.get('hard_floor') else ''}"
+        f"</div>"
+        f"<div style='display:flex; gap:0.4rem; margin-top:0.2rem;'>"
+        f"<a href='/skill/{html.escape(s.get('slug', ''))}' style='font-size:0.78rem;'>sidecar</a>"
+        f"<a href='/wiki/{html.escape(s.get('slug', ''))}' style='font-size:0.78rem;'>wiki</a>"
+        f"<a href='/graph?slug={html.escape(s.get('slug', ''))}' style='font-size:0.78rem;'>graph</a>"
+        f"</div>"
+        f"</div>"
         for s in sidecars
     )
+
+    grade_checkboxes = "".join(
+        f"<label style='display:flex; justify-content:space-between; "
+        f"padding:0.25rem 0;'>"
+        f"<span><input type='checkbox' class='grade-filter' value='{g}' checked> "
+        f"<span class='pill grade-{g}'>{g}</span></span>"
+        f"<span class='muted' style='font-size:0.78rem;'>{grade_counts[g]}</span>"
+        f"</label>"
+        for g in ("A", "B", "C", "D", "F")
+    )
+    type_checkboxes = "".join(
+        f"<label style='display:flex; justify-content:space-between; "
+        f"padding:0.25rem 0;'>"
+        f"<span><input type='checkbox' class='type-filter' value='{t}' checked> {t}</span>"
+        f"<span class='muted' style='font-size:0.78rem;'>{type_counts.get(t, 0)}</span>"
+        f"</label>"
+        for t in ("skill", "agent")
+    )
+
     body = (
         "<h1>Skills &amp; agents</h1>"
-        f"<p class='muted'>{len(sidecars)} sidecars.</p>"
-        "<table><tr><th>slug</th><th>grade</th><th>score</th>"
-        "<th>hard floor</th><th>type</th></tr>"
-        + rows
-        + "</table>"
+        f"<p class='muted'>{len(sidecars)} sidecars · click any card to drill in.</p>"
+        "<div style='display:grid; grid-template-columns:220px 1fr; gap:1.25rem; align-items:start;'>"
+        # ── Left filter sidebar ──────────────────────────────────────
+        "<aside style='position:sticky; top:1rem;'>"
+        "<div class='card'><strong>Search</strong>"
+        "<input type='text' id='skill-search' placeholder='filter by slug…' "
+        "style='width:100%; margin-top:0.4rem; padding:0.35rem 0.5rem; "
+        "border:1px solid #ccc; border-radius:4px;'></div>"
+        "<div class='card'><strong>Grade</strong>"
+        + grade_checkboxes
+        + "</div>"
+        "<div class='card'><strong>Type</strong>"
+        + type_checkboxes
+        + "</div>"
+        "<div class='card'><strong>Hard floor</strong>"
+        "<label style='display:block; padding:0.25rem 0;'>"
+        "<input type='checkbox' id='hide-floor'> hide floored</label>"
+        "</div>"
+        "<div class='card'><span id='match-count' class='muted'>—</span></div>"
+        "</aside>"
+        # ── Card grid ────────────────────────────────────────────────
+        "<div id='card-grid' style='display:grid; "
+        "grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:0.7rem;'>"
+        + cards
+        + "</div>"
+        "</div>"
+        "<script>\n"
+        "const cards = document.querySelectorAll('.skill-card');\n"
+        "const search = document.getElementById('skill-search');\n"
+        "const hideFloor = document.getElementById('hide-floor');\n"
+        "function activeGrades() { return Array.from(document.querySelectorAll('.grade-filter:checked')).map(x => x.value); }\n"
+        "function activeTypes() { return Array.from(document.querySelectorAll('.type-filter:checked')).map(x => x.value); }\n"
+        "function apply() {\n"
+        "  const q = search.value.trim().toLowerCase();\n"
+        "  const grades = new Set(activeGrades());\n"
+        "  const types = new Set(activeTypes());\n"
+        "  const hideF = hideFloor.checked;\n"
+        "  let shown = 0;\n"
+        "  cards.forEach(c => {\n"
+        "    const ok = grades.has(c.dataset.grade) && types.has(c.dataset.type)\n"
+        "      && (!q || c.dataset.slug.toLowerCase().includes(q))\n"
+        "      && (!hideF || !c.dataset.floor);\n"
+        "    c.style.display = ok ? '' : 'none';\n"
+        "    if (ok) shown++;\n"
+        "  });\n"
+        "  document.getElementById('match-count').textContent = shown + ' of ' + cards.length + ' match';\n"
+        "}\n"
+        "search.addEventListener('input', apply);\n"
+        "hideFloor.addEventListener('change', apply);\n"
+        "document.querySelectorAll('.grade-filter, .type-filter').forEach(el => el.addEventListener('change', apply));\n"
+        "apply();\n"
+        "</script>"
     )
     return _layout("Skills", body)
 
@@ -432,6 +721,141 @@ def _render_skill_detail(slug: str) -> str:
         "<table><tr><th>ts</th><th>event</th><th>actor</th></tr>"
         + audit_rows
         + "</table>"
+    )
+    return _layout(slug, body)
+
+
+def _render_graph(focus: str | None = None) -> str:
+    """Interactive graph view — cytoscape-rendered N-hop neighborhood.
+
+    Cytoscape.js is loaded from a CDN. This is a local-dev dashboard
+    so the cost of one external asset is acceptable; stdlib-only
+    remains the server invariant.
+    """
+    focus_slug = focus or ""
+    focus_js = json.dumps(focus_slug)
+    body = (
+        "<h1>Knowledge graph</h1>"
+        "<p class='muted'>Enter a skill or agent slug to explore its "
+        "1-hop neighborhood. Edge weight ≈ shared tag count.</p>"
+        "<div class='card' style='padding:0.6rem 0.8rem;'>"
+        "<input type='text' id='focus' placeholder='skill slug (e.g. python-patterns)' "
+        "value='" + html.escape(focus_slug) + "' "
+        "style='padding:0.35rem 0.6rem; width:22rem; border:1px solid #ccc; border-radius:4px;'>"
+        "<button id='go' style='margin-left:0.5rem;'>explore</button>"
+        "<label style='margin-left:1rem;'><input type='checkbox' id='agents-only'> agents only</label>"
+        "<span id='msg' class='muted' style='margin-left:0.75rem;'></span>"
+        "</div>"
+        "<div id='cy' style='width:100%; height:65vh; border:1px solid #ddd; "
+        "border-radius:6px; margin-top:1rem; background:#fafafa;'></div>"
+        "<script src='https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js'></script>"
+        "<script>\n"
+        f"const initial = {focus_js};\n"
+        "const cy = cytoscape({\n"
+        "  container: document.getElementById('cy'),\n"
+        "  style: [\n"
+        "    { selector: 'node', style: {\n"
+        "      'label': 'data(label)', 'font-size': '10px',\n"
+        "      'text-valign': 'center', 'color': '#111',\n"
+        "      'background-color': '#6366f1', 'width': 22, 'height': 22,\n"
+        "    }},\n"
+        "    { selector: 'node[type = \"agent\"]', style: {\n"
+        "      'background-color': '#f59e0b',\n"
+        "    }},\n"
+        "    { selector: 'node[depth = 0]', style: {\n"
+        "      'background-color': '#10b981', 'width': 34, 'height': 34,\n"
+        "      'font-weight': 'bold',\n"
+        "    }},\n"
+        "    { selector: 'edge', style: {\n"
+        "      'width': 'mapData(weight, 1, 10, 0.5, 4)',\n"
+        "      'line-color': '#cbd5e1', 'curve-style': 'straight',\n"
+        "    }},\n"
+        "  ],\n"
+        "  layout: { name: 'cose', animate: false, padding: 30 },\n"
+        "});\n"
+        "cy.on('tap', 'node', (e) => {\n"
+        "  const slug = e.target.id().replace(/^(skill|agent):/, '');\n"
+        "  window.location.href = '/wiki/' + encodeURIComponent(slug);\n"
+        "});\n"
+        "async function load(slug) {\n"
+        "  if (!slug) return;\n"
+        "  document.getElementById('msg').textContent = 'loading…';\n"
+        "  const r = await fetch('/api/graph/' + encodeURIComponent(slug) + '.json');\n"
+        "  if (!r.ok) { document.getElementById('msg').textContent = 'not found'; return; }\n"
+        "  const g = await r.json();\n"
+        "  if (!g.center) { document.getElementById('msg').textContent = 'slug not in graph'; return; }\n"
+        "  let elements = [...g.nodes, ...g.edges];\n"
+        "  if (document.getElementById('agents-only').checked) {\n"
+        "    const keep = new Set(g.nodes.filter(n => n.data.type === 'agent' || n.data.depth === 0).map(n => n.data.id));\n"
+        "    elements = [...g.nodes.filter(n => keep.has(n.data.id)),\n"
+        "                ...g.edges.filter(e => keep.has(e.data.source) && keep.has(e.data.target))];\n"
+        "  }\n"
+        "  cy.elements().remove();\n"
+        "  cy.add(elements);\n"
+        "  cy.layout({ name: 'cose', animate: false, padding: 30 }).run();\n"
+        "  document.getElementById('msg').textContent = g.nodes.length + ' nodes · ' + g.edges.length + ' edges';\n"
+        "}\n"
+        "document.getElementById('go').addEventListener('click', () => load(document.getElementById('focus').value.trim()));\n"
+        "document.getElementById('focus').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') load(ev.target.value.trim()); });\n"
+        "document.getElementById('agents-only').addEventListener('change', () => load(document.getElementById('focus').value.trim()));\n"
+        "if (initial) load(initial);\n"
+        "</script>"
+    )
+    return _layout("Graph", body)
+
+
+def _render_wiki_entity(slug: str) -> str:
+    """Render one wiki entity page (frontmatter + body)."""
+    path = _wiki_entity_path(slug)
+    if path is None:
+        return _layout(
+            slug,
+            f"<h1>{html.escape(slug)}</h1>"
+            f"<p class='muted'>No wiki page found for <code>{html.escape(slug)}</code>. "
+            f"Try <a href='/skills'>the skills index</a>.</p>",
+        )
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return _layout(
+            slug,
+            f"<h1>{html.escape(slug)}</h1><p class='muted'>read error: {html.escape(str(exc))}</p>",
+        )
+    meta, md_body = _parse_frontmatter(raw)
+    sidecar = _load_sidecar(slug)
+
+    fm_rows = "".join(
+        f"<tr><td class='muted'>{html.escape(k)}</td>"
+        f"<td><code>{html.escape(v[:120])}</code></td></tr>"
+        for k, v in sorted(meta.items())
+    )
+
+    sidecar_html = ""
+    if sidecar is not None:
+        sidecar_html = (
+            "<div class='card'>"
+            f"<strong>Quality</strong> <span class='pill grade-{html.escape(sidecar.get('grade', 'F'))}'>"
+            f"{html.escape(sidecar.get('grade', 'F'))}</span> "
+            f"score <strong>{sidecar.get('raw_score', 0.0):.3f}</strong>"
+            f"{' · floor ' + html.escape(sidecar.get('hard_floor','')) if sidecar.get('hard_floor') else ''}"
+            f"<div style='margin-top:0.4rem;'>"
+            f"<a href='/skill/{html.escape(slug)}'>sidecar detail →</a> · "
+            f"<a href='/graph?slug={html.escape(slug)}'>graph neighborhood →</a>"
+            "</div></div>"
+        )
+
+    body = (
+        f"<h1>{html.escape(slug)}</h1>"
+        + sidecar_html
+        + "<div style='display:grid; grid-template-columns:1fr 280px; gap:1rem;'>"
+        f"<div class='card'><pre style='white-space:pre-wrap; font-family:\"SF Mono\", Consolas, monospace; "
+        f"font-size:0.88rem;'>{html.escape(md_body[:12000])}</pre></div>"
+        f"<div class='card'><strong>Frontmatter</strong>"
+        "<table style='font-size:0.85rem;'>"
+        "<tr><th>Field</th><th>Value</th></tr>"
+        + (fm_rows or "<tr><td class='muted' colspan='2'>none</td></tr>")
+        + "</table></div>"
+        "</div>"
     )
     return _layout(slug, body)
 
@@ -651,7 +1075,13 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self) -> None:  # noqa: N802 — stdlib signature
-        path = self.path.split("?", 1)[0]
+        # Parse once so we can reuse the query string for /graph?slug=…
+        raw_path, _, raw_query = self.path.partition("?")
+        path = raw_path
+        qs = {}
+        if raw_query:
+            from urllib.parse import parse_qs
+            qs = {k: v[0] for k, v in parse_qs(raw_query).items()}
         try:
             if path == "/":
                 self._send_html(_render_home())
@@ -667,6 +1097,11 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 self._send_html(_render_loaded())
             elif path == "/logs":
                 self._send_html(_render_logs())
+            elif path == "/graph":
+                self._send_html(_render_graph(qs.get("slug")))
+            elif path.startswith("/wiki/"):
+                slug = path.split("/wiki/", 1)[1]
+                self._send_html(_render_wiki_entity(slug))
             elif path == "/events":
                 self._send_html(_render_events())
             elif path == "/api/sessions.json":
@@ -680,6 +1115,11 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                     self._send_404(f"no sidecar for {slug}")
                 else:
                     self._send_json(sidecar)
+            elif path.startswith("/api/graph/") and path.endswith(".json"):
+                slug = path[len("/api/graph/"): -len(".json")]
+                hops = max(1, min(int(qs.get("hops", 1)), 3))
+                limit = max(5, min(int(qs.get("limit", 40)), 150))
+                self._send_json(_graph_neighborhood(slug, hops=hops, limit=limit))
             elif path == "/api/events.stream":
                 self._stream_audit_log()
             else:
