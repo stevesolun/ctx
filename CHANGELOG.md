@@ -3,6 +3,46 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.2] — 2026-04-20
+
+Verification-pass patch after v0.6.1 shipped. Three items the v0.6.1
+for-the-reviewer note flagged as "not verified" all got verified; one
+surfaced a real bug (pre-commit tar repack silently failing on
+Windows/MSYS).
+
+### Fixed
+
+- **`.githooks/pre-commit` — tar repack crashed on Windows/MSYS**:
+  GNU tar parses `c:/path` as `host:path` for legacy rsh remote tar,
+  tries to resolve host `c`, and fails with `Cannot connect to c:
+  resolve failed`. The hook swallowed the error (by design — a hook
+  failure must not block a commit) but the tarball was never
+  regenerated, so developer-side rebuilds on Windows silently shipped
+  stale counts. Fixed by passing `--force-local` to the tar invocation.
+- **`.obsidian/` Obsidian vault config was being excluded from the
+  tarball** despite `graph/README.md` advertising "Obsidian vault
+  config, so the extracted tree opens as a graph directly in Obsidian."
+  Removed the `--exclude='.obsidian'` from the pre-commit repack so the
+  tarball actually ships what the docs promise.
+
+### Verified (v0.6.1 "not verified" items)
+
+- **PyPI 0.6.1 published**: wheel `claude_ctx-0.6.1-py3-none-any.whl`
+  (267 KB) + sdist (232 KB) live, uploaded 2026-04-19T23:45 UTC.
+  Publish / Tests / Deploy-docs workflows all succeeded.
+- **Cytoscape layout quality verified via headless Chromium**:
+  Playwright loaded `http://127.0.0.1:8811/graph?slug=cloud-architect`,
+  waited for `cy.nodes().length > 0`, then read the live cytoscape
+  instance: 40 nodes / 39 edges rendered, center `skill:cloud-architect`
+  at depth 0, COSE layout placed nodes (bounding box 400×297px, none
+  at origin), status panel showed "40 nodes · 39 edges", zero JS errors
+  on `pageerror` or `console.error`. Screenshot captured for proof.
+- **Tarball content**: same 1,789 skills / 464 agents / 2,253 nodes
+  / 454,719 edges after the hook fix, `.obsidian/` now included as
+  advertised.
+
+[0.6.2]: https://github.com/stevesolun/ctx/releases/tag/v0.6.2
+
 ## [0.6.1] — 2026-04-20
 
 Harvested **`0xNyk/council-of-high-intelligence`** on top of v0.6.0.
