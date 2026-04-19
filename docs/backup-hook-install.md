@@ -112,6 +112,47 @@ python src/backup_mirror.py create --reason pre-upgrade
 Both land under `~/.claude/backups/<timestamp>__<reason>/` and write a
 `manifest.json` that records the reason alongside every file's SHA-256.
 
+## Watchdog — snapshot on changes outside a Claude session
+
+The PostToolUse hook only fires on `Edit` / `Write` / `MultiEdit` tool
+calls *inside* a Claude session. If you edit `~/.claude/settings.json`
+in VS Code, or a `git pull` updates an agent file, the hook never
+sees it.
+
+For that gap, run the polling watchdog — a simple loop that calls
+`snapshot-if-changed` every N seconds:
+
+```bash
+python src/backup_mirror.py watchdog --interval 60
+```
+
+Flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--interval N` | Seconds between polls. Clamped to `[5, 3600]`. Default 60. |
+| `--reason-prefix LBL` | Prefix used for each snapshot's `--reason` label. Default `watchdog`. |
+| `--once` | Run exactly one tick and exit. Useful for cron / Task Scheduler. |
+| `--json` | Emit run stats as JSON on exit. |
+
+Because change detection is SHA-gated, polling is cheap — a tick with
+no real changes does zero disk writes.
+
+### Running it as a background service
+
+- **Linux (systemd)** — create a user unit that runs
+  `python .../backup_mirror.py watchdog --interval 60` with
+  `Restart=always`.
+- **macOS (launchd)** — drop a LaunchAgent plist into
+  `~/Library/LaunchAgents/`.
+- **Windows (Task Scheduler)** — create a task that runs
+  `watchdog --once` on a 1-minute trigger, or a continuous task with
+  `--interval 60`.
+
+The watchdog stops cleanly on SIGINT/SIGTERM, flushes its stats line
+to stderr, and exits 0. Pair it with the hook: the hook handles
+in-session edits in real time; the watchdog catches everything else.
+
 ## Retention — how old snapshots get pruned
 
 Auto-pruning runs after every successful `snapshot-if-changed`, so the
