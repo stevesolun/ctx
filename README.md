@@ -3,11 +3,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-1363_passing-brightgreen.svg)](#)
-[![Graph](https://img.shields.io/badge/Graph-2,211_nodes_/_642K_edges-red.svg)](graph/)
+[![Tests](https://img.shields.io/badge/Tests-1366_passing-brightgreen.svg)](#)
+[![Graph](https://img.shields.io/badge/Graph-2%2C235_nodes_/_448K_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
-Watches what you develop, walks a knowledge graph of **1,768 skills and 443 agents** (2,211 nodes, 642K edges, 865 communities), and recommends the right ones on the fly — you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+Watches what you develop, walks a knowledge graph of **1,789 skills and 446 agents** (2,235 nodes, 448K edges, 95 communities), and recommends the right ones on the fly — you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 ## Why it exists
 

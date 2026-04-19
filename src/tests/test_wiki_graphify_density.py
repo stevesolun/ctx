@@ -1,0 +1,113 @@
+"""
+test_wiki_graphify_density.py -- Regression test for the DENSE_TAG_THRESHOLD
+silent-drop bug that shipped as a sparsity regression in v0.5.x.
+
+History: ``build_graph()`` used ``DENSE_TAG_THRESHOLD = 20`` and silently
+skipped any tag that appeared on more than 20 nodes. In a real wiki
+where tags like ``python``, ``frontend``, ``security``, ``testing`` each
+span several hundred entities, this meant the graph lost ~99% of its
+edges on every rebuild — the live wiki collapsed from 642K edges to 861
+edges (v0.5.x regression caught by the v0.6.0 audit).
+
+Pinning the constant here keeps accidental "let's make the graph smaller
+for performance" tweaks from reintroducing the same bug. If the
+threshold needs to change, this test has to change too, which makes the
+decision visible in review.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+SRC_DIR = Path(__file__).resolve().parents[1]
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+import wiki_graphify as wg  # noqa: E402
+
+
+def test_dense_tag_threshold_is_at_least_500() -> None:
+    """The edge-density regression from v0.5.x happened because this was 20.
+
+    Any value below 500 drops semantically-useful tags on a wiki of
+    ~2,000 entities. Raising this back down without intent is the bug
+    we're preventing.
+    """
+    source = Path(wg.__file__).read_text(encoding="utf-8")
+    match = re.search(r"DENSE_TAG_THRESHOLD\s*=\s*(\d+)", source)
+    assert match is not None, "DENSE_TAG_THRESHOLD constant not found"
+    value = int(match.group(1))
+    assert value >= 500, (
+        f"DENSE_TAG_THRESHOLD={value} will silently drop dense tags and "
+        f"collapse the graph. Minimum sensible value is 500 (matches the "
+        f"canonical 642K-edge graph shipped in v0.6.0). Raising this "
+        f"back down needs a deliberate justification."
+    )
+
+
+def test_slug_token_pseudo_tags_are_indexed() -> None:
+    """Slug tokens like 'fastapi' from slug='fastapi-pro' must contribute
+    edges. Without these pseudo-tags, the graph misses the 'same-topic'
+    connectivity that makes it useful for recommendations.
+    """
+    source = Path(wg.__file__).read_text(encoding="utf-8")
+    # The implementation uses an "_t:" prefix on slug-token pseudo-tags.
+    assert "_t:" in source, (
+        "slug-token pseudo-tag indexing removed — graph connectivity "
+        "will regress for entities with sparse frontmatter tags"
+    )
+    # Stop-word filter to avoid "skill" / "agent" / "pro" etc. generating
+    # noise edges must remain.
+    assert "SLUG_STOP" in source, (
+        "SLUG_STOP filter removed — slug tokens like 'pro' and 'skill' "
+        "will over-connect the graph"
+    )
+
+
+def test_build_graph_produces_edges_on_small_fixture(tmp_path, monkeypatch) -> None:
+    """End-to-end: a 4-entity fixture with two shared tags must produce
+    at least one edge. Catches any future refactor that breaks the
+    tag->edge flow entirely.
+    """
+    wiki = tmp_path / "wiki"
+    (wiki / "entities" / "skills").mkdir(parents=True)
+    (wiki / "entities" / "agents").mkdir(parents=True)
+
+    def write(path: Path, name: str, tags: list[str]) -> None:
+        tags_block = "\n".join(f"  - {t}" for t in tags)
+        path.write_text(
+            f"---\ntitle: {name}\ntype: skill\ntags:\n{tags_block}\n---\n# {name}\nbody\n",
+            encoding="utf-8",
+        )
+
+    write(wiki / "entities" / "skills" / "fastapi-pro.md",     "fastapi-pro",     ["python", "web"])
+    write(wiki / "entities" / "skills" / "python-patterns.md", "python-patterns", ["python", "patterns"])
+    write(wiki / "entities" / "skills" / "react-patterns.md",  "react-patterns",  ["javascript", "patterns"])
+    write(wiki / "entities" / "agents" / "code-reviewer.md",   "code-reviewer",   ["review", "python"])
+
+    monkeypatch.setattr(wg, "SKILL_ENTITIES", wiki / "entities" / "skills")
+    monkeypatch.setattr(wg, "AGENT_ENTITIES", wiki / "entities" / "agents")
+    monkeypatch.setattr(wg, "QUALITY_SIDECAR_DIR", tmp_path / "sidecars")
+
+    G, _ = wg.build_graph()
+
+    # 4 nodes, some edges. The "python" tag connects 3 of 4 (fastapi-pro,
+    # python-patterns, code-reviewer) so we expect a triangle at minimum.
+    assert G.number_of_nodes() == 4
+    assert G.number_of_edges() >= 3, (
+        f"expected at least 3 edges (python triangle + patterns pair), "
+        f"got {G.number_of_edges()}"
+    )
+
+    # At least one skill<->agent edge must exist (code-reviewer shares
+    # "python" with fastapi-pro + python-patterns).
+    cross = sum(
+        1 for u, v in G.edges()
+        if G.nodes[u].get("type") != G.nodes[v].get("type")
+    )
+    assert cross >= 1, (
+        "no skill<->agent edges produced — recommendation walk will "
+        "never surface agents from a skill seed"
+    )

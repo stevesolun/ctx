@@ -55,17 +55,42 @@ def parse_frontmatter(text: str) -> dict[str, Any]:
     if not m:
         return {}
     fm: dict[str, Any] = {}
-    for line in m.group(1).splitlines():
+    lines = m.group(1).splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         if ":" not in line:
+            i += 1
             continue
         key, _, val = line.partition(":")
         key, val = key.strip(), val.strip()
         if val.startswith("[") and val.endswith("]"):
-            val = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
-        elif (val.startswith('"') and val.endswith('"')) or \
-             (val.startswith("'") and val.endswith("'")):
+            # Inline list: ``tags: [a, b, c]``
+            fm[key] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
+            i += 1
+            continue
+        if val == "" and i + 1 < len(lines) and lines[i + 1].lstrip().startswith("- "):
+            # Multi-line YAML list:
+            #   tags:
+            #     - python
+            #     - frontend
+            # Real wiki entity pages use this form; the old parser only
+            # handled inline lists and silently dropped these, collapsing
+            # every graph-edge source to slug tokens alone.
+            collected: list[str] = []
+            i += 1
+            while i < len(lines) and lines[i].lstrip().startswith("- "):
+                item = lines[i].lstrip()[2:].strip().strip("'\"")
+                if item:
+                    collected.append(item)
+                i += 1
+            fm[key] = collected
+            continue
+        if (val.startswith('"') and val.endswith('"')) or \
+           (val.startswith("'") and val.endswith("'")):
             val = val[1:-1]
         fm[key] = val
+        i += 1
     return fm
 
 

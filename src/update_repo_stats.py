@@ -250,6 +250,10 @@ def build_replacements(stats: dict, tests: int | None, converted: int | None) ->
         e_fmt = format_edges(e)
         reps.append((re.compile(r"badge/Knowledge_Graph-[\w.]+_edges-"),
                      f"badge/Knowledge_Graph-{e_fmt}_edges-"))
+        # Graph badge introduced in v0.5.0: "Graph-2,211_nodes_/_642K_edges-"
+        # where the comma is URL-encoded as %2C and slash is %2F / literal.
+        reps.append((re.compile(r"badge/Graph-[\w.%,/_-]+_edges-"),
+                     f"badge/Graph-{n:,}_nodes_/_{e_fmt}_edges-".replace(",", "%2C")))
         # "2,211 nodes, 642K edges, 865 communities"
         reps.append((re.compile(r"([\d,]+)\s+nodes,\s+[\w.]+\s+edges,\s+([\d,]+)\s+communities"),
                      f"{n:,} nodes, {e_fmt} edges, {stats['communities']:,} communities"))
