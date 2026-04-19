@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-ctx"
-version = "0.5.0-rc7"
+version = "0.5.0-rc8"
 description = "Skill and agent recommendation system for Claude Code — knowledge graph, wiki, and intake quality gates"
 authors = [{ name = "Steve Solun" }]
 license = { text = "MIT" }
@@ -25,10 +25,16 @@ Documentation = "https://stevesolun.github.io/ctx/"
 Changelog = "https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md"
 
 [project.scripts]
+ctx-init = "ctx_init:main"
+ctx-install-hooks = "inject_hooks:main"
+ctx-monitor = "ctx_monitor:main"
 ctx-scan-repo = "scan_repo:main"
 ctx-skill-quality = "skill_quality:main"
 ctx-skill-health = "skill_health:main"
 ctx-toolbox = "toolbox:main"
+ctx-lifecycle = "ctx_lifecycle:main"
+ctx-skill-add = "skill_add:main"
+ctx-wiki-graphify = "wiki_graphify:main"
 
 [project.optional-dependencies]
 dev = [
@@ -67,7 +73,9 @@ py-modules = [
     "council_runner",
     "ctx_audit_log",
     "ctx_config",
+    "ctx_init",
     "ctx_lifecycle",
+    "ctx_monitor",
     "embedding_backend",
     "flatten_agents",
     "import_strix_skills",
