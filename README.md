@@ -6,7 +6,7 @@
 [![Tests](https://img.shields.io/badge/Tests-1319_passing-brightgreen.svg)](#)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
-Watches what you develop, walks a knowledge graph of **1,768 skills and 443 agents**, and recommends the right ones on the fly — you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+Watches what you develop, walks a knowledge graph of **1,769 skills and 443 agents**, and recommends the right ones on the fly — you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 ## Why it exists
 
