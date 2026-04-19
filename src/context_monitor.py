@@ -91,6 +91,28 @@ KEYWORD_SIGNALS: dict[str, str] = {
     "github-actions": "github-actions",
     "gitlab-ci": "gitlab-ci",
     "vercel": "vercel",
+    # Payment / fintech
+    "stripe": "stripe",
+    "paymentintent": "stripe",
+    "setupintent": "stripe",
+    "paypal": "paypal",
+    "braintree": "braintree",
+    "plaid": "plaid",
+    "pci": "pci-compliance",
+    "payment": "payment-integration",
+    # Postgres signals beyond just "postgres"
+    "postgres": "postgres",
+    "postgresql": "postgres",
+    "psycopg": "postgres",
+    "psycopg2": "postgres",
+    "asyncpg": "postgres",
+    # MongoDB
+    "mongo": "mongodb",
+    "mongodb": "mongodb",
+    "pymongo": "mongodb",
+    "motor": "mongodb",
+    # Data validation commonly paired with FastAPI
+    "pydantic": "pydantic",
 }
 
 # File extension → stack signal

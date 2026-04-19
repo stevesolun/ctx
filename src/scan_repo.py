@@ -270,6 +270,17 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
         (py_dep_set, "dspy-ai", "dspy", "ai", 0.95),
         (py_dep_set, "openai", "openai-sdk", "ai", 0.8),
         (py_dep_set, "anthropic", "anthropic-sdk", "ai", 0.8),
+        # Fintech / payments
+        (py_dep_set, "stripe", "stripe", "payments", 0.99),
+        (py_dep_set, "paypalrestsdk", "paypal", "payments", 0.95),
+        (py_dep_set, "paypal-sdk", "paypal", "payments", 0.95),
+        (py_dep_set, "plaid-python", "plaid", "payments", 0.95),
+        (js_dep_set, "stripe", "stripe", "payments", 0.99),
+        (js_dep_set, "@stripe/stripe-js", "stripe", "payments", 0.99),
+        # Validation / schemas (often paired with FastAPI)
+        (py_dep_set, "pydantic", "pydantic", "web", 0.85),
+        (js_dep_set, "zod", "zod", "web", 0.85),
+        (js_dep_set, "yup", "yup", "web", 0.8),
         (js_dep_set, "react", "react", "web", 0.9),
         (js_dep_set, "vue", "vue", "web", 0.9),
         (js_dep_set, "next", "nextjs", "web", 0.95),
@@ -364,6 +375,20 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
         (py_dep_set, "redis", "redis", 0.85),
         (py_dep_set, "celery", "celery", 0.95),
         (py_dep_set, "kafka-python", "kafka", 0.9),
+        # Postgres explicit — the psycopg family installs as 'psycopg2',
+        # 'psycopg2-binary', or 'psycopg' (3.x). Any of them → postgres.
+        (py_dep_set, "psycopg2", "postgres", 0.95),
+        (py_dep_set, "psycopg2-binary", "postgres", 0.95),
+        (py_dep_set, "psycopg", "postgres", 0.95),
+        (py_dep_set, "asyncpg", "postgres", 0.95),
+        # MongoDB
+        (py_dep_set, "pymongo", "mongodb", 0.95),
+        (py_dep_set, "motor", "mongodb", 0.95),
+        (js_dep_set, "mongodb", "mongodb", 0.95),
+        (js_dep_set, "mongoose", "mongodb", 0.95),
+        # Postgres from JS side
+        (js_dep_set, "pg", "postgres", 0.9),
+        (js_dep_set, "postgres", "postgres", 0.9),
         (js_dep_set, "prisma", "prisma", 0.95),
         (js_dep_set, "@prisma/client", "prisma", 0.95),
         (js_dep_set, "typeorm", "typeorm", 0.95),
@@ -413,6 +438,27 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
             if not existing:
                 profile["testing"].append({
                     "name": stack_id, "confidence": conf, "evidence": [cfg_name]
+                })
+
+    # Dev-dependency based test-framework detection — catches pytest /
+    # jest / vitest / playwright / cypress declared in pyproject
+    # [tool.pytest.ini_options] / [dependency-groups] / package.json
+    # devDependencies without a dedicated config file on disk.
+    dev_test_checks = [
+        (py_dep_set, "pytest", "pytest", 0.9),
+        (py_dep_set, "pytest-asyncio", "pytest", 0.9),
+        (js_dep_set, "jest", "jest", 0.9),
+        (js_dep_set, "vitest", "vitest", 0.9),
+        (js_dep_set, "@playwright/test", "playwright", 0.9),
+        (js_dep_set, "cypress", "cypress", 0.9),
+    ]
+    for dep_set, dep_name, stack_id, conf in dev_test_checks:
+        if dep_name in dep_set:
+            existing = [t for t in profile["testing"] if t["name"] == stack_id]
+            if not existing:
+                profile["testing"].append({
+                    "name": stack_id, "confidence": conf,
+                    "evidence": [f"{dep_name} in dependencies"],
                 })
 
     # --- AI TOOLING ---
@@ -499,6 +545,11 @@ def main():
 
     signals = scan_directory(args.repo, max_depth=args.depth)
     profile = detect_stack(args.repo, signals)
+
+    # Ensure the output parent directory exists — users commonly pass
+    # --output .ctx/stack.json without pre-creating .ctx/. Without this
+    # the open() below raises FileNotFoundError.
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
 
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(profile, f, indent=2)
