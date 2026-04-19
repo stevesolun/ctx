@@ -144,6 +144,69 @@ def test_render_skills_sorts_grade_then_score(fake_claude: Path) -> None:
     assert idx_top < idx_mid < idx_low
 
 
+def test_read_manifest_empty_when_missing(fake_claude: Path) -> None:
+    m = cm._read_manifest()
+    assert m == {"load": [], "unload": [], "warnings": []}
+
+
+def test_read_manifest_reads_real_manifest(fake_claude: Path) -> None:
+    (fake_claude / "skill-manifest.json").write_text(
+        json.dumps({"load": [{"skill": "a"}], "unload": [{"skill": "b"}],
+                    "warnings": []}),
+        encoding="utf-8",
+    )
+    m = cm._read_manifest()
+    assert [e["skill"] for e in m["load"]] == ["a"]
+    assert [e["skill"] for e in m["unload"]] == ["b"]
+
+
+def test_render_loaded_shows_manifest_entries(fake_claude: Path) -> None:
+    (fake_claude / "skill-manifest.json").write_text(
+        json.dumps({
+            "load": [{"skill": "python-patterns", "source": "user-approved",
+                      "priority": 7, "reason": "fuzzy match"}],
+            "unload": [{"skill": "old-skill", "source": "stale"}],
+            "warnings": [],
+        }),
+        encoding="utf-8",
+    )
+    html = cm._render_loaded()
+    assert "python-patterns" in html
+    assert "old-skill" in html
+    # Action buttons must be present for each row.
+    assert "btn-unload" in html
+    assert "btn-load" in html
+    # Navigation must include new pages.
+    assert "/loaded" in html
+    assert "/logs" in html
+
+
+def test_render_logs_filters_and_renders(fake_claude: Path) -> None:
+    _write_audit(fake_claude, [
+        {"ts": "t1", "event": "skill.loaded", "subject_type": "skill",
+         "subject": "s1", "actor": "hook", "session_id": "sess"},
+        {"ts": "t2", "event": "skill.score_updated", "subject_type": "skill",
+         "subject": "s1", "actor": "hook", "session_id": "sess"},
+    ])
+    html = cm._render_logs()
+    assert "skill.loaded" in html
+    assert "skill.score_updated" in html
+    # Filter input must be wired.
+    assert "id='filter'" in html
+
+
+def test_perform_load_rejects_invalid_slug() -> None:
+    ok, msg = cm._perform_load("../etc/passwd")
+    assert ok is False
+    assert "invalid slug" in msg
+
+
+def test_perform_unload_rejects_invalid_slug() -> None:
+    ok, msg = cm._perform_unload("../../hostile")
+    assert ok is False
+    assert "invalid slug" in msg
+
+
 def test_cli_argparser_exposes_serve() -> None:
     # argparse should not raise; subcommand "serve" is required
     with pytest.raises(SystemExit):
