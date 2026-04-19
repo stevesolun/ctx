@@ -26,8 +26,7 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from ctx_config import cfg  # noqa: E402
+from ctx_config import cfg
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 IMPORT_ROOT = REPO_ROOT / "imported-skills" / "strix"

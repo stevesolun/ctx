@@ -125,6 +125,12 @@ def run_watchdog(
     log
         Injectable writer for diagnostic lines. Defaults to stderr.
     """
+    # Intentional import cycle with backup_mirror (see the matching
+    # comment at the top of that module). backup_mirror.cmd_watchdog
+    # calls run_watchdog, and run_watchdog calls back into
+    # backup_mirror.snapshot_if_changed — the call graph is cyclic by
+    # design. Importing lazily here keeps the module import graph
+    # acyclic so both modules load in either order.
     from backup_mirror import snapshot_if_changed  # noqa: PLC0415
 
     def emit(msg: str) -> None:

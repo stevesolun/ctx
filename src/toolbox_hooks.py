@@ -42,17 +42,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-try:
-    from behavior_miner import build_profile, format_digest, save_profile
-    from council_runner import build_plan, persist_plan
-    from toolbox_config import Toolbox, merged
-except ImportError:  # pragma: no cover
-    sys.path.insert(0, str(Path(__file__).parent))
-    from behavior_miner import (  # type: ignore[no-redef]
-        build_profile, format_digest, save_profile,
-    )
-    from council_runner import build_plan, persist_plan  # type: ignore[no-redef]
-    from toolbox_config import Toolbox, merged  # type: ignore[no-redef]
+from behavior_miner import build_profile, format_digest, save_profile
+from council_runner import build_plan, persist_plan
+from toolbox_config import Toolbox, merged
 
 
 VALID_TRIGGERS = frozenset({"session-start", "session-end", "pre-commit", "file-save"})

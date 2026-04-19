@@ -14,7 +14,9 @@ Usage:
 import argparse
 import json
 import os
+import shlex
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -30,23 +32,27 @@ def load_settings(path: Path) -> dict:
 
 def make_hooks(ctx_dir: str) -> dict:
     """Return the hooks config block for this installation."""
-    # The hooks system runs in the user's shell; 2>/dev/null || true ensures
-    # silent failure if the script is missing or python3 is unavailable
+    # shlex.quote() ensures paths with spaces, $, or quotes don't break the shell command.
+    # Tool input is delivered by Claude Code on stdin as JSON; --from-stdin reads it
+    # from there instead of interpolating $CLAUDE_TOOL_INPUT into argv (which would
+    # allow shell injection via malicious tool-input blobs).
+    q = shlex.quote(ctx_dir)
     monitor_cmd = (
-        f'python3 "{ctx_dir}/context_monitor.py" '
-        f'--tool "$CLAUDE_TOOL_NAME" --input "$CLAUDE_TOOL_INPUT" 2>/dev/null || true'
+        f'python3 {q}/context_monitor.py --from-stdin 2>/dev/null || true'
     )
     tracker_cmd = (
-        f'python3 "{ctx_dir}/usage_tracker.py" --sync 2>/dev/null || true'
+        f'python3 {q}/usage_tracker.py --sync 2>/dev/null || true'
+    )
+    quality_cmd = (
+        f'python3 {q}/../hooks/quality_on_session_end.py 2>/dev/null || true'
     )
     # Skill-add detection: when Write/Edit/Bash touches a SKILL.md path → register in wiki
     skill_add_cmd = (
-        f'python3 "{ctx_dir}/skill_add_detector.py" '
-        f'--tool "$CLAUDE_TOOL_NAME" --input "$CLAUDE_TOOL_INPUT" 2>/dev/null || true'
+        f'python3 {q}/skill_add_detector.py --from-stdin 2>/dev/null || true'
     )
     # Graph-based skill suggestion: surfaces pending-skills.json to Claude for user approval
     suggest_cmd = (
-        f'python3 "{ctx_dir}/skill_suggest.py" 2>/dev/null || true'
+        f'python3 {q}/skill_suggest.py 2>/dev/null || true'
     )
 
     return {
@@ -73,7 +79,11 @@ def make_hooks(ctx_dir: str) -> dict:
             {
                 "type": "command",
                 "command": tracker_cmd,
-            }
+            },
+            {
+                "type": "command",
+                "command": quality_cmd,
+            },
         ],
     }
 
@@ -139,6 +149,47 @@ def merge_hooks(existing: dict, new_hooks: dict) -> dict:
     return existing
 
 
+def write_settings_atomic(path: Path, data: dict) -> None:
+    """Write settings.json atomically: tempfile + fsync + os.replace().
+
+    On POSIX, os.replace() is a single syscall and is guaranteed atomic even
+    under concurrent writes.  On Windows, os.replace() raises PermissionError
+    if the destination is held open by another process/thread.  We retry a
+    small number of times with a short back-off; after that we re-raise so
+    callers know something is genuinely wrong.
+    """
+    import time
+
+    content = json.dumps(data, indent=2) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix="settings.json.",
+        dir=str(path.parent),
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        # Retry loop handles transient Windows PermissionError on os.replace().
+        _last_exc: Exception | None = None
+        for attempt in range(10):
+            try:
+                os.replace(tmp_path, path)
+                return
+            except PermissionError as exc:
+                _last_exc = exc
+                time.sleep(0.01 * (attempt + 1))
+        raise _last_exc  # type: ignore[misc]
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Inject hooks into settings.json")
     parser.add_argument("--settings", required=True, help="Path to settings.json")
@@ -153,13 +204,11 @@ def main() -> None:
     new_hooks = make_hooks(ctx_dir)
     updated = merge_hooks(settings, new_hooks)
 
-    # Write back with pretty formatting
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
+    write_settings_atomic(settings_path, updated)
 
     print(f"Hooks injected into {settings_path}")
     print("  PostToolUse: context_monitor + skill-add-detector + skill-suggest")
-    print("  Stop: usage_tracker")
+    print("  Stop: usage_tracker + quality_on_session_end")
 
 
 if __name__ == "__main__":

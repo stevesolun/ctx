@@ -35,9 +35,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from ctx_config import cfg  # noqa: E402
-from wiki_utils import parse_frontmatter as _parse_frontmatter  # noqa: E402
+from ctx_config import cfg
+from wiki_utils import parse_frontmatter as _parse_frontmatter
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*)?\]\]")
 REQUIRED_FM_KEYS = {"title", "created", "updated", "type", "tags"}

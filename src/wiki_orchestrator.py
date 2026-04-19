@@ -24,6 +24,20 @@ from typing import Any
 from ctx_config import cfg
 from wiki_utils import parse_frontmatter as _parse_frontmatter
 
+try:
+    from skill_add_detector import validate_skill_name as _validate_skill_name
+except ImportError:  # pragma: no cover
+    import re as _re
+    _SKILL_DIR_RE = _re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+    def _validate_skill_name(name: str) -> str:  # type: ignore[misc]
+        if not isinstance(name, str) or not _SKILL_DIR_RE.match(name):
+            raise ValueError(
+                f"invalid skill name extracted from path: {name!r} "
+                f"(must match {_SKILL_DIR_RE.pattern})"
+            )
+        return name
+
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 SCRIPT_DIR = Path(__file__).parent
 STALE_DAYS = 90
@@ -450,13 +464,58 @@ def run_sync(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: AR
 # ---------------------------------------------------------------------------
 
 
+def _resolve_add_name(skill_path_or_name: str) -> str:
+    """Extract and validate a skill name from an arbitrary user-supplied string.
+
+    Security contract (path traversal + weird-char injection prevention):
+      1. Resolve the path to an absolute form so traversal sequences like
+         ``../../etc/passwd`` are collapsed before any stem is extracted.
+      2. If the resolved path falls outside cfg.skills_dir, reject it — the
+         caller is not allowed to register skills from arbitrary disk locations.
+         A bare name (no directory separator, no file extension) is treated as a
+         slug directly and is not subject to the directory check.
+      3. Pass the raw stem through validate_skill_name(), which enforces the
+         ``^[a-z0-9][a-z0-9-]{0,63}$`` slug contract.
+
+    Returns the validated slug string.
+    Raises SystemExit(1) on any validation failure.
+    """
+    raw = skill_path_or_name
+    # Determine whether the argument looks like a path or a bare name.
+    is_path_like = "/" in raw or "\\" in raw or raw.endswith(".md") or raw.endswith(".py")
+
+    if is_path_like:
+        resolved = Path(raw).resolve()
+        skills_dir_resolved = cfg.skills_dir.resolve()
+        try:
+            resolved.relative_to(skills_dir_resolved)
+        except ValueError:
+            print(
+                f"Error: --add path '{raw}' resolves to '{resolved}', "
+                f"which is outside the configured skills directory "
+                f"'{skills_dir_resolved}'. Aborting.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        raw_stem = resolved.stem
+    else:
+        raw_stem = raw
+
+    try:
+        return _validate_skill_name(raw_stem)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
 def run_add(wiki_dir: Path, skill_path_or_name: str) -> None:
     """Delegate to skill_add, or fall back to wiki_sync upsert."""
+    skill_name = _resolve_add_name(skill_path_or_name)
+
     r = HealthReport()
     sa = _try_import("skill_add", r)
     if sa and hasattr(sa, "add_skill"):
         try:
-            skill_name = Path(skill_path_or_name).stem
             sa.add_skill(
                 source_path=Path(skill_path_or_name),
                 name=skill_name,
@@ -473,7 +532,6 @@ def run_add(wiki_dir: Path, skill_path_or_name: str) -> None:
         print("Neither skill_add nor wiki_sync available — cannot add skill.", file=sys.stderr)
         sys.exit(1)
 
-    skill_name = Path(skill_path_or_name).stem
     info = {"path": skill_path_or_name, "reason": "manually added via orchestrator"}
     is_new = ws.upsert_skill_page(str(wiki_dir), skill_name, info)
     ws.update_index(str(wiki_dir), [skill_name] if is_new else [])

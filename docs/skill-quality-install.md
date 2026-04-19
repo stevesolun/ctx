@@ -19,16 +19,21 @@ Every installed skill and agent gets a continuous quality score in
 Two hard floors override the weighted sum:
 
 - **`intake_fail`** — any structural check is currently failing → grade **F**.
+  Grade F is **only** produced by this hard floor; it is never returned by
+  the score-to-grade mapping function alone.  A score of 0.0 maps to **D**.
 - **`never_loaded_stale`** — no load events ever → grade capped at **D**.
 
-The score is mirrored to four sinks so every consumer sees the same
-number:
+The score is mirrored to three on-disk sinks so every consumer sees the
+same number:
 
 1. `~/.claude/skill-quality/<slug>.json` — canonical machine-readable form.
 2. Wiki entity frontmatter — `quality_score`, `quality_grade`, `quality_updated_at`.
 3. Wiki body — a `## Quality` block between `<!-- quality:begin -->` markers.
-4. Graph node attribute — `wiki_graphify` reads the sidecar and attaches
-   `quality_score` / `quality_grade` to each node on its next build.
+
+The knowledge-graph node attribute is a **separate consumer path**, not a
+write path from `persist_quality`: `wiki_graphify` reads the sidecar JSON
+produced by sink 1 and attaches `quality_score` / `quality_grade` to each
+node on its next build.
 
 ## Register the Stop hook
 
@@ -69,7 +74,7 @@ python src/skill_quality.py recompute --all
 ```
 
 This walks `~/.claude/skills/*/SKILL.md` and `~/.claude/agents/*.md`,
-scores each, and writes the four sinks. Expect ~15–30s depending on
+scores each, and writes the three on-disk sinks. Expect ~15–30s depending on
 corpus size and disk.
 
 ## CLI reference

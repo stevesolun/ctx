@@ -44,31 +44,17 @@ import sys
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
-try:
-    from behavior_miner import BehaviorProfile, build_profile, load_profile
-    from toolbox_config import (
-        Toolbox,
-        ToolboxSet,
-        global_config_path,
-        load_global,
-        merged,
-        save_global,
-    )
-except ImportError:  # pragma: no cover
-    sys.path.insert(0, str(Path(__file__).parent))
-    from behavior_miner import (  # type: ignore[no-redef]
-        BehaviorProfile, build_profile, load_profile,
-    )
-    from toolbox_config import (  # type: ignore[no-redef]
-        Toolbox,
-        ToolboxSet,
-        global_config_path,
-        load_global,
-        merged,
-        save_global,
-    )
+from behavior_miner import BehaviorProfile, build_profile, load_profile
+from toolbox_config import (
+    Toolbox,
+    ToolboxSet,
+    global_config_path,
+    load_global,
+    merged,
+    save_global,
+)
 
 
 STARTER_NAMES = (
@@ -649,7 +635,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     else:
         result = run_interactive(state, profile)
 
-    payload = {
+    payload: dict[str, Any] = {
         "state": state.to_dict(),
         "result": result.to_dict(),
     }

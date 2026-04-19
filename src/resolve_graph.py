@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import json
+import logging
 import math
 import os
 import sys
@@ -22,18 +23,44 @@ from pathlib import Path
 import networkx as nx
 from networkx.readwrite import node_link_graph
 
+logger = logging.getLogger(__name__)
+
 WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki"))
 GRAPH_PATH = WIKI_DIR / "graphify-out" / "graph.json"
 
+# A valid node-link graph dict must have "nodes" and either "links" or "edges"
+# (networkx >= 3.0 uses "edges"; older versions used "links").
+_EDGE_KEYS = frozenset({"links", "edges"})
 
-def load_graph() -> nx.Graph:
-    """Load the knowledge graph from graph.json."""
-    if not GRAPH_PATH.exists():
-        print(f"Error: {GRAPH_PATH} not found. Run wiki_graphify.py first.", file=sys.stderr)
-        sys.exit(1)
-    with open(GRAPH_PATH, encoding="utf-8") as f:
-        data = json.load(f)
-    return node_link_graph(data)
+
+def load_graph(path: Path | None = None) -> nx.Graph:
+    """Load the knowledge graph from graph.json.
+
+    Returns an empty graph on any parse or schema error rather than crashing.
+    Callers that *require* a populated graph (e.g. CLI main) should check
+    ``G.number_of_nodes() == 0`` and handle accordingly.
+    """
+    graph_path = path if path is not None else GRAPH_PATH
+    if not graph_path.exists():
+        logger.warning("graph.json not found at %s; returning empty graph", graph_path)
+        return nx.Graph()
+    try:
+        with open(graph_path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict) or "nodes" not in data or not (_EDGE_KEYS & data.keys()):
+            logger.warning(
+                "graph.json missing required keys ('nodes' + one of %s); returning empty graph",
+                sorted(_EDGE_KEYS),
+            )
+            return nx.Graph()
+        return node_link_graph(data)
+    except json.JSONDecodeError as exc:
+        logger.warning("graph.json is not valid JSON (%s); returning empty graph", exc)
+    except UnicodeDecodeError as exc:
+        logger.warning("graph.json has invalid encoding (%s); returning empty graph", exc)
+    except (KeyError, TypeError, nx.NetworkXError) as exc:
+        logger.warning("graph.json failed to deserialize (%s); returning empty graph", exc)
+    return nx.Graph()
 
 
 def resolve_by_seeds(
@@ -161,6 +188,9 @@ def main() -> None:
         sys.exit(1)
 
     G = load_graph()
+    if G.number_of_nodes() == 0 and not GRAPH_PATH.exists():
+        print(f"Error: {GRAPH_PATH} not found. Run wiki_graphify.py first.", file=sys.stderr)
+        sys.exit(1)
 
     if args.matched:
         seeds = [s.strip() for s in args.matched.split(",")]

@@ -188,7 +188,7 @@ def graph_suggest(unmatched_tags: list[str]) -> list[dict]:
     Scoring: name match (50pts) > tag overlap (10pts/tag) > degree (tiebreak).
     This ensures 'fastapi-pro' ranks above 'prompt-optimizer' for a 'fastapi' signal.
     """
-    graph_path = Path(os.path.expanduser("~/.claude/skill-wiki/graphify-out/graph.json"))
+    graph_path = CLAUDE_DIR / "skill-wiki" / "graphify-out" / "graph.json"
     if not graph_path.exists():
         return []
     try:
@@ -270,19 +270,52 @@ def load_recent_unmatched_count() -> int:
     return len(unmatched)
 
 
+def _parse_stdin_payload() -> tuple[str, dict[str, Any]]:
+    """Read the PostToolUse JSON payload from stdin.
+
+    Claude Code delivers the payload on stdin when a hook is invoked without
+    $CLAUDE_TOOL_NAME / $CLAUDE_TOOL_INPUT interpolation in the command string.
+    Returns (tool_name, tool_input).
+    """
+    try:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            return "unknown", {}
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return "unknown", {}
+        tool_name = str(data.get("tool_name") or "unknown")
+        tool_input = data.get("tool_input") or {}
+        if not isinstance(tool_input, dict):
+            tool_input = {}
+        return tool_name, tool_input
+    except (json.JSONDecodeError, OSError):
+        return "unknown", {}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="PostToolUse intent signal extractor")
     parser.add_argument("--tool", default="unknown", help="Tool name from hook")
     parser.add_argument("--input", default="{}", help="JSON-encoded tool input")
+    parser.add_argument(
+        "--from-stdin",
+        action="store_true",
+        help="Read tool_name and tool_input from the JSON payload on stdin "
+             "(safe alternative to --tool/--input that avoids shell injection)",
+    )
     args = parser.parse_args()
 
-    # Parse tool input safely
-    try:
-        tool_input = json.loads(args.input)
-    except json.JSONDecodeError:
-        tool_input = {"raw": args.input}
+    if args.from_stdin:
+        tool_name, tool_input = _parse_stdin_payload()
+    else:
+        tool_name = args.tool
+        # Parse tool input safely
+        try:
+            tool_input = json.loads(args.input)
+        except json.JSONDecodeError:
+            tool_input = {"raw": args.input}
 
-    signals = extract_signals(args.tool, tool_input)
+    signals = extract_signals(tool_name, tool_input)
     if not signals:
         sys.exit(0)  # Nothing to log
 
@@ -292,7 +325,7 @@ def main() -> None:
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-        "tool": args.tool,
+        "tool": tool_name,
         "signals": signals,
         "unmatched": unmatched,
     }

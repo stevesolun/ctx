@@ -103,13 +103,15 @@ def test_event_rejects_non_iso_timestamp() -> None:
 def test_log_event_rejects_oversized_meta(tmp_path: Path) -> None:
     big = {f"k{i}": i for i in range(st._MAX_META_KEYS + 1)}
     with pytest.raises(ValueError, match="max"):
-        st.log_event("load", "x", "s1", meta=big, path=tmp_path / "e.jsonl")
+        st.log_event("load", "x", "s1", meta=big, path=tmp_path / "e.jsonl",
+                     trusted_root=tmp_path)
 
 
 def test_log_event_rejects_non_scalar_meta_value(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="must be str/int/float/bool/None"):
         st.log_event(
-            "load", "x", "s1", meta={"nested": {"a": 1}}, path=tmp_path / "e.jsonl"
+            "load", "x", "s1", meta={"nested": {"a": 1}},
+            path=tmp_path / "e.jsonl", trusted_root=tmp_path,
         )
 
 
@@ -119,6 +121,7 @@ def test_log_event_rejects_oversized_meta_string(tmp_path: Path) -> None:
             "load", "x", "s1",
             meta={"big": "a" * (st._MAX_META_VALUE_LEN + 1)},
             path=tmp_path / "e.jsonl",
+            trusted_root=tmp_path,
         )
 
 
@@ -132,17 +135,18 @@ def test_log_event_and_read_events_round_trip(tmp_path: Path) -> None:
 
     rec_a = st.log_event(
         "load", "python-patterns", "sess-1",
-        meta={"source": "unit-test"}, path=events_path,
+        meta={"source": "unit-test"}, path=events_path, trusted_root=tmp_path,
     )
     rec_b = st.log_event(
         "unload", "python-patterns", "sess-1", path=events_path,
+        trusted_root=tmp_path,
     )
     rec_c = st.log_event(
         "override", "flask", "sess-1",
-        meta={"replaced_with": "fastapi"}, path=events_path,
+        meta={"replaced_with": "fastapi"}, path=events_path, trusted_root=tmp_path,
     )
 
-    got = list(st.read_events(path=events_path))
+    got = list(st.read_events(path=events_path, trusted_root=tmp_path))
     assert [e.event for e in got] == ["load", "unload", "override"]
     assert got[0].event_id == rec_a.event_id
     assert got[1].event_id == rec_b.event_id
@@ -152,7 +156,7 @@ def test_log_event_and_read_events_round_trip(tmp_path: Path) -> None:
 
 
 def test_read_events_missing_file_yields_nothing(tmp_path: Path) -> None:
-    assert list(st.read_events(path=tmp_path / "nope.jsonl")) == []
+    assert list(st.read_events(path=tmp_path / "nope.jsonl", trusted_root=tmp_path)) == []
 
 
 def test_read_events_skips_malformed_lines(
@@ -185,7 +189,7 @@ def test_read_events_skips_malformed_lines(
         encoding="utf-8",
     )
 
-    got = list(st.read_events(path=events_path))
+    got = list(st.read_events(path=events_path, trusted_root=tmp_path))
     assert [e.event_id for e in got] == ["e1", "e2"]
     captured = capsys.readouterr()
     # Warning is sanitised — no raw line content, no file path.
@@ -211,7 +215,8 @@ def test_concurrent_appends_produce_wellformed_lines(tmp_path: Path) -> None:
     N = 32
 
     def worker(i: int) -> None:
-        st.log_event("load", f"skill{i:03d}", f"sess-{i}", path=events_path)
+        st.log_event("load", f"skill{i:03d}", f"sess-{i}", path=events_path,
+                     trusted_root=tmp_path)
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(worker, range(N)))
@@ -292,3 +297,33 @@ def test_default_events_path_resolves_under_claude_dir(
     target = tmp_path / ".claude" / "skill-events.jsonl"
     monkeypatch.setattr(st, "DEFAULT_EVENTS_PATH", target)
     assert st.DEFAULT_EVENTS_PATH == target
+
+
+# ────────────────────────────────────────────────────────────────────
+# Trusted-root path containment (regression for Strix LOW finding)
+# ────────────────────────────────────────────────────────────────────
+
+
+def test_resolve_events_path_rejects_etc_passwd() -> None:
+    """Absolute path outside any trusted root must raise ValueError."""
+    with pytest.raises(ValueError, match="escapes trusted root"):
+        st._resolve_events_path(Path("/etc/passwd"))
+
+
+def test_resolve_events_path_rejects_windows_temp() -> None:
+    """Windows absolute path outside trusted root must raise ValueError."""
+    with pytest.raises(ValueError, match="escapes trusted root"):
+        st._resolve_events_path(Path("C:/Windows/Temp/x"))
+
+
+def test_resolve_events_path_none_returns_default() -> None:
+    """None path must return DEFAULT_EVENTS_PATH unchanged."""
+    result = st._resolve_events_path(None)
+    assert result == st.DEFAULT_EVENTS_PATH
+
+
+def test_resolve_events_path_tmp_path_with_trusted_root(tmp_path: Path) -> None:
+    """A path inside tmp_path succeeds when trusted_root=tmp_path."""
+    target = tmp_path / "x.jsonl"
+    result = st._resolve_events_path(target, trusted_root=tmp_path)
+    assert result == target

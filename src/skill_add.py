@@ -17,16 +17,15 @@ import os
 import re
 import shutil
 import sys
+import yaml
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Allow imports from the same directory as this script
-sys.path.insert(0, str(Path(__file__).parent))
-
-from batch_convert import convert_skill  # noqa: E402
-from ctx_config import cfg  # noqa: E402
-from wiki_sync import append_log, ensure_wiki, update_index  # noqa: E402
-from wiki_utils import validate_skill_name  # noqa: E402
+from batch_convert import convert_skill
+from ctx_config import cfg
+from intake_pipeline import IntakeRejected, check_intake, record_embedding
+from wiki_sync import append_log, ensure_wiki, update_index
+from wiki_utils import validate_skill_name
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -103,31 +102,30 @@ def build_entity_page(
         f"converted/{name}/" if has_pipeline else "null"
     )
 
-    frontmatter_lines = [
-        "---",
-        f"title: {name}",
-        f"created: {TODAY}",
-        f"updated: {TODAY}",
-        "type: skill",
-        "status: installed",
-        f"tags: [{', '.join(tags)}]",
-        "source: local",
-        f"original_path: {original_path}",
-        f"original_lines: {line_count}",
-        f"has_pipeline: {'true' if has_pipeline else 'false'}",
-        f"pipeline_path: {pipeline_path_str}",
-        "always_load: false",
-        "never_load: false",
-        f"last_used: {TODAY}",
-        "use_count: 0",
-        "avg_session_rating: null",
-        'notes: ""',
-    ]
-
+    fm_dict: dict = {
+        "title": name,
+        "created": TODAY,
+        "updated": TODAY,
+        "type": "skill",
+        "status": "installed",
+        "tags": tags,
+        "source": "local",
+        "original_path": str(original_path),
+        "original_lines": line_count,
+        "has_pipeline": has_pipeline,
+        "pipeline_path": pipeline_path_str,
+        "always_load": False,
+        "never_load": False,
+        "last_used": TODAY,
+        "use_count": 0,
+        "avg_session_rating": None,
+        "notes": "",
+    }
     if scan_sources:
-        frontmatter_lines.append(f"sources: [{', '.join(scan_sources)}]")
+        fm_dict["sources"] = scan_sources
 
-    frontmatter_lines.append("---")
+    frontmatter_body = yaml.safe_dump(fm_dict, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    frontmatter_block = f"---\n{frontmatter_body}---"
 
     related_links = "\n".join(f"- [[entities/skills/{r}]]" for r in related[:6])
     if not related_links:
@@ -139,7 +137,7 @@ def build_entity_page(
         else f"Skill is {line_count} lines — under the {cfg.line_threshold}-line threshold, no pipeline generated."
     )
 
-    return "\n".join(frontmatter_lines) + f"""
+    return frontmatter_block + f"""
 
 # {name}
 
@@ -263,10 +261,30 @@ def add_skill(
 
     content = source_path.read_text(encoding="utf-8", errors="replace")
     line_count = len(content.splitlines())
+
+    # Intake gate: reject broken/duplicate candidates before we touch
+    # skills-dir. Raising keeps the rejection visible in the batch
+    # summary at the CLI layer without any half-written state.
+    decision = check_intake(content, "skills")
+    if not decision.allow:
+        raise IntakeRejected(decision)
+
     tags = infer_tags(name, content)
 
     # 1. Install original into skills-dir (never modified after this)
     installed_path = install_skill(source_path, skills_dir, name)
+
+    # Record the candidate's embedding so future intake checks can
+    # rank against it. Failure here is non-fatal — the install already
+    # succeeded and a missing vector only weakens the next check, it
+    # doesn't corrupt anything.
+    try:
+        record_embedding(subject_id=name, raw_md=content, subject_type="skills")
+    except Exception as exc:  # noqa: BLE001 — cache failure must not break install
+        print(
+            f"Warning: failed to record intake embedding for {name}: {exc}",
+            file=sys.stderr,
+        )
 
     # 2. Convert if above threshold
     converted_root = wiki_path / "converted"

@@ -41,8 +41,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-sys.path.insert(0, str(Path(__file__).parent))
-from skill_quality import (  # noqa: E402
+from skill_quality import (
     QualityScore,
     default_sidecar_dir,
     load_quality,
@@ -281,8 +280,13 @@ def observe_score(
     """
     cfg = cfg or LifecycleConfig()
     new_ts = _parse_iso(score.computed_at)
+    # Guard: treat a missing/empty computed_at as a no-op.  Without a
+    # parseable timestamp we cannot determine ordering, so incrementing
+    # the streak would silently corrupt demotion state.
+    if new_ts is None:
+        return state
     seen_ts = _parse_iso(state.last_seen_computed_at)
-    if new_ts is not None and seen_ts is not None and new_ts <= seen_ts:
+    if seen_ts is not None and new_ts <= seen_ts:
         return state
 
     if score.grade in _NEGATIVE_GRADES:
@@ -612,12 +616,14 @@ def plan_review(
             continue
         if not _SLUG_RE.match(slug):
             continue
-        state = load_lifecycle_state(slug, sidecar_dir=sources.sidecar_dir)
-        if state is None:
+        lc_state: LifecycleState | None = load_lifecycle_state(
+            slug, sidecar_dir=sources.sidecar_dir
+        )
+        if lc_state is None:
             continue
-        observed[slug] = state
+        observed[slug] = lc_state
         proposal = classify_transition(
-            state, None, cfg=cfg, now=now, include_delete=include_delete
+            lc_state, None, cfg=cfg, now=now, include_delete=include_delete
         )
         if proposal is not None:
             proposals.append(proposal)
@@ -782,6 +788,17 @@ def _apply_buckets(
 
     for p in buckets.get(STATE_ARCHIVE, []):
         print(f"\nArchive candidate: {p.describe()}")
+        if auto:
+            # Under --auto, archive always requires explicit confirmation.
+            # Log the candidate and defer — the user can run `review`
+            # interactively to action it.
+            _logger.info(
+                "auto mode: skipping archive prompt for %s; "
+                "run `review` interactively to apply",
+                p.slug,
+            )
+            print("  (auto: deferred — run review interactively to archive)")
+            continue
         if not _prompt_yes_no("  Archive this entry?", default_yes=False):
             continue
         applied += _apply_one(p, states, sources=sources, cfg=cfg)

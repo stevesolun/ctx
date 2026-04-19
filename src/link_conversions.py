@@ -22,9 +22,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from ctx_config import cfg  # noqa: E402
-from wiki_utils import get_field as _find_field  # noqa: E402
+from ctx_config import cfg
+from wiki_utils import get_field as _find_field
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 

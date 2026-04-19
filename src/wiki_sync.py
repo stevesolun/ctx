@@ -19,8 +19,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from wiki_utils import SAFE_NAME_RE, get_field as _find_field  # noqa: E402
+from wiki_utils import SAFE_NAME_RE, get_field as _find_field
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 

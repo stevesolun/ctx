@@ -15,7 +15,6 @@ Usage:
 import argparse
 import json
 import os
-import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,8 +22,7 @@ from pathlib import Path
 import networkx as nx
 from networkx.algorithms.community import greedy_modularity_communities
 
-sys.path.insert(0, str(Path(__file__).parent))
-from wiki_utils import parse_frontmatter as _parse_fm  # noqa: E402
+from wiki_utils import parse_frontmatter as _parse_fm
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -76,9 +74,16 @@ def build_graph() -> tuple[nx.Graph, dict[str, dict]]:
             if tag != "uncategorized":
                 tag_index[tag].append(nid)
 
-    # Create edges between nodes sharing tags
+    # Create edges between nodes sharing tags.
+    # Guard: skip O(K²) all-pairs enumeration for tags with >DENSE_TAG_THRESHOLD
+    # nodes — popular tags (e.g. "python") would otherwise generate K*(K-1)/2
+    # edges for each single tag and dominate total edge count. Those tags still
+    # influence community detection through the edges they share with smaller tags.
+    DENSE_TAG_THRESHOLD = 20
     edge_count = 0
     for tag, nodes in tag_index.items():
+        if len(nodes) > DENSE_TAG_THRESHOLD:
+            continue  # Skip dense tags to avoid O(K²) edge explosion
         for i, n1 in enumerate(nodes):
             for n2 in nodes[i + 1:]:
                 if G.has_edge(n1, n2):
@@ -172,11 +177,22 @@ def generate_concept_pages(
     CONCEPTS_DIR.mkdir(parents=True, exist_ok=True)
     created: list[str] = []
 
+    # Reverse index: O(1) community lookup per neighbor instead of O(C) linear
+    # scan through communities.items(). Reduces cross-edge loop from O(C²·members)
+    # to O(C·members).
+    node_to_community: dict[str, int] = {
+        nid: cid for cid, members in communities.items() for nid in members
+    }
+    # Pre-compute community labels once to avoid redundant label_community calls
+    community_labels: dict[int, str] = {
+        cid: label_community(G, members) for cid, members in communities.items()
+    }
+
     for cid, members in sorted(communities.items(), key=lambda x: -len(x[1])):
         if len(members) < 3:
             continue  # Skip tiny communities
 
-        label = label_community(G, members)
+        label = community_labels[cid]
         safe_name = label.lower().replace(" + ", "-").replace(" ", "-")
         filename = f"community-{safe_name}.md"
 
@@ -188,17 +204,15 @@ def generate_concept_pages(
         )
         remaining = len(members) - len(top_members)
 
-        # Cross-community connections
+        # Cross-community connections (O(neighbors) via reverse-index lookup)
         cross: dict[str, int] = defaultdict(int)
+        members_set = set(members)
         for nid in members:
             for neighbor in G.neighbors(nid):
-                if neighbor not in members:
-                    # Find which community neighbor belongs to
-                    for other_cid, other_members in communities.items():
-                        if other_cid != cid and neighbor in other_members:
-                            other_label = label_community(G, other_members)
-                            cross[other_label] += 1
-                            break
+                if neighbor not in members_set:
+                    other_cid = node_to_community.get(neighbor)
+                    if other_cid is not None and other_cid != cid:
+                        cross[community_labels[other_cid]] += 1
 
         cross_links = "\n".join(
             f"- {lbl} ({cnt} connections)"

@@ -21,8 +21,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).parent))
-from wiki_utils import parse_frontmatter as _parse_fm  # noqa: E402
+from wiki_utils import parse_frontmatter as _parse_fm
+
+try:
+    from ctx_config import cfg as _cfg
+    _WIKI_DEFAULT = str(_cfg.wiki_dir)
+    _SKILLS_DEFAULT = str(_cfg.skills_dir)
+    _MANIFEST_DEFAULT = str(_cfg.skill_manifest)
+    _INTENT_LOG_DEFAULT = str(_cfg.intent_log)
+    _REGISTRY_DEFAULT = _cfg.skill_registry
+    _MAX_SKILLS_DEFAULT = _cfg.max_skills
+except ImportError:
+    _WIKI_DEFAULT = os.path.expanduser("~/.claude/skill-wiki")
+    _SKILLS_DEFAULT = os.path.expanduser("~/.claude/skills")
+    _MANIFEST_DEFAULT = os.path.expanduser("~/.claude/skill-manifest.json")
+    _INTENT_LOG_DEFAULT = os.path.expanduser("~/.claude/intent-log.jsonl")
+    _REGISTRY_DEFAULT = Path(os.path.expanduser("~/.claude/skill-registry.json"))
+    _MAX_SKILLS_DEFAULT = 15
 
 
 def discover_available_skills(skills_dir: str) -> dict[str, dict]:
@@ -369,11 +384,11 @@ def apply_intent_boosts(
 def main():
     parser = argparse.ArgumentParser(description="Resolve stack profile to skill manifest")
     parser.add_argument("--profile", required=True, help="Path to stack-profile.json")
-    parser.add_argument("--wiki", default=os.path.expanduser("~/.claude/skill-wiki"), help="Wiki path")
-    parser.add_argument("--available-skills", default=os.path.expanduser("~/.claude/skills"), help="Skills directory")
-    parser.add_argument("--output", default=os.path.expanduser("~/.claude/skill-manifest.json"), help="Output manifest path")
-    parser.add_argument("--max-skills", type=int, default=15, help="Max simultaneous skills")
-    parser.add_argument("--intent-log", default=os.path.expanduser("~/.claude/intent-log.jsonl"), help="Intent log path for mid-session signal boosts")
+    parser.add_argument("--wiki", default=_WIKI_DEFAULT, help="Wiki path")
+    parser.add_argument("--available-skills", default=_SKILLS_DEFAULT, help="Skills directory")
+    parser.add_argument("--output", default=_MANIFEST_DEFAULT, help="Output manifest path")
+    parser.add_argument("--max-skills", type=int, default=_MAX_SKILLS_DEFAULT, help="Max simultaneous skills")
+    parser.add_argument("--intent-log", default=_INTENT_LOG_DEFAULT, help="Intent log path for mid-session signal boosts")
     parser.add_argument("--pending-output", default="", help="If set, also write to this path (for mid-session re-runs)")
     args = parser.parse_args()
 
@@ -382,7 +397,7 @@ def main():
         profile = json.load(f)
 
     # Discover available skills (from registered dirs if registry exists)
-    registry_path = Path(os.path.expanduser("~/.claude/skill-registry.json"))
+    registry_path = Path(_REGISTRY_DEFAULT)
     skill_dirs = [args.available_skills]
     if registry_path.exists():
         try:

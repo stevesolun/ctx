@@ -34,8 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-sys.path.insert(0, str(Path(__file__).parent))
-from ctx_lifecycle import (  # noqa: E402
+from ctx_lifecycle import (
     LifecycleSources,
     STATE_ACTIVE,
     STATE_ARCHIVE,
@@ -43,9 +42,9 @@ from ctx_lifecycle import (  # noqa: E402
     STATE_WATCH,
     load_lifecycle_state,
 )
-from skill_category import CATEGORIES, infer_category, read_existing_category  # noqa: E402
-from skill_quality import QualityScore, load_quality  # noqa: E402
-from wiki_utils import parse_frontmatter_and_body  # noqa: E402
+from skill_category import CATEGORIES, infer_category, read_existing_category
+from skill_quality import QualityScore, load_quality
+from wiki_utils import parse_frontmatter_and_body
 
 _logger = logging.getLogger(__name__)
 
@@ -268,20 +267,20 @@ def aggregate(
         category_buckets[bucket].append(r)
 
     category_breakdown: list[dict[str, Any]] = []
-    for cat, bucket in category_buckets.items():
-        if not bucket:
+    for cat, cat_bucket in category_buckets.items():
+        if not cat_bucket:
             continue
-        scored = [r for r in bucket if r.grade in _GRADES]
+        scored = [r for r in cat_bucket if r.grade in _GRADES]
         avg_score = (
             sum(r.score for r in scored) / len(scored) if scored else 0.0
         )
         mix = {g: 0 for g in _GRADES}
-        for r in bucket:
+        for r in cat_bucket:
             mix[_grade_key(r.grade)] += 1
         category_breakdown.append(
             {
                 "category": cat,
-                "count": len(bucket),
+                "count": len(cat_bucket),
                 "avg_score": round(avg_score, 4),
                 "grade_mix": mix,
             }
