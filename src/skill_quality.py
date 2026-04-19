@@ -1054,12 +1054,15 @@ def cmd_recompute(args: argparse.Namespace) -> int:
             print(f"[recompute] {slug}: {exc}", file=sys.stderr)
     else:
         slugs: list[str]
-        if args.slugs:
+        if args.slugs_positional:
+            slugs = list(args.slugs_positional)
+        elif args.slugs:
             slugs = [s for s in args.slugs.split(",") if s.strip()]
         elif args.slug:
             slugs = [args.slug]
         else:
-            print("recompute: pass --all, --slugs, or --slug", file=sys.stderr)
+            print("recompute: pass one or more SLUG positionals, --all, "
+                  "--slugs, or --slug", file=sys.stderr)
             return 2
 
         for slug in slugs:
@@ -1160,6 +1163,8 @@ def build_argparser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("recompute", help="Recompute quality for one or more slugs")
+    r.add_argument("slugs_positional", nargs="*", metavar="SLUG",
+                   help="one or more slugs to recompute (positional)")
     r.add_argument("--all", action="store_true", help="recompute every installed slug")
     r.add_argument("--slug", help="recompute a single slug")
     r.add_argument("--slugs", help="comma-separated list of slugs")
