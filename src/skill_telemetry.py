@@ -36,8 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
-sys.path.insert(0, str(Path(__file__).parent))
-from _file_lock import file_lock  # noqa: E402
+from _file_lock import file_lock
 
 _logger = logging.getLogger(__name__)
 
@@ -51,6 +50,10 @@ _SKILL_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\-\.]{0,127}$")
 
 DEFAULT_EVENTS_PATH = Path(os.path.expanduser("~/.claude/skill-events.jsonl"))
 _ALLOWED_EVENTS_DIR = DEFAULT_EVENTS_PATH.parent.resolve()
+# Trusted root for path containment checks in _resolve_events_path.
+# Tests may override this per-call via the ``trusted_root`` kwarg so they
+# can write to pytest tmp_path without relaxing the production constraint.
+_TRUSTED_ROOT = DEFAULT_EVENTS_PATH.parent.resolve()
 DEFAULT_SESSION_FRACTION = 0.20
 DEFAULT_MIN_RETENTION_MIN = 20.0
 
@@ -127,26 +130,38 @@ def _validate_meta(meta: Mapping[str, Any]) -> None:
             )
 
 
-def _resolve_events_path(path: Path | None) -> Path:
-    """Resolve the events-file path and refuse anything outside ~/.claude/.
+def _resolve_events_path(
+    path: Path | None,
+    *,
+    trusted_root: Path = _TRUSTED_ROOT,
+) -> Path:
+    """Resolve the events-file path and refuse anything outside the trusted root.
 
-    Tests may pass a temp dir under ``tmp_path``; that's allowed because
-    ``tmp_path`` is explicit per-call, not attacker-controlled. The
-    containment check exists to defend against callers that accidentally
-    (or maliciously) pass ``path=Path("/etc/passwd")`` or similar.
+    The trusted root defaults to ``~/.claude/`` (the parent of
+    ``DEFAULT_EVENTS_PATH``). Tests that write to ``tmp_path`` should pass
+    ``trusted_root=tmp_path`` so they don't need to live under ``~/.claude/``.
+
+    Defence layers, applied in order:
+      1. ``..`` segment check — catches unresolved traversal in the raw path.
+      2. ``resolve()`` + ``relative_to()`` — catches absolute escapes such as
+         ``Path("/etc/passwd")`` or ``Path("C:/Windows/Temp/x")`` that don't
+         contain ``..`` but still land outside the trusted root.
     """
     if path is None:
         return DEFAULT_EVENTS_PATH
     target = Path(path)
-    # Refuse any path that ascends via "..". A caller passing an explicit
-    # path is opting in to their own location, but traversal segments are
-    # almost always either a bug (caller forgot to resolve) or an attempt
-    # to write outside the intended directory. Checking the unresolved
-    # parts — not ``resolve()`` output — is what catches it: ``resolve()``
-    # normalises ``..`` away, so comparing resolved strings would always
-    # agree with itself.
+    # Layer 1: refuse unresolved traversal segments.
     if ".." in target.parts:
         raise ValueError(f"path escapes its parent directory: {target}")
+    # Layer 2: after resolving symlinks / absolute components, verify the
+    # target still lives inside the trusted root.
+    resolved = target.resolve()
+    try:
+        resolved.relative_to(trusted_root)
+    except ValueError:
+        raise ValueError(
+            f"path escapes trusted root {trusted_root}: {path}"
+        )
     return target
 
 
@@ -157,13 +172,17 @@ def log_event(
     *,
     meta: Mapping[str, Any] | None = None,
     path: Path | None = None,
+    trusted_root: Path = _TRUSTED_ROOT,
 ) -> TelemetryEvent:
     """Append a single event to the JSONL stream.
 
     Returns the event that was written (callers stash ``event_id`` to
     pair a later unload with its load).
+
+    ``trusted_root`` is forwarded to ``_resolve_events_path``; tests that
+    write to ``tmp_path`` should pass ``trusted_root=tmp_path``.
     """
-    target = _resolve_events_path(path)
+    target = _resolve_events_path(path, trusted_root=trusted_root)
     target.parent.mkdir(parents=True, exist_ok=True)
 
     safe_meta: dict[str, Any] = dict(meta or {})
@@ -185,7 +204,11 @@ def log_event(
     return record
 
 
-def read_events(path: Path | None = None) -> Iterator[TelemetryEvent]:
+def read_events(
+    path: Path | None = None,
+    *,
+    trusted_root: Path = _TRUSTED_ROOT,
+) -> Iterator[TelemetryEvent]:
     """Yield every event from the JSONL stream in on-disk order.
 
     Malformed lines — including records missing required fields such as
@@ -194,8 +217,11 @@ def read_events(path: Path | None = None) -> Iterator[TelemetryEvent]:
     trailing line, so iteration must survive that. Warnings use only
     the exception type name so malformed input can't spoof stderr with
     embedded CR/LF or forged log-line content.
+
+    ``trusted_root`` is forwarded to ``_resolve_events_path``; tests that
+    read from ``tmp_path`` should pass ``trusted_root=tmp_path``.
     """
-    target = _resolve_events_path(path)
+    target = _resolve_events_path(path, trusted_root=trusted_root)
     try:
         fh = open(target, encoding="utf-8")
     except FileNotFoundError:

@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ctx-skill-quality"
+version = "0.5.0-rc1"
+description = "Skill and agent recommendation system for Claude Code — knowledge graph, wiki, and intake quality gates"
+authors = [{ name = "Steve Solun" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.11"
+
+dependencies = [
+    "networkx>=3,<4",
+    "numpy>=1.24,<3",
+    "pyyaml>=6,<7",
+]
+
+[project.urls]
+Homepage = "https://github.com/stevesolun/ctx"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "mypy>=1.8",
+    "ruff>=0.4",
+]
+embeddings = [
+    "sentence-transformers>=2,<4",
+    "torch>=2,<3",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["src/tests"]
+markers = [
+    "integration: marks tests that require external models or network (deselect with -m 'not integration')",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

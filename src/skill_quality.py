@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-skill_quality.py -- Post-install quality scorer + four-sink persistence.
+skill_quality.py -- Post-install quality scorer + three-sink persistence.
 
 Phase 3 of the skill-quality plan (see ``docs/roadmap/skill-quality.md``).
 
@@ -11,9 +11,9 @@ Flow:
      consulting the wiki graph, and pulling router-trace counts.
   2. ``compute_quality`` aggregates those ``SignalResult`` instances via
      a weighted sum, applies hard floors, and maps to an A/B/C/D/F grade.
-  3. ``persist_quality`` mirrors the result to four sinks so every
-     downstream consumer — Obsidian, the graph builder, machine-readable
-     automations, the wiki UI — can see the same number.
+  3. ``persist_quality`` mirrors the result to three on-disk sinks so every
+     downstream consumer — Obsidian, machine-readable automations, the wiki
+     UI — can see the same number.
 
 Persistence sinks (Q3 in the plan doc):
 
@@ -23,8 +23,11 @@ Persistence sinks (Q3 in the plan doc):
     ``quality_updated_at`` keys on the wiki entity page.
   - Wiki body — a ``## Quality`` section with the grade + breakdown
     rendered in Markdown.
-  - Knowledge-graph node attribute — written by ``wiki_graphify`` on
-    its next build, reading the sidecar JSON that this module produced.
+
+  The knowledge-graph node attribute is a **separate consumer path**:
+  ``wiki_graphify`` reads the sidecar JSON on its next build and attaches
+  quality attributes to graph nodes. It is not a write path owned by this
+  module.
 
 CLI verbs:
 
@@ -45,17 +48,16 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Protocol, runtime_checkable
 
-sys.path.insert(0, str(Path(__file__).parent))
-from quality_signals import (  # noqa: E402
+from quality_signals import (
     SignalResult,
     graph_signal,
     intake_signal,
     routing_signal,
     telemetry_signal,
 )
-from wiki_utils import parse_frontmatter_and_body  # noqa: E402
+from wiki_utils import parse_frontmatter_and_body
 
 _logger = logging.getLogger(__name__)
 
@@ -217,7 +219,20 @@ class QualityScore:
 
 
 def default_sidecar_dir() -> Path:
-    """Directory where per-slug quality JSONs land."""
+    """Directory where per-slug quality JSONs land.
+
+    Honours ``quality.paths.sidecar_dir`` from ``ctx_config.cfg`` when
+    set; falls back to ``~/.claude/skill-quality`` otherwise.
+    """
+    try:
+        from ctx_config import cfg  # local import to avoid cost on test import
+        raw = cfg.get("quality", {}) or {}
+        paths = raw.get("paths", {}) if isinstance(raw, dict) else {}
+        configured = paths.get("sidecar_dir") if isinstance(paths, dict) else None
+        if isinstance(configured, str) and configured.strip():
+            return Path(os.path.expanduser(configured))
+    except Exception:  # noqa: BLE001 — config unavailable in some test contexts
+        pass
     return Path(os.path.expanduser("~/.claude/skill-quality"))
 
 
@@ -237,6 +252,13 @@ def _now_iso() -> str:
 
 
 def _grade_from_score(score: float, thresholds: Mapping[str, float]) -> str:
+    """Map a numeric score to a letter grade A/B/C/D.
+
+    Note: This function does **not** return F. Grade F is produced
+    exclusively by the ``intake_fail`` hard-floor override in
+    ``compute_quality()`` when the intake signal reports a structural
+    failure.  A score of 0.0 returns D (the lowest score-derived grade).
+    """
     if score >= thresholds["A"]:
         return "A"
     if score >= thresholds["B"]:
@@ -346,6 +368,12 @@ class SignalSources:
     # graph walk). When None, ``extract_signals_for_slug`` falls back to
     # a cheap structural walk of entity frontmatter.
     graph_index: Mapping[str, Mapping[str, Any]] | None = None
+    # ``events_index`` may be supplied pre-built by ``recompute_all`` so
+    # that a full --all recompute reads the JSONL once instead of once
+    # per slug.  Keys are slug strings; values are lists of raw event
+    # dicts.  When None, ``_compute_telemetry_inputs`` scans the file
+    # directly (preserving the single-slug O(M) behaviour).
+    events_index: Mapping[str, list[dict[str, Any]]] | None = None
 
 
 def _read_skill_source(slug: str, sources: SignalSources) -> tuple[str, str]:
@@ -358,9 +386,23 @@ def _read_skill_source(slug: str, sources: SignalSources) -> tuple[str, str]:
     skill_path = sources.skills_dir / slug / "SKILL.md"
     if skill_path.is_file():
         return "skill", skill_path.read_text(encoding="utf-8", errors="replace")
+    # Agents may live in nested subdirectories (e.g. agents/design/foo.md).
+    # Try exact flat path first (O(1)), then fall back to an rglob scan.
     agent_path = sources.agents_dir / f"{slug}.md"
     if agent_path.is_file():
         return "agent", agent_path.read_text(encoding="utf-8", errors="replace")
+    if sources.agents_dir.is_dir():
+        matches = [
+            p for p in sources.agents_dir.rglob(f"{slug}.md")
+            if p.is_file()
+        ]
+        if len(matches) > 1:
+            raise FileNotFoundError(
+                f"ambiguous agent slug {slug!r}: found {len(matches)} files "
+                f"under {sources.agents_dir}: {[str(m) for m in matches]}"
+            )
+        if len(matches) == 1:
+            return "agent", matches[0].read_text(encoding="utf-8", errors="replace")
     raise FileNotFoundError(
         f"no skill or agent file found for slug {slug!r} under "
         f"{sources.skills_dir} or {sources.agents_dir}"
@@ -404,14 +446,26 @@ def _compute_telemetry_inputs(
     *,
     now: datetime,
     recent_window_days: float,
+    events_override: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Walk the event stream once and derive telemetry inputs."""
+    """Walk the event stream once and derive telemetry inputs.
+
+    When ``events_override`` is provided (a pre-filtered list of events
+    for this slug), it is used directly instead of scanning
+    ``events_path``.  This allows callers that already built a full
+    events index to avoid redundant O(M) file scans per slug.
+    """
     load_count = 0
     recent_load_count = 0
     last_load_at: datetime | None = None
     recent_cutoff = now.timestamp() - recent_window_days * 86400.0
 
-    for obj in _iter_events_for_slug(slug, events_path):
+    event_iter: Iterable[dict[str, Any]] = (
+        events_override
+        if events_override is not None
+        else _iter_events_for_slug(slug, events_path)
+    )
+    for obj in event_iter:
         if obj.get("event") != "load":
             continue
         ts = _parse_event_ts(str(obj.get("timestamp", "")))
@@ -514,11 +568,17 @@ def extract_signals_for_slug(
     fm, body = parse_frontmatter_and_body(raw_md)
     has_fm_block = raw_md.lstrip().startswith("---")
 
+    events_override = (
+        list(sources.events_index.get(slug, []))
+        if sources.events_index is not None
+        else None
+    )
     tel_inputs = _compute_telemetry_inputs(
         slug,
         sources.events_path,
         now=ts,
         recent_window_days=cfg.recent_window_days,
+        events_override=events_override,
     )
     tel = telemetry_signal(
         load_count=tel_inputs["load_count"],
@@ -556,7 +616,7 @@ def extract_signals_for_slug(
 
 
 # ────────────────────────────────────────────────────────────────────
-# Persistence (four sinks)
+# Persistence (three sinks)
 # ────────────────────────────────────────────────────────────────────
 
 
@@ -656,6 +716,85 @@ def _update_frontmatter_quality(raw_md: str, score: QualityScore) -> str:
     return "---" + "\n" + new_fm + "\n---" + after_fm
 
 
+@runtime_checkable
+class QualitySink(Protocol):
+    """Write a ``QualityScore`` to one persistence destination.
+
+    Each concrete sink is responsible for exactly one storage target:
+    the sidecar JSON file, the wiki entity frontmatter, or the wiki body
+    section.  ``persist_quality`` iterates over the active list of sinks.
+    """
+
+    def write(self, score: QualityScore) -> Path | None:
+        """Persist ``score`` and return the path written, or ``None`` if skipped."""
+        ...
+
+
+class SidecarSink:
+    """Sink 1 — ``~/.claude/skill-quality/<slug>.json`` (canonical machine form)."""
+
+    def __init__(self, sidecar_dir: Path | None = None) -> None:
+        self._sidecar_dir = sidecar_dir
+
+    def write(self, score: QualityScore) -> Path | None:
+        path = sidecar_path(score.slug, sidecar_dir=self._sidecar_dir)
+        _atomic_write(
+            path,
+            json.dumps(score.to_dict(), indent=2, sort_keys=True, ensure_ascii=False),
+        )
+        return path
+
+
+class WikiFrontmatterSink:
+    """Sink 2 — ``quality_*`` keys in the wiki entity page frontmatter."""
+
+    def __init__(self, wiki_dir: Path) -> None:
+        self._wiki_dir = wiki_dir
+
+    def _entity_path(self, score: QualityScore) -> Path:
+        entity_subdir = "skills" if score.subject_type == "skill" else "agents"
+        return self._wiki_dir / "entities" / entity_subdir / f"{score.slug}.md"
+
+    def write(self, score: QualityScore) -> Path | None:
+        entity_path = self._entity_path(score)
+        if not entity_path.is_file():
+            _logger.info(
+                "skill_quality: no wiki page at %s; frontmatter sink skipped",
+                entity_path,
+            )
+            return None
+        raw = entity_path.read_text(encoding="utf-8", errors="replace")
+        updated = _update_frontmatter_quality(raw, score)
+        _atomic_write(entity_path, updated)
+        return entity_path
+
+
+class WikiBodySink:
+    """Sink 3 — ``## Quality`` section in the wiki entity page body."""
+
+    def __init__(self, wiki_dir: Path) -> None:
+        self._wiki_dir = wiki_dir
+
+    def _entity_path(self, score: QualityScore) -> Path:
+        entity_subdir = "skills" if score.subject_type == "skill" else "agents"
+        return self._wiki_dir / "entities" / entity_subdir / f"{score.slug}.md"
+
+    def write(self, score: QualityScore) -> Path | None:
+        entity_path = self._entity_path(score)
+        if not entity_path.is_file():
+            return None
+        raw = entity_path.read_text(encoding="utf-8", errors="replace")
+        fm_end = raw.find("\n---", 3)
+        if fm_end == -1:
+            header, body = "", raw
+        else:
+            header = raw[: fm_end + 4]
+            body = raw[fm_end + 4 :]
+        new_body = _inject_quality_section(body, _render_quality_section(score))
+        _atomic_write(entity_path, header + new_body)
+        return entity_path
+
+
 def persist_quality(
     score: QualityScore,
     *,
@@ -663,59 +802,32 @@ def persist_quality(
     sidecar_dir: Path | None = None,
     update_frontmatter: bool = True,
 ) -> dict[str, Path]:
-    """Write the quality result to all four sinks that live on disk.
+    """Write the quality result to the three on-disk sinks.
 
-    The KG node-attribute sink is handled by ``wiki_graphify`` on its
-    next build — it reads the sidecar JSON that this function produced,
-    so the sidecar is the source of truth for the graph.
+    The knowledge-graph node-attribute is a separate consumer path:
+    ``wiki_graphify`` reads the sidecar JSON that this function produced
+    on its next build.
 
     Returns a mapping of sink-name → Path that was written, for the CLI
     to report back to the user.
     """
     written: dict[str, Path] = {}
 
-    # Sink 1: sidecar JSON (always written; canonical machine format).
-    sidecar = sidecar_path(score.slug, sidecar_dir=sidecar_dir)
-    _atomic_write(
-        sidecar,
-        json.dumps(score.to_dict(), indent=2, sort_keys=True, ensure_ascii=False),
-    )
-    written["sidecar"] = sidecar
+    sidecar_result = SidecarSink(sidecar_dir).write(score)
+    if sidecar_result is not None:
+        written["sidecar"] = sidecar_result
 
     if not update_frontmatter:
         return written
 
-    # Locate the wiki entity page. Skills + agents live in different
-    # subtrees.
-    entity_subdir = "skills" if score.subject_type == "skill" else "agents"
-    entity_path = sources.wiki_dir / "entities" / entity_subdir / f"{score.slug}.md"
-    if not entity_path.is_file():
-        # Wiki may not have been built yet, or this subject only exists
-        # under skills/ (the source of truth) and has no wiki page. Not
-        # an error — just skip the frontmatter + body sinks.
-        _logger.info(
-            "skill_quality: no wiki page at %s; frontmatter sink skipped",
-            entity_path,
-        )
-        return written
+    fm_result = WikiFrontmatterSink(sources.wiki_dir).write(score)
+    if fm_result is not None:
+        written["frontmatter"] = fm_result
 
-    raw = entity_path.read_text(encoding="utf-8", errors="replace")
-    updated = _update_frontmatter_quality(raw, score)
+    body_result = WikiBodySink(sources.wiki_dir).write(score)
+    if body_result is not None:
+        written["wiki_body"] = body_result
 
-    fm_end = updated.find("\n---", 3)
-    if fm_end == -1:
-        body = updated
-        header = ""
-    else:
-        header = updated[: fm_end + 4]
-        body = updated[fm_end + 4 :]
-
-    new_body = _inject_quality_section(body, _render_quality_section(score))
-    final = header + new_body
-
-    _atomic_write(entity_path, final)
-    written["frontmatter"] = entity_path
-    written["wiki_body"] = entity_path
     return written
 
 
@@ -802,6 +914,86 @@ def discover_slugs(sources: SignalSources) -> list[tuple[str, str]]:
     return [(subject, slug) for slug, subject in out.items()]
 
 
+_EVENTS_INDEX_SIZE_THRESHOLD = 100 * 1024 * 1024  # 100 MB
+
+
+def _build_events_index(
+    events_path: Path,
+) -> dict[str, list[dict[str, Any]]]:
+    """Read ``events_path`` once and return a ``{slug: [events]}`` map.
+
+    For a JSONL file under 100 MB the entire file is read into memory so
+    that ``recompute_all`` can hand each slug its pre-filtered event list
+    instead of re-scanning the file N times.
+
+    For files over 100 MB the same line-by-line approach is used but with
+    a ``defaultdict`` to keep peak memory proportional to distinct slugs
+    rather than total file size.
+    """
+    from collections import defaultdict
+
+    index: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    if not events_path.is_file():
+        return {}
+    try:
+        with events_path.open(encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(obj, dict):
+                    slug = obj.get("skill")
+                    if isinstance(slug, str) and slug:
+                        index[slug].append(obj)
+    except OSError:
+        return {}
+    return dict(index)
+
+
+def recompute_all(
+    *,
+    sources: SignalSources,
+    config: QualityConfig | None = None,
+    now: datetime | None = None,
+    sidecar_dir: Path | None = None,
+    update_frontmatter: bool = True,
+) -> tuple[list[QualityScore], list[tuple[str, Exception]]]:
+    """Recompute every discovered slug, reading the events JSONL once.
+
+    Returns ``(successes, failures)`` where failures is a list of
+    ``(slug, exception)`` pairs.  The JSONL is read once and the
+    resulting ``events_index`` is injected into ``sources`` so each
+    per-slug call to ``_compute_telemetry_inputs`` reads from memory
+    rather than re-scanning the file.
+    """
+    slug_pairs = discover_slugs(sources)
+    events_index = _build_events_index(sources.events_path)
+    # Inject the pre-built index into a new SignalSources instance.
+    from dataclasses import replace as _dc_replace
+    indexed_sources = _dc_replace(sources, events_index=events_index)
+
+    successes: list[QualityScore] = []
+    failures: list[tuple[str, Exception]] = []
+    for _subject_type, slug in slug_pairs:
+        try:
+            score = recompute_slug(
+                slug,
+                sources=indexed_sources,
+                config=config,
+                now=now,
+                sidecar_dir=sidecar_dir,
+                update_frontmatter=update_frontmatter,
+            )
+            successes.append(score)
+        except (FileNotFoundError, ValueError, OSError) as exc:
+            failures.append((slug, exc))
+    return successes, failures
+
+
 # ────────────────────────────────────────────────────────────────────
 # CLI
 # ────────────────────────────────────────────────────────────────────
@@ -861,26 +1053,33 @@ def cmd_recompute(args: argparse.Namespace) -> int:
     sources = _build_sources_from_config()
     cfg = _config_from_cfg()
 
-    slugs: list[str]
-    if args.all:
-        slugs = [slug for _, slug in discover_slugs(sources)]
-    elif args.slugs:
-        slugs = [s for s in args.slugs.split(",") if s.strip()]
-    elif args.slug:
-        slugs = [args.slug]
-    else:
-        print("recompute: pass --all, --slugs, or --slug", file=sys.stderr)
-        return 2
-
     results: list[dict[str, Any]] = []
     failures = 0
-    for slug in slugs:
-        try:
-            score = recompute_slug(slug, sources=sources, config=cfg)
-            results.append(score.to_dict())
-        except (FileNotFoundError, ValueError, OSError) as exc:
-            failures += 1
+
+    if args.all:
+        # O(M) single JSONL scan shared across all N slugs.
+        scores, errs = recompute_all(sources=sources, config=cfg)
+        results = [s.to_dict() for s in scores]
+        failures = len(errs)
+        for slug, exc in errs:
             print(f"[recompute] {slug}: {exc}", file=sys.stderr)
+    else:
+        slugs: list[str]
+        if args.slugs:
+            slugs = [s for s in args.slugs.split(",") if s.strip()]
+        elif args.slug:
+            slugs = [args.slug]
+        else:
+            print("recompute: pass --all, --slugs, or --slug", file=sys.stderr)
+            return 2
+
+        for slug in slugs:
+            try:
+                score = recompute_slug(slug, sources=sources, config=cfg)
+                results.append(score.to_dict())
+            except (FileNotFoundError, ValueError, OSError) as exc:
+                failures += 1
+                print(f"[recompute] {slug}: {exc}", file=sys.stderr)
 
     if args.json:
         print(json.dumps({"count": len(results), "failures": failures,
@@ -938,9 +1137,16 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     rows: list[dict[str, Any]] = []
     for p in sorted(sidecar_dir.glob("*.json")):
+        # Skip lifecycle sidecars written by ctx_lifecycle — they use the
+        # pattern <slug>.lifecycle.json and lack a quality_grade field.
+        if p.name.endswith(".lifecycle.json"):
+            continue
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
+            continue
+        if "quality_grade" not in data and "grade" not in data:
+            # Defensive: skip any sidecar that lacks both grade fields.
             continue
         rows.append(data)
 
@@ -1001,7 +1207,11 @@ if __name__ == "__main__":
 __all__ = [
     "QualityConfig",
     "QualityScore",
+    "QualitySink",
+    "SidecarSink",
     "SignalSources",
+    "WikiBodySink",
+    "WikiFrontmatterSink",
     "compute_quality",
     "default_sidecar_dir",
     "discover_slugs",
@@ -1009,6 +1219,7 @@ __all__ = [
     "load_quality",
     "main",
     "persist_quality",
+    "recompute_all",
     "recompute_slug",
     "sidecar_path",
 ]

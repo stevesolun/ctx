@@ -15,12 +15,19 @@ Outputs the skill/agent content path so Claude can read and apply it.
 
 import argparse
 import json
+import logging
 import os
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 from wiki_utils import validate_skill_name
+
+_logger = logging.getLogger(__name__)
+
+# Stable session ID for this process invocation; groups all loads in one run.
+_SESSION_ID: str = uuid.uuid4().hex
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -98,6 +105,34 @@ def update_manifest(name: str) -> None:
         _atomic_write_text(MANIFEST_PATH, json.dumps(manifest, indent=2))
 
 
+def emit_load_event(
+    name: str,
+    *,
+    path: "Path | None" = None,
+    trusted_root: "Path | None" = None,
+) -> None:
+    """Append a ``load`` telemetry event for *name* to the JSONL stream.
+
+    Failures are swallowed and logged at DEBUG level so a broken telemetry
+    write never interrupts skill loading.
+
+    Args:
+        name: Skill slug to record.
+        path: Override the events file location (tests pass a tmp_path here).
+        trusted_root: Override the containment root accepted by skill_telemetry
+            (tests pass their tmp_path so writes are not restricted to ~/.claude/).
+    """
+    try:
+        import skill_telemetry  # local import: avoids circular-import risk
+
+        kwargs: dict = {"path": path}
+        if trusted_root is not None:
+            kwargs["trusted_root"] = trusted_root
+        skill_telemetry.log_event("load", name, _SESSION_ID, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("skill_loader: telemetry write failed for %r: %s", name, exc)
+
+
 def clear_pending(names: list[str]) -> None:
     """Remove loaded skills from pending-skills.json."""
     if not PENDING_SKILLS.exists():
@@ -171,6 +206,7 @@ def main() -> None:
         result = find_skill(name)
         if result:
             update_manifest(name)
+            emit_load_event(name)
             loaded.append(result)
             print(f"  Loaded: {result['name']} [{result['type']}] -> {result['path']}")
         else:

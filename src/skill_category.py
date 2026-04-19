@@ -29,8 +29,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-sys.path.insert(0, str(Path(__file__).parent))
-from wiki_utils import parse_frontmatter_and_body  # noqa: E402
+from wiki_utils import parse_frontmatter_and_body
 
 _logger = logging.getLogger(__name__)
 

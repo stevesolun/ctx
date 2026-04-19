@@ -23,8 +23,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from wiki_utils import SAFE_NAME_RE, parse_frontmatter as _read_frontmatter  # noqa: E402
+from wiki_utils import SAFE_NAME_RE, parse_frontmatter as _read_frontmatter
 
 
 def _atomic_write_text(path: Path, text: str) -> None:

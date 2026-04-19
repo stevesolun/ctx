@@ -39,7 +39,6 @@ import json
 import os
 import re
 import shutil
-import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,8 +46,7 @@ from typing import Iterator
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent))
-from _file_lock import file_lock  # noqa: E402
+from _file_lock import file_lock
 
 
 DEFAULT_CACHE_ROOT = Path(os.path.expanduser("~/.claude/skills/_embeddings"))

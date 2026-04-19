@@ -14,6 +14,7 @@ If >180 lines: prints a prompt asking the user if they want to convert.
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -24,12 +25,35 @@ try:
     REGISTRY_PATH = _cfg.skill_registry
     CATALOG_PATH = _cfg.catalog
     LINE_THRESHOLD = _cfg.line_threshold
+    SKILLS_DIR = _cfg.skills_dir
 except ImportError:
     CLAUDE_DIR = Path(os.path.expanduser("~/.claude"))
     WIKI_DIR = CLAUDE_DIR / "skill-wiki"
     REGISTRY_PATH = CLAUDE_DIR / "skill-registry.json"
     CATALOG_PATH = WIKI_DIR / "catalog.md"
     LINE_THRESHOLD = 180
+    SKILLS_DIR = CLAUDE_DIR / "skills"
+
+# Skill directory names must be lowercase alnum + hyphen, bounded length.
+# Stricter than the telemetry _SKILL_NAME_RE because directory names on
+# disk should follow the canonical slug convention (no dots, no uppercase).
+_SKILL_DIR_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+
+def validate_skill_name(name: str) -> str:
+    """Validate and return a skill directory name.
+
+    Raises ValueError if the name does not match the canonical slug pattern.
+    This prevents attacker-controlled path components from being used in
+    downstream filesystem operations.
+    """
+    if not isinstance(name, str) or not _SKILL_DIR_RE.match(name):
+        raise ValueError(
+            f"invalid skill name extracted from path: {name!r} "
+            f"(must match {_SKILL_DIR_RE.pattern})"
+        )
+    return name
+
 
 SKILL_TRIGGERS = {"Write", "Edit"}  # Tools that could create a skill file
 
@@ -73,6 +97,18 @@ def count_lines(file_path: str) -> int:
         return 0
 
 
+def _escape_md_cell(s: str) -> str:
+    """Escape a string for safe embedding in a markdown table cell.
+
+    Replaces pipe characters (which break table structure), collapses
+    newlines to spaces, and escapes backticks to prevent nested code spans.
+    """
+    s = s.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    s = s.replace("|", r"\|")
+    s = s.replace("`", r"\`")
+    return s
+
+
 def register_skill_in_catalog(file_path: str, skill_name: str, lines: int) -> None:
     """Append a new skill entry to catalog.md."""
     if not CATALOG_PATH.exists():
@@ -84,11 +120,35 @@ def register_skill_in_catalog(file_path: str, skill_name: str, lines: int) -> No
     if f"| {skill_name} |" in content:
         return
     over_flag = "⚠" if lines > 180 else ""
-    entry = f"| {skill_name} | skill | {lines} | {over_flag} | `{file_path}` |"
+    safe_path = _escape_md_cell(file_path)
+    entry = f"| {skill_name} | skill | {lines} | {over_flag} | `{safe_path}` |"
     # Insert before the last line
     lines_list = content.splitlines()
     lines_list.append(entry)
     CATALOG_PATH.write_text("\n".join(lines_list) + "\n", encoding="utf-8")
+
+
+def _parse_stdin_payload() -> tuple[str, dict]:
+    """Read the PostToolUse JSON payload from stdin.
+
+    Claude Code delivers the payload on stdin when --from-stdin is used,
+    avoiding $CLAUDE_TOOL_INPUT interpolation into argv (shell injection risk).
+    Returns (tool_name, tool_input).
+    """
+    try:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            return "unknown", {}
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return "unknown", {}
+        tool_name = str(data.get("tool_name") or "unknown")
+        tool_input = data.get("tool_input") or {}
+        if not isinstance(tool_input, dict):
+            tool_input = {}
+        return tool_name, tool_input
+    except (json.JSONDecodeError, OSError):
+        return "unknown", {}
 
 
 def main() -> None:
@@ -96,17 +156,27 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tool", default="unknown")
     parser.add_argument("--input", default="{}")
+    parser.add_argument(
+        "--from-stdin",
+        action="store_true",
+        help="Read tool_name and tool_input from the JSON payload on stdin "
+             "(safe alternative to --tool/--input that avoids shell injection)",
+    )
     args = parser.parse_args()
 
-    if args.tool not in SKILL_TRIGGERS:
+    if args.from_stdin:
+        tool_name, tool_input = _parse_stdin_payload()
+    else:
+        tool_name = args.tool
+        try:
+            tool_input = json.loads(args.input)
+        except json.JSONDecodeError:
+            sys.exit(0)
+
+    if tool_name not in SKILL_TRIGGERS:
         sys.exit(0)
 
-    try:
-        tool_input = json.loads(args.input)
-    except json.JSONDecodeError:
-        sys.exit(0)
-
-    file_path = extract_written_path(args.tool, tool_input)
+    file_path = extract_written_path(tool_name, tool_input)
     if not file_path:
         sys.exit(0)
 
@@ -118,8 +188,18 @@ def main() -> None:
     if not is_in_skill_dir(file_path, skill_dirs):
         sys.exit(0)
 
-    # New skill detected in a skill directory
-    skill_name = Path(file_path).parent.name
+    # New skill detected in a skill directory.
+    # Resolve to an absolute path before extracting the parent name so that
+    # traversal sequences like "/tmp/../../etc/foo" are normalised away first.
+    # We already know the resolved path is inside a registered skill dir
+    # (is_in_skill_dir uses resolve() internally), so extracting .parent.name
+    # from the resolved path gives us the real directory name.
+    resolved_path = Path(file_path).resolve()
+    raw_name = resolved_path.parent.name
+    try:
+        skill_name = validate_skill_name(raw_name)
+    except ValueError:
+        sys.exit(0)
     lines = count_lines(file_path)
 
     # Register in catalog

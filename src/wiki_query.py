@@ -20,9 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-sys.path.insert(0, str(Path(__file__).parent))
-from ctx_config import cfg  # noqa: E402
-from wiki_utils import parse_frontmatter_and_body as _extract_frontmatter  # noqa: E402
+from ctx_config import cfg
+from wiki_utils import parse_frontmatter_and_body as _extract_frontmatter
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 

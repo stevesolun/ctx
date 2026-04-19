@@ -35,17 +35,15 @@ user who can override explicitly.
 from __future__ import annotations
 
 import re
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent))
-from cosine_ranker import CosineRanker, RankedMatch  # noqa: E402
-from embedding_backend import Embedder  # noqa: E402
-from wiki_utils import parse_frontmatter_and_body  # noqa: E402
+from cosine_ranker import CosineRanker, RankedMatch
+from embedding_backend import Embedder
+from wiki_utils import parse_frontmatter_and_body
 
 
 Severity = Literal["warn", "fail"]

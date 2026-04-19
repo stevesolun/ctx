@@ -57,11 +57,7 @@ def _validate_plan_hash(raw: str) -> str:
         raise ValueError(f"invalid plan_hash: {raw!r}")
     return raw
 
-try:
-    from toolbox_config import Toolbox, merged
-except ImportError:  # pragma: no cover
-    sys.path.insert(0, str(Path(__file__).parent))
-    from toolbox_config import Toolbox, merged  # type: ignore[no-redef]
+from toolbox_config import Toolbox, merged
 
 
 RUNS_DIR = Path(os.path.expanduser("~/.claude/toolbox-runs"))

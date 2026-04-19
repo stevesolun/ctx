@@ -22,8 +22,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from ctx_config import cfg  # noqa: E402
+from ctx_config import cfg
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 

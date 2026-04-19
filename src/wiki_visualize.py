@@ -349,12 +349,13 @@ function applyFilters() {{
     return true;
   }});
 
+  const nodeById = new Map(NODES.map(n => [n.id, n]));
   const edgeX = [], edgeY = [];
   let edgeCount = 0;
   EDGES.forEach(e => {{
     if (visible.has(e.source) && visible.has(e.target)) {{
-      const s = NODES.find(n => n.id === e.source);
-      const t = NODES.find(n => n.id === e.target);
+      const s = nodeById.get(e.source);
+      const t = nodeById.get(e.target);
       if (s && t) {{ edgeX.push(s.x, t.x, null); edgeY.push(s.y, t.y, null); edgeCount++; }}
     }}
   }});

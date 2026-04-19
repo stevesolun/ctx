@@ -1,11 +1,11 @@
 # ctx - Skill & Agent Recommendation and Management for Claude Code
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-green.svg)](https://python.org)
 [![Skills](https://img.shields.io/badge/Skills-1%2C768-purple.svg)](#)
 [![Agents](https://img.shields.io/badge/Agents-443-orange.svg)](#)
 [![Graph](https://img.shields.io/badge/Knowledge_Graph-642K_edges-red.svg)](#knowledge-graph)
-[![Tests](https://img.shields.io/badge/Tests-1015_passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-1304_passing-brightgreen.svg)](#)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
 Watches what you develop, walks a knowledge graph of **1,768 skills and 443 agents**, and recommends the right ones on the fly - you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
@@ -231,7 +231,7 @@ python src/wiki_graphify.py
 
 ## Configuration
 
-All paths, thresholds, and numeric limits live in `src/config.json` (nested structure). User overrides go in `~/.claude/skill-system-config.json`. Nothing is hardcoded.
+Paths, thresholds, and numeric limits live in `src/config.json` (nested structure). User overrides go in `~/.claude/skill-system-config.json`. The config is loaded by `src/ctx_config.py`, which is the config singleton used by most modules.
 
 ```json
 {
@@ -266,6 +266,44 @@ All paths, thresholds, and numeric limits live in `src/config.json` (nested stru
 | root | `tags` | Tag taxonomy for skill classification (configurable) |
 
 `src/ctx_config.py` is the config singleton. User overrides in `~/.claude/skill-system-config.json` are deep-merged over defaults.
+
+### User-configurable paths
+
+The following paths are read from `~/.claude/skill-system-config.json` via `ctx_config.cfg` and can be overridden per-user:
+
+| Config key | Default | Used by |
+|------------|---------|---------|
+| `paths.wiki_dir` | `~/.claude/skill-wiki` | `wiki_orchestrator`, `wiki_sync`, `usage_tracker`, `context_monitor`, and others |
+| `paths.skills_dir` | `~/.claude/skills` | `wiki_orchestrator --add`, `wiki_batch_entities`, `skill_health`, and others |
+| `paths.agents_dir` | `~/.claude/agents` | `wiki_batch_entities`, `skill_health`, `flatten_agents` |
+| `paths.skill_manifest` | `~/.claude/skill-manifest.json` | `usage_tracker`, `context_monitor`, `resolve_skills` |
+| `paths.intent_log` | `~/.claude/intent-log.jsonl` | `context_monitor`, `usage_tracker`, `resolve_skills` |
+| `paths.skill_registry` | `~/.claude/skill-registry.json` | `skill_add_detector`, `resolve_skills` |
+| `paths.pending_skills` | `~/.claude/pending-skills.json` | `context_monitor`, `skill_health` |
+
+### Known hardcoding gaps
+
+The following modules still hardcode `~/.claude`-relative paths instead of reading from `ctx_config`. They fall back gracefully when `ctx_config` is unavailable (standalone use), but ignore user overrides:
+
+| Module | Hardcoded paths | Issue |
+|--------|----------------|-------|
+| `behavior_miner.py` | `intent-log.jsonl`, `skill-manifest.json`, `user-profile.json` | config-hardcoding-cleanup |
+| `corpus_cache.py` | `skills/_embeddings` | config-hardcoding-cleanup |
+| `council_runner.py` | `toolbox-runs` | config-hardcoding-cleanup |
+| `flatten_agents.py` | `agents/` | config-hardcoding-cleanup |
+| `memory_anchor.py` | `projects/` | config-hardcoding-cleanup |
+| `resolve_graph.py` | `skill-wiki` | config-hardcoding-cleanup |
+| `skill_health.py` | `skills/`, `agents/`, manifests | config-hardcoding-cleanup |
+| `skill_suggest.py` | `~/.claude` base dir | config-hardcoding-cleanup |
+| `skill_unload.py` | `~/.claude` base dir | config-hardcoding-cleanup |
+| `toolbox_config.py` | `toolboxes.json` | config-hardcoding-cleanup |
+| `toolbox_verdict.py` | `toolbox-runs` | config-hardcoding-cleanup |
+| `update_repo_stats.py` | `skill-wiki/converted` | config-hardcoding-cleanup |
+| `versions_catalog.py` | wiki, skills, agents (CLI defaults) | config-hardcoding-cleanup |
+| `wiki_graphify.py` | `skill-wiki`, `skill-quality` | config-hardcoding-cleanup |
+| `wiki_visualize.py` | `skill-wiki` | config-hardcoding-cleanup |
+
+The top-priority cases (`context_monitor.py`, `resolve_skills.py`, `wiki_batch_entities.py`) have been fixed and now respect the user config. The remaining ~15 modules are tracked under **config-hardcoding-cleanup**.
 
 ---
 
@@ -491,7 +529,7 @@ ctx/
     update_repo_stats.py        # pre-commit hook: keep README numbers fresh
     import_strix_skills.py      # import Strix pentest skills under Apache-2.0
     flatten_agents.py           # flatten agent directory layouts
-    tests/                      # 1015 pytest tests across 25 modules
+    tests/                      # 1304 pytest tests across 25 modules
 ```
 
 ---

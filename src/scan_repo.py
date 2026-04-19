@@ -21,6 +21,7 @@ import sys
 import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 # Directories to always skip
 SKIP_DIRS = {
@@ -36,7 +37,7 @@ MAX_DEPTH = 3
 
 def scan_directory(repo_path: str, max_depth: int = MAX_DEPTH) -> dict:
     """Walk the repo and collect file/dir signals without reading contents."""
-    signals = {
+    signals: dict[str, list[Any]] = {
         "files": [],        # (relative_path, extension)
         "dirs": [],         # relative directory paths
         "config_files": [], # config files found (will be read)
@@ -168,7 +169,7 @@ def read_requirements(path: str) -> list[str]:
 
 def detect_stack(repo_path: str, signals: dict) -> dict:
     """Analyze signals and produce a stack profile."""
-    profile = {
+    profile: dict[str, Any] = {
         "repo_path": os.path.abspath(repo_path),
         "scanned_at": datetime.now(timezone.utc).isoformat(),
         "languages": [],
@@ -225,7 +226,7 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
         ".rs": "rust", ".go": "go", ".java": "java", ".kt": "kotlin",
         ".rb": "ruby", ".swift": "swift", ".cs": "csharp", ".php": "php",
     }
-    detected_langs = {}
+    detected_langs: dict[str, int] = {}
     for ext, count in ext_counts.items():
         if ext in lang_map:
             lang = lang_map[ext]

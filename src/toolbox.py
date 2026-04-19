@@ -28,37 +28,20 @@ import json
 import sys
 from pathlib import Path
 
-try:  # module-run vs repo-run import dance \u2014 same pattern as sibling modules
-    from toolbox_config import (
-        SCHEMA_VERSION,
-        Toolbox,
-        ToolboxSet,
-        _HAS_YAML,
-        _load_json,
-        _load_yaml,
-        global_config_path,
-        load_global,
-        load_repo,
-        merged,
-        repo_config_path,
-        save_global,
-    )
-except ImportError:  # pragma: no cover
-    sys.path.insert(0, str(Path(__file__).parent))
-    from toolbox_config import (  # type: ignore[no-redef]
-        SCHEMA_VERSION,
-        Toolbox,
-        ToolboxSet,
-        _HAS_YAML,
-        _load_json,
-        _load_yaml,
-        global_config_path,
-        load_global,
-        load_repo,
-        merged,
-        repo_config_path,
-        save_global,
-    )
+from toolbox_config import (
+    SCHEMA_VERSION,
+    Toolbox,
+    ToolboxSet,
+    _HAS_YAML,
+    _load_json,
+    _load_yaml,
+    global_config_path,
+    load_global,
+    load_repo,
+    merged,
+    repo_config_path,
+    save_global,
+)
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "docs" / "toolbox" / "templates"
 

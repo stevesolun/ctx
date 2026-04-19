@@ -18,9 +18,16 @@ from pathlib import Path
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-SKILLS_DIR = Path(os.path.expanduser("~/.claude/skills"))
-AGENTS_DIR = Path(os.path.expanduser("~/.claude/agents"))
-WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki"))
+try:
+    from ctx_config import cfg as _cfg
+    SKILLS_DIR = _cfg.skills_dir
+    AGENTS_DIR = _cfg.agents_dir
+    WIKI_DIR = _cfg.wiki_dir
+except ImportError:
+    SKILLS_DIR = Path(os.path.expanduser("~/.claude/skills"))
+    AGENTS_DIR = Path(os.path.expanduser("~/.claude/agents"))
+    WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki"))
+
 SKILL_ENTITIES = WIKI_DIR / "entities" / "skills"
 AGENT_ENTITIES = WIKI_DIR / "entities" / "agents"
 

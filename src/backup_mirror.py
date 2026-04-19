@@ -66,7 +66,7 @@ import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 # backup_config is the single source of truth for what/where/how we
 # mirror. The module globals below (TOP_FILES, TREE_SOURCES, etc.) are
@@ -74,6 +74,36 @@ from typing import Iterable
 # paths can continue to monkeypatch or iterate them directly without
 # paying a per-call config read.
 from backup_config import BackupConfig, from_ctx_config
+
+# ── Intentional import cycle with backup_watchdog ───────────────────────────
+# This module and ``backup_watchdog`` form a call-graph cycle:
+#   * ``cmd_watchdog`` (here) dispatches to ``backup_watchdog.run_watchdog``
+#     so ``python src/backup_mirror.py watchdog`` wires up the CLI subcommand.
+#   * ``backup_watchdog.run_watchdog`` calls back into
+#     ``snapshot_if_changed`` (here) — the whole point of the watchdog.
+# Both directions are genuinely needed. To keep the module import graph
+# acyclic we import each side lazily inside the function body that uses
+# it (see ``cmd_watchdog`` below and the corresponding comment in
+# ``backup_watchdog``). Static-analysis tools that report this as a
+# cycle are looking at the call graph, not the import graph.
+#
+# ``backup_retention`` and ``change_detector`` are imported lazily
+# inside function bodies for a different reason: they are only needed
+# on the prune / snapshot-if-changed code paths, so we keep them out
+# of the module import cost for the common ``create`` / ``restore``
+# paths. ``change_detector`` in particular deliberately avoids
+# depending on ``backup_mirror`` (see the comment at the top of that
+# module) — promoting it to a module-scope import here would erode
+# that separation. The TYPE_CHECKING block below exposes the three
+# type names used in public annotations so static type checkers
+# (mypy / pyright) resolve them correctly.
+# NOTE: ``typing.get_type_hints`` at runtime will still raise
+# NameError on these annotations unless callers pass an appropriate
+# ``localns``; this is the standard TYPE_CHECKING tradeoff.
+if TYPE_CHECKING:
+    from backup_config import BackupRetention
+    from backup_retention import RetentionPlan
+    from change_detector import ChangeReport
 
 
 CLAUDE_HOME = Path(os.path.expanduser("~/.claude"))
@@ -636,12 +666,12 @@ def prune_snapshots(keep: int,
 
 
 def prune_by_policy(
-    retention: "BackupRetention | None" = None,
+    retention: BackupRetention | None = None,
     backups_dir: Path | None = None,
     *,
     dry_run: bool = False,
     now: float | None = None,
-) -> "RetentionPlan":
+) -> RetentionPlan:
     """Prune snapshots according to the configured retention policy.
 
     Parameters
@@ -695,7 +725,7 @@ class SnapshotIfChangedResult:
     """Outcome of a snapshot-if-changed run."""
 
     snapshot_path: Path | None   # None when no snapshot was taken
-    report: "ChangeReport"        # type imported lazily below
+    report: ChangeReport          # resolved via TYPE_CHECKING import above
     reason: str | None
 
     def to_dict(self) -> dict:

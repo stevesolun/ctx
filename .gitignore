@@ -40,6 +40,9 @@ Thumbs.db
 # Agent directives (cloned from global ~/.claude/CLAUDE.md — personal, not for sharing)
 CLAUDE.md
 
+# Per-workspace Claude Code settings (local permissions, user-specific)
+.claude/
+
 # Wiki (runtime knowledge store, not source)
 # Uncomment to exclude the wiki from the repo:
 # ~/.claude/skill-wiki/
@@ -62,6 +65,9 @@ strix_runs/
 
 # Test coverage
 .coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
 
 # MkDocs build output
 /site/

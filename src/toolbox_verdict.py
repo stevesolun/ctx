@@ -45,11 +45,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Iterable, Sequence
 
-try:
-    from _file_lock import file_lock
-except ImportError:  # pragma: no cover
-    sys.path.insert(0, str(Path(__file__).parent))
-    from _file_lock import file_lock  # type: ignore[no-redef]
+from _file_lock import file_lock
 
 
 RUNS_DIR = Path(os.path.expanduser("~/.claude/toolbox-runs"))

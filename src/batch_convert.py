@@ -42,8 +42,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
             pass
         raise
 
-sys.path.insert(0, str(Path(__file__).parent))
-from ctx_config import cfg  # noqa: E402
+from ctx_config import cfg
 
 MIN_LINES = cfg.line_threshold
 MAX_STAGE_LINES = cfg.max_stage_lines
