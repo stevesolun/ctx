@@ -1,0 +1,79 @@
+name: Publish to PyPI
+
+# Publish claude-ctx to PyPI on every tag that looks like a version
+# (v0.5.0, v0.5.0-rc1, v1.0.0, …). Uses PyPI Trusted Publishing —
+# no API token needed once the pending publisher is configured at
+# https://pypi.org/manage/account/publishing/.
+#
+# Also deployable on demand via workflow_dispatch (useful for
+# re-publishing to TestPyPI).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "PyPI repository (pypi or testpypi)"
+        required: true
+        default: "pypi"
+        type: choice
+        options:
+          - pypi
+          - testpypi
+
+permissions:
+  id-token: write   # required for Trusted Publishing
+  contents: read
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+
+      - name: Build distributions
+        run: python -m build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/claude-ctx/
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        if: github.event_name == 'push' || github.event.inputs.repository == 'pypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Publish to TestPyPI
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.repository == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
