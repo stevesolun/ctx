@@ -23,6 +23,15 @@ from typing import Any
 
 from wiki_utils import parse_frontmatter as _parse_fm
 
+# Graph-walk augmentation. Lazy-imported so the module still works when the
+# graph artifacts haven't been built yet — resolve_by_seeds() degrades to an
+# empty list if the graph has zero nodes.
+try:
+    from resolve_graph import load_graph as _load_graph, resolve_by_seeds as _resolve_by_seeds
+    _GRAPH_AVAILABLE = True
+except ImportError:
+    _GRAPH_AVAILABLE = False
+
 try:
     from ctx_config import cfg as _cfg
     _WIKI_DEFAULT = str(_cfg.wiki_dir)
@@ -233,6 +242,72 @@ def resolve(
                     "confidence": confidence,
                     "priority": priority,
                 }
+
+    # ── Fuzzy installed-skill match for unresolved detections ────────
+    # STACK_SKILL_MAP lists skills by short canonical names (e.g. "fastapi"),
+    # but marketplace skills use suffixed slugs (e.g. "fastapi-pro",
+    # "python-fastapi-development"). If a matrix hit is unresolved, pick
+    # any installed skill whose name contains the detection id — otherwise
+    # the graph walk below has zero seeds and the recommendation engine
+    # silently no-ops on a well-known stack.
+    detection_ids = {d["name"].lower() for d, _ in all_detections}
+    for det_id in list(detection_ids):
+        if det_id in available:
+            continue  # already a direct hit — nothing to do
+        fuzzy_matches = [
+            s for s in available
+            if det_id in s.lower()
+        ]
+        for match in fuzzy_matches[:3]:  # cap to avoid flood
+            if match not in needed:
+                needed[match] = {
+                    "reason": f"fuzzy match for detected stack '{det_id}'",
+                    "confidence": 0.5,
+                    "priority": PRIORITY_BASE.get(match, 5) + 2,
+                }
+
+    # ── Graph-walk augmentation ──────────────────────────────────────
+    # Seed the graph with skills the (matrix or fuzzy) step matched, then
+    # walk 1-2 hops and add high-scoring neighbors that are also installed.
+    # This is what makes the 642K-edge knowledge graph load-bearing on the
+    # recommendation path — without it, resolve_skills is a static dict.
+    #
+    # Quiet on empty graph: resolve_by_seeds() returns [] if the graph
+    # hasn't been built yet, so this is safe on a fresh install.
+    if _GRAPH_AVAILABLE and needed:
+        try:
+            G = _load_graph()
+            if G.number_of_nodes() > 0:
+                graph_hits = _resolve_by_seeds(
+                    G,
+                    list(needed.keys()),
+                    max_hops=1,
+                    top_n=12,
+                    exclude_seeds=True,
+                )
+                for hit in graph_hits:
+                    name = hit["name"]
+                    if name in needed or name not in available:
+                        continue
+                    # Score 0..1 of edge-weight-driven ranking, quantized
+                    # into a modest priority bump (lower than matrix hits
+                    # so they never outrank a direct stack match).
+                    score = float(hit.get("score", 0.0))
+                    if score < 1.5:  # noise floor — ignore weak neighbors
+                        continue
+                    priority = 3 + min(int(score), 12)
+                    via = ", ".join(hit.get("via", [])[:2]) or "graph"
+                    shared = hit.get("shared_tags", [])[:3]
+                    shared_str = f" via shared tags {shared}" if shared else ""
+                    needed[name] = {
+                        "reason": f"graph neighbor of {via}{shared_str}",
+                        "confidence": min(0.6 + score / 20.0, 0.95),
+                        "priority": priority,
+                    }
+        except Exception as exc:  # noqa: BLE001 — graph is advisory
+            manifest["warnings"].append(
+                f"graph walk skipped: {type(exc).__name__}: {exc}"
+            )
 
     # Apply wiki overrides
     for skill_name, override in overrides.items():

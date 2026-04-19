@@ -54,6 +54,14 @@ def make_hooks(ctx_dir: str) -> dict:
     suggest_cmd = (
         f'python3 {q}/skill_suggest.py 2>/dev/null || true'
     )
+    # Change-triggered backup: fires on every Edit/Write/MultiEdit, takes a
+    # snapshot into ~/.claude/backups/ ONLY when tracked files actually
+    # changed. SHA-gated so no-op edits don't create folders. Without this,
+    # Claude-driven edits of ~/.claude/settings.json, agents/*, skills/*
+    # have no rollback target.
+    backup_cmd = (
+        f'python3 {q}/../hooks/backup_on_change.py 2>/dev/null || true'
+    )
 
     return {
         "PostToolUse": [
@@ -73,7 +81,16 @@ def make_hooks(ctx_dir: str) -> dict:
                         "command": suggest_cmd,
                     },
                 ],
-            }
+            },
+            {
+                "matcher": "Edit|Write|MultiEdit",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": backup_cmd,
+                    },
+                ],
+            },
         ],
         "Stop": [
             {
@@ -207,7 +224,7 @@ def main() -> None:
     write_settings_atomic(settings_path, updated)
 
     print(f"Hooks injected into {settings_path}")
-    print("  PostToolUse: context_monitor + skill-add-detector + skill-suggest")
+    print("  PostToolUse: context_monitor + skill-add-detector + skill-suggest + backup_on_change")
     print("  Stop: usage_tracker + quality_on_session_end")
 
 
