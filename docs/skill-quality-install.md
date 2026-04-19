@@ -113,6 +113,9 @@ All knobs live in `src/config.json` under the top-level `quality` key:
     "weights": {
       "telemetry": 0.40, "intake": 0.20, "graph": 0.25, "routing": 0.15
     },
+    "agent_weights": {
+      "telemetry": 0.15, "intake": 0.30, "graph": 0.35, "routing": 0.20
+    },
     "grade_thresholds": {"A": 0.80, "B": 0.60, "C": 0.40},
     "stale_threshold_days": 30.0,
     "recent_window_days": 14.0,
@@ -129,9 +132,23 @@ All knobs live in `src/config.json` under the top-level `quality` key:
 overrides in `~/.claude/skill-system-config.json` deep-merge over the
 repo defaults, so you can pin only the keys you want to change.
 
-Weights must sum to 1.0 (±0.01) and grade thresholds must satisfy
-`0 ≤ C ≤ B ≤ A ≤ 1` — `QualityConfig.__post_init__` will raise on bad
-values, catching typos before they pollute sidecars.
+Both weight vectors must sum to 1.0 (±0.01) and grade thresholds must
+satisfy `0 ≤ C ≤ B ≤ A ≤ 1` — `QualityConfig.__post_init__` will raise
+on bad values, catching typos before they pollute sidecars.
+
+### Why two weight vectors
+
+Skills and agents differ in how they're invoked. Skills are loaded
+automatically by the router, so **telemetry** (load counts, recency) is
+the strongest post-install quality signal — hence 0.40 weight.
+
+Agents are invoked via the Agent tool, deliberately and rarely. A
+seldom-used agent isn't stale, it's specialized. The agent weights
+shift mass onto **graph connectedness** (0.35) and **intake structure**
+(0.30) so agents aren't penalized for having an empty telemetry stream.
+The `never_loaded_stale` hard floor, which caps skills at D when they
+have zero load events, does **not** apply to agents for the same
+reason.
 
 ## Troubleshooting
 

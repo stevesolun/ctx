@@ -65,14 +65,25 @@ _logger = logging.getLogger(__name__)
 # ────────────────────────────────────────────────────────────────────
 
 
-# Default signal weights. Sum must be 1.0. Telemetry gets the largest
-# slice because it's the one signal that meaningfully changes after
-# install; the other three are structural and move slowly.
+# Default signal weights for skills. Sum must be 1.0. Telemetry gets the
+# largest slice because it's the one signal that meaningfully changes
+# after install; the other three are structural and move slowly.
 _DEFAULT_WEIGHTS: dict[str, float] = {
     "telemetry": 0.40,
     "intake": 0.20,
     "graph": 0.25,
     "routing": 0.15,
+}
+
+# Default signal weights for agents. Agents are invoked deliberately and
+# rarely — a seldom-used agent isn't stale, it's specialized — so
+# telemetry is a weaker quality signal for them than for skills. Graph
+# connectedness and intake structure carry more of the weight instead.
+_DEFAULT_AGENT_WEIGHTS: dict[str, float] = {
+    "telemetry": 0.15,
+    "intake": 0.30,
+    "graph": 0.35,
+    "routing": 0.20,
 }
 
 # Grade cutoffs. Score must meet or exceed the threshold for that grade.
@@ -100,12 +111,33 @@ def _ensure_safe_slug(slug: str) -> str:
     return slug
 
 
+_WEIGHT_KEYS: frozenset[str] = frozenset(
+    {"telemetry", "intake", "graph", "routing"}
+)
+
+
+def _validate_weight_vector(name: str, weights: Mapping[str, float]) -> None:
+    if set(weights) != _WEIGHT_KEYS:
+        raise ValueError(
+            f"{name} must supply exactly: telemetry, intake, graph, routing"
+        )
+    total = sum(weights.values())
+    if not 0.99 <= total <= 1.01:
+        raise ValueError(f"{name} must sum to 1.0; got {total:.4f}")
+    for k, v in weights.items():
+        if v < 0:
+            raise ValueError(f"{name} weight for {k!r} must be >= 0, got {v}")
+
+
 @dataclass(frozen=True)
 class QualityConfig:
     """All knobs used by the scorer. Frozen so tests cannot mutate by accident."""
 
     weights: Mapping[str, float] = field(
         default_factory=lambda: dict(_DEFAULT_WEIGHTS)
+    )
+    agent_weights: Mapping[str, float] = field(
+        default_factory=lambda: dict(_DEFAULT_AGENT_WEIGHTS)
     )
     grade_thresholds: Mapping[str, float] = field(
         default_factory=lambda: dict(_DEFAULT_GRADE_THRESHOLDS)
@@ -115,16 +147,8 @@ class QualityConfig:
     min_body_chars: int = _DEFAULT_MIN_BODY_CHARS
 
     def __post_init__(self) -> None:
-        if set(self.weights) != {"telemetry", "intake", "graph", "routing"}:
-            raise ValueError(
-                "weights must supply exactly: telemetry, intake, graph, routing"
-            )
-        total = sum(self.weights.values())
-        if not 0.99 <= total <= 1.01:
-            raise ValueError(f"weights must sum to 1.0; got {total:.4f}")
-        for k, v in self.weights.items():
-            if v < 0:
-                raise ValueError(f"weight for {k!r} must be >= 0, got {v}")
+        _validate_weight_vector("weights", self.weights)
+        _validate_weight_vector("agent_weights", self.agent_weights)
         if set(self.grade_thresholds) != {"A", "B", "C"}:
             raise ValueError("grade_thresholds must supply A, B, C cutoffs")
         a = self.grade_thresholds["A"]
@@ -140,6 +164,12 @@ class QualityConfig:
             raise ValueError("recent_window_days must be > 0")
         if self.min_body_chars < 0:
             raise ValueError("min_body_chars must be >= 0")
+
+    def weights_for(self, subject_type: str) -> Mapping[str, float]:
+        """Pick the weight vector that applies to this subject_type."""
+        if subject_type == "agent":
+            return self.agent_weights
+        return self.weights
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -227,16 +257,25 @@ def compute_quality(
     """Aggregate signals → score → grade, applying hard floors.
 
     Hard floors override the weighted grade:
-      - Any intake ``hard_fail`` → grade F (skill currently violates the
-        structural gate; remediate the file or unlist it).
-      - ``never_loaded`` AND last_load_age exceeds the stale window →
-        grade D, regardless of graph/intake strength. Evidence lives in
-        the telemetry signal; we just check the flag here.
+      - Any intake ``hard_fail`` → grade F (entity currently violates
+        the structural gate; remediate the file or unlist it). Applies
+        to both skills and agents.
+      - ``never_loaded`` on a **skill** → grade D, regardless of
+        graph/intake strength. Evidence lives in the telemetry signal;
+        we just check the flag here. This floor does NOT apply to
+        agents — agents are invoked via the Agent tool and do not emit
+        load events, so a zero telemetry signal is the expected steady
+        state for them rather than a staleness signal.
+
+    Weight vector is selected per subject_type: skills use
+    ``config.weights`` (telemetry-heavy), agents use
+    ``config.agent_weights`` (structure-heavy).
     """
     _ensure_safe_slug(slug)
     if subject_type not in ("skill", "agent"):
         raise ValueError(f"subject_type must be 'skill' or 'agent': {subject_type!r}")
     cfg = config or QualityConfig()
+    weights = cfg.weights_for(subject_type)
 
     required = {"telemetry", "intake", "graph", "routing"}
     if set(signals) != required:
@@ -246,7 +285,7 @@ def compute_quality(
             f"signals keys mismatch: missing={sorted(missing)}, extra={sorted(extra)}"
         )
 
-    raw = sum(cfg.weights[name] * signals[name].score for name in required)
+    raw = sum(weights[name] * signals[name].score for name in required)
     score = max(0.0, min(1.0, raw))
 
     hard_floor: str | None = None
@@ -254,7 +293,7 @@ def compute_quality(
     if intake_evidence.get("hard_fail"):
         hard_floor = "intake_fail"
         grade = "F"
-    else:
+    elif subject_type == "skill":
         telemetry_evidence = signals["telemetry"].evidence or {}
         never_loaded = bool(telemetry_evidence.get("never_loaded"))
         # Without telemetry we cannot tell stale from never-seen. Treat
@@ -268,6 +307,12 @@ def compute_quality(
                 grade = "D"
         else:
             grade = _grade_from_score(score, cfg.grade_thresholds)
+    else:
+        # Agent: no load-event stream exists, so the never_loaded flag
+        # on the telemetry signal is not a quality signal. Grade
+        # straight from the weighted sum (which already weights
+        # telemetry lightly for agents).
+        grade = _grade_from_score(score, cfg.grade_thresholds)
 
     return QualityScore(
         slug=slug,
@@ -277,7 +322,7 @@ def compute_quality(
         grade=grade,
         hard_floor=hard_floor,
         signals=dict(signals),
-        weights=dict(cfg.weights),
+        weights=dict(weights),
         computed_at=computed_at or _now_iso(),
     )
 
@@ -787,17 +832,20 @@ def _config_from_cfg() -> QualityConfig:
     """Build QualityConfig from ``ctx_config.cfg``'s ``quality`` block."""
     from ctx_config import cfg
     quality_raw = cfg.get("quality", {}) or {}
-    weights = quality_raw.get("weights") if isinstance(quality_raw, dict) else None
-    thresholds = (
-        quality_raw.get("grade_thresholds") if isinstance(quality_raw, dict) else None
-    )
-    stale = quality_raw.get("stale_threshold_days") if isinstance(quality_raw, dict) else None
-    recent = quality_raw.get("recent_window_days") if isinstance(quality_raw, dict) else None
-    min_body = quality_raw.get("min_body_chars") if isinstance(quality_raw, dict) else None
+    if not isinstance(quality_raw, dict):
+        return QualityConfig()
+    weights = quality_raw.get("weights")
+    agent_weights = quality_raw.get("agent_weights")
+    thresholds = quality_raw.get("grade_thresholds")
+    stale = quality_raw.get("stale_threshold_days")
+    recent = quality_raw.get("recent_window_days")
+    min_body = quality_raw.get("min_body_chars")
 
     kwargs: dict[str, Any] = {}
     if isinstance(weights, dict) and weights:
         kwargs["weights"] = {k: float(v) for k, v in weights.items()}
+    if isinstance(agent_weights, dict) and agent_weights:
+        kwargs["agent_weights"] = {k: float(v) for k, v in agent_weights.items()}
     if isinstance(thresholds, dict) and thresholds:
         kwargs["grade_thresholds"] = {k: float(v) for k, v in thresholds.items()}
     if isinstance(stale, (int, float)):
