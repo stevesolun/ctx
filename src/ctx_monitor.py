@@ -64,8 +64,23 @@ def _events_jsonl_path() -> Path:
     return _claude_dir() / "skill-events.jsonl"
 
 
+def _manifest_path() -> Path:
+    return _claude_dir() / "skill-manifest.json"
+
+
 def _sidecar_dir() -> Path:
     return _claude_dir() / "skill-quality"
+
+
+def _read_manifest() -> dict:
+    """Return the current ~/.claude/skill-manifest.json or an empty shell."""
+    path = _manifest_path()
+    if not path.exists():
+        return {"load": [], "unload": [], "warnings": []}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"load": [], "unload": [], "warnings": []}
 
 
 def _read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
@@ -255,8 +270,10 @@ def _layout(title: str, body: str) -> str:
         f"<style>{_CSS}</style></head><body>"
         "<div class='nav'>"
         "<a href='/'>Home</a>"
+        "<a href='/loaded'>Loaded</a>"
         "<a href='/sessions'>Sessions</a>"
         "<a href='/skills'>Skills</a>"
+        "<a href='/logs'>Logs</a>"
         "<a href='/events'>Live events</a>"
         "</div>"
         + body
@@ -439,6 +456,175 @@ def _render_events() -> str:
     )
 
 
+def _render_loaded() -> str:
+    """Live view of ~/.claude/skill-manifest.json with load/unload actions."""
+    manifest = _read_manifest()
+    load_rows = manifest.get("load", [])
+    unload_rows = manifest.get("unload", [])
+
+    loaded_html = "".join(
+        f"<tr>"
+        f"<td><a href='/skill/{html.escape(e.get('skill', ''))}'>"
+        f"<code>{html.escape(e.get('skill', ''))}</code></a></td>"
+        f"<td class='muted'>{html.escape(e.get('source', ''))}</td>"
+        f"<td class='muted'>priority {e.get('priority', '—')}</td>"
+        f"<td class='muted'>{html.escape(str(e.get('reason', ''))[:70])}</td>"
+        f"<td><button class='btn-unload' data-slug='{html.escape(e.get('skill', ''))}'>unload</button></td>"
+        f"</tr>"
+        for e in load_rows
+    )
+    unload_html = "".join(
+        f"<tr>"
+        f"<td><code>{html.escape(e.get('skill', ''))}</code></td>"
+        f"<td class='muted'>{html.escape(str(e.get('source', '') or e.get('reason', ''))[:80])}</td>"
+        f"<td><button class='btn-load' data-slug='{html.escape(e.get('skill', ''))}'>load</button></td>"
+        f"</tr>"
+        for e in unload_rows
+    )
+
+    body = (
+        "<h1>Loaded skills &amp; agents</h1>"
+        f"<div class='card'>"
+        f"<strong>{len(load_rows)}</strong> currently loaded · "
+        f"<strong>{len(unload_rows)}</strong> known-unloaded · "
+        f"<span class='muted'>source: <code>~/.claude/skill-manifest.json</code></span>"
+        "</div>"
+        "<h2>Load a new skill</h2>"
+        "<div class='card'>"
+        "<form id='load-form'>"
+        "<input type='text' id='load-input' placeholder='skill slug (e.g. fastapi-pro)' "
+        "style='padding:0.35rem 0.6rem; width:18rem; border:1px solid #ccc; "
+        "border-radius:4px;'>"
+        "<button type='submit' style='margin-left:0.5rem;'>load</button>"
+        "<span id='load-msg' class='muted' style='margin-left:0.75rem;'></span>"
+        "</form></div>"
+        f"<h2>Currently loaded ({len(load_rows)})</h2>"
+        "<table><tr><th>Skill</th><th>Source</th><th>Priority</th>"
+        "<th>Reason</th><th></th></tr>" + loaded_html + "</table>"
+        f"<h2>Recently unloaded ({len(unload_rows)})</h2>"
+        "<table><tr><th>Skill</th><th>Source / reason</th><th></th></tr>"
+        + unload_html + "</table>"
+        "<script>\n"
+        "async function post(url, body) {\n"
+        "  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body || {})});\n"
+        "  const ok = r.status >= 200 && r.status < 300;\n"
+        "  let msg = ''; try { msg = (await r.json()).detail || r.statusText; } catch(_) { msg = r.statusText; }\n"
+        "  return {ok, msg};\n"
+        "}\n"
+        "document.querySelectorAll('.btn-unload').forEach(b => b.addEventListener('click', async () => {\n"
+        "  b.disabled = true; const slug = b.dataset.slug;\n"
+        "  const r = await post('/api/unload', {slug});\n"
+        "  if (r.ok) location.reload(); else { b.disabled = false; alert('unload failed: ' + r.msg); }\n"
+        "}));\n"
+        "document.querySelectorAll('.btn-load').forEach(b => b.addEventListener('click', async () => {\n"
+        "  b.disabled = true; const slug = b.dataset.slug;\n"
+        "  const r = await post('/api/load', {slug});\n"
+        "  if (r.ok) location.reload(); else { b.disabled = false; alert('load failed: ' + r.msg); }\n"
+        "}));\n"
+        "document.getElementById('load-form').addEventListener('submit', async (ev) => {\n"
+        "  ev.preventDefault();\n"
+        "  const slug = document.getElementById('load-input').value.trim();\n"
+        "  if (!slug) return;\n"
+        "  document.getElementById('load-msg').textContent = 'loading…';\n"
+        "  const r = await post('/api/load', {slug});\n"
+        "  document.getElementById('load-msg').textContent = r.ok ? 'ok — reloading' : ('failed: ' + r.msg);\n"
+        "  if (r.ok) setTimeout(() => location.reload(), 400);\n"
+        "});\n"
+        "</script>"
+    )
+    return _layout("Loaded", body)
+
+
+def _render_logs() -> str:
+    """Filterable audit-log viewer — reads the last 500 lines of the log."""
+    entries = _read_jsonl(_audit_log_path(), limit=500)
+    rows = "".join(
+        f"<tr data-event='{html.escape(e.get('event', ''))}' "
+        f"data-subject='{html.escape(e.get('subject', ''))}' "
+        f"data-session='{html.escape(e.get('session_id', '') or '')}'>"
+        f"<td class='muted'>{html.escape(e.get('ts', ''))}</td>"
+        f"<td><span class='pill'>{html.escape(e.get('event', ''))}</span></td>"
+        f"<td><code>{html.escape(e.get('subject', ''))}</code></td>"
+        f"<td class='muted'>{html.escape(e.get('actor', ''))}</td>"
+        f"<td class='muted'>{html.escape((e.get('session_id') or '')[:24])}</td>"
+        f"<td class='muted'>{html.escape(json.dumps(e.get('meta', {}))[:100])}</td>"
+        f"</tr>"
+        for e in reversed(entries)
+    )
+    body = (
+        "<h1>Audit log</h1>"
+        f"<div class='card'>Showing last {len(entries)} of "
+        f"<code>~/.claude/ctx-audit.jsonl</code>. "
+        "<a href='/events'>Live stream →</a>"
+        "</div>"
+        "<div class='card'>"
+        "<input type='text' id='filter' placeholder='filter: event/subject/session…' "
+        "style='padding:0.35rem 0.6rem; width:20rem; border:1px solid #ccc; border-radius:4px;'>"
+        "<span class='muted' style='margin-left:0.75rem;'>"
+        "e.g. <code>skill.loaded</code>, <code>kubernetes-deployment</code>, or a session id</span>"
+        "</div>"
+        "<table id='logs'><tr><th>ts</th><th>event</th><th>subject</th>"
+        "<th>actor</th><th>session</th><th>meta</th></tr>" + rows + "</table>"
+        "<script>\n"
+        "const input = document.getElementById('filter');\n"
+        "const rows = document.querySelectorAll('#logs tr[data-event]');\n"
+        "input.addEventListener('input', () => {\n"
+        "  const q = input.value.toLowerCase();\n"
+        "  rows.forEach(r => {\n"
+        "    const hay = [r.dataset.event, r.dataset.subject, r.dataset.session].join(' ').toLowerCase();\n"
+        "    r.style.display = !q || hay.includes(q) ? '' : 'none';\n"
+        "  });\n"
+        "});\n"
+        "</script>"
+    )
+    return _layout("Audit log", body)
+
+
+# ─── Mutation endpoints ──────────────────────────────────────────────────────
+
+
+_SAFE_SLUG_RE = __import__("re").compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
+
+
+def _perform_load(slug: str) -> tuple[bool, str]:
+    """Invoke skill_loader.load_skill(slug). Returns (ok, message)."""
+    if not _SAFE_SLUG_RE.match(slug):
+        return False, f"invalid slug: {slug!r}"
+    try:
+        from skill_loader import load_skill  # local import — heavy module
+    except ImportError as exc:
+        return False, f"skill_loader import failed: {exc}"
+    try:
+        load_skill(slug)
+    except Exception as exc:  # noqa: BLE001 — surface the error to the caller
+        return False, f"{type(exc).__name__}: {exc}"
+    # Audit entry so the dashboard timeline reflects the dashboard-driven load.
+    try:
+        from ctx_audit_log import log_skill_event
+        log_skill_event("skill.loaded", slug, actor="user",
+                        meta={"via": "ctx-monitor"})
+    except Exception:  # noqa: BLE001 — audit best-effort
+        pass
+    return True, "loaded"
+
+
+def _perform_unload(slug: str) -> tuple[bool, str]:
+    """Invoke skill_unload.unload_from_session([slug]). Returns (ok, message)."""
+    if not _SAFE_SLUG_RE.match(slug):
+        return False, f"invalid slug: {slug!r}"
+    try:
+        from skill_unload import unload_from_session
+    except ImportError as exc:
+        return False, f"skill_unload import failed: {exc}"
+    try:
+        removed = unload_from_session([slug])
+    except Exception as exc:  # noqa: BLE001
+        return False, f"{type(exc).__name__}: {exc}"
+    if not removed:
+        return False, f"{slug} was not in the loaded set"
+    return True, f"unloaded {', '.join(removed)}"
+
+
 # ─── HTTP handler ────────────────────────────────────────────────────────────
 
 
@@ -448,6 +634,21 @@ class _MonitorHandler(BaseHTTPRequestHandler):
     # log_error() below.
     def log_message(self, fmt: str, *args: Any) -> None:
         return
+
+    # CSRF defense. Dashboard mutation endpoints (/api/load, /api/unload)
+    # accept JSON POST only from the same origin we're serving from, so a
+    # hostile webpage open in the same browser can't trigger load/unload
+    # via a forged fetch(). Serve+bind to 127.0.0.1 by default keeps
+    # network-side exposure off the table too.
+    def _same_origin(self) -> bool:
+        origin = self.headers.get("Origin") or ""
+        if origin:
+            host_header = self.headers.get("Host", "")
+            expected = f"http://{host_header}"
+            return origin == expected
+        # No Origin header (curl, direct tool calls) — accept, since the
+        # server is localhost-bound by default.
+        return True
 
     def do_GET(self) -> None:  # noqa: N802 — stdlib signature
         path = self.path.split("?", 1)[0]
@@ -462,10 +663,16 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 self._send_html(_render_skills())
             elif path.startswith("/skill/"):
                 self._send_html(_render_skill_detail(path.split("/skill/", 1)[1]))
+            elif path == "/loaded":
+                self._send_html(_render_loaded())
+            elif path == "/logs":
+                self._send_html(_render_logs())
             elif path == "/events":
                 self._send_html(_render_events())
             elif path == "/api/sessions.json":
                 self._send_json(_summarize_sessions())
+            elif path == "/api/manifest.json":
+                self._send_json(_read_manifest())
             elif path.startswith("/api/skill/") and path.endswith(".json"):
                 slug = path[len("/api/skill/"): -len(".json")]
                 sidecar = _load_sidecar(slug)
@@ -483,6 +690,50 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             return
         except Exception as exc:  # noqa: BLE001 — last-resort handler
             self._send_500(exc)
+
+    def do_POST(self) -> None:  # noqa: N802 — stdlib signature
+        """Mutation endpoints. Same-origin only; JSON body required."""
+        path = self.path.split("?", 1)[0]
+        try:
+            if not self._same_origin():
+                self._send_json_status(
+                    403, {"detail": "cross-origin POST denied"},
+                )
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length) if length else b""
+            try:
+                body = json.loads(raw.decode("utf-8")) if raw else {}
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._send_json_status(400, {"detail": "invalid JSON body"})
+                return
+
+            if path == "/api/load":
+                slug = str(body.get("slug", "")).strip()
+                ok, msg = _perform_load(slug)
+                self._send_json_status(
+                    200 if ok else 400, {"ok": ok, "detail": msg},
+                )
+            elif path == "/api/unload":
+                slug = str(body.get("slug", "")).strip()
+                ok, msg = _perform_unload(slug)
+                self._send_json_status(
+                    200 if ok else 400, {"ok": ok, "detail": msg},
+                )
+            else:
+                self._send_404(path)
+        except (BrokenPipeError, ConnectionAbortedError):
+            return
+        except Exception as exc:  # noqa: BLE001
+            self._send_500(exc)
+
+    def _send_json_status(self, status: int, obj: Any) -> None:
+        raw = json.dumps(obj, default=str).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
 
     def _send_html(self, body: str) -> None:
         raw = body.encode("utf-8")

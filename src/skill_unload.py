@@ -240,14 +240,27 @@ def list_never_load() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Unload skills/agents from session or suppress permanently")
-    parser.add_argument("--name", help="Skill or agent name to unload")
-    parser.add_argument("--names", help="Comma-separated names to unload")
+    # ``--slug`` is an alias for ``--name`` so docs/playbooks that say
+    # "slug" (the canonical vocabulary everywhere else in ctx) work
+    # without the user remembering that this one CLI uses "name".
+    parser.add_argument("--name", "--slug", dest="name",
+                        help="Skill or agent slug to unload")
+    parser.add_argument("--names", help="Comma-separated slugs to unload")
+    parser.add_argument("--session-id", dest="session_id",
+                        help="Override CTX_SESSION_ID env for the emitted "
+                             "unload events (default: env var or synthetic id)")
     parser.add_argument("--permanent", action="store_true", help="Set never_load: true (won't be recommended again)")
     parser.add_argument("--stale", action="store_true", help="Unload all stale skills")
     parser.add_argument("--restore", help="Remove never_load flag from a skill/agent")
     parser.add_argument("--list-loaded", action="store_true", help="Show currently loaded skills")
     parser.add_argument("--list-never", action="store_true", help="Show permanently suppressed skills")
     args = parser.parse_args()
+
+    # Propagate --session-id into the env so unload_from_session() and
+    # its audit-log call both tag the emitted events with the caller's
+    # chosen session id.
+    if args.session_id:
+        os.environ["CTX_SESSION_ID"] = args.session_id
 
     if args.list_loaded:
         list_loaded()

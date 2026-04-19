@@ -58,16 +58,56 @@ Pick a skill whose sidecar has:
 - `hard_floor: "never_loaded_stale"` — these all map to **grade D**
   (grade F is reserved for `intake_fail`), AND
 - `intake.score >= 0.8` (structurally valid), AND
+- **tag overlap with `context_monitor.KEYWORD_SIGNALS`** — otherwise
+  the skill can never surface through the observe→suggest path
+  (learned the hard way on rc8's verification run), AND
 - not a meta-skill (`skill-router`, `file-reading`, etc.).
 
 ```bash
-python -m skill_quality list --json | \
-  python -c "
-import json, random, sys
-rows = json.load(sys.stdin)['rows'] if isinstance(json.load(sys.stdin), dict) \
-       else json.load(sys.stdin)
-# … filter, shuffle, pick first one …
-"
+python - <<'PY'
+import json, random, re
+from pathlib import Path
+
+# Seed: installed KEYWORD_SIGNALS from context_monitor.
+# Load dynamically to survive future vocabulary changes.
+import importlib.util
+src = Path.home() / ".claude" / "skills"  # may differ per install
+spec_path = None
+for candidate in [
+    Path(__file__).resolve().parents[1] / "src" / "context_monitor.py",
+    Path.home() / ".local" / "lib" / "python3.11" / "site-packages" / "context_monitor.py",
+]:
+    if candidate.exists():
+        spec_path = candidate; break
+spec = importlib.util.spec_from_file_location("_cm", spec_path)
+cm = importlib.util.module_from_spec(spec); spec.loader.exec_module(cm)
+keywords = set(cm.KEYWORD_SIGNALS.keys())
+
+sidecar_dir = Path.home() / ".claude" / "skill-quality"
+candidates: list[str] = []
+for p in sidecar_dir.glob("*.json"):
+    if p.name.startswith(".") or p.name.endswith(".lifecycle.json"):
+        continue
+    try:
+        sc = json.loads(p.read_text())
+    except Exception:
+        continue
+    if sc.get("hard_floor") != "never_loaded_stale" or sc.get("grade") != "D":
+        continue
+    intake = (sc.get("signals") or {}).get("intake", {}) or {}
+    if intake.get("score", 0) < 0.8:
+        continue
+    slug = sc["slug"]
+    if slug in {"skill-router", "file-reading", "context-monitor"}:
+        continue
+    # Require ≥2 tag tokens in the slug that also appear as KEYWORD_SIGNALS
+    slug_tokens = set(re.split(r"[^a-z0-9]+", slug.lower()))
+    if len(slug_tokens & keywords) >= 2:
+        candidates.append(slug)
+
+random.shuffle(candidates)
+print(candidates[0] if candidates else "NONE_FOUND")
+PY
 ```
 
 Record the picked slug. Call it `$TARGET`.
@@ -167,16 +207,25 @@ $TARGET.
 
 ### Step 6 — Force a Stop hook (end-of-session)
 
+The Stop hook reads `session_id` from stdin (Claude Code delivers
+the session payload there in production). **Do NOT use `< /dev/null`**
+— it strips the session_id and the `skill.score_updated` audit row
+gets a synthesized id instead of the real one, so the dashboard's
+per-session timeline drops the middle event in the triad.
+
 ```bash
-python hooks/quality_on_session_end.py < /dev/null
+SID="random-load-test"
+echo "{\"session_id\":\"$SID\"}" | python hooks/quality_on_session_end.py
 python -m usage_tracker --sync
 ```
 
 **Expected**:
 - Sidecar for $TARGET now shows `load_count >= 1`,
-  `never_loaded=False`, `hard_floor=null`, grade shifted from F
+  `never_loaded=False`, `hard_floor=null`, grade shifted from D
   to something higher (usually C or B).
-- Audit log has a new `skill.score_updated` row for $TARGET.
+- Audit log has a new `skill.score_updated` row with
+  `session_id=random-load-test` for $TARGET. Confirm via
+  `grep score_updated ~/.claude/ctx-audit.jsonl | tail -1`.
 
 ### Step 7 — Wait for staleness
 
