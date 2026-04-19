@@ -112,6 +112,48 @@ python src/backup_mirror.py create --reason pre-upgrade
 Both land under `~/.claude/backups/<timestamp>__<reason>/` and write a
 `manifest.json` that records the reason alongside every file's SHA-256.
 
+## Retention — how old snapshots get pruned
+
+Auto-pruning runs after every successful `snapshot-if-changed`, so the
+hook cannot fill the disk. The active policy comes from
+`BackupRetention` in `src/backup_config.py` (or your user override):
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `keep_latest` | `50` | Always keep the N most-recent snapshots. |
+| `keep_daily` | `14` | For the M most-recent UTC days that have snapshots, keep the newest snapshot from each. |
+
+A snapshot survives the sweep iff it's in the **union** of those two
+sets. Snapshots whose `manifest.json` has a missing or zero
+`created_at` are always protected — we never silently delete something
+we can't place in time.
+
+To override per user, add a partial config at
+`~/.claude/backup-config.json`:
+
+```json
+{
+  "retention": { "keep_latest": 100, "keep_daily": 30 }
+}
+```
+
+### Manual prune
+
+```bash
+# Dry-run the configured policy — no deletions, JSON report.
+python src/backup_mirror.py prune --policy --dry-run --json
+
+# Apply the configured policy for real.
+python src/backup_mirror.py prune --policy
+
+# Legacy mode (still works): keep only the N newest.
+python src/backup_mirror.py prune --keep 20
+```
+
+The policy output tells you which snapshots were kept by `keep_latest`
+versus `keep_daily`, so a surprising retention decision is easy to
+audit.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
@@ -121,3 +163,5 @@ Both land under `~/.claude/backups/<timestamp>__<reason>/` and write a
 | Hook fires but no folder appears | Content hash matched — nothing actually changed. |
 | Credentials appear in a snapshot | User put them in `top_files`; the `ALWAYS_EXCLUDE` filter would drop them — check you're on the current `backup_config.py`. |
 | `ImportError: backup_config` from the hook | Repo moved; update the path in `settings.json`. |
+| Snapshots pile up forever | `retention.keep_latest` / `keep_daily` too high. Run `prune --policy --dry-run --json` to see what the current policy would do, then lower the caps in `~/.claude/backup-config.json`. |
+| Prune removed too much | Run `prune --policy --dry-run` *before* committing to a new policy. A snapshot with a missing/zero `created_at` is always protected, so if it's getting deleted the manifest is probably fine and the policy is genuinely too aggressive. |
