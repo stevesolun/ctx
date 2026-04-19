@@ -98,12 +98,18 @@
   },
 
   "quality": {
-    "_comment": "Post-install quality scorer. Weights must sum to 1.0. Grade thresholds must satisfy 0 <= C <= B <= A <= 1. See src/skill_quality.py.",
+    "_comment": "Post-install quality scorer. 'weights' applies to skills (telemetry-heavy — skills are auto-loaded and usage frequency is the strongest post-install signal). 'agent_weights' applies to agents (structure-heavy — agents are invoked deliberately and rarely, so telemetry is a weaker quality signal). Both must sum to 1.0 and contain exactly: telemetry, intake, graph, routing. Grade thresholds must satisfy 0 <= C <= B <= A <= 1. See src/skill_quality.py.",
     "weights": {
       "telemetry": 0.40,
       "intake": 0.20,
       "graph": 0.25,
       "routing": 0.15
+    },
+    "agent_weights": {
+      "telemetry": 0.15,
+      "intake": 0.30,
+      "graph": 0.35,
+      "routing": 0.20
     },
     "grade_thresholds": {
       "A": 0.80,

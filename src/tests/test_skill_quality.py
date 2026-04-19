@@ -343,6 +343,45 @@ def test_quality_config_rejects_inverted_thresholds() -> None:
         sq.QualityConfig(grade_thresholds={"A": 0.3, "B": 0.5, "C": 0.7})
 
 
+def test_quality_config_has_separate_agent_weights() -> None:
+    cfg = sq.QualityConfig()
+    assert sum(cfg.agent_weights.values()) == pytest.approx(1.0)
+    # Agents weight telemetry less than skills do — that's the whole
+    # point of the separate vector.
+    assert cfg.agent_weights["telemetry"] < cfg.weights["telemetry"]
+
+
+def test_quality_config_rejects_bad_agent_weights_sum() -> None:
+    with pytest.raises(ValueError):
+        sq.QualityConfig(
+            agent_weights={
+                "telemetry": 0.5, "intake": 0.5, "graph": 0.5, "routing": 0.5,
+            }
+        )
+
+
+def test_quality_config_rejects_missing_agent_weight_key() -> None:
+    with pytest.raises(ValueError):
+        sq.QualityConfig(
+            agent_weights={"telemetry": 0.3, "intake": 0.3, "graph": 0.4}
+        )
+
+
+def test_quality_config_rejects_negative_agent_weight() -> None:
+    with pytest.raises(ValueError):
+        sq.QualityConfig(
+            agent_weights={
+                "telemetry": -0.1, "intake": 0.4, "graph": 0.4, "routing": 0.3,
+            }
+        )
+
+
+def test_weights_for_dispatches_by_subject_type() -> None:
+    cfg = sq.QualityConfig()
+    assert cfg.weights_for("skill") == cfg.weights
+    assert cfg.weights_for("agent") == cfg.agent_weights
+
+
 # ────────────────────────────────────────────────────────────────────
 # compute_quality: weighted sum + hard floors + grades
 # ────────────────────────────────────────────────────────────────────
@@ -463,6 +502,79 @@ def test_compute_rejects_bad_slug() -> None:
             signals=_signals(),
             computed_at=_iso(NOW),
         )
+
+
+# ────────────────────────────────────────────────────────────────────
+# compute_quality: agent parity (Phase 5)
+# ────────────────────────────────────────────────────────────────────
+
+
+def test_agent_uses_agent_weights_in_persisted_score() -> None:
+    """QualityScore.weights reflects the vector actually used for scoring."""
+    cfg = sq.QualityConfig()
+    r = sq.compute_quality(
+        slug="demo",
+        subject_type="agent",
+        signals=_signals(),
+        config=cfg,
+        computed_at=_iso(NOW),
+    )
+    assert dict(r.weights) == dict(cfg.agent_weights)
+
+
+def test_skill_uses_skill_weights_in_persisted_score() -> None:
+    cfg = sq.QualityConfig()
+    r = sq.compute_quality(
+        slug="demo",
+        subject_type="skill",
+        signals=_signals(),
+        config=cfg,
+        computed_at=_iso(NOW),
+    )
+    assert dict(r.weights) == dict(cfg.weights)
+
+
+def test_agent_never_loaded_does_not_hit_never_loaded_stale() -> None:
+    """Agents have no load-event stream — never_loaded is not a staleness signal."""
+    r = sq.compute_quality(
+        slug="demo",
+        subject_type="agent",
+        signals=_signals(tel=0.0, never_loaded=True),
+        computed_at=_iso(NOW),
+    )
+    assert r.hard_floor is None
+    # With agent weights (telemetry=0.15) and everything else at 1.0:
+    # raw = 0.15*0 + 0.30*1 + 0.35*1 + 0.20*1 = 0.85 → grade A.
+    assert r.score == pytest.approx(0.85)
+    assert r.grade == "A"
+
+
+def test_agent_intake_fail_still_forces_f() -> None:
+    """Structural hard floor still applies to agents — a broken agent is broken."""
+    r = sq.compute_quality(
+        slug="demo",
+        subject_type="agent",
+        signals=_signals(intake=0.5, intake_hard_fail=True),
+        computed_at=_iso(NOW),
+    )
+    assert r.grade == "F"
+    assert r.hard_floor == "intake_fail"
+
+
+def test_agent_weights_produce_higher_raw_than_skill_when_telemetry_zero() -> None:
+    """Zero telemetry penalizes skills (0.40 weight) harder than agents (0.15)."""
+    skill_signals = _signals(tel=0.0, intake=1.0, graph=1.0, routing=1.0)
+    agent_signals = _signals(tel=0.0, intake=1.0, graph=1.0, routing=1.0)
+
+    skill_score = sq.compute_quality(
+        slug="demo", subject_type="skill", signals=skill_signals,
+        computed_at=_iso(NOW),
+    )
+    agent_score = sq.compute_quality(
+        slug="demo", subject_type="agent", signals=agent_signals,
+        computed_at=_iso(NOW),
+    )
+    assert agent_score.raw_score > skill_score.raw_score
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -770,6 +882,50 @@ def test_recompute_slug_writes_all_sinks(
         live_layout["wiki"] / "entities" / "skills" / "demo.md"
     ).read_text(encoding="utf-8")
     assert "<!-- quality:begin -->" in page
+
+
+# ────────────────────────────────────────────────────────────────────
+# _config_from_cfg
+# ────────────────────────────────────────────────────────────────────
+
+
+def test_config_from_cfg_reads_agent_weights(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Custom agent_weights in the config block propagate into QualityConfig."""
+    import ctx_config as cc
+
+    custom_agent_weights = {
+        "telemetry": 0.10, "intake": 0.40, "graph": 0.30, "routing": 0.20,
+    }
+
+    class FakeCfg:
+        def get(self, key: str, default=None):
+            if key == "quality":
+                return {"agent_weights": custom_agent_weights}
+            return default
+
+    monkeypatch.setattr(cc, "cfg", FakeCfg(), raising=True)
+    cfg = sq._config_from_cfg()
+    assert dict(cfg.agent_weights) == custom_agent_weights
+    # Skill weights should fall back to defaults since config didn't override them.
+    assert dict(cfg.weights) == dict(sq._DEFAULT_WEIGHTS)
+
+
+def test_config_from_cfg_with_empty_quality_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing config block → defaults for both vectors, no crash."""
+    import ctx_config as cc
+
+    class FakeCfg:
+        def get(self, key: str, default=None):
+            return default
+
+    monkeypatch.setattr(cc, "cfg", FakeCfg(), raising=True)
+    cfg = sq._config_from_cfg()
+    assert dict(cfg.weights) == dict(sq._DEFAULT_WEIGHTS)
+    assert dict(cfg.agent_weights) == dict(sq._DEFAULT_AGENT_WEIGHTS)
 
 
 # ────────────────────────────────────────────────────────────────────
