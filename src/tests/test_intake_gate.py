@@ -102,7 +102,7 @@ def _valid_md(body_extra: str = "") -> str:
 def test_config_defaults_match_plan() -> None:
     c = ig.IntakeConfig()
     assert c.dup_threshold == pytest.approx(0.93)
-    assert c.near_dup_threshold == pytest.approx(0.85)
+    assert c.near_dup_threshold == pytest.approx(0.80)
     assert c.min_neighbors == 0
 
 

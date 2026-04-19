@@ -49,7 +49,7 @@
   "intake": {
     "enabled": true,
     "dup_threshold": 0.93,
-    "near_dup_threshold": 0.85,
+    "near_dup_threshold": 0.80,
     "min_neighbors": 0,
     "min_neighbor_score": 0.30,
     "min_body_chars": 120,

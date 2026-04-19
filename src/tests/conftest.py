@@ -19,6 +19,25 @@ from wiki_sync import ensure_wiki  # noqa: E402  (import after path manipulation
 
 
 # ---------------------------------------------------------------------------
+# Markers
+# ---------------------------------------------------------------------------
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom markers so pytest doesn't warn on unknown-mark usage.
+
+    ``integration`` is used by tests that load real models (e.g. MiniLM for
+    the similarity precision/recall harness). Skip them in fast CI with
+    ``-m 'not integration'``.
+    """
+    config.addinivalue_line(
+        "markers",
+        "integration: tests that load real embedders or external services "
+        "(skip with -m 'not integration')",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 

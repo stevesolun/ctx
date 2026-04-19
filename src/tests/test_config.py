@@ -248,7 +248,7 @@ class TestConfigIntake:
         cfg = Config(_minimal_raw())
         assert cfg.intake_enabled is True
         assert cfg.intake_dup_threshold == pytest.approx(0.93)
-        assert cfg.intake_near_dup_threshold == pytest.approx(0.85)
+        assert cfg.intake_near_dup_threshold == pytest.approx(0.80)
         assert cfg.intake_min_neighbors == 0
         assert cfg.intake_min_neighbor_score == pytest.approx(0.30)
         assert cfg.intake_min_body_chars == 120
@@ -293,7 +293,7 @@ class TestConfigIntake:
         ic = cfg.build_intake_config()
         assert isinstance(ic, IntakeConfig)
         assert ic.dup_threshold == pytest.approx(0.93)
-        assert ic.near_dup_threshold == pytest.approx(0.85)
+        assert ic.near_dup_threshold == pytest.approx(0.80)
         assert ic.min_body_chars == 120
 
     def test_build_intake_config_honours_overrides(self) -> None:
