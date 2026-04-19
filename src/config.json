@@ -66,5 +66,34 @@
     "plugin_root": "C:/Users/solun/.claude/plugins/cache/a5c-ai/babysitter/4.0.149",
     "runs_dir": ".a5c/runs",
     "sdk_version": "latest"
+  },
+
+  "backup": {
+    "_comment": "Change-triggered snapshot config. Paths under top_files are relative to ~/.claude. Trees copy directories. memory_glob walks ~/.claude/projects/*/memory.",
+    "snapshot_dir": "~/.claude/backups",
+    "name_format": "{timestamp}",
+    "timestamp_format": "%Y%m%dT%H%M%SZ",
+    "scope": "full",
+    "max_file_bytes": 5242880,
+    "top_files": [
+      "settings.json",
+      "skill-manifest.json",
+      "pending-skills.json",
+      "CLAUDE.md",
+      "AGENTS.md",
+      "user-profile.json",
+      "skill-system-config.json",
+      "skill-registry.json"
+    ],
+    "trees": [
+      {"src": "agents", "dest": "agents"},
+      {"src": "skills", "dest": "skills"}
+    ],
+    "memory_glob": true,
+    "excludes": [],
+    "retention": {
+      "keep_latest": 50,
+      "keep_daily": 14
+    }
   }
 }
