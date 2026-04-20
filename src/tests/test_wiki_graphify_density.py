@@ -89,6 +89,10 @@ def test_build_graph_produces_edges_on_small_fixture(tmp_path, monkeypatch) -> N
 
     monkeypatch.setattr(wg, "SKILL_ENTITIES", wiki / "entities" / "skills")
     monkeypatch.setattr(wg, "AGENT_ENTITIES", wiki / "entities" / "agents")
+    # Repoint MCP_ENTITIES too — without this, build_graph would
+    # silently scan the user's real ~/.claude/skill-wiki/ and inflate
+    # the node count beyond what the test fixture creates.
+    monkeypatch.setattr(wg, "MCP_ENTITIES", wiki / "entities" / "mcp-servers")
     monkeypatch.setattr(wg, "QUALITY_SIDECAR_DIR", tmp_path / "sidecars")
 
     G, _ = wg.build_graph()

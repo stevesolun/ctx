@@ -321,7 +321,7 @@ def generate_mcp_page(record: McpRecord) -> str:
 
 {transports_body}
 
-## Related
+## Related MCP Servers
 
 <!-- backlinks added later by graph build -->
 """

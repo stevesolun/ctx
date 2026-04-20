@@ -29,6 +29,10 @@ TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki"))
 SKILL_ENTITIES = WIKI_DIR / "entities" / "skills"
 AGENT_ENTITIES = WIKI_DIR / "entities" / "agents"
+# MCP entities are sharded by first character
+# (entities/mcp-servers/<shard>/<slug>.md) — see McpRecord.entity_relpath.
+# Iterate recursively so the shard layout is transparent here.
+MCP_ENTITIES = WIKI_DIR / "entities" / "mcp-servers"
 CONCEPTS_DIR = WIKI_DIR / "concepts"
 GRAPH_OUT = WIKI_DIR / "graphify-out"
 # Source of truth for per-node quality: sidecars produced by
@@ -45,20 +49,77 @@ def parse_frontmatter(filepath: Path) -> dict:
     return result
 
 
+# ────────────────────────────────────────────────────────────────────
+# Entity-type dispatch — keeps skill/agent/mcp-server treatment in one
+# place so the inject loop below stays readable as types grow.
+# ────────────────────────────────────────────────────────────────────
+
+
+def _mcp_shard(slug: str) -> str:
+    """Return the shard segment for an MCP slug (matches McpRecord.entity_relpath)."""
+    first = slug[0] if slug else ""
+    return first if first.isalpha() else "0-9"
+
+
+def _entity_page_path(entity_type: str, slug: str) -> Path | None:
+    """Resolve (entity_type, slug) to its on-disk page path. None for unknown types."""
+    if entity_type == "skill":
+        return SKILL_ENTITIES / f"{slug}.md"
+    if entity_type == "agent":
+        return AGENT_ENTITIES / f"{slug}.md"
+    if entity_type == "mcp-server":
+        return MCP_ENTITIES / _mcp_shard(slug) / f"{slug}.md"
+    return None
+
+
+def _entity_wikilink(entity_type: str, slug: str) -> str | None:
+    """Wikilink target for an entity. None for unknown types."""
+    if entity_type == "skill":
+        return f"[[entities/skills/{slug}]]"
+    if entity_type == "agent":
+        return f"[[entities/agents/{slug}]]"
+    if entity_type == "mcp-server":
+        return f"[[entities/mcp-servers/{_mcp_shard(slug)}/{slug}]]"
+    return None
+
+
+def _related_section_header(entity_type: str) -> str:
+    """Section header under which graph-derived backlinks land."""
+    return {
+        "skill": "## Related Skills",
+        "agent": "## Related Agents",
+        "mcp-server": "## Related MCP Servers",
+    }.get(entity_type, "## Related")
+
+
 def build_graph() -> tuple[nx.Graph, dict[str, dict]]:
     """Build a networkx graph from all entity pages.
 
-    Nodes = entity pages (skills + agents).
+    Nodes = entity pages (skills + agents + mcp-servers).
     Edges = shared tags (weighted by number of shared tags).
+
+    Skills and agents live as flat ``<dir>/*.md``. MCP servers are
+    sharded by first character (``<dir>/<shard>/<slug>.md``) so we
+    iterate recursively for that subject type — the rest of the
+    pipeline is shard-agnostic since node IDs use only the slug stem.
     """
     G = nx.Graph()
     entities: dict[str, dict] = {}
 
-    # Collect all entities
-    for entity_dir, entity_type in [(SKILL_ENTITIES, "skill"), (AGENT_ENTITIES, "agent")]:
+    sources: list[tuple[Path, str, str]] = [
+        (SKILL_ENTITIES, "skill", "*.md"),
+        (AGENT_ENTITIES, "agent", "*.md"),
+        (MCP_ENTITIES, "mcp-server", "**/*.md"),
+    ]
+
+    for entity_dir, entity_type, glob_pattern in sources:
         if not entity_dir.exists():
             continue
-        for page in sorted(entity_dir.glob("*.md")):
+        if "**" in glob_pattern:
+            pages = sorted(entity_dir.rglob("*.md"))
+        else:
+            pages = sorted(entity_dir.glob(glob_pattern))
+        for page in pages:
             meta = parse_frontmatter(page)
             tags = meta.get("tags", [])
             if isinstance(tags, str):
@@ -305,10 +366,9 @@ def inject_community_links(
     for nid, data in G.nodes(data=True):
         entity_type = data.get("type", "skill")
         name = data.get("label", nid.split(":", 1)[-1])
-        entity_dir = SKILL_ENTITIES if entity_type == "skill" else AGENT_ENTITIES
-        page_path = entity_dir / f"{name}.md"
+        page_path = _entity_page_path(entity_type, name)
 
-        if not page_path.exists():
+        if page_path is None or not page_path.exists():
             continue
 
         content = page_path.read_text(encoding="utf-8", errors="replace")
@@ -324,15 +384,16 @@ def inject_community_links(
         for neighbor in neighbors:
             n_type = G.nodes[neighbor].get("type", "skill")
             n_name = G.nodes[neighbor].get("label", neighbor.split(":", 1)[-1])
-            link = f"[[entities/{'skills' if n_type == 'skill' else 'agents'}/{n_name}]]"
-            if link not in content:
-                new_links.append(f"- {link}")
+            link = _entity_wikilink(n_type, n_name)
+            if link is None or link in content:
+                continue
+            new_links.append(f"- {link}")
 
         if not new_links:
             continue
 
-        # Inject under ## Related Skills/Agents section
-        section_header = "## Related Skills" if entity_type == "skill" else "## Related Agents"
+        # Inject under the type-appropriate ## Related section header.
+        section_header = _related_section_header(entity_type)
         if section_header in content:
             insert_text = "\n".join(new_links)
             content = content.replace(
