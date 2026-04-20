@@ -234,6 +234,7 @@ def fetch_text(
     *,
     timeout: float = 30.0,
     user_agent: str = "ctx-mcp-fetch/0.1",
+    headers: dict[str, str] | None = None,
 ) -> str:
     """GET *url* and return its UTF-8 body.
 
@@ -248,6 +249,9 @@ def fetch_text(
         user_agent: ``User-Agent`` header value.  A descriptive default is
             used because some GitHub endpoints reject empty or stdlib-default
             agents.
+        headers: Optional extra headers merged on top of the ``User-Agent``
+            default.  Caller is responsible for not exposing secrets in logs;
+            this function does not log header values.
 
     Raises:
         ValueError: URL host or scheme is not allowed.
@@ -257,7 +261,10 @@ def fetch_text(
     """
     _validate_host(url)
 
-    request = Request(url, headers={"User-Agent": user_agent})
+    final_headers: dict[str, str] = {"User-Agent": user_agent}
+    if headers:
+        final_headers.update(headers)
+    request = Request(url, headers=final_headers)
     opener = _build_opener()
 
     with opener.open(request, timeout=timeout) as response:

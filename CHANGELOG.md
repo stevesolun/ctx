@@ -3,6 +3,92 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — MCP Phase 2b — pulsemcp source
+
+Adds the second catalog source: `www.pulsemcp.com` Sub-Registry API
+(~12,975 servers as of today). Uses the official JSON API
+(`/api/v0.1/servers`) with cursor-based pagination, gated by API
+credentials (`PULSEMCP_API_KEY` + `PULSEMCP_TENANT_ID` env vars).
+
+### Added
+
+- **`mcp_sources.pulsemcp`** — Source implementation against the
+  Generic MCP Registry API spec with PulseMCP `_meta` extensions.
+  Maps `repository.source == "github"` to `github_url`, infers
+  `language` from `packages[].registry_name` (`npm` → typescript,
+  `pypi` → python, `cargo` → rust, etc.), and tags entries with
+  `_meta["com.pulsemcp/server"].isOfficial == true` as `"official"`.
+  Caches raw page JSON under `~/.claude/skill-wiki/raw/marketplace-dumps/pulsemcp/<date>--page-NNNN.json`.
+- **`fetch_text(headers=...)`** in `mcp_sources.base` — optional
+  per-call header dict, merged on top of the User-Agent default.
+  Existing callers unchanged.
+
+### Security
+
+- **CRLF header-injection guard** in `_credentials()`: rejects API key
+  or tenant ID values containing `\r`, `\n`, or `:`. Python's
+  `urllib.request.Request` does NOT sanitize header values on 3.11+,
+  so a malicious env-var value would otherwise inject arbitrary
+  headers into every authenticated request. Error message does not
+  echo the rejected value (no secret leakage).
+- **Cursor URL-encoding** in `_build_url`: opaque cursors from the
+  upstream API are wrapped with `urllib.parse.quote(safe='')` to
+  prevent query-string smuggling (a cursor containing `&` would
+  inject extra parameters; `#` would silently truncate).
+- **Stripped diagnostic output**: malformed-entry warnings no longer
+  echo the full server object repr to stderr — they emit only the
+  fact that `name` was missing, in case upstream payloads ever
+  contain sensitive fields.
+
+### Tests
+
+- **31 new tests** in `test_mcp_sources_pulsemcp.py`:
+  - 11 `_to_record` mapping tests (happy path, missing fields, github
+    vs gitlab, official tag, language inference, round-trip through
+    `McpRecord.from_dict`)
+  - 4 credential-handling tests
+  - 4 NEW credential-injection regression tests (CR, LF, colon, secret
+    not echoed in error)
+  - 3 NEW cursor URL-encoding regression tests
+  - 5 pagination tests (single page, two pages with cursor, limit
+    short-circuits second-page fetch, limit spans pages, 429 raises)
+  - 4 SOURCE singleton tests
+  - Tests use an autouse `_isolate_wiki` fixture so cache writes don't
+    pollute the user's real `~/.claude/skill-wiki/`.
+- **Total**: 1,546 passed, 2 skipped (was 1,515 → +31 net, 0 regressions).
+- **`pytestmark skipif` removed** — the module now ships, so a broken
+  import should fail the suite rather than silently skip.
+
+### Live verification
+
+```
+$ ctx-mcp-fetch --list-sources
+awesome-mcp     https://github.com/punkpeye/awesome-mcp-servers
+pulsemcp        https://www.pulsemcp.com/servers
+
+$ ctx-mcp-fetch --source pulsemcp --limit 1
+Error: source 'pulsemcp' failed: Missing required environment
+variable(s): PULSEMCP_API_KEY, PULSEMCP_TENANT_ID. Obtain API
+credentials from https://www.pulsemcp.com/settings/api-keys and
+set them before running the pulsemcp source.
+```
+
+Authenticated end-to-end fetch was NOT verified live — the test author
+does not have PulseMCP API credentials. The fetch path is exercised
+through the recorded JSON fixtures (`pulsemcp_page1.json`,
+`pulsemcp_page2.json`) covering both single-page and multi-page cursor
+pagination. Users with credentials can run
+`PULSEMCP_API_KEY=... PULSEMCP_TENANT_ID=... ctx-mcp-fetch --source pulsemcp --limit 5 | ctx-mcp-add --from-stdin`
+to confirm.
+
+### Reviewer findings deferred (Phase 2.5 cleanup)
+
+- File permission tightening on cache writes (Sec MEDIUM): `atomic_write_text` doesn't `chmod 0o600` — affects all sources, not just pulsemcp
+- HTTPError body sanitization in non-429 re-raise path (Sec MEDIUM)
+- TypedDict for JSON shapes in `pulsemcp.py` (Python MEDIUM)
+- `@dataclass(frozen=True)` for `_PulsemcpSource` (Python LOW)
+- Consolidate `noqa: no-any-return` suppressions (Python LOW)
+
 ## [Unreleased] — MCP Phase 2a — fetcher + first source
 
 Adds the `Source` protocol, an SSRF-hardened HTTP fetcher, and the

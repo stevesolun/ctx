@@ -1,0 +1,39 @@
+{
+  "servers": [
+    {
+      "server": {
+        "name": "io.github.acme/memorystore",
+        "description": "Persistent memory store for multi-turn conversations",
+        "repository": {
+          "url": "https://github.com/acme/memorystore",
+          "source": "github"
+        },
+        "packages": [
+          {"registry_name": "npm", "name": "@acme/memorystore-mcp"}
+        ]
+      },
+      "_meta": {
+        "com.pulsemcp/server": {"isOfficial": false, "visitorsEstimateMostRecentWeek": 300},
+        "com.pulsemcp/server-version": {"publishedAt": "2026-02-10T09:00:00Z", "isLatest": true}
+      }
+    },
+    {
+      "server": {
+        "name": "io.github.acme/sqlbridge",
+        "description": "SQL database bridge for LLM agents",
+        "repository": {
+          "url": "https://github.com/acme/sqlbridge",
+          "source": "github"
+        },
+        "packages": [
+          {"registry_name": "pypi", "name": "acme-sqlbridge"}
+        ]
+      },
+      "_meta": {
+        "com.pulsemcp/server": {"isOfficial": false, "visitorsEstimateMostRecentWeek": 220},
+        "com.pulsemcp/server-version": {"publishedAt": "2026-03-01T12:00:00Z", "isLatest": true}
+      }
+    }
+  ],
+  "metadata": {}
+}

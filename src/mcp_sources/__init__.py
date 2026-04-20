@@ -13,9 +13,11 @@ already registered.
 
 from mcp_sources.awesome_mcp import SOURCE as _AWESOME
 from mcp_sources.base import Source
+from mcp_sources.pulsemcp import SOURCE as _PULSEMCP
 
 SOURCES: dict[str, Source] = {
     _AWESOME.name: _AWESOME,
+    _PULSEMCP.name: _PULSEMCP,
 }
 
 __all__ = ["SOURCES", "Source"]
