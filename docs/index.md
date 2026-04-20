@@ -82,6 +82,27 @@ from your usage. Stale ones are flagged. New ones self-ingest.
 
 <div class="grid cards" markdown>
 
+-   **Knowledge graph**
+
+    ---
+
+    2,253 nodes (1,789 skills + 464 agents) connected by 454,719 weighted
+    edges across 93 communities. Ships pre-built in
+    `graph/wiki-graph.tar.gz` and powers the graph-aware skill
+    recommendations.
+
+    [:octicons-arrow-right-24: Knowledge graph](knowledge-graph.md)
+
+-   **Dashboard**
+
+    ---
+
+    `ctx-monitor serve` opens a local HTTP dashboard with live graph,
+    skill grades + four-signal scores, session timelines, and one-click
+    load/unload. Zero dependencies beyond stdlib.
+
+    [:octicons-arrow-right-24: Dashboard reference](dashboard.md)
+
 -   **Toolbox**
 
     ---
