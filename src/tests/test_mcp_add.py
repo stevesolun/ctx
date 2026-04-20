@@ -322,6 +322,40 @@ class TestCorpusTextStructure:
         assert "# " in body  # H1
         assert "## " in body  # H2
 
+    def test_yaml_injection_in_description_does_not_corrupt_frontmatter(self) -> None:
+        # Regression: malicious description with embedded ``\n---\n`` or
+        # YAML key syntax must NOT escape the frontmatter block when
+        # parsed by a real YAML parser (which is what generate_mcp_page
+        # and the wiki entity writer use). The fix uses yaml.safe_dump
+        # so the dangerous content is stored as a properly-escaped
+        # scalar rather than naked interpolation.
+        import re
+        from mcp_add import _build_corpus_text
+
+        record = _make_record(
+            name="evil-mcp",
+            description=(
+                "Innocent description.\n---\nname: hijacked\n---\n"
+                "More text. Long enough to clear the body length gate "
+                "for the structural intake check."
+            ),
+        )
+        text = _build_corpus_text(record)
+
+        # Extract the frontmatter block by the real YAML fences and
+        # parse it with PyYAML — the same parser that generate_mcp_page
+        # downstream relies on for the on-disk entity page.
+        m = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+        assert m is not None, "frontmatter fences missing"
+        fm = yaml.safe_load(m.group(1))
+        assert isinstance(fm, dict)
+        # The injected key must NOT appear as a real frontmatter field.
+        assert fm.get("name") == "evil-mcp"
+        # And the injected description must be the literal string,
+        # quoted/escaped, not parsed as YAML structure.
+        assert "hijacked" in fm.get("description", "")
+        assert isinstance(fm.get("description"), str)
+
     def test_short_description_correctly_rejected_by_intake(self) -> None:
         # Documents the inverse: very short descriptions trip
         # BODY_TOO_SHORT, which is the intake gate working as intended.

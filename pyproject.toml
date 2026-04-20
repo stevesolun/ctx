@@ -35,6 +35,7 @@ ctx-toolbox = "toolbox:main"
 ctx-lifecycle = "ctx_lifecycle:main"
 ctx-skill-add = "skill_add:main"
 ctx-mcp-add = "mcp_add:main"
+ctx-mcp-fetch = "mcp_fetch:main"
 ctx-wiki-graphify = "wiki_graphify:main"
 
 [project.optional-dependencies]
@@ -88,6 +89,7 @@ py-modules = [
     "link_conversions",
     "mcp_add",
     "mcp_entity",
+    "mcp_fetch",
     "memory_anchor",
     "quality_signals",
     "resolve_graph",
@@ -120,7 +122,10 @@ py-modules = [
 ]
 # Do NOT ship the test suite to PyPI. The previous build inadvertently
 # bundled src/tests/ because it was the only directory with __init__.py.
-packages = []
+# The ``mcp_sources`` subpackage is listed here because setuptools'
+# ``py-modules`` is flat-only; subpackages need an explicit ``packages``
+# entry to be installed.
+packages = ["mcp_sources"]
 
 [tool.setuptools.package-data]
 "*" = ["config.json", "skill-registry.json"]

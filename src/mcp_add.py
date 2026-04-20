@@ -56,15 +56,28 @@ def _build_corpus_text(record: McpRecord) -> str:
     The synthesized text is used only for intake (gate + embedding
     cache); the actual entity page that lands on disk is the richer
     output of ``generate_mcp_page``.
+
+    Frontmatter is rendered via ``yaml.safe_dump`` rather than f-string
+    interpolation. Descriptions and slugs flow from untrusted README
+    content in the awesome-mcp parser; a description containing
+    ``\\n---\\n`` or ``\\nname: evil`` would otherwise corrupt the
+    synthesized YAML before the intake gate sees it. Body sections are
+    plain markdown with no parser-significant interpolation.
     """
     tags_line = " ".join(record.tags) if record.tags else "none"
     transports_line = " ".join(record.transports) if record.transports else "unknown"
     sources_line = " ".join(record.sources) if record.sources else "none"
 
+    fm_yaml = yaml.safe_dump(
+        {"name": record.slug, "description": record.description},
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False,
+    )
+
     return (
         "---\n"
-        f"name: {record.slug}\n"
-        f"description: {record.description}\n"
+        f"{fm_yaml}"
         "---\n\n"
         f"# {record.name}\n\n"
         "## Overview\n\n"

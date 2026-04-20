@@ -3,6 +3,64 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — MCP Phase 2a — fetcher + first source
+
+Adds the `Source` protocol, an SSRF-hardened HTTP fetcher, and the
+first real catalog source: `github.com/punkpeye/awesome-mcp-servers`.
+Live verification fetched 2,023 entries from the actual README; the
+end-to-end pipe `ctx-mcp-fetch --source awesome-mcp --limit 5 |
+ctx-mcp-add --from-stdin` ingested 5 records into the wiki, all of
+which entered the knowledge graph and clustered together via shared
+tags (e.g. all five `aggregator`-tagged MCPs formed a clique).
+
+### Added
+
+- **`mcp_sources.base`** — `Source` Protocol (`fetch(*, limit, refresh)
+  → Iterator[dict]`), `cache_path` / `read_cache` / `write_cache`
+  helpers under `~/.claude/skill-wiki/raw/marketplace-dumps/<source>/`,
+  and an SSRF-defended `fetch_text(url)` HTTP client.
+- **`mcp_sources.awesome_mcp`** — parses the punkpeye README into
+  raw record dicts. Walks `## Server Implementations` → `### <Section>`
+  → `- [name](url) - description` hierarchy. Tags inferred from
+  section header (emoji-stripped). Language inferred from per-line
+  emoji flags. ~2,000 records on the live README.
+- **`mcp_fetch.py` + `ctx-mcp-fetch` CLI** — JSONL stream to stdout,
+  progress to stderr (clean to pipe into `ctx-mcp-add --from-stdin`).
+  `--list-sources`, `--source <name>`, `--limit N`, `--refresh`.
+
+### Security
+
+- **`fetch_text` defense in depth**: HTTPS-only, allowlist of 5 hosts
+  (`raw.githubusercontent.com`, `github.com`, `api.github.com`,
+  `pulsemcp.com`, `www.pulsemcp.com`), no redirects (3xx raises),
+  10 MB response body cap (raises `_ResponseTooLargeError` rather
+  than silently truncating).
+- **`cache_path` path-traversal guard** — both `source_name` and
+  `basename` validated as plain filenames (no `/`, `\`, leading dot).
+- **`mcp_add._build_corpus_text` YAML safety** — frontmatter now
+  rendered via `yaml.safe_dump` rather than f-string interpolation
+  so a malicious description can't escape the YAML scalar.
+
+### Fixed
+
+- **Reload safety** in `mcp_sources.base`: imports the `ctx_config`
+  module rather than `cfg` directly, so `ctx_config.reload()` (used
+  by tests) doesn't leave a stale singleton reference.
+
+### Changed
+
+- `pyproject.toml` — adds `mcp_fetch` to `py-modules`, `mcp_sources`
+  to `packages`, and registers the `ctx-mcp-fetch` console script.
+
+### Tests
+
+- 49 new tests across `test_mcp_sources_base.py` (24, including 4
+  path-traversal regressions and 1 response-size cap regression),
+  `test_mcp_sources_awesome.py` (12), `test_mcp_fetch_cli.py` (10),
+  plus 3 new `TestCorpusTextStructure` cases pinning the YAML safety
+  in `mcp_add`. Total: 1,515 / 1,517 passed (2 pre-existing skips,
+  0 regressions).
+
 ## [Unreleased] — MCP Phase 1 — foundation
 
 First-class **MCP server** entity type alongside skills and agents.
