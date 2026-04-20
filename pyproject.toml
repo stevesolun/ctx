@@ -36,6 +36,7 @@ ctx-lifecycle = "ctx_lifecycle:main"
 ctx-skill-add = "skill_add:main"
 ctx-mcp-add = "mcp_add:main"
 ctx-mcp-fetch = "mcp_fetch:main"
+ctx-mcp-quality = "mcp_quality:main"
 ctx-wiki-graphify = "wiki_graphify:main"
 
 [project.optional-dependencies]
@@ -90,6 +91,8 @@ py-modules = [
     "mcp_add",
     "mcp_entity",
     "mcp_fetch",
+    "mcp_quality",
+    "mcp_quality_signals",
     "memory_anchor",
     "quality_signals",
     "resolve_graph",

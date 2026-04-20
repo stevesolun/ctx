@@ -3,6 +3,105 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — MCP Phase 4 — six-signal quality scorer
+
+Adds the MCP-specific quality scorer with the six-signal model designed
+in the Phase 4 interview: popularity / freshness / structural / graph /
+trust / runtime. Config-overridable weights (default sum 1.0 with
+popularity-heavy distribution per the locked decision). Reuses
+``SignalResult`` from the existing skill quality system; otherwise
+stands as a parallel module to preserve the working skill scorer
+contract.
+
+### Added
+
+- **`mcp_quality_signals`** (NEW, ~370 lines): six pure-function signal
+  extractors, all returning ``SignalResult`` with bounded score [0,1]
+  and rich evidence dicts.
+  - ``popularity_signal``: log-scaled GitHub stars, neutral 0.5 when
+    star data missing
+  - ``freshness_signal``: exponential decay with 90-day half-life on
+    days-since-last-commit, neutral when missing
+  - ``structural_signal``: 5 binary checks (description / repo_url /
+    tags / transports / language) each contributing 1/5
+  - ``graph_signal``: degree + cross-type-degree weighted score
+  - ``trust_signal``: official-or-org tag, license presence, author
+    presence
+  - ``runtime_signal``: invocation telemetry placeholder (neutral 0.5
+    until Phase 5+ runtime instrumentation lands)
+- **`mcp_quality`** (NEW, ~1000 lines): orchestrator + ``ctx-mcp-quality``
+  CLI mirroring the skill quality scorer pattern.
+  - ``McpQualityConfig`` frozen dataclass with weight + threshold
+    validation (sum-to-1.0, monotone A>=B>=C, etc.)
+  - ``McpQualityScore`` frozen dataclass with ``to_dict`` for the
+    sidecar JSON sink
+  - ``compute_quality`` pure: weighted sum + grade map. Grade F band
+    added for very low scores (<0.20) since MCP scorer has no hard-floor
+    mechanism today
+  - ``extract_signals_for_slug`` reads entity from
+    ``entities/mcp-servers/<shard>/<slug>.md``, builds graph degrees
+    from optional pre-loaded ``graph_index``
+  - ``load_graph_index`` parses ``graphify-out/graph.json`` into
+    {node_id: {degree, cross_type_degree}} index for cheap per-slug
+    lookups
+  - ``persist_quality`` writes three sinks atomically: sidecar JSON at
+    ``~/.claude/skill-quality/mcp/<slug>.json`` (note the ``mcp/``
+    subdir for clean separation from skill scores), entity-page
+    frontmatter (``quality_score``/``quality_grade``/``quality_updated_at``),
+    body block between ``<!-- quality:begin -->`` markers
+  - CLI verbs: ``recompute --slug X | --all``, ``show <slug>``,
+    ``explain <slug>``, ``list``. ``--wiki-dir PATH`` accepted on
+    every verb so users can target a non-default wiki without exporting
+    env vars.
+- **``mcp_quality`` block in `config.json`**: weights + thresholds +
+  saturation knobs + sidecar path. User can override via
+  ``~/.claude/skill-system-config.json``.
+- **`pyproject.toml`**: registers ``mcp_quality`` and
+  ``mcp_quality_signals`` modules, plus the ``ctx-mcp-quality`` console
+  script.
+
+### Live verification
+
+```
+$ ctx-mcp-quality recompute --all
+... (41 MCPs scored in 1.9 seconds)
+
+$ ctx-mcp-quality list | sort -k2 | head -5
+atlassian-cloud      B  score=0.61
+github               B  score=0.61
+ariekogan-ateam-mcp  B  score=0.62
+arikusi-deepseek-mcp-server  B  score=0.62
+playwright-browser-automation  B  score=0.67
+
+Grade distribution: 16 B (40%), 25 C (60%) across 41 entities.
+```
+
+`playwright-browser-automation` top scorer (graph=1.00 from 104 cross-
+type neighbors, trust=1.00 from official+org+license, structural=0.80
+from 4/5 fields). Popularity/freshness/runtime all neutral 0.5 pending
+Phase 6 detail-page enrichment.
+
+### Tests
+
+- 38 cases in ``test_mcp_quality_signals.py``: per-signal happy/edge,
+  monotonicity, saturation, negative-input ValueError raises
+- 30 cases in ``test_mcp_quality.py``: config validation, compute
+  formula, signal extraction with/without graph_index, persist 3-sink
+  idempotency, CLI for all 4 verbs (--help, recompute, show, list)
+- Total: **1613 passed, 2 skipped** (was 1545 → +68 new, 0 regressions)
+
+### Limitations
+
+- Popularity, freshness, and runtime signals all return neutral 0.5
+  until Phase 6 enrichment lands the missing fields (stars, last
+  commit age, invocation telemetry). The infrastructure is in place;
+  signals will become discriminating automatically once data arrives.
+- Sidecar JSONs land at ``~/.claude/skill-quality/mcp/<slug>.json`` —
+  ``wiki_graphify._attach_quality_attrs`` currently scans only the
+  parent ``~/.claude/skill-quality/`` dir, so MCP scores don't yet
+  decorate graph nodes. Phase 5 (recommender wiring) will update
+  ``wiki_graphify`` to look in the ``mcp/`` subdir too.
+
 ## [Unreleased] — MCP Phase 3.6 — cross-source canonical-key dedup
 
 Phase 3c surfaced that two MCP catalog sources slugify the same upstream

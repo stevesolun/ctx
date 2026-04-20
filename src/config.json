@@ -62,6 +62,29 @@
     }
   },
 
+  "mcp_quality": {
+    "_comment": "Phase 4 MCP scorer. Weights must sum to 1.0; signals are popularity, freshness, structural, graph, trust, runtime. Override per-key in your user config (~/.claude/skill-system-config.json).",
+    "weights": {
+      "popularity": 0.30,
+      "freshness":  0.20,
+      "structural": 0.15,
+      "graph":      0.15,
+      "trust":      0.10,
+      "runtime":    0.10
+    },
+    "grade_thresholds": {
+      "A": 0.80,
+      "B": 0.60,
+      "C": 0.40
+    },
+    "star_saturation": 1000,
+    "freshness_half_life_days": 90.0,
+    "graph_degree_saturation": 20,
+    "paths": {
+      "sidecar_dir": "~/.claude/skill-quality/mcp"
+    }
+  },
+
   "babysitter": {
     "plugin_root": "C:/Users/solun/.claude/plugins/cache/a5c-ai/babysitter/4.0.149",
     "runs_dir": ".a5c/runs",
