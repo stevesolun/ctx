@@ -162,7 +162,7 @@ class TestSubjectTypeValidation:
                 subject_type="widgets",
             )
 
-    @pytest.mark.parametrize("subject_type", ["skills", "agents"])
+    @pytest.mark.parametrize("subject_type", ["skills", "agents", "mcp-servers"])
     def test_accepted_subject_types(self, subject_type):
         decision = pipeline.check_intake(
             _valid_md("ok", "fine skill"),

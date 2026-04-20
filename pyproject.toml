@@ -34,6 +34,7 @@ ctx-skill-health = "skill_health:main"
 ctx-toolbox = "toolbox:main"
 ctx-lifecycle = "ctx_lifecycle:main"
 ctx-skill-add = "skill_add:main"
+ctx-mcp-add = "mcp_add:main"
 ctx-wiki-graphify = "wiki_graphify:main"
 
 [project.optional-dependencies]
@@ -85,6 +86,8 @@ py-modules = [
     "intent_interview",
     "kpi_dashboard",
     "link_conversions",
+    "mcp_add",
+    "mcp_entity",
     "memory_anchor",
     "quality_signals",
     "resolve_graph",

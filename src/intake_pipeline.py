@@ -42,7 +42,11 @@ from intake_gate import IntakeDecision, compose_corpus_text, run_intake_gate
 
 # Only these subject types have a dedicated ranking space. Extending
 # this set requires a paired migration of any existing cache.
-_SUBJECT_TYPES = frozenset({"skills", "agents"})
+#
+# Cache key format: ``"{subject_type}:{embedder.name}"`` — see
+# ``_cache_for`` below. Adding a new subject type creates a fresh
+# vector space; existing skills/agents caches are untouched.
+_SUBJECT_TYPES = frozenset({"skills", "agents", "mcp-servers"})
 
 # Single-slot embedder cache. Reused across ``check_intake`` +
 # ``record_embedding`` calls in the same process so the

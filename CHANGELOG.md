@@ -3,6 +3,52 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — MCP Phase 1 — foundation
+
+First-class **MCP server** entity type alongside skills and agents.
+Phase 1 ships the data model, intake hooks, and ingest CLI; no fetcher
+yet (Phase 2) and no quality scoring yet (Phase 4).
+
+### Added
+
+- **`mcp_entity.McpRecord`** — frozen dataclass capturing one MCP
+  server: slug, description, sources, github URL, tags, transports,
+  language, license, author, stars, last commit. Normalizes slug to
+  `[a-z0-9-]+`, canonicalizes GitHub URLs, filters transports to the
+  known subset, deduplicates and sorts tags. Provides `from_dict`,
+  `to_frontmatter`, `entity_relpath` (sharded `<first-letter>/<slug>.md`,
+  `0-9/` for digit-leading slugs), and `canonical_dedup_key` (github URL
+  > slug fallback).
+- **`mcp_add.add_mcp` + `ctx-mcp-add` CLI** — orchestrator that
+  installs one MCP record into `~/.claude/skill-wiki/entities/mcp-servers/`
+  via the existing intake gate. Idempotent: re-adding the same record
+  is a no-op; re-adding from a different source merges sources into one
+  page. CLI flags: `--from-json`, `--from-jsonl`, `--from-stdin`,
+  `--dry-run`, `--skip-existing`, `--wiki`. Non-fatal embedding failure
+  matches the agent_add convention.
+- **`generate_mcp_page`** in `wiki_batch_entities.py` — renderer that
+  matches the existing skill / agent page layout, with sections for
+  Sources (links to GitHub + homepage), Tags, Transports, and a
+  placeholder Related block for graph backlinks.
+- **`mcp-servers` subject type** in `intake_pipeline._SUBJECT_TYPES` —
+  MCPs get their own embedding cache namespace, isolated from skills
+  and agents.
+
+### Changed
+
+- `pyproject.toml` — registers `mcp_add` and `mcp_entity` modules and
+  the `ctx-mcp-add` console script.
+
+### Notes
+
+- Storage is sharded from day one (`entities/mcp-servers/<first-letter>/<slug>.md`)
+  to keep listings fast at the projected ~12k+ scale.
+- Quality scoring, fetchers, and cross-type recommendations land in
+  Phases 2-5. Phase 1 is infra only.
+- `wiki_sync.update_index` writes the `## Skills` section header for
+  every subject type (pre-existing limitation also affecting agents).
+  Subject-aware index updates deferred to a follow-up cleanup.
+
 ## [0.6.4] — 2026-04-20
 
 Dashboard-tab release. v0.6.3 added docs for the graph and the KPI

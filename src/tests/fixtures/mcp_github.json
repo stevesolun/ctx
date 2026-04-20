@@ -1,0 +1,12 @@
+{
+  "name": "github",
+  "description": "Repository management, file operations, and GitHub API integration",
+  "sources": ["awesome-mcp"],
+  "github_url": "https://github.com/modelcontextprotocol/servers",
+  "tags": ["github", "git"],
+  "transports": ["stdio"],
+  "language": "typescript",
+  "license": "MIT",
+  "author": "modelcontextprotocol",
+  "author_type": "org"
+}

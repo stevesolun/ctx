@@ -1,0 +1,330 @@
+"""
+tests/test_mcp_add.py -- Integration-style tests for the add_mcp orchestrator.
+
+Mirrors the structure of test_skill_add.py. Heavy external deps
+(check_intake, record_embedding) are monkeypatched on the mcp_add module
+so the tests run without sentence-transformers or a real vector store.
+
+Coverage:
+  - New record creates entity file, returns is_new_page=True
+  - Created file has valid YAML frontmatter containing type: mcp-server
+  - Calling add_mcp twice with same record returns is_new_page=False, sources deduped
+  - Two records with same slug from different sources merges sources list
+  - dry_run=True does not write any file, still returns computed dict
+  - Intake gate rejection raises IntakeRejected
+  - Numeric slug sharding: slug starting with digit lands under 0-9/
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+import yaml  # type: ignore[import-untyped]
+
+SRC_DIR = Path(__file__).resolve().parents[1]
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from mcp_entity import McpRecord  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_record(
+    name: str = "github-mcp",
+    description: str = "A GitHub MCP server",
+    sources: list[str] | None = None,
+    github_url: str | None = "https://github.com/Org/github-mcp",
+    **kwargs: Any,
+) -> McpRecord:
+    data: dict[str, Any] = {
+        "name": name,
+        "description": description,
+        "sources": sources if sources is not None else ["awesome-mcp"],
+        "github_url": github_url,
+        "tags": ["github"],
+        "transports": ["stdio"],
+    }
+    data.update(kwargs)
+    return McpRecord.from_dict(data)
+
+
+def _fake_allow(*args: Any, **kwargs: Any) -> Any:
+    from intake_gate import IntakeDecision
+
+    return IntakeDecision(allow=True)
+
+
+def _fake_reject(*args: Any, **kwargs: Any) -> Any:
+    from intake_gate import IntakeDecision, IntakeFinding
+
+    finding = IntakeFinding(code="DUPLICATE", severity="fail", message="test rejection")
+    return IntakeDecision(allow=False, findings=(finding,))
+
+
+def _fake_record_embedding(**kwargs: Any) -> None:
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def wiki_dir(tmp_path: Path) -> Path:
+    """Minimal wiki root with entities/mcp-servers directory pre-created."""
+    wiki = tmp_path / "skill-wiki"
+    wiki.mkdir()
+    (wiki / "entities" / "mcp-servers").mkdir(parents=True)
+    return wiki
+
+
+@pytest.fixture()
+def patched_mcp_add(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Import mcp_add with intake, embedding, and wiki-sync deps patched out.
+
+    ``update_index`` and ``append_log`` mutate top-level wiki files
+    (``index.md``, ``log.md``) that this fixture's tmp_path wiki does
+    not pre-populate. The behaviour they implement is exercised in
+    ``test_wiki_sync.py``; here we just need ``add_mcp`` to call them
+    once with the right slug.
+    """
+    import mcp_add  # noqa: PLC0415
+
+    monkeypatch.setattr("mcp_add.check_intake", _fake_allow)
+    monkeypatch.setattr("mcp_add.record_embedding", _fake_record_embedding)
+    monkeypatch.setattr("mcp_add.update_index", lambda *a, **k: None)
+    monkeypatch.setattr("mcp_add.append_log", lambda *a, **k: None)
+    return mcp_add
+
+
+# ---------------------------------------------------------------------------
+# Core orchestrator behaviour
+# ---------------------------------------------------------------------------
+
+
+class TestAddMcpNewRecord:
+    def test_new_record_creates_entity_file(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record = _make_record(name="github-mcp")
+        patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+
+        expected = (
+            wiki_dir / "entities" / "mcp-servers" / "g" / "github-mcp.md"
+        )
+        assert expected.exists(), f"Entity file not found at {expected}"
+
+    def test_new_record_returns_is_new_page_true(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record = _make_record(name="github-mcp")
+        result = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert result["is_new_page"] is True
+
+    def test_new_record_result_contains_slug(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record = _make_record(name="github-mcp")
+        result = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert result["slug"] == record.slug
+
+    def test_new_record_result_contains_path(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record = _make_record(name="github-mcp")
+        result = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert "path" in result
+
+
+class TestEntityFileContent:
+    def test_created_file_has_valid_yaml_frontmatter(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record = _make_record(name="github-mcp")
+        patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+
+        entity_file = wiki_dir / "entities" / "mcp-servers" / "g" / "github-mcp.md"
+        content = entity_file.read_text(encoding="utf-8")
+
+        # Must start with YAML frontmatter
+        assert content.startswith("---"), "File does not start with YAML frontmatter"
+        _, fm_block, _ = content.split("---", 2)
+        parsed = yaml.safe_load(fm_block)
+        assert isinstance(parsed, dict), "Frontmatter did not parse to a dict"
+
+    def test_created_file_contains_type_mcp_server(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record = _make_record(name="github-mcp")
+        patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+
+        entity_file = wiki_dir / "entities" / "mcp-servers" / "g" / "github-mcp.md"
+        content = entity_file.read_text(encoding="utf-8")
+        _, fm_block, _ = content.split("---", 2)
+        parsed = yaml.safe_load(fm_block)
+        assert parsed.get("type") == "mcp-server"
+
+
+# ---------------------------------------------------------------------------
+# Idempotency
+# ---------------------------------------------------------------------------
+
+
+class TestAddMcpIdempotency:
+    def test_second_call_same_record_returns_is_new_page_false(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record = _make_record(name="github-mcp", sources=["awesome-mcp"])
+        patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        result2 = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert result2["is_new_page"] is False
+
+    def test_second_call_same_source_keeps_sources_length_one(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record = _make_record(name="github-mcp", sources=["awesome-mcp"])
+        patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        result2 = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert len(result2["merged_sources"]) == 1
+
+
+class TestAddMcpSourceMerging:
+    def test_two_different_sources_merged_and_sorted(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record_a = _make_record(name="github-mcp", sources=["awesome-mcp"])
+        record_b = _make_record(name="github-mcp", sources=["pulsemcp"])
+
+        patched_mcp_add.add_mcp(record=record_a, wiki_path=wiki_dir)
+        result2 = patched_mcp_add.add_mcp(record=record_b, wiki_path=wiki_dir)
+
+        assert sorted(result2["merged_sources"]) == ["awesome-mcp", "pulsemcp"]
+        assert result2["is_new_page"] is False
+
+
+# ---------------------------------------------------------------------------
+# dry_run
+# ---------------------------------------------------------------------------
+
+
+class TestAddMcpDryRun:
+    def test_dry_run_does_not_create_file(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record = _make_record(name="dry-run-mcp")
+        patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir, dry_run=True)
+
+        expected = wiki_dir / "entities" / "mcp-servers" / "d" / "dry-run-mcp.md"
+        assert not expected.exists(), "dry_run=True must not create the entity file"
+
+    def test_dry_run_returns_result_dict(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record = _make_record(name="dry-run-mcp")
+        result = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir, dry_run=True)
+
+        assert "slug" in result
+        assert "is_new_page" in result
+        assert "merged_sources" in result
+        assert "path" in result
+
+
+# ---------------------------------------------------------------------------
+# Intake gate rejection
+# ---------------------------------------------------------------------------
+
+
+class TestAddMcpIntakeRejection:
+    def test_rejected_intake_raises_intake_rejected(
+        self, monkeypatch: pytest.MonkeyPatch, wiki_dir: Path
+    ) -> None:
+        import mcp_add  # noqa: PLC0415
+        from intake_pipeline import IntakeRejected  # noqa: PLC0415
+
+        monkeypatch.setattr("mcp_add.check_intake", _fake_reject)
+        monkeypatch.setattr("mcp_add.record_embedding", _fake_record_embedding)
+
+        record = _make_record(name="rejected-mcp")
+        with pytest.raises(IntakeRejected):
+            mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+
+    def test_rejected_intake_does_not_create_file(
+        self, monkeypatch: pytest.MonkeyPatch, wiki_dir: Path
+    ) -> None:
+        import mcp_add  # noqa: PLC0415
+        from intake_pipeline import IntakeRejected  # noqa: PLC0415
+
+        monkeypatch.setattr("mcp_add.check_intake", _fake_reject)
+        monkeypatch.setattr("mcp_add.record_embedding", _fake_record_embedding)
+
+        record = _make_record(name="rejected-mcp")
+        with pytest.raises(IntakeRejected):
+            mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+
+        entity_file = wiki_dir / "entities" / "mcp-servers" / "r" / "rejected-mcp.md"
+        assert not entity_file.exists()
+
+
+# ---------------------------------------------------------------------------
+# Numeric slug sharding (0-9 bucket)
+# ---------------------------------------------------------------------------
+
+
+class TestAddMcpNumericSharding:
+    def test_numeric_slug_lands_in_0_9_directory(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record = _make_record(
+            name="007-mcp",
+            github_url="https://github.com/Org/007-mcp",
+        )
+        patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+
+        expected = wiki_dir / "entities" / "mcp-servers" / "0-9" / "007-mcp.md"
+        assert expected.exists(), (
+            f"Numeric-slug entity file not found at {expected}"
+        )
+
+    def test_numeric_slug_result_is_new_page_true(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record = _make_record(
+            name="007-mcp",
+            github_url="https://github.com/Org/007-mcp",
+        )
+        result = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert result["is_new_page"] is True
+
+
+# ---------------------------------------------------------------------------
+# Fixture-based smoke test
+# ---------------------------------------------------------------------------
+
+
+class TestAddMcpFromFixtures:
+    def test_github_fixture_can_be_added(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        fixture_path = Path(__file__).parent / "fixtures" / "mcp_github.json"
+        data = json.loads(fixture_path.read_text(encoding="utf-8"))
+        record = McpRecord.from_dict(data)
+        result = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert result["is_new_page"] is True
+
+    def test_pulsemcp_fixture_can_be_added(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        fixture_path = Path(__file__).parent / "fixtures" / "mcp_pulsemcp.json"
+        data = json.loads(fixture_path.read_text(encoding="utf-8"))
+        record = McpRecord.from_dict(data)
+        result = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert result["is_new_page"] is True

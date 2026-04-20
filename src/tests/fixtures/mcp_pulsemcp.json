@@ -1,0 +1,15 @@
+{
+  "name": "filesystem",
+  "description": "Secure file operations with configurable access controls for reading, writing, and managing local files",
+  "sources": ["pulsemcp"],
+  "github_url": "https://github.com/modelcontextprotocol/servers",
+  "homepage_url": "https://pulsemcp.com/servers/filesystem",
+  "tags": ["filesystem", "files", "storage"],
+  "transports": ["stdio", "http"],
+  "language": "typescript",
+  "license": "MIT",
+  "author": "modelcontextprotocol",
+  "author_type": "org",
+  "stars": 12500,
+  "last_commit_at": "2025-03-15"
+}

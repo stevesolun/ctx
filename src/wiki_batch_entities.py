@@ -9,12 +9,20 @@ Usage:
     python wiki_batch_entities.py --dry-run      # Preview without writing
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+import yaml
+
+if TYPE_CHECKING:
+    from mcp_entity import McpRecord
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -250,6 +258,74 @@ Agent definition file.
 ## Related Agents
 """
     return page
+
+
+def generate_mcp_page(record: McpRecord) -> str:
+    """Generate entity page content for an MCP server record.
+
+    Args:
+        record: A populated McpRecord dataclass instance.
+
+    Returns:
+        Full markdown page string including YAML frontmatter.
+    """
+    # Start from the record's own frontmatter dict, then layer in catalog fields.
+    fm_dict = record.to_frontmatter()
+    fm_dict["created"] = TODAY
+    fm_dict["updated"] = TODAY
+    fm_dict["type"] = "mcp-server"
+    fm_dict["status"] = "cataloged"
+
+    frontmatter_body = yaml.safe_dump(
+        fm_dict, default_flow_style=False, allow_unicode=True, sort_keys=False
+    )
+    frontmatter_block = f"---\n{frontmatter_body}---"
+
+    # Sources section — record.sources plus optional repo/homepage links
+    source_lines = [f"- {s}" for s in record.sources]
+    if record.github_url:
+        source_lines.append(f"- [GitHub]({record.github_url})")
+    if record.homepage_url:
+        source_lines.append(f"- [Homepage]({record.homepage_url})")
+    sources_body = "\n".join(source_lines) if source_lines else "- (none)"
+
+    # Tags section
+    tags_body = (
+        " · ".join(f"`{t}`" for t in record.tags) if record.tags else "(none)"
+    )
+
+    # Transports section
+    transports_body = (
+        ", ".join(record.transports) if record.transports else "Unknown"
+    )
+
+    return (
+        frontmatter_block
+        + f"""
+
+# {record.name}
+
+## Overview
+
+{record.description}
+
+## Sources
+
+{sources_body}
+
+## Tags
+
+{tags_body}
+
+## Transports
+
+{transports_body}
+
+## Related
+
+<!-- backlinks added later by graph build -->
+"""
+    )
 
 
 def generate_missing_skills(dry_run: bool = False) -> int:
