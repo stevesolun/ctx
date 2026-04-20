@@ -3,6 +3,59 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.4] — 2026-04-20
+
+Dashboard-tab release. v0.6.3 added docs for the graph and the KPI
+pipeline; v0.6.4 exposes both (plus a proper wiki browser) as
+top-level navigation tabs in `ctx-monitor`, so the docs pages match
+what's actually reachable in the UI.
+
+### Added
+
+- **`/kpi` HTML route** — renders `kpi_dashboard.generate()` as a
+  browser view. Six sections: grade distribution, lifecycle tiers
+  (active/watch/demote/archive), hard-floor reasons, by-category
+  A/B/C/D/F mix, top-25 demotion candidates (active/watch entries
+  graded D/F, sorted by D-streak desc then score asc), and the
+  archived list. Each demotion-candidate slug is a link to
+  `/skill/<slug>`. Empty-state page points at `ctx-skill-quality
+  score --all` when the sidecar dir is empty.
+- **`/api/kpi.json`** — JSON passthrough of the `DashboardSummary`
+  dataclass for scripting. Same shape as `python -m kpi_dashboard
+  render --json`.
+- **`/wiki` index route** — card grid of every entity page under
+  `~/.claude/skill-wiki/entities/{skills,agents}/`. Left sidebar:
+  text search (slug · description · tag), skill/agent checkboxes,
+  live "N of M match" counter. Each card shows the slug, quality
+  grade pill (when a sidecar exists), description, and tag preview.
+  Slug allowlist (`^[a-z0-9][a-z0-9_.-]{0,127}$`) applied to every
+  file glob to keep path-traversal bugs out of the index.
+- **`/graph` landing-page seeds** — when no slug is selected, the
+  graph page now shows a "Popular seed slugs" panel with the 18
+  highest-degree entities as clickable chips, plus a stats line with
+  node + edge counts. First-time visitors no longer land on a blank
+  cytoscape canvas with nothing to click.
+- **Wiki + KPI tabs in the top nav** — every page now shows
+  `Home · Loaded · Skills · Wiki · Graph · KPIs · Sessions · Logs ·
+  Live`.
+
+### Changed
+
+- **`ctx_monitor.py` module docstring** — updated the route
+  catalogue to the full 15 routes (was 8). New dev-reference table
+  matches what the server actually exposes.
+- **`docs/dashboard.md`** — added a Usage section with three
+  walkthroughs (Browse the LLM wiki, Explore the knowledge graph,
+  Read the quality KPIs). Route tables extended with `/wiki`,
+  `/kpi`, `/api/kpi.json` rows.
+
+### Tests
+
+- +9 tests in `src/tests/test_ctx_monitor.py` covering the new
+  routes (empty + populated states), the slug-allowlist gate on the
+  wiki index, the seed-chip panel on `/graph` landing, and nav-bar
+  tab presence. Full suite: 1,372 passing, 2 skipped.
+
 ## [0.6.3] — 2026-04-19
 
 Docs-only release. The two marquee features of ctx — the pre-built

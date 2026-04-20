@@ -323,6 +323,167 @@ def test_render_skills_emits_sidebar_filters(fake_claude: Path) -> None:
     assert ">graph</a>" in html_out
 
 
+def test_render_wiki_index_lists_entities(fake_claude: Path) -> None:
+    skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
+    agents_dir = fake_claude / "skill-wiki" / "entities" / "agents"
+    skills_dir.mkdir(parents=True)
+    agents_dir.mkdir(parents=True)
+    (skills_dir / "python-patterns.md").write_text(
+        "---\nname: python-patterns\ntype: skill\n"
+        "description: Idiomatic Python patterns\ntags: [python, patterns]\n"
+        "---\n# body\n",
+        encoding="utf-8",
+    )
+    (agents_dir / "code-reviewer.md").write_text(
+        "---\nname: code-reviewer\ntype: agent\n"
+        "description: Reviews code for issues\ntags: [review, quality]\n"
+        "---\n# body\n",
+        encoding="utf-8",
+    )
+    html_out = cm._render_wiki_index()
+    # Both entities render as cards with their slug.
+    assert "python-patterns" in html_out
+    assert "code-reviewer" in html_out
+    # Descriptions surface on the card.
+    assert "Idiomatic Python patterns" in html_out
+    assert "Reviews code for issues" in html_out
+    # Search + type filter must be present.
+    assert "id='wiki-search'" in html_out
+    assert "class='wiki-type-filter'" in html_out
+    # Cards link to the per-entity wiki page.
+    assert "href='/wiki/python-patterns'" in html_out
+    assert "href='/wiki/code-reviewer'" in html_out
+
+
+def test_render_wiki_index_empty_when_no_entities(fake_claude: Path) -> None:
+    html_out = cm._render_wiki_index()
+    # No entities → still renders the chrome + a helpful empty state.
+    assert "<h1>Wiki</h1>" in html_out
+    assert "No wiki entities found" in html_out
+
+
+def test_render_wiki_index_rejects_unsafe_filenames(fake_claude: Path) -> None:
+    """A file on disk with a slug that doesn't pass the allowlist must
+    not appear in the index, even if glob returns it."""
+    skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
+    skills_dir.mkdir(parents=True)
+    # Valid entry alongside an uppercase-first filename (fails ^[a-z0-9]).
+    (skills_dir / "python-patterns.md").write_text(
+        "---\nname: python-patterns\n---\n", encoding="utf-8",
+    )
+    (skills_dir / "Bad-Start.md").write_text(
+        "---\nname: Bad-Start\n---\n", encoding="utf-8",
+    )
+    entries = cm._wiki_index_entries()
+    slugs = {e["slug"] for e in entries}
+    assert "python-patterns" in slugs
+    assert "Bad-Start" not in slugs
+
+
+def test_render_kpi_empty_state(fake_claude: Path) -> None:
+    """With no sidecars, /kpi must render a helpful empty state, not 500."""
+    html_out = cm._render_kpi()
+    assert "<h1>KPIs</h1>" in html_out
+    assert "No KPI data yet" in html_out or "ctx-skill-quality" in html_out
+
+
+def test_render_kpi_with_sidecars(fake_claude: Path) -> None:
+    """With real sidecars + lifecycle files, /kpi must surface the four
+    main tables: grade distribution, lifecycle tiers, categories,
+    demotion candidates. Mirrors kpi_dashboard.render_markdown sections."""
+    _write_sidecar(fake_claude, "alpha", {
+        "slug": "alpha", "subject_type": "skill",
+        "grade": "A", "raw_score": 0.92, "score": 0.92,
+        "hard_floor": None, "computed_at": "2026-04-19T10:00:00+00:00",
+    })
+    _write_sidecar(fake_claude, "foxtrot", {
+        "slug": "foxtrot", "subject_type": "skill",
+        "grade": "F", "raw_score": 0.08, "score": 0.08,
+        "hard_floor": "intake_fail",
+        "computed_at": "2026-04-19T10:00:00+00:00",
+    })
+    html_out = cm._render_kpi()
+    # The five section headings must all be present.
+    assert "Grade distribution" in html_out
+    assert "Lifecycle tiers" in html_out
+    assert "Top demotion candidates" in html_out
+    assert "By category" in html_out
+    assert "Archived" in html_out
+    # Slug must be linked into the demotion-candidates table.
+    assert "foxtrot" in html_out
+    # Cross-link to the JSON endpoint + /skills drill-down.
+    assert "/api/kpi.json" in html_out
+    assert "/skills" in html_out
+
+
+def test_api_kpi_summary_shape(fake_claude: Path) -> None:
+    """The JSON endpoint must return a DashboardSummary-shaped dict."""
+    _write_sidecar(fake_claude, "alpha", {
+        "slug": "alpha", "subject_type": "skill",
+        "grade": "A", "raw_score": 0.9, "score": 0.9,
+        "hard_floor": None, "computed_at": "2026-04-19T10:00:00+00:00",
+    })
+    summary = cm._kpi_summary()
+    assert summary is not None
+    d = summary.to_dict()
+    for key in ("total", "grade_counts", "lifecycle_counts",
+                "category_breakdown", "hard_floor_counts",
+                "low_quality_candidates", "archived", "generated_at"):
+        assert key in d, f"missing {key}"
+    assert d["total"] == 1
+    assert d["grade_counts"].get("A", 0) == 1
+
+
+def test_layout_nav_includes_wiki_and_kpi() -> None:
+    """Every rendered page must include the new Wiki + KPI tabs in the
+    top nav — the user explicitly asked for them to be accessible."""
+    out = cm._layout("test", "<p>body</p>")
+    assert "href='/wiki'" in out
+    assert "href='/kpi'" in out
+    assert "href='/graph'" in out
+    assert ">Wiki<" in out
+    assert ">KPIs<" in out
+
+
+def test_render_graph_landing_shows_seeds_when_available(monkeypatch) -> None:
+    """With a non-empty graph, /graph (no slug) should surface popular
+    seed slugs so the first-time visitor has something to click."""
+    import networkx as nx
+    G = nx.Graph()
+    # High-degree hub: 'skill:python-patterns' with 5 neighbors.
+    for peer in ("skill:fastapi-pro", "skill:async-patterns",
+                 "agent:code-reviewer", "skill:pydantic", "skill:sqlalchemy"):
+        G.add_edge("skill:python-patterns", peer, weight=2)
+    G.nodes["skill:python-patterns"]["label"] = "python-patterns"
+    fake = type("M", (), {"load_graph": staticmethod(lambda: G)})
+    import sys
+    monkeypatch.setitem(sys.modules, "resolve_graph", fake)
+
+    html_out = cm._render_graph(None)
+    # Landing page shows the seeds block.
+    assert "Popular seed slugs" in html_out
+    # Hub slug must appear as a clickable chip.
+    assert "python-patterns" in html_out
+    # Graph stats line shows node/edge counts.
+    assert "nodes" in html_out
+
+
+def test_render_graph_landing_hides_seeds_when_graph_absent(monkeypatch) -> None:
+    import sys
+
+    def _bad(*_a, **_k):
+        raise RuntimeError("no graph")
+
+    fake = type("M", (), {"load_graph": _bad})
+    monkeypatch.setitem(sys.modules, "resolve_graph", fake)
+    html_out = cm._render_graph(None)
+    # No seeds section when graph isn't available.
+    assert "Popular seed slugs" not in html_out
+    # But the search box and cytoscape mount still render.
+    assert "id='focus'" in html_out
+    assert "id='cy'" in html_out
+
+
 def test_cli_argparser_exposes_serve() -> None:
     # argparse should not raise; subcommand "serve" is required
     with pytest.raises(SystemExit):

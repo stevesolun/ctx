@@ -7,13 +7,23 @@ sidecars into a browser UI at http://localhost:8765/.
 Routes:
 
     /                           Home — summary stats + session list + links
+    /loaded                     Live manifest view + load/unload actions
     /sessions                   List of sessions (from audit + events jsonl)
     /session/<id>               Skills + agents seen in that session
-    /skills                     Grade distribution + sortable table
+    /skills                     Sidecar card grid with grade + score filters
     /skill/<slug>               Sidecar breakdown + timeline of audit events
+    /wiki                       Wiki entity index — all pages with search
+    /wiki/<slug>                One wiki entity page (frontmatter + body)
+    /graph                      Cytoscape graph explorer + popular seeds
+    /graph?slug=<slug>          Focus cytoscape on a specific slug
+    /kpi                        Grade / lifecycle / category KPIs
+    /logs                       Filterable tail of ctx-audit.jsonl
     /events                     Live SSE stream of new audit-log lines
     /api/sessions.json          JSON index for scripting
+    /api/manifest.json          Raw ~/.claude/skill-manifest.json
     /api/skill/<slug>.json      Sidecar passthrough
+    /api/graph/<slug>.json      Cytoscape-shaped neighborhood
+    /api/kpi.json               DashboardSummary passthrough
 
 Design notes:
 
@@ -309,7 +319,9 @@ def _layout(title: str, body: str) -> str:
         "<a href='/'>Home</a>"
         "<a href='/loaded'>Loaded</a>"
         "<a href='/skills'>Skills</a>"
+        "<a href='/wiki'>Wiki</a>"
         "<a href='/graph'>Graph</a>"
+        "<a href='/kpi'>KPIs</a>"
         "<a href='/sessions'>Sessions</a>"
         "<a href='/logs'>Logs</a>"
         "<a href='/events'>Live</a>"
@@ -725,6 +737,32 @@ def _render_skill_detail(slug: str) -> str:
     return _layout(slug, body)
 
 
+def _top_degree_seeds(limit: int = 18) -> list[dict]:
+    """Pick high-degree nodes from the graph as seed suggestions.
+
+    Used by ``/graph`` landing page so the first-time visitor has
+    something to click. Falls back to empty on any graph-load failure.
+    """
+    try:
+        from resolve_graph import load_graph as _lg  # type: ignore
+        G = _lg()
+    except Exception:  # noqa: BLE001
+        return []
+    if G.number_of_nodes() == 0:
+        return []
+    ranked = sorted(G.degree, key=lambda kv: -kv[1])[:limit]
+    out: list[dict] = []
+    for node_id, degree in ranked:
+        prefix, _, slug = node_id.partition(":")
+        out.append({
+            "slug": slug,
+            "type": "agent" if prefix == "agent" else "skill",
+            "degree": int(degree),
+            "label": G.nodes[node_id].get("label", slug),
+        })
+    return out
+
+
 def _render_graph(focus: str | None = None) -> str:
     """Interactive graph view — cytoscape-rendered N-hop neighborhood.
 
@@ -734,11 +772,36 @@ def _render_graph(focus: str | None = None) -> str:
     """
     focus_slug = focus or ""
     focus_js = json.dumps(focus_slug)
+    gstats = _graph_stats()
+    seeds = _top_degree_seeds() if not focus_slug and gstats.get("available") else []
+    seed_html = ""
+    if seeds:
+        chips = "".join(
+            f"<a href='/graph?slug={html.escape(s['slug'])}' "
+            f"style='display:inline-block; margin:0.2rem 0.25rem; padding:0.25rem 0.6rem; "
+            f"border-radius:999px; background:{'#fef3c7' if s['type']=='agent' else '#e0e7ff'}; "
+            f"color:#111; font-size:0.82rem; text-decoration:none;'>"
+            f"<code style='background:transparent;'>{html.escape(s['slug'])}</code> "
+            f"<span class='muted' style='font-size:0.72rem;'>· deg {s['degree']}</span>"
+            f"</a>"
+            for s in seeds
+        )
+        seed_html = (
+            "<div class='card'><strong>Popular seed slugs</strong> "
+            "<span class='muted' style='font-size:0.8rem;'>"
+            "(click to explore 1-hop neighborhood)</span>"
+            f"<div style='margin-top:0.4rem;'>{chips}</div></div>"
+        )
+    stats_html = (
+        f"<span class='muted'>{gstats.get('nodes', 0):,} nodes · "
+        f"{gstats.get('edges', 0):,} edges</span>"
+    )
     body = (
         "<h1>Knowledge graph</h1>"
-        "<p class='muted'>Enter a skill or agent slug to explore its "
-        "1-hop neighborhood. Edge weight ≈ shared tag count.</p>"
-        "<div class='card' style='padding:0.6rem 0.8rem;'>"
+        f"<p class='muted'>Enter a skill or agent slug to explore its "
+        f"1-hop neighborhood. Edge weight ≈ shared tag count. {stats_html}</p>"
+        + seed_html
+        + "<div class='card' style='padding:0.6rem 0.8rem;'>"
         "<input type='text' id='focus' placeholder='skill slug (e.g. python-patterns)' "
         "value='" + html.escape(focus_slug) + "' "
         "style='padding:0.35rem 0.6rem; width:22rem; border:1px solid #ccc; border-radius:4px;'>"
@@ -858,6 +921,320 @@ def _render_wiki_entity(slug: str) -> str:
         "</div>"
     )
     return _layout(slug, body)
+
+
+def _wiki_index_entries() -> list[dict]:
+    """List every wiki entity page under ~/.claude/skill-wiki/entities/.
+
+    Returns a slug-sorted list of ``{slug, type, tags, description, path}``.
+    Reads only the YAML frontmatter (cheap) — never parses full bodies.
+    """
+    base = _wiki_dir() / "entities"
+    if not base.is_dir():
+        return []
+    out: list[dict] = []
+    for sub in ("skills", "agents"):
+        d = base / sub
+        if not d.is_dir():
+            continue
+        entity_type = sub[:-1]  # "skills" -> "skill"
+        for path in sorted(d.glob("*.md")):
+            slug = path.stem
+            if not _SAFE_SLUG_RE.match(slug):
+                continue
+            try:
+                # Read only the first ~2 KB — enough for frontmatter.
+                head = path.read_text(encoding="utf-8", errors="replace")[:2048]
+            except OSError:
+                continue
+            meta, _ = _parse_frontmatter(head)
+            tags_raw = meta.get("tags", "")
+            # frontmatter parser returns strings — tags come as
+            # "[a, b]" or "a, b". Normalize to a small preview list.
+            tags_preview: list[str] = []
+            for tok in tags_raw.replace("[", "").replace("]", "").split(","):
+                tok = tok.strip().strip("'\"")
+                if tok:
+                    tags_preview.append(tok)
+                if len(tags_preview) >= 6:
+                    break
+            out.append({
+                "slug": slug,
+                "type": entity_type,
+                "tags": tags_preview,
+                "description": meta.get("description", "")[:200],
+            })
+    return out
+
+
+def _render_wiki_index() -> str:
+    """Card grid of every wiki entity — search + type filter + sidecar grades."""
+    entries = _wiki_index_entries()
+    # Join with grade pills where a sidecar exists.
+    grade_by_slug: dict[str, str] = {}
+    for sc in _all_sidecars():
+        slug = sc.get("slug")
+        if slug:
+            grade_by_slug[slug] = sc.get("grade", "")
+
+    type_counts = {"skill": 0, "agent": 0}
+    for e in entries:
+        type_counts[e["type"]] = type_counts.get(e["type"], 0) + 1
+
+    cards = "".join(
+        "<a class='wiki-card' "
+        f"data-slug='{html.escape(e['slug'])}' "
+        f"data-type='{html.escape(e['type'])}' "
+        f"data-tags='{html.escape(' '.join(e['tags']).lower())}' "
+        f"href='/wiki/{html.escape(e['slug'])}' "
+        "style='border:1px solid #e5e7eb; border-radius:6px; "
+        "padding:0.6rem 0.8rem; text-decoration:none; color:inherit; "
+        "display:flex; flex-direction:column; gap:0.25rem;'>"
+        "<div style='display:flex; justify-content:space-between; align-items:center; gap:0.4rem;'>"
+        f"<code style='font-size:0.84rem;'>{html.escape(e['slug'])}</code>"
+        + (f"<span class='pill grade-{html.escape(grade_by_slug[e['slug']])}'>"
+           f"{html.escape(grade_by_slug[e['slug']])}</span>"
+           if grade_by_slug.get(e['slug']) else
+           f"<span class='pill'>{html.escape(e['type'])}</span>")
+        + "</div>"
+        f"<div class='muted' style='font-size:0.78rem; line-height:1.3;'>"
+        f"{html.escape(e['description'] or '(no description)')}"
+        "</div>"
+        + (f"<div class='muted' style='font-size:0.72rem;'>"
+           f"{' · '.join(html.escape(t) for t in e['tags'][:5])}</div>"
+           if e["tags"] else "")
+        + "</a>"
+        for e in entries
+    )
+
+    type_checkboxes = "".join(
+        f"<label style='display:flex; justify-content:space-between; padding:0.25rem 0;'>"
+        f"<span><input type='checkbox' class='wiki-type-filter' value='{t}' checked> {t}</span>"
+        f"<span class='muted' style='font-size:0.78rem;'>{type_counts.get(t, 0)}</span>"
+        f"</label>"
+        for t in ("skill", "agent")
+    )
+
+    body = (
+        "<h1>Wiki</h1>"
+        f"<p class='muted'>{len(entries)} entity pages under "
+        f"<code>~/.claude/skill-wiki/entities/</code> · "
+        "search by slug / description / tag, or click a card to read the page.</p>"
+        "<div style='display:grid; grid-template-columns:220px 1fr; gap:1.25rem; align-items:start;'>"
+        # Left sidebar
+        "<aside style='position:sticky; top:1rem;'>"
+        "<div class='card'><strong>Search</strong>"
+        "<input type='text' id='wiki-search' placeholder='slug / tag / text…' "
+        "style='width:100%; margin-top:0.4rem; padding:0.35rem 0.5rem; "
+        "border:1px solid #ccc; border-radius:4px;'></div>"
+        "<div class='card'><strong>Type</strong>" + type_checkboxes + "</div>"
+        "<div class='card'><span id='wiki-match-count' class='muted'>—</span></div>"
+        "</aside>"
+        # Card grid
+        "<div id='wiki-grid' style='display:grid; "
+        "grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:0.6rem;'>"
+        + (cards or "<p class='muted'>No wiki entities found. "
+           "Extract <code>graph/wiki-graph.tar.gz</code> into "
+           "<code>~/.claude/skill-wiki/</code> to populate.</p>")
+        + "</div>"
+        "</div>"
+        "<script>\n"
+        "const wcards = document.querySelectorAll('.wiki-card');\n"
+        "const wsearch = document.getElementById('wiki-search');\n"
+        "function wActiveTypes() { return Array.from(document.querySelectorAll('.wiki-type-filter:checked')).map(x => x.value); }\n"
+        "function wApply() {\n"
+        "  const q = wsearch.value.trim().toLowerCase();\n"
+        "  const types = new Set(wActiveTypes());\n"
+        "  let shown = 0;\n"
+        "  wcards.forEach(c => {\n"
+        "    const hay = (c.dataset.slug + ' ' + (c.textContent||'') + ' ' + c.dataset.tags).toLowerCase();\n"
+        "    const ok = types.has(c.dataset.type) && (!q || hay.includes(q));\n"
+        "    c.style.display = ok ? '' : 'none';\n"
+        "    if (ok) shown++;\n"
+        "  });\n"
+        "  document.getElementById('wiki-match-count').textContent = shown + ' of ' + wcards.length + ' match';\n"
+        "}\n"
+        "wsearch.addEventListener('input', wApply);\n"
+        "document.querySelectorAll('.wiki-type-filter').forEach(el => el.addEventListener('change', wApply));\n"
+        "wApply();\n"
+        "</script>"
+    )
+    return _layout("Wiki", body)
+
+
+def _kpi_summary():
+    """Compute the KPI DashboardSummary using the default source layout.
+
+    Returns ``None`` if the kpi_dashboard module can't be imported or
+    the required directories don't exist — the caller renders an
+    explanatory empty state instead of failing.
+    """
+    try:
+        from kpi_dashboard import generate  # type: ignore
+        from ctx_lifecycle import LifecycleSources  # type: ignore
+    except Exception:  # noqa: BLE001 — KPIs are advisory
+        return None
+    sidecar_dir = _sidecar_dir()
+    if not sidecar_dir.is_dir():
+        return None
+    try:
+        from ctx_config import cfg  # type: ignore
+        sources = LifecycleSources(
+            skills_dir=cfg.skills_dir,
+            agents_dir=cfg.agents_dir,
+            sidecar_dir=sidecar_dir,
+        )
+    except Exception:  # noqa: BLE001 — fallback: sidecar-only
+        sources = LifecycleSources(
+            skills_dir=sidecar_dir,
+            agents_dir=sidecar_dir,
+            sidecar_dir=sidecar_dir,
+        )
+    try:
+        return generate(sources=sources, top_n=25)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _render_kpi() -> str:
+    """HTML-rendered KPI dashboard — grades, lifecycle, categories,
+    hard floors, top demotion candidates, archived entities.
+
+    Mirrors the structure of ``kpi_dashboard.render_markdown`` so the
+    commit-friendly Markdown digest and the browser view show the
+    same numbers.
+    """
+    summary = _kpi_summary()
+    if summary is None or summary.total == 0:
+        empty = (
+            "<h1>KPIs</h1>"
+            "<div class='card'><strong>No KPI data yet.</strong>"
+            "<p class='muted' style='margin-top:0.4rem;'>"
+            "The KPI dashboard reads from "
+            "<code>~/.claude/skill-quality/*.json</code> and "
+            "<code>*.lifecycle.json</code>. Run "
+            "<code>ctx-skill-quality score --all</code> to populate "
+            "sidecars, then reload this page.</p>"
+            "<p class='muted'>CLI equivalent: "
+            "<code>python -m kpi_dashboard render</code></p></div>"
+        )
+        return _layout("KPIs", empty)
+
+    total = summary.total
+
+    # Grade distribution pills + detail table
+    grade_pills = "".join(
+        f"<span class='pill grade-{g}'>{g}: {summary.grade_counts.get(g, 0)}</span> "
+        for g in ("A", "B", "C", "D", "F")
+    )
+
+    def pct(n: int) -> str:
+        return f"{(100.0 * n / total):.1f}%" if total else "—"
+
+    grade_rows = "".join(
+        f"<tr><td><span class='pill grade-{g}'>{g}</span></td>"
+        f"<td>{summary.grade_counts.get(g, 0)}</td>"
+        f"<td class='muted'>{pct(summary.grade_counts.get(g, 0))}</td></tr>"
+        for g in ("A", "B", "C", "D", "F")
+    )
+
+    lifecycle_rows = "".join(
+        f"<tr><td><code>{html.escape(state)}</code></td>"
+        f"<td>{summary.lifecycle_counts.get(state, 0)}</td></tr>"
+        for state in ("active", "watch", "demote", "archive")
+    )
+
+    floor_rows = "".join(
+        f"<tr><td><code>{html.escape(reason)}</code></td><td>{count}</td></tr>"
+        for reason, count in sorted(
+            summary.hard_floor_counts.items(), key=lambda kv: (-kv[1], kv[0]),
+        )
+    ) or "<tr><td colspan='2' class='muted'>No hard floors active.</td></tr>"
+
+    category_rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(c['category'])}</td>"
+        f"<td>{c['count']}</td>"
+        f"<td class='muted'>{c['avg_score']:.3f}</td>"
+        f"<td><span class='pill grade-A'>{c['grade_mix'].get('A', 0)}</span></td>"
+        f"<td><span class='pill grade-B'>{c['grade_mix'].get('B', 0)}</span></td>"
+        f"<td><span class='pill grade-C'>{c['grade_mix'].get('C', 0)}</span></td>"
+        f"<td><span class='pill grade-D'>{c['grade_mix'].get('D', 0)}</span></td>"
+        f"<td><span class='pill grade-F'>{c['grade_mix'].get('F', 0)}</span></td>"
+        "</tr>"
+        for c in summary.category_breakdown
+    ) or "<tr><td colspan='8' class='muted'>No categorized entities.</td></tr>"
+
+    demotion_rows = "".join(
+        "<tr>"
+        f"<td><a href='/skill/{html.escape(c['slug'])}'><code>{html.escape(c['slug'])}</code></a></td>"
+        f"<td class='muted'>{html.escape(c['subject_type'])}</td>"
+        f"<td class='muted'>{html.escape(c['category'])}</td>"
+        f"<td><span class='pill grade-{html.escape(c['grade'])}'>{html.escape(c['grade'])}</span></td>"
+        f"<td class='muted'>{c['score']:.3f}</td>"
+        f"<td class='muted'>{html.escape(c['lifecycle_state'])}</td>"
+        f"<td>{c['consecutive_d_count']}</td>"
+        f"<td class='muted'>{html.escape(c.get('hard_floor') or '—')}</td>"
+        "</tr>"
+        for c in summary.low_quality_candidates
+    ) or "<tr><td colspan='8' class='muted'>No active D/F grade entries — corpus is healthy.</td></tr>"
+
+    archived_rows = "".join(
+        "<tr>"
+        f"<td><a href='/skill/{html.escape(a['slug'])}'><code>{html.escape(a['slug'])}</code></a></td>"
+        f"<td class='muted'>{html.escape(a['subject_type'])}</td>"
+        f"<td class='muted'>{html.escape(a['category'])}</td>"
+        f"<td class='muted'>{html.escape(a.get('last_grade') or '—')}</td>"
+        f"<td class='muted'>{html.escape(a.get('computed_at') or '—')}</td>"
+        "</tr>"
+        for a in summary.archived
+    ) or "<tr><td colspan='5' class='muted'>None.</td></tr>"
+
+    by_subject = summary.by_subject
+    subject_blurb = " · ".join(
+        f"{html.escape(s)}: {n}" for s, n in sorted(by_subject.items())
+    ) or "—"
+
+    body = (
+        "<h1>KPIs</h1>"
+        "<p class='muted'>Aggregated from "
+        "<code>~/.claude/skill-quality/*.json</code> (quality sidecars) "
+        "and <code>*.lifecycle.json</code> (tier sidecars). "
+        f"Generated {html.escape(summary.generated_at)}.</p>"
+        "<div class='card'>"
+        f"<strong>Total entities:</strong> {total} "
+        f"<span class='muted'>· {subject_blurb}</span>"
+        f"<div style='margin-top:0.5rem;'>{grade_pills}</div>"
+        "<div style='margin-top:0.4rem;'>"
+        "<a href='/api/kpi.json'>JSON</a> · "
+        "<a href='/skills'>skill cards →</a></div>"
+        "</div>"
+        "<div style='display:grid; grid-template-columns:1fr 1fr; gap:1rem;'>"
+        "<div class='card'><strong>Grade distribution</strong>"
+        "<table><tr><th>Grade</th><th>Count</th><th>Share</th></tr>"
+        + grade_rows + "</table></div>"
+        "<div class='card'><strong>Lifecycle tiers</strong>"
+        "<table><tr><th>State</th><th>Count</th></tr>"
+        + lifecycle_rows + "</table></div>"
+        "</div>"
+        "<div class='card'><strong>Hard floors active</strong>"
+        "<table><tr><th>Reason</th><th>Count</th></tr>"
+        + floor_rows + "</table></div>"
+        "<div class='card'><strong>By category</strong>"
+        "<table><tr><th>Category</th><th>Count</th><th>Avg score</th>"
+        "<th>A</th><th>B</th><th>C</th><th>D</th><th>F</th></tr>"
+        + category_rows + "</table></div>"
+        "<div class='card'><strong>Top demotion candidates</strong> "
+        "<span class='muted'>(active or watch · grade D/F · sorted by D-streak desc, score asc)</span>"
+        "<table><tr><th>Slug</th><th>Type</th><th>Category</th><th>Grade</th>"
+        "<th>Score</th><th>State</th><th>D-streak</th><th>Hard floor</th></tr>"
+        + demotion_rows + "</table></div>"
+        "<div class='card'><strong>Archived</strong>"
+        "<table><tr><th>Slug</th><th>Type</th><th>Category</th>"
+        "<th>Last grade</th><th>Computed at</th></tr>"
+        + archived_rows + "</table></div>"
+    )
+    return _layout("KPIs", body)
 
 
 def _render_events() -> str:
@@ -1099,15 +1476,24 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 self._send_html(_render_logs())
             elif path == "/graph":
                 self._send_html(_render_graph(qs.get("slug")))
+            elif path == "/wiki":
+                self._send_html(_render_wiki_index())
             elif path.startswith("/wiki/"):
                 slug = path.split("/wiki/", 1)[1]
                 self._send_html(_render_wiki_entity(slug))
+            elif path == "/kpi":
+                self._send_html(_render_kpi())
             elif path == "/events":
                 self._send_html(_render_events())
             elif path == "/api/sessions.json":
                 self._send_json(_summarize_sessions())
             elif path == "/api/manifest.json":
                 self._send_json(_read_manifest())
+            elif path == "/api/kpi.json":
+                summary = _kpi_summary()
+                self._send_json(summary.to_dict() if summary is not None else {
+                    "total": 0, "detail": "no sidecars yet",
+                })
             elif path.startswith("/api/skill/") and path.endswith(".json"):
                 slug = path[len("/api/skill/"): -len(".json")]
                 sidecar = _load_sidecar(slug)
