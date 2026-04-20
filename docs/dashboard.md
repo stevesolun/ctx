@@ -15,7 +15,97 @@ Zero Python dependencies added by the dashboard. Everything runs on
 stdlib `http.server`. Cytoscape.js is loaded from a CDN on the
 `/graph` route only.
 
+## Usage
+
+Every page in the dashboard has the same top nav, so getting around
+is `Home → jump anywhere`. The three feature tabs new in v0.6.4 are
+how you explore the ctx corpus without ever touching the CLI.
+
+### Browse the LLM wiki — `/wiki`
+
+The wiki tab is a filterable card grid of **every entity page** under
+`~/.claude/skill-wiki/entities/{skills,agents}/`. Each card shows:
+
+- the slug (click to open `/wiki/<slug>`)
+- the quality grade pill (A/B/C/D/F) when the entity has a sidecar,
+  otherwise a "skill" or "agent" type badge
+- the frontmatter `description`
+- up to 6 tags
+
+The **left sidebar** has a text search that matches across slug,
+description, and tags, plus skill/agent type checkboxes. Pair them to
+answer questions like "show me all grade-B agents related to
+testing" — check `agent`, type `testing` in the search box.
+
+Per-entity pages (`/wiki/<slug>`) render the full markdown body, the
+frontmatter table on the right, and a quality banner with deep links
+to `/skill/<slug>` (sidecar detail) and `/graph?slug=<slug>` (1-hop
+neighborhood).
+
+### Explore the knowledge graph — `/graph`
+
+The graph tab is a cytoscape-rendered view over the 2,253-node
+skill↔agent graph. When you arrive with no slug selected, the page
+shows:
+
+- a stats line with the total node + edge counts
+- a **Popular seed slugs** panel — the 18 highest-degree entities
+  rendered as clickable chips (skills in indigo, agents in amber).
+  Click a chip to explore that entity's 1-hop neighborhood
+- a search box — type any valid skill or agent slug and press
+  `explore` (or hit Enter)
+- the cytoscape canvas itself, which activates as soon as you pick a
+  seed
+
+Inside the cytoscape view, node colors mean:
+
+- **emerald** — the focus node you searched for
+- **indigo** — skills
+- **amber** — agents
+
+Edge width encodes the `weight` attribute (count of shared tags), so
+thicker lines = stronger semantic relationships. **Tap any node** to
+navigate to that entity's wiki page. The `agents only` toggle hides
+skill nodes, useful when you're looking for agent pairings.
+
+### Read the quality KPIs — `/kpi`
+
+The KPI tab is the browser equivalent of `python -m kpi_dashboard
+render`. It aggregates the quality + lifecycle sidecars under
+`~/.claude/skill-quality/` into a single page with six tables:
+
+1. **Header banner** — total entity count, subject breakdown, grade
+   pill counts, link to the raw `/api/kpi.json` payload, link back to
+   `/skills`.
+2. **Grade distribution** — A/B/C/D/F count and share.
+3. **Lifecycle tiers** — counts for `active`, `watch`, `demote`,
+   `archive`.
+4. **Hard floors active** — which override reasons are currently
+   pinning entities to F (`never_loaded_stale`, `intake_fail`, etc.)
+   and how many entities each one catches.
+5. **By category** — per-category count, average score, and full
+   A/B/C/D/F mix. This is the row most useful for "where are my D/F
+   skills concentrated?"
+6. **Top demotion candidates** — up to 25 active-or-watch entities
+   graded D/F, sorted by consecutive-D streak desc then raw score
+   asc. Click a slug to jump to its sidecar.
+7. **Archived** — slugs currently in the archive tier, with their
+   last-known grade.
+
+If the quality sidecar directory is empty (no scoring has happened
+yet), the page shows a helpful empty-state pointing at
+`ctx-skill-quality score --all`.
+
 ## Routes
+
+### Top navigation
+
+Every page shows the same nav bar. The nine tabs cover the observable
+surface of ctx:
+
+```
+Home · Loaded · Skills · Wiki · Graph · KPIs · Sessions · Logs · Live
+```
 
 ### HTML views
 
@@ -25,8 +115,11 @@ stdlib `http.server`. Cytoscape.js is loaded from a CDN on the
 | `/loaded` | **Currently-loaded skills** from `~/.claude/skill-manifest.json` with per-row **unload** buttons + a text-input to load a new slug |
 | `/skills` | Every sidecar as a filterable **card grid**: left sidebar (search by slug, grade checkboxes, skill/agent toggle, hide-floored), card shows grade pill + raw score + links to sidecar/wiki/graph |
 | `/skill/<slug>` | Full sidecar breakdown: four-signal score (telemetry · intake · graph · routing), hard-floor reason, computed_at timestamp, per-skill audit timeline |
+| `/wiki` | **Wiki entity index** — card grid of every page under `~/.claude/skill-wiki/entities/{skills,agents}/`. Left sidebar: text search (slug · description · tag), skill/agent checkboxes. Each card shows the grade pill (when a sidecar exists), description, and tag preview. Click to open the entity page |
 | `/wiki/<slug>` | Wiki entity page rendered: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views |
+| `/graph` | **Graph explorer landing page** — node/edge count header, a "Popular seed slugs" block (18 highest-degree entities as clickable chips), search box for any slug, and the cytoscape canvas. Clicking a seed chip navigates to `/graph?slug=<slug>` |
 | `/graph?slug=<slug>` | **Cytoscape-rendered** 1-hop neighborhood around the target slug. Node colors: emerald=focus, indigo=skill, amber=agent. Edge width maps to shared-tag count. Tap any node → navigate to that entity's wiki page. Toggle to filter agents only |
+| `/kpi` | **KPI dashboard** — total entity count with subject breakdown, grade distribution pills, two-column tables for grade counts and lifecycle tiers (active · watch · demote · archive), hard-floor reasons with counts, **By category** table (count · avg score · A/B/C/D/F mix per category), **Top demotion candidates** (active/watch entries graded D or F, sorted by consecutive-D streak desc then score asc), and the **Archived** list. Same shape as `python -m kpi_dashboard render` but HTML |
 | `/sessions` | Index of every session (audit + skill-events), first/last seen, counts of skills loaded/unloaded/agents/lifecycle transitions |
 | `/session/<id>` | Per-session audit timeline showing the load → score_updated → unload triad with timestamps |
 | `/logs` | Last 500 audit events in a filterable table (client-side filter on event name, subject, session id) |
@@ -40,6 +133,7 @@ stdlib `http.server`. Cytoscape.js is loaded from a CDN on the
 | `GET /api/manifest.json` | Raw `skill-manifest.json` passthrough |
 | `GET /api/skill/<slug>.json` | Raw sidecar for one slug |
 | `GET /api/graph/<slug>.json?hops=1&limit=40` | Cytoscape-shaped `{nodes, edges, center}`; `hops` ∈ [1, 3], `limit` ∈ [5, 150] |
+| `GET /api/kpi.json` | `DashboardSummary` passthrough — `{total, by_subject, grade_counts, lifecycle_counts, category_breakdown, hard_floor_counts, low_quality_candidates, archived, generated_at}`. Returns `{total: 0, detail: "no sidecars yet"}` when the quality directory is empty |
 | `GET /api/events.stream` | Server-sent events tail of `~/.claude/ctx-audit.jsonl` |
 
 ### Mutation endpoints
