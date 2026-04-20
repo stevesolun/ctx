@@ -16,6 +16,7 @@ __all__ = [
     "validate_skill_name",
     "parse_frontmatter",
     "parse_frontmatter_and_body",
+    "get_field",
 ]
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)

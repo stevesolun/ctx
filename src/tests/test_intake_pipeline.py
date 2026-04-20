@@ -270,8 +270,10 @@ class TestRoundTrip:
         text_a = compose_corpus_text(md_a)
         text_b = compose_corpus_text(md_b)
 
-        vec_a = np.zeros(8, dtype=np.float32); vec_a[0] = 1.0
-        vec_b = np.zeros(8, dtype=np.float32); vec_b[7] = 1.0  # orthogonal
+        vec_a = np.zeros(8, dtype=np.float32)
+        vec_a[0] = 1.0
+        vec_b = np.zeros(8, dtype=np.float32)
+        vec_b[7] = 1.0  # orthogonal
 
         reset_intake_pipeline.arrange(text_a, vec_a)
         reset_intake_pipeline.arrange(text_b, vec_b)
@@ -294,7 +296,8 @@ class TestSubjectTypeIsolation:
         from intake_gate import compose_corpus_text
         md = _valid_md("shared", "shared description body")
         text = compose_corpus_text(md)
-        vec = np.zeros(8, dtype=np.float32); vec[0] = 1.0
+        vec = np.zeros(8, dtype=np.float32)
+        vec[0] = 1.0
         reset_intake_pipeline.arrange(text, vec)
 
         # Record under skills.
