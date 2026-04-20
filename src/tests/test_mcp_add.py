@@ -279,6 +279,64 @@ class TestAddMcpIntakeRejection:
 # ---------------------------------------------------------------------------
 
 
+class TestCorpusTextStructure:
+    """Regression: _build_corpus_text must produce SKILL.md-shaped markdown.
+
+    The intake gate's structural check (intake_gate._check_structure)
+    rejects raw_md without YAML frontmatter, name+description fields,
+    and H1+H2 in the body. Real-wiki ingest uncovered that the original
+    plain-text corpus blob was rejected with FRONTMATTER_MISSING. These
+    tests pin the SKILL.md shape so the regression cannot return.
+    """
+
+    def test_corpus_text_passes_structural_check(self) -> None:
+        from intake_gate import IntakeConfig, _check_structure, _parse_candidate
+        from mcp_add import _build_corpus_text
+
+        # Realistic-length description so the body clears the 120-char
+        # min_body_chars gate. Real MCP records from awesome-mcp /
+        # pulsemcp routinely have descriptions of this length or longer.
+        record = _make_record(
+            name="github-mcp",
+            description=(
+                "Repository management, file operations, and GitHub API "
+                "integration via the Model Context Protocol."
+            ),
+        )
+        text = _build_corpus_text(record)
+        parsed = _parse_candidate(text)
+
+        # All four structural checks pass: frontmatter present, name +
+        # description fields populated, H1 and H2 in body.
+        findings = _check_structure(parsed, IntakeConfig())
+        assert findings == [], f"unexpected structural failures: {findings}"
+
+    def test_corpus_text_has_frontmatter_with_required_fields(self) -> None:
+        from wiki_utils import parse_frontmatter_and_body
+        from mcp_add import _build_corpus_text
+
+        record = _make_record(name="github-mcp")
+        fm, body = parse_frontmatter_and_body(_build_corpus_text(record))
+        assert fm.get("name") == "github-mcp"
+        assert fm.get("description")
+        assert "# " in body  # H1
+        assert "## " in body  # H2
+
+    def test_short_description_correctly_rejected_by_intake(self) -> None:
+        # Documents the inverse: very short descriptions trip
+        # BODY_TOO_SHORT, which is the intake gate working as intended.
+        # MCPs from sources with bare-bones metadata will be flagged.
+        from intake_gate import IntakeConfig, _check_structure, _parse_candidate
+        from mcp_add import _build_corpus_text
+
+        record = _make_record(name="bare", description="too short")
+        text = _build_corpus_text(record)
+        parsed = _parse_candidate(text)
+        findings = _check_structure(parsed, IntakeConfig())
+        codes = {f.code for f in findings}
+        assert "BODY_TOO_SHORT" in codes
+
+
 class TestAddMcpNumericSharding:
     def test_numeric_slug_lands_in_0_9_directory(
         self, patched_mcp_add: Any, wiki_dir: Path

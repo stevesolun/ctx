@@ -45,15 +45,37 @@ _MCP_ENTITY_SUBDIR = "entities/mcp-servers"
 
 
 def _build_corpus_text(record: McpRecord) -> str:
-    """Build the text blob passed to the intake gate and embedding store."""
-    parts = [record.description, ""]
-    if record.tags:
-        parts.append(" ".join(record.tags))
-    if record.transports:
-        parts.append(" ".join(record.transports))
-    if record.sources:
-        parts.append(" ".join(record.sources))
-    return "\n\n".join(filter(None, parts))
+    """Build a SKILL.md-shaped corpus blob for the intake gate + embedding.
+
+    The intake gate's structural check expects YAML frontmatter with
+    ``name`` + ``description`` plus an H1 and H2 in the body — the
+    same shape skills and agents present. We synthesize a minimal
+    page from the McpRecord so the same gate that polices skills and
+    agents also polices MCPs without the gate needing per-type logic.
+
+    The synthesized text is used only for intake (gate + embedding
+    cache); the actual entity page that lands on disk is the richer
+    output of ``generate_mcp_page``.
+    """
+    tags_line = " ".join(record.tags) if record.tags else "none"
+    transports_line = " ".join(record.transports) if record.transports else "unknown"
+    sources_line = " ".join(record.sources) if record.sources else "none"
+
+    return (
+        "---\n"
+        f"name: {record.slug}\n"
+        f"description: {record.description}\n"
+        "---\n\n"
+        f"# {record.name}\n\n"
+        "## Overview\n\n"
+        f"{record.description}\n\n"
+        "## Tags\n\n"
+        f"{tags_line}\n\n"
+        "## Transports\n\n"
+        f"{transports_line}\n\n"
+        "## Sources\n\n"
+        f"{sources_line}\n"
+    )
 
 
 def _merge_sources(existing_fm: dict[str, Any], new_sources: tuple[str, ...]) -> list[str]:
