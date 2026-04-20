@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 mcp_sources/base.py -- Shared primitives for MCP catalog source modules.
 

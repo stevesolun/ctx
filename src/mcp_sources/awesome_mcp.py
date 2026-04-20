@@ -14,28 +14,14 @@ Language is inferred from emoji annotation in the entry line.
 
 from __future__ import annotations
 
+import logging
 import re
-import sys
 from collections.abc import Iterator
 from datetime import date
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    pass
+from mcp_sources.base import Source, fetch_text, read_cache, write_cache
 
-try:
-    from mcp_sources.base import Source, fetch_text, read_cache, write_cache
-except ImportError:  # pragma: no cover — satisfied at runtime by the Foundation engineer
-    Source = object  # type: ignore[misc,assignment]
-
-    def fetch_text(url: str) -> str:  # type: ignore[misc]
-        raise NotImplementedError("base.py not yet present")
-
-    def read_cache(source: str, basename: str) -> str | None:  # type: ignore[misc]
-        return None
-
-    def write_cache(source: str, basename: str, text: str) -> None:  # type: ignore[misc]
-        pass
+_logger = logging.getLogger(__name__)
 
 
 URL = "https://raw.githubusercontent.com/punkpeye/awesome-mcp-servers/main/README.md"
@@ -180,10 +166,7 @@ def _parse_readme(text: str) -> list[dict]:  # noqa: C901 — complexity justifi
         if not links:
             # No markdown link at all — skip (section description, back-to-top, etc.)
             skipped += 1
-            print(
-                f"[awesome-mcp] skip (no link): {entry_body[:80]!r}",
-                file=sys.stderr,
-            )
+            _logger.debug("skip (no link): %r", entry_body[:80])
             continue
 
         # First link is the primary entry link
@@ -191,10 +174,7 @@ def _parse_readme(text: str) -> list[dict]:  # noqa: C901 — complexity justifi
         name = name.strip()
         if not name:
             skipped += 1
-            print(
-                f"[awesome-mcp] skip (empty name): {entry_body[:80]!r}",
-                file=sys.stderr,
-            )
+            _logger.debug("skip (empty name): %r", entry_body[:80])
             continue
 
         # Classify URL
@@ -243,10 +223,7 @@ def _parse_readme(text: str) -> list[dict]:  # noqa: C901 — complexity justifi
 
         records.append(record)
 
-    print(
-        f"[awesome-mcp] parsed {len(records)} entries, skipped {skipped}",
-        file=sys.stderr,
-    )
+    _logger.info("parsed %d entries, skipped %d", len(records), skipped)
     return records
 
 

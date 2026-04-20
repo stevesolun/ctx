@@ -27,14 +27,6 @@ import sys
 from typing import Iterator
 
 from mcp_sources import SOURCES
-from mcp_sources.base import Source
-
-
-def _iter_records(
-    source: Source, *, limit: int | None, refresh: bool
-) -> Iterator[dict]:
-    """Delegate to *source*.fetch so per-source errors surface uniformly."""
-    yield from source.fetch(limit=limit, refresh=refresh)
 
 
 def _emit(records: Iterator[dict]) -> int:
@@ -66,7 +58,7 @@ def _run_one(
         return 0, 1
 
     try:
-        emitted = _emit(_iter_records(source, limit=limit, refresh=refresh))
+        emitted = _emit(source.fetch(limit=limit, refresh=refresh))
     except Exception as exc:  # noqa: BLE001 — dispatcher must not leak tracebacks to pipes
         print(f"Error: source {source_name!r} failed: {exc}", file=sys.stderr)
         return 0, 1

@@ -3,6 +3,46 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — MCP Phase 2.5 — reviewer cleanup
+
+Rolls up the deferred python-reviewer + security-reviewer findings
+from Phase 2a/2b/2b.5 that didn't block merge but were worth a
+focused cleanup pass.
+
+### Changed
+
+- **`mcp_sources.awesome_mcp`**: replaced two `print(..., file=sys.stderr)`
+  diagnostic calls with `logging.getLogger(__name__)` calls (per house
+  rule: library code must not print). Removed the dead
+  `if TYPE_CHECKING: pass` block and the dead `try/except ImportError`
+  fallback that was needed only during the parallel-write Phase 2a.
+- **`mcp_fetch.py`**: inlined the one-line `_iter_records` wrapper —
+  it added no error handling beyond the existing `except` block in
+  `_run_one`. Removed the now-unused `Source` import.
+- **`mcp_sources/base.py`**: removed the `#!/usr/bin/env python3`
+  shebang. `base.py` is a library, not an entry point — the shebang
+  was a leftover from the Foundation Engineer's template.
+
+### Deferred (still pending)
+
+- `_fs_utils.atomic_write_text` `chmod 0o600` (security MEDIUM): touches
+  a shared utility used by 14+ modules; warrants its own focused
+  commit with broader testing rather than rolling into this cleanup.
+- `_parse_readme` lazy-yield refactor (Python LOW): current 1.2 MB
+  peak for the awesome-mcp README is fine.
+- `@dataclass(frozen=True)` for Source classes (Python LOW): style
+  only, no behavior change.
+- TypedDict for JSON shapes in old pulsemcp.py: the API mode that
+  used those shapes was removed in 2b.5.
+
+### Verification
+
+- 1535 passed, 2 skipped (no regressions vs. Phase 2b.5)
+- ruff + mypy clean on all touched files
+- Live `ctx-mcp-fetch --source awesome-mcp --limit 2` and
+  `ctx-mcp-fetch --source pulsemcp --limit 2` both produce valid
+  JSONL with progress emitted to stderr (no longer pollutes stdout)
+
 ## [Unreleased] — MCP Phase 2b.5 — pulsemcp switched to public HTML scraping
 
 The pulsemcp.com Sub-Registry API requires per-account credentials
