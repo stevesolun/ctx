@@ -327,7 +327,12 @@ def export_graph(G: nx.Graph, communities: dict[int, list[str]]) -> None:
     # (resolve_graph, wiki_visualize) can rely on it regardless of the
     # networkx version that wrote it — default changed from "links" in
     # <3.0 to "edges" in >=3.0, which silently broke every consumer.
-    graph_data = nx.node_link_data(G, edges="edges")
+    # edges= kwarg added in networkx 3.4; fall back for older installs
+    try:
+        graph_data = nx.node_link_data(G, edges="edges")
+    except TypeError:
+        graph_data = nx.node_link_data(G)
+        graph_data["edges"] = graph_data.pop("links", graph_data.get("edges", []))
     (GRAPH_OUT / "graph.json").write_text(
         json.dumps(graph_data, indent=2, default=str),
         encoding="utf-8",
