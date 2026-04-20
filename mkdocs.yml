@@ -113,9 +113,3 @@ nav:
       - Memory anchoring: memory-anchor.md
       - Skill lifecycle & dashboard: skill-lifecycle-and-dashboard.md
       - Skill-quality install: skill-quality-install.md
-  - Playbooks:
-      - Real-world end-to-end: playbook-real-world.md
-      - Live load/unload verification: playbook-live-load-unload.md
-      - Random load + unload cycle: playbook-random-load-unload.md
-  - Analysis:
-      - LLM-Wiki-v2 gist review: llm-wiki-v2-analysis.md
