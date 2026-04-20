@@ -1,311 +1,207 @@
-"""src/mcp_sources/pulsemcp.py -- Source for pulsemcp.com Sub-Registry API.
+"""src/mcp_sources/pulsemcp.py -- Source for pulsemcp.com (HTML scraping mode).
 
-Cursor-paginated JSON API. Requires PULSEMCP_API_KEY and PULSEMCP_TENANT_ID
-environment variables.
+Iterates the public listing pages at https://www.pulsemcp.com/servers
+?page=N. Stdlib only (html.parser). No credentials required — the
+authenticated JSON API at /api/v0.1 is documented but gated behind
+manual approval; scraping the public pages is the only path users
+without a partnership API key can take.
 
-Rate limits: 200/min, 5000/hr, 10000/day. On 429 this module raises
-immediately rather than sleeping — Phase 6 will add retry logic.
+Each listing page returns 42 server cards. Total ~12,975 servers
+across ~310 pages as of v0.6.5. Detail-page enrichment (github_url,
+language, transports) is deferred to Phase 6 — Phase 2b.5 ships only
+the listing-card data: slug (from URL), name (from h3), creator,
+description, classification (official / community / reference).
+
+The HTML structure is content-addressed via ``data-test-id="mcp-server-card-<slug>"``
+attributes which gives us a stable card boundary without depending on
+class names that may shift with a frontend redesign.
 """
 
 from __future__ import annotations
 
-import json
-import os
-import sys
+import re
 from collections.abc import Iterator
 from datetime import date
-from urllib.error import HTTPError
-from urllib.parse import quote as _url_quote
+from html.parser import HTMLParser
 
 from mcp_sources.base import Source, fetch_text, read_cache, write_cache
 
 __all__ = ["SOURCE"]
 
-API_BASE = "https://www.pulsemcp.com/api/v0.1"
-_DEFAULT_PAGE_SIZE = 100  # maximum allowed by the pulsemcp API
+LISTING_BASE = "https://www.pulsemcp.com/servers"
+_TOTAL_PAGES_FALLBACK = 310  # As of 2026-04: 12,975 servers / 42 per page = 310
 
-# Mapping from package registry name to canonical language tag.
-_REGISTRY_LANG: dict[str, str] = {
-    "npm": "typescript",
-    "pypi": "python",
-    "cargo": "rust",
-    "go": "go",
-    "rubygems": "ruby",
-    "nuget": "csharp",
-    "maven": "java",
-    "packagist": "php",
-}
+# Card boundary marker — content-addressed so a frontend restyle of
+# class names doesn't silently break the parser.
+_CARD_TEST_ID_RE = re.compile(r'data-test-id="mcp-server-card-([a-z0-9][a-z0-9_-]+)"')
 
 
-# ── Credential helpers ────────────────────────────────────────────────────────
+class _CardTextExtractor(HTMLParser):
+    """Stream-extract text content per tag inside one server card.
 
-
-class _MissingPulsemcpCredentialsError(RuntimeError):
-    """Raised when PULSEMCP_API_KEY or PULSEMCP_TENANT_ID are unset."""
-
-
-class _InvalidPulsemcpCredentialError(ValueError):
-    """Raised when a credential value contains characters that would inject
-    HTTP headers (CR, LF, or colon).
-
-    ``urllib.request.Request`` does not sanitize header values on Python
-    3.11/3.12/3.13 — a credential value containing ``\\r\\nX-Other: ...``
-    would inject an arbitrary header on every request. We reject such
-    values up front rather than rely on the transport.
+    Builds an ordered list of ``(tag, attrs, text)`` triples for every
+    leaf text node, plus a separate flat string of all text for fallback
+    matching. We keep both so the record-mapping step can prefer
+    structural matches (h3 → name, gray-500 p → creator) while degrading
+    gracefully when the markup shifts.
     """
 
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.items: list[tuple[str, dict[str, str], str]] = []
+        self._stack: list[tuple[str, dict[str, str]]] = []
+        self._buffer: list[str] = []
 
-def _credentials() -> dict[str, str]:
-    """Return auth headers built from environment variables.
+    def _flush(self) -> None:
+        if not self._stack:
+            return
+        text = "".join(self._buffer).strip()
+        if text:
+            tag, attrs = self._stack[-1]
+            self.items.append((tag, attrs, text))
+        self._buffer = []
 
-    Both ``PULSEMCP_API_KEY`` and ``PULSEMCP_TENANT_ID`` must be set.
-    Obtain them from https://www.pulsemcp.com/settings/api-keys.
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._flush()
+        attrs_dict = {k: (v or "") for k, v in attrs}
+        self._stack.append((tag, attrs_dict))
 
-    Values are validated against header-injection: a value containing
-    CR, LF, or colon characters would be passed verbatim into the HTTP
-    request line by ``urllib`` and could be used to inject arbitrary
-    headers. We refuse such values explicitly.
+    def handle_endtag(self, tag: str) -> None:
+        self._flush()
+        if self._stack and self._stack[-1][0] == tag:
+            self._stack.pop()
 
-    Raises:
-        _MissingPulsemcpCredentialsError: Either variable is absent or empty.
-        _InvalidPulsemcpCredentialError: A value contains CR/LF/colon.
+    def handle_data(self, data: str) -> None:
+        self._buffer.append(data)
+
+
+def _split_cards(html: str) -> list[str]:
+    """Return the substring slice for each card found in *html*.
+
+    Uses ``data-test-id="mcp-server-card-<slug>"`` as the anchor and
+    walks forward to the next card anchor (or end of input) to bound
+    the slice. Avoids html.parser overhead for the page-level split.
     """
-    api_key = os.environ.get("PULSEMCP_API_KEY", "").strip()
-    tenant_id = os.environ.get("PULSEMCP_TENANT_ID", "").strip()
-
-    missing = []
-    if not api_key:
-        missing.append("PULSEMCP_API_KEY")
-    if not tenant_id:
-        missing.append("PULSEMCP_TENANT_ID")
-
-    if missing:
-        raise _MissingPulsemcpCredentialsError(
-            f"Missing required environment variable(s): {', '.join(missing)}. "
-            "Obtain API credentials from https://www.pulsemcp.com/settings/api-keys "
-            "and set them before running the pulsemcp source."
-        )
-
-    # Header injection guard. Values are never echoed in the error
-    # message — an attacker who can set the env can already see them,
-    # but tracebacks routed elsewhere (Sentry, CI logs) should not.
-    for label, value in (
-        ("PULSEMCP_API_KEY", api_key),
-        ("PULSEMCP_TENANT_ID", tenant_id),
-    ):
-        if any(ch in value for ch in ("\r", "\n", ":")):
-            raise _InvalidPulsemcpCredentialError(
-                f"{label} contains CR, LF, or colon — refused to prevent "
-                "HTTP header injection"
-            )
-
-    return {
-        "X-API-Key": api_key,
-        "X-Tenant-ID": tenant_id,
-    }
-
-
-# ── Record mapping ────────────────────────────────────────────────────────────
-
-
-def _infer_language(packages: object) -> str | None:
-    """Infer language from the first recognized package registry name."""
-    if not isinstance(packages, list):
-        return None
-    for pkg in packages:
-        if not isinstance(pkg, dict):
-            continue
-        registry = pkg.get("registry_name")
-        if isinstance(registry, str) and registry.lower() in _REGISTRY_LANG:
-            return _REGISTRY_LANG[registry.lower()]
-    return None
-
-
-def _infer_transports(packages: object) -> list[str]:
-    """Extract transport values from ``--transport`` package arguments."""
-    if not isinstance(packages, list):
+    anchors = list(_CARD_TEST_ID_RE.finditer(html))
+    if not anchors:
         return []
-    found: list[str] = []
-    for pkg in packages:
-        if not isinstance(pkg, dict):
-            continue
-        args = pkg.get("package_arguments")
-        if not isinstance(args, list):
-            continue
-        # Arguments are often dicts with "name" / "value" keys, or plain strings.
-        it = iter(args)
-        for arg in it:
-            if isinstance(arg, dict):
-                name = arg.get("name", "")
-                value = arg.get("value")
-                if name == "--transport" and isinstance(value, str) and value:
-                    found.append(value)
-            elif isinstance(arg, str) and arg == "--transport":
-                # Positional-style: next element is the value
-                try:
-                    nxt = next(it)
-                    if isinstance(nxt, str) and nxt:
-                        found.append(nxt)
-                except StopIteration:
-                    pass
-    return found
+    slices = []
+    for i, m in enumerate(anchors):
+        # Walk back to the opening <a href="/servers/..." that wraps
+        # this card. The data-test-id sits on a <div> inside the <a>,
+        # so we step back to the nearest <a tag start.
+        end = anchors[i + 1].start() if i + 1 < len(anchors) else len(html)
+        # Find nearest preceding "<a" — bounded scan.
+        scan_from = max(0, m.start() - 500)
+        a_open = html.rfind('<a ', scan_from, m.start())
+        start = a_open if a_open >= 0 else m.start()
+        slices.append(html[start:end])
+    return slices
 
 
-def _to_record(server_obj: dict, meta: dict) -> dict | None:
-    """Map one pulsemcp API entry to a McpRecord-compatible raw dict.
+def _slug_from_card(card_html: str) -> str | None:
+    """Extract the slug from the card's data-test-id."""
+    m = _CARD_TEST_ID_RE.search(card_html)
+    return m.group(1) if m else None
 
-    Returns ``None`` when the entry is too malformed to be useful (missing
-    name and no fallback). Logs a one-line warning to stderr per skipped
-    entry so the caller can diagnose upstream data quality without crashing.
 
-    Args:
-        server_obj: The ``server`` sub-object from one pulsemcp list entry.
-        meta: The ``_meta`` sub-object from the same entry.
+def _to_record(card_html: str) -> dict | None:
+    """Map one server card's HTML slice to a McpRecord-compatible dict.
 
-    Returns:
-        Raw dict accepted by ``McpRecord.from_dict``, or ``None``.
+    Returns ``None`` when the card is too malformed to use (no slug
+    or no name). Listing-page data is sparse: we get slug, name,
+    creator, description, classification. github_url, language, and
+    transports remain unset until Phase 6 fetches detail pages.
     """
-    name: str | None = server_obj.get("name")
-    if not isinstance(name, str) or not name.strip():
-        # Don't echo the full server_obj — upstream payloads may grow to
-        # contain arbitrary data we don't want surfacing in stderr/logs.
-        # The name field's absence is itself the diagnostic.
-        print(
-            "[pulsemcp] skip: entry missing required 'name' field",
-            file=sys.stderr,
-        )
+    slug = _slug_from_card(card_html)
+    if not slug:
         return None
 
-    description: str | None = server_obj.get("description")
+    extractor = _CardTextExtractor()
+    try:
+        extractor.feed(card_html)
+    except Exception:  # noqa: BLE001 — html.parser may choke on malformed input
+        return None
 
-    # Classify repository URL
-    github_url: str | None = None
-    homepage_url: str | None = None
-    repo = server_obj.get("repository")
-    if isinstance(repo, dict):
-        url = repo.get("url")
-        source = repo.get("source", "")
-        if isinstance(url, str) and url.strip():
-            if isinstance(source, str) and source.lower() == "github":
-                github_url = url.strip()
-            else:
-                homepage_url = url.strip()
+    name: str | None = None
+    creator: str | None = None
+    description: str | None = None
+    classification: str | None = None
+    saw_classification_label = False
 
-    # Timestamps and official flag from _meta
-    last_commit_at: str | None = None
-    tags: list[str] = []
+    for tag, attrs, text in extractor.items:
+        cls = attrs.get("class", "")
+        if name is None and tag == "h3":
+            name = text
+            continue
+        if creator is None and tag == "p" and "text-gray-500" in cls:
+            creator = text
+            continue
+        if description is None and tag == "p" and "text-pulse-black" in cls and "leading-relaxed" in cls:
+            description = text
+            continue
+        if tag == "p" and "Classification" in text:
+            saw_classification_label = True
+            continue
+        if saw_classification_label and tag == "p" and classification is None:
+            # Next text-bearing <p> after the label carries the value.
+            classification = text.strip().lower()
+            saw_classification_label = False
 
-    server_meta = meta.get("com.pulsemcp/server")
-    if isinstance(server_meta, dict) and server_meta.get("isOfficial") is True:
-        tags.append("official")
-
-    version_meta = meta.get("com.pulsemcp/server-version")
-    if isinstance(version_meta, dict):
-        published = version_meta.get("publishedAt")
-        if isinstance(published, str) and published.strip():
-            last_commit_at = published.strip()
-
-    packages = server_obj.get("packages")
-    language = _infer_language(packages)
-    transports = _infer_transports(packages)
+    if not name:
+        # Fall back to the slug itself; better than dropping the card.
+        name = slug.replace("-", " ").title()
 
     record: dict = {
-        "name": name.strip(),
+        "name": name,
         "sources": ["pulsemcp"],
-        "tags": tags if tags else ["uncategorized"],
+        "homepage_url": f"{LISTING_BASE}/{slug}",
     }
     if description:
         record["description"] = description
-    if github_url:
-        record["github_url"] = github_url
-    if homepage_url:
-        record["homepage_url"] = homepage_url
-    if last_commit_at:
-        record["last_commit_at"] = last_commit_at
-    if language:
-        record["language"] = language
-    if transports:
-        record["transports"] = transports
-
+    if creator:
+        record["author"] = creator
+    tags: list[str] = []
+    if classification == "official":
+        tags.append("official")
+    elif classification == "community":
+        tags.append("community")
+    elif classification == "reference":
+        tags.append("reference")
+    if tags:
+        record["tags"] = tags
     return record
 
 
-# ── Pagination ────────────────────────────────────────────────────────────────
+def _parse_listing(html: str) -> list[dict]:
+    """Parse one listing page's HTML into a list of raw record dicts.
 
-
-def _build_url(cursor: str | None, page_size: int) -> str:
-    """Build a paginated API URL.
-
-    The opaque cursor from upstream is URL-encoded with ``safe=''`` to
-    prevent query-string smuggling: a cursor containing ``&`` would
-    otherwise inject extra parameters, and ``#`` would silently truncate
-    the URL at the fragment boundary.
+    Pure function — no I/O. Tested against a recorded fixture excerpt.
+    Skipped cards (no slug) are dropped silently; partial cards (no
+    name) fall back to the slug-derived name rather than being dropped.
     """
-    url = f"{API_BASE}/servers?limit={page_size}"
-    if cursor:
-        url += f"&cursor={_url_quote(cursor, safe='')}"
-    return url
+    out: list[dict] = []
+    for card_html in _split_cards(html):
+        record = _to_record(card_html)
+        if record is not None:
+            out.append(record)
+    return out
 
 
-def _fetch_page(
-    cursor: str | None,
-    *,
-    page_size: int,
-    page_index: int,
-    auth_headers: dict[str, str],
-    refresh: bool,
-) -> dict:
-    """Fetch one page from the pulsemcp API, with caching.
-
-    Cache key: ``raw/marketplace-dumps/pulsemcp/<date>/page-<n>.json``.
-    The cursor is not stable across days, so the date-scoped directory
-    naturally expires stale cursors without manual cleanup.
-
-    Args:
-        cursor: Opaque pagination cursor, or ``None`` for the first page.
-        page_size: Number of records to request per page.
-        page_index: Zero-based page counter (used for the cache filename).
-        auth_headers: Dict with ``X-API-Key`` and ``X-Tenant-ID``.
-        refresh: When ``True``, skip cache and re-fetch from network.
-
-    Returns:
-        Parsed JSON dict from the API response.
-
-    Raises:
-        RuntimeError: API returned HTTP 429 (rate limited).
-        urllib.error.HTTPError: Any other non-2xx response.
-    """
+def _fetch_page(page: int, *, refresh: bool) -> str:
+    """Fetch one listing page's HTML, with date-keyed caching."""
     today = date.today().isoformat()
-    # Nest under a date subdirectory. cache_path only accepts a plain basename
-    # (no path separators), so we encode the date into the basename itself.
-    basename = f"{today}--page-{page_index:04d}.json"
+    basename = f"{today}--page-{page:04d}.html"
     source_name = "pulsemcp"
 
-    cached: str | None = None
-    if not refresh:
-        cached = read_cache(source_name, basename)
-
+    cached = None if refresh else read_cache(source_name, basename)
     if cached is not None:
-        return json.loads(cached)  # type: ignore[no-any-return]
+        return cached
 
-    url = _build_url(cursor, page_size)
-    try:
-        raw_text = fetch_text(url, headers=auth_headers)
-    except HTTPError as exc:
-        if exc.code == 429:
-            retry_after = exc.headers.get("Retry-After", "unknown") if exc.headers else "unknown"
-            raise RuntimeError(
-                f"pulsemcp API rate-limited (HTTP 429). "
-                f"Retry-After: {retry_after}. "
-                f"Limits: 200/min, 5000/hr, 10000/day."
-            ) from exc
-        raise
-
-    write_cache(source_name, basename, raw_text)
-    return json.loads(raw_text)  # type: ignore[no-any-return]
-
-
-# ── Source class ──────────────────────────────────────────────────────────────
+    url = f"{LISTING_BASE}?page={page}"
+    text = fetch_text(url)
+    write_cache(source_name, basename, text)
+    return text
 
 
 class _PulsemcpSource:
@@ -313,84 +209,35 @@ class _PulsemcpSource:
     homepage = "https://www.pulsemcp.com/servers"
 
     def fetch(self, *, limit: int | None = None, refresh: bool = False) -> Iterator[dict]:
-        """Walk pulsemcp pages until exhausted or *limit* records yielded.
+        """Walk pulsemcp listing pages until exhausted or *limit* reached.
 
-        Credentials are read from ``PULSEMCP_API_KEY`` and
-        ``PULSEMCP_TENANT_ID`` environment variables; a descriptive error
-        is raised if either is absent.
+        Each page yields ~42 records. Stops early when:
+          - *limit* records have been yielded
+          - A page returns 0 cards (means we ran past the end)
+          - We hit page _TOTAL_PAGES_FALLBACK (hard ceiling against
+            runaway loops if the parser misses the empty signal)
 
         Args:
-            limit: Maximum records to yield. ``None`` yields all available.
+            limit: Maximum records to yield. ``None`` yields everything.
             refresh: Bypass the local raw cache and re-fetch from network.
 
         Yields:
             Raw dicts suitable for ``McpRecord.from_dict()``.
-
-        Raises:
-            _MissingPulsemcpCredentialsError: Env vars not set.
-            RuntimeError: HTTP 429 rate-limit hit.
-            urllib.error.HTTPError: Other non-2xx API response.
         """
-        auth_headers = _credentials()  # raises early if env vars missing
-
         yielded = 0
-        cursor: str | None = None
-        page_index = 0
-
-        while True:
+        for page in range(1, _TOTAL_PAGES_FALLBACK + 1):
             if limit is not None and yielded >= limit:
-                break
-
-            page = _fetch_page(
-                cursor,
-                page_size=_DEFAULT_PAGE_SIZE,
-                page_index=page_index,
-                auth_headers=auth_headers,
-                refresh=refresh,
-            )
-
-            servers = page.get("servers", [])
-            if not isinstance(servers, list):
-                print(
-                    "[pulsemcp] unexpected 'servers' shape on page "
-                    f"{page_index}; stopping.",
-                    file=sys.stderr,
-                )
-                break
-
-            for entry in servers:
+                return
+            html = _fetch_page(page, refresh=refresh)
+            records = _parse_listing(html)
+            if not records:
+                # Past the last populated page.
+                return
+            for record in records:
                 if limit is not None and yielded >= limit:
                     return
-
-                if not isinstance(entry, dict):
-                    print(
-                        f"[pulsemcp] skip: non-dict entry on page {page_index}",
-                        file=sys.stderr,
-                    )
-                    continue
-
-                server_obj = entry.get("server", {})
-                meta = entry.get("_meta", {})
-                if not isinstance(server_obj, dict):
-                    server_obj = {}
-                if not isinstance(meta, dict):
-                    meta = {}
-
-                record = _to_record(server_obj, meta)
-                if record is None:
-                    continue
-
                 yield record
                 yielded += 1
-
-            # Advance cursor; stop when absent or empty
-            metadata = page.get("metadata", {})
-            next_cursor = metadata.get("nextCursor") if isinstance(metadata, dict) else None
-            if not next_cursor:
-                break
-
-            cursor = next_cursor
-            page_index += 1
 
 
 SOURCE: Source = _PulsemcpSource()

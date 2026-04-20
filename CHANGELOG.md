@@ -3,6 +3,66 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — MCP Phase 2b.5 — pulsemcp switched to public HTML scraping
+
+The pulsemcp.com Sub-Registry API requires per-account credentials
+that aren't broadly available. Phase 2b.5 swaps the auth-gated JSON
+client for a stdlib HTML scraper of the public listing pages
+(`https://www.pulsemcp.com/servers?page=N`), making the source
+usable by anyone without contacting PulseMCP for an API key.
+
+### Changed
+
+- **`mcp_sources.pulsemcp` rewritten** for HTML scraping mode. Walks
+  pages 1..310 (current total: ~12,975 servers / 42 per page = 310
+  pages). Cards are delineated by `data-test-id="mcp-server-card-<slug>"`
+  attributes — content-addressed so a frontend restyle of class names
+  doesn't silently break the parser. Per-card extraction uses
+  `html.parser.HTMLParser` (stdlib) for robustness against malformed
+  markup.
+- **Per-card data**: slug, name, creator (author), description,
+  classification (official / community / reference → tag). Detail-page
+  enrichment (github_url, language, transports) deferred to Phase 6.
+- **No credentials required**. The PULSEMCP_API_KEY / PULSEMCP_TENANT_ID
+  env vars are no longer read; the credential-injection guard, cursor
+  URL-encoding guard, and 429 handling all dropped along with the API
+  client. Attack surface for the source is now strictly the HTML
+  parser.
+
+### Removed
+
+- `src/tests/fixtures/pulsemcp_page1.json` and `pulsemcp_page2.json`
+  (API-mode fixtures). Replaced with `pulsemcp_listing_excerpt.html`
+  — a 3-card real-HTML snippet captured from page 1 of the live site.
+- `_credentials`, `_MissingPulsemcpCredentialsError`,
+  `_InvalidPulsemcpCredentialError`, `_build_url`,
+  `_to_record(server_obj, meta)` API-shape mapper. Replaced with
+  HTML-shape `_to_record(card_html)`, `_split_cards`, `_parse_listing`,
+  and `_CardTextExtractor`.
+
+### Tests
+
+- 20 new tests in `test_mcp_sources_pulsemcp.py` covering split,
+  parse, mapping, and pagination paths against the real-HTML fixture.
+- Total: **1,535 passed, 2 skipped** (was 1,546 → -11 net because
+  the 31 API-mode tests were swapped for 20 HTML tests; 0 regressions
+  in any unrelated suite).
+
+### Live verification
+
+```
+$ ctx-mcp-fetch --source pulsemcp --limit 5 | ctx-mcp-add --from-stdin
+[1/5] [added] playwright-browser-automation
+[2/5] [added] duckdb
+[3/5] [added] excel-file-manipulation
+[4/5] [added] office-word
+[5/5] [added] context7-documentation-database
+Done: 5 added, 0 merged, 0 rejected, 0 errors
+```
+
+Sharded paths verified: `entities/mcp-servers/{c,d,e,o,p}/<slug>.md`.
+Cleaned up before commit.
+
 ## [Unreleased] — MCP Phase 2b — pulsemcp source
 
 Adds the second catalog source: `www.pulsemcp.com` Sub-Registry API
