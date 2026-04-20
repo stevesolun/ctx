@@ -134,12 +134,19 @@ def add_mcp(
 
     Flow:
       1. Validate slug.
-      2. Run intake gate.
-      3. Compute target path: wiki/entities/mcp-servers/<first-letter>/<slug>.md
-      4. If target exists: read frontmatter, merge sources (dedup + sort),
-         keep longer description, rewrite page. is_new_page = False.
-         Otherwise: generate fresh page via generate_mcp_page(). is_new_page = True.
-      5. record_embedding (non-fatal).
+      2. Compute target path: wiki/entities/mcp-servers/<first-letter>/<slug>.md
+      3. If target exists -> SKIP intake gate, run merge directly. The
+         merge path is for known-good entities; running intake here would
+         flag the re-fetched record as DUPLICATE against its own existing
+         embedding (cosine 1.0 >= dup_threshold 0.93) and block source
+         merging from ever happening. Existence is the source of truth.
+      4. If target does NOT exist -> run intake gate, then write a new
+         entity page via generate_mcp_page(). Intake's similarity check
+         here is meaningful: it catches near-duplicates *between distinct
+         slugs* in the same source (e.g. two records that differ only in
+         creator-prefix capitalisation).
+      5. record_embedding (non-fatal). Only on first creation; re-merge
+         doesn't touch the cache because the existing vector is correct.
       6. update_index + append_log (only when is_new_page).
 
     Args:
@@ -152,29 +159,38 @@ def add_mcp(
     """
     validate_skill_name(record.slug)
 
-    corpus_text = _build_corpus_text(record)
-
-    decision = check_intake(corpus_text, "mcp-servers")
-    if not decision.allow:
-        raise IntakeRejected(decision)
-
     entity_rel = record.entity_relpath()  # e.g. "f/fetch-mcp.md"
     target_path = wiki_path / _MCP_ENTITY_SUBDIR / entity_rel
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     is_new_page: bool
     merged_sources: list[str]
+    decision = None  # Filled only on the new-record path; new entries
+                     # carry their intake findings forward into the log.
+    corpus_text = ""
 
     # Phase 1 of branching: compute the read-side state. No serialization
     # work happens here so dry-run cannot fail on a malformed existing
     # page — that's deferred to the write-gate below.
     if target_path.exists():
+        # Existing entity → straight to merge. No intake call: the gate
+        # would reject this as DUPLICATE against the cached embedding
+        # of the original ingest, blocking the source-merge that's the
+        # whole point of re-fetching. Phase 3b made this concrete.
         is_new_page = False
         existing_text = target_path.read_text(encoding="utf-8")
         existing_fm = _parse_frontmatter(existing_text)
         merged_sources = _merge_sources(existing_fm, record.sources)
         kept_description = _keep_longer_description(existing_fm, record)
     else:
+        # New entity → intake gate applies. A DUPLICATE finding here
+        # would mean a *different* slug has near-identical content,
+        # which is a real signal we want to surface.
+        corpus_text = _build_corpus_text(record)
+        decision = check_intake(corpus_text, "mcp-servers")
+        if not decision.allow:
+            raise IntakeRejected(decision)
+
         is_new_page = True
         existing_text = ""
         existing_fm = {}
@@ -197,22 +213,23 @@ def add_mcp(
 
         target_path.write_text(final_text, encoding="utf-8")
 
-        try:
-            record_embedding(
-                subject_id=record.slug,
-                raw_md=corpus_text,
-                subject_type="mcp-servers",
-            )
-        except Exception as exc:  # noqa: BLE001 — cache failure must not break catalog
-            print(
-                f"Warning: failed to record intake embedding for {record.slug}: {exc}",
-                file=sys.stderr,
-            )
-
-        # Index + log only on first creation. Source-merge re-harvests
-        # would otherwise produce one log line per existing record per
-        # batch run, blowing up log.md at scale.
+        # Embed + index + log only on first creation. Re-merging an
+        # existing entity does not invalidate its embedding (content
+        # is the same — sources are metadata, not corpus text), and
+        # logging every re-merge would blow up log.md at scale.
         if is_new_page:
+            try:
+                record_embedding(
+                    subject_id=record.slug,
+                    raw_md=corpus_text,
+                    subject_type="mcp-servers",
+                )
+            except Exception as exc:  # noqa: BLE001 — cache failure must not break catalog
+                print(
+                    f"Warning: failed to record intake embedding for {record.slug}: {exc}",
+                    file=sys.stderr,
+                )
+
             update_index(str(wiki_path), [record.slug], subject_type="mcp-servers")
 
             log_details = [
@@ -222,6 +239,10 @@ def add_mcp(
                 f"Tags: {', '.join(record.tags) if record.tags else 'none'}",
                 f"Transports: {', '.join(record.transports) if record.transports else 'unknown'}",
             ]
+            # ``decision`` is set whenever ``is_new_page`` is True (intake
+            # ran on the new-record path). The assert is a typing invariant,
+            # not a runtime guard.
+            assert decision is not None
             warnings = decision.warnings
             if warnings:
                 log_details.append(

@@ -275,6 +275,130 @@ class TestAddMcpIntakeRejection:
 
 
 # ---------------------------------------------------------------------------
+# Phase 3.5 regression: existence check bypasses intake on the merge path
+# ---------------------------------------------------------------------------
+
+
+class TestExistenceBypassesIntakeOnMerge:
+    """Regression: when target entity already exists, intake gate must
+    NOT run. The intake gate would flag the re-fetched record as
+    DUPLICATE against its own cached embedding (cosine 1.0 > 0.93
+    threshold) and block the source-merge path entirely.
+
+    This was discovered live in Phase 3b: re-running
+    ``ctx-mcp-fetch --source awesome-mcp --limit 5`` after a prior
+    N=1 ingest produced ``[1/5] [rejected] 1mcp-agent: DUPLICATE``
+    instead of the expected merge.
+    """
+
+    def test_intake_not_called_when_target_exists(
+        self, monkeypatch: pytest.MonkeyPatch, wiki_dir: Path
+    ) -> None:
+        import mcp_add  # noqa: PLC0415
+
+        # First write: intake should be called (allowed) and the file
+        # created. We use a counter so the second call's lack of intake
+        # invocation is observable.
+        intake_calls: list[str] = []
+
+        def _counting_intake(*args: Any, **_kwargs: Any) -> Any:
+            from intake_gate import IntakeDecision  # noqa: PLC0415
+            intake_calls.append("called")
+            return IntakeDecision(allow=True)
+
+        monkeypatch.setattr("mcp_add.check_intake", _counting_intake)
+        monkeypatch.setattr("mcp_add.record_embedding", _fake_record_embedding)
+        monkeypatch.setattr("mcp_add.update_index", lambda *a, **k: None)
+        monkeypatch.setattr("mcp_add.append_log", lambda *a, **k: None)
+
+        record = _make_record(name="merge-test-mcp")
+
+        # First ingest: new entity → intake runs.
+        mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert len(intake_calls) == 1, "first add must trigger intake"
+
+        # Second ingest of the same record: existing entity → intake
+        # MUST be skipped, otherwise the gate's DUPLICATE check would
+        # reject and the source-merge path becomes unreachable.
+        mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert len(intake_calls) == 1, (
+            "re-add must NOT trigger intake (was: "
+            f"{len(intake_calls)} calls; expected to stay at 1)"
+        )
+
+    def test_re_add_with_new_source_merges_without_intake(
+        self, monkeypatch: pytest.MonkeyPatch, wiki_dir: Path
+    ) -> None:
+        # Even if intake would reject as DUPLICATE, the merge path
+        # should run because the target file already exists.
+        import mcp_add  # noqa: PLC0415
+
+        # Allow first add, then reject everything afterwards. If the
+        # merge path correctly bypasses intake, the second add still
+        # succeeds.
+        call_count: list[int] = [0]
+
+        def _allow_then_reject(*args: Any, **_kwargs: Any) -> Any:
+            from intake_gate import IntakeDecision, IntakeFinding  # noqa: PLC0415
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return IntakeDecision(allow=True)
+            return IntakeDecision(
+                allow=False,
+                findings=(IntakeFinding(code="DUPLICATE", severity="fail",
+                                        message="cosine 1.0"),),
+            )
+
+        monkeypatch.setattr("mcp_add.check_intake", _allow_then_reject)
+        monkeypatch.setattr("mcp_add.record_embedding", _fake_record_embedding)
+        monkeypatch.setattr("mcp_add.update_index", lambda *a, **k: None)
+        monkeypatch.setattr("mcp_add.append_log", lambda *a, **k: None)
+
+        record_v1 = _make_record(name="cross-source-mcp", sources=["awesome-mcp"])
+        record_v2 = _make_record(name="cross-source-mcp", sources=["pulsemcp"])
+
+        # First add succeeds (new entity, intake allows).
+        result1 = mcp_add.add_mcp(record=record_v1, wiki_path=wiki_dir)
+        assert result1["is_new_page"] is True
+
+        # Second add MUST NOT raise IntakeRejected even though our
+        # mock intake would now reject. The merge path bypasses intake.
+        result2 = mcp_add.add_mcp(record=record_v2, wiki_path=wiki_dir)
+        assert result2["is_new_page"] is False
+        assert result2["merged_sources"] == ["awesome-mcp", "pulsemcp"]
+        # Intake was called exactly once (the first add); the second
+        # never reached the gate.
+        assert call_count[0] == 1
+
+    def test_record_embedding_not_called_on_merge(
+        self, monkeypatch: pytest.MonkeyPatch, wiki_dir: Path
+    ) -> None:
+        # Re-merging an existing entity must NOT re-embed (the existing
+        # vector is correct; re-embedding would be wasted I/O).
+        import mcp_add  # noqa: PLC0415
+
+        monkeypatch.setattr("mcp_add.check_intake", _fake_allow)
+        monkeypatch.setattr("mcp_add.update_index", lambda *a, **k: None)
+        monkeypatch.setattr("mcp_add.append_log", lambda *a, **k: None)
+
+        embed_calls: list[str] = []
+
+        def _counting_embed(**kwargs: Any) -> None:
+            embed_calls.append(kwargs.get("subject_id", "?"))
+
+        monkeypatch.setattr("mcp_add.record_embedding", _counting_embed)
+
+        record = _make_record(name="no-reembed-mcp")
+        mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert embed_calls == ["no-reembed-mcp"]
+
+        mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert embed_calls == ["no-reembed-mcp"], (
+            "embedding must not be re-recorded on merge"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Numeric slug sharding (0-9 bucket)
 # ---------------------------------------------------------------------------
 
