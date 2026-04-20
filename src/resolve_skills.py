@@ -278,29 +278,71 @@ def resolve(
         try:
             G = _load_graph()
             if G.number_of_nodes() > 0:
+                # top_n=30 gives MCPs (sparse type) room to surface
+                # past the denser skill hits at equal scores. Downstream
+                # noise floor + availability filter keep the final
+                # manifest tight regardless of pool size.
                 graph_hits = _resolve_by_seeds(
                     G,
                     list(needed.keys()),
                     max_hops=1,
-                    top_n=12,
+                    top_n=30,
                     exclude_seeds=True,
                 )
+                # Noise floor calibrated per hit type. Skills live in a
+                # 1789-node / ~454k-edge dense graph where a single shared
+                # tag produces score 1.0 noise; we need >=1.5 to cross
+                # the threshold. MCPs are a sparse new type (~42 today,
+                # growing to ~12k in Phase 6) so a single matched edge
+                # IS meaningful. Using the same 1.5 floor kills every
+                # single-seed MCP hit. Lower floor for mcp-server only;
+                # revisit in Phase 6 once the corpus is dense.
+                _SKILL_NOISE_FLOOR = 1.5
+                _MCP_NOISE_FLOOR = 1.0
                 for hit in graph_hits:
                     name = hit["name"]
-                    if name in needed or name not in available:
-                        continue
+                    hit_type = hit.get("type", "skill")
                     # Score 0..1 of edge-weight-driven ranking, quantized
                     # into a modest priority bump (lower than matrix hits
                     # so they never outrank a direct stack match).
                     score = float(hit.get("score", 0.0))
-                    if score < 1.5:  # noise floor — ignore weak neighbors
+                    floor = (
+                        _MCP_NOISE_FLOOR if hit_type == "mcp-server"
+                        else _SKILL_NOISE_FLOOR
+                    )
+                    if score < floor:
                         continue
-                    priority = 3 + min(int(score), 12)
+
                     via = ", ".join(hit.get("via", [])[:2]) or "graph"
                     shared = hit.get("shared_tags", [])[:3]
                     shared_str = f" via shared tags {shared}" if shared else ""
+                    reason = f"graph neighbor of {via}{shared_str}"
+
+                    # Phase 5: MCP servers land in their own manifest
+                    # bucket. Users don't "load" MCPs the way they load
+                    # skills; they see the recommendation and opt into
+                    # registering the server in ~/.claude/mcp.json
+                    # themselves (ctx-mcp-install will automate this
+                    # in Phase 6+). We still surface them here so the
+                    # monitor/dashboard has something to show.
+                    if hit_type == "mcp-server":
+                        if any(m.get("name") == name for m in manifest["mcp_servers"]):
+                            continue  # already listed
+                        manifest["mcp_servers"].append({
+                            "name": name,
+                            "reason": reason,
+                            "score": score,
+                            "via": hit.get("via", [])[:4],
+                            "shared_tags": shared,
+                        })
+                        continue
+
+                    # skill / agent path — existing behaviour unchanged.
+                    if name in needed or name not in available:
+                        continue
+                    priority = 3 + min(int(score), 12)
                     needed[name] = {
-                        "reason": f"graph neighbor of {via}{shared_str}",
+                        "reason": reason,
                         "confidence": min(0.6 + score / 20.0, 0.95),
                         "priority": priority,
                     }

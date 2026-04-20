@@ -250,6 +250,174 @@ class TestResolve:
         assert entry["priority"] >= 17
 
 
+class TestResolveMcpRecommendations:
+    """Phase 5 regression: graph-walk hits with type=='mcp-server' land
+    in manifest['mcp_servers'], NOT manifest['load'] (the skill bucket).
+    """
+
+    def _fake_graph(self, monkeypatch):
+        """Make resolve() think the graph is available and non-empty."""
+        import resolve_skills  # noqa: PLC0415
+
+        class _FakeGraph:
+            def number_of_nodes(self) -> int:
+                return 1
+
+        monkeypatch.setattr(
+            resolve_skills, "_load_graph", lambda: _FakeGraph()
+        )
+        monkeypatch.setattr(resolve_skills, "_GRAPH_AVAILABLE", True)
+
+    def test_mcp_graph_hit_lands_in_mcp_servers_not_load(
+        self, tmp_path, monkeypatch
+    ):
+        import resolve_skills  # noqa: PLC0415
+        self._fake_graph(monkeypatch)
+
+        # Synthetic graph hit: an MCP-type neighbor with score above the
+        # 1.5 noise floor.
+        def fake_resolve_by_seeds(graph, seeds, **kwargs):
+            return [
+                {
+                    "name": "github-mcp-server",
+                    "type": "mcp-server",
+                    "score": 3.0,
+                    "shared_tags": ["_t:github"],
+                    "via": ["react"],
+                },
+            ]
+
+        monkeypatch.setattr(
+            resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds
+        )
+
+        available = {"react": {"path": str(tmp_path / "react/SKILL.md"), "name": "react"}}
+        profile = _minimal_profile(frameworks=[_detection("react")])
+        manifest = resolve(profile, available, {})
+
+        mcp_names = [m["name"] for m in manifest["mcp_servers"]]
+        load_names = [e["skill"] for e in manifest["load"]]
+        assert "github-mcp-server" in mcp_names, (
+            f"MCP should appear in mcp_servers bucket; got {manifest['mcp_servers']}"
+        )
+        assert "github-mcp-server" not in load_names, (
+            "MCP must NOT land in manifest['load'] — that's the skill-loader bucket"
+        )
+
+    def test_mcp_entry_has_reason_score_and_shared_tags(
+        self, tmp_path, monkeypatch
+    ):
+        import resolve_skills  # noqa: PLC0415
+        self._fake_graph(monkeypatch)
+
+        def fake_resolve_by_seeds(graph, seeds, **kwargs):
+            return [
+                {
+                    "name": "fetch-mcp",
+                    "type": "mcp-server",
+                    "score": 2.5,
+                    "shared_tags": ["_t:fetch", "http"],
+                    "via": ["django"],
+                },
+            ]
+
+        monkeypatch.setattr(
+            resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds
+        )
+
+        available = {"django": {"path": str(tmp_path / "django/SKILL.md"), "name": "django"}}
+        profile = _minimal_profile(frameworks=[_detection("django")])
+        manifest = resolve(profile, available, {})
+
+        assert len(manifest["mcp_servers"]) == 1
+        entry = manifest["mcp_servers"][0]
+        assert entry["name"] == "fetch-mcp"
+        assert entry["score"] == 2.5
+        assert "graph neighbor of django" in entry["reason"]
+        assert "_t:fetch" in entry["shared_tags"]
+
+    def test_mcp_deduped_when_same_name_hit_twice(
+        self, tmp_path, monkeypatch
+    ):
+        import resolve_skills  # noqa: PLC0415
+        self._fake_graph(monkeypatch)
+
+        def fake_resolve_by_seeds(graph, seeds, **kwargs):
+            return [
+                {"name": "duped-mcp", "type": "mcp-server", "score": 2.0,
+                 "shared_tags": [], "via": ["a"]},
+                {"name": "duped-mcp", "type": "mcp-server", "score": 1.8,
+                 "shared_tags": [], "via": ["b"]},
+            ]
+
+        monkeypatch.setattr(
+            resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds
+        )
+
+        available = {"react": {"path": str(tmp_path / "react/SKILL.md"), "name": "react"}}
+        profile = _minimal_profile(frameworks=[_detection("react")])
+        manifest = resolve(profile, available, {})
+
+        assert sum(1 for m in manifest["mcp_servers"] if m["name"] == "duped-mcp") == 1
+
+    def test_mcp_below_noise_floor_dropped(
+        self, tmp_path, monkeypatch
+    ):
+        import resolve_skills  # noqa: PLC0415
+        self._fake_graph(monkeypatch)
+
+        def fake_resolve_by_seeds(graph, seeds, **kwargs):
+            return [
+                {"name": "weak-mcp", "type": "mcp-server", "score": 0.8,
+                 "shared_tags": [], "via": ["a"]},
+            ]
+
+        monkeypatch.setattr(
+            resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds
+        )
+
+        available = {"react": {"path": str(tmp_path / "react/SKILL.md"), "name": "react"}}
+        profile = _minimal_profile(frameworks=[_detection("react")])
+        manifest = resolve(profile, available, {})
+
+        assert manifest["mcp_servers"] == []
+
+    def test_skill_hits_still_route_to_load(
+        self, tmp_path, monkeypatch
+    ):
+        # Regression: mixing mcp-server hits and skill hits must not
+        # break the existing skill path.
+        import resolve_skills  # noqa: PLC0415
+        self._fake_graph(monkeypatch)
+
+        def fake_resolve_by_seeds(graph, seeds, **kwargs):
+            return [
+                {"name": "pytest-something", "type": "skill", "score": 3.0,
+                 "shared_tags": [], "via": ["django"]},
+                {"name": "fetch-mcp", "type": "mcp-server", "score": 2.0,
+                 "shared_tags": [], "via": ["django"]},
+            ]
+
+        monkeypatch.setattr(
+            resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds
+        )
+
+        available = {
+            "django": {"path": str(tmp_path / "django/SKILL.md"), "name": "django"},
+            "pytest-something": {
+                "path": str(tmp_path / "pytest-something/SKILL.md"),
+                "name": "pytest-something",
+            },
+        }
+        profile = _minimal_profile(frameworks=[_detection("django")])
+        manifest = resolve(profile, available, {})
+
+        mcp_names = [m["name"] for m in manifest["mcp_servers"]]
+        load_names = [e["skill"] for e in manifest["load"]]
+        assert "fetch-mcp" in mcp_names
+        assert "pytest-something" in load_names
+
+
 # ---------------------------------------------------------------------------
 # read_intent_signals
 # ---------------------------------------------------------------------------

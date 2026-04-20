@@ -94,3 +94,67 @@ def test_attach_quality_ignores_slug_with_no_node(tmp_path: Path) -> None:
     attached = wg._attach_quality_attrs(G, sidecar)
     assert attached == 0
     assert G.nodes["skill:real"]["quality_score"] is None
+
+
+def _write_mcp_sidecar(
+    sidecar_dir: Path, slug: str, score: float, grade: str
+) -> None:
+    """Write an MCP-shaped sidecar (no ``subject_type`` field — the
+    ``mcp/`` subdir is the type discriminator for Phase 4 writes)."""
+    mcp_dir = sidecar_dir / "mcp"
+    mcp_dir.mkdir(parents=True, exist_ok=True)
+    (mcp_dir / f"{slug}.json").write_text(
+        json.dumps({"slug": slug, "score": score, "grade": grade}),
+        encoding="utf-8",
+    )
+
+
+def test_attach_quality_loads_mcp_subdir(tmp_path: Path) -> None:
+    # Phase 5 regression: MCP quality sidecars (Phase 4) live in the
+    # ``mcp/`` subdir of ~/.claude/skill-quality/. _attach_quality_attrs
+    # must scan there too.
+    G = nx.Graph()
+    G.add_node("skill:alpha", label="alpha", type="skill", tags=["python"])
+    G.add_node("mcp-server:github", label="github", type="mcp-server", tags=[])
+
+    sidecar = tmp_path / "quality"
+    _write_sidecar(sidecar, "alpha", "skill", 0.85, "A")
+    _write_mcp_sidecar(sidecar, "github", 0.67, "B")
+
+    attached = wg._attach_quality_attrs(G, sidecar)
+    assert attached == 2
+    assert G.nodes["skill:alpha"]["quality_grade"] == "A"
+    assert G.nodes["mcp-server:github"]["quality_grade"] == "B"
+    assert G.nodes["mcp-server:github"]["quality_score"] == pytest.approx(0.67)
+
+
+def test_attach_quality_mcp_sidecar_without_subject_type_field(
+    tmp_path: Path,
+) -> None:
+    # MCP sidecars from Phase 4 don't include subject_type; it's
+    # implied by the mcp/ subdir. Confirm the node_id is still
+    # resolved as mcp-server: rather than defaulting to skill:.
+    G = nx.Graph()
+    G.add_node("mcp-server:fetch", label="fetch", type="mcp-server", tags=[])
+
+    sidecar = tmp_path / "quality"
+    _write_mcp_sidecar(sidecar, "fetch", 0.50, "C")
+
+    attached = wg._attach_quality_attrs(G, sidecar)
+    assert attached == 1
+    assert G.nodes["mcp-server:fetch"]["quality_grade"] == "C"
+
+
+def test_attach_quality_no_mcp_subdir_still_works(tmp_path: Path) -> None:
+    # If the mcp/ subdir doesn't exist (user hasn't run
+    # ctx-mcp-quality), the scan should still attach skill/agent
+    # sidecars from the flat layout.
+    G = nx.Graph()
+    G.add_node("skill:alpha", label="alpha", type="skill", tags=[])
+
+    sidecar = tmp_path / "quality"
+    _write_sidecar(sidecar, "alpha", "skill", 0.85, "A")
+
+    attached = wg._attach_quality_attrs(G, sidecar)
+    assert attached == 1
+    assert G.nodes["skill:alpha"]["quality_grade"] == "A"

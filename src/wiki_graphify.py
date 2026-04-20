@@ -201,6 +201,14 @@ def _attach_quality_attrs(G: nx.Graph, sidecar_dir: Path) -> int:
     matching graph nodes so downstream consumers (graph export, Obsidian
     graph view coloring) see one consistent number. Nodes without a
     sidecar keep their default values so the attribute is always present.
+
+    Scans two roots:
+      - ``<sidecar_dir>/*.json`` — skill + agent scores from
+        ``skill_quality.persist_quality``
+      - ``<sidecar_dir>/mcp/*.json`` — MCP scores from
+        ``mcp_quality.persist_quality`` (Phase 4 separated MCP scores
+        into a subdir so the MCP scorer's different signal-set
+        doesn't pollute the flat skill/agent layout).
     """
     attached = 0
     # Default attrs so callers can always read the key without KeyError.
@@ -211,21 +219,39 @@ def _attach_quality_attrs(G: nx.Graph, sidecar_dir: Path) -> int:
     if not sidecar_dir.is_dir():
         return 0
 
-    for path in sidecar_dir.glob("*.json"):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-        slug = data.get("slug")
-        subject_type = data.get("subject_type", "skill")
-        if not slug:
-            continue
-        node_id = f"{subject_type}:{slug}"
-        if node_id not in G:
-            continue
-        G.nodes[node_id]["quality_score"] = float(data.get("score", 0.0))
-        G.nodes[node_id]["quality_grade"] = data.get("grade")
-        attached += 1
+    # Two roots to scan. The ``subject_type`` field in each sidecar
+    # determines the graph node prefix — ``skill:`` or ``agent:`` for
+    # the flat dir, ``mcp-server:`` for the mcp/ subdir. We don't infer
+    # the prefix from the directory because the subject_type is the
+    # canonical source of truth and some historical sidecars may have
+    # landed in the wrong place.
+    roots: list[Path] = [sidecar_dir]
+    mcp_subdir = sidecar_dir / "mcp"
+    if mcp_subdir.is_dir():
+        roots.append(mcp_subdir)
+
+    for root in roots:
+        for path in root.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            slug = data.get("slug")
+            subject_type = data.get("subject_type", "skill")
+            if not slug:
+                continue
+            # MCP sidecars written by Phase 4 don't carry a
+            # ``subject_type`` field (the McpQualityScore shape omits
+            # it since the subdir is the type discriminator). When a
+            # sidecar lives under mcp/ we treat it as mcp-server.
+            if root == mcp_subdir and subject_type == "skill":
+                subject_type = "mcp-server"
+            node_id = f"{subject_type}:{slug}"
+            if node_id not in G:
+                continue
+            G.nodes[node_id]["quality_score"] = float(data.get("score", 0.0))
+            G.nodes[node_id]["quality_grade"] = data.get("grade")
+            attached += 1
     return attached
 
 

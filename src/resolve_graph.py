@@ -76,14 +76,18 @@ def resolve_by_seeds(
     top_n: int = 10,
     exclude_seeds: bool = True,
 ) -> list[dict]:
-    """Walk the graph from seed skills/agents and rank neighbors by connection strength.
+    """Walk the graph from seed skills/agents/mcp-servers and rank neighbors.
 
     Returns a list of dicts: [{name, type, score, shared_tags, via}]
     """
-    # Map plain names to graph node IDs (skill:<name> or agent:<name>)
+    # Map plain names to graph node IDs. Tries skill, agent, and
+    # mcp-server prefixes so a seed name that happens to match an
+    # MCP slug (e.g. "github", "filesystem") can kick off a walk
+    # through MCP territory too. Phase 5 additive change — skill and
+    # agent seeds still work identically.
     seed_ids: set[str] = set()
     for name in seed_names:
-        for prefix in ("skill:", "agent:"):
+        for prefix in ("skill:", "agent:", "mcp-server:"):
             nid = f"{prefix}{name}"
             if nid in G:
                 seed_ids.add(nid)

@@ -3,6 +3,82 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — MCP Phase 5 — cross-type recommendations
+
+Closes the loop on MCP integration: the graph already contained MCP
+nodes with cross-type edges (Phase 3c) and had per-MCP quality scores
+(Phase 4); Phase 5 wires them into the recommender so a user scanning
+a repo sees MCP suggestions alongside skill/agent recommendations.
+
+### Changed
+
+- **``resolve_skills.resolve``**: graph-walk hits with
+  ``type=="mcp-server"`` now land in ``manifest["mcp_servers"]`` as
+  ``{name, reason, score, via, shared_tags}`` entries. Previously they
+  were silently filtered out because the skill-availability check
+  (``name in available``) dropped them — ``available`` contains only
+  installed SKILLS.
+- **Noise floor per hit type**: skills remain at ``>= 1.5`` (calibrated
+  for the 1789-node / 454k-edge dense skill graph where single-tag
+  overlaps are noise). MCPs get ``>= 1.0`` since the corpus is sparse
+  (42 today, projected ~12k in Phase 6) so a single matched edge is
+  already a meaningful signal.
+- **Graph-walk pool widened from top_n=12 to top_n=30**: without this,
+  equal-score-1.0 skills filled all 12 slots before any MCPs could
+  surface. The downstream noise floor + availability filter keep the
+  final manifest tight regardless of pool size.
+- **``resolve_graph.resolve_by_seeds``** now recognizes the
+  ``mcp-server:`` node prefix in addition to ``skill:`` and ``agent:``
+  so a seed name that matches an MCP slug (e.g. ``github``,
+  ``filesystem``) can kick off a walk from MCP territory too.
+- **``wiki_graphify._attach_quality_attrs``** scans both
+  ``~/.claude/skill-quality/*.json`` (skills + agents) and
+  ``~/.claude/skill-quality/mcp/*.json`` (MCPs). Phase 4 put MCP
+  sidecars in the ``mcp/`` subdir for isolation; without this Phase 5
+  change, MCP graph nodes would never pick up their quality scores
+  for Obsidian-graph coloring etc.
+
+### Live verification
+
+```
+Synthetic GitHub Actions repo → resolve()
+  load: 2 skills
+  mcp_servers: 4 MCPs surfaced:
+    github-mcp-server-awesome-variant   score=1.00   shared=['_t:github']
+    github                              score=1.00   shared=['_t:github']
+    tadas-github-a2asearch-mcp          score=1.00   shared=['_t:github']
+    data-everything-mcp-server-templates score=1.00  shared=['_t:templates']
+```
+
+Each MCP recommendation carries a reason string and the shared graph
+tags that produced it. Cross-type edges are the mechanism proven in
+Phase 3c; Phase 5 is the presentation layer.
+
+### Tests
+
+- 5 new ``TestResolveMcpRecommendations`` cases in
+  ``test_resolve_skills.py``: MCP lands in correct bucket (not load),
+  reason+score preserved, dedup on repeat hits, noise floor respected,
+  mixed skill+mcp hits route correctly.
+- 3 new cases in ``test_wiki_graphify_quality.py``: mcp/ subdir
+  loaded, missing ``subject_type`` field inferred from subdir,
+  backward compat when mcp/ doesn't exist.
+- Total: **1621 passed, 2 skipped** (was 1613 → +8 new, 0 regressions).
+
+### Not yet done (Phase 5.5 or Phase 6)
+
+- The ``scan_repo`` CLI doesn't yet print MCP recommendations to the
+  terminal. The manifest is populated correctly but only consumers
+  that read it (monitor, hooks) see MCPs. Minor UX gap.
+- ``## Related MCP Servers`` section header on MCP entity pages can
+  show skills as neighbors (accurate links, misleading header). Same
+  neighbors-list works; just cosmetic. Defer to when all entity pages
+  are regenerated.
+- Data sparsity: the 42 MCPs in the wiki today are github/aggregator/
+  playwright-themed. A random Python+JS repo may surface 0 MCP
+  recommendations because no topical overlap exists. Phase 6 full
+  ingest (~12k MCPs) will fix this organically.
+
 ## [Unreleased] — MCP Phase 4 — six-signal quality scorer
 
 Adds the MCP-specific quality scorer with the six-signal model designed
