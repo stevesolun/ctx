@@ -19,6 +19,7 @@ Covers:
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -309,6 +310,97 @@ class TestUpdateIndex:
         content = (wiki / "index.md").read_text()
         assert "[[entities/skills/react]]" in content
         assert "[[entities/skills/docker]]" in content
+
+
+class TestUpdateIndexSubjectAware:
+    """Subject-aware index updates for agents and mcp-servers.
+
+    Tests the ``wiki_sync.update_index`` (note: ``link_conversions``
+    has its own narrower update_index for the conversion pipeline,
+    which intentionally remains skills-only). The function defaults
+    to ``subject_type="skills"`` for backward compat with all the
+    legacy callers. These tests cover the new subject-aware paths.
+    """
+
+    @staticmethod
+    def _ws_update_index(*args: Any, **kwargs: Any) -> None:
+        # Imported locally so the module-level import block above
+        # (which pulls update_index from link_conversions) stays
+        # untouched — that is the function the existing TestUpdateIndex
+        # class still validates.
+        from wiki_sync import update_index as _ws_ui  # noqa: PLC0415
+        _ws_ui(*args, **kwargs)
+
+    def _wiki_with_all_sections(self, tmp_path: Path) -> Path:
+        wiki = tmp_path / "wiki"
+        (wiki / "entities" / "skills").mkdir(parents=True)
+        (wiki / "entities" / "agents").mkdir(parents=True)
+        (wiki / "entities" / "mcp-servers").mkdir(parents=True)
+        (wiki / "converted").mkdir()
+        (wiki / "index.md").write_text(
+            "# Index\n\n"
+            "## Total pages: 0 | Last updated: 2024-01-01\n\n"
+            "## Skills\n\n"
+            "## Agents\n\n"
+            "## MCP Servers\n",
+            encoding="utf-8",
+        )
+        (wiki / "log.md").write_text("# Log\n", encoding="utf-8")
+        return wiki
+
+    def test_agent_lands_in_agents_section(self, tmp_path):
+        wiki = self._wiki_with_all_sections(tmp_path)
+        self._ws_update_index(str(wiki), ["code-reviewer"], subject_type="agents")
+        content = (wiki / "index.md").read_text()
+        assert "[[entities/agents/code-reviewer]]" in content
+        # Should NOT be in skills section format
+        assert "[[entities/skills/code-reviewer]]" not in content
+
+    def test_mcp_server_uses_sharded_path(self, tmp_path):
+        wiki = self._wiki_with_all_sections(tmp_path)
+        self._ws_update_index(str(wiki), ["github-mcp"], subject_type="mcp-servers")
+        content = (wiki / "index.md").read_text()
+        assert "[[entities/mcp-servers/g/github-mcp]]" in content
+
+    def test_mcp_server_digit_slug_lands_in_0_9_shard(self, tmp_path):
+        wiki = self._wiki_with_all_sections(tmp_path)
+        self._ws_update_index(str(wiki), ["007-server"], subject_type="mcp-servers")
+        content = (wiki / "index.md").read_text()
+        assert "[[entities/mcp-servers/0-9/007-server]]" in content
+
+    def test_unknown_subject_type_raises(self, tmp_path):
+        wiki = self._wiki_with_all_sections(tmp_path)
+        with pytest.raises(ValueError, match="unknown subject_type"):
+            self._ws_update_index(str(wiki), ["foo"], subject_type="widgets")
+
+    def test_missing_section_is_created(self, tmp_path):
+        # Wiki built before ## Agents section was templated in.
+        wiki = tmp_path / "legacy-wiki"
+        wiki.mkdir()
+        (wiki / "index.md").write_text(
+            "# Index\n\n## Total pages: 0\n\n## Skills\n",
+            encoding="utf-8",
+        )
+        self._ws_update_index(str(wiki), ["new-agent"], subject_type="agents")
+        content = (wiki / "index.md").read_text()
+        assert "## Agents" in content
+        assert "[[entities/agents/new-agent]]" in content
+
+    def test_total_pages_counts_across_all_sections(self, tmp_path):
+        wiki = self._wiki_with_all_sections(tmp_path)
+        self._ws_update_index(str(wiki), ["alpha-skill"], subject_type="skills")
+        self._ws_update_index(str(wiki), ["beta-agent"], subject_type="agents")
+        self._ws_update_index(str(wiki), ["gamma-mcp"], subject_type="mcp-servers")
+        content = (wiki / "index.md").read_text()
+        assert "Total pages: 3" in content
+
+    def test_default_subject_type_is_skills(self, tmp_path):
+        # Backward compat: callers that don't pass subject_type get
+        # the legacy ## Skills behavior.
+        wiki = self._wiki_with_all_sections(tmp_path)
+        self._ws_update_index(str(wiki), ["legacy-skill"])  # no subject_type
+        content = (wiki / "index.md").read_text()
+        assert "[[entities/skills/legacy-skill]]" in content
 
 
 # ---------------------------------------------------------------------------

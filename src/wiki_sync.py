@@ -93,6 +93,8 @@ Created: {TODAY}
 
 ## Skills
 
+## Agents
+
 ## Plugins
 
 ## MCP Servers
@@ -236,39 +238,104 @@ Detected and loaded by skill-router.
 
 
 
-def update_index(wiki_path: str, new_skills: list[str]) -> None:
-    """Add new skill entries to index.md."""
-    if not new_skills:
+# Section header used for each subject type in index.md. Adding a new
+# subject type requires extending this map and the entity-link helper
+# below. ``"skills"`` stays first so the default keyword arg for backward
+# compat (callers that predate the subject_type param) keeps writing
+# into the same section it always did.
+_INDEX_SECTION_FOR_SUBJECT: dict[str, str] = {
+    "skills": "## Skills",
+    "agents": "## Agents",
+    "mcp-servers": "## MCP Servers",
+    "plugins": "## Plugins",
+}
+
+
+def _entity_index_link(subject_type: str, slug: str) -> str:
+    """Return the wikilink target for an entity in the index.
+
+    Skills, agents, and plugins live in flat directories. MCP servers
+    are sharded by first character (``g/github-mcp``, ``0-9/007-mcp``)
+    to keep ``ls`` and Obsidian fast at the projected ~12k+ scale —
+    so their links must include the shard segment.
+    """
+    if subject_type == "mcp-servers":
+        first = slug[0] if slug else ""
+        shard = first if first.isalpha() else "0-9"
+        return f"entities/mcp-servers/{shard}/{slug}"
+    return f"entities/{subject_type}/{slug}"
+
+
+def update_index(
+    wiki_path: str,
+    new_entries: list[str],
+    subject_type: str = "skills",
+) -> None:
+    """Add new entity entries to index.md under the right section header.
+
+    Args:
+        wiki_path: Path to the wiki root.
+        new_entries: Slugs to insert. Empty list is a no-op.
+        subject_type: One of ``skills``, ``agents``, ``mcp-servers``,
+            ``plugins``. Defaults to ``"skills"`` for backward compat
+            with callers that predate the subject-type param.
+
+    The total-pages counter at the top counts every ``[[entities/``
+    link across all sections, so multi-type wikis show the true total.
+    If the section header for ``subject_type`` is missing from the
+    index (e.g. wikis built before the agents section was templated
+    in), it is appended at the end of the existing section list rather
+    than silently dropping the entries into ``## Skills``.
+    """
+    if not new_entries:
         return
+    if subject_type not in _INDEX_SECTION_FOR_SUBJECT:
+        raise ValueError(
+            f"unknown subject_type {subject_type!r}; "
+            f"expected one of {sorted(_INDEX_SECTION_FOR_SUBJECT)!r}"
+        )
 
     index_path = Path(wiki_path) / "index.md"
     content = index_path.read_text(encoding="utf-8")
-
-    # Find the ## Skills section and append
     lines = content.split("\n")
-    insert_idx = None
+
+    section_header = _INDEX_SECTION_FOR_SUBJECT[subject_type]
+
+    # Locate the target section by scanning for its ## header. Track
+    # the index *after* the header so we insert before the next ##.
+    insert_idx: int | None = None
+    in_target_section = False
     for i, line in enumerate(lines):
-        if line.strip() == "## Skills":
+        if line.strip() == section_header:
+            in_target_section = True
             insert_idx = i + 1
-        elif insert_idx and line.startswith("## "):
-            # Found next section
+        elif in_target_section and line.startswith("## "):
+            # Stop at the next section.
             break
 
     if insert_idx is None:
+        # Section missing — create it at the end of the file. Older
+        # wikis don't have ## Agents for example.
+        if lines and lines[-1] != "":
+            lines.append("")
+        lines.append(section_header)
+        lines.append("")
         insert_idx = len(lines)
 
-    for skill in sorted(new_skills):
-        entry = f"- [[entities/skills/{skill}]] - Auto-discovered by skill-router"
-        # Check not already present
+    for slug in sorted(new_entries):
+        entry = (
+            f"- [[{_entity_index_link(subject_type, slug)}]] "
+            "- Auto-discovered by skill-router"
+        )
         if entry not in content:
             lines.insert(insert_idx, entry)
             insert_idx += 1
 
-    # Update total count
-    skill_count = sum(1 for ln in lines if "[[entities/skills/" in ln)
+    # Total-pages counter spans every entity type, not just skills.
+    total_count = sum(1 for ln in lines if "[[entities/" in ln)
     for i, line in enumerate(lines):
         if "Total pages:" in line:
-            lines[i] = re.sub(r"Total pages: \d+", f"Total pages: {skill_count}", line)
+            lines[i] = re.sub(r"Total pages: \d+", f"Total pages: {total_count}", line)
             lines[i] = re.sub(r"Last updated: [\d-]+", f"Last updated: {TODAY}", lines[i])
             break
 

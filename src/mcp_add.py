@@ -178,7 +178,7 @@ def add_mcp(
         # would otherwise produce one log line per existing record per
         # batch run, blowing up log.md at scale.
         if is_new_page:
-            update_index(str(wiki_path), [record.slug])
+            update_index(str(wiki_path), [record.slug], subject_type="mcp-servers")
 
             log_details = [
                 f"Slug: {record.slug}",

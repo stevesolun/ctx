@@ -109,7 +109,7 @@ def add_agent(
 
     # 4. Index + log.
     if is_new:
-        update_index(str(wiki_path), [name])
+        update_index(str(wiki_path), [name], subject_type="agents")
 
     log_details = [
         f"Source: {source_path}",
