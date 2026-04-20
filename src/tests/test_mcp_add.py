@@ -399,6 +399,141 @@ class TestExistenceBypassesIntakeOnMerge:
 
 
 # ---------------------------------------------------------------------------
+# Phase 3.6 regression: cross-source canonical-key dedup
+# ---------------------------------------------------------------------------
+
+
+class TestCrossSourceCanonicalKeyDedup:
+    """Regression: when two sources catalog the same upstream repo under
+    different slugs, the second source must merge into the first
+    entity rather than creating a duplicate at its own slug path.
+
+    The current pulsemcp scraper (Phase 2b.5) does not extract
+    github_url from listing pages — that's Phase 6 detail-page work.
+    These tests use hand-crafted records that DO carry github_url to
+    prove the dedup mechanism. Phase 6's enrichment will then make the
+    pulsemcp side benefit automatically.
+    """
+
+    def test_normalize_github_url_strips_trailing_slash_and_lowercases(self) -> None:
+        from mcp_add import _normalize_github_url  # noqa: PLC0415
+
+        assert _normalize_github_url(
+            "https://GitHub.com/Org/Repo/"
+        ) == "https://github.com/org/repo"
+
+    def test_normalize_returns_none_for_non_github(self) -> None:
+        from mcp_add import _normalize_github_url  # noqa: PLC0415
+
+        assert _normalize_github_url("https://gitlab.com/org/repo") is None
+        assert _normalize_github_url("https://example.com/foo") is None
+        assert _normalize_github_url(None) is None
+        assert _normalize_github_url("") is None
+
+    def test_find_existing_returns_none_for_empty_dir(self, tmp_path: Path) -> None:
+        from mcp_add import _find_existing_by_github_url  # noqa: PLC0415
+
+        # Directory doesn't exist → None (no scan needed)
+        assert _find_existing_by_github_url(
+            tmp_path / "missing", "https://github.com/foo/bar"
+        ) is None
+
+    def test_find_existing_matches_by_canonical_url(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        from mcp_add import _find_existing_by_github_url  # noqa: PLC0415
+
+        # Add an entity with github_url = .../org/repo
+        record = _make_record(
+            name="awesome-cataloged-repo",
+            github_url="https://github.com/Org/Repo",
+        )
+        patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+
+        # Search for the same URL with different casing + trailing slash
+        mcp_dir = wiki_dir / "entities" / "mcp-servers"
+        match = _find_existing_by_github_url(
+            mcp_dir, "https://GITHUB.com/org/repo/"
+        )
+        assert match is not None
+        assert match.name == "awesome-cataloged-repo.md"
+
+    def test_second_source_merges_into_first_entity_path(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        # awesome-mcp adds the repo first under its name-derived slug.
+        record_awesome = _make_record(
+            name="modelcontextprotocol/servers",
+            github_url="https://github.com/modelcontextprotocol/servers",
+            sources=["awesome-mcp"],
+        )
+        result1 = patched_mcp_add.add_mcp(record=record_awesome, wiki_path=wiki_dir)
+        assert result1["is_new_page"] is True
+        first_path = Path(result1["path"])
+
+        # pulsemcp finds the same repo under a different slug.
+        record_pulsemcp = _make_record(
+            name="modelcontextprotocol-servers-mcp",
+            github_url="https://github.com/modelcontextprotocol/servers",
+            sources=["pulsemcp"],
+        )
+        result2 = patched_mcp_add.add_mcp(record=record_pulsemcp, wiki_path=wiki_dir)
+
+        # Critical: the second add merged into the FIRST entity's path,
+        # not its own slug-based path.
+        assert result2["is_new_page"] is False
+        assert result2["path"] == str(first_path)
+        assert result2["merged_sources"] == ["awesome-mcp", "pulsemcp"]
+
+        # And only ONE entity file exists in the wiki.
+        all_entities = list(
+            (wiki_dir / "entities" / "mcp-servers").rglob("*.md")
+        )
+        assert len(all_entities) == 1, f"expected 1 entity, found {all_entities}"
+
+    def test_records_without_github_url_still_use_slug_dedup(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        # When the new record has no github_url (e.g. pulsemcp listing
+        # records before Phase 6 detail enrichment), canonical-key
+        # dedup is skipped and slug-based dedup applies.
+        record = _make_record(
+            name="no-github-mcp",
+            github_url=None,
+            sources=["pulsemcp"],
+        )
+        result1 = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert result1["is_new_page"] is True
+
+        # Same slug → existence check fires (Phase 3.5), merges by slug.
+        result2 = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
+        assert result2["is_new_page"] is False
+
+    def test_non_github_homepage_url_does_not_collide(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        # A pulsemcp record with homepage_url = pulsemcp.com/servers/...
+        # must NOT match an awesome-mcp record with the same string in
+        # a different field — only github_url is the canonical key.
+        record_aw = _make_record(
+            name="aw-record",
+            github_url="https://github.com/foo/bar",
+            sources=["awesome-mcp"],
+        )
+        patched_mcp_add.add_mcp(record=record_aw, wiki_path=wiki_dir)
+
+        # Different repo, no github_url at all → must create separate entity.
+        record_ps = _make_record(
+            name="ps-record",
+            github_url=None,
+            sources=["pulsemcp"],
+        )
+        result = patched_mcp_add.add_mcp(record=record_ps, wiki_path=wiki_dir)
+        assert result["is_new_page"] is True
+        assert "ps-record" in result["path"]
+
+
+# ---------------------------------------------------------------------------
 # Numeric slug sharding (0-9 bucket)
 # ---------------------------------------------------------------------------
 

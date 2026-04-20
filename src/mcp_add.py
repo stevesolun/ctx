@@ -124,6 +124,61 @@ def _rewrite_frontmatter(page_text: str, new_fm: dict[str, Any]) -> str:
     return f"---\n{fm_str}---\n{body}"
 
 
+def _normalize_github_url(url: str | None) -> str | None:
+    """Return the canonical lowercase GitHub URL, or None for non-GitHub inputs.
+
+    Mirrors ``McpRecord.canonical_dedup_key`` so an existing-entity scan
+    can match against new records on the same key. We strip trailing
+    slashes and lowercase host+path because GitHub URLs are case-
+    insensitive at the host but display case is preserved by the parser.
+    """
+    if not url:
+        return None
+    candidate = url.strip().rstrip("/").lower()
+    if not candidate.startswith(("http://github.com/", "https://github.com/")):
+        return None
+    return candidate
+
+
+def _find_existing_by_github_url(
+    mcp_dir: Path, target_github_url: str | None
+) -> Path | None:
+    """Scan existing MCP entity files for one whose github_url matches.
+
+    Phase 3.6 cross-source dedup. When awesome-mcp and pulsemcp both
+    catalog the same upstream repository, their slugs typically differ
+    (awesome-mcp slugifies the README name, pulsemcp uses the URL path)
+    so the slug-based existence check in ``add_mcp`` would create two
+    separate entities. This helper finds the existing entity by its
+    canonical github_url so the second source can merge into it.
+
+    Returns ``None`` when the new record has no github_url, when no
+    existing entity matches, or when ``mcp_dir`` does not exist yet.
+
+    Cost: O(n) entity reads per call. Acceptable at current ~40 entity
+    scale; sidecar index will replace this for the Phase 6 ~12k+ scale.
+    """
+    target = _normalize_github_url(target_github_url)
+    if target is None or not mcp_dir.is_dir():
+        return None
+    # Fast path: grep the whole tree for the URL substring before
+    # parsing frontmatter. Avoids ~12k YAML parses when the answer is
+    # almost always None.
+    for page in mcp_dir.rglob("*.md"):
+        try:
+            text = page.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if target not in text.lower():
+            continue
+        # Confirm the match is in the github_url frontmatter field, not
+        # an incidental URL mention in the body.
+        fm = _parse_frontmatter(text)
+        if _normalize_github_url(fm.get("github_url")) == target:
+            return page
+    return None
+
+
 def add_mcp(
     *,
     record: McpRecord,
@@ -160,7 +215,21 @@ def add_mcp(
     validate_skill_name(record.slug)
 
     entity_rel = record.entity_relpath()  # e.g. "f/fetch-mcp.md"
-    target_path = wiki_path / _MCP_ENTITY_SUBDIR / entity_rel
+    mcp_dir = wiki_path / _MCP_ENTITY_SUBDIR
+    target_path = mcp_dir / entity_rel
+
+    # Phase 3.6: cross-source dedup by canonical github_url before the
+    # slug-based check. When awesome-mcp and pulsemcp both catalog the
+    # same upstream repo, their slugs differ — we want to merge into
+    # the existing entity, not create a second one at our slug path.
+    # Only fires when the new record carries a github_url; pulsemcp
+    # listing-page records currently have only homepage_url (Phase 6
+    # detail-page enrichment will populate github_url so this dedup
+    # path becomes meaningful for them too).
+    canonical_match = _find_existing_by_github_url(mcp_dir, record.github_url)
+    if canonical_match is not None and canonical_match != target_path:
+        target_path = canonical_match
+
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     is_new_page: bool

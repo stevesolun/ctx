@@ -3,6 +3,69 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — MCP Phase 3.6 — cross-source canonical-key dedup
+
+Phase 3c surfaced that two MCP catalog sources slugify the same upstream
+repo differently — awesome-mcp slugifies the README name, pulsemcp uses
+the URL path — so the slug-based existence check in ``add_mcp`` would
+create two separate entities for the same repo. This phase adds a
+github_url-based canonical-key lookup that runs **before** the slug
+check so the second source merges into the first entity rather than
+duplicating.
+
+### Added
+
+- ``mcp_add._normalize_github_url(url)`` — lowercases host+path, strips
+  trailing ``/``. Returns None for non-GitHub URLs. Mirrors
+  ``McpRecord.canonical_dedup_key()`` so an existing-entity scan can
+  match against new records on the same key.
+- ``mcp_add._find_existing_by_github_url(mcp_dir, target)`` —
+  scan-on-demand lookup across all entity files. Substring-greps the
+  raw text first to avoid parsing 12k YAML frontmatters when the
+  answer is almost always None, then confirms via frontmatter parse.
+
+### Changed
+
+- ``add_mcp`` runs the canonical-key lookup before the slug existence
+  check. When a match is found at a different path than the new
+  record's slug-based path, ``target_path`` is rewritten to the
+  existing entity's path so the merge fires there.
+
+### Limitations (will be addressed in Phase 6)
+
+- Pulsemcp listing-page records (Phase 2b.5) carry only
+  ``homepage_url: pulsemcp.com/servers/<slug>``, not ``github_url``.
+  Cross-source dedup against awesome-mcp records won't fire for
+  pulsemcp until Phase 6 detail-page enrichment populates the
+  github_url field. The infrastructure is in place; only the data
+  is missing.
+- Scan cost is O(n) per add. Acceptable at the current ~40 entity
+  scale and tolerable up to ~1k. At Phase 6's projected ~12k+ scale
+  this needs a sidecar index (canonical_key → entity_relpath).
+
+### Tests
+
+- 7 new ``TestCrossSourceCanonicalKeyDedup`` cases covering
+  normalize_github_url canonicalization, missing-dir tolerance,
+  cross-source merge into existing path, no-github_url fallback,
+  and non-collision proof for entities with mismatched URL fields.
+- Total: 1545 passed, 2 skipped (was 1538 → +7 new, 0 regressions).
+
+### Live verification
+
+```
+$ ctx-mcp-add --from-jsonl /tmp/cross_source_test.jsonl
+[1/2] [added] github-mcp-server-awesome-variant
+[2/2] [merged] example-org-cross-source-test
+Done: 1 added, 1 merged, 0 rejected, 0 errors
+```
+
+Both records carried github_url=``https://github.com/example-org/cross-source-test-repo``
+under different slugs and from different sources. Result: 1 entity
+file (not 2), sources field merged to ``[awesome-mcp, pulsemcp]``.
+Wiki entity count went 40 → 41 (not 42), proving the dedup blocked
+the duplicate.
+
 ## [Unreleased] — MCP Phase 2.5 — reviewer cleanup
 
 Rolls up the deferred python-reviewer + security-reviewer findings
