@@ -3,6 +3,53 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.3] — 2026-04-19
+
+Docs-only release. The two marquee features of ctx — the pre-built
+knowledge graph and the `ctx-monitor` dashboard — were referenced all
+over the docs but had no dedicated page explaining them. This release
+adds both and wires them into the home page and the top of the nav.
+
+### Added
+
+- **`docs/knowledge-graph.md`** — dedicated page for the pre-built
+  graph: authoritative counts (2,253 nodes / 454,719 edges / 93
+  communities / 416.6 avg degree / 1,152 max degree / 195,226 skill↔
+  agent cross-edges / 71 isolated), install via the shipped tarball,
+  how edges are built (explicit frontmatter tags + slug-token
+  pseudo-tags with `DENSE_TAG_THRESHOLD=500` and the `SLUG_STOP`
+  filter), community detection details (greedy modularity
+  `resolution=1.2`), query recipes via the dashboard + Python +
+  recommendation path, rebuild instructions, and a postmortem section
+  explaining why the edge count is 454K and not the stale 642K bundle
+  referenced in earlier releases.
+- **`docs/dashboard.md`** — full `ctx-monitor` reference: startup
+  commands (with the `--host 0.0.0.0` opt-in warning), complete HTML
+  route catalog (`/`, `/loaded`, `/skills`, `/skill/<slug>`,
+  `/wiki/<slug>`, `/graph`, `/sessions`, `/session/<id>`, `/logs`,
+  `/events`), JSON API (`/api/sessions.json`, `/api/manifest.json`,
+  `/api/skill/<slug>.json`, `/api/graph/<slug>.json`,
+  `/api/events.stream`), mutation endpoints with CSRF/same-origin
+  notes, a **KPIs / measures / scores** section explaining the six
+  home stat cards, the grade + raw-score view on `/skills`, the full
+  four-signal breakdown on `/skill/<slug>` (Telemetry 0.40, Intake
+  0.20, Graph 0.25, Routing 0.15) with hard-floor reasons, and the
+  `load → score_updated → unload` observability triad on
+  `/session/<id>`. Also documents the security posture (loopback
+  default, same-origin gating on POST, slug allowlist on every
+  path-resolving route).
+
+### Changed
+
+- **`mkdocs.yml` nav** — knowledge graph and dashboard hoisted to
+  positions 2 and 3 (right after Home), above Toolbox / Skill router /
+  Health. They are the two observables users are most likely looking
+  for, so the nav now matches the mental model.
+- **`docs/index.md`** — added two grid cards at the top of the "Explore
+  the docs" section pointing at the new pages, so the home page
+  surfaces the graph + dashboard as first-class features rather than
+  burying them inside the router/health sections.
+
 ## [0.6.2] — 2026-04-20
 
 Verification-pass patch after v0.6.1 shipped. Three items the v0.6.1

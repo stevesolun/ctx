@@ -93,6 +93,8 @@ plugins:
 
 nav:
   - Home: index.md
+  - Knowledge graph: knowledge-graph.md
+  - Dashboard: dashboard.md
   - Toolbox:
       - Overview: toolbox/index.md
       - Configuration: toolbox/configuration.md
