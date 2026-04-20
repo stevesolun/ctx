@@ -94,12 +94,17 @@ def make_hooks(ctx_dir: str) -> dict:
         ],
         "Stop": [
             {
-                "type": "command",
-                "command": tracker_cmd,
-            },
-            {
-                "type": "command",
-                "command": quality_cmd,
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": tracker_cmd,
+                    },
+                    {
+                        "type": "command",
+                        "command": quality_cmd,
+                    },
+                ],
             },
         ],
     }
