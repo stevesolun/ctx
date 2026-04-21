@@ -104,6 +104,32 @@ class TestScanDirectorySkipsIgnoredDirs:
         paths = [f for f, _ in signals["files"]]
         assert not any(".git" in p for p in paths)
 
+    def test_github_signal_dir_allowlisted(self, tmp_path: Path) -> None:
+        # Regression: hidden dirs that carry signal (``.github``,
+        # ``.devcontainer``, ``.vscode``, ``.idea``) must be walked.
+        # Before the Phase 6a hotfix the blanket ``startswith(".")`` drop
+        # silently skipped ``.github/workflows/``, and --recommend against
+        # a GitHub Actions repo returned zero MCPs.
+        repo = tmp_path / "repo"
+        _write(repo / ".github" / "workflows" / "ci.yml", "on: push\n")
+        _write(repo / ".devcontainer" / "devcontainer.json", "{}")
+        _write(repo / ".vscode" / "settings.json", "{}")
+        _write(repo / ".idea" / "workspace.xml", "<x/>")
+        # Control: ``.git`` must still be filtered.
+        _write(repo / ".git" / "HEAD", "ref: refs/heads/main")
+
+        signals = sr.scan_directory(str(repo))
+        paths = [f for f, _ in signals["files"]]
+        assert any(".github" in p and "ci.yml" in p for p in paths), (
+            ".github/workflows/ci.yml must be walked (signal dir allowlist)"
+        )
+        assert any(".devcontainer" in p for p in paths)
+        assert any(".vscode" in p for p in paths)
+        assert any(".idea" in p for p in paths)
+        assert not any(".git" in p and "HEAD" in p for p in paths), (
+            ".git must remain filtered even with the allowlist"
+        )
+
     def test_pycache_and_venv_skipped(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         _write(repo / "__pycache__" / "x.cpython-311.pyc")

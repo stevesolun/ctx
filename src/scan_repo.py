@@ -67,14 +67,23 @@ def scan_directory(repo_path: str, max_depth: int = MAX_DEPTH) -> dict:
         "Cargo.lock", "Gemfile.lock", "go.sum", "composer.lock",
     }
 
+    # Hidden dirs that DO carry signal — must be walked. ``.github``
+    # holds GitHub Actions workflows, ``.devcontainer`` holds container
+    # configs, ``.vscode``/``.idea`` hold IDE integration. Without this
+    # allowlist the default ``startswith(".")`` filter drops every one
+    # of them and the corresponding stack detection silently no-ops.
+    SIGNAL_HIDDEN_DIRS = {".github", ".devcontainer", ".vscode", ".idea"}
+
     for dirpath, dirnames, filenames in os.walk(repo):
         rel_dir = os.path.relpath(dirpath, repo)
         depth = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
 
-        # Skip ignored dirs
+        # Skip ignored dirs. Hidden dirs are dropped EXCEPT the
+        # allowlisted signal-bearing ones (.github etc.).
         dirnames[:] = [
             d for d in dirnames
-            if d not in SKIP_DIRS and not d.startswith(".")
+            if d not in SKIP_DIRS
+            and (not d.startswith(".") or d in SIGNAL_HIDDEN_DIRS)
         ]
 
         if depth > max_depth:
