@@ -37,6 +37,7 @@ ctx-skill-add = "skill_add:main"
 ctx-mcp-add = "mcp_add:main"
 ctx-mcp-fetch = "mcp_fetch:main"
 ctx-mcp-quality = "mcp_quality:main"
+ctx-mcp-rebuild-index = "mcp_rebuild_index:main"
 ctx-wiki-graphify = "wiki_graphify:main"
 
 [project.optional-dependencies]
@@ -89,10 +90,12 @@ py-modules = [
     "kpi_dashboard",
     "link_conversions",
     "mcp_add",
+    "mcp_canonical_index",
     "mcp_entity",
     "mcp_fetch",
     "mcp_quality",
     "mcp_quality_signals",
+    "mcp_rebuild_index",
     "memory_anchor",
     "quality_signals",
     "resolve_graph",

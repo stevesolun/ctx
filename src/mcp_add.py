@@ -33,6 +33,7 @@ import yaml
 
 from ctx_config import cfg
 from intake_pipeline import IntakeRejected, check_intake, record_embedding
+import mcp_canonical_index
 from mcp_entity import McpRecord
 from wiki_batch_entities import generate_mcp_page
 from wiki_sync import append_log, ensure_wiki, update_index
@@ -140,42 +141,96 @@ def _normalize_github_url(url: str | None) -> str | None:
     return candidate
 
 
-def _find_existing_by_github_url(
-    mcp_dir: Path, target_github_url: str | None
-) -> Path | None:
-    """Scan existing MCP entity files for one whose github_url matches.
+def _scan_for_github_url(mcp_dir: Path, target: str) -> Path | None:
+    """Walk every entity page looking for a canonical github_url match.
 
-    Phase 3.6 cross-source dedup. When awesome-mcp and pulsemcp both
-    catalog the same upstream repository, their slugs typically differ
-    (awesome-mcp slugifies the README name, pulsemcp uses the URL path)
-    so the slug-based existence check in ``add_mcp`` would create two
-    separate entities. This helper finds the existing entity by its
-    canonical github_url so the second source can merge into it.
-
-    Returns ``None`` when the new record has no github_url, when no
-    existing entity matches, or when ``mcp_dir`` does not exist yet.
-
-    Cost: O(n) entity reads per call. Acceptable at current ~40 entity
-    scale; sidecar index will replace this for the Phase 6 ~12k+ scale.
+    O(n) fallback used when the canonical-index sidecar misses or
+    returns a stale entry. ``target`` must already be normalized — this
+    function does not re-normalize.
     """
-    target = _normalize_github_url(target_github_url)
-    if target is None or not mcp_dir.is_dir():
-        return None
-    # Fast path: grep the whole tree for the URL substring before
-    # parsing frontmatter. Avoids ~12k YAML parses when the answer is
-    # almost always None.
     for page in mcp_dir.rglob("*.md"):
+        # Skip sidecar files (``.canonical-index.json`` is not .md but
+        # a future hidden .md would be caught here).
+        if page.name.startswith("."):
+            continue
         try:
             text = page.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
+        # Fast path: grep the text for the URL before parsing YAML.
         if target not in text.lower():
             continue
-        # Confirm the match is in the github_url frontmatter field, not
-        # an incidental URL mention in the body.
         fm = _parse_frontmatter(text)
         if _normalize_github_url(fm.get("github_url")) == target:
             return page
+    return None
+
+
+def _find_existing_by_github_url(
+    mcp_dir: Path, target_github_url: str | None
+) -> Path | None:
+    """Return the path of an existing entity page for ``target_github_url``.
+
+    Phase 3.6 cross-source dedup: when awesome-mcp and pulsemcp both
+    catalog the same upstream repo, their slugs differ, and the slug-
+    based existence check in ``add_mcp`` would create two separate
+    entities. This helper finds the existing entity by its canonical
+    github_url so the second source can merge into it instead.
+
+    Phase 6b: canonical-index sidecar turns the O(n) scan into O(1)
+    lookup on the hot path. The index is a *cache*, not authoritative:
+
+    - Hit + file exists  -> return the indexed path.
+    - Hit + file missing -> stale entry; scan and repair (upsert the
+      scan result, or remove the stale mapping if nothing matches).
+    - Miss               -> scan once; on hit, repair by upserting.
+    - No github_url      -> return None (indexing github-only URLs).
+    """
+    target = _normalize_github_url(target_github_url)
+    if target is None or not mcp_dir.is_dir():
+        return None
+
+    index = mcp_canonical_index.load_index(mcp_dir)
+    # Distinguish "true miss" (no entry) from "stale hit" (entry exists
+    # but points at nothing/something else). lookup() collapses both to
+    # None which hides the information we need for repair decisions.
+    raw_entry = index["by_github_url"].get(target)
+    cached = mcp_canonical_index.lookup(mcp_dir, target, index=index)
+    if cached is not None:
+        # Defensive confirm: the indexed file might have been manually
+        # edited to point at a different repo. If the stored github_url
+        # still matches the target, we trust it; otherwise fall through
+        # to the scan path and treat this as a stale entry.
+        try:
+            fm = _parse_frontmatter(cached.read_text(encoding="utf-8", errors="replace"))
+            if _normalize_github_url(fm.get("github_url")) == target:
+                return cached
+        except OSError:
+            pass  # Scan-and-repair below handles this.
+
+    # Miss or stale hit: fall back to the authoritative scan.
+    hit = _scan_for_github_url(mcp_dir, target)
+    if hit is not None:
+        # Repair the index so the next call is O(1).
+        try:
+            relpath = hit.relative_to(mcp_dir).as_posix()
+            slug = hit.stem
+            mcp_canonical_index.upsert(
+                mcp_dir, target, slug=slug, relpath=relpath, index=index
+            )
+        except (OSError, ValueError):
+            # Index-repair failure must not block the dedup decision;
+            # the next successful add will get another chance to repair.
+            pass
+        return hit
+
+    # Nothing on disk anywhere. If the index had a stale entry, drop it
+    # so future lookups don't keep paying the scan cost.
+    if raw_entry is not None:
+        try:
+            mcp_canonical_index.remove(mcp_dir, target, index=index)
+        except OSError:
+            pass
     return None
 
 
@@ -281,6 +336,29 @@ def add_mcp(
             final_text = _rewrite_frontmatter(existing_text, updated_fm)
 
         target_path.write_text(final_text, encoding="utf-8")
+
+        # Phase 6b: keep the canonical sidecar index hot. Upsert on
+        # every successful write so the first cross-source dedup after
+        # this add is O(1) without needing a rebuild. Applies to both
+        # new pages AND source merges — a merge can land a github_url
+        # from the second source when the first source lacked one.
+        # Index-write failures must not break the add; the next lookup
+        # will scan-and-repair.
+        canonical = _normalize_github_url(record.github_url)
+        if canonical is not None:
+            try:
+                relpath = target_path.relative_to(mcp_dir).as_posix()
+                mcp_canonical_index.upsert(
+                    mcp_dir,
+                    canonical,
+                    slug=record.slug,
+                    relpath=relpath,
+                )
+            except (OSError, ValueError) as exc:
+                print(
+                    f"Warning: failed to update canonical index for {record.slug}: {exc}",
+                    file=sys.stderr,
+                )
 
         # Embed + index + log only on first creation. Re-merging an
         # existing entity does not invalidate its embedding (content
