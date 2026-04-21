@@ -532,11 +532,82 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
     return profile
 
 
+def _print_recommendations(repo: str, profile: dict) -> None:
+    """Run resolve() and print a 3-section summary (skills / agents / MCPs).
+
+    Phase 6a UX: previously only programmatic consumers (monitor, hooks)
+    saw the manifest output. Running ``ctx-scan-repo --recommend`` now
+    prints the same three buckets to the terminal so users see MCP
+    recommendations surface from real repos without opening the
+    dashboard.
+    """
+    # Local imports — these pull in networkx and the full resolver graph
+    # which isn't needed for plain profile scans. Keeps default scan fast.
+    from resolve_skills import (  # noqa: PLC0415
+        discover_available_skills,
+        read_wiki_overrides,
+        resolve,
+    )
+    from ctx_config import cfg  # noqa: PLC0415
+
+    available = discover_available_skills(str(cfg.skills_dir))
+    overrides = read_wiki_overrides(str(cfg.wiki_dir))
+    manifest = resolve(profile, available, overrides, max_skills=cfg.max_skills)
+
+    print()
+    print("=" * 60)
+    print("Recommended for this repo")
+    print("=" * 60)
+
+    # Skills section
+    print(f"\n-- Skills ({len(manifest['load'])}) --")
+    if manifest["load"]:
+        for entry in manifest["load"][:10]:
+            reason = entry["reason"][:55]
+            print(f"  {entry['skill']:<40s}  {reason}")
+    else:
+        print("  (no skills matched)")
+
+    # Agents section — separate from skills by type
+    agents = [e for e in manifest["load"] if e.get("type") == "agent"]
+    if agents:
+        print(f"\n-- Agents ({len(agents)}) --")
+        for entry in agents[:10]:
+            print(f"  {entry['skill']:<40s}  {entry['reason'][:55]}")
+
+    # MCP servers section — Phase 5 populated this bucket
+    print(f"\n-- MCP Servers ({len(manifest['mcp_servers'])}) --")
+    if manifest["mcp_servers"]:
+        for m in manifest["mcp_servers"][:10]:
+            shared = ",".join(m.get("shared_tags", [])[:2]) or "-"
+            print(f"  {m['name']:<40s}  score={m['score']:.2f}  via={shared}")
+    else:
+        print("  (no MCP servers matched — try running")
+        print("   `ctx-mcp-fetch --source awesome-mcp --limit 100 | ctx-mcp-add --from-stdin`")
+        print("   to populate the catalog, then rescan)")
+
+    # Warnings (missing skill installs etc.)
+    if manifest["warnings"]:
+        print(f"\n-- Notes ({len(manifest['warnings'])}) --")
+        for w in manifest["warnings"][:5]:
+            print(f"  {w}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Scan a repo and produce a stack profile")
     parser.add_argument("--repo", required=True, help="Path to the repository")
     parser.add_argument("--output", default="/tmp/stack-profile.json", help="Output JSON path")
     parser.add_argument("--depth", type=int, default=MAX_DEPTH, help="Max scan depth")
+    parser.add_argument(
+        "--recommend",
+        action="store_true",
+        help=(
+            "After scanning, run the resolver and print recommended "
+            "skills / agents / MCP servers to stderr. Requires an "
+            "existing ~/.claude/skill-wiki graph (run ctx-wiki-graphify "
+            "first). Default: scan only, no recommendations."
+        ),
+    )
     args = parser.parse_args()
 
     if not os.path.isdir(args.repo):
@@ -564,6 +635,12 @@ def main():
     print(f"Scanned {args.repo}: {total} stack elements detected")
     print(f"Type: {profile['project_type']} | Monorepo: {profile['monorepo']}")
     print(f"Profile saved to {args.output}")
+
+    if args.recommend:
+        try:
+            _print_recommendations(args.repo, profile)
+        except Exception as exc:  # noqa: BLE001 — recommendation is advisory
+            print(f"\n(recommender failed: {type(exc).__name__}: {exc})", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,54 @@
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — MCP Phase 6a — cheap wins before scale
+
+Three small items from the Phase 2.5, 5, and 6 backlogs, bundled so
+the scale work (6b–6f) starts from a clean base.
+
+### Security
+
+- **``_fs_utils.atomic_write_{text,bytes,json}``** now ``chmod 0o600``
+  the temp file before ``os.replace`` so the renamed inode lands
+  owner-only. Phase 2.5 security-reviewer MEDIUM: ``tempfile.mkstemp``
+  creates with 0o600 on POSIX but ``os.replace`` onto an existing
+  file can inherit the destination's more-permissive mode. Explicit
+  chmod closes that window. Windows ignores the bits (OSError swallowed).
+
+### Added
+
+- **``ctx-mcp-fetch -v / --verbose``** — wires up ``logging.basicConfig``
+  so library-module ``_logger.info`` / ``_logger.debug`` calls
+  (Phase 2.5 print→logging cleanup) surface on stderr. ``-v`` = INFO,
+  ``-vv`` = DEBUG. Default silent so JSONL pipe consumers stay clean.
+- **``ctx-scan-repo --recommend``** — after stack detection, runs
+  ``resolve()`` and prints a three-section summary to stdout: Skills
+  (from ``manifest["load"]``), Agents (filtered from load by type),
+  MCP Servers (``manifest["mcp_servers"]`` from Phase 5). Default
+  off — scan stays fast for callers who only want the profile.
+
+### Tests
+
+- 4 new ``TestVerboseFlag`` cases in ``test_mcp_fetch_cli.py``: no-op
+  at verbosity 0, INFO at -v, DEBUG at -vv, argparser accepts the flag.
+- 5 new tests in ``test_fs_utils_permissions.py`` (POSIX-only via
+  ``pytest.mark.skipif``): 0o600 on text/bytes/json writes, and the
+  critical regression for the Phase 2.5 finding — overwriting a 0o644
+  file must pin the result to 0o600.
+- Total: **1626 passed, 6 skipped** (was 1621 → +5 new tests + 4
+  new platform-skips, 0 regressions).
+
+### Live verification
+
+```
+$ ctx-mcp-fetch --source awesome-mcp --limit 2 -v 2>&1 >/dev/null
+[mcp_sources.awesome_mcp] parsed 2023 entries, skipped 0
+[awesome-mcp] emitted 2 record(s)
+
+$ ctx-scan-repo --repo . --recommend
+... 16 Skills / 0 MCP Servers (with helpful hint to populate) / 4 Notes
+```
+
 ## [Unreleased] — MCP Phase 5 — cross-type recommendations
 
 Closes the loop on MCP integration: the graph already contained MCP

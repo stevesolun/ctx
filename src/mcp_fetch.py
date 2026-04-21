@@ -127,13 +127,43 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Bypass the local raw cache and fetch fresh upstream content",
     )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="count",
+        default=0,
+        help=(
+            "Enable progress logging to stderr. -v for INFO (parse counts, "
+            "page progress), -vv for DEBUG (per-entry skip reasons). Library "
+            "modules emit via ``logging`` by default but are silent unless "
+            "this flag wires up basicConfig."
+        ),
+    )
     return parser
+
+
+def _configure_logging(verbosity: int) -> None:
+    """Wire logging.basicConfig for CLI visibility.
+
+    Phase 2.5 replaced print(stderr) in library code with logging calls
+    which are silent by default. This helper lights them up on demand.
+    stderr (not stdout) so JSONL pipe consumers stay clean.
+    """
+    if verbosity <= 0:
+        return
+    import logging  # noqa: PLC0415 — local import keeps cold-path cost off imports
+    level = logging.DEBUG if verbosity >= 2 else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="[%(name)s] %(message)s",
+        stream=sys.stderr,
+    )
 
 
 def main() -> None:
     """Entry point for the ``ctx-mcp-fetch`` console script."""
     parser = _build_parser()
     args = parser.parse_args()
+    _configure_logging(args.verbose)
 
     if args.list_sources:
         sys.exit(_list_sources())

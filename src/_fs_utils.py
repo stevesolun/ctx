@@ -26,18 +26,32 @@ from typing import Any
 __all__ = ["atomic_write_text", "atomic_write_bytes", "atomic_write_json"]
 
 
+# Permission mask for newly written files. 0o600 = owner read/write only.
+# Phase 2.5 security reviewer noted that on Linux/macOS,
+# ``tempfile.mkstemp`` defaults to 0o600 for the temp file, but
+# ``os.replace`` can inherit the destination's permissions if the
+# target already exists. An explicit chmod before the replace makes
+# the intent load-bearing across platforms (Windows ignores the mode
+# but doesn't error). Applied to all atomic writers so skill-quality
+# sidecars, pulsemcp cache JSONs, and backup manifests all land
+# owner-only on multi-user machines.
+_FILE_MODE_PRIVATE: int = 0o600
+
+
 def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
     """Write *text* to *path* atomically.
 
     Uses a temp file in the same directory so that the final ``os.replace``
     stays on the same filesystem (avoids cross-device rename failures).
-    Creates parent directories if they are missing.
+    Creates parent directories if they are missing. The written file
+    lands with permissions ``0o600`` (owner read/write only).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding=encoding) as fh:
             fh.write(text)
+        _chmod_private(tmp)
         _replace_with_retry(tmp, path)
     except Exception:
         _unlink_silent(tmp)
@@ -49,12 +63,14 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
 
     Same temp-file-in-same-dir + ``os.replace`` strategy as
     :func:`atomic_write_text`.  Creates parent directories if missing.
+    Result permissions: ``0o600``.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
+        _chmod_private(tmp)
         _replace_with_retry(tmp, path)
     except Exception:
         _unlink_silent(tmp)
@@ -94,6 +110,24 @@ def _replace_with_retry(src: str, dst: Path, *, attempts: int = 10, delay: float
             last_exc = exc
             time.sleep(delay)
     raise last_exc  # type: ignore[misc]
+
+
+def _chmod_private(path: str) -> None:
+    """chmod ``path`` to owner-read/write only. Best-effort on Windows.
+
+    ``tempfile.mkstemp`` already creates with 0o600 on POSIX, but
+    ``os.replace`` onto an existing destination can inherit the
+    destination's more-permissive mode. Calling chmod immediately
+    before the replace pins the mode to 0o600 on the temp file so the
+    final renamed inode keeps it.
+    """
+    try:
+        os.chmod(path, _FILE_MODE_PRIVATE)
+    except OSError:
+        # Windows ignores most of the unix bits; cross-filesystem
+        # temp placements may also return OSError. Non-fatal: the
+        # replace still succeeds, just without the hardened mode.
+        pass
 
 
 def _unlink_silent(path: str) -> None:

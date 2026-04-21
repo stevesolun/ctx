@@ -231,3 +231,56 @@ class TestFetchError:
         # Error detail must surface somewhere — prefer stderr
         error_output = captured.err + captured.out
         assert error_output.strip() != "", "Expected error output when fetch raises"
+
+
+class TestVerboseFlag:
+    """Phase 6a: -v/--verbose wires up logging.basicConfig so library
+    modules' logger calls (Phase 2.5 cleanup) become visible."""
+
+    def test_configure_logging_no_verbosity_is_noop(self) -> None:
+        # Zero verbosity must not touch basicConfig (avoid polluting
+        # other tests' logging state).
+        import logging  # noqa: PLC0415
+        before = len(logging.getLogger().handlers)
+        mcp_fetch._configure_logging(0)
+        after = len(logging.getLogger().handlers)
+        assert before == after, (
+            "verbosity=0 must not add logging handlers"
+        )
+
+    def test_configure_logging_v1_sets_info_level(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import logging  # noqa: PLC0415
+
+        captured: dict[str, object] = {}
+
+        def _capture(**kwargs: object) -> None:
+            captured.update(kwargs)
+
+        monkeypatch.setattr(logging, "basicConfig", _capture)
+        mcp_fetch._configure_logging(1)
+        assert captured.get("level") == logging.INFO
+
+    def test_configure_logging_v2_sets_debug_level(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import logging  # noqa: PLC0415
+
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(logging, "basicConfig", lambda **kw: captured.update(kw))
+        mcp_fetch._configure_logging(2)
+        assert captured.get("level") == logging.DEBUG
+
+    def test_verbose_flag_accepted_by_argparser(self) -> None:
+        # -v and --verbose must not break the parser.
+        parser = mcp_fetch._build_parser()
+        # With -v alongside a required arg:
+        args = parser.parse_args(["--list-sources", "-v"])
+        assert args.verbose == 1
+
+        args = parser.parse_args(["--list-sources", "-vv"])
+        assert args.verbose == 2
+
+        args = parser.parse_args(["--list-sources"])
+        assert args.verbose == 0
