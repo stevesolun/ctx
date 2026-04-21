@@ -36,6 +36,7 @@ ctx-lifecycle = "ctx_lifecycle:main"
 ctx-skill-add = "skill_add:main"
 ctx-mcp-add = "mcp_add:main"
 ctx-mcp-fetch = "mcp_fetch:main"
+ctx-mcp-ingest = "mcp_ingest:main"
 ctx-mcp-quality = "mcp_quality:main"
 ctx-mcp-rebuild-index = "mcp_rebuild_index:main"
 ctx-wiki-graphify = "wiki_graphify:main"
@@ -93,6 +94,7 @@ py-modules = [
     "mcp_canonical_index",
     "mcp_entity",
     "mcp_fetch",
+    "mcp_ingest",
     "mcp_quality",
     "mcp_quality_signals",
     "mcp_rebuild_index",
