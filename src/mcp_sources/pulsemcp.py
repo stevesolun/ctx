@@ -35,6 +35,30 @@ _TOTAL_PAGES_FALLBACK = 310  # As of 2026-04: 12,975 servers / 42 per page = 310
 # class names doesn't silently break the parser.
 _CARD_TEST_ID_RE = re.compile(r'data-test-id="mcp-server-card-([a-z0-9][a-z0-9_-]+)"')
 
+# Detail-page anchors — used by fetch_details(). The GitHub-repo
+# anchor is a structural marker (``data-test-id``) which is why we
+# prefer it over class-based matching that'd break on a frontend
+# restyle. Pulsemcp emits this anchor only for MCPs whose creator
+# claimed a GitHub repo; SaaS-wrapper MCPs legitimately omit it.
+#
+# Attribute order inside the ``<a>`` is not stable (we've seen both
+# ``data-test-id`` then ``href`` and ``href`` then ``data-test-id``),
+# so we anchor on the test-id and extract href + inner separately
+# rather than encoding an attribute order into a single regex.
+_DETAIL_REPO_TAG_RE = re.compile(
+    r'<a\b[^>]*?data-test-id="mcp-server-github-repo"[^>]*?>'
+    r'(?P<inner>.*?)</a>',
+    re.DOTALL,
+)
+_DETAIL_REPO_HREF_RE = re.compile(
+    r'href="(?P<url>https://github\.com/[A-Za-z0-9_.\-/]+)"'
+)
+# Stars render as ``(N stars)`` or ``(N star)`` inside the GitHub
+# anchor, often wrapped across multiple lines with whitespace/newlines
+# between ``(``, the number, and the word. ``\s+`` matches newlines so
+# the pattern survives pulsemcp's pretty-printed markup.
+_STARS_RE = re.compile(r'\(\s*(\d+)\s+stars?\s*\)', re.DOTALL)
+
 
 class _CardTextExtractor(HTMLParser):
     """Stream-extract text content per tag inside one server card.
@@ -204,9 +228,80 @@ def _fetch_page(page: int, *, refresh: bool) -> str:
     return text
 
 
+def _parse_detail(html: str) -> dict:
+    """Extract enrichable fields from a pulsemcp detail page.
+
+    Returns a dict with these optional keys:
+
+      - ``github_url``: the repo URL from the ``mcp-server-github-repo``
+        anchor. Absent when the MCP has no linked repo (SaaS wrappers).
+      - ``stars``: int, parsed from the ``(N stars)`` label inside the
+        same anchor. Absent when the label is missing.
+
+    Never raises for missing fields — the whole point of Phase 6f.A
+    is that we can enrich what's there and leave the rest null.
+    """
+    out: dict = {}
+    tag_m = _DETAIL_REPO_TAG_RE.search(html)
+    if tag_m is None:
+        return out
+
+    # Scan the whole anchor block — not just the matched slice — for
+    # the href, because attributes before the test-id (which the tag
+    # regex captures) live outside the ``inner`` group.
+    anchor_block = tag_m.group(0)
+    href_m = _DETAIL_REPO_HREF_RE.search(anchor_block)
+    if href_m is not None:
+        # Strip trailing slash + any fragment/query so the URL form
+        # is canonical (the Phase 6f.B GitHub API consumer wants a
+        # bare ``https://github.com/<owner>/<repo>``).
+        url = href_m.group("url").rstrip("/")
+        url = url.split("#", 1)[0].split("?", 1)[0]
+        out["github_url"] = url
+
+    stars_m = _STARS_RE.search(tag_m.group("inner"))
+    if stars_m is not None:
+        try:
+            out["stars"] = int(stars_m.group(1))
+        except ValueError:
+            pass  # non-integer — leave unset rather than guessing
+    return out
+
+
+def _fetch_detail_html(slug: str, *, refresh: bool) -> str:
+    """Fetch one detail page's HTML, date-keyed cache. Mirror of _fetch_page."""
+    today = date.today().isoformat()
+    basename = f"{today}--detail-{slug}.html"
+    source_name = "pulsemcp"
+
+    cached = None if refresh else read_cache(source_name, basename)
+    if cached is not None:
+        return cached
+
+    url = f"{LISTING_BASE}/{slug}"
+    text = fetch_text(url)
+    write_cache(source_name, basename, text)
+    return text
+
+
 class _PulsemcpSource:
     name = "pulsemcp"
     homepage = "https://www.pulsemcp.com/servers"
+
+    def fetch_details(self, slug: str, *, refresh: bool = False) -> dict:
+        """Fetch ``pulsemcp.com/servers/<slug>`` and return enrichment fields.
+
+        Returns ``{"github_url": str, "stars": int}`` with either key
+        optional. An HTTP 404 (slug since removed) raises HTTPError and
+        the caller is expected to convert it to a per-slug failure
+        without aborting a batch. Any other network error also raises.
+
+        This is the fetch primitive for Phase 6f.A: the outer
+        ``mcp_enrich`` orchestrator handles checkpoint + frontmatter
+        updates across the full 10,786-slug catalog.
+        """
+        html = _fetch_detail_html(slug, refresh=refresh)
+        return _parse_detail(html)
 
     def fetch(self, *, limit: int | None = None, refresh: bool = False) -> Iterator[dict]:
         """Walk pulsemcp listing pages until exhausted or *limit* reached.
