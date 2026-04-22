@@ -93,6 +93,7 @@ py-modules = [
     "flatten_agents",
     "import_strix_skills",
     "inject_hooks",
+    "install_utils",
     "intake_gate",
     "intake_pipeline",
     "intent_interview",
