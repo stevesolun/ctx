@@ -41,6 +41,8 @@ ctx-mcp-add = "mcp_add:main"
 ctx-mcp-fetch = "mcp_fetch:main"
 ctx-mcp-ingest = "mcp_ingest:main"
 ctx-mcp-enrich = "mcp_enrich:main"
+ctx-mcp-install = "mcp_install:install_main"
+ctx-mcp-uninstall = "mcp_install:uninstall_main"
 ctx-mcp-quality = "mcp_quality:main"
 ctx-mcp-rebuild-index = "mcp_rebuild_index:main"
 ctx-wiki-graphify = "wiki_graphify:main"
@@ -102,6 +104,7 @@ py-modules = [
     "mcp_entity",
     "mcp_fetch",
     "mcp_ingest",
+    "mcp_install",
     "mcp_quality",
     "mcp_quality_signals",
     "mcp_rebuild_index",
