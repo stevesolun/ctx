@@ -62,6 +62,32 @@
     }
   },
 
+  "graph": {
+    "_comment": "Knowledge-graph edge weighting for wiki_graphify. Every edge between two entity pages (skill ↔ agent ↔ mcp-server, any combination) is computed from three signals and combined as a weighted sum. Semantic similarity uses sentence embeddings (cfg.intake.embedding.backend) to compare entity descriptions — this catches context-level affinity that tags and slug tokens miss (e.g., a 'python-linter' MCP links to a 'code-reviewer' agent even when they share no explicit tags). Tag similarity counts explicit frontmatter tag overlaps. Slug-token similarity counts shared tokens from entity slugs (e.g., 'atlassian-admin' skill ↔ 'atlassian-cloud' MCP share the 'atlassian' token). Override any key in your user config (~/.claude/skill-system-config.json) — weights must sum to 1.0.",
+    "edge_weights": {
+      "semantic":    0.70,
+      "tags":        0.15,
+      "slug_tokens": 0.15
+    },
+    "semantic": {
+      "_comment": "Semantic edge construction. top_k caps per-node neighbors to keep edge count bounded; at N=13,000 nodes and top_k=20 that's ~260K semantic edges. min_cosine drops weak matches before they become edges — 0.35 keeps pairs where the embeddings are meaningfully related but rejects noise.",
+      "top_k": 20,
+      "min_cosine": 0.35,
+      "batch_size": 128,
+      "cache_dir": "~/.claude/skill-wiki/.embedding-cache/graph"
+    },
+    "tag_edges": {
+      "_comment": "Tag edge construction. dense_tag_threshold skips over-broad tags shared by >N nodes (a tag on 1000 nodes would create 500k noise edges of weight 1). Use Infinity to disable. shared_tag_saturation is the number of overlapping tags at which tag_sim saturates to 1.0 — with saturation=5, two pages sharing 5+ tags contribute tag_sim=1.0; sharing 2 contributes 0.4.",
+      "dense_tag_threshold": 500,
+      "shared_tag_saturation": 5
+    },
+    "token_edges": {
+      "_comment": "Slug-token edge construction. Mirrors tag_edges but for the pseudo-tags synthesized from slug tokens. shared_token_saturation applies to how many slug tokens two pages must share before token_sim saturates to 1.0.",
+      "dense_token_threshold": 500,
+      "shared_token_saturation": 3
+    }
+  },
+
   "mcp_quality": {
     "_comment": "Phase 4 MCP scorer. Weights must sum to 1.0; signals are popularity, freshness, structural, graph, trust, runtime. Override per-key in your user config (~/.claude/skill-system-config.json).",
     "weights": {

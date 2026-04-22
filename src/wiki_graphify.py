@@ -92,17 +92,138 @@ def _related_section_header(entity_type: str) -> str:
     }.get(entity_type, "## Related")
 
 
+SLUG_STOP: frozenset[str] = frozenset({
+    "a", "an", "the", "and", "of", "for", "to", "with",
+    "skill", "agent", "expert", "pro", "core",
+})
+
+
+def _extract_description(content: str) -> str:
+    """Pull a short description out of an entity markdown body.
+
+    Prefers the first non-empty paragraph after the frontmatter and
+    the first heading. Used only to build semantic embedding text;
+    failing gracefully to the slug is fine because the caller
+    concatenates name + this + slug anyway.
+    """
+    # Everything after the second --- delimiter is the body.
+    parts = content.split("---", 2)
+    body = parts[2] if len(parts) >= 3 else content
+    lines = body.splitlines()
+    # Skip empty lines and the h1 title until we hit prose.
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            continue
+        # Skip wiki infra markers.
+        if stripped.startswith("<!--") or stripped.startswith("[["):
+            continue
+        return stripped[:500]  # clamp — embedding models cap tokens anyway
+    return ""
+
+
+def _embed_text(meta: dict, slug: str) -> str:
+    """Compose the string fed to the embedder for a node.
+
+    Fields blended: explicit ``name`` or ``title`` from frontmatter,
+    ``description`` from frontmatter, first prose line from the body,
+    the slug itself (de-hyphenated), and tags. Redundancy between
+    these is intentional — modern sentence encoders weight repeated
+    concepts slightly higher, which we want.
+    """
+    pieces: list[str] = []
+    for key in ("name", "title"):
+        v = meta.get(key)
+        if isinstance(v, str) and v.strip():
+            pieces.append(v.strip())
+            break
+    desc = meta.get("description")
+    if isinstance(desc, str) and desc.strip():
+        pieces.append(desc.strip())
+    body_desc = _extract_description(meta.get("_content", ""))
+    if body_desc and body_desc not in pieces:
+        pieces.append(body_desc)
+    pieces.append(slug.replace("-", " "))
+    tags = meta.get("tags") or []
+    if isinstance(tags, list) and tags:
+        pieces.append(" ".join(str(t) for t in tags if t))
+    return " | ".join(p for p in pieces if p)
+
+
+def _slug_tokens(slug: str) -> list[str]:
+    """Return the >=3-char non-stopword tokens from a slug."""
+    return [
+        t for t in slug.lower().split("-")
+        if len(t) >= 3 and t not in SLUG_STOP
+    ]
+
+
+def _pairs_from_index(
+    index: dict[str, list[str]],
+    *,
+    dense_threshold: int,
+    saturation: int,
+) -> tuple[dict[tuple[str, str], int], dict[tuple[str, str], list[str]]]:
+    """Turn a ``{key: [node_ids]}`` index into per-pair overlap counts.
+
+    Buckets with more than ``dense_threshold`` nodes are skipped —
+    they'd produce O(N^2) noise edges of weight 1 (e.g. a "python"
+    tag on 1,000 entities ⇒ 499,500 near-meaningless pairs).
+
+    Returns ``(counts, shared_keys)``:
+      - ``counts[pair]`` is the number of shared keys in that pair
+      - ``shared_keys[pair]`` is the concrete list of shared keys,
+        for edge attribution in the rendered graph.
+    """
+    counts: dict[tuple[str, str], int] = defaultdict(int)
+    shared: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for key, node_ids in index.items():
+        if len(node_ids) > dense_threshold:
+            continue
+        sorted_ids = sorted(node_ids)
+        for i, n1 in enumerate(sorted_ids):
+            for n2 in sorted_ids[i + 1:]:
+                pair = (n1, n2)
+                counts[pair] += 1
+                shared[pair].append(key)
+    return counts, shared
+
+
 def build_graph() -> tuple[nx.Graph, dict[str, dict]]:
     """Build a networkx graph from all entity pages.
 
     Nodes = entity pages (skills + agents + mcp-servers).
-    Edges = shared tags (weighted by number of shared tags).
 
-    Skills and agents live as flat ``<dir>/*.md``. MCP servers are
-    sharded by first character (``<dir>/<shard>/<slug>.md``) so we
-    iterate recursively for that subject type — the rest of the
-    pipeline is shard-agnostic since node IDs use only the slug stem.
+    Edges come from three independent signals whose per-edge
+    contributions are blended into a single ``final_weight``:
+
+      - **Semantic similarity** (default blend 0.70) — cosine between
+        sentence-embedding vectors of each entity's name+description+
+        slug+tags. Captures context-level affinity that tags miss
+        (e.g. a python-linter MCP ↔ a code-reviewer agent).
+      - **Shared tags** (default 0.15) — explicit ``tags:`` frontmatter
+        overlap, saturating at ``shared_tag_saturation`` overlaps.
+      - **Shared slug tokens** (default 0.15) — matching >=3-char
+        non-stopword tokens from the slug (``atlassian-admin`` ↔
+        ``atlassian-cloud`` share the ``atlassian`` token).
+
+    Weights and thresholds are configurable via ``cfg.graph.*`` in
+    config.json (see the ``graph`` section comments for the full
+    rationale). Setting ``semantic=0.0`` reverts to the pre-7.1
+    tag+token-only behaviour.
+
+    Each edge carries: ``semantic_sim``, ``tag_sim``, ``token_sim``,
+    ``final_weight``, ``weight`` (alias of final_weight for backward
+    compat with Obsidian graph view + downstream consumers that still
+    read ``weight``), and ``shared_tags`` / ``shared_tokens`` lists
+    for explainability.
     """
+    from ctx_config import cfg as _cfg  # noqa: PLC0415 — local to avoid
+    # a config read at module-import time (tests patch cfg).
+    import semantic_edges as _sem  # noqa: PLC0415
+
     G = nx.Graph()
     entities: dict[str, dict] = {}
 
@@ -112,6 +233,8 @@ def build_graph() -> tuple[nx.Graph, dict[str, dict]]:
         (MCP_ENTITIES, "mcp-server", "**/*.md"),
     ]
 
+    # ── Phase 1: discover nodes + collect embedding texts ─────────────
+    embed_nodes: list[_sem.SemanticNode] = []
     for entity_dir, entity_type, glob_pattern in sources:
         if not entity_dir.exists():
             continue
@@ -124,72 +247,91 @@ def build_graph() -> tuple[nx.Graph, dict[str, dict]]:
             tags = meta.get("tags", [])
             if isinstance(tags, str):
                 tags = [t.strip() for t in tags.split(",") if t.strip()]
-            node_id = f"{entity_type}:{page.stem}"
-            G.add_node(node_id, label=page.stem, type=entity_type, tags=tags)
+            slug = page.stem
+            node_id = f"{entity_type}:{slug}"
+            G.add_node(node_id, label=slug, type=entity_type, tags=tags)
             entities[node_id] = meta
+            embed_nodes.append(_sem.SemanticNode(
+                node_id=node_id, text=_embed_text(meta, slug),
+            ))
 
-    # Build tag->nodes index for edge creation.
-    #
-    # Two sources of connectivity:
-    #   1. Explicit frontmatter ``tags:`` — broad categories like "python",
-    #      "frontend", "security". These are high-cardinality (300-1000
-    #      nodes each) but semantically meaningful.
-    #   2. Slug-token pseudo-tags — the slug "fastapi-pro" contributes the
-    #      token "fastapi" as an implicit tag; "python-patterns"
-    #      contributes "python" and "patterns". This gives finer edges
-    #      between entities that share a topic keyword but aren't both
-    #      tagged with the same broad category.
-    #
-    # Together they produce a ~2,211-node / 600K-edge graph with the
-    # same density as the canonical v0.5 tarball (threshold=500 matches
-    # that corpus; lower thresholds produced the 861-edge sparsity that
-    # v0.5.x shipped as a regression).
+    # ── Phase 2: tag + slug-token indices (cheap) ────────────────────
     tag_index: dict[str, list[str]] = defaultdict(list)
-    SLUG_STOP = {"a", "an", "the", "and", "of", "for", "to", "with",
-                 "skill", "agent", "expert", "pro", "core"}
+    token_index: dict[str, list[str]] = defaultdict(list)
     for nid, data in G.nodes(data=True):
         for tag in data.get("tags", []):
             if tag and tag != "uncategorized":
-                tag_index[tag].append(nid)
-        # Slug-token pseudo-tags — prefix the implicit ones with "_t:"
-        # so they're distinguishable in shared_tags lists but still
-        # fully participate in edge weighting.
+                tag_index[str(tag)].append(nid)
         slug = data.get("label", nid.split(":", 1)[-1])
-        for token in slug.lower().split("-"):
-            if len(token) >= 3 and token not in SLUG_STOP:
-                tag_index[f"_t:{token}"].append(nid)
+        for token in _slug_tokens(slug):
+            token_index[token].append(nid)
 
-    # Create edges between nodes sharing tags.
-    #
-    # DENSE_TAG_THRESHOLD = 500 matches the canonical 642K-edge graph
-    # that ships in graph/wiki-graph.tar.gz. The 20 threshold in prior
-    # releases silently dropped every semantically-useful tag (python,
-    # frontend, security, testing all appear on >250 entities each),
-    # yielding only 861 edges on a 2,235-node corpus.
-    #
-    # Projections from the live tag distribution:
-    #   threshold= 20 ->     919 edges (v0.5.x sparsity regression)
-    #   threshold=500 -> 605,471 edges (this release — sensible density)
-    #   threshold=inf -> 2,263,557 edges (noise floor, dominated by
-    #                   the "ai"/"typescript" broad buckets)
-    DENSE_TAG_THRESHOLD = 500
-    edge_count = 0
-    for tag, nodes in tag_index.items():
-        if len(nodes) > DENSE_TAG_THRESHOLD:
-            continue  # Skip noise-floor tags (>500 nodes share them)
-        for i, n1 in enumerate(nodes):
-            for n2 in nodes[i + 1:]:
-                if G.has_edge(n1, n2):
-                    G[n1][n2]["weight"] += 1
-                    G[n1][n2]["shared_tags"].append(tag)
-                else:
-                    G.add_edge(n1, n2, weight=1, shared_tags=[tag])
-                    edge_count += 1
+    tag_counts, tag_shared = _pairs_from_index(
+        tag_index,
+        dense_threshold=_cfg.graph_dense_tag_threshold,
+        saturation=_cfg.graph_shared_tag_saturation,
+    )
+    token_counts, token_shared = _pairs_from_index(
+        token_index,
+        dense_threshold=_cfg.graph_dense_token_threshold,
+        saturation=_cfg.graph_shared_token_saturation,
+    )
+
+    # ── Phase 3: semantic edges (expensive) ──────────────────────────
+    if _cfg.graph_edge_weight_semantic > 0.0:
+        sem_pairs = _sem.compute_semantic_edges(
+            embed_nodes,
+            top_k=_cfg.graph_semantic_top_k,
+            min_cosine=_cfg.graph_semantic_min_cosine,
+            batch_size=_cfg.graph_semantic_batch_size,
+            cache_dir=_cfg.graph_semantic_cache_dir,
+            backend=_cfg.intake_backend,
+            model=_cfg.intake_model,
+        )
+    else:
+        sem_pairs = {}
+
+    # ── Phase 4: union all pairs and blend weights per pair ──────────
+    tag_sat = max(_cfg.graph_shared_tag_saturation, 1)
+    tok_sat = max(_cfg.graph_shared_token_saturation, 1)
+    w_sem = _cfg.graph_edge_weight_semantic
+    w_tag = _cfg.graph_edge_weight_tags
+    w_tok = _cfg.graph_edge_weight_tokens
+
+    all_pairs: set[tuple[str, str]] = (
+        set(sem_pairs) | set(tag_counts) | set(token_counts)
+    )
+    for pair in all_pairs:
+        n1, n2 = pair
+        sem = sem_pairs.get(pair, 0.0)
+        tag = min(tag_counts.get(pair, 0) / tag_sat, 1.0)
+        tok = min(token_counts.get(pair, 0) / tok_sat, 1.0)
+        final = w_sem * sem + w_tag * tag + w_tok * tok
+        # An edge that ends up exactly 0.0 is useless — happens only
+        # when every weight either drops to zero or the signals all
+        # landed below their floors. Skip it.
+        if final <= 0.0:
+            continue
+        G.add_edge(
+            n1, n2,
+            semantic_sim=round(sem, 4),
+            tag_sim=round(tag, 4),
+            token_sim=round(tok, 4),
+            final_weight=round(final, 4),
+            weight=round(final, 4),
+            shared_tags=tag_shared.get(pair, []),
+            shared_tokens=token_shared.get(pair, []),
+        )
 
     _attach_quality_attrs(G, QUALITY_SIDECAR_DIR)
 
     print(f"Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
-    print(f"Tag index: {len(tag_index)} unique tags")
+    print(
+        f"Edge sources: semantic={len(sem_pairs)}, tag_pairs={len(tag_counts)}, "
+        f"token_pairs={len(token_counts)} "
+        f"(blend: sem={w_sem}, tag={w_tag}, tok={w_tok})"
+    )
+    print(f"Tag index: {len(tag_index)} unique tags; token index: {len(token_index)} tokens")
     return G, entities
 
 

@@ -164,6 +164,58 @@ class Config:
         self.babysitter_runs_dir: str = bsitter.get("runs_dir", ".a5c/runs")
         self.babysitter_sdk_version: str = bsitter.get("sdk_version", "latest")
 
+        # ── Graph Edge Weights ──────────────────────────────────────────────
+        # wiki_graphify builds edges from three signals (semantic / tag /
+        # slug-token). Weights blend their per-edge contributions into a
+        # single final weight. Must sum to 1.0; validated lazily on first
+        # access so a bad user config surfaces with a clear error.
+        graph = raw.get("graph", {}) if isinstance(raw.get("graph"), dict) else {}
+        ew = graph.get("edge_weights", {}) if isinstance(graph.get("edge_weights"), dict) else {}
+        self.graph_edge_weight_semantic: float = float(ew.get("semantic", 0.70))
+        self.graph_edge_weight_tags: float = float(ew.get("tags", 0.15))
+        self.graph_edge_weight_tokens: float = float(ew.get("slug_tokens", 0.15))
+
+        sem = graph.get("semantic", {}) if isinstance(graph.get("semantic"), dict) else {}
+        self.graph_semantic_top_k: int = int(sem.get("top_k", 20))
+        self.graph_semantic_min_cosine: float = float(sem.get("min_cosine", 0.35))
+        self.graph_semantic_batch_size: int = int(sem.get("batch_size", 128))
+        self.graph_semantic_cache_dir: Path = Path(_expand(
+            sem.get("cache_dir", "~/.claude/skill-wiki/.embedding-cache/graph")
+        ))
+
+        te = graph.get("tag_edges", {}) if isinstance(graph.get("tag_edges"), dict) else {}
+        self.graph_dense_tag_threshold: int = int(te.get("dense_tag_threshold", 500))
+        self.graph_shared_tag_saturation: int = int(te.get("shared_tag_saturation", 5))
+
+        toe = graph.get("token_edges", {}) if isinstance(graph.get("token_edges"), dict) else {}
+        self.graph_dense_token_threshold: int = int(toe.get("dense_token_threshold", 500))
+        self.graph_shared_token_saturation: int = int(toe.get("shared_token_saturation", 3))
+
+        # Validate the blend weights sum to 1.0 (±1e-6 tolerance). A
+        # misconfigured user config is better caught here than 10 min
+        # into a regraphify pass when scores come out wrong.
+        weight_sum = (
+            self.graph_edge_weight_semantic
+            + self.graph_edge_weight_tags
+            + self.graph_edge_weight_tokens
+        )
+        if abs(weight_sum - 1.0) > 1e-6:
+            raise ValueError(
+                f"graph.edge_weights must sum to 1.0 "
+                f"(got {weight_sum:.4f}: semantic={self.graph_edge_weight_semantic}, "
+                f"tags={self.graph_edge_weight_tags}, "
+                f"slug_tokens={self.graph_edge_weight_tokens})"
+            )
+        for name, val in (
+            ("semantic", self.graph_edge_weight_semantic),
+            ("tags", self.graph_edge_weight_tags),
+            ("slug_tokens", self.graph_edge_weight_tokens),
+        ):
+            if val < 0.0:
+                raise ValueError(
+                    f"graph.edge_weights.{name} must be >= 0 (got {val})"
+                )
+
     def get(self, key: str, default: Any = None) -> Any:
         """Raw key access (dot-separated: 'paths.wiki_dir')."""
         parts = key.split(".")
