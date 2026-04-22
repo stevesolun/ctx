@@ -48,7 +48,19 @@ _logger = logging.getLogger(__name__)
 __all__ = [
     "SemanticNode",
     "compute_semantic_edges",
+    "TopKState",
 ]
+
+# ── Top-K state persistence (incremental mode) ───────────────────────────────
+#
+# On a full regraphify we embed + compute top-K neighbors for every node.
+# On an incremental regraphify we only recompute top-K for nodes whose
+# text changed, whose neighbors' text changed, or that appeared/vanished.
+# The state file holds per-node content hashes + top-K neighbor lists so
+# the next run can diff and skip.
+
+_TOPK_STATE_FILENAME = "topk-state.json"
+_TOPK_STATE_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -63,6 +75,155 @@ class SemanticNode:
 
     node_id: str
     text: str
+
+
+@dataclass(frozen=True)
+class TopKState:
+    """Persistent top-K neighbor cache for incremental regraphify.
+
+    Invalidation axes: a change to ``model_id``, ``top_k``, or
+    ``build_floor`` makes the cached top-K meaningless (different
+    filter or different geometry), so the orchestrator rebuilds
+    from scratch. A change to the entity body text invalidates
+    that one entity's entry; its neighbors may or may not be
+    affected depending on whether the changed entity was in their
+    top-K (that cascade is resolved by ``_partition_for_incremental``).
+
+    ``nodes`` maps node_id to:
+      - content_hash: SHA-256 of the text we embedded
+      - top_k: [[neighbor_id, cosine], ...] — descending by cosine
+    """
+
+    version: int
+    model_id: str
+    top_k: int
+    build_floor: float
+    nodes: dict[str, dict]  # node_id -> {"content_hash": ..., "top_k": [[id, score], ...]}
+
+    def is_compatible(
+        self, *, model_id: str, top_k: int, build_floor: float,
+    ) -> bool:
+        """True when a cached state can feed the current run as-is."""
+        return (
+            self.version == _TOPK_STATE_VERSION
+            and self.model_id == model_id
+            and self.top_k == top_k
+            # build_floor must match exactly; a lower current floor
+            # would let the cache admit pairs it dropped previously,
+            # a higher one would orphan cached pairs we should keep.
+            and abs(self.build_floor - build_floor) < 1e-9
+        )
+
+
+def _topk_state_path(cache_dir: Path) -> Path:
+    return cache_dir / _TOPK_STATE_FILENAME
+
+
+def _load_topk_state(cache_dir: Path) -> TopKState | None:
+    """Load the prior run's top-K state. Returns None on any issue.
+
+    Tolerates missing file, bad JSON, wrong schema version — anything
+    unexpected resets to "no cache" and forces a full rebuild.
+    """
+    import json  # noqa: PLC0415 — keep the cold-path import local
+
+    path = _topk_state_path(cache_dir)
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        _logger.warning("semantic_edges: topk-state load failed (%s)", exc)
+        return None
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return TopKState(
+            version=int(raw.get("version", 0)),
+            model_id=str(raw.get("model_id", "")),
+            top_k=int(raw.get("top_k", 0)),
+            build_floor=float(raw.get("build_floor", 0.0)),
+            nodes=dict(raw.get("nodes", {})),
+        )
+    except (TypeError, ValueError) as exc:
+        _logger.warning("semantic_edges: topk-state shape invalid (%s)", exc)
+        return None
+
+
+def _save_topk_state(cache_dir: Path, state: TopKState) -> None:
+    """Atomically persist the top-K state via a tmp-file + os.replace."""
+    import json  # noqa: PLC0415
+    from _fs_utils import atomic_write_text  # noqa: PLC0415
+
+    payload = {
+        "version": state.version,
+        "model_id": state.model_id,
+        "top_k": state.top_k,
+        "build_floor": state.build_floor,
+        "nodes": state.nodes,
+    }
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(_topk_state_path(cache_dir), json.dumps(payload))
+
+
+def _partition_for_incremental(
+    current_nodes: list[SemanticNode],
+    prior: TopKState,
+) -> tuple[set[str], set[str]]:
+    """Partition current nodes into (need_recompute, unchanged).
+
+    A node needs recomputation when:
+      1. It's new (no prior entry).
+      2. Its content hash changed.
+      3. Any neighbor in its prior top-K has itself been invalidated
+         — either removed from the current set, or its hash changed.
+
+    Propagation is conservative single-pass: we compute the first-order
+    "affected" set (new + hash-changed + removed), then for every
+    unchanged node check if any of its prior top-K neighbors fell into
+    that set. That covers the common case (a handful of entities
+    updated in the latest ingest). It does NOT iterate to stability —
+    second-order shifts (where A's neighbor B drops because B's
+    neighbor C changed) are picked up on the next full rebuild.
+    The trade-off is acceptable because cosine scores are relative-
+    rank stable for small changes; transitive rotation of the tail
+    of a top-20 list rarely changes the recommendations.
+    """
+    current_by_id: dict[str, str] = {
+        n.node_id: _content_hash(n.text) for n in current_nodes
+    }
+    prior_ids = set(prior.nodes.keys())
+    current_ids = set(current_by_id.keys())
+
+    new = current_ids - prior_ids
+    removed = prior_ids - current_ids
+    overlap = current_ids & prior_ids
+
+    changed: set[str] = set()
+    for nid in overlap:
+        cached_hash = prior.nodes[nid].get("content_hash", "")
+        if cached_hash != current_by_id[nid]:
+            changed.add(nid)
+
+    first_order_affected = new | changed | removed
+
+    # Second pass: any unchanged node whose prior top-K contained an
+    # affected node must be recomputed.
+    contaminated: set[str] = set()
+    for nid in overlap - changed:
+        prior_neighbors = prior.nodes[nid].get("top_k", [])
+        for entry in prior_neighbors:
+            # entry is [neighbor_id, score]; defensive in case of shape drift.
+            if not entry:
+                continue
+            neighbor_id = entry[0] if isinstance(entry, list) else str(entry)
+            if neighbor_id in first_order_affected:
+                contaminated.add(nid)
+                break
+
+    need_recompute = new | changed | contaminated
+    unchanged = current_ids - need_recompute
+    return need_recompute, unchanged
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -139,12 +300,14 @@ def _save_cache(
     vecs = np.stack([cache[k] for k in keys]).astype("float32")
     path = _cache_file(cache_dir)
     # ``np.savez_compressed`` auto-appends ``.npz`` when the filename
-    # doesn't already end that way. Hand it a stem without any
-    # extension so the behaviour is deterministic: we know the real
-    # on-disk name will be ``<stem>.npz``.
-    tmp_stem = path.with_name("embeddings.tmp")           # no suffix at all
+    # doesn't already end that way. Hand it a name without ``.npz`` so
+    # the behaviour is deterministic: we know numpy writes
+    # ``embeddings.tmp.npz``. ``with_suffix(".npz")`` would REPLACE the
+    # ``.tmp`` suffix and hand us the wrong on-disk name — use
+    # ``with_name`` with explicit concatenation to append instead.
+    tmp_stem = path.with_name("embeddings.tmp")  # on-disk target: embeddings.tmp.npz
     np.savez_compressed(tmp_stem, hashes=hashes, vecs=vecs, model=np.asarray([model_id]))
-    tmp_real = tmp_stem.with_suffix(".npz")               # "embeddings.tmp.npz"
+    tmp_real = tmp_stem.with_name(tmp_stem.name + ".npz")  # "embeddings.tmp.npz"
     os.replace(tmp_real, path)
 
 
@@ -335,6 +498,7 @@ def compute_semantic_edges(
     cache_dir: Path,
     backend: str = "sentence-transformers",
     model: str | None = None,
+    incremental: bool = True,
 ) -> dict[tuple[str, str], float]:
     """Build the semantic-similarity edge map.
 
@@ -343,21 +507,27 @@ def compute_semantic_edges(
             Duplicate ``node_id`` values are rejected (a programming
             error; IDs must be unique across skills/agents/MCPs).
         top_k: Per-node neighbor cap.
-        min_cosine: Minimum cosine to keep an edge.
+        min_cosine: Minimum cosine to admit a pair. In the graphify
+            caller this is ``build_floor`` — the inclusion threshold,
+            not the display filter.
         batch_size: Embedding batch size. 128 is a good default for
             sentence-transformers on CPU.
-        cache_dir: On-disk cache root. Created if missing. Contains
-            one ``embeddings.npz`` file keyed by content hash.
-        backend: ``embedding_backend`` backend name. Only used to
-            drive the embedder factory; the cache dedup already
-            accounts for text content.
-        model: Optional override of the backend default model. When
-            ``None`` the backend's own default is used.
+        cache_dir: On-disk cache root. Contains ``embeddings.npz``
+            (content-hash keyed vectors) and ``topk-state.json``
+            (per-node top-K neighbor lists for incremental mode).
+        backend: ``embedding_backend`` backend name.
+        model: Optional override of the backend default model.
+        incremental: When True (default), skip top-K recomputation for
+            nodes whose content is unchanged AND whose prior top-K
+            doesn't reference any changed/removed node. Falls through
+            to a full rebuild when the state file is missing or its
+            schema/model/top_k/build_floor don't match the current
+            run — see ``TopKState.is_compatible``.
 
     Returns:
         ``{(node_id_low, node_id_high): cosine}`` with node IDs
         canonicalised to the lexicographically-smaller/larger order.
-        Edges with cosine < ``min_cosine`` are dropped.
+        Pairs with cosine < ``min_cosine`` are dropped.
     """
     import numpy as np  # noqa: PLC0415
 
@@ -379,14 +549,43 @@ def compute_semantic_edges(
     model_id = getattr(embedder, "name", f"{backend}:{model or 'default'}")
 
     cache = _load_cache(cache_dir, model_id)
+
+    # ── Incremental partition (optional) ──────────────────────────────
+    # When a prior top-K state exists and is parameter-compatible, we
+    # can skip top-K recomputation for unchanged nodes. Otherwise we
+    # fall through to the full path.
+    prior_state: TopKState | None = None
+    need_recompute: set[str] = {n.node_id for n in node_list}  # default: all
+    unchanged: set[str] = set()
+    if incremental:
+        prior_state = _load_topk_state(cache_dir)
+        if prior_state is not None and prior_state.is_compatible(
+            model_id=model_id, top_k=top_k, build_floor=min_cosine,
+        ):
+            need_recompute, unchanged = _partition_for_incremental(
+                node_list, prior_state,
+            )
+            _logger.info(
+                "semantic_edges: incremental partition — recompute=%d, reuse=%d (of %d)",
+                len(need_recompute), len(unchanged), len(node_list),
+            )
+        else:
+            _logger.info(
+                "semantic_edges: no compatible prior state; full rebuild"
+            )
+            prior_state = None  # force full rebuild path
+
     _logger.info(
-        "semantic_edges: cache hits=%d of %d nodes (model=%s)",
+        "semantic_edges: embed cache hits=%d of %d nodes (model=%s)",
         sum(1 for n in node_list if _content_hash(n.text) in cache),
         len(node_list),
         model_id,
     )
 
-    # Build the row-aligned embedding matrix.
+    # ── Embedding pass (still covers every node; cache makes it cheap) ─
+    # We need every node's vector for the top-K pass even in incremental
+    # mode, because a recomputing node's top-K is computed against ALL
+    # nodes (not just other recomputing nodes).
     dim = -1
     missing: list[tuple[int, str, str]] = []
     row_vecs: list[np.ndarray | None] = [None] * len(node_list)
@@ -416,9 +615,6 @@ def compute_semantic_edges(
         _logger.warning("semantic_edges: no embeddings produced (empty input?)")
         return {}
 
-    # Any slot still None means its embedding wasn't resolved — should
-    # be impossible given the logic above, but guard so we don't crash
-    # on a None row in the matmul.
     for i, v in enumerate(row_vecs):
         if v is None:
             raise RuntimeError(
@@ -429,9 +625,156 @@ def compute_semantic_edges(
     vecs = _l2_normalize(vecs)
     node_ids = [n.node_id for n in node_list]
 
-    pairs = _topk_pairs(vecs, node_ids, top_k=top_k, min_cosine=min_cosine)
-    _logger.info(
-        "semantic_edges: produced %d semantic pairs (top_k=%d, min_cosine=%.2f)",
-        len(pairs), top_k, min_cosine,
+    # ── Top-K pass (incremental or full) ──────────────────────────────
+    if prior_state is not None and unchanged:
+        # Incremental path: compute fresh top-K only for ``need_recompute``;
+        # reuse prior_state for ``unchanged`` nodes.
+        recompute_indices = [
+            i for i, nid in enumerate(node_ids) if nid in need_recompute
+        ]
+        fresh_pairs = _topk_pairs_subset(
+            vecs, node_ids, recompute_indices,
+            top_k=top_k, min_cosine=min_cosine,
+        )
+        reused_pairs = _reuse_prior_pairs(
+            prior_state, unchanged, min_cosine,
+        )
+        # fresh_pairs always wins on overlap — it's computed against the
+        # current full vector set, so any numeric drift from a changed
+        # neighbor's vector is already baked in.
+        pairs: dict[tuple[str, str], float] = dict(reused_pairs)
+        pairs.update(fresh_pairs)
+        _logger.info(
+            "semantic_edges: incremental pairs — fresh=%d, reused=%d, total=%d",
+            len(fresh_pairs), len(reused_pairs), len(pairs),
+        )
+    else:
+        # Full rebuild path.
+        pairs = _topk_pairs(
+            vecs, node_ids, top_k=top_k, min_cosine=min_cosine,
+        )
+        _logger.info(
+            "semantic_edges: full-rebuild pairs — %d (top_k=%d, floor=%.2f)",
+            len(pairs), top_k, min_cosine,
+        )
+
+    # ── Persist the fresh state for the next run's incremental pass ───
+    # Materialise per-node top-K from the pair dict. The state stores
+    # it per source node (not canonicalised pairs) so next run can
+    # check each node's neighbors independently.
+    per_node_topk: dict[str, list[list]] = {nid: [] for nid in node_ids}
+    for (a, b), score in pairs.items():
+        per_node_topk[a].append([b, score])
+        per_node_topk[b].append([a, score])
+    for nid, entries in per_node_topk.items():
+        entries.sort(key=lambda e: -e[1])
+        del entries[top_k:]
+
+    new_state = TopKState(
+        version=_TOPK_STATE_VERSION,
+        model_id=model_id,
+        top_k=top_k,
+        build_floor=min_cosine,
+        nodes={
+            nid: {
+                "content_hash": _content_hash(node_list[i].text),
+                "top_k": per_node_topk[nid],
+            }
+            for i, nid in enumerate(node_ids)
+        },
     )
+    try:
+        _save_topk_state(cache_dir, new_state)
+    except OSError as exc:
+        # State is an optimisation — a failure to persist doesn't
+        # invalidate the edges we just produced.
+        _logger.warning("semantic_edges: topk-state save failed (%s)", exc)
+
     return pairs
+
+
+def _topk_pairs_subset(
+    vecs: "np.ndarray",
+    node_ids: list[str],
+    subset_indices: list[int],
+    *,
+    top_k: int,
+    min_cosine: float,
+    chunk_size: int = 512,
+) -> dict[tuple[str, str], float]:
+    """Top-K cosine but only for rows whose index is in ``subset_indices``.
+
+    Used by the incremental path: we want fresh top-K for changed and
+    new nodes but we still evaluate them against the FULL vector set
+    (their neighbors may be unchanged nodes). Returns the same
+    unordered-pair → cosine shape as ``_topk_pairs``.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    if not subset_indices:
+        return {}
+
+    out: dict[tuple[str, str], float] = {}
+    effective_k = min(top_k + 1, vecs.shape[0])
+
+    # Chunk the subset so memory stays bounded regardless of how many
+    # nodes changed.
+    for chunk_start in range(0, len(subset_indices), chunk_size):
+        chunk_indices = subset_indices[chunk_start : chunk_start + chunk_size]
+        chunk = vecs[chunk_indices]
+        sims = chunk @ vecs.T  # (chunk_rows, N_total)
+
+        # Mask self-pairs. For each chunk-local row i, the absolute
+        # row index is chunk_indices[i] — that's the column to mask.
+        for i, abs_i in enumerate(chunk_indices):
+            sims[i, abs_i] = -1.0
+
+        idx_unsorted = np.argpartition(-sims, effective_k - 1, axis=1)[:, :effective_k]
+        for i, abs_i in enumerate(chunk_indices):
+            src_id = node_ids[abs_i]
+            for j in idx_unsorted[i]:
+                j = int(j)
+                if j == abs_i:
+                    continue
+                score = float(sims[i, j])
+                if score < min_cosine:
+                    continue
+                dst_id = node_ids[j]
+                pair = (src_id, dst_id) if src_id < dst_id else (dst_id, src_id)
+                existing = out.get(pair)
+                if existing is None or score > existing:
+                    out[pair] = score
+    return out
+
+
+def _reuse_prior_pairs(
+    prior: TopKState,
+    unchanged: set[str],
+    min_cosine: float,
+) -> dict[tuple[str, str], float]:
+    """Lift pairs from the prior state for nodes marked unchanged.
+
+    A pair ``(A, B)`` is reused when BOTH A and B are in ``unchanged``
+    — otherwise its score may have shifted (one side's vector changed)
+    and we should let the fresh top-K pass re-derive it. The fresh
+    pass will also produce (A, B) from A's perspective if B is
+    unchanged and A is in the recompute set, so we don't drop real
+    edges by this rule.
+    """
+    out: dict[tuple[str, str], float] = {}
+    for nid in unchanged:
+        entry = prior.nodes.get(nid, {})
+        for tk in entry.get("top_k", []):
+            if not tk:
+                continue
+            neighbor = tk[0]
+            score = float(tk[1]) if len(tk) > 1 else 0.0
+            if neighbor not in unchanged:
+                continue
+            if score < min_cosine:
+                continue
+            pair = (nid, neighbor) if nid < neighbor else (neighbor, nid)
+            existing = out.get(pair)
+            if existing is None or score > existing:
+                out[pair] = score
+    return out

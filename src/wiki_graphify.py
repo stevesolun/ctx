@@ -218,7 +218,7 @@ def _pairs_from_index(
     return counts, shared
 
 
-def build_graph() -> tuple[nx.Graph, dict[str, dict]]:
+def build_graph(*, incremental: bool = True) -> tuple[nx.Graph, dict[str, dict]]:
     """Build a networkx graph from all entity pages.
 
     Nodes = entity pages (skills + agents + mcp-servers).
@@ -320,6 +320,7 @@ def build_graph() -> tuple[nx.Graph, dict[str, dict]]:
             cache_dir=_cfg.graph_semantic_cache_dir,
             backend=_cfg.intake_backend,
             model=_cfg.intake_model,
+            incremental=incremental,
         )
     else:
         sem_pairs = {}
@@ -726,9 +727,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Build knowledge graph from wiki entities")
     parser.add_argument("--graph-only", action="store_true", help="Build graph and export only")
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
+    # Incremental vs full: incremental reuses the prior run's per-node
+    # top-K where the entity text hasn't changed. Full forces a top-K
+    # recompute for every node (but still honors the embedding cache,
+    # so the embedding pass is only expensive on first run or after a
+    # model/text change).
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--incremental", dest="incremental", action="store_true",
+        default=True,
+        help="Reuse prior top-K for unchanged nodes (default)",
+    )
+    mode.add_argument(
+        "--full", dest="incremental", action="store_false",
+        help="Force a full top-K recompute for every node",
+    )
     args = parser.parse_args()
 
-    G, entities = build_graph()
+    G, entities = build_graph(incremental=args.incremental)
     communities = detect_communities(G)
     export_graph(G, communities)
 
