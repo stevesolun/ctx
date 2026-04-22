@@ -159,8 +159,36 @@ def _configure_logging(verbosity: int) -> None:
     )
 
 
+def _force_utf8_stdio() -> None:
+    """Reconfigure stdout/stderr to UTF-8 on platforms that default to
+    something narrower (Windows cp1252).
+
+    The JSONL output uses ``ensure_ascii=False`` so non-ASCII names,
+    descriptions, and emoji flow through verbatim — which crashes the
+    default Windows console with ``UnicodeEncodeError: 'charmap' codec``
+    the moment a record contains a non-Latin-1 character. Real pulsemcp
+    records routinely include CJK, emoji, and accented characters, so
+    this is guaranteed to fire on any non-trivial run on Windows.
+
+    ``reconfigure`` is a best-effort call: if the stream has already been
+    replaced (e.g. in tests that capture stdout) or if the platform's
+    stdio doesn't support reconfigure, the original encoding stays.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            # Closed stream or stream that rejects reconfiguration —
+            # not worth failing the run over.
+            pass
+
+
 def main() -> None:
     """Entry point for the ``ctx-mcp-fetch`` console script."""
+    _force_utf8_stdio()
     parser = _build_parser()
     args = parser.parse_args()
     _configure_logging(args.verbose)

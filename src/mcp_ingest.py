@@ -472,8 +472,27 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _force_utf8_stdio() -> None:
+    """Reconfigure stdout/stderr to UTF-8.
+
+    Mirror of the same helper in mcp_fetch. Needed here because non-ASCII
+    slugs, descriptions, or error messages would crash Windows' default
+    cp1252 console the moment a record with CJK / emoji / accented text
+    flows through the per-record progress printer.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
 def main() -> None:
     """Entry point for the ``ctx-mcp-ingest`` console script."""
+    _force_utf8_stdio()
     parser = _build_parser()
     args = parser.parse_args()
 
