@@ -70,8 +70,9 @@
       "slug_tokens": 0.15
     },
     "semantic": {
-      "_comment": "Semantic edge construction. top_k caps per-node neighbors to keep edge count bounded; at N=13,000 nodes and top_k=20 that's ~260K semantic edges (pre-filter). min_cosine drops weak matches before they become edges — it must be strictly in (0, 1). At 0.80 default, only pairs whose embedding vectors agree on nearly all their mass survive, which prioritises precision over recall (fewer but very-high-confidence edges; think near-duplicate or same-domain entities). Lower the floor (e.g. 0.50) when you want broader context-level connectivity at the cost of noise.",
+      "_comment": "Semantic edge construction uses two thresholds so you can tune display strictness WITHOUT paying to rebuild the graph. build_floor is the low bar for inclusion (all pairs at or above this survive to graph.json); min_cosine is the query/display filter that consumers (resolve, visualize, recommend) apply at read time. build_floor must be <= min_cosine. Rebuilding is only required when you change top_k, build_floor, or the entity body text that drives the cached embeddings — min_cosine alone is rebuild-free.",
       "top_k": 20,
+      "build_floor": 0.50,
       "min_cosine": 0.80,
       "batch_size": 128,
       "cache_dir": "~/.claude/skill-wiki/.embedding-cache/graph"

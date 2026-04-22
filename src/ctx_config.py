@@ -177,21 +177,34 @@ class Config:
 
         sem = graph.get("semantic", {}) if isinstance(graph.get("semantic"), dict) else {}
         self.graph_semantic_top_k: int = int(sem.get("top_k", 20))
+        self.graph_semantic_build_floor: float = float(sem.get("build_floor", 0.50))
         self.graph_semantic_min_cosine: float = float(sem.get("min_cosine", 0.80))
         self.graph_semantic_batch_size: int = int(sem.get("batch_size", 128))
         self.graph_semantic_cache_dir: Path = Path(_expand(
             sem.get("cache_dir", "~/.claude/skill-wiki/.embedding-cache/graph")
         ))
-        # Strict (0, 1) open interval. 0 would include every pair and
-        # produce a ~N^2 edge explosion; 1 would only match exact
-        # duplicates (and floating-point drift means even identical
-        # texts rarely hit exactly 1.0), which effectively disables
-        # the signal. Both endpoints almost certainly indicate a
-        # config typo; refuse them.
+        # Strict (0, 1) open interval on both thresholds. 0 would
+        # include every pair (N^2 explosion); 1 would only match
+        # exact duplicates (floating-point drift means even identical
+        # texts rarely hit exactly 1.0). And build_floor must be
+        # <= min_cosine — otherwise min_cosine would accept edges
+        # the graph never materialised, producing silent gaps.
+        if not (0.0 < self.graph_semantic_build_floor < 1.0):
+            raise ValueError(
+                f"graph.semantic.build_floor must be strictly in (0, 1) "
+                f"(got {self.graph_semantic_build_floor})"
+            )
         if not (0.0 < self.graph_semantic_min_cosine < 1.0):
             raise ValueError(
                 f"graph.semantic.min_cosine must be strictly in (0, 1) "
                 f"(got {self.graph_semantic_min_cosine})"
+            )
+        if self.graph_semantic_build_floor > self.graph_semantic_min_cosine:
+            raise ValueError(
+                f"graph.semantic.build_floor ({self.graph_semantic_build_floor}) "
+                f"must be <= min_cosine ({self.graph_semantic_min_cosine}); "
+                "otherwise query-time filtering would ask for edges that "
+                "were never materialised into the graph."
             )
 
         te = graph.get("tag_edges", {}) if isinstance(graph.get("tag_edges"), dict) else {}

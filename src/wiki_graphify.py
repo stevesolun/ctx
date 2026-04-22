@@ -306,11 +306,16 @@ def build_graph() -> tuple[nx.Graph, dict[str, dict]]:
     )
 
     # ── Phase 3: semantic edges (expensive) ──────────────────────────
+    # ``build_floor`` governs inclusion in graph.json; ``min_cosine`` is
+    # the query-time filter applied by consumers. Materialising everything
+    # down to the floor lets operators A/B different display thresholds
+    # without regraphifying — the slow path only runs when the floor
+    # itself, top_k, or the embedding text changes.
     if _cfg.graph_edge_weight_semantic > 0.0:
         sem_pairs = _sem.compute_semantic_edges(
             embed_nodes,
             top_k=_cfg.graph_semantic_top_k,
-            min_cosine=_cfg.graph_semantic_min_cosine,
+            min_cosine=_cfg.graph_semantic_build_floor,
             batch_size=_cfg.graph_semantic_batch_size,
             cache_dir=_cfg.graph_semantic_cache_dir,
             backend=_cfg.intake_backend,
@@ -353,6 +358,13 @@ def build_graph() -> tuple[nx.Graph, dict[str, dict]]:
 
     _attach_quality_attrs(G, QUALITY_SIDECAR_DIR)
 
+    # Record the build-time floor on the graph so consumers that
+    # inherit a stale graph.json can sanity-check their filter
+    # request (filtering below the floor is meaningless — those
+    # edges were never materialised).
+    G.graph["semantic_build_floor"] = round(_cfg.graph_semantic_build_floor, 4)
+    G.graph["semantic_min_cosine_default"] = round(_cfg.graph_semantic_min_cosine, 4)
+
     print(f"Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
     print(
         f"Edge sources: semantic={len(sem_pairs)}, tag_pairs={len(tag_counts)}, "
@@ -361,6 +373,48 @@ def build_graph() -> tuple[nx.Graph, dict[str, dict]]:
     )
     print(f"Tag index: {len(tag_index)} unique tags; token index: {len(token_index)} tokens")
     return G, entities
+
+
+def filter_graph_by_min_cosine(G: nx.Graph, min_cosine: float) -> nx.Graph:
+    """Return a subgraph view with semantic edges filtered at query time.
+
+    Keeps an edge when ANY of the three signals justifies it:
+      - ``semantic_sim`` >= ``min_cosine``, OR
+      - ``tag_sim > 0`` (any shared explicit tag), OR
+      - ``token_sim > 0`` (any shared slug token)
+
+    This means tag/token-only connections survive any semantic
+    threshold — only edges whose sole reason-to-exist is a below-
+    threshold cosine disappear. That matches user intent: "show me
+    only strong semantic links" shouldn't hide edges that are
+    validated by explicit categorical overlap.
+
+    Downstream consumers (resolve_graph, visualize, recommenders)
+    should call this with ``cfg.graph_semantic_min_cosine`` at the
+    top of their pipeline, then work with the filtered copy.
+
+    Refuses to filter below the graph's build floor — that request
+    would return a graph that doesn't contain edges it pretends to
+    include at that threshold. The caller either regraphifies with
+    a lower build_floor or raises the requested min_cosine.
+    """
+    build_floor = float(G.graph.get("semantic_build_floor", 0.0))
+    if min_cosine < build_floor:
+        raise ValueError(
+            f"min_cosine ({min_cosine}) is below the graph's build_floor "
+            f"({build_floor}); regraphify with a lower floor or raise "
+            "min_cosine."
+        )
+    sub = nx.Graph()
+    sub.graph.update(G.graph)
+    sub.add_nodes_from(G.nodes(data=True))
+    for n1, n2, attrs in G.edges(data=True):
+        sem = float(attrs.get("semantic_sim", 0.0))
+        tag = float(attrs.get("tag_sim", 0.0))
+        tok = float(attrs.get("token_sim", 0.0))
+        if sem >= min_cosine or tag > 0.0 or tok > 0.0:
+            sub.add_edge(n1, n2, **attrs)
+    return sub
 
 
 def _attach_quality_attrs(G: nx.Graph, sidecar_dir: Path) -> int:
