@@ -539,12 +539,20 @@ def generate_concept_pages(
         safe_name = label.lower().replace(" + ", "-").replace(" ", "-")
         filename = f"community-{safe_name}.md"
 
-        # Top members by degree
+        # Top members by degree.
+        #
+        # Prior impl used ``'skills' if 'skill:' in m else 'agents'`` which
+        # silently routed every ``mcp-server:`` node into ``entities/agents/``,
+        # producing a sea of broken wikilinks once the MCP catalog was
+        # ingested. Reuse _entity_wikilink which knows all three types
+        # and the MCP shard layout.
         top_members = sorted(members, key=lambda n: G.degree(n), reverse=True)[:20]
-        member_links = "\n".join(
-            f"- [[entities/{'skills' if 'skill:' in m else 'agents'}/{m.split(':', 1)[1]}]]"
-            for m in top_members
-        )
+        member_link_lines: list[str] = []
+        for m in top_members:
+            entity_type, _sep, slug = m.partition(":")
+            link = _entity_wikilink(entity_type, slug)
+            member_link_lines.append(f"- {link}" if link else f"- {m}")
+        member_links = "\n".join(member_link_lines)
         remaining = len(members) - len(top_members)
 
         # Cross-community connections (O(neighbors) via reverse-index lookup)

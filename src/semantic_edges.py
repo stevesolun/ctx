@@ -138,14 +138,14 @@ def _save_cache(
     hashes = np.asarray(keys, dtype="S64")
     vecs = np.stack([cache[k] for k in keys]).astype("float32")
     path = _cache_file(cache_dir)
-    # np.savez_compressed appends ``.npz`` if the filename doesn't
-    # already end in it — so we ask numpy to write to a ``.tmp`` name
-    # and reconstruct the actual on-disk name (``.tmp.npz``) for the
-    # atomic rename.
-    tmp_base = path.with_name(path.name + ".tmp")
-    np.savez_compressed(tmp_base, hashes=hashes, vecs=vecs, model=np.asarray([model_id]))
-    tmp_actual = tmp_base.with_suffix(tmp_base.suffix + ".npz")
-    os.replace(tmp_actual, path)
+    # ``np.savez_compressed`` auto-appends ``.npz`` when the filename
+    # doesn't already end that way. Hand it a stem without any
+    # extension so the behaviour is deterministic: we know the real
+    # on-disk name will be ``<stem>.npz``.
+    tmp_stem = path.with_name("embeddings.tmp")           # no suffix at all
+    np.savez_compressed(tmp_stem, hashes=hashes, vecs=vecs, model=np.asarray([model_id]))
+    tmp_real = tmp_stem.with_suffix(".npz")               # "embeddings.tmp.npz"
+    os.replace(tmp_real, path)
 
 
 # ────────────────────────────────────────────────────────────────────

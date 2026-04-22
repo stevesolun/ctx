@@ -44,16 +44,18 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from _fs_utils import atomic_write_text as _atomic_write_text
 from ctx_config import cfg
+from install_utils import (
+    bump_entity_status,
+    emit_load_event,
+    record_install,
+)
 from wiki_utils import validate_skill_name
 
 _logger = logging.getLogger(__name__)
 
 # Stable session ID so telemetry can correlate a multi-slug install call.
 _SESSION_ID: str = uuid.uuid4().hex
-
-MANIFEST_PATH = Path(os.path.expanduser("~/.claude/skill-manifest.json"))
 
 
 @dataclass(frozen=True)
@@ -100,80 +102,6 @@ def _pick_source(
     if original.is_file():
         return original, "original"
     return None, None
-
-
-# ── Manifest + frontmatter updates ───────────────────────────────────────────
-
-
-def _load_manifest() -> dict:
-    """Read skill-manifest.json; return empty shell on any error."""
-    if not MANIFEST_PATH.exists():
-        return {"load": [], "unload": [], "warnings": []}
-    try:
-        data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {"load": [], "unload": [], "warnings": []}
-    # Defensive: ensure expected keys exist.
-    data.setdefault("load", [])
-    data.setdefault("unload", [])
-    data.setdefault("warnings", [])
-    return data
-
-
-def _save_manifest(manifest: dict) -> None:
-    _atomic_write_text(MANIFEST_PATH, json.dumps(manifest, indent=2))
-
-
-def _record_in_manifest(slug: str, source: str = "ctx-skill-install") -> None:
-    """Add slug to ``load`` (idempotent) and drop it from ``unload`` if present.
-
-    The unload removal matters: if a user unloaded a skill, then installs
-    it again, stale unload entries would cause ``skill_unload --list-never``
-    to show wrong data.
-    """
-    manifest = _load_manifest()
-    loaded = {e.get("skill") for e in manifest["load"]}
-    if slug not in loaded:
-        manifest["load"].append({"skill": slug, "source": source})
-    manifest["unload"] = [
-        e for e in manifest["unload"] if e.get("skill") != slug
-    ]
-    _save_manifest(manifest)
-
-
-def _bump_entity_status(wiki_dir: Path, slug: str) -> bool:
-    """Flip the wiki entity's ``status`` frontmatter to ``installed``.
-
-    Silently no-ops when the entity file is missing (the install still
-    succeeded in the filesystem sense; the wiki card is a mirror, not
-    authoritative). Returns True when the file changed.
-    """
-    import re  # local: keeps the hot path free of the regex import
-
-    entity = _entity_path(wiki_dir, slug)
-    if not entity.is_file():
-        return False
-    text = entity.read_text(encoding="utf-8", errors="replace")
-    new_text, count = re.subn(
-        r"^status:\s*.+$", "status: installed", text, count=1, flags=re.MULTILINE
-    )
-    if count == 0:
-        # No status field at all — insert after the opening delimiter.
-        new_text = re.sub(r"(---\n)", r"\1status: installed\n", text, count=1)
-    if new_text != text:
-        _atomic_write_text(entity, new_text)
-        return True
-    return False
-
-
-def _emit_install_event(slug: str) -> None:
-    """Log a ``load`` telemetry event (best-effort)."""
-    try:
-        import skill_telemetry
-
-        skill_telemetry.log_event("load", slug, _SESSION_ID)
-    except Exception as exc:  # noqa: BLE001 — telemetry must not break install
-        _logger.debug("skill_install: telemetry write failed for %r: %s", slug, exc)
 
 
 # ── Copy logic ───────────────────────────────────────────────────────────────
@@ -253,8 +181,10 @@ def install_skill(
         # Already installed. Still refresh manifest/status so an earlier
         # install that didn't record into manifest gets reconciled.
         if not dry_run:
-            _record_in_manifest(slug)
-            _bump_entity_status(wiki_dir, slug)
+            record_install(
+                slug, entity_type="skill", source="ctx-skill-install",
+            )
+            bump_entity_status(_entity_path(wiki_dir, slug), status="installed")
         return InstallResult(
             slug=slug, status="skipped-existing",
             installed_path=str(dest), source_variant=variant,
@@ -277,9 +207,9 @@ def install_skill(
     shutil.copy2(source, dest)
     refs_copied = _copy_references(converted, dest_dir)
 
-    _record_in_manifest(slug)
-    _bump_entity_status(wiki_dir, slug)
-    _emit_install_event(slug)
+    record_install(slug, entity_type="skill", source="ctx-skill-install")
+    bump_entity_status(_entity_path(wiki_dir, slug), status="installed")
+    emit_load_event(slug, _SESSION_ID)
 
     return InstallResult(
         slug=slug, status="installed", installed_path=str(dest),

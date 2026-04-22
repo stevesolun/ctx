@@ -55,21 +55,41 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from _fs_utils import atomic_write_text as _atomic_write_text
 from ctx_config import cfg
+from install_utils import (
+    bump_entity_status,
+    record_install,
+    record_uninstall,
+)
 from wiki_utils import validate_skill_name
 
 _logger = logging.getLogger(__name__)
 
 _SESSION_ID: str = uuid.uuid4().hex
-MANIFEST_PATH = Path(os.path.expanduser("~/.claude/skill-manifest.json"))
+
+# Allowlist of executables we trust as the first token of an MCP
+# install command. ``install_cmd`` can round-trip through entity
+# frontmatter on reinstall (see _install_cmd fallback in install_mcp);
+# frontmatter is under file-system control and must be treated as
+# untrusted. Bespoke runtimes should go through ``--cmd-json`` which
+# passes the entire config to claude mcp add-json without argv splitting.
+_ALLOWED_CMD_EXECS: frozenset[str] = frozenset({
+    "npx",
+    "uvx",
+    "node",
+    "python",
+    "python3",
+    "deno",
+    "bunx",
+})
 
 
 @dataclass(frozen=True)
 class InstallResult:
     slug: str
     status: str  # "installed" | "skipped-existing" | "aborted"
-                 # | "not-in-wiki" | "no-github-url" | "claude-cli-failed"
+                 # | "not-in-wiki" | "no-command" | "invalid-cmd"
+                 # | "claude-cli-failed"
     command: str | None
     message: str = ""
 
@@ -129,113 +149,6 @@ def _parse_entity_frontmatter(path: Path) -> dict[str, str]:
             continue
         fm[key] = val.strip('"').strip("'")
     return fm
-
-
-# ── Frontmatter update ───────────────────────────────────────────────────────
-
-
-def _set_frontmatter_field(text: str, field: str, value: str) -> str:
-    """Replace or insert a flat scalar field inside the frontmatter.
-
-    Mirrors the helper in mcp_enrich; copied here rather than imported
-    to keep mcp_install self-contained when the ingest layer isn't
-    installed. Only touches flat scalars — install_cmd / status
-    are strings so this is sufficient.
-    """
-    safe = value.replace("\r", " ").replace("\n", " ")
-    escaped = re.escape(field)
-    pattern = rf"^{escaped}:[ \t]*.*$"
-    rendered = _render_scalar(safe)
-    new_text, n = re.subn(
-        pattern, f"{field}: {rendered}", text, count=1, flags=re.MULTILINE,
-    )
-    if n:
-        return new_text
-    # Insert after the opening frontmatter delimiter.
-    fm_match = _FRONTMATTER_RE.match(text)
-    if fm_match is None:
-        return text
-    insert_at = len("---\n")
-    return text[:insert_at] + f"{field}: {rendered}\n" + text[insert_at:]
-
-
-def _render_scalar(value: str) -> str:
-    """YAML scalar rendering — quote when the value could be misparsed."""
-    if value == "":
-        return "null"
-    if any(ch in value for ch in ':#&*!|>%@`') or value.startswith(("-", "?", "[", "{")):
-        escaped = value.replace('"', '\\"')
-        return f'"{escaped}"'
-    return value
-
-
-def _update_entity_status(
-    wiki_dir: Path, slug: str, *, status: str, install_cmd: str | None,
-) -> bool:
-    """Flip status + optionally set install_cmd on the entity page."""
-    path = _entity_path(wiki_dir, slug)
-    if not path.is_file():
-        return False
-    text = path.read_text(encoding="utf-8", errors="replace")
-    text = _set_frontmatter_field(text, "status", status)
-    if install_cmd is not None:
-        text = _set_frontmatter_field(text, "install_cmd", install_cmd)
-    _atomic_write_text(path, text)
-    return True
-
-
-# ── Manifest update ──────────────────────────────────────────────────────────
-
-
-def _load_manifest() -> dict:
-    if not MANIFEST_PATH.exists():
-        return {"load": [], "unload": [], "warnings": []}
-    try:
-        data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {"load": [], "unload": [], "warnings": []}
-    data.setdefault("load", [])
-    data.setdefault("unload", [])
-    data.setdefault("warnings", [])
-    return data
-
-
-def _save_manifest(manifest: dict) -> None:
-    _atomic_write_text(MANIFEST_PATH, json.dumps(manifest, indent=2))
-
-
-def _record_install(slug: str, *, command: str) -> None:
-    """Manifest-load the MCP slug (idempotent)."""
-    manifest = _load_manifest()
-    loaded = {(e.get("skill"), e.get("entity_type")) for e in manifest["load"]}
-    if (slug, "mcp-server") not in loaded:
-        manifest["load"].append({
-            "skill": slug,
-            "entity_type": "mcp-server",
-            "source": "ctx-mcp-install",
-            "command": command,
-        })
-    manifest["unload"] = [
-        e for e in manifest["unload"]
-        if not (e.get("skill") == slug and e.get("entity_type") == "mcp-server")
-    ]
-    _save_manifest(manifest)
-
-
-def _record_uninstall(slug: str) -> None:
-    manifest = _load_manifest()
-    manifest["load"] = [
-        e for e in manifest["load"]
-        if not (e.get("skill") == slug and e.get("entity_type") == "mcp-server")
-    ]
-    unloaded = {(e.get("skill"), e.get("entity_type")) for e in manifest["unload"]}
-    if (slug, "mcp-server") not in unloaded:
-        manifest["unload"].append({
-            "skill": slug,
-            "entity_type": "mcp-server",
-            "source": "ctx-mcp-uninstall",
-        })
-    _save_manifest(manifest)
 
 
 # ── claude mcp CLI wrapper ───────────────────────────────────────────────────
@@ -357,7 +270,7 @@ def install_mcp(
     effective_cmd: str | None = command or fm.get("install_cmd") or None
     if not effective_cmd and not json_config and not dry_run:
         return InstallResult(
-            slug=slug, status="no-github-url", command=None,
+            slug=slug, status="no-command", command=None,
             message=(
                 "no install command. Either pass --cmd '<invocation>' "
                 "or --cmd-json '<json>', or look up "
@@ -365,6 +278,18 @@ def install_mcp(
                 "for the recommended invocation."
             ),
         )
+
+    # Validate json_config IS parseable JSON before handing it to
+    # claude mcp add-json. A malformed string would otherwise surface
+    # as a confusing claude-cli error; prefer the clear local error.
+    if json_config is not None:
+        try:
+            json.loads(json_config)
+        except json.JSONDecodeError as exc:
+            return InstallResult(
+                slug=slug, status="invalid-cmd", command=None,
+                message=f"--cmd-json is not valid JSON: {exc}",
+            )
 
     card = render_card(fm, slug, command=effective_cmd)
     print(card)
@@ -386,7 +311,31 @@ def install_mcp(
         rc, stdout, stderr = _run_claude_mcp(["add-json", slug, json_config])
     else:
         assert effective_cmd is not None  # narrowed by dry_run branch above
-        tokens = shlex.split(effective_cmd)
+        try:
+            tokens = shlex.split(effective_cmd)
+        except ValueError as exc:
+            return InstallResult(
+                slug=slug, status="invalid-cmd", command=effective_cmd,
+                message=f"could not parse --cmd/install_cmd: {exc}",
+            )
+        if not tokens:
+            return InstallResult(
+                slug=slug, status="invalid-cmd", command=effective_cmd,
+                message="empty install command",
+            )
+        # Executable allowlist. install_cmd can flow from frontmatter
+        # (which is under entity-file control); treat it as untrusted.
+        # Only known MCP-runtime launchers are allowed — if your
+        # server needs a bespoke runtime, add-json is the right path.
+        if tokens[0] not in _ALLOWED_CMD_EXECS:
+            return InstallResult(
+                slug=slug, status="invalid-cmd", command=effective_cmd,
+                message=(
+                    f"executable {tokens[0]!r} not in allowlist "
+                    f"{sorted(_ALLOWED_CMD_EXECS)}; use --cmd-json for "
+                    "bespoke runtimes."
+                ),
+            )
         rc, stdout, stderr = _run_claude_mcp(["add", slug, "--", *tokens])
 
     if rc != 0:
@@ -395,11 +344,17 @@ def install_mcp(
             message=f"claude mcp add failed (rc={rc}): {stderr.strip() or stdout.strip()}",
         )
 
-    _update_entity_status(
-        wiki_dir, slug, status="installed",
-        install_cmd=effective_cmd or "",
+    bump_entity_status(
+        _entity_path(wiki_dir, slug),
+        status="installed",
+        extra_fields={"install_cmd": effective_cmd or ""},
     )
-    _record_install(slug, command=effective_cmd or json_config or "")
+    record_install(
+        slug,
+        entity_type="mcp-server",
+        source="ctx-mcp-install",
+        extra={"command": effective_cmd or json_config or ""},
+    )
 
     return InstallResult(
         slug=slug, status="installed", command=effective_cmd,
@@ -450,10 +405,11 @@ def uninstall_mcp(
     # Even on non-zero (with --force) we still flip local state, since
     # the user asked us to.
     if entity.is_file():
-        _update_entity_status(
-            wiki_dir, slug, status="cataloged", install_cmd=None,
+        bump_entity_status(
+            entity, status="cataloged",
+            extra_fields={"install_cmd": None},  # render as YAML null
         )
-    _record_uninstall(slug)
+    record_uninstall(slug, entity_type="mcp-server", source="ctx-mcp-uninstall")
 
     return UninstallResult(
         slug=slug, status="uninstalled",

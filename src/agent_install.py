@@ -34,14 +34,17 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from _fs_utils import atomic_write_text as _atomic_write_text
 from ctx_config import cfg
+from install_utils import (
+    bump_entity_status,
+    emit_load_event,
+    record_install,
+)
 from wiki_utils import validate_skill_name
 
 _logger = logging.getLogger(__name__)
 
 _SESSION_ID: str = uuid.uuid4().hex
-MANIFEST_PATH = Path(os.path.expanduser("~/.claude/skill-manifest.json"))
 
 
 @dataclass(frozen=True)
@@ -61,72 +64,6 @@ def _entity_path(wiki_dir: Path, slug: str) -> Path:
 
 def _mirror_path(wiki_dir: Path, slug: str) -> Path:
     return wiki_dir / "converted-agents" / f"{slug}.md"
-
-
-# ── Manifest + frontmatter updates ───────────────────────────────────────────
-
-
-def _load_manifest() -> dict:
-    if not MANIFEST_PATH.exists():
-        return {"load": [], "unload": [], "warnings": []}
-    try:
-        data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {"load": [], "unload": [], "warnings": []}
-    data.setdefault("load", [])
-    data.setdefault("unload", [])
-    data.setdefault("warnings", [])
-    return data
-
-
-def _save_manifest(manifest: dict) -> None:
-    _atomic_write_text(MANIFEST_PATH, json.dumps(manifest, indent=2))
-
-
-def _record_in_manifest(slug: str, source: str = "ctx-agent-install") -> None:
-    """Idempotent manifest update; mirrors skill_install._record_in_manifest."""
-    manifest = _load_manifest()
-    loaded = {(e.get("skill"), e.get("entity_type")) for e in manifest["load"]}
-    if (slug, "agent") not in loaded:
-        manifest["load"].append({
-            "skill": slug,
-            "entity_type": "agent",
-            "source": source,
-        })
-    # Drop any unload entry for this agent so a reinstall clears the flag.
-    manifest["unload"] = [
-        e for e in manifest["unload"]
-        if not (e.get("skill") == slug and e.get("entity_type", "skill") == "agent")
-    ]
-    _save_manifest(manifest)
-
-
-def _bump_entity_status(wiki_dir: Path, slug: str) -> bool:
-    """Flip entity card status to ``installed`` (or insert if absent)."""
-    import re  # local: one-shot use
-
-    entity = _entity_path(wiki_dir, slug)
-    if not entity.is_file():
-        return False
-    text = entity.read_text(encoding="utf-8", errors="replace")
-    new_text, count = re.subn(
-        r"^status:\s*.+$", "status: installed", text, count=1, flags=re.MULTILINE
-    )
-    if count == 0:
-        new_text = re.sub(r"(---\n)", r"\1status: installed\n", text, count=1)
-    if new_text != text:
-        _atomic_write_text(entity, new_text)
-        return True
-    return False
-
-
-def _emit_install_event(slug: str) -> None:
-    try:
-        import skill_telemetry
-
-        skill_telemetry.log_event("load", slug, _SESSION_ID)
-    except Exception as exc:  # noqa: BLE001
-        _logger.debug("agent_install: telemetry write failed for %r: %s", slug, exc)
 
 
 # ── Core install ─────────────────────────────────────────────────────────────
@@ -162,8 +99,10 @@ def install_agent(
     dest = agents_dir / f"{slug}.md"
     if dest.exists() and not force:
         if not dry_run:
-            _record_in_manifest(slug)
-            _bump_entity_status(wiki_dir, slug)
+            record_install(
+                slug, entity_type="agent", source="ctx-agent-install",
+            )
+            bump_entity_status(_entity_path(wiki_dir, slug), status="installed")
         return InstallResult(
             slug=slug, status="skipped-existing", installed_path=str(dest),
             message="already installed; pass --force to overwrite",
@@ -178,9 +117,9 @@ def install_agent(
     agents_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, dest)
 
-    _record_in_manifest(slug)
-    _bump_entity_status(wiki_dir, slug)
-    _emit_install_event(slug)
+    record_install(slug, entity_type="agent", source="ctx-agent-install")
+    bump_entity_status(_entity_path(wiki_dir, slug), status="installed")
+    emit_load_event(slug, _SESSION_ID)
 
     return InstallResult(slug=slug, status="installed", installed_path=str(dest))
 

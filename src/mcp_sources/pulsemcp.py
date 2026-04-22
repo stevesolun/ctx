@@ -23,6 +23,7 @@ import re
 from collections.abc import Iterator
 from datetime import date
 from html.parser import HTMLParser
+from urllib.parse import quote as _url_quote
 
 from mcp_sources.base import Source, fetch_text, read_cache, write_cache
 
@@ -269,16 +270,27 @@ def _parse_detail(html: str) -> dict:
 
 
 def _fetch_detail_html(slug: str, *, refresh: bool) -> str:
-    """Fetch one detail page's HTML, date-keyed cache. Mirror of _fetch_page."""
+    """Fetch one detail page's HTML, date-keyed cache. Mirror of _fetch_page.
+
+    The slug is URL-encoded before interpolation so a value like
+    ``foo%2F..%2Fadmin`` extracted from a poisoned entity frontmatter
+    can't traverse to an unintended pulsemcp path. ``quote(slug, safe="")``
+    percent-encodes every non-unreserved character, including ``/`` and
+    ``%`` itself — a slug that legitimately contains a ``/`` wouldn't
+    be a valid pulsemcp slug anyway.
+    """
     today = date.today().isoformat()
-    basename = f"{today}--detail-{slug}.html"
+    # Cache basename has to be filesystem-safe; the URL-encoded form
+    # keeps it safe AND round-trips in the filesystem unchanged.
+    safe_slug = _url_quote(slug, safe="")
+    basename = f"{today}--detail-{safe_slug}.html"
     source_name = "pulsemcp"
 
     cached = None if refresh else read_cache(source_name, basename)
     if cached is not None:
         return cached
 
-    url = f"{LISTING_BASE}/{slug}"
+    url = f"{LISTING_BASE}/{safe_slug}"
     text = fetch_text(url)
     write_cache(source_name, basename, text)
     return text
