@@ -70,9 +70,9 @@
       "slug_tokens": 0.15
     },
     "semantic": {
-      "_comment": "Semantic edge construction. top_k caps per-node neighbors to keep edge count bounded; at N=13,000 nodes and top_k=20 that's ~260K semantic edges. min_cosine drops weak matches before they become edges — 0.35 keeps pairs where the embeddings are meaningfully related but rejects noise.",
+      "_comment": "Semantic edge construction. top_k caps per-node neighbors to keep edge count bounded; at N=13,000 nodes and top_k=20 that's ~260K semantic edges (pre-filter). min_cosine drops weak matches before they become edges — it must be strictly in (0, 1). At 0.80 default, only pairs whose embedding vectors agree on nearly all their mass survive, which prioritises precision over recall (fewer but very-high-confidence edges; think near-duplicate or same-domain entities). Lower the floor (e.g. 0.50) when you want broader context-level connectivity at the cost of noise.",
       "top_k": 20,
-      "min_cosine": 0.35,
+      "min_cosine": 0.80,
       "batch_size": 128,
       "cache_dir": "~/.claude/skill-wiki/.embedding-cache/graph"
     },
