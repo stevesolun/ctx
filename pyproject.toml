@@ -34,6 +34,9 @@ ctx-skill-health = "skill_health:main"
 ctx-toolbox = "toolbox:main"
 ctx-lifecycle = "ctx_lifecycle:main"
 ctx-skill-add = "skill_add:main"
+ctx-skill-install = "skill_install:main"
+ctx-agent-mirror = "agent_mirror:main"
+ctx-agent-install = "agent_install:main"
 ctx-mcp-add = "mcp_add:main"
 ctx-mcp-fetch = "mcp_fetch:main"
 ctx-mcp-ingest = "mcp_ingest:main"
@@ -64,6 +67,8 @@ py-modules = [
     "_file_lock",
     "_fs_utils",
     "agent_add",
+    "agent_install",
+    "agent_mirror",
     "backup_config",
     "backup_mirror",
     "backup_retention",
@@ -107,6 +112,7 @@ py-modules = [
     "skill_add_detector",
     "skill_category",
     "skill_health",
+    "skill_install",
     "skill_loader",
     "skill_quality",
     "skill_suggest",
