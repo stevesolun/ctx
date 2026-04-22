@@ -298,6 +298,8 @@ def _save_cache(
     keys = sorted(cache.keys())
     hashes = np.asarray(keys, dtype="S64")
     vecs = np.stack([cache[k] for k in keys]).astype("float32")
+    from _fs_utils import _replace_with_retry  # noqa: PLC0415 — local import
+
     path = _cache_file(cache_dir)
     # ``np.savez_compressed`` auto-appends ``.npz`` when the filename
     # doesn't already end that way. Hand it a name without ``.npz`` so
@@ -308,7 +310,12 @@ def _save_cache(
     tmp_stem = path.with_name("embeddings.tmp")  # on-disk target: embeddings.tmp.npz
     np.savez_compressed(tmp_stem, hashes=hashes, vecs=vecs, model=np.asarray([model_id]))
     tmp_real = tmp_stem.with_name(tmp_stem.name + ".npz")  # "embeddings.tmp.npz"
-    os.replace(tmp_real, path)
+    # ``_replace_with_retry`` rather than raw ``os.replace`` — on Windows
+    # the os-level rename can race with antivirus/indexer handles on a
+    # 20MB+ .npz written milliseconds earlier. The wrapper retries 10x
+    # at 50ms each, totalling up to 500ms, which beats a 14-min rebuild
+    # losing its output to a transient lock.
+    _replace_with_retry(str(tmp_real), path)
 
 
 # ────────────────────────────────────────────────────────────────────
