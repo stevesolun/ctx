@@ -167,30 +167,101 @@ def _l2_normalize(matrix: "np.ndarray") -> "np.ndarray":
     return (matrix / norms).astype("float32")
 
 
+# Chunking config. all-MiniLM-L6-v2 caps at 256 tokens (~180 words)
+# before silent truncation; using 150 words per chunk leaves room for
+# the tokenizer's per-word variance without losing trailing content.
+# Overlap preserves context that spans chunk boundaries (a sentence
+# cut mid-way still gets embedded coherently in one of the chunks).
+_CHUNK_WORDS = 150
+_CHUNK_OVERLAP_WORDS = 20
+
+
+def _chunk_text(text: str) -> list[str]:
+    """Split *text* into overlapping word-chunks of ~``_CHUNK_WORDS`` words.
+
+    Returns at least one chunk for any non-empty input so callers
+    can assume ``len(chunks) >= 1`` when text is present. Falls back
+    to a single empty-string chunk for empty input so the mean-pool
+    has something to average.
+
+    Tokenization here is whitespace-based, not model-aware, so the
+    chunk sizes are approximate — but the embedder itself applies
+    the real tokenizer and tolerates slight over/under counts.
+    """
+    words = text.split()
+    if not words:
+        return [""]
+    step = max(1, _CHUNK_WORDS - _CHUNK_OVERLAP_WORDS)
+    chunks: list[str] = []
+    start = 0
+    while start < len(words):
+        end = min(start + _CHUNK_WORDS, len(words))
+        chunks.append(" ".join(words[start:end]))
+        if end == len(words):
+            break
+        start += step
+    return chunks
+
+
 def _embed_missing(
     missing: list[tuple[int, str, str]],  # [(row_index, node_id, text)]
     embedder: "object",
     batch_size: int,
 ) -> "np.ndarray":
-    """Embed the texts with unknown content hashes.
+    """Embed ``missing`` texts with chunk + mean-pool.
+
+    Each text is split into word-chunks, all chunks go through the
+    embedder in one flat pass (batched by ``batch_size``), and the
+    per-node vector is the length-weighted mean of its chunk
+    embeddings. This captures the "whole context" of long entity
+    bodies instead of silently truncating them to the first 256
+    tokens the way a naive ``encode(full_text)`` would.
 
     Returns an (M, dim) matrix aligned with the input order.
-    ``embedder.embed(list[str]) -> np.ndarray`` is the
-    ``EmbedderProtocol`` contract from ``embedding_backend``.
     """
     import numpy as np  # noqa: PLC0415
 
     if not missing:
-        # Callers shouldn't invoke with an empty list, but guard for robustness.
         return np.zeros((0, 0), dtype="float32")
 
-    rows: list[np.ndarray] = []
-    for start in range(0, len(missing), batch_size):
-        batch = missing[start : start + batch_size]
-        texts = [t for _, _, t in batch]
-        matrix = embedder.embed(texts)  # type: ignore[attr-defined]
-        rows.append(np.asarray(matrix, dtype="float32"))
-    return np.vstack(rows)
+    # Phase 1: chunk every text, remember the ranges per node so
+    # we can pool correctly after the flat embedding pass.
+    all_chunks: list[str] = []
+    node_ranges: list[tuple[int, int]] = []  # inclusive-exclusive index range
+    chunk_weights: list[int] = []  # word count per chunk for length-weighted pool
+    for _row_i, _node_id, text in missing:
+        chunks = _chunk_text(text)
+        start = len(all_chunks)
+        for c in chunks:
+            all_chunks.append(c)
+            chunk_weights.append(max(len(c.split()), 1))
+        node_ranges.append((start, len(all_chunks)))
+
+    # Phase 2: batched embedding over the flat chunk list.
+    chunk_embeddings: list[np.ndarray] = []
+    for batch_start in range(0, len(all_chunks), batch_size):
+        batch = all_chunks[batch_start : batch_start + batch_size]
+        matrix = embedder.embed(batch)  # type: ignore[attr-defined]
+        chunk_embeddings.append(np.asarray(matrix, dtype="float32"))
+    if not chunk_embeddings:
+        return np.zeros((0, 0), dtype="float32")
+    chunks_matrix = np.vstack(chunk_embeddings)
+    dim = chunks_matrix.shape[1]
+
+    # Phase 3: length-weighted mean-pool per node range.
+    out = np.zeros((len(missing), dim), dtype="float32")
+    weights_arr = np.asarray(chunk_weights, dtype="float32")
+    for i, (start, end) in enumerate(node_ranges):
+        if end == start:
+            continue  # defensive — should have 1 empty chunk at minimum
+        node_vecs = chunks_matrix[start:end]
+        node_weights = weights_arr[start:end]
+        total_weight = float(node_weights.sum())
+        if total_weight <= 0.0:
+            out[i] = node_vecs.mean(axis=0)
+        else:
+            out[i] = (node_vecs * (node_weights / total_weight)[:, None]).sum(axis=0)
+    return out
 
 
 # ────────────────────────────────────────────────────────────────────

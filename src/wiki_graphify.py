@@ -98,58 +98,85 @@ SLUG_STOP: frozenset[str] = frozenset({
 })
 
 
-def _extract_description(content: str) -> str:
-    """Pull a short description out of an entity markdown body.
-
-    Prefers the first non-empty paragraph after the frontmatter and
-    the first heading. Used only to build semantic embedding text;
-    failing gracefully to the slug is fine because the caller
-    concatenates name + this + slug anyway.
-    """
-    # Everything after the second --- delimiter is the body.
+def _strip_frontmatter(content: str) -> str:
+    """Return the markdown body with the YAML frontmatter removed."""
     parts = content.split("---", 2)
-    body = parts[2] if len(parts) >= 3 else content
-    lines = body.splitlines()
-    # Skip empty lines and the h1 title until we hit prose.
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("#"):
-            continue
-        # Skip wiki infra markers.
-        if stripped.startswith("<!--") or stripped.startswith("[["):
-            continue
-        return stripped[:500]  # clamp — embedding models cap tokens anyway
-    return ""
+    return parts[2] if len(parts) >= 3 else content
 
 
-def _embed_text(meta: dict, slug: str) -> str:
-    """Compose the string fed to the embedder for a node.
+def _load_full_body(meta: dict, slug: str, entity_type: str) -> str:
+    """Load the canonical content source for semantic embedding.
 
-    Fields blended: explicit ``name`` or ``title`` from frontmatter,
-    ``description`` from frontmatter, first prose line from the body,
-    the slug itself (de-hyphenated), and tags. Redundancy between
-    these is intentional — modern sentence encoders weight repeated
-    concepts slightly higher, which we want.
+    Different entity types live in different places in the wiki:
+
+      - **skill**: the pipeline-converted ``<wiki>/converted/<slug>/SKILL.md``
+        is the canonical wiki body. We also concatenate the
+        ``references/*.md`` pipeline stages when present so a skill
+        whose logic is split across 5 stages still embeds the union
+        of all five. Falls back to the entity card body when no
+        converted dir exists (short skills <180 lines that skip the
+        pipeline).
+      - **agent**: ``<wiki>/converted-agents/<slug>.md`` holds the full
+        Claude Code agent prompt (populated by ``ctx-agent-mirror``).
+        Falls back to the entity card body when the mirror hasn't
+        run for a particular slug.
+      - **mcp-server**: entity cards are the only body we have; the
+        pulsemcp description + tags + related links inside the
+        card are the full context. Phase 6f.B detail-enrichment
+        could later pull the GitHub README here, but that's out of
+        scope for this pass.
+
+    The returned text is always non-empty — falls through to the
+    slug (hyphen-split) if every richer source was blank.
     """
-    pieces: list[str] = []
+    entity_body = _strip_frontmatter(meta.get("_content", ""))
+
+    rich_body = ""
+    if entity_type == "skill":
+        skill_md = WIKI_DIR / "converted" / slug / "SKILL.md"
+        if skill_md.is_file():
+            try:
+                rich_body = skill_md.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                rich_body = ""
+            refs_dir = WIKI_DIR / "converted" / slug / "references"
+            if refs_dir.is_dir():
+                parts: list[str] = [rich_body] if rich_body else []
+                for ref in sorted(refs_dir.glob("*.md")):
+                    try:
+                        parts.append(ref.read_text(encoding="utf-8", errors="replace"))
+                    except OSError:
+                        continue
+                rich_body = "\n\n".join(p for p in parts if p.strip())
+    elif entity_type == "agent":
+        agent_md = WIKI_DIR / "converted-agents" / f"{slug}.md"
+        if agent_md.is_file():
+            try:
+                rich_body = agent_md.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                rich_body = ""
+
+    body = rich_body or entity_body
+
+    # Prepend a tiny header (name + tags) so it rides along even when
+    # body content is noisy. Short, canonical, high-signal.
+    header_pieces: list[str] = []
     for key in ("name", "title"):
         v = meta.get(key)
         if isinstance(v, str) and v.strip():
-            pieces.append(v.strip())
+            header_pieces.append(v.strip())
             break
     desc = meta.get("description")
     if isinstance(desc, str) and desc.strip():
-        pieces.append(desc.strip())
-    body_desc = _extract_description(meta.get("_content", ""))
-    if body_desc and body_desc not in pieces:
-        pieces.append(body_desc)
-    pieces.append(slug.replace("-", " "))
+        header_pieces.append(desc.strip())
+    header_pieces.append(slug.replace("-", " "))
     tags = meta.get("tags") or []
     if isinstance(tags, list) and tags:
-        pieces.append(" ".join(str(t) for t in tags if t))
-    return " | ".join(p for p in pieces if p)
+        header_pieces.append(" ".join(str(t) for t in tags if t))
+
+    head = " | ".join(p for p in header_pieces if p)
+    combined = f"{head}\n\n{body}" if body else head
+    return combined.strip() or slug.replace("-", " ")
 
 
 def _slug_tokens(slug: str) -> list[str]:
@@ -252,7 +279,8 @@ def build_graph() -> tuple[nx.Graph, dict[str, dict]]:
             G.add_node(node_id, label=slug, type=entity_type, tags=tags)
             entities[node_id] = meta
             embed_nodes.append(_sem.SemanticNode(
-                node_id=node_id, text=_embed_text(meta, slug),
+                node_id=node_id,
+                text=_load_full_body(meta, slug, entity_type),
             ))
 
     # ── Phase 2: tag + slug-token indices (cheap) ────────────────────
