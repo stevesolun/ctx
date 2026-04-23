@@ -428,10 +428,6 @@ def build_graph(
     return G, entities
 
 
-def _graph_pickle_path() -> Path:
-    return GRAPH_OUT / "graph.pickle"
-
-
 def _recover_affected_from_sem_state(
     *, cache_dir: Path, current_ids: set[str],
 ) -> set[str]:
@@ -488,27 +484,57 @@ def _recover_affected_from_sem_state(
 
 
 def load_prior_graph() -> nx.Graph | None:
-    """Load the previous run's pickled graph, or return None on any issue.
+    """Load the previous run's graph from ``graph.json``, or None on any issue.
 
-    The pickle is an optimisation sidecar — ``patch_graph`` uses it
-    as the starting point for an incremental update, but callers
-    that can't load it (corrupt file, schema drift from a codebase
-    upgrade, first run) just build from scratch instead.
+    The canonical on-disk artifact is ``graph.json`` (node-link format).
+    ``patch_graph`` uses the loaded graph as the starting point for an
+    incremental update; callers that can't load (missing file, corrupt
+    JSON, wrong schema, first run) just build from scratch instead.
+
+    SECURITY NOTE: earlier revisions of this function read a
+    ``graph.pickle`` sidecar via ``pickle.loads``, which is an RCE
+    primitive — a poisoned pickle executes during deserialisation,
+    before any type check. Security-auditor finding C-1. The pickle
+    path is now permanently removed; a stale ``graph.pickle`` on disk
+    is ignored. Do not reintroduce it — use JSON or a checksummed
+    binary format (msgpack) if the JSON parse cost ever matters.
     """
-    import pickle  # noqa: PLC0415
-
-    path = _graph_pickle_path()
+    path = GRAPH_OUT / "graph.json"
     if not path.is_file():
         return None
     try:
-        data = path.read_bytes()
-        obj = pickle.loads(data)
-    except (OSError, pickle.UnpicklingError, EOFError, AttributeError) as exc:
-        print(f"wiki_graphify: prior graph pickle unreadable ({exc}); full rebuild", flush=True)
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f"wiki_graphify: prior graph.json unreadable ({exc}); full rebuild",
+            flush=True,
+        )
         return None
-    if not isinstance(obj, nx.Graph):
+    # Shape check: networkx node-link documents have a 'nodes' list and
+    # an 'edges' (or legacy 'links') list. Anything else is either a
+    # garbage file someone dropped in graphify-out/ or an unrelated
+    # JSON blob — reject rather than feed to node_link_graph.
+    if not isinstance(data, dict):
         return None
-    return obj
+    if "nodes" not in data or not isinstance(data["nodes"], list):
+        return None
+    if "edges" not in data and "links" not in data:
+        return None
+    try:
+        # ``edges="edges"`` matches what export_graph writes. networkx
+        # auto-falls-back to the legacy ``links`` key internally when
+        # reading, but being explicit here pins the contract.
+        graph = nx.node_link_graph(data, edges="edges")
+    except (KeyError, TypeError, ValueError) as exc:
+        print(
+            f"wiki_graphify: prior graph.json rejected by node_link_graph "
+            f"({exc}); full rebuild",
+            flush=True,
+        )
+        return None
+    if not isinstance(graph, nx.Graph):
+        return None
+    return graph
 
 
 def patch_graph(
@@ -968,14 +994,12 @@ def export_graph(
         encoding="utf-8",
     )
 
-    # Pickle mirror for the next run's patch-incremental path.
-    # JSON round-trip is lossy (edge attr types, graph-level
-    # metadata) and ~10x slower to load for 13k nodes / 800k edges,
-    # so we keep a binary copy alongside the portable JSON. The
-    # pickle is an optimisation — patch_graph falls back to a
-    # full rebuild if it's missing or unreadable.
-    import pickle  # noqa: PLC0415 — local: not every caller needs it
-    (GRAPH_OUT / "graph.pickle").write_bytes(pickle.dumps(G, protocol=pickle.HIGHEST_PROTOCOL))
+    # No binary sidecar. An earlier revision wrote ``graph.pickle`` next
+    # to this JSON for faster incremental loads, but pickle.loads is an
+    # RCE primitive — security-auditor finding C-1 (fixed). The JSON
+    # parse overhead (~3s at 13k nodes / 850k edges) is acceptable for
+    # the once-per-regraphify load path. ``load_prior_graph`` reads
+    # graph.json directly.
 
     # Delta export — only the nodes touched this run + their incident
     # edges. Written unconditionally (empty when the full run produced
