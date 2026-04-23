@@ -131,9 +131,18 @@ def resolve_by_seeds(
 
         frontier = next_frontier
 
-    # Rank and return
+    # Rank + normalise. Post-P2.5 we report both:
+    #   score            — raw accumulated edge weight (backward-compat)
+    #   normalized_score — score / max(score), in [0, 1] (new, preferred)
+    # Pre-fix, callers used absolute ``score >= 1.5`` floors that
+    # happened to match the OLD integer-weight graph but broke on the
+    # v0.7 float-weight graph (single edge weight is now <=1.0, so a
+    # 1.5 floor silently drops ALL single-seed hits). Normalised
+    # percentile thresholds don't care about the underlying weight
+    # scale.
     ranked = sorted(scores.items(), key=lambda x: -x[1])[:top_n]
     results: list[dict] = []
+    max_score = max((s for _, s in ranked), default=0.0) or 1.0
     for nid, score in ranked:
         node_data = G.nodes.get(nid, {})
         entity_type = node_data.get("type", "skill")
@@ -142,6 +151,7 @@ def resolve_by_seeds(
             "name": name,
             "type": entity_type,
             "score": round(score, 2),
+            "normalized_score": round(score / max_score, 4),
             "shared_tags": shared_tags_map.get(nid, [])[:8],
             "via": via.get(nid, [])[:4],
         })

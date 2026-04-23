@@ -75,8 +75,24 @@ def find_skill(name: str) -> dict | None:
     return None
 
 
-def update_manifest(name: str) -> None:
-    """Add skill to the current session manifest so context-monitor knows it's loaded."""
+def update_manifest(name: str, entity_type: str = "skill") -> None:
+    """Add entity to the current session manifest (idempotent).
+
+    Dedup is on the ``(name, entity_type)`` tuple to match
+    ``install_utils.record_install``. Same-slug skill + agent (e.g. a
+    user has both a ``code-reviewer`` skill AND a ``code-reviewer``
+    agent installed) now coexist in the manifest without one silently
+    dropping the other. Prior impl deduped on ``name`` alone; the
+    entry was accepted but its ``entity_type`` was absent, which
+    downstream ``install_utils`` code couldn't distinguish from the
+    two-type case — code-reviewer HIGH, fixed here.
+
+    ``entity_type`` defaults to ``"skill"`` so older call sites that
+    pass only ``name`` keep working with the same implicit contract
+    they had before (skill_loader.main historically only loaded
+    skills and agents via ``find_skill`` — the type is always known
+    at the call site).
+    """
     manifest = {"load": [], "unload": [], "warnings": []}
     if MANIFEST_PATH.exists():
         try:
@@ -84,9 +100,19 @@ def update_manifest(name: str) -> None:
         except (json.JSONDecodeError, OSError):
             pass
 
-    loaded_names = {e["skill"] for e in manifest.get("load", [])}
-    if name not in loaded_names:
-        manifest["load"].append({"skill": name, "source": "user-approved"})
+    # (slug, entity_type) tuple dedup — missing entity_type in an
+    # existing entry defaults to "skill" to preserve the pre-fix
+    # implicit contract.
+    loaded_pairs = {
+        (e.get("skill"), e.get("entity_type", "skill"))
+        for e in manifest.get("load", [])
+    }
+    if (name, entity_type) not in loaded_pairs:
+        manifest["load"].append({
+            "skill": name,
+            "entity_type": entity_type,
+            "source": "user-approved",
+        })
         _atomic_write_text(MANIFEST_PATH, json.dumps(manifest, indent=2))
 
 
@@ -190,7 +216,7 @@ def main() -> None:
     for name in names:
         result = find_skill(name)
         if result:
-            update_manifest(name)
+            update_manifest(name, entity_type=result["type"])
             emit_load_event(name)
             loaded.append(result)
             print(f"  Loaded: {result['name']} [{result['type']}] -> {result['path']}")

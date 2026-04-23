@@ -105,61 +105,13 @@ def read_wiki_overrides(wiki_path: str) -> dict[str, dict]:
     return overrides
 
 
-# Stack-to-skill mapping (simplified version of skill-stack-matrix.md)
-STACK_SKILL_MAP = {
-    # Web frameworks
-    "fastapi": ["fastapi"],
-    "django": ["django"],
-    "flask": ["flask"],
-    "express": ["express"],
-    "nestjs": ["nestjs"],
-    "react": ["react", "frontend-design"],
-    "nextjs": ["nextjs", "react", "frontend-design"],
-    "vue": ["vue", "frontend-design"],
-    "nuxt": ["nuxt", "vue", "frontend-design"],
-    "angular": ["angular", "frontend-design"],
-    "svelte": ["svelte", "frontend-design"],
-    # AI/ML
-    "langchain": ["langchain"],
-    "llamaindex": ["llamaindex"],
-    "crewai": ["crewai"],
-    "pytorch": ["pytorch"],
-    "tensorflow": ["tensorflow"],
-    "huggingface": ["huggingface"],
-    "openai-sdk": ["openai-sdk"],
-    "anthropic-sdk": ["anthropic-sdk"],
-    "mcp": ["mcp-dev"],
-    # Infra
-    "docker": ["docker"],
-    "docker-compose": ["docker"],
-    "kubernetes": ["kubernetes"],
-    "terraform": ["terraform"],
-    "github-actions": ["github-actions"],
-    "gitlab-ci": ["gitlab-ci"],
-    "aws-cdk": ["aws"],
-    "vercel": ["vercel"],
-    # Data
-    "sqlalchemy": ["sqlalchemy"],
-    "prisma": ["prisma"],
-    "typeorm": ["typeorm"],
-    "drizzle": ["drizzle"],
-    "redis": ["redis"],
-    "dbt": ["dbt"],
-    # Testing
-    "pytest": ["pytest"],
-    "jest": ["jest"],
-    "vitest": ["vitest"],
-    "playwright": ["playwright"],
-    "cypress": ["cypress"],
-    # Docs
-    "openapi": ["openapi"],
-    "mkdocs": ["mkdocs"],
-    "docusaurus": ["docusaurus"],
-    # Build
-    "vite": ["vite"],
-    "webpack": ["webpack"],
-    "turborepo": ["turborepo"],
-}
+# Stack-to-skill mapping lives in ``stack_skill_map`` as the single
+# source of truth shared with ``usage_tracker.SIGNAL_SKILL_MAP``.
+# Pre-P2.4 each module had its own copy; the usage_tracker one was a
+# 20-entry subset that caused use_count to never increment for skills
+# in stacks like angular/django/docker/cypress/dbt — lifecycle then
+# spuriously flagged them as stale. Code-reviewer HIGH, consolidated.
+from stack_skill_map import STACK_SKILL_MAP  # noqa: E402
 
 # Skills that conflict
 CONFLICTS = [
@@ -289,23 +241,31 @@ def resolve(
                     top_n=30,
                     exclude_seeds=True,
                 )
-                # Noise floor calibrated per hit type. Skills live in a
-                # 1789-node / ~454k-edge dense graph where a single shared
-                # tag produces score 1.0 noise; we need >=1.5 to cross
-                # the threshold. MCPs are a sparse new type (~42 today,
-                # growing to ~12k in Phase 6) so a single matched edge
-                # IS meaningful. Using the same 1.5 floor kills every
-                # single-seed MCP hit. Lower floor for mcp-server only;
-                # revisit in Phase 6 once the corpus is dense.
-                _SKILL_NOISE_FLOOR = 1.5
-                _MCP_NOISE_FLOOR = 1.0
+                # Percentile noise floor. Pre-P2.5 this used absolute
+                # score thresholds (1.5 for skills / 1.0 for MCPs)
+                # calibrated to the v0.6 integer-weight graph. On the
+                # v0.7 blended float-weight graph, per-edge weight is
+                # <=1.0, so absolute thresholds either drop nearly
+                # everything (on sparse/fixture graphs) or
+                # underweight popular hits (on the real 13k-node
+                # graph where ``docker`` accumulates scores of ~300).
+                # Normalised [0,1] thresholds are scale-invariant.
+                # MCPs keep a slightly lower floor because the type
+                # is historically sparser; a single strong link is
+                # still signal, not noise.
+                _SKILL_NOISE_FLOOR = 0.30     # 30% of top hit's score
+                _MCP_NOISE_FLOOR   = 0.20     # 20% (MCPs sparser)
                 for hit in graph_hits:
                     name = hit["name"]
                     hit_type = hit.get("type", "skill")
-                    # Score 0..1 of edge-weight-driven ranking, quantized
-                    # into a modest priority bump (lower than matrix hits
-                    # so they never outrank a direct stack match).
-                    score = float(hit.get("score", 0.0))
+                    # Use normalized_score when present (new schema);
+                    # fall through to raw ``score`` for older graphs
+                    # that predate the normalised field.
+                    score = float(
+                        hit.get("normalized_score")
+                        if "normalized_score" in hit
+                        else hit.get("score", 0.0)
+                    )
                     floor = (
                         _MCP_NOISE_FLOOR if hit_type == "mcp-server"
                         else _SKILL_NOISE_FLOOR

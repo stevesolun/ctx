@@ -68,29 +68,19 @@ def _today() -> str:
 # on it — all date comparisons below go through _today().
 TODAY = _today()
 
-# Minimal signal→skill correlation (mirrors STACK_SKILL_MAP logic)
-SIGNAL_SKILL_MAP: dict[str, list[str]] = {
-    "docker": ["docker"],
-    "kubernetes": ["kubernetes"],
-    "terraform": ["terraform"],
-    "react": ["react", "frontend-design"],
-    "vue": ["vue", "frontend-design"],
-    "angular": ["angular", "frontend-design"],
-    "nextjs": ["nextjs", "react", "frontend-design"],
-    "fastapi": ["fastapi"],
-    "django": ["django"],
-    "flask": ["flask"],
-    "langchain": ["langchain"],
-    "pytorch": ["pytorch"],
-    "anthropic-sdk": ["anthropic-sdk"],
-    "openai-sdk": ["openai-sdk"],
-    "mcp": ["mcp-dev"],
-    "pytest": ["pytest"],
-    "jest": ["jest"],
-    "playwright": ["playwright"],
-    "prisma": ["prisma"],
-    "sqlalchemy": ["sqlalchemy"],
-}
+# Signal -> skill correlation. Lives in ``stack_skill_map`` alongside
+# the resolver's copy so both modules can't drift. Pre-P2.4, a local
+# "minimal subset" was maintained here (20 entries vs resolve_skills'
+# 40) — skills in stacks like angular/django/docker/pytest-cousins
+# never got use_count bumped, which then fooled ctx_lifecycle into
+# flagging them as stale. Code-reviewer HIGH, fixed by consolidation.
+from stack_skill_map import STACK_SKILL_MAP as _SHARED_MAP  # noqa: E402
+
+# Re-exported under the original name for backward-compat with any
+# external caller that imports ``usage_tracker.SIGNAL_SKILL_MAP``.
+# It's a MappingProxyType (read-only); mutations belong in
+# ``stack_skill_map._RAW``, not here.
+SIGNAL_SKILL_MAP = _SHARED_MAP
 
 # (STALE_THRESHOLD and KEEP_DAYS loaded from ctx_config above)
 

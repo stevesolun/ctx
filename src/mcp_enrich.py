@@ -277,6 +277,16 @@ def _render_scalar(value: Any) -> str:
     misparsed as another YAML type (start with ``-``, contain ``:``);
     github URLs are alnum+``/.-_`` so they fall in the safe-bare
     range, but we quote anyway for consistency.
+
+    SECURITY NOTE: strings are stripped of ``\\n`` / ``\\r`` before
+    rendering to prevent frontmatter injection. Security-auditor H-1:
+    a Source implementation that returned a multi-line URL value
+    (e.g. scraped from a poisoned detail page) would otherwise inject
+    fake YAML keys like ``status: installed`` or ``install_cmd: ...``
+    which the next ``ctx-mcp-install --force`` would dutifully pick
+    up from the now-poisoned frontmatter. The executable allowlist
+    (commit b79be55) catches most of the blast radius today, but the
+    injection vector must be shut at the writer too.
     """
     if value is None:
         return "null"
@@ -285,11 +295,16 @@ def _render_scalar(value: Any) -> str:
     if isinstance(value, int):
         return str(value)
     if isinstance(value, str):
+        # Neutralise embedded newlines + CRs first — they're the
+        # actual injection vector. Replace with a single space so
+        # the rendered scalar stays intact but no new YAML line
+        # breaks past the writer.
+        sanitised = value.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
         # Quote only when necessary to keep the file readable in Obsidian.
-        if any(ch in value for ch in ":#&*!|>%@`") or value.startswith(("-", "?", "[", "{")):
-            escaped = value.replace('"', '\\"')
+        if any(ch in sanitised for ch in ":#&*!|>%@`") or sanitised.startswith(("-", "?", "[", "{")):
+            escaped = sanitised.replace('"', '\\"')
             return f'"{escaped}"'
-        return value
+        return sanitised
     # Defensive fallback — stringify and quote.
     return f'"{str(value)}"'
 

@@ -616,3 +616,68 @@ class TestCLIPurge:
         rc = lc.main(["purge"])
         assert rc == 0
         assert "Nothing to purge" in capsys.readouterr().out
+
+
+# ─────────────────────────────────────────────────────────────────────
+# _build_config: config.json overrides actually propagate
+# ─────────────────────────────────────────────────────────────────────
+#
+# P2.3 pinned regression. A code-reviewer finding claimed
+# ``app_cfg.get("quality", {})`` returned empty because config.json
+# had no "quality" section, silently ignoring all user overrides. In
+# fact config.json DOES have "quality.lifecycle" and _build_config
+# does read it — but the defaults happen to match the configured
+# values, so the reviewer couldn't tell by inspection. This test
+# pins the propagation so a future refactor that accidentally breaks
+# get() traversal fails loudly.
+
+class TestBuildConfigPropagates:
+
+    def _rebuild_with_override(self, overrides: dict):
+        """Rebuild ctx_config.cfg with a lifecycle override and reload
+        ctx_lifecycle so its late-bound import picks up the new cfg."""
+        import importlib
+        import ctx_config as _cc
+
+        raw = _cc._load_raw()
+        raw.setdefault("quality", {}).setdefault("lifecycle", {}).update(overrides)
+        _cc.cfg = _cc.Config(raw)
+
+        import ctx_lifecycle as _cl
+        importlib.reload(_cl)
+        return _cl._build_config()
+
+    def test_archive_threshold_override_propagates(self, monkeypatch):
+        cfg = self._rebuild_with_override({"archive_threshold_days": 999.0})
+        assert cfg.archive_threshold_days == 999.0
+
+    def test_delete_threshold_override_propagates(self, monkeypatch):
+        cfg = self._rebuild_with_override({"delete_threshold_days": 777.0})
+        assert cfg.delete_threshold_days == 777.0
+
+    def test_history_max_override_propagates(self, monkeypatch):
+        cfg = self._rebuild_with_override({"history_max": 42})
+        assert cfg.history_max == 42
+
+    def test_demoted_subdir_override_propagates(self, monkeypatch):
+        cfg = self._rebuild_with_override({"demoted_subdir": "_my_demoted"})
+        assert cfg.demoted_subdir == "_my_demoted"
+
+    def test_missing_quality_section_gracefully_defaults(self, monkeypatch):
+        """If a user's config.json has no quality.lifecycle section
+        (older config or deliberate stripped-down config),
+        _build_config must return defaults without crashing."""
+        import importlib
+        import ctx_config as _cc
+
+        raw = _cc._load_raw()
+        raw.pop("quality", None)
+        _cc.cfg = _cc.Config(raw)
+        import ctx_lifecycle as _cl
+        importlib.reload(_cl)
+
+        cfg = _cl._build_config()
+        # Matches the LifecycleConfig dataclass defaults.
+        default = _cl.LifecycleConfig()
+        assert cfg.archive_threshold_days == default.archive_threshold_days
+        assert cfg.history_max == default.history_max

@@ -97,3 +97,85 @@ def test_validate_skill_name_rejects_bad(fake_home):
     for bad in ("../x", "x/y", "*", "", "_leading", ".leading", "-leading"):
         with pytest.raises(ValueError):
             validate_skill_name(bad)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# update_manifest: (slug, entity_type) tuple dedup contract
+# ─────────────────────────────────────────────────────────────────────
+#
+# Code-reviewer HIGH (P2.2). Prior impl deduped on slug alone and
+# wrote entries without an ``entity_type`` field. A same-slug
+# skill + agent collision silently dropped one of them.
+
+import json
+
+class TestUpdateManifestEntityType:
+
+    def test_writes_entity_type_field(self, fake_home):
+        loader, home = fake_home
+        manifest_path = home / ".claude" / "skill-manifest.json"
+        loader.update_manifest("goodskill", entity_type="skill")
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entries = [
+            e for e in data["load"]
+            if e.get("skill") == "goodskill"
+        ]
+        assert len(entries) == 1
+        assert entries[0].get("entity_type") == "skill"
+
+    def test_same_slug_skill_and_agent_coexist(self, fake_home):
+        """The regression: before the fix, adding an agent with the same
+        slug as an already-loaded skill was silently a no-op because
+        the slug-only dedup thought the agent was already loaded."""
+        loader, home = fake_home
+        manifest_path = home / ".claude" / "skill-manifest.json"
+        loader.update_manifest("code-reviewer", entity_type="skill")
+        loader.update_manifest("code-reviewer", entity_type="agent")
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        pairs = {
+            (e.get("skill"), e.get("entity_type"))
+            for e in data["load"]
+        }
+        assert ("code-reviewer", "skill") in pairs
+        assert ("code-reviewer", "agent") in pairs
+
+    def test_idempotent_same_type(self, fake_home):
+        """Calling update_manifest twice with the same (slug, type)
+        must not append a duplicate entry."""
+        loader, home = fake_home
+        manifest_path = home / ".claude" / "skill-manifest.json"
+        loader.update_manifest("goodskill", entity_type="skill")
+        loader.update_manifest("goodskill", entity_type="skill")
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entries = [e for e in data["load"] if e.get("skill") == "goodskill"]
+        assert len(entries) == 1
+
+    def test_default_entity_type_is_skill(self, fake_home):
+        """Backward compat: call sites that don't pass entity_type
+        default to ``skill`` — the pre-fix implicit contract."""
+        loader, home = fake_home
+        manifest_path = home / ".claude" / "skill-manifest.json"
+        loader.update_manifest("legacy-caller")
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entry = next(e for e in data["load"] if e.get("skill") == "legacy-caller")
+        assert entry.get("entity_type") == "skill"
+
+    def test_legacy_pre_fix_manifest_entry_is_not_duplicated(self, fake_home):
+        """If the manifest already has a pre-fix entry (no ``entity_type``
+        key, slug == ``foo``), a new ``update_manifest("foo", "skill")``
+        call must recognise it as the same pair — the missing
+        ``entity_type`` in the old entry implicitly meant ``skill``."""
+        loader, home = fake_home
+        manifest_path = home / ".claude" / "skill-manifest.json"
+        manifest_path.write_text(json.dumps({
+            "load": [{"skill": "foo", "source": "legacy"}],
+            "unload": [],
+            "warnings": [],
+        }), encoding="utf-8")
+        loader.update_manifest("foo", entity_type="skill")
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        foo_entries = [e for e in data["load"] if e.get("skill") == "foo"]
+        assert len(foo_entries) == 1, (
+            "legacy entry got duplicated — missing entity_type should "
+            "default to 'skill' for dedup purposes"
+        )

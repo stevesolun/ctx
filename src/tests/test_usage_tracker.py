@@ -140,18 +140,21 @@ class TestSignalsToSkills:
         assert "docker" in skills
         assert "pytest" in skills
 
-    def test_empty_mapping_value_returns_nothing(self):
-        """Defensive: if a signal maps to an empty list in the config
-        (a maintenance state between adding a signal and picking its
-        skills), we return nothing — not the raw signal."""
+    def test_empty_mapping_value_returns_nothing(self, monkeypatch):
+        """Defensive: if a signal maps to an empty list (a maintenance
+        state between adding a signal and picking its skills), we
+        return nothing — not the raw signal.
+
+        Post-P2.4 the map is a ``MappingProxyType`` — immutable. The
+        old copy-mutate-restore pattern doesn't work anymore. Use
+        monkeypatch to swap in a plain dict for the duration of the
+        test, then the original immutable view restores automatically.
+        """
         import usage_tracker as _ut_mod
-        original = _ut_mod.SIGNAL_SKILL_MAP.copy()
-        try:
-            _ut_mod.SIGNAL_SKILL_MAP["tmp-signal"] = []
-            assert "tmp-signal" not in signals_to_skills({"tmp-signal": 1})
-        finally:
-            _ut_mod.SIGNAL_SKILL_MAP.clear()
-            _ut_mod.SIGNAL_SKILL_MAP.update(original)
+        override = dict(_ut_mod.SIGNAL_SKILL_MAP)
+        override["tmp-signal"] = []
+        monkeypatch.setattr(_ut_mod, "SIGNAL_SKILL_MAP", override)
+        assert "tmp-signal" not in signals_to_skills({"tmp-signal": 1})
 
 
 # ---------------------------------------------------------------------------

@@ -129,6 +129,7 @@ py-modules = [
     "skill_suggest",
     "skill_telemetry",
     "skill_unload",
+    "stack_skill_map",
     "toolbox",
     "toolbox_config",
     "toolbox_hooks",

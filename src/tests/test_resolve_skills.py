@@ -367,8 +367,12 @@ class TestResolveMcpRecommendations:
         self._fake_graph(monkeypatch)
 
         def fake_resolve_by_seeds(graph, seeds, **kwargs):
+            # Post-P2.5 the resolver uses normalized_score (percentile
+            # in [0,1]) against the 0.20 MCP floor. A value of 0.1
+            # sits below the floor so the hit must be dropped.
             return [
-                {"name": "weak-mcp", "type": "mcp-server", "score": 0.8,
+                {"name": "weak-mcp", "type": "mcp-server",
+                 "score": 0.8, "normalized_score": 0.10,
                  "shared_tags": [], "via": ["a"]},
             ]
 
@@ -513,3 +517,122 @@ class TestApplyIntentBoosts:
         manifest = self._make_manifest()
         apply_intent_boosts(needed, {}, {}, manifest)
         assert needed["react"]["priority"] == 10
+
+
+# ─────────────────────────────────────────────────────────────────────
+# P2.5 normalised noise-floor regression
+# ─────────────────────────────────────────────────────────────────────
+#
+# Pre-P2.5 the floors were absolute (1.5 / 1.0) and calibrated against
+# the v0.6 integer-weight graph. On v0.7's blended float-weight graph
+# a single edge is <=1.0, so absolute 1.5 dropped ALL single-seed
+# hits on any sparse/test graph — the suggestion arm silently produced
+# nothing. Post-fix the floors are percentile thresholds in [0,1],
+# scale-invariant.
+
+class TestNoiseFloorNormalized:
+
+    def _fake_graph(self, monkeypatch):
+        import networkx as nx
+        import resolve_skills
+
+        def fake_load_graph(_=None):
+            G = nx.Graph()
+            G.add_node("skill:foo", type="skill", label="foo")
+            return G
+
+        monkeypatch.setattr(resolve_skills, "_load_graph", fake_load_graph)
+
+    def test_normalized_score_at_top_survives(self, tmp_path, monkeypatch):
+        """A hit with normalized_score=1.0 (the top of its ranking)
+        always passes the floor — otherwise the top recommendation
+        gets silently dropped on small fixtures."""
+        import resolve_skills
+        from resolve_skills import resolve
+        self._fake_graph(monkeypatch)
+
+        def fake_hits(*a, **kw):
+            return [
+                {"name": "top-skill", "type": "skill",
+                 "score": 1.23, "normalized_score": 1.0,
+                 "shared_tags": ["x"], "via": ["react"]},
+            ]
+
+        monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_hits)
+        available = {"react": {"path": str(tmp_path / "r/SKILL.md"), "name": "react"},
+                     "top-skill": {"path": str(tmp_path / "t/SKILL.md"), "name": "top-skill"}}
+        profile = _minimal_profile(frameworks=[_detection("react")])
+        manifest = resolve(profile, available, {})
+        assert "top-skill" in {e["skill"] for e in manifest["load"]}
+
+    def test_skill_below_0_3_dropped(self, tmp_path, monkeypatch):
+        """Skill hits with normalized_score < 0.30 don't make the cut."""
+        import resolve_skills
+        from resolve_skills import resolve
+        self._fake_graph(monkeypatch)
+
+        def fake_hits(*a, **kw):
+            return [
+                {"name": "noisy", "type": "skill",
+                 "score": 0.12, "normalized_score": 0.10,
+                 "shared_tags": [], "via": ["react"]},
+            ]
+        monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_hits)
+        available = {"react": {"path": str(tmp_path / "r/SKILL.md"), "name": "react"},
+                     "noisy": {"path": str(tmp_path / "n/SKILL.md"), "name": "noisy"}}
+        profile = _minimal_profile(frameworks=[_detection("react")])
+        manifest = resolve(profile, available, {})
+        assert "noisy" not in {e["skill"] for e in manifest["load"]}
+
+    def test_mcp_floor_is_lower_than_skill_floor(self, tmp_path, monkeypatch):
+        """MCPs are historically sparser; a hit with normalized_score=0.25
+        passes the MCP floor (0.20) but NOT the skill floor (0.30).
+        Pinning this asymmetry so a future 'unify the floors' refactor
+        wipes out MCP recommendations without CI noticing."""
+        import resolve_skills
+        from resolve_skills import resolve
+        self._fake_graph(monkeypatch)
+
+        def fake_hits(*a, **kw):
+            return [
+                {"name": "mid-mcp", "type": "mcp-server",
+                 "score": 0.3, "normalized_score": 0.25,
+                 "shared_tags": ["x"], "via": ["react"]},
+                {"name": "mid-skill", "type": "skill",
+                 "score": 0.3, "normalized_score": 0.25,
+                 "shared_tags": ["x"], "via": ["react"]},
+            ]
+        monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_hits)
+        available = {
+            "react": {"path": str(tmp_path / "r/SKILL.md"), "name": "react"},
+            "mid-skill": {"path": str(tmp_path / "s/SKILL.md"), "name": "mid-skill"},
+        }
+        profile = _minimal_profile(frameworks=[_detection("react")])
+        manifest = resolve(profile, available, {})
+        # Skill below 0.30 → dropped.
+        assert "mid-skill" not in {e["skill"] for e in manifest["load"]}
+        # MCP above 0.20 → kept.
+        mcp_names = {m["name"] for m in manifest["mcp_servers"]}
+        assert "mid-mcp" in mcp_names
+
+    def test_backward_compat_raw_score_fallback(self, tmp_path, monkeypatch):
+        """An older resolver output without normalized_score must
+        still work via raw-score fallback, so a stale cached graph
+        doesn't silently return [] after the P2.5 upgrade."""
+        import resolve_skills
+        from resolve_skills import resolve
+        self._fake_graph(monkeypatch)
+
+        def fake_hits(*a, **kw):
+            # No ``normalized_score`` key — pre-P2.5 shape.
+            return [
+                {"name": "legacy-hit", "type": "skill",
+                 "score": 2.5, "shared_tags": ["x"], "via": ["react"]},
+            ]
+        monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_hits)
+        available = {"react": {"path": str(tmp_path / "r/SKILL.md"), "name": "react"},
+                     "legacy-hit": {"path": str(tmp_path / "l/SKILL.md"), "name": "legacy-hit"}}
+        profile = _minimal_profile(frameworks=[_detection("react")])
+        manifest = resolve(profile, available, {})
+        # Raw score 2.5 >> any old skill floor so legacy behaviour survives.
+        assert "legacy-hit" in {e["skill"] for e in manifest["load"]}
