@@ -41,22 +41,52 @@ if [[ -f "$UPDATER" ]]; then
 fi
 
 # ── Stage 2: Wiki tarball refresh ─────────────────────────────────────────────
-# Only run if this commit touches skills/ or agents/ (staged changes), or if
-# the tarball itself is already staged (force-rebuild signal).
+# Trigger conditions (any one fires a rebuild):
+#
+#   A. The commit touches repo-tracked entity sources:
+#      - skills/  agents/  (legacy locations)
+#      - any src/*mirror*.py / src/*_install.py (behavioural contract
+#        changes for how entities flow from local -> wiki -> tarball)
+#   B. The tarball itself is already staged (force-rebuild signal —
+#      e.g. a manual repack the author wants preserved).
+#   C. WIKI DRIFT: ~/.claude/skill-wiki/ carries content newer than
+#      graph/wiki-graph.tar.gz. Covers the case where
+#      ctx-skill-mirror / ctx-agent-mirror / ctx-mcp-ingest wrote into
+#      the wiki OUTSIDE a commit and the tarball is now stale. Prior
+#      to this rule MCP ingests were invisible to the hook — MCPs
+#      don't live under repo-tracked skills/ or agents/.
 STAGED_CHANGES=$(git diff --cached --name-only)
 NEEDS_WIKI_REBUILD=0
+WIKI_REBUILD_REASON=""
+
 if echo "$STAGED_CHANGES" | grep -qE '^(skills|agents)/' ; then
   NEEDS_WIKI_REBUILD=1
-fi
-if echo "$STAGED_CHANGES" | grep -qE '^graph/wiki-graph\.tar\.gz$' ; then
+  WIKI_REBUILD_REASON="skills/ or agents/ source changed"
+elif echo "$STAGED_CHANGES" | grep -qE '^graph/wiki-graph\.tar\.gz$' ; then
   NEEDS_WIKI_REBUILD=1
+  WIKI_REBUILD_REASON="tarball staged (force-rebuild signal)"
+elif [[ -f "$TARBALL" && -d "$WIKI_DIR" ]]; then
+  # Cheap drift check: find the newest relevant wiki file and compare
+  # against the tarball's mtime. Bounded to the dirs we actually pack
+  # (exclude raw/, .embedding-cache/, checkpoints) so unrelated
+  # regenerable state doesn't fire a rebuild.
+  WIKI_NEWEST=$(find "$WIKI_DIR" \
+      -path "$WIKI_DIR/raw" -prune -o \
+      -path "$WIKI_DIR/.embedding-cache" -prune -o \
+      -path "$WIKI_DIR/.ingest-checkpoint" -prune -o \
+      -path "$WIKI_DIR/.enrich-checkpoint" -prune -o \
+      -type f -newer "$TARBALL" -print 2>/dev/null | head -1)
+  if [[ -n "$WIKI_NEWEST" ]]; then
+    NEEDS_WIKI_REBUILD=1
+    WIKI_REBUILD_REASON="wiki drift — ${WIKI_NEWEST#$WIKI_DIR/} newer than tarball"
+  fi
 fi
 
 if [[ $NEEDS_WIKI_REBUILD -eq 1 ]]; then
   if [[ ! -d "$WIKI_DIR" ]]; then
-    log "skills/agents changed but wiki not deployed at $WIKI_DIR — skipping rebuild"
+    log "$WIKI_REBUILD_REASON, but wiki not deployed at $WIKI_DIR — skipping rebuild"
   else
-    log "skills/agents changed — rebuilding wiki + graph + tarball"
+    log "$WIKI_REBUILD_REASON — rebuilding wiki + graph + tarball (skills + agents + MCPs)"
 
     # Regenerate entity pages + graph. These two scripts already warn but
     # don't abort on individual failures.
