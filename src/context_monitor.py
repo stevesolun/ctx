@@ -345,24 +345,35 @@ def main() -> None:
     }
     append_intent_log(entry)
 
-    # If cumulative unmatched today hits threshold → write pending-skills
+    # Cumulative check: collect every unique unmatched signal in today's
+    # intent log (already written above, so this invocation's unmatched
+    # is included) and gate on THAT count, not on the single-invocation
+    # ``unmatched`` list.
+    #
+    # Prior impl checked ``len(unmatched) >= THRESHOLD`` — which required
+    # a single tool call to surface THRESHOLD=3 unmatched signals by
+    # itself. In practice Read/Edit tool calls surface 1 signal each,
+    # so the gate never fired and pending-skills.json was almost never
+    # written. That silently killed the suggestion arm of the alive
+    # loop: context_monitor → skill_suggest → skill_loader never
+    # triggered. Code-reviewer BLOCKER, fixed here.
     THRESHOLD = _THRESHOLD
-    if len(unmatched) >= THRESHOLD:
-        # Collect all today's unmatched for a richer suggestion
-        all_unmatched: set[str] = set(unmatched)
-        if INTENT_LOG.exists():
-            today = entry["date"]
-            try:
-                with open(INTENT_LOG, encoding="utf-8") as f:
-                    for line in f:
-                        try:
-                            e = json.loads(line.strip())
-                            if e.get("date", "") == today:
-                                all_unmatched.update(e.get("unmatched", []))
-                        except json.JSONDecodeError:
-                            continue
-            except Exception as exc:
-                print(f"Warning: failed to collect today's unmatched: {exc}", file=sys.stderr)
+    all_unmatched: set[str] = set(unmatched)
+    if INTENT_LOG.exists():
+        today = entry["date"]
+        try:
+            with open(INTENT_LOG, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        e = json.loads(line.strip())
+                        if e.get("date", "") == today:
+                            all_unmatched.update(e.get("unmatched", []))
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as exc:
+            print(f"Warning: failed to collect today's unmatched: {exc}", file=sys.stderr)
+
+    if len(all_unmatched) >= THRESHOLD:
         write_pending_skills(sorted(all_unmatched))
 
 

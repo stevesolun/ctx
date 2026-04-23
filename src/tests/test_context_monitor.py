@@ -355,3 +355,131 @@ class TestMain:
         monkeypatch.setattr(sys, "argv", ["context_monitor.py", "--tool", "Read", "--input", tool_input])
         _cm.main()
         assert pending.exists()
+
+
+# ---------------------------------------------------------------------------
+# Cumulative-threshold regression (code-reviewer finding BLOCKER)
+# ---------------------------------------------------------------------------
+#
+# Prior impl used ``len(unmatched) >= THRESHOLD`` where ``unmatched`` is the
+# per-invocation list. A single tool call almost never surfaces 3 unmatched
+# signals alone, so the default threshold=3 meant pending-skills.json was
+# essentially never written — silently killing the suggestion arm of the
+# alive loop. The fix walks the intent log and checks the cumulative
+# (per-day, across all invocations) unmatched count against the threshold.
+
+class TestCumulativeThreshold:
+    """The threshold must fire on cumulative unmatched across today's log,
+    not just on a single invocation's count.
+    """
+
+    def _setup_paths(self, tmp_path, monkeypatch):
+        log = tmp_path / "intent.jsonl"
+        pending = tmp_path / "pending.json"
+        monkeypatch.setattr(_cm, "CLAUDE_DIR", tmp_path)
+        monkeypatch.setattr(_cm, "INTENT_LOG", log)
+        monkeypatch.setattr(_cm, "MANIFEST_PATH", tmp_path / "manifest.json")
+        monkeypatch.setattr(_cm, "PENDING_SKILLS", pending)
+        return log, pending
+
+    def _run_main(self, monkeypatch, tool_name: str, tool_input: dict):
+        monkeypatch.setattr(
+            sys, "argv",
+            ["context_monitor.py", "--tool", tool_name, "--input", json.dumps(tool_input)],
+        )
+        _cm.main()
+
+    def test_fires_on_cumulative_across_three_invocations(
+        self, tmp_path, monkeypatch,
+    ):
+        """Three invocations each surfacing ONE unmatched signal should
+        trigger pending-skills write when THRESHOLD=3.
+
+        This is the case the old len(unmatched)>=THRESHOLD check missed.
+        The user types a react file, then opens a Dockerfile, then edits
+        terraform — three separate tool calls, three different unmatched
+        signals, cumulatively at threshold.
+        """
+        _, pending = self._setup_paths(tmp_path, monkeypatch)
+        monkeypatch.setattr(_cm, "_THRESHOLD", 3)
+
+        # Three invocations, one unique unmatched signal each.
+        self._run_main(monkeypatch, "Read", {"file_path": "App.tsx"})       # react
+        assert not pending.exists(), "fired after 1 cumulative unmatched"
+
+        self._run_main(monkeypatch, "Read", {"file_path": "Dockerfile"})    # docker
+        assert not pending.exists(), "fired after 2 cumulative unmatched"
+
+        self._run_main(monkeypatch, "Read", {"file_path": "main.tf"})       # terraform
+        assert pending.exists(), (
+            "did NOT fire after 3 cumulative unmatched — "
+            "the per-invocation threshold bug regressed"
+        )
+
+    def test_does_not_fire_below_cumulative_threshold(
+        self, tmp_path, monkeypatch,
+    ):
+        """Below-threshold cumulative count must NOT trigger.
+
+        Otherwise every first-keystroke would spam pending-skills.json.
+        """
+        _, pending = self._setup_paths(tmp_path, monkeypatch)
+        monkeypatch.setattr(_cm, "_THRESHOLD", 3)
+
+        self._run_main(monkeypatch, "Read", {"file_path": "App.tsx"})
+        self._run_main(monkeypatch, "Read", {"file_path": "Dockerfile"})
+        # Only 2 unique signals accumulated; THRESHOLD=3 => no write.
+        assert not pending.exists()
+
+    def test_fires_when_single_invocation_surfaces_multiple(
+        self, tmp_path, monkeypatch,
+    ):
+        """Backward-compat: a single invocation carrying threshold-worth of
+        new signals on its own still fires (the old happy path)."""
+        _, pending = self._setup_paths(tmp_path, monkeypatch)
+        monkeypatch.setattr(_cm, "_THRESHOLD", 2)
+
+        # A Bash pip install surfaces multiple signals in one invocation.
+        self._run_main(
+            monkeypatch, "Bash",
+            {"command": "pip install fastapi django"},
+        )
+        assert pending.exists()
+
+    def test_pending_contains_cumulative_union(
+        self, tmp_path, monkeypatch,
+    ):
+        """When the threshold fires, pending-skills.json lists ALL of today's
+        unmatched signals, not just the current invocation's."""
+        _, pending = self._setup_paths(tmp_path, monkeypatch)
+        monkeypatch.setattr(_cm, "_THRESHOLD", 2)
+
+        self._run_main(monkeypatch, "Read", {"file_path": "App.tsx"})
+        self._run_main(monkeypatch, "Read", {"file_path": "Dockerfile"})
+
+        assert pending.exists()
+        payload = json.loads(pending.read_text())
+        unmatched = set(payload.get("unmatched_signals", []))
+        # Both react (from App.tsx) and docker (from Dockerfile) must be
+        # present — a fix that only reports the current invocation's
+        # signals would miss react.
+        assert {"react", "docker"}.issubset(unmatched), (
+            f"pending does not include cumulative signals: {unmatched}"
+        )
+
+    def test_duplicate_signals_across_invocations_count_once(
+        self, tmp_path, monkeypatch,
+    ):
+        """Unique-set cumulative count — repeated signals don't inflate.
+
+        The same file edited twice should not double-count toward the
+        threshold; otherwise a tight edit-save-edit-save loop would
+        auto-trigger suggestions on a single concept.
+        """
+        _, pending = self._setup_paths(tmp_path, monkeypatch)
+        monkeypatch.setattr(_cm, "_THRESHOLD", 2)
+
+        self._run_main(monkeypatch, "Read", {"file_path": "App.tsx"})       # react
+        self._run_main(monkeypatch, "Read", {"file_path": "index.tsx"})     # react (dup)
+        # Only 1 unique unmatched concept; THRESHOLD=2 => no write.
+        assert not pending.exists()
