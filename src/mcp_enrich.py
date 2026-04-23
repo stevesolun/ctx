@@ -100,8 +100,13 @@ def _now_iso() -> str:
 
 
 def _checkpoint_path(wiki_path: Path, source: str) -> Path:
-    if "/" in source or "\\" in source or source.startswith("."):
-        raise ValueError(f"invalid source name: {source!r}")
+    # Delegate to shared validator. Prior impl only rejected ``/``, ``\\``
+    # and leading ``.``, which let Windows drive-relative names like
+    # ``C:evil`` through — those resolve against drive C's CWD, not the
+    # wiki, which an attacker could use to overwrite ~/.claude/settings.json
+    # via ``--source "C:...\\settings"``. Security-auditor H-3, fixed here.
+    from _safe_name import validate_source_name  # noqa: PLC0415
+    validate_source_name(source, field="source")
     return wiki_path / CHECKPOINT_SUBDIR / f"{source}.json"
 
 

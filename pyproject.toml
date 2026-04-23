@@ -69,6 +69,7 @@ package-dir = {"" = "src"}
 py-modules = [
     "_file_lock",
     "_fs_utils",
+    "_safe_name",
     "agent_add",
     "agent_install",
     "agent_mirror",

@@ -130,15 +130,41 @@ def load_index(mcp_dir: Path) -> CanonicalIndex:
     if not isinstance(by_url, dict):
         return _empty_index()
     # Defensive: coerce each entry to the typed shape, drop malformed.
+    #
+    # Security-auditor H-2 found the prior impl accepted any string for
+    # ``relpath``, including ``"../../../../hooks/backup_on_change.py"``.
+    # ``lookup`` then built ``mcp_dir / relpath`` and returned the
+    # escaped path; callers (``mcp_add._rewrite_frontmatter``) wrote
+    # back to it via atomic_write_text — arbitrary-file-write primitive
+    # reachable via a poisoned ``.canonical-index.json``. Fixed here by
+    # rejecting any entry whose relpath doesn't resolve under ``mcp_dir``.
+    from _safe_name import is_safe_relpath  # noqa: PLC0415
+
     cleaned: dict[str, CanonicalEntry] = {}
+    dropped = 0
     for url, entry in by_url.items():
         if (
             isinstance(url, str)
             and isinstance(entry, dict)
             and isinstance(entry.get("slug"), str)
             and isinstance(entry.get("relpath"), str)
+            and is_safe_relpath(mcp_dir, entry["relpath"])
         ):
             cleaned[url] = {"slug": entry["slug"], "relpath": entry["relpath"]}
+        else:
+            dropped += 1
+    if dropped:
+        # Surface the drop count so an operator seeing a discrepancy
+        # between mcp-entities/ on disk and the index can diagnose it.
+        # Not raised — a poisoned entry is malicious, not a config
+        # error; silently quarantine it and keep the rest of the
+        # index useful.
+        import logging  # noqa: PLC0415
+        logging.getLogger(__name__).warning(
+            "mcp_canonical_index: dropped %d malformed/unsafe entries "
+            "(likely poisoned relpath) from %s",
+            dropped, _index_path(mcp_dir),
+        )
     return {
         "version": INDEX_VERSION,
         "updated": str(data.get("updated", _now_iso())),
@@ -198,6 +224,12 @@ def upsert(
     accumulate changes in memory and write once at the end, avoiding N
     disk writes for N entities.
     """
+    # Match load_index's containment rule on the write side too —
+    # otherwise a caller could insert an unsafe relpath that survives
+    # in-process lookups until the next load filters it out.
+    from _safe_name import validate_relpath  # noqa: PLC0415
+    validate_relpath(mcp_dir, relpath, field="relpath")
+
     idx = index if index is not None else load_index(mcp_dir)
     idx["by_github_url"][normalized_url] = {"slug": slug, "relpath": relpath}
     if persist:

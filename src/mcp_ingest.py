@@ -129,12 +129,15 @@ def _now_iso() -> str:
 
 
 def _checkpoint_path(wiki_path: Path, source: str) -> Path:
-    """Return the sidecar path for ``source``'s checkpoint."""
-    # Slashes in a source name would escape the subdir; reject upfront
-    # rather than silently walking the tree. Sources are registered by
-    # name in ``mcp_sources.SOURCES``; nothing legitimate has a slash.
-    if "/" in source or "\\" in source or source.startswith("."):
-        raise ValueError(f"invalid source name: {source!r}")
+    """Return the sidecar path for ``source``'s checkpoint.
+
+    Source name safety delegates to the shared validator in
+    ``_safe_name``. See its docstring for the full rule set — most
+    notably it rejects Windows drive-relative (``C:evil``) which the
+    older ad-hoc check missed. Security-auditor H-3.
+    """
+    from _safe_name import validate_source_name  # noqa: PLC0415
+    validate_source_name(source, field="source")
     return wiki_path / CHECKPOINT_SUBDIR / f"{source}.json"
 
 

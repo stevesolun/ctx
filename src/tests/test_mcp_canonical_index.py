@@ -310,3 +310,82 @@ def test_sidecar_file_is_0o600(tmp_path: Path) -> None:
     mci.upsert(tmp_path, "https://github.com/a/b", slug="a-b", relpath="a/a-b.md")
     mode = stat.S_IMODE(os.stat(tmp_path / mci.INDEX_FILENAME).st_mode)
     assert mode == 0o600, f"sidecar must be owner-only; got {oct(mode)}"
+
+
+# ── H-2 regression: relpath traversal via poisoned index ────────────────────
+
+
+class TestRelpathTraversalRegression:
+    """Security-auditor finding H-2.
+
+    Before the fix, load_index accepted any string for ``relpath``. A
+    poisoned ``.canonical-index.json`` with
+      ``{"by_github_url": {"https://g/a/b": {"slug": "x", "relpath":
+        "../../../../hooks/backup_on_change.py"}}}``
+    would cause ``lookup`` to return a path OUTSIDE mcp_dir, which
+    ``mcp_add._rewrite_frontmatter`` would then overwrite via
+    ``atomic_write_text`` — an arbitrary-file-write primitive reachable
+    from any process that could write to the shared wiki (cloud sync,
+    shared vault, merged PR).
+    """
+
+    def test_load_index_drops_traversal_relpath(self, tmp_path: Path) -> None:
+        import json as _json
+        sidecar = tmp_path / mci.INDEX_FILENAME
+        sidecar.write_text(_json.dumps({
+            "version": 1,
+            "updated": "2026-04-22T00:00:00Z",
+            "by_github_url": {
+                "https://github.com/safe/ok": {"slug": "ok", "relpath": "o/ok.md"},
+                "https://github.com/evil/one": {
+                    "slug": "evil", "relpath": "../../../../hooks/backup_on_change.py",
+                },
+                "https://github.com/evil/two": {
+                    "slug": "evil2", "relpath": "/etc/passwd",
+                },
+            },
+        }), encoding="utf-8")
+
+        idx = mci.load_index(tmp_path)
+        urls = set(idx["by_github_url"].keys())
+        # Safe entry survives; both poisoned entries dropped.
+        assert "https://github.com/safe/ok" in urls
+        assert "https://github.com/evil/one" not in urls
+        assert "https://github.com/evil/two" not in urls
+
+    def test_load_index_drops_windows_drive_relative(self, tmp_path: Path) -> None:
+        """``C:evil`` resolves against drive C's CWD on Windows — rejected."""
+        import json as _json
+        sidecar = tmp_path / mci.INDEX_FILENAME
+        sidecar.write_text(_json.dumps({
+            "version": 1,
+            "updated": "2026-04-22T00:00:00Z",
+            "by_github_url": {
+                "https://github.com/x/y": {"slug": "y", "relpath": "C:evil.md"},
+            },
+        }), encoding="utf-8")
+        idx = mci.load_index(tmp_path)
+        assert idx["by_github_url"] == {}
+
+    def test_upsert_rejects_traversal_relpath(self, tmp_path: Path) -> None:
+        """Write-side validation mirrors the read side."""
+        with pytest.raises(ValueError, match="invalid relpath"):
+            mci.upsert(
+                tmp_path, "https://github.com/x/y",
+                slug="y", relpath="../../../hooks/evil.py",
+            )
+
+    def test_upsert_rejects_absolute_relpath(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="invalid relpath"):
+            mci.upsert(
+                tmp_path, "https://github.com/x/y",
+                slug="y", relpath="/etc/passwd",
+            )
+
+    def test_upsert_accepts_safe_relpath(self, tmp_path: Path) -> None:
+        """Sanity: legitimate relpaths still work after the validator."""
+        idx = mci.upsert(
+            tmp_path, "https://github.com/x/y",
+            slug="y", relpath="x/y.md",
+        )
+        assert "https://github.com/x/y" in idx["by_github_url"]

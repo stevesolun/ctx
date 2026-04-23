@@ -167,6 +167,23 @@ class TestCheckpointPersistence:
         with pytest.raises(ValueError):
             mcp_ingest._checkpoint_path(tmp_path, ".hidden")
 
+    def test_windows_drive_relative_source_rejected(self, tmp_path: Path) -> None:
+        """H-3 regression — ``C:evil`` would resolve against drive C's CWD
+        on Windows, not under wiki_path. Prior validator only caught
+        ``/``, ``\\``, and leading ``.``; drive-relative slipped through."""
+        with pytest.raises(ValueError, match="invalid source name"):
+            mcp_ingest._checkpoint_path(tmp_path, "C:evil")
+        with pytest.raises(ValueError, match="invalid source name"):
+            mcp_ingest._checkpoint_path(tmp_path, "Z:payload")
+
+    def test_windows_reserved_device_name_rejected(self, tmp_path: Path) -> None:
+        """``NUL.json`` on Windows silently writes to the null device.
+        The shared validator blocks CON/PRN/NUL/AUX/COM1-9/LPT1-9."""
+        with pytest.raises(ValueError, match="invalid source name"):
+            mcp_ingest._checkpoint_path(tmp_path, "NUL")
+        with pytest.raises(ValueError, match="invalid source name"):
+            mcp_ingest._checkpoint_path(tmp_path, "con")  # case-insensitive
+
 
 # ── Fresh run ───────────────────────────────────────────────────────────────
 
