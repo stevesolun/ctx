@@ -214,8 +214,24 @@ def _render_scalar(value: object) -> str:
         return str(value)
     if isinstance(value, str):
         safe = value.replace("\r", " ").replace("\n", " ")
-        if any(ch in safe for ch in ':#&*!|>%@`') or safe.startswith(("-", "?", "[", "{")):
-            escaped = safe.replace('"', '\\"')
+        # Conservative: quote when the string contains ANY YAML-structural
+        # / flow-indicator / reserved character, OR leads with a block-
+        # indicator char, OR leads/trails whitespace. The unquoted path is
+        # reserved for simple alphanumeric-style values that YAML's plain-
+        # scalar scanner parses unambiguously.
+        #
+        # The full set mirrors the YAML 1.1 reserved-indicator table:
+        # flow indicators (,[]{}), block/map indicators (:?-), anchor/
+        # alias (&*), tag (!), pipe/fold (|>), comment (#), directive (%),
+        # reserved (@`), and both quote marks.
+        yaml_structural = set(",[]{}:?#&*!|>%@`\"'\\")
+        needs_quote = (
+            any(ch in safe for ch in yaml_structural)
+            or (safe and (safe[0] == "-" or safe[0].isspace() or safe[-1].isspace()))
+            or safe.startswith(("?", "[", "{"))
+        )
+        if needs_quote:
+            escaped = safe.replace("\\", "\\\\").replace('"', '\\"')
             return f'"{escaped}"'
         return safe
     return f'"{str(value)}"'

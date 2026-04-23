@@ -300,9 +300,26 @@ def _render_scalar(value: Any) -> str:
         # the rendered scalar stays intact but no new YAML line
         # breaks past the writer.
         sanitised = value.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
-        # Quote only when necessary to keep the file readable in Obsidian.
-        if any(ch in sanitised for ch in ":#&*!|>%@`") or sanitised.startswith(("-", "?", "[", "{")):
-            escaped = sanitised.replace('"', '\\"')
+        # Conservative: quote on the full YAML 1.1 reserved-indicator set,
+        # leading block indicators, or leading/trailing whitespace. The
+        # unquoted path is reserved for simple alphanumeric-style values
+        # that YAML's plain-scalar scanner parses unambiguously. Mirrors
+        # install_utils._render_scalar — the two must stay aligned.
+        yaml_structural = set(",[]{}:?#&*!|>%@`\"'\\")
+        needs_quote = (
+            any(ch in sanitised for ch in yaml_structural)
+            or (
+                sanitised
+                and (
+                    sanitised[0] == "-"
+                    or sanitised[0].isspace()
+                    or sanitised[-1].isspace()
+                )
+            )
+            or sanitised.startswith(("?", "[", "{"))
+        )
+        if needs_quote:
+            escaped = sanitised.replace("\\", "\\\\").replace('"', '\\"')
             return f'"{escaped}"'
         return sanitised
     # Defensive fallback — stringify and quote.
