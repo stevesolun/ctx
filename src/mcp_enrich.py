@@ -61,6 +61,18 @@ DEFAULT_SLEEP_SECONDS = 0.5  # polite pacing between live fetches
 
 _MCP_ENTITY_SUBDIR = Path("entities") / "mcp-servers"
 
+# Line-break codepoints that Python's str.splitlines() treats as
+# boundaries. The renderer neutralises all five so that a quoted
+# scalar cannot be split into new frontmatter lines by the project's
+# splitlines-based parser (_parse_entity_frontmatter). Strix
+# vuln-0001 HIGH. \x85 is NEL,   is LINE SEPARATOR,   is
+# PARAGRAPH SEPARATOR — written with \u escapes so editor autonorm
+# cannot silently convert them to plain space (U+0020).
+_LINE_SEP_TRANSLATE = str.maketrans({
+    "\r": " ", "\n": " ",
+    "\x85": " ", "\u2028": " ", "\u2029": " ",
+})
+
 
 # ── Graceful exit ────────────────────────────────────────────────────────────
 
@@ -295,17 +307,20 @@ def _render_scalar(value: Any) -> str:
     if isinstance(value, int):
         return str(value)
     if isinstance(value, str):
-        # Neutralise embedded newlines + CRs first — they're the
-        # actual injection vector. Replace with a single space so
-        # the rendered scalar stays intact but no new YAML line
-        # breaks past the writer.
-        sanitised = value.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+        # Neutralise ASCII line breaks (\r\n) AND Unicode line separators
+        # (U+0085 NEL, U+2028 LS, U+2029 PS). Python's str.splitlines()
+        # treats all five as line boundaries, so downstream splitlines-
+        # based parsers (mcp_install._parse_entity_frontmatter,
+        # wiki_utils) would otherwise see a quoted scalar as multiple
+        # frontmatter lines — Strix vuln-0001 HIGH (CWE-116). Mirrors
+        # install_utils._render_scalar so the two stay aligned.
+        sanitised = value.translate(_LINE_SEP_TRANSLATE)
         # Conservative: quote on the full YAML 1.1 reserved-indicator set,
         # leading block indicators, or leading/trailing whitespace. The
         # unquoted path is reserved for simple alphanumeric-style values
         # that YAML's plain-scalar scanner parses unambiguously. Mirrors
         # install_utils._render_scalar — the two must stay aligned.
-        yaml_structural = set(",[]{}:?#&*!|>%@`\"'\\")
+        yaml_structural = set(",[]{}:?#&*!|>%@`=\"'\\")
         needs_quote = (
             any(ch in sanitised for ch in yaml_structural)
             or (

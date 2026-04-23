@@ -213,7 +213,17 @@ def _render_scalar(value: object) -> str:
     if isinstance(value, int):
         return str(value)
     if isinstance(value, str):
-        safe = value.replace("\r", " ").replace("\n", " ")
+        # Neutralise ASCII line breaks (\r\n) AND Unicode line separators
+        # (U+0085 NEL, U+2028 LS, U+2029 PS). Python's str.splitlines()
+        # treats all five as real line boundaries, so downstream parsers
+        # (mcp_install._parse_entity_frontmatter, wiki_utils) would
+        # otherwise see a quoted scalar as multiple frontmatter lines —
+        # Strix vuln-0001 HIGH (CWE-116). The fix closes the injection
+        # at the writer; the parsers stay unchanged.
+        safe = value.translate(str.maketrans({
+    "\r": " ", "\n": " ",
+    "\x85": " ", "\u2028": " ", "\u2029": " ",
+}))
         # Conservative: quote when the string contains ANY YAML-structural
         # / flow-indicator / reserved character, OR leads with a block-
         # indicator char, OR leads/trails whitespace. The unquoted path is
@@ -224,7 +234,7 @@ def _render_scalar(value: object) -> str:
         # flow indicators (,[]{}), block/map indicators (:?-), anchor/
         # alias (&*), tag (!), pipe/fold (|>), comment (#), directive (%),
         # reserved (@`), and both quote marks.
-        yaml_structural = set(",[]{}:?#&*!|>%@`\"'\\")
+        yaml_structural = set(",[]{}:?#&*!|>%@`=\"'\\")
         needs_quote = (
             any(ch in safe for ch in yaml_structural)
             or (safe and (safe[0] == "-" or safe[0].isspace() or safe[-1].isspace()))
