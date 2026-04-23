@@ -4,10 +4,10 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
 [![Tests](https://img.shields.io/badge/Tests-1766_passing-brightgreen.svg)](#)
-[![Graph](https://img.shields.io/badge/Graph-2%2C253_nodes_/_454K_edges-red.svg)](graph/)
+[![Graph](https://img.shields.io/badge/Graph-13%2C041_nodes_/_847K_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
-Watches what you develop, walks a knowledge graph of **1,789 skills and 464 agents** (2,253 nodes, 454K edges, 93 communities), and recommends the right ones on the fly — you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+Watches what you develop, walks a knowledge graph of **1,791 skills and 464 agents** (13,041 nodes, 847K edges, 15 communities), and recommends the right ones on the fly — you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 ## Why it exists
 
@@ -26,7 +26,7 @@ Optional extras: `pip install "claude-ctx[embeddings]"` for the semantic backend
 
 ### Pre-built knowledge graph (optional)
 
-A pre-built knowledge graph of 2,253 nodes and 454K edges ships as a tarball. Extract to get a ready-to-use `~/.claude/skill-wiki/`:
+A pre-built knowledge graph of 13,041 nodes and 847K edges ships as a tarball. Extract to get a ready-to-use `~/.claude/skill-wiki/`:
 
 ```bash
 # after `git clone` — or download graph/wiki-graph.tar.gz from the GitHub release

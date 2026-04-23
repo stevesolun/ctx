@@ -82,9 +82,29 @@ if [[ $NEEDS_WIKI_REBUILD -eq 1 ]]; then
       # .obsidian is intentionally included — graph/README documents
       # that the tarball opens directly as an Obsidian vault. Dropping
       # it silently removes a shipped feature.
+      # Exclusions beyond .trash / __pycache__:
+      #   - raw/: MCP catalog HTML dumps (pulsemcp scraper). 700MB+
+      #     of regenerable content; the ingest cache is pointless
+      #     to ship and pushed the tarball past GitHub's 100MB
+      #     single-file limit.
+      #   - .embedding-cache/: 60MB+ of sentence-transformer vectors
+      #     keyed by content hash. Auto-regenerated on the first
+      #     graphify after unpack.
+      #   - .ingest-checkpoint/ + .enrich-checkpoint/: per-user
+      #     resume state for catalog scrapes. Useless to another
+      #     user and could leak partial enrichment history.
+      #   - graphify-out/graph-delta.json + graph.pickle: the delta
+      #     is a single-run artifact; pickle was removed as an RCE
+      #     vector in 86a1688 but a stale one on disk must not ship.
       ( cd "$WIKI_DIR" && tar --force-local -czf "$TARBALL" \
           --exclude='.trash' \
           --exclude='__pycache__' \
+          --exclude='./raw' \
+          --exclude='./.embedding-cache' \
+          --exclude='./.ingest-checkpoint' \
+          --exclude='./.enrich-checkpoint' \
+          --exclude='./graphify-out/graph-delta.json' \
+          --exclude='./graphify-out/graph.pickle' \
           . ) \
         && { git add "$TARBALL"; log "wiki tarball rebuilt and re-staged ($(du -h "$TARBALL" | cut -f1))"; } \
         || log "tar repack failed — tarball left as-is"
