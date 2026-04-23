@@ -381,6 +381,62 @@ class TestInstallMcp:
         )
         assert r.status == "invalid-cmd"
 
+    # Strix vuln-0002 regression: even when the first token is allowlisted,
+    # code-execution argument forms must be rejected. A tampered frontmatter
+    # install_cmd could otherwise invoke arbitrary interpreter-controlled
+    # code through python, node, or deno.
+    @pytest.mark.parametrize("cmd", [
+        'python -c "import os; os.system(\'whoami\')"',
+        'python3 -c "pwn"',
+        "python -m http.server",
+        'python3 -m http.server',
+        "node -e require('fs').writeFileSync('/tmp/p','owned')",
+        'node --eval "process.exit(1)"',
+        'deno eval "await Deno.writeTextFile(\'/tmp/p\',\'x\')"',
+        'deno repl',
+    ])
+    def test_rejects_code_execution_args_through_allowlisted_interpreter(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+        cmd: str,
+    ) -> None:
+        """Each payload uses an allowlisted exec but a code-execution arg."""
+        _write_entity(wiki_dir, "srv", {"status": "cataloged"})
+        r = mcp_install.install_mcp(
+            "srv", wiki_dir=wiki_dir, command=cmd, auto=True,
+        )
+        assert r.status == "invalid-cmd", (
+            f"{cmd!r} slipped past arg-shape filter (status={r.status})"
+        )
+        assert fake_claude["calls"] == [], "claude CLI was invoked"
+
+    # Non-regression: the supported package-launcher patterns MUST still work.
+    @pytest.mark.parametrize("cmd", [
+        "npx -y @modelcontextprotocol/server-github",
+        "uvx atlassian-mcp",
+        "bunx some-pkg",
+        "node /opt/mcp-server/index.js",         # script path, not -e
+        "python /opt/mcp-server/server.py",      # script path, not -c
+        "python3 ./server.py",
+        "deno run --allow-net /opt/mcp/main.ts", # deno run is the designed path
+    ])
+    def test_accepts_supported_launcher_patterns(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+        cmd: str,
+    ) -> None:
+        _write_entity(wiki_dir, "srv-ok", {"status": "cataloged"})
+        r = mcp_install.install_mcp(
+            "srv-ok", wiki_dir=wiki_dir, command=cmd, auto=True,
+        )
+        assert r.status == "installed", (
+            f"legitimate launcher {cmd!r} falsely rejected (msg={r.message})"
+        )
+
     def test_empty_command_tokens_rejected(
         self, wiki_dir: Path, fake_claude: dict[str, Any], isolated_manifest: Path
     ) -> None:

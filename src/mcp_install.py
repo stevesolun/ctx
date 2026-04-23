@@ -83,6 +83,59 @@ _ALLOWED_CMD_EXECS: frozenset[str] = frozenset({
     "bunx",
 })
 
+# Code-execution argument patterns per-executable. Strix vuln-0002:
+# the executable allowlist alone is not enough — ``python -c "..."``,
+# ``node -e "..."``, and ``deno eval "..."`` all pass the first-token
+# gate and then execute attacker-controlled code via an allowlisted
+# runtime. Block the code-execution arg forms explicitly. Legitimate
+# MCP servers always run as a script (``python server.py``,
+# ``node index.js``, ``deno run main.ts``) or via a package launcher
+# (``npx -y @pkg``, ``uvx pkg``, ``bunx pkg``), so we lose nothing
+# by refusing the eval forms. Package launchers stay unrestricted
+# because their whole job is to run packages.
+_BANNED_INTERPRETER_ARGS: dict[str, frozenset[str]] = {
+    "python":   frozenset({"-c", "-m", "-"}),
+    "python3":  frozenset({"-c", "-m", "-"}),
+    "node":     frozenset({"-e", "--eval", "-p", "--print",
+                           "--input-type", "-"}),
+    "deno":     frozenset({"eval", "repl"}),
+    # npx / uvx / bunx intentionally unrestricted — they ARE the
+    # package-launcher pattern MCP servers are expected to use.
+}
+
+
+def _rejects_banned_args(tokens: list[str]) -> str | None:
+    """Return a human-readable reason string when *tokens* uses a
+    blocked interpreter arg, else None. Only consults the first
+    non-option argument for interpreters that restrict specific
+    sub-commands (deno), and the first N tokens' flag-ish prefixes
+    for the rest."""
+    if not tokens:
+        return None
+    exe = tokens[0]
+    banned = _BANNED_INTERPRETER_ARGS.get(exe)
+    if banned is None:
+        return None
+    # Deno uses subcommands (first non-empty post-exe token) rather than flags.
+    if exe == "deno":
+        for t in tokens[1:]:
+            if not t:
+                continue
+            if t in banned:
+                return f"{exe!r} subcommand {t!r} is not permitted as an install_cmd"
+            break  # only the first subcommand matters
+        return None
+    # python / node: scan for any banned flag anywhere in the args.
+    # Treat "--flag=value" the same as "--flag" when comparing.
+    for t in tokens[1:]:
+        head = t.split("=", 1)[0]
+        if head in banned:
+            return (
+                f"{exe!r} argument {head!r} is a code-execution form "
+                "(use a script path instead, or --cmd-json for bespoke runtimes)"
+            )
+    return None
+
 
 @dataclass(frozen=True)
 class InstallResult:
@@ -335,6 +388,15 @@ def install_mcp(
                     f"{sorted(_ALLOWED_CMD_EXECS)}; use --cmd-json for "
                     "bespoke runtimes."
                 ),
+            )
+        # Strix vuln-0002: allowlisted interpreters (python, node, deno)
+        # can still execute attacker-controlled code via -c / -e / eval
+        # argument forms. Refuse those even when the exe is allowlisted.
+        banned_reason = _rejects_banned_args(tokens)
+        if banned_reason is not None:
+            return InstallResult(
+                slug=slug, status="invalid-cmd", command=effective_cmd,
+                message=banned_reason,
             )
         rc, stdout, stderr = _run_claude_mcp(["add", slug, "--", *tokens])
 
