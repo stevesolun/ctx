@@ -88,10 +88,15 @@ class Config:
 
         # ── Resolver ───────────────────────────────────────────────────────
         self.max_skills: int = resolver.get("max_skills", 15)
+        self.recommendation_top_k: int = int(resolver.get("recommendation_top_k", 5))
         self.intent_boost_per_signal: int = resolver.get("intent_boost_per_signal", 5)
         self.intent_boost_max: int = resolver.get("intent_boost_max", 15)
         self.staleness_penalty: int = resolver.get("staleness_penalty", -8)
         self.meta_skills: list[str] = resolver.get("meta_skills", ["skill-router", "file-reading"])
+        if self.recommendation_top_k < 1:
+            raise ValueError(
+                f"resolver.recommendation_top_k must be >= 1 (got {self.recommendation_top_k})"
+            )
 
         # ── Context Monitor ────────────────────────────────────────────────
         self.unmatched_signal_threshold: int = monitor.get("unmatched_signal_threshold", 3)

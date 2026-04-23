@@ -16,7 +16,9 @@
   },
 
   "resolver": {
+    "_comment": "Resolver + recommendation tuning. max_skills is the HARD ceiling for a single resolve call (anti-budget-blowout). recommendation_top_k is the soft cap shown to users as a bundle — a mixed recommendation spanning skills + agents + MCPs ordered by graph score. Keep top_k small (default 5) so users aren't overwhelmed by options; the full ranked list is still available programmatically. A bundle can be all three types, two, or one — whatever the graph surfaces as most relevant to the current unmatched signals.",
     "max_skills": 15,
+    "recommendation_top_k": 5,
     "intent_boost_per_signal": 5,
     "intent_boost_max": 15,
     "staleness_penalty": -8,

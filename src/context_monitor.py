@@ -189,12 +189,39 @@ def count_recent_unmatched(signals: list[str], loaded_skills: set[str]) -> list[
     return unmatched
 
 
-def graph_suggest(unmatched_tags: list[str]) -> list[dict]:
-    """Use the knowledge graph to suggest skills/agents for unmatched signals.
+def graph_suggest(
+    unmatched_tags: list[str], *, top_k: int | None = None,
+) -> list[dict]:
+    """Walk the knowledge graph for a BUNDLE recommendation across all 3 types.
 
-    Scoring: name match (50pts) > tag overlap (10pts/tag) > degree (tiebreak).
-    This ensures 'fastapi-pro' ranks above 'prompt-optimizer' for a 'fastapi' signal.
+    Returns up to ``top_k`` results ranked by relevance, mixed across
+    skills, agents, and MCP servers — whatever scores highest wins,
+    regardless of entity type. A bundle can therefore be:
+      - all three types (e.g. python-pro skill + code-reviewer agent +
+        anthropic-python-sdk MCP)
+      - two types
+      - just skills, or just agents, or just MCPs
+    It's dynamic, driven by graph affinity to the current signals.
+
+    Scoring: name match (50pts) > tag overlap (10pts/tag) > degree
+    (tiebreak). 'fastapi-pro' ranks above 'prompt-optimizer' for a
+    'fastapi' signal.
+
+    ``top_k`` defaults to ``cfg.recommendation_top_k`` (config default 5)
+    so the user doesn't get overwhelmed. The full ranked list beyond
+    top_k is dropped — we don't store it anywhere.
     """
+    if top_k is None:
+        # Local import: the config module imports os / sys / pathlib
+        # lazily and we want context_monitor to stay importable in a
+        # minimal-env test where the full config chain isn't wired.
+        try:
+            from ctx_config import cfg  # noqa: PLC0415
+            top_k = int(cfg.recommendation_top_k)
+        except Exception:
+            top_k = 5  # matches the config default
+    if top_k < 1:
+        top_k = 1
     graph_path = CLAUDE_DIR / "skill-wiki" / "graphify-out" / "graph.json"
     if not graph_path.exists():
         return []
@@ -229,7 +256,7 @@ def graph_suggest(unmatched_tags: list[str]) -> list[dict]:
                 score += math.log1p(G.degree(nid))
                 scores[nid] = score
 
-        ranked = sorted(scores.items(), key=lambda x: -x[1])[:8]
+        ranked = sorted(scores.items(), key=lambda x: -x[1])[:top_k]
         return [
             {
                 "name": G.nodes[nid].get("label", nid.split(":", 1)[-1]),
@@ -245,9 +272,13 @@ def graph_suggest(unmatched_tags: list[str]) -> list[dict]:
 
 
 def write_pending_skills(unmatched: list[str]) -> None:
-    """Write pending skill suggestions enriched with graph-based discovery."""
-    graph_suggestions = graph_suggest(unmatched)
-    suggestion_names = [s["name"] for s in graph_suggestions[:5]]
+    """Write pending bundle suggestions enriched with graph-based discovery.
+
+    The bundle may span all three entity types (skill/agent/mcp-server)
+    or any subset — the graph score is what ranks, not the type.
+    """
+    graph_suggestions = graph_suggest(unmatched)  # already top-K capped
+    suggestion_names = [s["name"] for s in graph_suggestions]
     suggestion_text = (
         f"Detected {len(unmatched)} stack signals not covered by loaded skills: {', '.join(unmatched)}"
     )

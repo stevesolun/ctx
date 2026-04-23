@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-1766_passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-1785_passing-brightgreen.svg)](#)
 [![Graph](https://img.shields.io/badge/Graph-13%2C041_nodes_/_847K_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
@@ -33,6 +33,8 @@ A pre-built knowledge graph of 13,041 nodes and 847K edges ships as a tarball. E
 mkdir -p ~/.claude/skill-wiki
 tar xzf graph/wiki-graph.tar.gz -C ~/.claude/skill-wiki/
 ```
+
+> **Windows / Git-Bash / MSYS:** pass `--force-local` so `tar` doesn't read the `c:` in the path as a remote host: `tar --force-local xzf graph/wiki-graph.tar.gz -C ~/.claude/skill-wiki/`. Linux/macOS users can ignore.
 
 ## Use
 
