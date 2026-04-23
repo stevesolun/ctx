@@ -93,6 +93,24 @@ class TestIsSafeSourceName:
         """``NUL.json`` on Windows writes to the null device silently."""
         assert not is_safe_source_name(name)
 
+    # Strix vuln-0003: Windows device-name reservation survives a suffix
+    # or trailing dot/space. `con.txt`, `aux.md`, `nul.`, `com1.log`, and
+    # `lpt1.txt` all still resolve to the device endpoint on Windows.
+    @pytest.mark.parametrize("name", [
+        "con.txt", "CON.TXT", "Con.Log",
+        "aux.md", "AUX.json",
+        "prn.bak",
+        "nul.",          # trailing dot — Windows strips it then matches NUL
+        "com1.log", "COM9.cfg",
+        "lpt1.txt", "lpt9.ini",
+    ])
+    def test_rejects_reserved_name_with_suffix_or_trailing_dot(
+        self, name: str,
+    ) -> None:
+        assert not is_safe_source_name(name), (
+            f"{name!r} slipped past the Windows reserved-name normalize"
+        )
+
     def test_rejects_non_string(self):
         assert not is_safe_source_name(None)              # type: ignore[arg-type]
         assert not is_safe_source_name(123)               # type: ignore[arg-type]

@@ -34,14 +34,32 @@ from typing import Final
 # Accept ``[a-z0-9][a-z0-9_.-]{0,127}`` — length, leading char, allowed chars.
 _SOURCE_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_.\-]{0,127}$")
 
-# Windows reserved device names. Case-insensitive match; ``NUL`` resolves
-# to the null device and ``NUL.json`` would silently succeed as a write
-# target on Windows.
+# Windows reserved device names. On Windows, these resolve to device
+# endpoints EVEN when followed by an extension or a trailing dot/space:
+# ``NUL.json``, ``con.txt``, ``aux.md``, ``nul.``, ``com1.log``,
+# ``lpt1.txt`` all still match the device. Reserved-name check must
+# normalize the candidate before comparing — strip trailing dots/
+# spaces, take the pre-dot basename, uppercase. Strix vuln-0003.
 _WINDOWS_RESERVED: Final[frozenset[str]] = frozenset({
     "CON", "PRN", "AUX", "NUL",
     "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
     "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 })
+
+
+def _is_windows_reserved(name: str) -> bool:
+    """Return True when *name* matches a Windows device name under the
+    OS's aliasing rules (suffix / trailing-dot forms included)."""
+    if not name:
+        return False
+    # Windows strips trailing dots and spaces before filename resolution.
+    stripped = name.rstrip(". ")
+    if not stripped:
+        return False
+    # Device name matches the stem (portion before the first dot),
+    # case-insensitively.
+    stem = stripped.split(".", 1)[0]
+    return stem.upper() in _WINDOWS_RESERVED
 
 
 # ── Source-name validator ────────────────────────────────────────────────────
@@ -66,7 +84,7 @@ def is_safe_source_name(name: str) -> bool:
         return False
     if not _SOURCE_NAME_RE.match(name):
         return False
-    if name.upper() in _WINDOWS_RESERVED:
+    if _is_windows_reserved(name):
         return False
     return True
 
