@@ -32,8 +32,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[dev]"
 
-      - name: Run tests
-        run: pytest -q
+      - name: Run tests with coverage gate
+        # --cov-fail-under=40 is the FLOOR, not the goal. QA-expert
+        # flagged zero coverage on install CLIs, install_utils,
+        # semantic_edges, and others; the immediate ask is that a PR
+        # which DROPS coverage below the current baseline fails CI.
+        # Bump this number as the coverage sprint ships — never
+        # lower it.
+        run: pytest -q --cov=src --cov-report=term-missing --cov-fail-under=40
 
       - name: Upload coverage artifact
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
@@ -42,3 +48,51 @@ jobs:
           name: coverage
           path: .coverage
           retention-days: 7
+
+  no-test-no-merge:
+    name: "Every src/*.py change must touch a src/tests/*.py"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce test-coverage-per-PR policy
+        # Policy: any source change under src/ that isn't itself a test
+        # must be accompanied by at least one test file change in the
+        # same PR. Exemptions:
+        #   - Pure docs / comment changes (matched by a trivial heuristic)
+        #   - Config JSON (src/config.json) — schema changes get tests
+        #     for the accessor, not the JSON itself.
+        #   - Changes ONLY inside __pycache__, .pyc files, etc.
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD" -- 'src/**/*.py' 'src/**/*.json' || true)
+          SRC=$(echo "$CHANGED" | grep -E '^src/.*\.py$' | grep -v '^src/tests/' || true)
+          TEST=$(echo "$CHANGED" | grep -E '^src/tests/.*\.py$' || true)
+
+          if [ -z "$SRC" ]; then
+            echo "No src/*.py changes — policy not applicable."
+            exit 0
+          fi
+          if [ -z "$TEST" ]; then
+            echo "::error::Policy violation — src/*.py changed but no src/tests/*.py touched in this PR."
+            echo "Source files changed without accompanying test:"
+            echo "$SRC"
+            echo ""
+            echo "Fix: add or update tests in src/tests/ that cover the change."
+            echo "If the change is genuinely untestable (e.g. a release-version"
+            echo "bump), label the PR 'no-tests-needed' and leave a comment."
+            exit 1
+          fi
+          echo "Policy satisfied — src changes accompanied by test changes."
+          echo ""
+          echo "Source files:"
+          echo "$SRC"
+          echo ""
+          echo "Test files:"
+          echo "$TEST"

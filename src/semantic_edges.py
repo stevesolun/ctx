@@ -552,8 +552,23 @@ def compute_semantic_edges(
             raise ValueError(f"duplicate node_id in semantic edges input: {n.node_id!r}")
         seen.add(n.node_id)
 
-    embedder = get_embedder(backend, model=model)
-    model_id = getattr(embedder, "name", f"{backend}:{model or 'default'}")
+    try:
+        embedder = get_embedder(backend, model=model)
+        model_id = getattr(embedder, "name", f"{backend}:{model or 'default'}")
+    except (RuntimeError, ImportError) as exc:
+        # Graceful fallback: if the embedding backend can't load
+        # (sentence-transformers not installed, ollama daemon down,
+        # etc.) we return no semantic pairs rather than crashing the
+        # entire graph build. Consumers fall through to tag + token
+        # edges only — reduced signal, same operational graph.
+        # Users who want semantic must install the embeddings extra:
+        #   pip install "claude-ctx[embeddings]"
+        _logger.warning(
+            "semantic_edges: embedding backend unavailable (%s) — "
+            "skipping semantic pairs. Install the 'embeddings' extra "
+            "to enable semantic edges.", exc,
+        )
+        return {}
 
     cache = _load_cache(cache_dir, model_id)
 
@@ -610,7 +625,21 @@ def compute_semantic_edges(
             "semantic_edges: embedding %d uncached texts in batches of %d",
             len(missing), batch_size,
         )
-        new_vecs = _embed_missing(missing, embedder, batch_size)
+        try:
+            new_vecs = _embed_missing(missing, embedder, batch_size)
+        except (RuntimeError, ImportError) as exc:
+            # The embed call lazily loads the backend model
+            # (sentence-transformers, torch). Missing dep surfaces here
+            # as RuntimeError; ImportError catches the unlikely case of
+            # a bare import sneaking past the lazy guard. Either way,
+            # fall back to "no semantic pairs" so build_graph still
+            # produces a functional tag+token graph.
+            _logger.warning(
+                "semantic_edges: embedding failed (%s) — skipping semantic "
+                "pairs for this run. Install the 'embeddings' extra: "
+                "pip install \"claude-ctx[embeddings]\"", exc,
+            )
+            return {}
         if new_vecs.size:
             dim = int(new_vecs.shape[1])
             for (row_i, _nid, text), vec in zip(missing, new_vecs, strict=True):

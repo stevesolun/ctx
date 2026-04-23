@@ -31,19 +31,22 @@ import wiki_graphify as wg  # noqa: E402
 def test_dense_tag_threshold_is_at_least_500() -> None:
     """The edge-density regression from v0.5.x happened because this was 20.
 
-    Any value below 500 drops semantically-useful tags on a wiki of
-    ~2,000 entities. Raising this back down without intent is the bug
-    we're preventing.
+    Policy moved from a module-level ``DENSE_TAG_THRESHOLD`` constant
+    into ``cfg.graph_dense_tag_threshold`` during the Phase-7.1d config
+    split (commit 77b41da). The regression this test prevents is
+    unchanged: any value below 500 drops semantically-useful tags on
+    a 13K-entity wiki and collapses the graph. We now assert the
+    live config value directly — accidental tweaks in
+    ``src/config.json`` fail here.
     """
-    source = Path(wg.__file__).read_text(encoding="utf-8")
-    match = re.search(r"DENSE_TAG_THRESHOLD\s*=\s*(\d+)", source)
-    assert match is not None, "DENSE_TAG_THRESHOLD constant not found"
-    value = int(match.group(1))
+    from ctx_config import cfg  # noqa: PLC0415
+    value = cfg.graph_dense_tag_threshold
     assert value >= 500, (
-        f"DENSE_TAG_THRESHOLD={value} will silently drop dense tags and "
-        f"collapse the graph. Minimum sensible value is 500 (matches the "
-        f"canonical 642K-edge graph shipped in v0.6.0). Raising this "
-        f"back down needs a deliberate justification."
+        f"graph.tag_edges.dense_tag_threshold={value} will silently "
+        f"drop dense tags and collapse the graph. Minimum sensible "
+        f"value is 500 (matches the canonical 642K-edge graph shipped "
+        f"in v0.6.0). Raising this back down needs a deliberate "
+        f"justification."
     )
 
 
@@ -51,19 +54,34 @@ def test_slug_token_pseudo_tags_are_indexed() -> None:
     """Slug tokens like 'fastapi' from slug='fastapi-pro' must contribute
     edges. Without these pseudo-tags, the graph misses the 'same-topic'
     connectivity that makes it useful for recommendations.
+
+    Before 256bc6a, slug tokens lived in the same tag_index under an
+    ``_t:`` prefix. After 256bc6a, slug tokens live in a separate
+    ``token_index`` blended with a 0.15 weight in the edge formula.
+    The behaviour (shared slug tokens produce edges) is unchanged —
+    this test now pins the PUBLIC SURFACE rather than the internal
+    prefix trick.
     """
-    source = Path(wg.__file__).read_text(encoding="utf-8")
-    # The implementation uses an "_t:" prefix on slug-token pseudo-tags.
-    assert "_t:" in source, (
-        "slug-token pseudo-tag indexing removed — graph connectivity "
-        "will regress for entities with sparse frontmatter tags"
+    # The helper that extracts slug tokens must still be exported
+    # from wiki_graphify — it's the one piece of contract that
+    # downstream consumers (resolve_graph debugging, visualize)
+    # might import directly.
+    assert hasattr(wg, "_slug_tokens"), (
+        "_slug_tokens helper removed — slug-token indexing has been "
+        "torn out and graph connectivity will regress for entities "
+        "with sparse frontmatter tags"
     )
-    # Stop-word filter to avoid "skill" / "agent" / "pro" etc. generating
-    # noise edges must remain.
-    assert "SLUG_STOP" in source, (
+    # Stop-word filter must remain — without it, tokens like 'pro'
+    # and 'skill' would over-connect the graph.
+    assert hasattr(wg, "SLUG_STOP"), (
         "SLUG_STOP filter removed — slug tokens like 'pro' and 'skill' "
         "will over-connect the graph"
     )
+    # Sanity behaviour check: "fastapi-pro" yields "fastapi" (not the
+    # stopped "pro"), and at least one real token.
+    toks = wg._slug_tokens("fastapi-pro")
+    assert "fastapi" in toks
+    assert "pro" not in toks  # filtered by SLUG_STOP
 
 
 def test_build_graph_produces_edges_on_small_fixture(tmp_path, monkeypatch) -> None:
