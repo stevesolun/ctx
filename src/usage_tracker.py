@@ -44,7 +44,29 @@ except ImportError:
 ENTITIES_DIR = WIKI_DIR / "entities" / "skills"
 LOG_PATH = WIKI_DIR / "log.md"
 
-TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+def _today() -> str:
+    """Today's date in UTC, computed fresh per call.
+
+    Prior impl used a module-level ``TODAY`` constant computed at import
+    time. If the process was long-running (test runner, persistent
+    daemon, hook server) and crossed midnight, every downstream date
+    comparison — ``entry.get("date") == TODAY``, ``last_used: TODAY``,
+    log headers — kept using yesterday's date. That made staleness
+    decisions (session_count >= STALE_THRESHOLD AND use_count == 0)
+    fire on the wrong calendar day. Code-reviewer HIGH, fixed here.
+
+    Note: preserved ``TODAY`` as a module-level alias for backward
+    compatibility with any external callers (and one existing test
+    that imports it), but every in-module use goes through the
+    function so it evaluates at call-time.
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+# Backward-compat alias for external importers. Internal uses call _today().
+# This value IS frozen at import time but downstream code no longer relies
+# on it — all date comparisons below go through _today().
+TODAY = _today()
 
 # Minimal signal→skill correlation (mirrors STACK_SKILL_MAP logic)
 SIGNAL_SKILL_MAP: dict[str, list[str]] = {
@@ -84,7 +106,7 @@ def read_today_signals() -> dict[str, int]:
             for line in f:
                 try:
                     entry = json.loads(line.strip())
-                    if entry.get("date", "") == TODAY:
+                    if entry.get("date", "") == _today():
                         for sig in entry.get("signals", []):
                             signal_counts[sig] = signal_counts.get(sig, 0) + 1
                 except json.JSONDecodeError:
@@ -96,10 +118,24 @@ def read_today_signals() -> dict[str, int]:
 
 
 def signals_to_skills(signal_counts: dict[str, int]) -> set[str]:
-    """Map signal names to skill names via SIGNAL_SKILL_MAP."""
+    """Map signal names to skill names via SIGNAL_SKILL_MAP.
+
+    Unmapped signals return NO skills. Prior impl fell through to
+    ``[signal]`` — the raw signal string — which then became a skill
+    slug passed into ``update_skill_page``. Effect: a signal like
+    ``javascript`` (no entry in SIGNAL_SKILL_MAP) would poke a
+    nonexistent ``javascript`` wiki page, or worse, corrupt the
+    ``use_count`` on an unrelated wiki page whose slug happened to
+    match. Code-reviewer HIGH, fixed by empty-list default.
+
+    If a signal needs to map to itself (common for stack names that
+    ARE skill names — e.g. ``docker`` → ``[docker]``), add it
+    explicitly to SIGNAL_SKILL_MAP. The explicit map is the single
+    source of truth; silent passthrough hides the mapping gap.
+    """
     skills: set[str] = set()
     for signal in signal_counts:
-        for skill in SIGNAL_SKILL_MAP.get(signal, [signal]):
+        for skill in SIGNAL_SKILL_MAP.get(signal, []):
             skills.add(skill)
     return skills
 
@@ -227,8 +263,9 @@ def update_skill_page(
         if used:
             use_count = int(str(meta.get("use_count", "0"))) + 1
             content = _set_frontmatter_field(content, "use_count", str(use_count))
-            content = _set_frontmatter_field(content, "last_used", TODAY)
-            content = _set_frontmatter_field(content, "updated", TODAY)
+            today = _today()
+            content = _set_frontmatter_field(content, "last_used", today)
+            content = _set_frontmatter_field(content, "updated", today)
             # Reset stale status if skill was used
             content = _set_frontmatter_field(content, "status", "installed")
         else:
@@ -258,7 +295,7 @@ def append_wiki_log(loaded_count: int, used_skills: set[str], stale_count: int,
         return
 
     entry = (
-        f"\n## [{TODAY}] session-end | usage-sync\n"
+        f"\n## [{_today()}] session-end | usage-sync\n"
         f"- Skills loaded: {loaded_count}\n"
         f"- Skills actively used (signals): {len(used_skills)}\n"
         f"- Skills marked stale this session: {stale_count}\n"

@@ -113,9 +113,24 @@ class TestSignalsToSkills:
         assert "react" in skills
         assert "frontend-design" in skills
 
-    def test_unknown_signal_passes_through(self):
+    def test_unknown_signal_returns_no_skills(self):
+        """An unmapped signal must NOT leak its raw name as a skill.
+
+        Prior impl had ``SIGNAL_SKILL_MAP.get(signal, [signal])`` — the
+        fallback put the raw signal name into the returned set, which
+        update_skill_page then treated as a skill slug. The downstream
+        effect was arbitrary corruption of use_count on wiki pages whose
+        slug happened to match a signal name (code-reviewer HIGH).
+        """
         skills = signals_to_skills({"totally-unknown": 1})
-        assert "totally-unknown" in skills
+        assert "totally-unknown" not in skills
+        assert skills == set()
+
+    def test_unknown_signal_does_not_poison_mapped_result(self):
+        """Mixed known + unknown input returns only the known mapping."""
+        skills = signals_to_skills({"docker": 1, "some-unmapped-stack": 5})
+        assert "docker" in skills
+        assert "some-unmapped-stack" not in skills
 
     def test_empty_input(self):
         assert signals_to_skills({}) == set()
@@ -124,6 +139,19 @@ class TestSignalsToSkills:
         skills = signals_to_skills({"docker": 1, "pytest": 2})
         assert "docker" in skills
         assert "pytest" in skills
+
+    def test_empty_mapping_value_returns_nothing(self):
+        """Defensive: if a signal maps to an empty list in the config
+        (a maintenance state between adding a signal and picking its
+        skills), we return nothing — not the raw signal."""
+        import usage_tracker as _ut_mod
+        original = _ut_mod.SIGNAL_SKILL_MAP.copy()
+        try:
+            _ut_mod.SIGNAL_SKILL_MAP["tmp-signal"] = []
+            assert "tmp-signal" not in signals_to_skills({"tmp-signal": 1})
+        finally:
+            _ut_mod.SIGNAL_SKILL_MAP.clear()
+            _ut_mod.SIGNAL_SKILL_MAP.update(original)
 
 
 # ---------------------------------------------------------------------------
@@ -350,3 +378,96 @@ class TestMain:
         with pytest.raises(SystemExit) as exc:
             _ut.main()
         assert exc.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# TODAY freshness regression (code-reviewer HIGH)
+# ---------------------------------------------------------------------------
+
+class TestTodayIsFresh:
+    """``_today()`` computes the date at call-time, not at import.
+
+    Prior impl cached ``TODAY = datetime.now(...)`` at module import.
+    A long-running process that crossed midnight kept using yesterday's
+    date — ``read_today_signals`` would silently drop new-day entries,
+    ``update_skill_page`` would stamp yesterday's date as ``last_used``,
+    and ``append_wiki_log`` would file today's events under yesterday's
+    header.
+    """
+
+    def test_today_follows_wall_clock(self, monkeypatch):
+        """Changing the system clock changes _today() without module reload."""
+        from datetime import datetime, timezone
+
+        import usage_tracker as _ut_mod
+
+        class _FakeDT:
+            """Minimal datetime stand-in returning a fixed UTC date."""
+            @classmethod
+            def now(cls, tz=None):
+                # Return 2027-06-15 UTC regardless of the real clock.
+                return datetime(2027, 6, 15, 12, 0, 0, tzinfo=tz or timezone.utc)
+
+        monkeypatch.setattr(_ut_mod, "datetime", _FakeDT)
+        assert _ut_mod._today() == "2027-06-15"
+
+    def test_today_changes_when_clock_changes_between_calls(self, monkeypatch):
+        """Simulates a midnight crossing: two calls on different calendar
+        days must return different strings. Pre-fix, both would have
+        returned the module-import date."""
+        from datetime import datetime, timezone
+
+        import usage_tracker as _ut_mod
+
+        state = {"day": 1}
+
+        class _DTOnTheRun:
+            @classmethod
+            def now(cls, tz=None):
+                # Alternate between two days on each call.
+                if state["day"] == 1:
+                    return datetime(2027, 6, 15, 23, 59, 59, tzinfo=tz or timezone.utc)
+                return datetime(2027, 6, 16, 0, 0, 1, tzinfo=tz or timezone.utc)
+
+        monkeypatch.setattr(_ut_mod, "datetime", _DTOnTheRun)
+
+        before = _ut_mod._today()
+        state["day"] = 2
+        after = _ut_mod._today()
+
+        assert before == "2027-06-15"
+        assert after == "2027-06-16"
+        assert before != after
+
+    def test_read_today_signals_uses_fresh_date(
+        self, tmp_path, monkeypatch,
+    ):
+        """The log reader must filter on the CURRENT date, not the
+        frozen-at-import one. If a caller writes an entry timestamped
+        with TODAY and reads it back after a midnight crossing, the
+        reader should skip it — verifying the comparison is dynamic."""
+        from datetime import datetime, timezone
+
+        import usage_tracker as _ut_mod
+
+        log = tmp_path / "intent.jsonl"
+        # Two entries: one "today" (day 1), one "tomorrow" (day 2).
+        log.write_text(
+            json.dumps({"date": "2027-06-15", "signals": ["docker"]}) + "\n" +
+            json.dumps({"date": "2027-06-16", "signals": ["kubernetes"]}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(_ut_mod, "INTENT_LOG", log)
+
+        class _DTDay2:
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2027, 6, 16, 10, 0, 0, tzinfo=tz or timezone.utc)
+
+        monkeypatch.setattr(_ut_mod, "datetime", _DTDay2)
+        signals = _ut_mod.read_today_signals()
+
+        # On day 2, only the kubernetes entry matches today — docker
+        # (day 1) must not leak in.
+        assert "kubernetes" in signals
+        assert "docker" not in signals
