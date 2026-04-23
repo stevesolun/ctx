@@ -53,6 +53,7 @@ ctx-wiki-graphify = "wiki_graphify:main"
 dev = [
     "pytest>=8",
     "pytest-cov>=5",
+    "hypothesis>=6",
     "mypy>=1.8",
     "ruff>=0.4",
 ]

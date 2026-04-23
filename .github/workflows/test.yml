@@ -49,6 +49,39 @@ jobs:
           path: .coverage
           retention-days: 7
 
+  e2e-canary:
+    name: "A-Z alive-loop E2E canary"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+
+      - name: Run E2E + fuzz canary suite
+        # These two files pin the critical-path invariants:
+        #   test_alive_loop_e2e.py: A-Z user journey (signals → bundle →
+        #     install → unload → purge) — any handoff regression trips it.
+        #   test_fuzz_yaml_rendering.py: property-based YAML injection
+        #     coverage on install/enrich render_scalar.
+        # They live in the main matrix job already, but pulling them
+        # forward as a separate fail-fast canary surfaces the regression
+        # in seconds instead of waiting for the full 2500-test run.
+        run: |
+          pytest -q --no-cov \
+            src/tests/test_alive_loop_e2e.py \
+            src/tests/test_fuzz_yaml_rendering.py
+
   no-test-no-merge:
     name: "Every src/*.py change must touch a src/tests/*.py"
     runs-on: ubuntu-latest
