@@ -547,3 +547,51 @@ class TestCLI:
         parts = first_line.split("\t")
         assert parts[0] == "github"
         assert parts[1] in ("A", "B", "C", "D", "F")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# default_sidecar_dir honors Path.home monkeypatching (pinned 2026-04-23)
+# ─────────────────────────────────────────────────────────────────────
+#
+# Pre-fix, default_sidecar_dir used os.path.expanduser on the
+# config-derived path, which bypasses any Path.home() monkeypatch
+# and writes to the real ~/.claude/. Tests monkeypatching Path.home
+# (the existing pattern in this file) silently escaped their
+# sandbox. The fix swaps the ``~`` -> str(Path.home()) manually
+# instead of deferring to os.path.expanduser, so monkeypatched
+# home propagates through the configured-path branch too.
+
+
+class TestDefaultSidecarDirHonorsPathHome:
+
+    def test_configured_path_expands_via_path_home(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        fake_home = tmp_path / "fake-home"
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
+        # default_sidecar_dir should now point under fake_home, not
+        # the real user's home dir.
+        result = mq.default_sidecar_dir()
+        assert str(result).startswith(str(fake_home)), (
+            f"default_sidecar_dir ignored Path.home() monkeypatch: "
+            f"{result} not under {fake_home}"
+        )
+
+    def test_unconfigured_path_falls_back_to_path_home(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """When config has no mcp_quality.paths.sidecar_dir, the
+        fallback path is Path.home()/.claude/skill-quality/mcp —
+        honors the monkeypatch via the fallback branch."""
+        import ctx_config
+        # Strip the configured sidecar_dir so the fallback fires.
+        raw = ctx_config._load_raw()
+        if "mcp_quality" in raw and isinstance(raw["mcp_quality"], dict):
+            raw["mcp_quality"].pop("paths", None)
+        monkeypatch.setattr(ctx_config, "cfg", ctx_config.Config(raw))
+
+        fake_home = tmp_path / "fallback-home"
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
+        result = mq.default_sidecar_dir()
+        assert str(result).startswith(str(fake_home))
+        assert ".claude" in str(result)

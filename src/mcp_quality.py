@@ -501,12 +501,18 @@ def extract_signals_for_slug(
 def default_sidecar_dir() -> Path:
     """Return the directory where per-slug MCP quality JSONs land.
 
-    Checks ``mcp_quality.paths.sidecar_dir`` in ``ctx_config.cfg`` first;
-    falls back to ``Path.home() / .claude / skill-quality / mcp``.
+    Resolution order:
+      1. ``mcp_quality.paths.sidecar_dir`` from ``ctx_config.cfg``
+         — the configured path. Writing ``~`` at the start is expanded
+         via ``Path.home()`` so tests that monkeypatch ``Path.home``
+         redirect writes into tmp_path. Without this,
+         ``os.path.expanduser`` would consult ``$HOME`` / ``%USERPROFILE%``
+         directly and bypass the monkeypatch.
+      2. Fallback: ``Path.home() / .claude / skill-quality / mcp``.
 
-    Uses ``Path.home()`` rather than ``os.path.expanduser("~")`` so
-    tests can monkeypatch ``Path.home`` to redirect writes into a
-    tmp_path without setting environment variables.
+    The configured path points at the parent ``skill-quality/`` dir;
+    we append ``mcp/`` to keep MCP scores in their own subtree
+    alongside skill+agent scores.
     """
     try:
         from ctx_config import cfg  # local import — avoid cost on test import
@@ -514,7 +520,12 @@ def default_sidecar_dir() -> Path:
         paths = raw.get("paths", {}) if isinstance(raw, dict) else {}
         configured = paths.get("sidecar_dir") if isinstance(paths, dict) else None
         if isinstance(configured, str) and configured.strip():
-            return Path(os.path.expanduser(configured))
+            # Honor Path.home() monkeypatching for tests. os.path.
+            # expanduser would shortcut through the env and miss it.
+            expanded = configured
+            if expanded.startswith("~"):
+                expanded = str(Path.home()) + expanded[1:]
+            return Path(expanded)
     except Exception:  # noqa: BLE001 — config unavailable in some test contexts
         pass
     return Path.home() / ".claude" / "skill-quality" / "mcp"
