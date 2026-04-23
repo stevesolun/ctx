@@ -45,19 +45,23 @@ def _read_graph_from_tarball() -> dict[str, int | None] | None:
         return None
     stats: dict[str, int | None] = {
         "nodes": None, "edges": None,
-        "skills": None, "agents": None, "communities": None,
+        "skills": None, "agents": None, "mcps": None, "communities": None,
     }
     try:
         with tarfile.open(tarball, "r:gz") as tf:
             members = tf.getnames()
             # Count entity pages directly from the archive index.
-            s = a = 0
+            # MCP entities are sharded by first char (entities/mcp-servers/<shard>/)
+            # so we match the whole subtree, not just one level.
+            s = a = m = 0
             for name in members:
                 if "entities/skills/" in name and name.endswith(".md"):
                     s += 1
                 elif "entities/agents/" in name and name.endswith(".md"):
                     a += 1
-            stats["skills"], stats["agents"] = s, a
+                elif "entities/mcp-servers/" in name and name.endswith(".md"):
+                    m += 1
+            stats["skills"], stats["agents"], stats["mcps"] = s, a, m
             # Graph + communities are smaller files — extract to read.
             for path in ("graphify-out/graph.json", "graphify-out/communities.json"):
                 member = next((m for m in members if m.rstrip("/").endswith(path)), None)
@@ -116,6 +120,7 @@ def read_graph_stats() -> dict:
         "edges": None,
         "skills": None,
         "agents": None,
+        "mcps": None,
         "communities": None,
     }
 
@@ -131,6 +136,7 @@ def read_graph_stats() -> dict:
             type_counts[t] = type_counts.get(t, 0) + 1
         stats["skills"] = type_counts.get("skill")
         stats["agents"] = type_counts.get("agent")
+        stats["mcps"] = type_counts.get("mcp-server")
 
     if communities_repo.exists():
         c = json.loads(communities_repo.read_text(encoding="utf-8"))
@@ -233,6 +239,21 @@ def build_replacements(stats: dict, tests: int | None, converted: int | None) ->
     if stats["skills"]:
         s = stats["skills"]
         reps.append((re.compile(r"badge/Skills-[0-9%,]+-"), f"badge/Skills-{s:,}-".replace(",", "%2C")))
+        # 3-type pattern: "1,789 skills, 464 agents, and 10,786 MCP servers"
+        # Order matters — this regex is more specific than the 2-type one
+        # below, so match it first. Handles the MCP-aware tagline that
+        # lands in the README after the Phase 7 MCP-first rewrite.
+        if stats["agents"] and stats["mcps"]:
+            reps.append((
+                re.compile(
+                    r"\*\*[\d,]+\s+skills,\s+[\d,]+\s+agents,\s+and\s+"
+                    r"[\d,]+\s+MCP\s+servers\*\*"
+                ),
+                f"**{s:,} skills, {stats['agents']:,} agents, "
+                f"and {stats['mcps']:,} MCP servers**",
+            ))
+        # 2-type fallback pattern for legacy phrasing. Only fires on
+        # READMEs that haven't adopted the 3-type wording yet.
         reps.append((re.compile(r"\*\*[\d,]+\s+skills\s+and\s+[\d,]+\s+agents\*\*"),
                      f"**{s:,} skills and {stats['agents']:,} agents**"))
         reps.append((re.compile(r"#\s*([\d,]+)\s+entity pages\s*\(one per skill\)"),
@@ -243,6 +264,11 @@ def build_replacements(stats: dict, tests: int | None, converted: int | None) ->
         reps.append((re.compile(r"badge/Agents-[0-9,]+-"), f"badge/Agents-{a}-"))
         reps.append((re.compile(r"#\s*([\d,]+)\s+entity pages\s*\(one per agent\)"),
                      f"# {a} entity pages (one per agent)"))
+
+    if stats["mcps"]:
+        m = stats["mcps"]
+        reps.append((re.compile(r"badge/MCPs-[0-9,%]+-"),
+                     f"badge/MCPs-{m:,}-".replace(",", "%2C")))
 
     if stats["nodes"] and stats["edges"]:
         n = stats["nodes"]

@@ -1,4 +1,4 @@
-# ctx — Skill & Agent Recommendation for Claude Code
+# ctx — Skill, Agent & MCP Recommendation for Claude Code
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
@@ -7,11 +7,11 @@
 [![Graph](https://img.shields.io/badge/Graph-13%2C041_nodes_/_847K_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
-Watches what you develop, walks a knowledge graph of **1,791 skills and 464 agents** (13,041 nodes, 847K edges, 15 communities), and recommends the right ones on the fly — you decide what to load and unload. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+Watches what you develop, walks a knowledge graph of **1,791 skills, 464 agents, and 10,786 MCP servers** (13,041 nodes, 847K edges — blended semantic + tag + slug-token), and recommends the right bundle on the fly. You approve, it installs; you stop using, it unloads. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 ## Why it exists
 
-- **Discovery** — with 1,700+ skills and 400+ agents, you can't possibly know which exist or which apply to your current repo.
+- **Discovery** — with 1,700+ skills, 400+ agents, and 10K+ MCPs, you can't possibly know which exist or which apply to your current work.
 - **Context budget** — loading everything wastes tokens and degrades quality. You need the right 10–15 per session.
 - **Skill rot** — skills you installed months ago and never used are cluttering context. Stale ones should be flagged automatically.
 
