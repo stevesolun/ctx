@@ -436,10 +436,25 @@ def _graph_stats() -> dict:
 
 
 def _wiki_stats() -> dict:
+    """Entity counts across all three types.
+
+    MCPs are sharded by first-char under ``entities/mcp-servers/<shard>/``
+    so we recurse rather than the flat glob used for skills + agents.
+    Home page consumes ``total`` for the headline number and the
+    individual counts for the "N skills . M agents . K MCPs" detail
+    line.
+    """
     base = _wiki_dir() / "entities"
     skills = len(list((base / "skills").glob("*.md"))) if (base / "skills").is_dir() else 0
     agents = len(list((base / "agents").glob("*.md"))) if (base / "agents").is_dir() else 0
-    return {"skills": skills, "agents": agents, "total": skills + agents}
+    mcp_dir = base / "mcp-servers"
+    mcps = len(list(mcp_dir.rglob("*.md"))) if mcp_dir.is_dir() else 0
+    return {
+        "skills": skills,
+        "agents": agents,
+        "mcps": mcps,
+        "total": skills + agents + mcps,
+    }
 
 
 def _render_home() -> str:
@@ -487,9 +502,10 @@ def _render_home() -> str:
         f"<div style='font-size:1.6rem; font-weight:600;'>{sum(grades.values())}</div>"
         f"<a href='/skills'>browse →</a></div>"
         + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Wiki entities</div>"
-        f"<div style='font-size:1.6rem; font-weight:600;'>{wstats['total']}</div>"
+        f"<div style='font-size:1.6rem; font-weight:600;'>{wstats['total']:,}</div>"
         f"<span class='muted' style='font-size:0.75rem;'>"
-        f"{wstats['skills']} skills · {wstats['agents']} agents</span></div>"
+        f"{wstats['skills']:,} skills · {wstats['agents']:,} agents · "
+        f"{wstats['mcps']:,} MCPs</span></div>"
         + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Knowledge graph</div>"
         f"<div style='font-size:1.6rem; font-weight:600;'>{gstats['nodes']}</div>"
         f"<span class='muted' style='font-size:0.75rem;'>{gstats['edges']:,} edges</span>"
@@ -798,19 +814,53 @@ def _render_graph(focus: str | None = None) -> str:
     )
     body = (
         "<h1>Knowledge graph</h1>"
-        f"<p class='muted'>Enter a skill or agent slug to explore its "
-        f"1-hop neighborhood. Edge weight ≈ shared tag count. {stats_html}</p>"
+        f"<p class='muted'>Enter an entity slug to explore its 1-hop "
+        f"neighborhood. Edges blend semantic + tag + slug-token "
+        f"signals (weight = final_weight). {stats_html}</p>"
         + seed_html
-        + "<div class='card' style='padding:0.6rem 0.8rem;'>"
-        "<input type='text' id='focus' placeholder='skill slug (e.g. python-patterns)' "
-        "value='" + html.escape(focus_slug) + "' "
-        "style='padding:0.35rem 0.6rem; width:22rem; border:1px solid #ccc; border-radius:4px;'>"
-        "<button id='go' style='margin-left:0.5rem;'>explore</button>"
-        "<label style='margin-left:1rem;'><input type='checkbox' id='agents-only'> agents only</label>"
-        "<span id='msg' class='muted' style='margin-left:0.75rem;'></span>"
+        # Two-column layout — filter sidebar on the left (mirrors /wiki),
+        # cytoscape canvas on the right. Client-side JS hides nodes by
+        # type + tag without hitting the server so a user can carve out
+        # a subgraph without rebuilding anything.
+        + "<div style='display:grid; grid-template-columns:240px 1fr; "
+          "gap:1rem; align-items:start; margin-top:1rem;'>"
+        # Left sidebar
+        "<aside style='position:sticky; top:1rem;'>"
+        "<div class='card'><strong>Focus</strong>"
+        "<input type='text' id='focus' "
+        "placeholder='skill / agent / mcp slug' "
+        f"value='{html.escape(focus_slug)}' "
+        "style='width:100%; margin-top:0.4rem; padding:0.35rem 0.5rem; "
+        "border:1px solid #ccc; border-radius:4px;'>"
+        "<button id='go' style='margin-top:0.4rem; width:100%;'>"
+        "explore</button></div>"
+        "<div class='card'><strong>Type</strong>"
+        "<label style='display:flex; justify-content:space-between; padding:0.25rem 0;'>"
+        "<span><input type='checkbox' class='graph-type-filter' value='skill' checked> skill</span>"
+        "<span class='muted' id='graph-count-skill' style='font-size:0.78rem;'>—</span></label>"
+        "<label style='display:flex; justify-content:space-between; padding:0.25rem 0;'>"
+        "<span><input type='checkbox' class='graph-type-filter' value='agent' checked> agent</span>"
+        "<span class='muted' id='graph-count-agent' style='font-size:0.78rem;'>—</span></label>"
+        "<label style='display:flex; justify-content:space-between; padding:0.25rem 0;'>"
+        "<span><input type='checkbox' class='graph-type-filter' value='mcp-server' checked> mcp-server</span>"
+        "<span class='muted' id='graph-count-mcp-server' style='font-size:0.78rem;'>—</span></label>"
         "</div>"
-        "<div id='cy' style='width:100%; height:65vh; border:1px solid #ddd; "
-        "border-radius:6px; margin-top:1rem; background:#fafafa;'></div>"
+        "<div class='card'><strong>Tag filter</strong>"
+        "<input type='text' id='tag-filter' "
+        "placeholder='shared_tag or slug_token' "
+        "style='width:100%; margin-top:0.4rem; padding:0.3rem 0.5rem; "
+        "border:1px solid #ccc; border-radius:4px;'>"
+        "<p class='muted' style='font-size:0.72rem; margin:0.4rem 0 0 0;'>"
+        "Filters nodes by tag substring (client-side).</p></div>"
+        "<div class='card'>"
+        "<span id='graph-match-count' class='muted'>—</span>"
+        "</div>"
+        "<div class='card'><span id='msg' class='muted'></span></div>"
+        "</aside>"
+        # Right: cytoscape canvas
+        "<div id='cy' style='width:100%; height:75vh; border:1px solid #ddd; "
+        "border-radius:6px; background:#fafafa;'></div>"
+        "</div>"
         "<script src='https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js'></script>"
         "<script>\n"
         f"const initial = {focus_js};\n"
@@ -823,11 +873,19 @@ def _render_graph(focus: str | None = None) -> str:
         "      'background-color': '#6366f1', 'width': 22, 'height': 22,\n"
         "    }},\n"
         "    { selector: 'node[type = \"agent\"]', style: {\n"
-        "      'background-color': '#f59e0b',\n"
+        "      'background-color': '#f59e0b',\n"  # amber for agents
+        "    }},\n"
+        "    { selector: 'node[type = \"mcp-server\"]', style: {\n"
+        "      'background-color': '#ef4444',\n"  # red for MCPs so the
+        # three types are visually distinct at a glance in the graph.
+        "      'shape': 'diamond', 'width': 24, 'height': 24,\n"
         "    }},\n"
         "    { selector: 'node[depth = 0]', style: {\n"
         "      'background-color': '#10b981', 'width': 34, 'height': 34,\n"
         "      'font-weight': 'bold',\n"
+        "    }},\n"
+        "    { selector: 'node.hidden-by-filter', style: {\n"
+        "      'display': 'none',\n"
         "    }},\n"
         "    { selector: 'edge', style: {\n"
         "      'width': 'mapData(weight, 1, 10, 0.5, 4)',\n"
@@ -837,9 +895,44 @@ def _render_graph(focus: str | None = None) -> str:
         "  layout: { name: 'cose', animate: false, padding: 30 },\n"
         "});\n"
         "cy.on('tap', 'node', (e) => {\n"
-        "  const slug = e.target.id().replace(/^(skill|agent):/, '');\n"
+        # Node IDs are prefixed "skill:", "agent:", or "mcp-server:".
+        "  const slug = e.target.id().replace(/^(skill|agent|mcp-server):/, '');\n"
         "  window.location.href = '/wiki/' + encodeURIComponent(slug);\n"
         "});\n"
+        # ── Client-side filtering (type + tag substring) ─────────────
+        "function applyFilters() {\n"
+        "  const allowedTypes = new Set(\n"
+        "    Array.from(document.querySelectorAll('.graph-type-filter'))\n"
+        "      .filter(cb => cb.checked).map(cb => cb.value));\n"
+        "  const tagQ = (document.getElementById('tag-filter').value || '')\n"
+        "    .trim().toLowerCase();\n"
+        "  const counts = {skill: 0, agent: 0, 'mcp-server': 0};\n"
+        "  let visible = 0;\n"
+        "  cy.nodes().forEach(n => {\n"
+        "    const t = n.data('type');\n"
+        "    const isFocus = n.data('depth') === 0;\n"
+        "    const tags = Array.from(n.data('tags') || []).map(x => String(x).toLowerCase());\n"
+        "    const typeOk = isFocus || allowedTypes.has(t);\n"
+        "    const tagOk = !tagQ || tags.some(tag => tag.includes(tagQ));\n"
+        "    const hidden = !(typeOk && tagOk);\n"
+        "    n.toggleClass('hidden-by-filter', hidden);\n"
+        "    if (!hidden) {\n"
+        "      visible++;\n"
+        "      if (t in counts) counts[t]++;\n"
+        "    }\n"
+        "  });\n"
+        "  cy.edges().forEach(e => {\n"
+        "    const src = cy.getElementById(e.data('source'));\n"
+        "    const tgt = cy.getElementById(e.data('target'));\n"
+        "    const srcHidden = src.hasClass('hidden-by-filter');\n"
+        "    const tgtHidden = tgt.hasClass('hidden-by-filter');\n"
+        "    e.toggleClass('hidden-by-filter', srcHidden || tgtHidden);\n"
+        "  });\n"
+        "  document.getElementById('graph-count-skill').textContent = counts.skill;\n"
+        "  document.getElementById('graph-count-agent').textContent = counts.agent;\n"
+        "  document.getElementById('graph-count-mcp-server').textContent = counts['mcp-server'];\n"
+        "  document.getElementById('graph-match-count').textContent = visible + ' visible';\n"
+        "}\n"
         "async function load(slug) {\n"
         "  if (!slug) return;\n"
         "  document.getElementById('msg').textContent = 'loading…';\n"
@@ -847,20 +940,16 @@ def _render_graph(focus: str | None = None) -> str:
         "  if (!r.ok) { document.getElementById('msg').textContent = 'not found'; return; }\n"
         "  const g = await r.json();\n"
         "  if (!g.center) { document.getElementById('msg').textContent = 'slug not in graph'; return; }\n"
-        "  let elements = [...g.nodes, ...g.edges];\n"
-        "  if (document.getElementById('agents-only').checked) {\n"
-        "    const keep = new Set(g.nodes.filter(n => n.data.type === 'agent' || n.data.depth === 0).map(n => n.data.id));\n"
-        "    elements = [...g.nodes.filter(n => keep.has(n.data.id)),\n"
-        "                ...g.edges.filter(e => keep.has(e.data.source) && keep.has(e.data.target))];\n"
-        "  }\n"
         "  cy.elements().remove();\n"
-        "  cy.add(elements);\n"
+        "  cy.add([...g.nodes, ...g.edges]);\n"
         "  cy.layout({ name: 'cose', animate: false, padding: 30 }).run();\n"
         "  document.getElementById('msg').textContent = g.nodes.length + ' nodes · ' + g.edges.length + ' edges';\n"
+        "  applyFilters();\n"
         "}\n"
         "document.getElementById('go').addEventListener('click', () => load(document.getElementById('focus').value.trim()));\n"
         "document.getElementById('focus').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') load(ev.target.value.trim()); });\n"
-        "document.getElementById('agents-only').addEventListener('change', () => load(document.getElementById('focus').value.trim()));\n"
+        "document.querySelectorAll('.graph-type-filter').forEach(cb => cb.addEventListener('change', applyFilters));\n"
+        "document.getElementById('tag-filter').addEventListener('input', applyFilters);\n"
         "if (initial) load(initial);\n"
         "</script>"
     )
@@ -932,13 +1021,20 @@ def _wiki_index_entries() -> list[dict]:
     base = _wiki_dir() / "entities"
     if not base.is_dir():
         return []
+    # Iterate all three entity subdirs. MCPs are sharded (one dir per
+    # first-char) so we glob recursively; skills + agents are flat.
+    sources: list[tuple[str, str, bool]] = [
+        ("skills", "skill", False),        # dir_name, entity_type, recursive
+        ("agents", "agent", False),
+        ("mcp-servers", "mcp-server", True),
+    ]
     out: list[dict] = []
-    for sub in ("skills", "agents"):
+    for sub, entity_type, recursive in sources:
         d = base / sub
         if not d.is_dir():
             continue
-        entity_type = sub[:-1]  # "skills" -> "skill"
-        for path in sorted(d.glob("*.md")):
+        paths = sorted(d.rglob("*.md") if recursive else d.glob("*.md"))
+        for path in paths:
             slug = path.stem
             if not _SAFE_SLUG_RE.match(slug):
                 continue
@@ -977,7 +1073,7 @@ def _render_wiki_index() -> str:
         if slug:
             grade_by_slug[slug] = sc.get("grade", "")
 
-    type_counts = {"skill": 0, "agent": 0}
+    type_counts = {"skill": 0, "agent": 0, "mcp-server": 0}
     for e in entries:
         type_counts[e["type"]] = type_counts.get(e["type"], 0) + 1
 
@@ -1010,9 +1106,9 @@ def _render_wiki_index() -> str:
     type_checkboxes = "".join(
         f"<label style='display:flex; justify-content:space-between; padding:0.25rem 0;'>"
         f"<span><input type='checkbox' class='wiki-type-filter' value='{t}' checked> {t}</span>"
-        f"<span class='muted' style='font-size:0.78rem;'>{type_counts.get(t, 0)}</span>"
+        f"<span class='muted' style='font-size:0.78rem;'>{type_counts.get(t, 0):,}</span>"
         f"</label>"
-        for t in ("skill", "agent")
+        for t in ("skill", "agent", "mcp-server")
     )
 
     body = (
@@ -1258,25 +1354,67 @@ def _render_events() -> str:
 
 
 def _render_loaded() -> str:
-    """Live view of ~/.claude/skill-manifest.json with load/unload actions."""
+    """Live view of ~/.claude/skill-manifest.json with load/unload actions.
+
+    Groups manifest entries by ``entity_type`` (skill / agent / mcp-server)
+    with a per-section count. Unload button posts both the slug and
+    entity_type so the server routes correctly — MCPs need
+    ``claude mcp remove``, skills + agents take the file-copy path.
+    Legacy entries without entity_type default to ``skill`` (what the
+    pre-install_utils manifest implicitly assumed).
+    """
     manifest = _read_manifest()
     load_rows = manifest.get("load", [])
     unload_rows = manifest.get("unload", [])
 
-    loaded_html = "".join(
-        f"<tr>"
-        f"<td><a href='/skill/{html.escape(e.get('skill', ''))}'>"
-        f"<code>{html.escape(e.get('skill', ''))}</code></a></td>"
-        f"<td class='muted'>{html.escape(e.get('source', ''))}</td>"
-        f"<td class='muted'>priority {e.get('priority', '—')}</td>"
-        f"<td class='muted'>{html.escape(str(e.get('reason', ''))[:70])}</td>"
-        f"<td><button class='btn-unload' data-slug='{html.escape(e.get('skill', ''))}'>unload</button></td>"
-        f"</tr>"
-        for e in load_rows
-    )
+    def _etype(entry: dict) -> str:
+        # Missing entity_type => legacy skill entry.
+        return str(entry.get("entity_type") or "skill")
+
+    # Split loaded by entity_type for the 3-section layout.
+    by_type: dict[str, list[dict]] = {"skill": [], "agent": [], "mcp-server": []}
+    for e in load_rows:
+        by_type.setdefault(_etype(e), []).append(e)
+
+    def _row(e: dict) -> str:
+        slug = e.get("skill", "")
+        etype = _etype(e)
+        link = (
+            f"<a href='/wiki/{html.escape(slug)}'>"
+            f"<code>{html.escape(slug)}</code></a>"
+        )
+        return (
+            f"<tr>"
+            f"<td>{link}</td>"
+            f"<td class='muted'>{html.escape(e.get('source', ''))}</td>"
+            f"<td class='muted'>{html.escape(str(e.get('command', '') or e.get('priority', '—')))[:60]}</td>"
+            f"<td><button class='btn-unload' data-slug='{html.escape(slug)}' "
+            f"data-etype='{html.escape(etype)}'>unload</button></td>"
+            f"</tr>"
+        )
+
+    def _section(title: str, etype: str) -> str:
+        rows = by_type.get(etype, [])
+        if not rows:
+            return (
+                f"<h3 style='margin-top:1.2rem;'>{title} "
+                f"<span class='muted' style='font-size:0.85rem;'>(0)</span></h3>"
+                f"<p class='muted' style='margin-left:0.4rem;'>"
+                f"None loaded.</p>"
+            )
+        return (
+            f"<h3 style='margin-top:1.2rem;'>{title} "
+            f"<span class='muted' style='font-size:0.85rem;'>({len(rows)})</span></h3>"
+            f"<table>"
+            f"<tr><th>Slug</th><th>Source</th><th>Cmd / priority</th><th></th></tr>"
+            + "".join(_row(e) for e in rows)
+            + "</table>"
+        )
+
     unload_html = "".join(
         f"<tr>"
         f"<td><code>{html.escape(e.get('skill', ''))}</code></td>"
+        f"<td class='muted'>{html.escape(_etype(e))}</td>"
         f"<td class='muted'>{html.escape(str(e.get('source', '') or e.get('reason', ''))[:80])}</td>"
         f"<td><button class='btn-load' data-slug='{html.escape(e.get('skill', ''))}'>load</button></td>"
         f"</tr>"
@@ -1284,9 +1422,13 @@ def _render_loaded() -> str:
     )
 
     body = (
-        "<h1>Loaded skills &amp; agents</h1>"
+        "<h1>Loaded entities — skills, agents &amp; MCPs</h1>"
         f"<div class='card'>"
-        f"<strong>{len(load_rows)}</strong> currently loaded · "
+        f"<strong>{len(load_rows)}</strong> currently loaded "
+        f"(<span class='muted'>"
+        f"{len(by_type.get('skill', []))} skills · "
+        f"{len(by_type.get('agent', []))} agents · "
+        f"{len(by_type.get('mcp-server', []))} MCPs</span>) · "
         f"<strong>{len(unload_rows)}</strong> known-unloaded · "
         f"<span class='muted'>source: <code>~/.claude/skill-manifest.json</code></span>"
         "</div>"
@@ -1300,10 +1442,11 @@ def _render_loaded() -> str:
         "<span id='load-msg' class='muted' style='margin-left:0.75rem;'></span>"
         "</form></div>"
         f"<h2>Currently loaded ({len(load_rows)})</h2>"
-        "<table><tr><th>Skill</th><th>Source</th><th>Priority</th>"
-        "<th>Reason</th><th></th></tr>" + loaded_html + "</table>"
-        f"<h2>Recently unloaded ({len(unload_rows)})</h2>"
-        "<table><tr><th>Skill</th><th>Source / reason</th><th></th></tr>"
+        + _section("Skills", "skill")
+        + _section("Agents", "agent")
+        + _section("MCP servers", "mcp-server")
+        + f"<h2>Recently unloaded ({len(unload_rows)})</h2>"
+        "<table><tr><th>Slug</th><th>Type</th><th>Source / reason</th><th></th></tr>"
         + unload_html + "</table>"
         "<script>\n"
         "async function post(url, body) {\n"
@@ -1313,8 +1456,8 @@ def _render_loaded() -> str:
         "  return {ok, msg};\n"
         "}\n"
         "document.querySelectorAll('.btn-unload').forEach(b => b.addEventListener('click', async () => {\n"
-        "  b.disabled = true; const slug = b.dataset.slug;\n"
-        "  const r = await post('/api/unload', {slug});\n"
+        "  b.disabled = true; const slug = b.dataset.slug; const entity_type = b.dataset.etype || 'skill';\n"
+        "  const r = await post('/api/unload', {slug, entity_type});\n"
         "  if (r.ok) location.reload(); else { b.disabled = false; alert('unload failed: ' + r.msg); }\n"
         "}));\n"
         "document.querySelectorAll('.btn-load').forEach(b => b.addEventListener('click', async () => {\n"
@@ -1409,10 +1552,32 @@ def _perform_load(slug: str) -> tuple[bool, str]:
     return True, "loaded"
 
 
-def _perform_unload(slug: str) -> tuple[bool, str]:
-    """Invoke skill_unload.unload_from_session([slug]). Returns (ok, message)."""
+def _perform_unload(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
+    """Unload the given entity.
+
+    Routes by ``entity_type``:
+      - ``skill`` / ``agent``: ``skill_unload.unload_from_session`` —
+        file-copy + manifest update, reversible via /api/load.
+      - ``mcp-server``: ``mcp_install.uninstall_mcp`` — wraps
+        ``claude mcp remove`` subprocess. Requires the claude CLI on
+        PATH; errors surface to the caller.
+    """
     if not _SAFE_SLUG_RE.match(slug):
         return False, f"invalid slug: {slug!r}"
+    if entity_type == "mcp-server":
+        try:
+            from mcp_install import uninstall_mcp
+        except ImportError as exc:
+            return False, f"mcp_install import failed: {exc}"
+        try:
+            result = uninstall_mcp(slug, wiki_dir=_wiki_dir(), force=True)
+        except Exception as exc:  # noqa: BLE001
+            return False, f"{type(exc).__name__}: {exc}"
+        if result.status not in ("uninstalled",):
+            return False, f"uninstall failed: {result.message or result.status}"
+        return True, f"unloaded mcp:{slug}"
+
+    # skill or agent — both flow through the same skill_unload module.
     try:
         from skill_unload import unload_from_session
     except ImportError as exc:
@@ -1542,7 +1707,12 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 )
             elif path == "/api/unload":
                 slug = str(body.get("slug", "")).strip()
-                ok, msg = _perform_unload(slug)
+                # entity_type defaults to "skill" for backward compat with
+                # existing JS that only sends {slug}. New /loaded page
+                # sends {slug, entity_type} so MCPs flow through the
+                # subprocess unload path.
+                etype = str(body.get("entity_type", "skill")).strip() or "skill"
+                ok, msg = _perform_unload(slug, entity_type=etype)
                 self._send_json_status(
                     200 if ok else 400, {"ok": ok, "detail": msg},
                 )

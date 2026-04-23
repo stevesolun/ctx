@@ -8,9 +8,9 @@ Pre-built knowledge graph of **13,041 nodes** (1,791 skills + 464 agents + 10,78
 
 | File | Size | Contents |
 |------|------|----------|
-| `wiki-graph.tar.gz` | 23.5 MB | **Full wiki** — entity cards, 1,772 converted skill bodies, 430 mirrored agent bodies, 13K-node knowledge graph, concept pages, catalog |
-| `communities.json` | ~150 KB | 15 detected communities with labels + member lists |
-| `graph-report.md` | ~40 KB | God nodes (most connected skills / agents / MCPs) + community summary |
+| `wiki-graph.tar.gz` | 22.5 MB | **Full wiki** — entity cards, 1,772 converted skill bodies, 430 mirrored agent bodies, 13K-node knowledge graph, concept pages, catalog |
+| `communities.json` | 153 KB | 15 detected communities with labels + member lists |
+| `graph-report.md` | 31 KB | God nodes (most connected skills / agents / MCPs) + community summary |
 | `viz-overview.html` / `.png` | — | Plotly-rendered overview of the full graph |
 | `viz-python.html` | — | Python-skills sub-view |
 | `viz-security.html` / `.png` | — | Security-skills sub-view |
@@ -88,18 +88,27 @@ The extracted wiki is an Obsidian-compatible vault. Entity pages use `[[wikilink
 
 ## Rebuild
 
-After adding new skills or changing the wiki:
+After adding new skills, agents, or MCP entities (or changing the wiki):
 
 ```bash
-python -m wiki_batch_entities --all
-python -m wiki_graphify
+python -m wiki_batch_entities --all     # regenerate entity cards
+python -m wiki_graphify                 # incremental by default; --full to force
 ```
 
-Then re-archive:
+Then re-archive. The pre-commit hook does this automatically when the wiki drifts beyond the tarball; the manual command below mirrors its exclusions:
 
 ```bash
 cd ~/.claude/skill-wiki
-tar czf /path/to/ctx/graph/wiki-graph.tar.gz \
-    graphify-out/ entities/ concepts/ converted/ catalog.md \
-    SCHEMA.md index.md log.md .obsidian/
+tar --force-local -czf /path/to/ctx/graph/wiki-graph.tar.gz \
+    --exclude='.trash' \
+    --exclude='__pycache__' \
+    --exclude='./raw' \
+    --exclude='./.embedding-cache' \
+    --exclude='./.ingest-checkpoint' \
+    --exclude='./.enrich-checkpoint' \
+    --exclude='./graphify-out/graph-delta.json' \
+    --exclude='./graphify-out/graph.pickle' \
+    .
 ```
+
+The exclusions keep the tarball under GitHub's 100MB file limit (raw/ alone is ~700MB of regenerable pulsemcp HTML). `--force-local` tells MSYS `tar` on Windows not to parse `c:` as a remote host. Non-Windows users can drop that flag.
