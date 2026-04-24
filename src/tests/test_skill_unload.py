@@ -36,7 +36,7 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
 
-    import skill_unload
+    from ctx.adapters.claude_code.install import skill_unload
     importlib.reload(skill_unload)
     return skill_unload, home
 

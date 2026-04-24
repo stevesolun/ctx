@@ -16,10 +16,8 @@ from typing import Any
 
 import pytest
 
-import install_utils
-import mcp_install
-
-
+from ctx.adapters.claude_code.install import install_utils
+from ctx.adapters.claude_code.install import mcp_install
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 

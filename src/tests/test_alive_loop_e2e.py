@@ -241,7 +241,7 @@ def e2e_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path
     monkeypatch.setattr(_bo, "PENDING_UNLOAD", claude_dir / "pending-unload.json")
     monkeypatch.setattr(_bo, "SHOWN_FLAG", claude_dir / ".bundle-shown")
 
-    import install_utils as _iu
+    from ctx.adapters.claude_code.install import install_utils as _iu
     monkeypatch.setattr(_iu, "MANIFEST_PATH", manifest)
 
     return {

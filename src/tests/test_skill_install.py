@@ -13,10 +13,8 @@ from pathlib import Path
 
 import pytest
 
-import install_utils
-import skill_install
-
-
+from ctx.adapters.claude_code.install import install_utils
+from ctx.adapters.claude_code.install import skill_install
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 

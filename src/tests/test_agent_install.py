@@ -12,10 +12,8 @@ from pathlib import Path
 
 import pytest
 
-import agent_install
-import install_utils
-
-
+from ctx.adapters.claude_code.install import agent_install
+from ctx.adapters.claude_code.install import install_utils
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 
