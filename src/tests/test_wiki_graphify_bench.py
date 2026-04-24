@@ -122,7 +122,7 @@ def _run_cross_community_lookup(
     This mirrors the fixed code: build node_to_community + community_labels
     once, then do O(1) lookups per neighbor.
     """
-    from wiki_graphify import label_community
+    from ctx.core.wiki.wiki_graphify import label_community
 
     node_to_community: dict[str, int] = {
         nid: cid for cid, members in communities.items() for nid in members

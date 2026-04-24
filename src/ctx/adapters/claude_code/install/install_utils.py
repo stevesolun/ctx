@@ -34,7 +34,7 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from _fs_utils import atomic_write_text as _atomic_write_text
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 
 _logger = logging.getLogger(__name__)
 

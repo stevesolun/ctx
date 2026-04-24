@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from wiki_utils import parse_frontmatter as _parse_fm
+from ctx.core.wiki.wiki_utils import parse_frontmatter as _parse_fm
 
 # Graph-walk augmentation. Lazy-imported so the module still works when the
 # graph artifacts haven't been built yet — resolve_by_seeds() degrades to an

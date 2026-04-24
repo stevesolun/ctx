@@ -10,9 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import resolve_graph
-
-
+from ctx.core.graph import resolve_graph
 def _write_graph_file(tmp_path: Path, content: bytes | str) -> Path:
     p = tmp_path / "graph.json"
     if isinstance(content, str):

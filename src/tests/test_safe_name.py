@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from _safe_name import (
+from ctx.utils._safe_name import (
     is_safe_relpath,
     is_safe_source_name,
     validate_relpath,

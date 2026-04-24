@@ -23,7 +23,7 @@ SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from _fs_utils import atomic_write_bytes, atomic_write_json, atomic_write_text  # noqa: E402
+from ctx.utils._fs_utils import atomic_write_bytes, atomic_write_json, atomic_write_text  # noqa: E402
 
 
 _POSIX_ONLY = pytest.mark.skipif(

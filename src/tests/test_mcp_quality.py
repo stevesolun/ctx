@@ -25,7 +25,7 @@ if str(SRC_DIR) not in sys.path:
 _IMPORT_OK = False
 try:
     import mcp_quality as mq  # noqa: E402
-    from quality_signals import SignalResult  # noqa: E402
+    from ctx.core.quality.quality_signals import SignalResult  # noqa: E402
 
     _IMPORT_OK = True
 except ImportError:

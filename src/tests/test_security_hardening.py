@@ -26,7 +26,7 @@ if str(SRC) not in sys.path:
 import council_runner as cr  # noqa: E402
 import toolbox as tb  # noqa: E402
 import toolbox_verdict as tv  # noqa: E402
-from _file_lock import file_lock  # noqa: E402
+from ctx.utils._file_lock import file_lock  # noqa: E402
 
 
 # ── plan_hash validation ────────────────────────────────────────────────────

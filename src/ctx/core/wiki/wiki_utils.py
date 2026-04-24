@@ -46,7 +46,7 @@ def validate_skill_name(name: str) -> str:
     # dressed up with suffixes or trailing dots. Delegates to the same
     # normalization rule that _safe_name.is_safe_source_name uses so
     # the two validators stay aligned.
-    from _safe_name import _is_windows_reserved  # noqa: PLC0415
+    from ctx.utils._safe_name import _is_windows_reserved  # noqa: PLC0415
     if _is_windows_reserved(name):
         raise ValueError(
             f"Invalid skill name {name!r}: Windows reserved device names "

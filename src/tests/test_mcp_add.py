@@ -571,7 +571,7 @@ class TestCorpusTextStructure:
         assert findings == [], f"unexpected structural failures: {findings}"
 
     def test_corpus_text_has_frontmatter_with_required_fields(self) -> None:
-        from wiki_utils import parse_frontmatter_and_body
+        from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
         from mcp_add import _build_corpus_text
 
         record = _make_record(name="github-mcp")

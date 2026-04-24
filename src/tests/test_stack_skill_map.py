@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from stack_skill_map import (
+from ctx.core.resolve.stack_skill_map import (
     SIGNAL_SKILL_MAP,
     STACK_SKILL_MAP,
     skills_for,
@@ -42,7 +42,7 @@ class TestIdentity:
         assert usage_tracker.SIGNAL_SKILL_MAP is STACK_SKILL_MAP
 
     def test_resolve_skills_import_points_at_shared(self):
-        import resolve_skills
+        from ctx.core.resolve import resolve_skills
         assert resolve_skills.STACK_SKILL_MAP is STACK_SKILL_MAP
 
 

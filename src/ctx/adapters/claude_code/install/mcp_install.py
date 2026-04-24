@@ -61,7 +61,7 @@ from ctx.adapters.claude_code.install.install_utils import (
     record_install,
     record_uninstall,
 )
-from wiki_utils import validate_skill_name
+from ctx.core.wiki.wiki_utils import validate_skill_name
 
 _logger = logging.getLogger(__name__)
 

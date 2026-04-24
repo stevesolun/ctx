@@ -87,13 +87,13 @@ def test_rglob_pattern_cannot_escape_agents_dir(fake_home):
 
 def test_validate_skill_name_accepts_common_names(fake_home):
     loader, _ = fake_home
-    from wiki_utils import validate_skill_name
+    from ctx.core.wiki.wiki_utils import validate_skill_name
     for name in ("fastapi-pro", "docker_expert", "py3.11", "a", "Aa0._-"):
         assert validate_skill_name(name) == name
 
 
 def test_validate_skill_name_rejects_bad(fake_home):
-    from wiki_utils import validate_skill_name
+    from ctx.core.wiki.wiki_utils import validate_skill_name
     for bad in ("../x", "x/y", "*", "", "_leading", ".leading", "-leading"):
         with pytest.raises(ValueError):
             validate_skill_name(bad)

@@ -21,8 +21,8 @@ import sys
 import uuid
 from pathlib import Path
 
-from _fs_utils import atomic_write_text as _atomic_write_text
-from wiki_utils import validate_skill_name
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
+from ctx.core.wiki.wiki_utils import validate_skill_name
 
 _logger = logging.getLogger(__name__)
 

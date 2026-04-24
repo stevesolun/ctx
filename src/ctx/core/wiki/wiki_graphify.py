@@ -252,7 +252,7 @@ def build_graph(
     """
     from ctx_config import cfg as _cfg  # noqa: PLC0415 — local to avoid
     # a config read at module-import time (tests patch cfg).
-    import semantic_edges as _sem  # noqa: PLC0415
+    from ctx.core.graph import semantic_edges as _sem  # noqa: PLC0415
 
     G = nx.Graph()
     entities: dict[str, dict] = {}

@@ -23,7 +23,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 import ctx_lifecycle as lc  # noqa: E402
-from quality_signals import SignalResult  # noqa: E402
+from ctx.core.quality.quality_signals import SignalResult  # noqa: E402
 from skill_quality import QualityScore  # noqa: E402
 
 

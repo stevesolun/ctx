@@ -328,7 +328,7 @@ class TestUpdateIndexSubjectAware:
         # (which pulls update_index from link_conversions) stays
         # untouched — that is the function the existing TestUpdateIndex
         # class still validates.
-        from wiki_sync import update_index as _ws_ui  # noqa: PLC0415
+        from ctx.core.wiki.wiki_sync import update_index as _ws_ui  # noqa: PLC0415
         _ws_ui(*args, **kwargs)
 
     def _wiki_with_all_sections(self, tmp_path: Path) -> Path:

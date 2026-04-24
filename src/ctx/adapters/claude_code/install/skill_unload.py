@@ -19,8 +19,8 @@ import re
 import sys
 from pathlib import Path
 
-from _fs_utils import atomic_write_text as _atomic_write_text
-from wiki_utils import validate_skill_name
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
+from ctx.core.wiki.wiki_utils import validate_skill_name
 
 CLAUDE_DIR = Path(os.path.expanduser("~/.claude"))
 MANIFEST_PATH = CLAUDE_DIR / "skill-manifest.json"

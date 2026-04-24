@@ -19,7 +19,7 @@ _SRC = Path(__file__).resolve().parent.parent
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from _fs_utils import atomic_write_bytes, atomic_write_json, atomic_write_text
+from ctx.utils._fs_utils import atomic_write_bytes, atomic_write_json, atomic_write_text
 
 
 # ── atomic_write_text ─────────────────────────────────────────────────────────

@@ -382,7 +382,7 @@ class TestAliveLoopE2E:
         """User approves a skill from the bundle → skill_install copies
         wiki body into the live skills dir, flips entity status to
         `installed`, records (slug, 'skill') in the manifest load list."""
-        from skill_install import install_skill
+        from ctx.adapters.claude_code.install.skill_install import install_skill
 
         result = install_skill(
             "python-patterns",
@@ -409,8 +409,8 @@ class TestAliveLoopE2E:
         """Approving an agent with the SAME slug as an installed skill
         must not collide — the manifest dedups on (slug, entity_type)
         tuple, not slug alone. Pins the P1.3 regression."""
-        from skill_install import install_skill
-        from agent_install import install_agent
+        from ctx.adapters.claude_code.install.skill_install import install_skill
+        from ctx.adapters.claude_code.install.agent_install import install_agent
 
         # Install a skill and an agent sharing the slug "same-slug".
         # This fixture doesn't have one; use the distinct slugs from
@@ -453,8 +453,8 @@ class TestAliveLoopE2E:
         """
         from ctx.adapters.claude_code.hooks import context_monitor as _cm
         from ctx.adapters.claude_code.hooks import bundle_orchestrator as _bo
-        from skill_install import install_skill
-        from agent_install import install_agent
+        from ctx.adapters.claude_code.install.skill_install import install_skill
+        from ctx.adapters.claude_code.install.agent_install import install_agent
 
         # ── 1. Accumulate signals ────────────────────────────────────
         # Three invocations spanning extension-based AND command-based

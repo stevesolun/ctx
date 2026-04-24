@@ -17,7 +17,7 @@ if str(SRC_DIR) not in sys.path:
 
 import kpi_dashboard as kd  # noqa: E402
 import ctx_lifecycle as cl  # noqa: E402
-from quality_signals import SignalResult  # noqa: E402
+from ctx.core.quality.quality_signals import SignalResult  # noqa: E402
 from skill_quality import QualityScore, sidecar_path  # noqa: E402
 
 

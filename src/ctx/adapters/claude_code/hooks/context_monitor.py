@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from _fs_utils import atomic_write_text as _atomic_write_text
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 
 try:
     from ctx_config import cfg as _cfg

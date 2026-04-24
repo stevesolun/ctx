@@ -153,7 +153,7 @@ def _load_topk_state(cache_dir: Path) -> TopKState | None:
 def _save_topk_state(cache_dir: Path, state: TopKState) -> None:
     """Atomically persist the top-K state via a tmp-file + os.replace."""
     import json  # noqa: PLC0415
-    from _fs_utils import atomic_write_text  # noqa: PLC0415
+    from ctx.utils._fs_utils import atomic_write_text  # noqa: PLC0415
 
     payload = {
         "version": state.version,
@@ -298,7 +298,7 @@ def _save_cache(
     keys = sorted(cache.keys())
     hashes = np.asarray(keys, dtype="S64")
     vecs = np.stack([cache[k] for k in keys]).astype("float32")
-    from _fs_utils import _replace_with_retry  # noqa: PLC0415 — local import
+    from ctx.utils._fs_utils import _replace_with_retry  # noqa: PLC0415 — local import
 
     path = _cache_file(cache_dir)
     # ``np.savez_compressed`` auto-appends ``.npz`` when the filename

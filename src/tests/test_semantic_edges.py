@@ -1175,7 +1175,7 @@ class TestComputeSemanticEdgesCacheHitPath:
     def test_all_from_cache_uses_cache_dim(self, tmp_path: Path) -> None:
         """When all nodes are cache hits, dim is read from cached vectors (line 618-619)."""
         import importlib
-        import semantic_edges as se_mod
+        from ctx.core.graph import semantic_edges as se_mod
 
         vec_a = np.array([1.0, 0.0, 0.0, 0.0], dtype="float32")
         vec_b = np.array([1.0, 0.0, 0.0, 0.0], dtype="float32")

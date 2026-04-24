@@ -289,7 +289,7 @@ class TestIntegrationWithInstall:
 
         This is the exact regression the mirror exists to fix.
         """
-        from skill_install import install_skill
+        from ctx.adapters.claude_code.install.skill_install import install_skill
 
         skills, wiki = dirs
         _write_skill(

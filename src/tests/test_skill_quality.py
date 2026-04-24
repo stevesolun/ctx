@@ -29,7 +29,7 @@ SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-import quality_signals as qs  # noqa: E402
+from ctx.core.quality import quality_signals as qs  # noqa: E402
 import skill_quality as sq  # noqa: E402
 
 
