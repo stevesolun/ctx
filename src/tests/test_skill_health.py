@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-import skill_health as sh
+from ctx.adapters.claude_code import skill_health as sh
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
