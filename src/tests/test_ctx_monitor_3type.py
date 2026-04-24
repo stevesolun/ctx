@@ -238,7 +238,7 @@ class TestPerformUnloadByEntityType:
             calls["slugs"] = slugs
             return slugs
 
-        import skill_unload
+        from ctx.adapters.claude_code.install import skill_unload
         monkeypatch.setattr(skill_unload, "unload_from_session",
                             fake_unload_from_session)
         ok, msg = _cm._perform_unload("python-patterns", entity_type="skill")
@@ -263,7 +263,7 @@ class TestPerformUnloadByEntityType:
             calls["kw"] = kw
             return _FakeResult(slug=slug, status="uninstalled", message="ok")
 
-        import mcp_install
+        from ctx.adapters.claude_code.install import mcp_install
         monkeypatch.setattr(mcp_install, "uninstall_mcp", fake_uninstall)
 
         ok, msg = _cm._perform_unload("anthropic-python-sdk",
@@ -283,7 +283,7 @@ class TestPerformUnloadByEntityType:
             status: str
             message: str = ""
 
-        import mcp_install
+        from ctx.adapters.claude_code.install import mcp_install
         monkeypatch.setattr(
             mcp_install, "uninstall_mcp",
             lambda slug, **kw: _FakeResult(slug=slug, status="claude-cli-failed",

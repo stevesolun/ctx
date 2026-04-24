@@ -1535,7 +1535,7 @@ def _perform_load(slug: str) -> tuple[bool, str]:
     if not _SAFE_SLUG_RE.match(slug):
         return False, f"invalid slug: {slug!r}"
     try:
-        from skill_loader import load_skill  # local import — heavy module
+        from ctx.adapters.claude_code.skill_loader import load_skill  # local import — heavy module
     except ImportError as exc:
         return False, f"skill_loader import failed: {exc}"
     try:
@@ -1566,7 +1566,7 @@ def _perform_unload(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
         return False, f"invalid slug: {slug!r}"
     if entity_type == "mcp-server":
         try:
-            from mcp_install import uninstall_mcp
+            from ctx.adapters.claude_code.install.mcp_install import uninstall_mcp
         except ImportError as exc:
             return False, f"mcp_install import failed: {exc}"
         try:
@@ -1579,7 +1579,7 @@ def _perform_unload(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
 
     # skill or agent — both flow through the same skill_unload module.
     try:
-        from skill_unload import unload_from_session
+        from ctx.adapters.claude_code.install.skill_unload import unload_from_session
     except ImportError as exc:
         return False, f"skill_unload import failed: {exc}"
     try:
