@@ -34,6 +34,7 @@ from typing import Any
 from ctx.adapters.generic.compaction import TokenBudgetCompactor
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox, make_tool_executor
 from ctx.adapters.generic.loop import run_loop
+from ctx.adapters.generic.evaluator import Evaluator, run_with_evaluation
 from ctx.adapters.generic.planner import Planner, augmented_system_prompt
 from ctx.adapters.generic.providers import Message, get_provider
 from ctx.adapters.generic.state import (
@@ -319,6 +320,34 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     r.add_argument(
+        "--evaluator",
+        action="store_true",
+        help=(
+            "Run an Evaluator agent after the Generator finishes. "
+            "Grades the output against criteria (the planner's spec "
+            "criteria when --planner is set, sensible defaults otherwise). "
+            "When the verdict is 'needs_revision', feeds back into "
+            "the Generator for up to --evaluator-rounds revisions."
+        ),
+    )
+    r.add_argument(
+        "--evaluator-model",
+        default=None,
+        help=(
+            "Model override for the evaluator. Default: same as --model."
+        ),
+    )
+    r.add_argument(
+        "--evaluator-rounds",
+        type=int,
+        default=2,
+        help=(
+            "Max Generator→Evaluator rounds (1 = one generation "
+            "then a final grade, no revision; 2 = one revision; "
+            "etc.). Default 2."
+        ),
+    )
+    r.add_argument(
         "--quiet", action="store_true",
         help="Suppress status lines; only print the final message.",
     )
@@ -391,12 +420,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     system_prompt = _resolve_system_prompt(args.system_prompt)
     session_id = args.session_id or new_session_id()
 
-    # Planner pass (opt-in). Runs ONE provider call before the
-    # Generator loop starts; the produced spec is embedded into
-    # system_prompt for the Generator. Both calls land in the same
-    # session's cost/token totals.
+    # Planner pass (opt-in, SOLO path only — when --evaluator is set,
+    # run_with_evaluation owns the planner call so the P/G/E agents
+    # share state coherently). In the solo path, the planner runs
+    # inline here and the produced spec is embedded into
+    # system_prompt for the Generator.
     plan_artifact = None
-    if args.planner:
+    if args.planner and not args.evaluator:
         if not args.quiet:
             print("[ctx] planner: building spec...", file=sys.stderr)
         planner = Planner(
@@ -447,6 +477,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 for c in mcp_configs],
         "ctx_tools_enabled": not args.no_ctx_tools,
         "planner_used": plan_artifact is not None,
+        "evaluator_used": args.evaluator,
+        "evaluator_max_rounds": args.evaluator_rounds if args.evaluator else None,
         "plan": plan_artifact.to_dict() if plan_artifact else None,
         "plan_usage": (
             {
@@ -466,29 +498,90 @@ def _cmd_run(args: argparse.Namespace) -> int:
         if args.budget_usd is not None:
             print(f"[ctx] budget: ${args.budget_usd:.2f}", file=sys.stderr)
 
+    evaluator_rounds: list[dict[str, Any]] | None = None
     try:
-        result = run_loop(
-            provider=provider,
-            system_prompt=system_prompt,
-            task=args.task,
-            router=router,
-            extra_tools=extra_tools or None,
-            tool_executor=tool_executor,
-            model=args.model,
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-            max_iterations=args.max_iterations,
-            budget_usd=args.budget_usd,
-            budget_tokens=args.budget_tokens,
-            observer=observer,
-            compactor=compactor,
-        )
+        if args.evaluator:
+            if not args.quiet:
+                print(
+                    f"[ctx] evaluator enabled (max_rounds={args.evaluator_rounds})",
+                    file=sys.stderr,
+                )
+            planner_agent = (
+                Planner(provider, model=args.planner_model or args.model)
+                if args.planner
+                else None
+            )
+            evaluator_agent = Evaluator(
+                provider, model=args.evaluator_model or args.model,
+            )
+            eval_outcome = run_with_evaluation(
+                provider=provider,
+                system_prompt=system_prompt,
+                task=args.task,
+                evaluator=evaluator_agent,
+                max_rounds=args.evaluator_rounds,
+                planner=planner_agent,
+                router=router,
+                extra_tools=extra_tools or None,
+                tool_executor=tool_executor,
+                model=args.model,
+                temperature=args.temperature,
+                max_tokens=args.max_tokens,
+                max_iterations=args.max_iterations,
+                budget_usd=args.budget_usd,
+                budget_tokens=args.budget_tokens,
+                observer=observer,
+                compactor=compactor,
+            )
+            result = eval_outcome.final
+            plan_artifact = eval_outcome.plan
+            evaluator_rounds = [
+                {
+                    "index": r.index,
+                    "stop_reason": r.loop_result.stop_reason,
+                    "verdict": r.evaluation.verdict,
+                    "overall_score": r.evaluation.overall_score,
+                    "summary_feedback": r.evaluation.summary_feedback,
+                    "revision_directive": r.evaluation.revision_directive,
+                    "parsed_ok": r.evaluation.parsed_ok,
+                }
+                for r in eval_outcome.rounds
+            ]
+            if not args.quiet:
+                last = eval_outcome.rounds[-1] if eval_outcome.rounds else None
+                if last is not None:
+                    print(
+                        f"[ctx] evaluator: {len(eval_outcome.rounds)} "
+                        f"round(s); final verdict = {last.evaluation.verdict}",
+                        file=sys.stderr,
+                    )
+        else:
+            result = run_loop(
+                provider=provider,
+                system_prompt=system_prompt,
+                task=args.task,
+                router=router,
+                extra_tools=extra_tools or None,
+                tool_executor=tool_executor,
+                model=args.model,
+                temperature=args.temperature,
+                max_tokens=args.max_tokens,
+                max_iterations=args.max_iterations,
+                budget_usd=args.budget_usd,
+                budget_tokens=args.budget_tokens,
+                observer=observer,
+                compactor=compactor,
+            )
     finally:
         store.close()
         if router is not None:
             router.stop()
 
-    return _emit_result(result, session_id, as_json=args.json, quiet=args.quiet)
+    return _emit_result(
+        result, session_id,
+        as_json=args.json, quiet=args.quiet,
+        evaluator_rounds=evaluator_rounds,
+    )
 
 
 # ── Command: resume ────────────────────────────────────────────────────────
@@ -585,6 +678,7 @@ def _cmd_sessions(args: argparse.Namespace) -> int:
 
 def _emit_result(
     result: Any, session_id: str, *, as_json: bool, quiet: bool,
+    evaluator_rounds: list[dict[str, Any]] | None = None,
 ) -> int:
     if as_json:
         payload = {
@@ -599,6 +693,8 @@ def _emit_result(
             },
             "detail": result.detail,
         }
+        if evaluator_rounds is not None:
+            payload["evaluator_rounds"] = evaluator_rounds
         print(json.dumps(payload, indent=2))
     else:
         if not quiet:
