@@ -38,7 +38,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Literal, Protocol
+from typing import Any, Callable, Literal, Protocol
 
 from ctx.adapters.generic.providers import (
     CompletionResponse,
@@ -176,6 +176,7 @@ def run_loop(
     cancel_event: threading.Event | None = None,
     observer: LoopObserver | None = None,
     messages: list[Message] | None = None,
+    compactor: Any | None = None,  # ctx.adapters.generic.compaction.ContextCompactor
 ) -> LoopResult:
     """Drive a solo agent loop until it terminates.
 
@@ -300,6 +301,25 @@ def run_loop(
                 break
         if tool_error_occurred:
             break
+
+        # Context compaction runs BEFORE budget checks so the summary
+        # call's cost lands inside this iteration's budget window.
+        # The compactor owns the should-compact decision + the
+        # summary call + the in-place message-list swap.
+        if compactor is not None and compactor.should_compact(conversation):
+            try:
+                new_conversation = compactor.compact(conversation, provider)
+            except Exception as exc:  # noqa: BLE001
+                _logger.warning(
+                    "compactor raised (%s); continuing with uncompacted "
+                    "conversation — next provider call may hit context limit",
+                    exc,
+                )
+            else:
+                if new_conversation is not conversation:
+                    # Accept whatever the compactor returned (list or
+                    # any sequence). Replace in place.
+                    conversation[:] = list(new_conversation)
 
         # Budget checks run AFTER the tool responses land in the
         # conversation — the caller sees the model's last pre-budget
