@@ -63,11 +63,15 @@ embeddings = [
 ]
 
 [tool.setuptools]
-# src/ holds ~55 flat top-level modules (scan_repo.py, skill_quality.py, …),
-# not a proper package tree. `packages.find` only discovers directories with
-# __init__.py, so the earlier config packaged only `tests/` and shipped a
-# broken wheel. List every runtime module explicitly via py-modules and tell
-# setuptools to look for them under src/.
+# Plan 001 migration (docs/plans/001-model-agnostic-harness.md).
+# During phases R0-R6 the codebase lives in TWO shapes simultaneously:
+#   - The legacy flat modules listed in ``py-modules`` below.
+#   - The target ``ctx`` package tree (ctx.core, ctx.adapters, ctx.cli,
+#     ctx.mcp_server, ctx.utils) declared in ``packages`` below.
+# Each R-phase moves a small batch from the flat list into the package
+# tree, updates imports, and drops the corresponding py-modules entry.
+# Running both layouts at once is intentional — it lets the migration
+# ship one commit at a time with the suite green at every step.
 package-dir = {"" = "src"}
 py-modules = [
     "_file_lock",
@@ -151,8 +155,28 @@ py-modules = [
 # bundled src/tests/ because it was the only directory with __init__.py.
 # The ``mcp_sources`` subpackage is listed here because setuptools'
 # ``py-modules`` is flat-only; subpackages need an explicit ``packages``
-# entry to be installed.
-packages = ["mcp_sources"]
+# entry to be installed. Plan 001 (phase R0) adds the ``ctx`` tree
+# alongside; both layouts coexist until R6 drops the flat modules.
+packages = [
+    "mcp_sources",
+    "ctx",
+    "ctx.core",
+    "ctx.core.graph",
+    "ctx.core.quality",
+    "ctx.core.wiki",
+    "ctx.core.resolve",
+    "ctx.core.bundle",
+    "ctx.adapters",
+    "ctx.adapters.claude_code",
+    "ctx.adapters.claude_code.hooks",
+    "ctx.adapters.claude_code.install",
+    "ctx.adapters.generic",
+    "ctx.adapters.generic.providers",
+    "ctx.adapters.generic.tools",
+    "ctx.cli",
+    "ctx.mcp_server",
+    "ctx.utils",
+]
 
 [tool.setuptools.package-data]
 "*" = ["config.json", "skill-registry.json"]

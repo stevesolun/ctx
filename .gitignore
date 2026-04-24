@@ -58,6 +58,7 @@ skill-system-config.json
 .strix-venv/
 .strix-instructions.txt
 .strix-output/
+.strix-out/
 .strix-run.log
 .strix-preview-wiki/
 .imported-deployed/
