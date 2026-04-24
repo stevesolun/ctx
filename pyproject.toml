@@ -25,29 +25,34 @@ Documentation = "https://stevesolun.github.io/ctx/"
 Changelog = "https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md"
 
 [project.scripts]
+# Plan 001 phase R5: entrypoints for modules moved in R1-R4 now point at
+# their canonical package path. Entrypoints for modules still at the
+# flat layout (ctx_init, ctx_monitor, etc.) stay unchanged — they will
+# move in a later R-phase. The legacy flat shims continue to exist so
+# anyone invoking the CLIs via `python path/to/module.py` keeps working.
 ctx-init = "ctx_init:main"
-ctx-install-hooks = "inject_hooks:main"
+ctx-install-hooks = "ctx.adapters.claude_code.inject_hooks:main"
 ctx-monitor = "ctx_monitor:main"
 ctx-scan-repo = "scan_repo:main"
 ctx-skill-quality = "skill_quality:main"
-ctx-skill-health = "skill_health:main"
+ctx-skill-health = "ctx.adapters.claude_code.skill_health:main"
 ctx-toolbox = "toolbox:main"
 ctx-lifecycle = "ctx_lifecycle:main"
 ctx-skill-add = "skill_add:main"
-ctx-skill-install = "skill_install:main"
+ctx-skill-install = "ctx.adapters.claude_code.install.skill_install:main"
 ctx-skill-mirror = "skill_mirror:main"
-ctx-bundle-suggest = "bundle_orchestrator:main"
+ctx-bundle-suggest = "ctx.adapters.claude_code.hooks.bundle_orchestrator:main"
 ctx-agent-mirror = "agent_mirror:main"
-ctx-agent-install = "agent_install:main"
+ctx-agent-install = "ctx.adapters.claude_code.install.agent_install:main"
 ctx-mcp-add = "mcp_add:main"
 ctx-mcp-fetch = "mcp_fetch:main"
 ctx-mcp-ingest = "mcp_ingest:main"
 ctx-mcp-enrich = "mcp_enrich:main"
-ctx-mcp-install = "mcp_install:install_main"
-ctx-mcp-uninstall = "mcp_install:uninstall_main"
+ctx-mcp-install = "ctx.adapters.claude_code.install.mcp_install:install_main"
+ctx-mcp-uninstall = "ctx.adapters.claude_code.install.mcp_install:uninstall_main"
 ctx-mcp-quality = "mcp_quality:main"
 ctx-mcp-rebuild-index = "mcp_rebuild_index:main"
-ctx-wiki-graphify = "wiki_graphify:main"
+ctx-wiki-graphify = "ctx.core.wiki.wiki_graphify:main"
 
 [project.optional-dependencies]
 dev = [
