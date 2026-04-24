@@ -45,6 +45,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
+from ctx.adapters.generic.contract import (
+    Contract,
+    ContractBuilder,
+    augmented_system_prompt_with_contract,
+)
 from ctx.adapters.generic.loop import LoopObserver, LoopResult, run_loop
 from ctx.adapters.generic.planner import PlanArtifact, Planner, augmented_system_prompt
 from ctx.adapters.generic.providers import (
@@ -160,12 +165,14 @@ class EvaluationLoopResult:
 
     ``rounds`` is one entry per Generator+Evaluator pair; ``final``
     is the last Generator LoopResult; ``plan`` is populated when a
-    Planner was supplied.
+    Planner was supplied; ``contract`` is populated when a
+    ContractBuilder was supplied (full P/G/E/C flow).
     """
 
     final: LoopResult
     rounds: tuple["EvaluationRound", ...]
     plan: PlanArtifact | None
+    contract: Contract | None
     total_usage: Usage
 
 
@@ -307,6 +314,7 @@ def run_with_evaluation(
     evaluator: Evaluator,
     max_rounds: int = 2,
     planner: Planner | None = None,
+    contract_builder: ContractBuilder | None = None,
     # All other kwargs mirror run_loop.
     router: McpRouter | None = None,
     extra_tools: list[ToolDefinition] | None = None,
@@ -322,19 +330,27 @@ def run_with_evaluation(
 ) -> EvaluationLoopResult:
     """Run Generator → Evaluator → (revise) until pass or round cap.
 
-    Optionally runs a ``Planner`` first (full P/G/E triad). The
-    planner's success_criteria replace the evaluator's defaults
-    when present — keeps the agents agreeing on what "done" means.
+    Supports three progressively richer flows:
+
+      * Solo G+E: planner=None, contract_builder=None — grade the
+        Generator's first output against the evaluator's default
+        criteria.
+      * P/G/E: planner supplied. Planner runs first, its
+        success_criteria replace the evaluator defaults, its spec
+        is embedded in the Generator's system prompt.
+      * P/C/G/E: also contract_builder supplied. After the planner,
+        a contract agent refines the plan's success_criteria into
+        testable pass/fail conditions; those conditions become the
+        evaluator's grading criteria AND are embedded in the
+        Generator's system prompt.
 
     Budgets (``budget_usd``, ``budget_tokens``) apply to the
-    Generator call specifically in each round, NOT to the
-    evaluator/planner calls. Planner + evaluator costs are tracked
-    in the returned ``total_usage`` so the caller can see the true
-    full cost.
+    Generator call in each round, NOT to the planner / contract /
+    evaluator calls. Their costs are tracked in ``total_usage`` so
+    the caller sees the full picture.
 
     ``max_rounds`` caps the total Generator calls. 1 = solo agent
-    with a grade applied at the end; 2 = one revision; 3 = two
-    revisions; etc.
+    with a grade applied at the end; 2 = one revision; etc.
     """
     if max_rounds < 1:
         raise ValueError(f"max_rounds must be >= 1 (got {max_rounds})")
@@ -342,6 +358,7 @@ def run_with_evaluation(
     # Planner pass — if supplied, transform the system prompt + give
     # the evaluator its spec-based criteria.
     plan: PlanArtifact | None = None
+    contract: Contract | None = None
     augmented_prompt = system_prompt
     active_evaluator = evaluator
     if planner is not None:
@@ -350,10 +367,26 @@ def run_with_evaluation(
         if plan.success_criteria:
             active_evaluator = evaluator.with_criteria(plan.success_criteria)
 
-    # Total usage starts with the planner's cost, if any.
+    # Contract pass — runs AFTER the planner, BEFORE the Generator.
+    # Replaces the evaluator's criteria with the contract's testable
+    # clauses and overwrites the Generator's system prompt with the
+    # contract markdown (more specific than the planner's).
+    if contract_builder is not None:
+        contract = contract_builder.build(task, plan=plan)
+        if contract.criteria:
+            active_evaluator = evaluator.with_criteria(
+                contract.as_evaluator_criteria()
+            )
+            augmented_prompt = augmented_system_prompt_with_contract(
+                system_prompt, contract,
+            )
+
+    # Total usage starts with the planner's + contract builder's cost.
     totals = _UsageTotals()
     if plan is not None:
         totals.add(plan.usage)
+    if contract is not None:
+        totals.add(contract.usage)
 
     rounds: list[EvaluationRound] = []
     round_index = 0
@@ -443,6 +476,7 @@ def run_with_evaluation(
         final=final,
         rounds=tuple(rounds),
         plan=plan,
+        contract=contract,
         total_usage=totals.as_usage(),
     )
 

@@ -34,6 +34,7 @@ from typing import Any
 from ctx.adapters.generic.compaction import TokenBudgetCompactor
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox, make_tool_executor
 from ctx.adapters.generic.loop import run_loop
+from ctx.adapters.generic.contract import ContractBuilder
 from ctx.adapters.generic.evaluator import Evaluator, run_with_evaluation
 from ctx.adapters.generic.planner import Planner, augmented_system_prompt
 from ctx.adapters.generic.providers import Message, get_provider
@@ -348,6 +349,22 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     r.add_argument(
+        "--contract",
+        action="store_true",
+        help=(
+            "Refine the planner's success criteria into testable "
+            "contract clauses before the Generator runs. Requires "
+            "--planner and --evaluator (the three agents share a "
+            "contract-driven definition of 'done'). Adds one "
+            "provider call."
+        ),
+    )
+    r.add_argument(
+        "--contract-model",
+        default=None,
+        help="Model override for the contract-refinement call.",
+    )
+    r.add_argument(
         "--quiet", action="store_true",
         help="Suppress status lines; only print the final message.",
     )
@@ -477,6 +494,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 for c in mcp_configs],
         "ctx_tools_enabled": not args.no_ctx_tools,
         "planner_used": plan_artifact is not None,
+        "contract_used": bool(args.evaluator and args.contract),
         "evaluator_used": args.evaluator,
         "evaluator_max_rounds": args.evaluator_rounds if args.evaluator else None,
         "plan": plan_artifact.to_dict() if plan_artifact else None,
@@ -499,16 +517,38 @@ def _cmd_run(args: argparse.Namespace) -> int:
             print(f"[ctx] budget: ${args.budget_usd:.2f}", file=sys.stderr)
 
     evaluator_rounds: list[dict[str, Any]] | None = None
+    contract_artifact = None  # populated only on P/C/G/E path
     try:
         if args.evaluator:
+            if args.contract and not args.planner:
+                # Contracts refine planner output; without a plan
+                # they'd have no prior spec to refine.
+                raise SystemExit(
+                    "error: --contract requires --planner (the contract "
+                    "refines the planner's success_criteria into "
+                    "testable clauses)."
+                )
             if not args.quiet:
+                pieces = ["evaluator"]
+                if args.planner:
+                    pieces.insert(0, "planner")
+                if args.contract:
+                    pieces.append("contract")
                 print(
-                    f"[ctx] evaluator enabled (max_rounds={args.evaluator_rounds})",
+                    f"[ctx] triad enabled: {' → '.join(pieces)} "
+                    f"(max_rounds={args.evaluator_rounds})",
                     file=sys.stderr,
                 )
             planner_agent = (
                 Planner(provider, model=args.planner_model or args.model)
                 if args.planner
+                else None
+            )
+            contract_builder = (
+                ContractBuilder(
+                    provider, model=args.contract_model or args.model,
+                )
+                if args.contract
                 else None
             )
             evaluator_agent = Evaluator(
@@ -521,6 +561,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 evaluator=evaluator_agent,
                 max_rounds=args.evaluator_rounds,
                 planner=planner_agent,
+                contract_builder=contract_builder,
                 router=router,
                 extra_tools=extra_tools or None,
                 tool_executor=tool_executor,
@@ -535,6 +576,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
             result = eval_outcome.final
             plan_artifact = eval_outcome.plan
+            contract_artifact = eval_outcome.contract
+            # session_start metadata was snapshotted BEFORE the planner
+            # and contract ran (they live inside run_with_evaluation),
+            # so plan/contract fields on that event are null. Emit
+            # explicit events here so load_session still surfaces the
+            # refined artifacts for resume + audit.
+            if plan_artifact is not None:
+                store.write_event("plan", plan_artifact.to_dict())
+            if contract_artifact is not None:
+                store.write_event("contract", contract_artifact.to_dict())
             evaluator_rounds = [
                 {
                     "index": r.index,
