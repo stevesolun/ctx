@@ -61,7 +61,7 @@ def test_write_text_no_temp_file_left_on_success(tmp_path: Path) -> None:
 def test_write_text_no_temp_file_left_on_error(tmp_path: Path) -> None:
     """Temp file must be cleaned up even when os.replace raises."""
     target = tmp_path / "out.txt"
-    with patch("_fs_utils._replace_with_retry", side_effect=OSError("boom")):
+    with patch("ctx.utils._fs_utils._replace_with_retry", side_effect=OSError("boom")):
         with pytest.raises(OSError, match="boom"):
             atomic_write_text(target, "data")
     leftover = list(tmp_path.glob("out.txt.*"))
@@ -130,8 +130,8 @@ def test_replace_retries_on_permission_error(tmp_path: Path) -> None:
             raise PermissionError("locked")
         real_replace(src, dst)
 
-    with patch("_fs_utils.os.replace", side_effect=flaky_replace):
-        with patch("_fs_utils.time.sleep"):  # don't actually sleep
+    with patch("ctx.utils._fs_utils.os.replace", side_effect=flaky_replace):
+        with patch("ctx.utils._fs_utils.time.sleep"):  # don't actually sleep
             atomic_write_text(target, "retry-test")
 
     assert call_count == 2
@@ -142,8 +142,8 @@ def test_replace_raises_after_max_attempts(tmp_path: Path) -> None:
     """After exhausting retries, the PermissionError must propagate."""
     target = tmp_path / "out.txt"
 
-    with patch("_fs_utils.os.replace", side_effect=PermissionError("always locked")):
-        with patch("_fs_utils.time.sleep"):
+    with patch("ctx.utils._fs_utils.os.replace", side_effect=PermissionError("always locked")):
+        with patch("ctx.utils._fs_utils.time.sleep"):
             with pytest.raises(PermissionError, match="always locked"):
                 atomic_write_text(target, "data")
 
