@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from resolve_skills import (
+from ctx.core.resolve.resolve_skills import (
     apply_intent_boosts,
     discover_available_skills,
     read_intent_signals,
@@ -257,7 +257,7 @@ class TestResolveMcpRecommendations:
 
     def _fake_graph(self, monkeypatch):
         """Make resolve() think the graph is available and non-empty."""
-        import resolve_skills  # noqa: PLC0415
+        from ctx.core.resolve import resolve_skills  # noqa: PLC0415
 
         class _FakeGraph:
             def number_of_nodes(self) -> int:
@@ -271,7 +271,7 @@ class TestResolveMcpRecommendations:
     def test_mcp_graph_hit_lands_in_mcp_servers_not_load(
         self, tmp_path, monkeypatch
     ):
-        import resolve_skills  # noqa: PLC0415
+        from ctx.core.resolve import resolve_skills  # noqa: PLC0415
         self._fake_graph(monkeypatch)
 
         # Synthetic graph hit: an MCP-type neighbor with score above the
@@ -307,7 +307,7 @@ class TestResolveMcpRecommendations:
     def test_mcp_entry_has_reason_score_and_shared_tags(
         self, tmp_path, monkeypatch
     ):
-        import resolve_skills  # noqa: PLC0415
+        from ctx.core.resolve import resolve_skills  # noqa: PLC0415
         self._fake_graph(monkeypatch)
 
         def fake_resolve_by_seeds(graph, seeds, **kwargs):
@@ -339,7 +339,7 @@ class TestResolveMcpRecommendations:
     def test_mcp_deduped_when_same_name_hit_twice(
         self, tmp_path, monkeypatch
     ):
-        import resolve_skills  # noqa: PLC0415
+        from ctx.core.resolve import resolve_skills  # noqa: PLC0415
         self._fake_graph(monkeypatch)
 
         def fake_resolve_by_seeds(graph, seeds, **kwargs):
@@ -363,7 +363,7 @@ class TestResolveMcpRecommendations:
     def test_mcp_below_noise_floor_dropped(
         self, tmp_path, monkeypatch
     ):
-        import resolve_skills  # noqa: PLC0415
+        from ctx.core.resolve import resolve_skills  # noqa: PLC0415
         self._fake_graph(monkeypatch)
 
         def fake_resolve_by_seeds(graph, seeds, **kwargs):
@@ -391,7 +391,7 @@ class TestResolveMcpRecommendations:
     ):
         # Regression: mixing mcp-server hits and skill hits must not
         # break the existing skill path.
-        import resolve_skills  # noqa: PLC0415
+        from ctx.core.resolve import resolve_skills  # noqa: PLC0415
         self._fake_graph(monkeypatch)
 
         def fake_resolve_by_seeds(graph, seeds, **kwargs):
@@ -534,7 +534,7 @@ class TestNoiseFloorNormalized:
 
     def _fake_graph(self, monkeypatch):
         import networkx as nx
-        import resolve_skills
+        from ctx.core.resolve import resolve_skills
 
         def fake_load_graph(_=None):
             G = nx.Graph()
@@ -547,8 +547,8 @@ class TestNoiseFloorNormalized:
         """A hit with normalized_score=1.0 (the top of its ranking)
         always passes the floor — otherwise the top recommendation
         gets silently dropped on small fixtures."""
-        import resolve_skills
-        from resolve_skills import resolve
+        from ctx.core.resolve import resolve_skills
+        from ctx.core.resolve.resolve_skills import resolve
         self._fake_graph(monkeypatch)
 
         def fake_hits(*a, **kw):
@@ -567,8 +567,8 @@ class TestNoiseFloorNormalized:
 
     def test_skill_below_0_3_dropped(self, tmp_path, monkeypatch):
         """Skill hits with normalized_score < 0.30 don't make the cut."""
-        import resolve_skills
-        from resolve_skills import resolve
+        from ctx.core.resolve import resolve_skills
+        from ctx.core.resolve.resolve_skills import resolve
         self._fake_graph(monkeypatch)
 
         def fake_hits(*a, **kw):
@@ -589,8 +589,8 @@ class TestNoiseFloorNormalized:
         passes the MCP floor (0.20) but NOT the skill floor (0.30).
         Pinning this asymmetry so a future 'unify the floors' refactor
         wipes out MCP recommendations without CI noticing."""
-        import resolve_skills
-        from resolve_skills import resolve
+        from ctx.core.resolve import resolve_skills
+        from ctx.core.resolve.resolve_skills import resolve
         self._fake_graph(monkeypatch)
 
         def fake_hits(*a, **kw):
@@ -619,8 +619,8 @@ class TestNoiseFloorNormalized:
         """An older resolver output without normalized_score must
         still work via raw-score fallback, so a stale cached graph
         doesn't silently return [] after the P2.5 upgrade."""
-        import resolve_skills
-        from resolve_skills import resolve
+        from ctx.core.resolve import resolve_skills
+        from ctx.core.resolve.resolve_skills import resolve
         self._fake_graph(monkeypatch)
 
         def fake_hits(*a, **kw):

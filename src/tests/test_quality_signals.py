@@ -30,7 +30,7 @@ import math
 
 import pytest
 
-import quality_signals as qs
+from ctx.core.quality import quality_signals as qs
 
 
 # ────────────────────────────────────────────────────────────────────

@@ -47,8 +47,8 @@ _SRC = Path(__file__).resolve().parents[1]
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-import semantic_edges  # noqa: E402
-from semantic_edges import (  # noqa: E402
+from ctx.core.graph import semantic_edges  # noqa: E402
+from ctx.core.graph.semantic_edges import (  # noqa: E402
     SemanticNode,
     TopKState,
     _chunk_text,
@@ -848,7 +848,7 @@ class TestComputeSemanticEdgesDuplicateId:
         """Duplicate node_id must raise ValueError before any embedding."""
         mock_embedder = _fake_embedder()
         monkeypatch.setattr(
-            "semantic_edges.get_embedder",
+            "ctx.core.graph.semantic_edges.get_embedder",
             lambda *a, **kw: mock_embedder,
             raising=False,
         )
@@ -878,7 +878,7 @@ class TestComputeSemanticEdgesBackendUnavailable:
         with patch.dict("sys.modules", {"embedding_backend": fake_eb}):
             # Re-import to pick up patched module in lazy import path
             import importlib
-            import semantic_edges as se_mod
+            from ctx.core.graph import semantic_edges as se_mod
             importlib.reload(se_mod)
             nodes = [SemanticNode("a", "text")]
             result = se_mod.compute_semantic_edges(
@@ -898,7 +898,7 @@ class TestComputeSemanticEdgesBackendUnavailable:
         fake_eb.get_embedder.side_effect = ImportError("no ST")
         with patch.dict("sys.modules", {"embedding_backend": fake_eb}):
             import importlib
-            import semantic_edges as se_mod
+            from ctx.core.graph import semantic_edges as se_mod
             importlib.reload(se_mod)
             nodes = [SemanticNode("a", "text")]
             result = se_mod.compute_semantic_edges(
@@ -953,7 +953,7 @@ class TestComputeSemanticEdgesWithFakeEmbedder:
 
         with patch.dict("sys.modules", {"embedding_backend": fake_eb_module}):
             import importlib
-            import semantic_edges as se_mod
+            from ctx.core.graph import semantic_edges as se_mod
             importlib.reload(se_mod)
 
             with patch.object(se_mod, "_embed_missing", side_effect=_fake_embed_missing):
@@ -1049,7 +1049,7 @@ class TestComputeSemanticEdgesIncrementalPath:
 
         with patch.dict("sys.modules", {"embedding_backend": fake_eb_module}):
             import importlib
-            import semantic_edges as se_mod
+            from ctx.core.graph import semantic_edges as se_mod
             importlib.reload(se_mod)
 
             with patch.object(se_mod, "_embed_missing", side_effect=_fake_embed_missing):
@@ -1123,7 +1123,7 @@ class TestComputeSemanticEdgesEmbedFailure:
 
         with patch.dict("sys.modules", {"embedding_backend": fake_eb}):
             import importlib
-            import semantic_edges as se_mod
+            from ctx.core.graph import semantic_edges as se_mod
             importlib.reload(se_mod)
 
             with patch.object(se_mod, "_embed_missing", side_effect=_raise_embed):
@@ -1148,7 +1148,7 @@ class TestComputeSemanticEdgesEmbedFailure:
 
         with patch.dict("sys.modules", {"embedding_backend": fake_eb}):
             import importlib
-            import semantic_edges as se_mod
+            from ctx.core.graph import semantic_edges as se_mod
             importlib.reload(se_mod)
 
             with patch.object(se_mod, "_embed_missing", side_effect=_raise_embed):
@@ -1209,7 +1209,7 @@ class TestComputeSemanticEdgesCacheHitPath:
     def test_save_topk_state_oserror_does_not_propagate(self, tmp_path: Path) -> None:
         """OSError from _save_topk_state is swallowed; pairs still returned (lines 724-727)."""
         import importlib
-        import semantic_edges as se_mod
+        from ctx.core.graph import semantic_edges as se_mod
 
         vec_a = np.array([1.0, 0.0], dtype="float32")
         vec_b = np.array([1.0, 0.0], dtype="float32")

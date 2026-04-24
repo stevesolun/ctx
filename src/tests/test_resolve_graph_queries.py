@@ -27,7 +27,7 @@ from unittest.mock import patch
 import networkx as nx
 import pytest
 
-import resolve_graph
+from ctx.core.graph import resolve_graph
 
 
 # ── Graph builders ────────────────────────────────────────────────────────────
