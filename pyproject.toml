@@ -57,6 +57,12 @@ ctx-wiki-graphify = "ctx.core.wiki.wiki_graphify:main"
 # `ctx resume`, `ctx sessions`. Ships v1 of the model-agnostic
 # harness; requires the [harness] optional dep for LiteLLM.
 ctx = "ctx.cli.run:main"
+# Plan 001 phase H8: standalone MCP server exposing ctx-core.
+# Any MCP-aware host (Cline, Goose, Claude Code itself, Claude
+# Agent SDK, custom harness) can attach this server and gain
+# access to the skill/agent/MCP recommendation surface WITHOUT
+# using our ``ctx run`` harness loop.
+ctx-mcp-server = "ctx.mcp_server.server:main"
 
 [project.optional-dependencies]
 dev = [
