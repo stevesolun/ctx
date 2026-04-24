@@ -53,6 +53,10 @@ ctx-mcp-uninstall = "ctx.adapters.claude_code.install.mcp_install:uninstall_main
 ctx-mcp-quality = "mcp_quality:main"
 ctx-mcp-rebuild-index = "mcp_rebuild_index:main"
 ctx-wiki-graphify = "ctx.core.wiki.wiki_graphify:main"
+# Plan 001 phase H7: the generic harness CLI — `ctx run`,
+# `ctx resume`, `ctx sessions`. Ships v1 of the model-agnostic
+# harness; requires the [harness] optional dep for LiteLLM.
+ctx = "ctx.cli.run:main"
 
 [project.optional-dependencies]
 dev = [

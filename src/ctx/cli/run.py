@@ -1,0 +1,583 @@
+"""ctx.cli.run — `ctx run` / `ctx resume` / `ctx sessions` CLI.
+
+First user-facing entry to the model-agnostic harness. Ships as v1
+per Plan 001 §10 success criteria:
+
+    ctx run --provider openrouter --model minimax/minimax-m1 \\
+            --mcp ctx,filesystem \\
+            --task "fix the failing tests in this repo"
+
+Three commands:
+    run       - start a new agent session
+    resume    - continue a prior session by id
+    sessions  - list sessions + inspect a single one
+
+Example end-to-end (Ollama, no API key needed):
+
+    ctx run --provider ollama --model llama3.1 \\
+            --task "summarize the architecture of this codebase" \\
+            --mcp filesystem:/tmp/project
+
+Plan 001 Phase H7.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import sys
+from pathlib import Path
+from typing import Any
+
+from ctx.adapters.generic.compaction import TokenBudgetCompactor
+from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox, make_tool_executor
+from ctx.adapters.generic.loop import run_loop
+from ctx.adapters.generic.providers import Message, get_provider
+from ctx.adapters.generic.state import (
+    JsonlObserver,
+    SessionStore,
+    default_sessions_dir,
+    list_sessions,
+    load_session,
+    new_session_id,
+)
+from ctx.adapters.generic.tools import McpRouter, McpServerConfig
+
+
+_logger = logging.getLogger(__name__)
+
+
+# ── Provider key-env defaults ───────────────────────────────────────────────
+
+
+# Tier-1 provider → env var map. The CLI reads --api-key-env or falls
+# back to this table. Users can override with --api-key-env explicitly.
+_PROVIDER_KEY_ENV: dict[str, str] = {
+    "openrouter": "OPENROUTER_API_KEY",
+    "anthropic":  "ANTHROPIC_API_KEY",
+    "openai":     "OPENAI_API_KEY",
+    "gemini":     "GEMINI_API_KEY",
+    "mistral":    "MISTRAL_API_KEY",
+    "deepseek":   "DEEPSEEK_API_KEY",
+    "together":   "TOGETHER_API_KEY",
+    "groq":       "GROQ_API_KEY",
+    # Ollama: no key needed (local)
+    "ollama":     "",
+}
+
+
+def _model_provider_prefix(model: str) -> str:
+    """Given a model string like 'openrouter/anthropic/claude-opus-4.7',
+    return the leading provider segment ('openrouter')."""
+    return model.split("/", 1)[0] if "/" in model else model
+
+
+def _resolve_api_key_env(
+    explicit: str | None, model: str, provider: str | None,
+) -> str | None:
+    if explicit is not None:
+        return explicit if explicit else None   # empty → None (Ollama)
+    prefix = provider or _model_provider_prefix(model)
+    key = _PROVIDER_KEY_ENV.get(prefix)
+    return key if key else None
+
+
+# ── MCP spec parsing ───────────────────────────────────────────────────────
+
+
+def _parse_mcp_spec(spec: str) -> McpServerConfig:
+    """Parse a --mcp argument.
+
+    Two forms:
+      name:<shell-invocation>
+        Example: filesystem:npx -y @modelcontextprotocol/server-filesystem /data
+        The part before the colon is the name; the part after is the
+        command + args (split on whitespace, no shell).
+
+      name (bare)
+        Names that match a known preset get a default invocation.
+        Currently recognised presets:
+          filesystem → npx -y @modelcontextprotocol/server-filesystem .
+          github     → npx -y @modelcontextprotocol/server-github
+          git        → npx -y @modelcontextprotocol/server-git
+        Unknown bare names raise SystemExit.
+    """
+    spec = spec.strip()
+    if not spec:
+        raise SystemExit("empty --mcp spec")
+
+    if ":" in spec:
+        name, _, invocation = spec.partition(":")
+        name = name.strip()
+        invocation = invocation.strip()
+        if not name or not invocation:
+            raise SystemExit(f"malformed --mcp spec: {spec!r}")
+        parts = invocation.split()
+        if not parts:
+            raise SystemExit(f"malformed --mcp spec: {spec!r}")
+        return McpServerConfig(
+            name=name,
+            command=parts[0],
+            args=tuple(parts[1:]),
+        )
+
+    # Bare name → preset.
+    preset = _MCP_PRESETS.get(spec)
+    if preset is None:
+        raise SystemExit(
+            f"unknown MCP preset {spec!r}. "
+            f"Use 'name:<command>' form or pick one of: "
+            f"{sorted(_MCP_PRESETS)}"
+        )
+    return preset
+
+
+_MCP_PRESETS: dict[str, McpServerConfig] = {
+    "filesystem": McpServerConfig(
+        name="filesystem",
+        command="npx",
+        args=("-y", "@modelcontextprotocol/server-filesystem", "."),
+    ),
+    "github": McpServerConfig(
+        name="github",
+        command="npx",
+        args=("-y", "@modelcontextprotocol/server-github"),
+    ),
+    "git": McpServerConfig(
+        name="git",
+        command="npx",
+        args=("-y", "@modelcontextprotocol/server-git"),
+    ),
+}
+
+
+# ── Default system prompt ──────────────────────────────────────────────────
+
+
+_DEFAULT_SYSTEM_PROMPT = """\
+You are a coding assistant running inside the ctx harness. You have
+access to the model's knowledge PLUS a set of tools for file system
+access, git operations, and the ctx knowledge graph (ctx__*). The
+knowledge graph tools can recommend relevant skills, agents, and MCP
+servers for the user's task — use them when you need deeper expertise
+or tooling you don't have loaded.
+
+Workflow:
+  1. Read the task carefully.
+  2. If the task needs specialised tooling or techniques, call
+     ctx__recommend_bundle(query=<short description>) to surface
+     relevant skills / agents / MCPs.
+  3. Use ctx__wiki_get(slug=<slug>) to read the details of a
+     recommended skill/agent you want to use.
+  4. Use filesystem / git / other MCP tools as needed to make
+     changes.
+  5. When the task is done OR you cannot proceed without more input
+     from the user, answer in text — do not call more tools.
+
+Be concise. Preserve file paths and slugs verbatim in your responses.
+"""
+
+
+# ── Main entry ─────────────────────────────────────────────────────────────
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.command == "run":
+        return _cmd_run(args)
+    if args.command == "resume":
+        return _cmd_resume(args)
+    if args.command == "sessions":
+        return _cmd_sessions(args)
+    parser.print_help()
+    return 2
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="ctx",
+        description=(
+            "ctx — model-agnostic harness. Drive any LLM through "
+            "a coding task with file system, git, and ctx-core skill "
+            "tools attached."
+        ),
+    )
+    sub = p.add_subparsers(dest="command", required=True)
+
+    # run
+    r = sub.add_parser(
+        "run",
+        help="Start a new agent session.",
+        description="Run the harness against a fresh task.",
+    )
+    r.add_argument(
+        "--provider",
+        help=(
+            "Provider backend (informational; the model string's "
+            "prefix determines actual routing when using LiteLLM). "
+            "Default: inferred from --model."
+        ),
+    )
+    r.add_argument(
+        "--model",
+        required=True,
+        help=(
+            "Model slug in LiteLLM form, e.g. "
+            "'openrouter/anthropic/claude-opus-4.7', "
+            "'ollama/llama3.1:70b', 'openai/gpt-5.5'."
+        ),
+    )
+    r.add_argument(
+        "--task", required=True,
+        help="The task for the agent (user-turn content).",
+    )
+    r.add_argument(
+        "--system-prompt",
+        help=(
+            "Override the default system prompt. Pass '-' to read "
+            "from stdin."
+        ),
+    )
+    r.add_argument(
+        "--mcp",
+        action="append",
+        default=[],
+        metavar="NAME[:COMMAND]",
+        help=(
+            "Attach an MCP server. Repeatable. Forms: "
+            "'filesystem' (preset) or 'name:npx -y ...' (explicit)."
+        ),
+    )
+    r.add_argument(
+        "--no-ctx-tools",
+        action="store_true",
+        help="Do not attach the built-in ctx__* tool surface.",
+    )
+    r.add_argument(
+        "--api-key-env",
+        help=(
+            "Override the env var holding the provider's API key. "
+            "Default: auto-detected from the model prefix."
+        ),
+    )
+    r.add_argument(
+        "--base-url",
+        help="Override provider base URL (e.g. Ollama host).",
+    )
+    r.add_argument(
+        "--temperature", type=float, default=0.7,
+        help="Sampling temperature (default 0.7).",
+    )
+    r.add_argument(
+        "--max-iterations", type=int, default=25,
+        help="Hard cap on agent loop iterations (default 25).",
+    )
+    r.add_argument(
+        "--max-tokens", type=int, default=None,
+        help="Max tokens per provider call (default: provider default).",
+    )
+    r.add_argument(
+        "--budget-usd", type=float, default=None,
+        help="Stop when cumulative cost exceeds this many USD.",
+    )
+    r.add_argument(
+        "--budget-tokens", type=int, default=None,
+        help="Stop when input+output tokens exceed this total.",
+    )
+    r.add_argument(
+        "--no-compact",
+        action="store_true",
+        help="Disable automatic context compaction.",
+    )
+    r.add_argument(
+        "--session-id",
+        help="Pin the session id. Default: auto-generated uuid.",
+    )
+    r.add_argument(
+        "--sessions-dir",
+        default=None,
+        help="Override sessions directory (default ~/.ctx/sessions).",
+    )
+    r.add_argument(
+        "--quiet", action="store_true",
+        help="Suppress status lines; only print the final message.",
+    )
+    r.add_argument(
+        "--json", action="store_true",
+        help="Emit the LoopResult as JSON instead of text.",
+    )
+
+    # resume
+    rz = sub.add_parser(
+        "resume",
+        help="Continue a previously-run session by id.",
+    )
+    rz.add_argument("session_id", help="The session id to resume.")
+    rz.add_argument(
+        "--task", required=True,
+        help="The follow-up task to run against the replayed session.",
+    )
+    rz.add_argument(
+        "--model",
+        help=(
+            "Model to use for the resume. Default: the same model the "
+            "original session used (read from session metadata)."
+        ),
+    )
+    rz.add_argument(
+        "--sessions-dir", default=None,
+        help="Override sessions directory.",
+    )
+    rz.add_argument(
+        "--quiet", action="store_true",
+    )
+    rz.add_argument(
+        "--json", action="store_true",
+    )
+
+    # sessions
+    ls = sub.add_parser(
+        "sessions",
+        help="List saved sessions or inspect one by id.",
+    )
+    ls.add_argument(
+        "--sessions-dir", default=None,
+        help="Override sessions directory.",
+    )
+    ls.add_argument(
+        "session_id", nargs="?", default=None,
+        help="If given, print that session's summary metadata.",
+    )
+    ls.add_argument(
+        "--json", action="store_true",
+    )
+
+    return p
+
+
+# ── Command: run ───────────────────────────────────────────────────────────
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    sdir = Path(args.sessions_dir) if args.sessions_dir else default_sessions_dir()
+
+    api_key_env = _resolve_api_key_env(args.api_key_env, args.model, args.provider)
+    provider = get_provider(
+        default_model=args.model,
+        base_url=args.base_url,
+        api_key_env=api_key_env,
+    )
+
+    system_prompt = _resolve_system_prompt(args.system_prompt)
+    session_id = args.session_id or new_session_id()
+
+    # MCP router startup.
+    mcp_configs = [_parse_mcp_spec(spec) for spec in args.mcp]
+    router = McpRouter(mcp_configs) if mcp_configs else None
+    if router is not None:
+        if not args.quiet:
+            print(f"[ctx] starting MCP servers: {[c.name for c in mcp_configs]}",
+                  file=sys.stderr)
+        router.start()
+
+    # ctx-core tools.
+    extra_tools = []
+    tool_executor = None
+    if not args.no_ctx_tools:
+        toolbox = CtxCoreToolbox()
+        extra_tools.extend(toolbox.tool_definitions())
+        tool_executor = make_tool_executor(toolbox, fallback=None)
+
+    compactor = None if args.no_compact else TokenBudgetCompactor()
+
+    store = SessionStore.create(session_id=session_id, sessions_dir=sdir)
+    metadata = {
+        "task": args.task,
+        "model": args.model,
+        "provider_prefix": _model_provider_prefix(args.model),
+        "system_prompt": system_prompt,
+        "temperature": args.temperature,
+        "max_iterations": args.max_iterations,
+        "budget_usd": args.budget_usd,
+        "budget_tokens": args.budget_tokens,
+        "mcp": [{"name": c.name, "command": c.command, "args": list(c.args)}
+                for c in mcp_configs],
+        "ctx_tools_enabled": not args.no_ctx_tools,
+    }
+    observer = JsonlObserver(store, session_metadata=metadata)
+
+    if not args.quiet:
+        print(f"[ctx] session {session_id}  ({store.path})", file=sys.stderr)
+        print(f"[ctx] model: {args.model}", file=sys.stderr)
+        if args.budget_usd is not None:
+            print(f"[ctx] budget: ${args.budget_usd:.2f}", file=sys.stderr)
+
+    try:
+        result = run_loop(
+            provider=provider,
+            system_prompt=system_prompt,
+            task=args.task,
+            router=router,
+            extra_tools=extra_tools or None,
+            tool_executor=tool_executor,
+            model=args.model,
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+            max_iterations=args.max_iterations,
+            budget_usd=args.budget_usd,
+            budget_tokens=args.budget_tokens,
+            observer=observer,
+            compactor=compactor,
+        )
+    finally:
+        store.close()
+        if router is not None:
+            router.stop()
+
+    return _emit_result(result, session_id, as_json=args.json, quiet=args.quiet)
+
+
+# ── Command: resume ────────────────────────────────────────────────────────
+
+
+def _cmd_resume(args: argparse.Namespace) -> int:
+    sdir = Path(args.sessions_dir) if args.sessions_dir else default_sessions_dir()
+    state = load_session(args.session_id, sessions_dir=sdir)
+
+    meta = state.metadata
+    model = args.model or meta.get("model")
+    if not model:
+        print(
+            f"error: session {args.session_id!r} has no recorded model; "
+            "pass --model explicitly.",
+            file=sys.stderr,
+        )
+        return 1
+
+    system_prompt = meta.get("system_prompt") or _DEFAULT_SYSTEM_PROMPT
+    api_key_env = _resolve_api_key_env(None, model, None)
+    provider = get_provider(default_model=model, api_key_env=api_key_env)
+
+    store = SessionStore.attach(args.session_id, sessions_dir=sdir)
+    observer = JsonlObserver(store, session_metadata={}, emit_session_start=False)
+    compactor = TokenBudgetCompactor()
+
+    if not args.quiet:
+        print(
+            f"[ctx] resuming {args.session_id} ({len(state.messages)} prior messages)",
+            file=sys.stderr,
+        )
+
+    try:
+        result = run_loop(
+            provider=provider,
+            system_prompt=system_prompt,
+            task=args.task,
+            messages=list(state.messages),
+            model=model,
+            observer=observer,
+            compactor=compactor,
+        )
+    finally:
+        store.close()
+
+    return _emit_result(result, args.session_id, as_json=args.json, quiet=args.quiet)
+
+
+# ── Command: sessions ─────────────────────────────────────────────────────
+
+
+def _cmd_sessions(args: argparse.Namespace) -> int:
+    sdir = Path(args.sessions_dir) if args.sessions_dir else default_sessions_dir()
+    if args.session_id is None:
+        ids = list_sessions(sdir)
+        if args.json:
+            print(json.dumps(ids))
+        else:
+            if not ids:
+                print("(no sessions)")
+            else:
+                for sid in ids:
+                    print(sid)
+        return 0
+
+    # Detail view: load + summarise.
+    state = load_session(args.session_id, sessions_dir=sdir)
+    summary = {
+        "session_id": state.session_id,
+        "path": str(state.path),
+        "stopped": state.stopped,
+        "stop_reason": state.stop_reason,
+        "event_count": state.event_count,
+        "messages": len(state.messages),
+        "metadata": state.metadata,
+    }
+    if args.json:
+        print(json.dumps(summary, indent=2))
+    else:
+        print(f"session: {state.session_id}")
+        print(f"  path: {state.path}")
+        print(f"  events: {state.event_count}  messages: {len(state.messages)}")
+        print(f"  stopped: {state.stopped}  reason: {state.stop_reason}")
+        task = state.metadata.get("task", "<no recorded task>")
+        print(f"  task: {task!r}")
+        model = state.metadata.get("model", "<unknown>")
+        print(f"  model: {model}")
+    return 0
+
+
+# ── Result emission ────────────────────────────────────────────────────────
+
+
+def _emit_result(
+    result: Any, session_id: str, *, as_json: bool, quiet: bool,
+) -> int:
+    if as_json:
+        payload = {
+            "session_id": session_id,
+            "stop_reason": result.stop_reason,
+            "final_message": result.final_message,
+            "iterations": result.iterations,
+            "usage": {
+                "input_tokens": result.usage.input_tokens,
+                "output_tokens": result.usage.output_tokens,
+                "cost_usd": result.usage.cost_usd,
+            },
+            "detail": result.detail,
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        if not quiet:
+            print(
+                f"\n[ctx] stop={result.stop_reason}  iterations={result.iterations}  "
+                f"tokens={result.usage.input_tokens + result.usage.output_tokens}",
+                file=sys.stderr,
+            )
+            if result.usage.cost_usd is not None:
+                print(f"[ctx] cost: ${result.usage.cost_usd:.4f}", file=sys.stderr)
+            if result.detail:
+                print(f"[ctx] detail: {result.detail}", file=sys.stderr)
+        print(result.final_message)
+
+    # Non-zero only on true errors. 'tool_error' is exit 2; everything
+    # else (including max_iterations / budget) is exit 0 since the
+    # session completed in the sense of "ran to a defined stopping
+    # point". Cancellation also exits 0.
+    if result.stop_reason == "tool_error":
+        return 2
+    return 0
+
+
+def _resolve_system_prompt(raw: str | None) -> str:
+    if raw is None:
+        return _DEFAULT_SYSTEM_PROMPT
+    if raw == "-":
+        return sys.stdin.read()
+    return raw
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
