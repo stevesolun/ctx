@@ -22,7 +22,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-import bundle_orchestrator as _bo
+from ctx.adapters.claude_code.hooks import bundle_orchestrator as _bo
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -272,12 +272,12 @@ class TestSkillSuggestShim:
     hook configs that invoke ``python skill_suggest.py`` break silently."""
 
     def test_shim_re_exports_main(self):
-        import skill_suggest
+        from ctx.adapters.claude_code.hooks import skill_suggest
         # The shim re-imports main from bundle_orchestrator. The function
         # object must be the SAME instance to guarantee behavioural parity.
         assert skill_suggest.main is _bo.main
 
     def test_shim_re_exports_constants(self):
-        import skill_suggest
+        from ctx.adapters.claude_code.hooks import skill_suggest
         assert skill_suggest.PENDING_SKILLS == _bo.PENDING_SKILLS
         assert skill_suggest.PENDING_UNLOAD == _bo.PENDING_UNLOAD

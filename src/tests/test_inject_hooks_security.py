@@ -21,7 +21,7 @@ _SRC = Path(__file__).resolve().parent.parent
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from inject_hooks import make_hooks, merge_hooks, write_settings_atomic  # noqa: E402
+from ctx.adapters.claude_code.inject_hooks import make_hooks, merge_hooks, write_settings_atomic  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ def _all_commands(hooks_block: dict) -> list[str]:
 
 def _run_inject(ctx_dir: str, settings_path: Path) -> None:
     """Run the full inject pipeline (load → merge → atomic write)."""
-    from inject_hooks import load_settings, _remove_stale_hooks
+    from ctx.adapters.claude_code.inject_hooks import load_settings, _remove_stale_hooks
 
     settings = load_settings(settings_path)
     settings = _remove_stale_hooks(settings)
@@ -246,7 +246,7 @@ class TestAtomicWrite:
         directly (bypassing load_settings) to isolate the write path from the
         Windows file-lock behaviour on the read side.
         """
-        from inject_hooks import write_settings_atomic
+        from ctx.adapters.claude_code.inject_hooks import write_settings_atomic
 
         settings_path = tmp_path / "settings.json"
         payload = {"hooks": {"Stop": [{"type": "command", "command": "python x.py"}]}}
@@ -282,7 +282,7 @@ class TestAtomicWrite:
     ) -> None:
         """If os.replace() raises, the tempfile is removed and no stale .tmp lingers."""
         import os as _os
-        import inject_hooks as _ih
+        from ctx.adapters.claude_code import inject_hooks as _ih
 
         settings_path = tmp_path / "settings.json"
         original_replace = _os.replace

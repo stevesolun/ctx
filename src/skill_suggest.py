@@ -1,30 +1,9 @@
-#!/usr/bin/env python3
-"""
-skill_suggest.py -- Backward-compat shim for bundle_orchestrator.
+"""Legacy shim — prefer ``ctx.adapters.claude_code.hooks.skill_suggest``.
 
-The real implementation moved to ``bundle_orchestrator.py`` because
-the name "skill suggest" misrepresented the job -- this hook produces
-a recommendation BUNDLE that may span skills, agents, and MCP servers
-in any combination. The graph ranks across all three types uniformly;
-whatever scores highest wins.
-
-This module exists because existing ``~/.claude/settings.json`` hook
-configs invoke ``python skill_suggest.py``. Renaming the file without
-a shim would silently break those installs on the next
-``ctx-init --hooks`` refresh.
-
-New call sites should use ``bundle_orchestrator.py`` directly.
+Plan 001 phase R4b moved the real module to
+``src/ctx/adapters/claude_code/hooks/skill_suggest.py``. This shim stays as long as legacy
+``from skill_suggest import X`` call sites exist (scheduled to be dropped
+at the end of R6). New code should import directly from ``ctx.adapters.claude_code.hooks.skill_suggest``.
 """
 
-from __future__ import annotations
-
-from bundle_orchestrator import (  # noqa: F401 -- re-exports for legacy imports
-    PENDING_SKILLS,
-    PENDING_UNLOAD,
-    already_shown_this_session,
-    main,
-    mark_shown,
-)
-
-if __name__ == "__main__":
-    main()
+from ctx.adapters.claude_code.hooks.skill_suggest import *  # noqa: F401, F403

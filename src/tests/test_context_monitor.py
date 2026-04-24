@@ -22,8 +22,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-import context_monitor as _cm
-from context_monitor import (
+from ctx.adapters.claude_code.hooks import context_monitor as _cm
+from ctx.adapters.claude_code.hooks.context_monitor import (
     _parse_stdin_payload,
     append_intent_log,
     count_recent_unmatched,

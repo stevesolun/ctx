@@ -229,13 +229,13 @@ def e2e_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path
     )
 
     # ── Monkeypatch every module's path constants ─────────────────────────
-    import context_monitor as _cm
+    from ctx.adapters.claude_code.hooks import context_monitor as _cm
     monkeypatch.setattr(_cm, "CLAUDE_DIR", claude_dir)
     monkeypatch.setattr(_cm, "INTENT_LOG", intent_log)
     monkeypatch.setattr(_cm, "PENDING_SKILLS", pending_skills)
     monkeypatch.setattr(_cm, "MANIFEST_PATH", manifest)
 
-    import bundle_orchestrator as _bo
+    from ctx.adapters.claude_code.hooks import bundle_orchestrator as _bo
     monkeypatch.setattr(_bo, "CLAUDE_DIR", claude_dir)
     monkeypatch.setattr(_bo, "PENDING_SKILLS", pending_skills)
     monkeypatch.setattr(_bo, "PENDING_UNLOAD", claude_dir / "pending-unload.json")
@@ -273,7 +273,7 @@ class TestAliveLoopE2E:
         pre-fix, len(unmatched)>=THRESHOLD never fired; post-fix, the
         cumulative check also doesn't fire until enough signals have
         accumulated."""
-        import context_monitor as _cm
+        from ctx.adapters.claude_code.hooks import context_monitor as _cm
 
         monkeypatch.setattr(sys, "argv", [
             "context_monitor.py", "--tool", "Read",
@@ -292,7 +292,7 @@ class TestAliveLoopE2E:
         pending-skills write once the threshold is reached. The alive
         loop's suggestion arm now fires in production — code-reviewer
         BLOCKER verified in-situ."""
-        import context_monitor as _cm
+        from ctx.adapters.claude_code.hooks import context_monitor as _cm
 
         # Mix Read + Bash to exercise extension-based AND command-based
         # signal extraction. Each invocation surfaces a distinct signal
@@ -325,7 +325,7 @@ class TestAliveLoopE2E:
         python agent + python MCP, graph_suggest returns entries
         spanning all three types. Pins the cross-type contract the
         bundle orchestrator depends on."""
-        import context_monitor as _cm
+        from ctx.adapters.claude_code.hooks import context_monitor as _cm
 
         sugs = _cm.graph_suggest(["python"])
         assert len(sugs) > 0
@@ -342,8 +342,8 @@ class TestAliveLoopE2E:
         """Fire the cumulative threshold, then run the bundle orchestrator
         hook. Output must contain the three-type categorised layout and
         be valid Claude-Code-hook JSON."""
-        import context_monitor as _cm
-        import bundle_orchestrator as _bo
+        from ctx.adapters.claude_code.hooks import context_monitor as _cm
+        from ctx.adapters.claude_code.hooks import bundle_orchestrator as _bo
 
         # Feed signals that include a python-adjacent one so
         # graph_suggest hits our python-tagged nodes.
@@ -451,8 +451,8 @@ class TestAliveLoopE2E:
         If any link in the chain regresses, this test fails and CI
         blocks the PR. This is the load-bearing integration contract.
         """
-        import context_monitor as _cm
-        import bundle_orchestrator as _bo
+        from ctx.adapters.claude_code.hooks import context_monitor as _cm
+        from ctx.adapters.claude_code.hooks import bundle_orchestrator as _bo
         from skill_install import install_skill
         from agent_install import install_agent
 
