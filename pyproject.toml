@@ -66,6 +66,17 @@ embeddings = [
     "sentence-transformers>=2,<4",
     "torch>=2,<3",
 ]
+harness = [
+    # LiteLLM is the substrate for the model-agnostic harness
+    # (ctx.adapters.generic.providers). Every remote provider —
+    # OpenRouter (the tier-1 aggregator), Anthropic, OpenAI, Gemini,
+    # Mistral, ... — and local inference servers (Ollama, vLLM) all
+    # flow through a single litellm.completion() call. Keeping the
+    # dep optional means users who only want the Claude Code
+    # integration (ctx-skill-install, the hooks pipeline) don't pay
+    # the LiteLLM dependency-tree cost.
+    "litellm>=1.40,<2",
+]
 
 [tool.setuptools]
 # Plan 001 migration (docs/plans/001-model-agnostic-harness.md).
