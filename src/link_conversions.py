@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ctx_config import cfg
-from wiki_utils import get_field as _find_field
+from ctx.core.wiki.wiki_utils import get_field as _find_field
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 

@@ -82,7 +82,7 @@ from ctx_config import cfg
 from intake_pipeline import IntakeRejected
 from mcp_add import add_mcp, _MCP_ENTITY_SUBDIR
 from mcp_entity import McpRecord
-from wiki_sync import ensure_wiki
+from ctx.core.wiki.wiki_sync import ensure_wiki
 
 __all__ = [
     "CHECKPOINT_SUBDIR",

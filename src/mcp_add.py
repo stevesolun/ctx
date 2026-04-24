@@ -36,8 +36,8 @@ from intake_pipeline import IntakeRejected, check_intake, record_embedding
 import mcp_canonical_index
 from mcp_entity import McpRecord
 from wiki_batch_entities import generate_mcp_page
-from wiki_sync import append_log, ensure_wiki, update_index
-from wiki_utils import validate_skill_name
+from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
+from ctx.core.wiki.wiki_utils import validate_skill_name
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 

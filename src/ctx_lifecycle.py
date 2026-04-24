@@ -47,7 +47,7 @@ from skill_quality import (
     load_quality,
     sidecar_path,
 )
-from wiki_utils import SAFE_NAME_RE as _SLUG_RE
+from ctx.core.wiki.wiki_utils import SAFE_NAME_RE as _SLUG_RE
 
 _logger = logging.getLogger(__name__)
 

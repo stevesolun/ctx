@@ -58,7 +58,7 @@ from quality_signals import (
     telemetry_signal,
 )
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write
-from wiki_utils import SAFE_NAME_RE as _SLUG_RE, parse_frontmatter_and_body
+from ctx.core.wiki.wiki_utils import SAFE_NAME_RE as _SLUG_RE, parse_frontmatter_and_body
 
 _logger = logging.getLogger(__name__)
 

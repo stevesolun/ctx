@@ -48,15 +48,29 @@ _fake_batch_convert = MagicMock()
 _fake_intake = MagicMock()
 _fake_wiki_sync = MagicMock()
 
-# Inject stubs before skill_add is imported
-for _mod_name, _mod in [
+# Inject stubs before skill_add is imported. Plan 001 R6b moved
+# wiki_sync under ctx.core.wiki — cover both the canonical and the
+# legacy names so whichever one skill_add resolves lands on the mock.
+# This block runs at COLLECTION time (module load), which means the
+# injection would persist for the whole pytest session if we did not
+# clean up. The cleanup at the bottom of this block removes the
+# MagicMock entries from sys.modules immediately after skill_add's
+# import has captured them into its own namespace — from that point on
+# skill_add's bindings (ensure_wiki, append_log, update_index, etc.)
+# stay pinned to the mock while the rest of the test session sees the
+# real modules. Prior approach that kept the entries live leaked into
+# test_link_conversions and test_wiki_*.
+_STUBS: list[tuple[str, MagicMock]] = [
     ("ctx_config", _fake_ctx_config),
     ("batch_convert", _fake_batch_convert),
     ("intake_pipeline", _fake_intake),
     ("wiki_sync", _fake_wiki_sync),
-]:
-    if _mod_name not in sys.modules:
-        sys.modules[_mod_name] = _mod
+    ("ctx.core.wiki.wiki_sync", _fake_wiki_sync),
+]
+_SAVED_MODULES: dict[str, object] = {}
+for _mod_name, _mod in _STUBS:
+    _SAVED_MODULES[_mod_name] = sys.modules.get(_mod_name)
+    sys.modules[_mod_name] = _mod
 
 import skill_add as _sa  # noqa: E402 -- must come after stubs
 
@@ -73,6 +87,26 @@ from skill_add import (  # noqa: E402
     wire_backlinks,
     write_entity_page,
 )
+
+# Clean up the sys.modules stubs NOW that skill_add has been imported
+# and its names are bound. skill_add's own reference to (e.g.)
+# ensure_wiki is already captured into its namespace, so removing
+# the MagicMock from sys.modules does NOT unbind skill_add's name —
+# skill_add.ensure_wiki keeps pointing at the mock for the rest of
+# the session. Every OTHER test module that imports wiki_sync /
+# ctx.core.wiki.wiki_sync afresh gets the real module back. This
+# closes the cross-file pollution that broke test_link_conversions
+# and test_wiki_* whenever test_skill_add collected earlier.
+for _name in ("wiki_sync", "ctx.core.wiki.wiki_sync",
+              "batch_convert", "intake_pipeline", "ctx_config"):
+    if sys.modules.get(_name) in (_fake_wiki_sync, _fake_batch_convert,
+                                   _fake_intake, _fake_ctx_config):
+        # Restore whatever was there before (None means "not loaded").
+        original = _SAVED_MODULES.get(_name)
+        if original is None:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = original
 
 
 # ---------------------------------------------------------------------------

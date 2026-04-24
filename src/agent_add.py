@@ -30,8 +30,8 @@ from pathlib import Path
 from ctx_config import cfg
 from intake_pipeline import IntakeRejected, check_intake, record_embedding
 from wiki_batch_entities import generate_agent_page
-from wiki_sync import append_log, ensure_wiki, update_index
-from wiki_utils import validate_skill_name
+from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
+from ctx.core.wiki.wiki_utils import validate_skill_name
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 

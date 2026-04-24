@@ -44,7 +44,7 @@ from ctx_lifecycle import (
 )
 from skill_category import CATEGORIES, infer_category, read_existing_category
 from skill_quality import QualityScore, load_quality
-from wiki_utils import parse_frontmatter_and_body
+from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
 
 _logger = logging.getLogger(__name__)
 

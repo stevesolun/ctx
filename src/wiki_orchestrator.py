@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from ctx_config import cfg
-from wiki_utils import parse_frontmatter as _parse_frontmatter
+from ctx.core.wiki.wiki_utils import parse_frontmatter as _parse_frontmatter
 
 from skill_add_detector import validate_user_supplied_slug as _validate_skill_name
 

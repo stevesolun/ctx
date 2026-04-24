@@ -42,7 +42,7 @@ import numpy as np
 
 from cosine_ranker import CosineRanker, RankedMatch
 from embedding_backend import Embedder
-from wiki_utils import parse_frontmatter_and_body
+from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
 
 
 Severity = Literal["warn", "fail"]
