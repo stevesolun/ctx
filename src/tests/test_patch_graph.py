@@ -18,7 +18,7 @@ from typing import Any
 import networkx as nx
 import pytest
 
-from wiki_graphify import patch_graph
+from ctx.core.wiki.wiki_graphify import patch_graph
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

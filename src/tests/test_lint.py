@@ -13,7 +13,7 @@ from pathlib import Path
 # Ensure the project root is importable regardless of working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import wiki_lint as wl  # noqa: E402
+from ctx.core.wiki import wiki_lint as wl  # noqa: E402
 
 from ._wiki_helpers import _FRESH_DATE, _STALE_DATE, make_entity_page, make_wiki  # noqa: E402
 

@@ -25,7 +25,7 @@ SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-import wiki_graphify as wg  # noqa: E402
+from ctx.core.wiki import wiki_graphify as wg  # noqa: E402
 
 
 def test_dense_tag_threshold_is_at_least_500() -> None:

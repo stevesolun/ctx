@@ -23,7 +23,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from wiki_utils import (  # noqa: E402
+from ctx.core.wiki.wiki_utils import (  # noqa: E402
     FRONTMATTER_RE,
     SAFE_NAME_RE,
     get_field,

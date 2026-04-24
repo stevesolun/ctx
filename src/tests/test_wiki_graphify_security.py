@@ -34,7 +34,7 @@ def graphify_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     Every test that touches the load/export paths needs the module-level
     constant overridden so tests don't clobber the real wiki.
     """
-    import wiki_graphify
+    from ctx.core.wiki import wiki_graphify
 
     out = tmp_path / "graphify-out"
     out.mkdir(parents=True, exist_ok=True)
@@ -107,7 +107,7 @@ def test_load_prior_graph_does_not_execute_pickle_payload(
     If load_prior_graph ever starts reading graph.pickle again, this
     sentinel file will be created and the test fails.
     """
-    import wiki_graphify
+    from ctx.core.wiki import wiki_graphify
 
     marker = tmp_path / "rce-executed.sentinel"
     _PickleRCESentinel._marker = str(marker)  # type: ignore[attr-defined]
@@ -139,7 +139,7 @@ def test_load_prior_graph_ignores_pickle_when_only_pickle_exists(
     After the fix, graph.pickle is never read — the absence of graph.json
     yields None (triggers a full rebuild) rather than executing pickle.
     """
-    import wiki_graphify
+    from ctx.core.wiki import wiki_graphify
 
     marker = tmp_path / "rce-pickle-only.sentinel"
     _PickleRCESentinel._marker = str(marker)  # type: ignore[attr-defined]
@@ -163,7 +163,7 @@ def test_load_prior_graph_roundtrip_preserves_nodes_and_edges(
     graphify_out: Path,
 ) -> None:
     """A graph exported to JSON and loaded back must be structurally equal."""
-    import wiki_graphify
+    from ctx.core.wiki import wiki_graphify
 
     original = _make_sample_graph()
     _write_graph_json(graphify_out, original)
@@ -179,7 +179,7 @@ def test_load_prior_graph_roundtrip_preserves_edge_attrs(
     graphify_out: Path,
 ) -> None:
     """Edge attributes (semantic_sim, tag_sim, etc.) survive JSON round-trip."""
-    import wiki_graphify
+    from ctx.core.wiki import wiki_graphify
 
     original = _make_sample_graph()
     _write_graph_json(graphify_out, original)
@@ -204,7 +204,7 @@ def test_load_prior_graph_roundtrip_preserves_graph_level_metadata(
     below-floor requests; if it got dropped during serialisation the filter
     would silently accept invalid thresholds.
     """
-    import wiki_graphify
+    from ctx.core.wiki import wiki_graphify
 
     original = _make_sample_graph()
     _write_graph_json(graphify_out, original)
@@ -221,14 +221,14 @@ def test_load_prior_graph_roundtrip_preserves_graph_level_metadata(
 
 
 def test_load_prior_graph_returns_none_on_missing_json(graphify_out: Path) -> None:
-    import wiki_graphify
+    from ctx.core.wiki import wiki_graphify
 
     # graphify_out is empty — no graph.json
     assert wiki_graphify.load_prior_graph() is None
 
 
 def test_load_prior_graph_returns_none_on_malformed_json(graphify_out: Path) -> None:
-    import wiki_graphify
+    from ctx.core.wiki import wiki_graphify
 
     (graphify_out / "graph.json").write_text("not { valid json", encoding="utf-8")
     assert wiki_graphify.load_prior_graph() is None
@@ -241,7 +241,7 @@ def test_load_prior_graph_returns_none_on_wrong_schema(graphify_out: Path) -> No
     but confused a downstream consumer. Post-fix, the shape check rejects
     anything that isn't a networkx node-link document.
     """
-    import wiki_graphify
+    from ctx.core.wiki import wiki_graphify
 
     (graphify_out / "graph.json").write_text(
         json.dumps({"not_a_graph": "nope"}), encoding="utf-8",
@@ -256,7 +256,7 @@ def test_load_prior_graph_returns_none_on_wrong_schema(graphify_out: Path) -> No
 
 def test_export_graph_does_not_write_pickle(graphify_out: Path) -> None:
     """export_graph must stop writing graph.pickle — no future RCE primitive."""
-    import wiki_graphify
+    from ctx.core.wiki import wiki_graphify
 
     G = _make_sample_graph()
     wiki_graphify.export_graph(G, communities={})

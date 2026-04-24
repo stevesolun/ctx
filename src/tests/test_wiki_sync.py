@@ -31,9 +31,7 @@ from pathlib import Path
 
 import pytest
 
-import wiki_sync
-
-
+from ctx.core.wiki import wiki_sync
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

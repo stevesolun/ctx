@@ -15,7 +15,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from wiki_sync import ensure_wiki  # noqa: E402  (import after path manipulation)
+from ctx.core.wiki.wiki_sync import ensure_wiki  # noqa: E402  (import after path manipulation)
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-import wiki_graphify as wg  # noqa: E402
+from ctx.core.wiki import wiki_graphify as wg  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
