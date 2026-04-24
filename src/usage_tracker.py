@@ -74,7 +74,7 @@ TODAY = _today()
 # 40) — skills in stacks like angular/django/docker/pytest-cousins
 # never got use_count bumped, which then fooled ctx_lifecycle into
 # flagging them as stale. Code-reviewer HIGH, fixed by consolidation.
-from stack_skill_map import STACK_SKILL_MAP as _SHARED_MAP  # noqa: E402
+from ctx.core.resolve.stack_skill_map import STACK_SKILL_MAP as _SHARED_MAP  # noqa: E402
 
 # Re-exported under the original name for backward-compat with any
 # external caller that imports ``usage_tracker.SIGNAL_SKILL_MAP``.

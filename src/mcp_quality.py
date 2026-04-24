@@ -49,7 +49,7 @@ from typing import Any, Mapping
 
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write
 from mcp_entity import MCP_SLUG_RE, McpRecord
-from quality_signals import SignalResult
+from ctx.core.quality.quality_signals import SignalResult
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
 
 _logger = logging.getLogger(__name__)

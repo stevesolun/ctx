@@ -28,7 +28,7 @@ import math
 from typing import Any
 
 from mcp_entity import McpRecord
-from quality_signals import SignalResult
+from ctx.core.quality.quality_signals import SignalResult
 
 __all__ = [
     "popularity_signal",

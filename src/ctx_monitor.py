@@ -344,7 +344,7 @@ def _graph_neighborhood(slug: str, hops: int = 1, limit: int = 40) -> dict:
     if not _SAFE_SLUG_RE.match(slug):
         return {"nodes": [], "edges": [], "center": None}
     try:
-        from resolve_graph import load_graph as _lg  # type: ignore
+        from ctx.core.graph.resolve_graph import load_graph as _lg  # type: ignore
         G = _lg()
     except Exception:  # noqa: BLE001 — graph is advisory; blank on error
         return {"nodes": [], "edges": [], "center": None}
@@ -424,7 +424,7 @@ def _graph_neighborhood(slug: str, hops: int = 1, limit: int = 40) -> dict:
 def _graph_stats() -> dict:
     """Top-line graph stats for the home page. Cached per-request."""
     try:
-        from resolve_graph import load_graph as _lg  # type: ignore
+        from ctx.core.graph.resolve_graph import load_graph as _lg  # type: ignore
         G = _lg()
     except Exception:  # noqa: BLE001
         return {"nodes": 0, "edges": 0, "available": False}
@@ -760,7 +760,7 @@ def _top_degree_seeds(limit: int = 18) -> list[dict]:
     something to click. Falls back to empty on any graph-load failure.
     """
     try:
-        from resolve_graph import load_graph as _lg  # type: ignore
+        from ctx.core.graph.resolve_graph import load_graph as _lg  # type: ignore
         G = _lg()
     except Exception:  # noqa: BLE001
         return []

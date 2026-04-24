@@ -552,7 +552,7 @@ def _print_recommendations(repo: str, profile: dict) -> None:
     """
     # Local imports — these pull in networkx and the full resolver graph
     # which isn't needed for plain profile scans. Keeps default scan fast.
-    from resolve_skills import (  # noqa: PLC0415
+    from ctx.core.resolve.resolve_skills import (  # noqa: PLC0415
         discover_available_skills,
         read_wiki_overrides,
         resolve,

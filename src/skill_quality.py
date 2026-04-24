@@ -50,7 +50,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol, runtime_checkable
 
-from quality_signals import (
+from ctx.core.quality.quality_signals import (
     SignalResult,
     graph_signal,
     intake_signal,
