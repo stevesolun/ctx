@@ -34,6 +34,7 @@ from typing import Any
 from ctx.adapters.generic.compaction import TokenBudgetCompactor
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox, make_tool_executor
 from ctx.adapters.generic.loop import run_loop
+from ctx.adapters.generic.planner import Planner, augmented_system_prompt
 from ctx.adapters.generic.providers import Message, get_provider
 from ctx.adapters.generic.state import (
     JsonlObserver,
@@ -302,6 +303,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override sessions directory (default ~/.ctx/sessions).",
     )
     r.add_argument(
+        "--planner",
+        action="store_true",
+        help=(
+            "Run a Planner agent first to decompose the task into a "
+            "structured spec before the Generator executes. Adds one "
+            "provider call. Opt-in per Plan 001 §5."
+        ),
+    )
+    r.add_argument(
+        "--planner-model",
+        default=None,
+        help=(
+            "Model override for the planner. Default: same as --model."
+        ),
+    )
+    r.add_argument(
         "--quiet", action="store_true",
         help="Suppress status lines; only print the final message.",
     )
@@ -374,6 +391,29 @@ def _cmd_run(args: argparse.Namespace) -> int:
     system_prompt = _resolve_system_prompt(args.system_prompt)
     session_id = args.session_id or new_session_id()
 
+    # Planner pass (opt-in). Runs ONE provider call before the
+    # Generator loop starts; the produced spec is embedded into
+    # system_prompt for the Generator. Both calls land in the same
+    # session's cost/token totals.
+    plan_artifact = None
+    if args.planner:
+        if not args.quiet:
+            print("[ctx] planner: building spec...", file=sys.stderr)
+        planner = Planner(
+            provider,
+            model=args.planner_model or args.model,
+        )
+        plan_artifact = planner.plan(args.task)
+        system_prompt = augmented_system_prompt(system_prompt, plan_artifact)
+        if not args.quiet:
+            status = "ok" if plan_artifact.parsed_ok else "unstructured"
+            print(
+                f"[ctx] planner: spec {status} "
+                f"(criteria={len(plan_artifact.success_criteria)}, "
+                f"risks={len(plan_artifact.risks)})",
+                file=sys.stderr,
+            )
+
     # MCP router startup.
     mcp_configs = [_parse_mcp_spec(spec) for spec in args.mcp]
     router = McpRouter(mcp_configs) if mcp_configs else None
@@ -406,6 +446,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
         "mcp": [{"name": c.name, "command": c.command, "args": list(c.args)}
                 for c in mcp_configs],
         "ctx_tools_enabled": not args.no_ctx_tools,
+        "planner_used": plan_artifact is not None,
+        "plan": plan_artifact.to_dict() if plan_artifact else None,
+        "plan_usage": (
+            {
+                "input_tokens": plan_artifact.usage.input_tokens,
+                "output_tokens": plan_artifact.usage.output_tokens,
+                "cost_usd": plan_artifact.usage.cost_usd,
+            }
+            if plan_artifact
+            else None
+        ),
     }
     observer = JsonlObserver(store, session_metadata=metadata)
 
