@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-from _fs_utils import atomic_write_text as _atomic_write
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write
 from wiki_utils import parse_frontmatter_and_body
 
 _logger = logging.getLogger(__name__)

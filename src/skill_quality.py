@@ -57,7 +57,7 @@ from quality_signals import (
     routing_signal,
     telemetry_signal,
 )
-from _fs_utils import atomic_write_text as _atomic_write
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write
 from wiki_utils import SAFE_NAME_RE as _SLUG_RE, parse_frontmatter_and_body
 
 _logger = logging.getLogger(__name__)

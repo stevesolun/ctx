@@ -73,7 +73,7 @@ from typing import TYPE_CHECKING, Iterable
 # derived from it at import time and kept as tuples so tests and hot
 # paths can continue to monkeypatch or iterate them directly without
 # paying a per-call config read.
-from _fs_utils import atomic_write_text as _atomic_write_text
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 from backup_config import BackupConfig, from_ctx_config
 
 # ── Intentional import cycle with backup_watchdog ───────────────────────────

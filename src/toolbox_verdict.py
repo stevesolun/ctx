@@ -44,8 +44,8 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from _file_lock import file_lock
-from _fs_utils import atomic_write_text as _atomic_write
+from ctx.utils._file_lock import file_lock
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write
 
 
 RUNS_DIR = Path(os.path.expanduser("~/.claude/toolbox-runs"))

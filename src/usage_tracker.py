@@ -22,7 +22,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from _fs_utils import atomic_write_text as _atomic_write_text
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 from wiki_utils import SAFE_NAME_RE, parse_frontmatter as _read_frontmatter
 
 try:

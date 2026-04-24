@@ -56,7 +56,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
 
-from _fs_utils import atomic_write_json
+from ctx.utils._fs_utils import atomic_write_json
 
 __all__ = [
     "INDEX_FILENAME",
@@ -138,7 +138,7 @@ def load_index(mcp_dir: Path) -> CanonicalIndex:
     # back to it via atomic_write_text — arbitrary-file-write primitive
     # reachable via a poisoned ``.canonical-index.json``. Fixed here by
     # rejecting any entry whose relpath doesn't resolve under ``mcp_dir``.
-    from _safe_name import is_safe_relpath  # noqa: PLC0415
+    from ctx.utils._safe_name import is_safe_relpath  # noqa: PLC0415
 
     cleaned: dict[str, CanonicalEntry] = {}
     dropped = 0
@@ -227,7 +227,7 @@ def upsert(
     # Match load_index's containment rule on the write side too —
     # otherwise a caller could insert an unsafe relpath that survives
     # in-process lookups until the next load filters it out.
-    from _safe_name import validate_relpath  # noqa: PLC0415
+    from ctx.utils._safe_name import validate_relpath  # noqa: PLC0415
     validate_relpath(mcp_dir, relpath, field="relpath")
 
     idx = index if index is not None else load_index(mcp_dir)

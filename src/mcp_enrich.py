@@ -48,7 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from _fs_utils import atomic_write_json, atomic_write_text
+from ctx.utils._fs_utils import atomic_write_json, atomic_write_text
 from ctx_config import cfg
 from mcp_sources import SOURCES
 
@@ -117,7 +117,7 @@ def _checkpoint_path(wiki_path: Path, source: str) -> Path:
     # ``C:evil`` through — those resolve against drive C's CWD, not the
     # wiki, which an attacker could use to overwrite ~/.claude/settings.json
     # via ``--source "C:...\\settings"``. Security-auditor H-3, fixed here.
-    from _safe_name import validate_source_name  # noqa: PLC0415
+    from ctx.utils._safe_name import validate_source_name  # noqa: PLC0415
     validate_source_name(source, field="source")
     return wiki_path / CHECKPOINT_SUBDIR / f"{source}.json"
 

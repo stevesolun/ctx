@@ -46,7 +46,7 @@ from typing import Iterator
 
 import numpy as np
 
-from _file_lock import file_lock
+from ctx.utils._file_lock import file_lock
 
 
 DEFAULT_CACHE_ROOT = Path(os.path.expanduser("~/.claude/skills/_embeddings"))

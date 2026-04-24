@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
-from _file_lock import file_lock
+from ctx.utils._file_lock import file_lock
 
 _logger = logging.getLogger(__name__)
 

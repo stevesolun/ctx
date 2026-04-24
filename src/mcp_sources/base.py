@@ -30,7 +30,7 @@ from urllib.request import (
     build_opener,
 )
 
-from _fs_utils import atomic_write_text
+from ctx.utils._fs_utils import atomic_write_text
 # Import the module rather than `cfg` so that ctx_config.reload()
 # (used by test_config.py) doesn't leave us holding a stale reference.
 import ctx_config as _ctx_config

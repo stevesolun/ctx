@@ -47,7 +47,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from _fs_utils import atomic_write_text as _atomic_write
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write
 from mcp_entity import MCP_SLUG_RE, McpRecord
 from quality_signals import SignalResult
 from wiki_utils import parse_frontmatter_and_body

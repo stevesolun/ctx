@@ -25,7 +25,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from _fs_utils import atomic_write_text as _atomic_write
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write
 
 try:
     import yaml  # type: ignore[import-untyped]

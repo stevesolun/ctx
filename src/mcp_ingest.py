@@ -77,7 +77,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, TypedDict
 
-from _fs_utils import atomic_write_json
+from ctx.utils._fs_utils import atomic_write_json
 from ctx_config import cfg
 from intake_pipeline import IntakeRejected
 from mcp_add import add_mcp, _MCP_ENTITY_SUBDIR
@@ -136,7 +136,7 @@ def _checkpoint_path(wiki_path: Path, source: str) -> Path:
     notably it rejects Windows drive-relative (``C:evil``) which the
     older ad-hoc check missed. Security-auditor H-3.
     """
-    from _safe_name import validate_source_name  # noqa: PLC0415
+    from ctx.utils._safe_name import validate_source_name  # noqa: PLC0415
     validate_source_name(source, field="source")
     return wiki_path / CHECKPOINT_SUBDIR / f"{source}.json"
 

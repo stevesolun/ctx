@@ -37,7 +37,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from _fs_utils import atomic_write_text as _atomic_write_text
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 from ctx_config import cfg
 from wiki_utils import validate_skill_name
 
