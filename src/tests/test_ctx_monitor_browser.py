@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
@@ -193,19 +192,26 @@ def test_browser_sse_streams_do_not_block_json_requests(
 ) -> None:
     harness = _start_monitor(monkeypatch, fake_load=False)
     try:
+        audit_path = fake_claude / "ctx-audit.jsonl"
+        audit_path.write_text("", encoding="utf-8")
         page.goto(f"{harness.base_url}/loaded")
         page.wait_for_load_state("networkidle")
         page.evaluate("""
             () => {
               window.__ctxEvents = [];
+              window.__ctxOpenCount = 0;
               window.__ctxSourceA = new EventSource('/api/events.stream');
               window.__ctxSourceB = new EventSource('/api/events.stream');
+              window.__ctxSourceA.onopen = () => { window.__ctxOpenCount += 1; };
+              window.__ctxSourceB.onopen = () => { window.__ctxOpenCount += 1; };
               window.__ctxSourceA.onmessage = (event) => window.__ctxEvents.push(['a', event.data]);
               window.__ctxSourceB.onmessage = (event) => window.__ctxEvents.push(['b', event.data]);
             }
         """)
-        time.sleep(0.7)
-        audit_path = fake_claude / "ctx-audit.jsonl"
+        page.wait_for_function(
+            "() => window.__ctxOpenCount && window.__ctxOpenCount >= 2",
+            timeout=5000,
+        )
         audit_path.write_text(
             json.dumps({
                 "ts": "2026-04-28T00:00:00Z",

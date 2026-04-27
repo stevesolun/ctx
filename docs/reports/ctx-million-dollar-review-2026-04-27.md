@@ -919,6 +919,25 @@ Verification observed:
 - `python -m ruff check src\tests\test_mcp_live_compat.py` reported `All checks passed!`.
 - `python -m mypy src\tests\test_mcp_live_compat.py` reported `Success: no issues found in 1 source file`.
 
+### Phase 42: Browser CI and SSE race hardening
+
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- The main GitHub Actions test matrix now runs `pytest -m "not browser"` explicitly, so browser ownership is no longer hidden behind import skips.
+- Added a dedicated Ubuntu `browser-security` job that installs `.[dev,browser]`, installs Playwright Chromium with system dependencies, and runs `src/tests/test_ctx_monitor_browser.py` under the `browser` marker.
+- The browser SSE test now creates the audit file before opening streams and waits for both EventSource connections to fire `onopen` before writing the single audit event.
+- Removed the fixed sleep that could let slow CI connect after the audit write and then tail from EOF.
+
+Verification observed:
+
+- `python -m pytest -q --no-cov src\tests\test_ctx_monitor_browser.py -rs` reported `4 passed`.
+- `python -m pytest -q --no-cov src\tests\test_ctx_monitor.py::test_monitor_sse_stream_does_not_block_json_requests src\tests\test_ctx_monitor.py::test_monitor_shutdown_signals_open_sse_workers -rs` reported `2 passed`.
+- `python -m ruff check src\tests\test_ctx_monitor_browser.py` reported `All checks passed!`.
+- `python -m mypy src\tests\test_ctx_monitor_browser.py` reported `Success: no issues found in 1 source file`.
+- `python -c "import yaml, pathlib; yaml.safe_load(pathlib.Path('.github/workflows/test.yml').read_text()); print('workflow yaml parsed')"` reported `workflow yaml parsed`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -959,7 +978,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-41 closed the original P0/P1 blocker list plus the newly surfaced wiki type-sync blocker and the first release-hardening slices in the current branch, with the remaining caveats now narrowed to live-host execution, live third-party MCP validation, browser CI ownership, release/tag readiness, and exhaustive process-kill crash-consistency scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-42 closed the original P0/P1 blocker list plus the newly surfaced wiki type-sync blocker and the first release-hardening slices in the current branch, with the remaining caveats now narrowed to live-host execution, live third-party MCP validation, release/tag readiness, and exhaustive process-kill crash-consistency scenarios noted below.
 
 ## P0 Findings
 
@@ -2148,12 +2167,7 @@ The original P0/P1 remediation work is complete in this branch, and the parallel
    - Manifest install/uninstall lost-update coverage was fixed in Phase 34, active dashboard load/unload lost-update coverage was fixed in Phase 39, and wiki atomic write/lock coverage was hardened in Phase 38.
    - Remaining crash-consistency work should focus on process-kill restore/session interruption cases and any writer that still bypasses the shared atomic helpers.
 
-4. Make browser security coverage real in CI:
-   - `.github/workflows/test.yml` still installs `.[dev]`, while Playwright is in the `browser` extra.
-   - Add a dedicated browser job that installs `.[dev,browser]`, installs Chromium, and runs `src/tests/test_ctx_monitor_browser.py` under the `browser` marker.
-   - Harden the SSE browser test by waiting for both EventSource connections to open before writing the single audit event.
-
-5. Prepare release readiness material:
+4. Prepare release readiness material:
    - Generate a changelog from the remediation commits.
    - Document behavior changes around MCP env inheritance and tool policy.
    - Bump `pyproject.toml` and `src/ctx/__init__.py` off `0.6.4`; PyPI and the existing remote tag already use `0.6.4`.

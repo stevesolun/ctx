@@ -45,7 +45,7 @@ jobs:
         # which DROPS coverage below the current baseline fails CI.
         # Bump this number as the coverage sprint ships — never
         # lower it.
-        run: pytest -q --cov=src --cov-report=term-missing --cov-fail-under=40
+        run: pytest -q -m "not browser" --cov=src --cov-report=term-missing --cov-fail-under=40
 
       - name: Upload coverage artifact
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
@@ -87,6 +87,29 @@ jobs:
           pytest -q --no-cov \
             src/tests/test_alive_loop_e2e.py \
             src/tests/test_fuzz_yaml_rendering.py
+
+  browser-security:
+    name: "Browser monitor security"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install browser test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev,browser]"
+          python -m playwright install --with-deps chromium
+
+      - name: Run browser security tests
+        run: pytest -q --no-cov -m browser src/tests/test_ctx_monitor_browser.py
 
   package-smoke:
     name: "Wheel package smoke"
