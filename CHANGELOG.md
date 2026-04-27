@@ -52,6 +52,7 @@ handling across the dashboard, resolver, manifest, and wiki.
 
 - Added wheel/package smoke checks, version/tag alignment protections,
   clean-host contract coverage, and browser-monitor CI coverage.
+- Updated package license metadata to the modern SPDX string form.
 - Raised the local type gate to `python -m mypy src`.
 - This release bumps package metadata from `0.6.4` to `0.7.0`; do not
   reuse the existing remote `v0.6.4` tag.

@@ -959,6 +959,21 @@ Verification observed:
 - `Select-String -Path 'CHANGELOG.md' -Pattern '^## \[Unreleased\]' | Measure-Object | Select-Object -ExpandProperty Count` reported `1`.
 - `git diff --check` reported no whitespace errors, only existing CRLF conversion warnings.
 
+### Phase 44: Modern package license metadata
+
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- Changed `pyproject.toml` from deprecated `license = { text = "MIT" }` to the SPDX string form `license = "MIT"`.
+- Raised the build backend floor from `setuptools>=42` to `setuptools>=77`, matching the Setuptools version family that supports the modern license field.
+- Added the package metadata cleanup to the `0.7.0` changelog.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_package_scaffold.py src\tests\test_public_api.py -q` reported `51 passed`.
+- A clean package build captured stdout/stderr, found no `SetuptoolsDeprecationWarning` or `project.license` warning, and then `python -m twine check <temp>\*` reported `PASSED` for both `claude_ctx-0.7.0` artifacts.
+
 ### Final verification after Phase 43
 
 Status: completed on branch `codex/current-next-steps-hardening`.
@@ -980,9 +995,9 @@ Observed:
   - Entry point probe reported `loaded 27 ctx console scripts from wheel 0.7.0`.
   - Installed `ctx-init --help`, `ctx-scan-repo --help`, `ctx-wiki-graphify --help`, and `ctx --help` all executed.
 
-Caveat:
+Follow-up:
 
-- The build emitted a Setuptools deprecation warning for `project.license` being a TOML table. It is not a current failure, but it should be changed to a SPDX string before the 2027-Feb-18 deprecation deadline.
+- Phase 44 removed the Setuptools `project.license` deprecation warning observed in this dry-run.
 
 ## Blocker Summary
 
@@ -1024,7 +1039,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-43 closed the original P0/P1 blocker list plus the newly surfaced wiki type-sync blocker and the first release-hardening slices in the current branch, with final local verification now green. The remaining caveats are live-host execution, live third-party MCP validation, exhaustive process-kill crash-consistency scenarios, and tagging only after merge.
+The original reviewed source violated all three invariants. Phases 1-44 closed the original P0/P1 blocker list plus the newly surfaced wiki type-sync blocker and the first release-hardening slices in the current branch, with final local verification now green. The remaining caveats are live-host execution, live third-party MCP validation, exhaustive process-kill crash-consistency scenarios, and tagging only after merge.
 
 ## P0 Findings
 
@@ -2217,7 +2232,6 @@ The original P0/P1 remediation work is complete in this branch, and the parallel
    - The 0.7.0 package dry-run passed locally.
    - After branch review/merge, tag the merge commit as `v0.7.0`.
    - Do not reuse the existing `v0.6.4` tag.
-   - Before a later packaging cleanup release, update `project.license` from the deprecated TOML table form to a SPDX string.
 
 ## Residual Uncertainty
 
