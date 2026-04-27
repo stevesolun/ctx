@@ -1,0 +1,195 @@
+{
+  "upstream": "https://github.com/mattpocock/skills",
+  "upstream_revision": "90ea8eec03d4ae8f43427aaf6fe4722653561a42",
+  "license": "MIT",
+  "namespace": "mattpocock",
+  "total": 21,
+  "entries": [
+    {
+      "name": "caveman",
+      "description": "Ultra-compressed communication mode. Cuts token usage ~75% by dropping filler, articles, and pleasantries while keeping full technical accuracy. Use when user says \"caveman mode\", \"talk like caveman\", \"use caveman\", \"less tokens\", \"be brief\", or invokes /caveman.",
+      "slug": "caveman",
+      "source_path": "caveman/SKILL.md",
+      "support_files": [],
+      "lines": 49
+    },
+    {
+      "name": "design-an-interface",
+      "description": "Generate multiple radically different interface designs for a module using parallel sub-agents. Use when user wants to design an API, explore interface options, compare module shapes, or mentions \"design it twice\".",
+      "slug": "design-an-interface",
+      "source_path": "design-an-interface/SKILL.md",
+      "support_files": [],
+      "lines": 94
+    },
+    {
+      "name": "domain-model",
+      "description": "Grilling session that challenges your plan against the existing domain model, sharpens terminology, and updates documentation (CONTEXT.md, ADRs) inline as decisions crystallise. Use when user wants to stress-test a plan against their project's language and documented decisions.",
+      "slug": "domain-model",
+      "source_path": "domain-model/SKILL.md",
+      "support_files": [
+        "ADR-FORMAT.md",
+        "CONTEXT-FORMAT.md"
+      ],
+      "lines": 81
+    },
+    {
+      "name": "edit-article",
+      "description": "Edit and improve articles by restructuring sections, improving clarity, and tightening prose. Use when user wants to edit, revise, or improve an article draft.",
+      "slug": "edit-article",
+      "source_path": "edit-article/SKILL.md",
+      "support_files": [],
+      "lines": 14
+    },
+    {
+      "name": "git-guardrails-claude-code",
+      "description": "Set up Claude Code hooks to block dangerous git commands (push, reset --hard, clean, branch -D, etc.) before they execute. Use when user wants to prevent destructive git operations, add git safety hooks, or block git push/reset in Claude Code.",
+      "slug": "git-guardrails-claude-code",
+      "source_path": "git-guardrails-claude-code/SKILL.md",
+      "support_files": [
+        "scripts/block-dangerous-git.sh"
+      ],
+      "lines": 95
+    },
+    {
+      "name": "github-triage",
+      "description": "Triage GitHub issues through a label-based state machine. Use when user wants to create an issue, triage issues, review incoming bugs or feature requests, prepare issues for an AFK agent, or manage issue workflow.",
+      "slug": "github-triage",
+      "source_path": "github-triage/SKILL.md",
+      "support_files": [
+        "AGENT-BRIEF.md",
+        "OUT-OF-SCOPE.md"
+      ],
+      "lines": 168
+    },
+    {
+      "name": "grill-me",
+      "description": "Interview the user relentlessly about a plan or design until reaching shared understanding, resolving each branch of the decision tree. Use when user wants to stress-test a plan, get grilled on their design, or mentions \"grill me\".",
+      "slug": "grill-me",
+      "source_path": "grill-me/SKILL.md",
+      "support_files": [],
+      "lines": 10
+    },
+    {
+      "name": "improve-codebase-architecture",
+      "description": "Find deepening opportunities in a codebase, informed by the domain language in CONTEXT.md and the decisions in docs/adr/. Use when the user wants to improve architecture, find refactoring opportunities, consolidate tightly-coupled modules, or make a codebase more testable and AI-navigable.",
+      "slug": "improve-codebase-architecture",
+      "source_path": "improve-codebase-architecture/SKILL.md",
+      "support_files": [
+        "DEEPENING.md",
+        "INTERFACE-DESIGN.md",
+        "LANGUAGE.md"
+      ],
+      "lines": 76
+    },
+    {
+      "name": "migrate-to-shoehorn",
+      "description": "Migrate test files from `as` type assertions to @total-typescript/shoehorn. Use when user mentions shoehorn, wants to replace `as` in tests, or needs partial test data.",
+      "slug": "migrate-to-shoehorn",
+      "source_path": "migrate-to-shoehorn/SKILL.md",
+      "support_files": [],
+      "lines": 118
+    },
+    {
+      "name": "obsidian-vault",
+      "description": "Search, create, and manage notes in the Obsidian vault with wikilinks and index notes. Use when user wants to find, create, or organize notes in Obsidian.",
+      "slug": "obsidian-vault",
+      "source_path": "obsidian-vault/SKILL.md",
+      "support_files": [],
+      "lines": 59
+    },
+    {
+      "name": "qa",
+      "description": "Interactive QA session where user reports bugs or issues conversationally, and the agent files GitHub issues. Explores the codebase in the background for context and domain language. Use when user wants to report bugs, do QA, file issues conversationally, or mentions \"QA session\".",
+      "slug": "qa",
+      "source_path": "qa/SKILL.md",
+      "support_files": [],
+      "lines": 130
+    },
+    {
+      "name": "request-refactor-plan",
+      "description": "Create a detailed refactor plan with tiny commits via user interview, then file it as a GitHub issue. Use when user wants to plan a refactor, create a refactoring RFC, or break a refactor into safe incremental steps.",
+      "slug": "request-refactor-plan",
+      "source_path": "request-refactor-plan/SKILL.md",
+      "support_files": [],
+      "lines": 68
+    },
+    {
+      "name": "scaffold-exercises",
+      "description": "Create exercise directory structures with sections, problems, solutions, and explainers that pass linting. Use when user wants to scaffold exercises, create exercise stubs, or set up a new course section.",
+      "slug": "scaffold-exercises",
+      "source_path": "scaffold-exercises/SKILL.md",
+      "support_files": [],
+      "lines": 106
+    },
+    {
+      "name": "setup-pre-commit",
+      "description": "Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo. Use when user wants to add pre-commit hooks, set up Husky, configure lint-staged, or add commit-time formatting/typechecking/testing.",
+      "slug": "setup-pre-commit",
+      "source_path": "setup-pre-commit/SKILL.md",
+      "support_files": [],
+      "lines": 91
+    },
+    {
+      "name": "tdd",
+      "description": "Test-driven development with red-green-refactor loop. Use when user wants to build features or fix bugs using TDD, mentions \"red-green-refactor\", wants integration tests, or asks for test-first development.",
+      "slug": "tdd",
+      "source_path": "tdd/SKILL.md",
+      "support_files": [
+        "deep-modules.md",
+        "interface-design.md",
+        "mocking.md",
+        "refactoring.md",
+        "tests.md"
+      ],
+      "lines": 107
+    },
+    {
+      "name": "to-issues",
+      "description": "Break a plan, spec, or PRD into independently-grabbable GitHub issues using tracer-bullet vertical slices. Use when user wants to convert a plan into issues, create implementation tickets, or break down work into issues.",
+      "slug": "to-issues",
+      "source_path": "to-issues/SKILL.md",
+      "support_files": [],
+      "lines": 79
+    },
+    {
+      "name": "to-prd",
+      "description": "Turn the current conversation context into a PRD and submit it as a GitHub issue. Use when user wants to create a PRD from the current context.",
+      "slug": "to-prd",
+      "source_path": "to-prd/SKILL.md",
+      "support_files": [],
+      "lines": 72
+    },
+    {
+      "name": "triage-issue",
+      "description": "Triage a bug or issue by exploring the codebase to find root cause, then create a GitHub issue with a TDD-based fix plan. Use when user reports a bug, wants to file an issue, mentions \"triage\", or wants to investigate and plan a fix for a problem.",
+      "slug": "triage-issue",
+      "source_path": "triage-issue/SKILL.md",
+      "support_files": [],
+      "lines": 102
+    },
+    {
+      "name": "ubiquitous-language",
+      "description": "Extract a DDD-style ubiquitous language glossary from the current conversation, flagging ambiguities and proposing canonical terms. Saves to UBIQUITOUS_LANGUAGE.md. Use when user wants to define domain terms, build a glossary, harden terminology, create a ubiquitous language, or mentions \"domain model\" or \"DDD\".",
+      "slug": "ubiquitous-language",
+      "source_path": "ubiquitous-language/SKILL.md",
+      "support_files": [],
+      "lines": 93
+    },
+    {
+      "name": "write-a-skill",
+      "description": "Create new agent skills with proper structure, progressive disclosure, and bundled resources. Use when user wants to create, write, or build a new skill.",
+      "slug": "write-a-skill",
+      "source_path": "write-a-skill/SKILL.md",
+      "support_files": [],
+      "lines": 117
+    },
+    {
+      "name": "zoom-out",
+      "description": "Tell the agent to zoom out and give broader context or a higher-level perspective. Use when you're unfamiliar with a section of code or need to understand how it fits into the bigger picture.",
+      "slug": "zoom-out",
+      "source_path": "zoom-out/SKILL.md",
+      "support_files": [],
+      "lines": 7
+    }
+  ]
+}

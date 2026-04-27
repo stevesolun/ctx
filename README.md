@@ -3,11 +3,16 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-1807_passing-brightgreen.svg)](#)
-[![Graph](https://img.shields.io/badge/Graph-13%2C041_nodes_/_847K_edges-red.svg)](graph/)
+[![Tests](https://img.shields.io/badge/Tests-3190_passing-brightgreen.svg)](#)
+[![Graph](https://img.shields.io/badge/Graph-13%2C218_nodes_/_963K_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
-Watches what you develop, walks a knowledge graph of **1,791 skills, 464 agents, and 10,786 MCP servers** (13,041 nodes, 847K edges — blended semantic + tag + slug-token), and recommends the right bundle on the fly. You approve, it installs; you stop using, it unloads. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+Watches what you develop, walks a knowledge graph of **1,968 skills, 464 agents, and 10,786 MCP servers**, and recommends the right bundle on the fly. You approve, it installs; you stop using, it unloads. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+
+> **2026-04-27 updates.**
+> - Imported [mattpocock/skills](https://github.com/mattpocock/skills) — 21 opinionated skills (TDD, domain-model, ubiquitous-language, github-triage, caveman compression mode, write-a-skill, plus 15 more) deployed under the `mattpocock-` prefix. See [`imported-skills/mattpocock/ATTRIBUTION.md`](imported-skills/mattpocock/ATTRIBUTION.md).
+> - Imported [designdotmd.directory](https://designdotmd.directory) — 156 DESIGN.md files (visual identities: color tokens, typography, spacing, components + rationale) deployed under the `designdotmd-` prefix. These are reference designs an agent can read when asked to build a UI. See [`imported-skills/designdotmd/ATTRIBUTION.md`](imported-skills/designdotmd/ATTRIBUTION.md).
+> - Skill total: 1,791 → **1,968** (+177).
 
 ## Why it exists
 
@@ -26,7 +31,7 @@ Optional extras: `pip install "claude-ctx[embeddings]"` for the semantic backend
 
 ### Pre-built knowledge graph (optional)
 
-A pre-built knowledge graph of 13,041 nodes and 847K edges ships as a tarball. Extract to get a ready-to-use `~/.claude/skill-wiki/`:
+A pre-built knowledge graph of 13,218 nodes and 963K edges ships as a tarball. Extract to get a ready-to-use `~/.claude/skill-wiki/`:
 
 ```bash
 # after `git clone` — or download graph/wiki-graph.tar.gz from the GitHub release
