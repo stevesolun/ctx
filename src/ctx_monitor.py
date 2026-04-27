@@ -49,12 +49,16 @@ import argparse
 import html
 import json
 import os
+import secrets
 import sys
 import time
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
+
+
+_MONITOR_TOKEN = ""
 
 
 # ─── Data sources ────────────────────────────────────────────────────────────
@@ -149,6 +153,8 @@ def _read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
 
 
 def _load_sidecar(slug: str) -> dict | None:
+    if not _SAFE_SLUG_RE.match(slug):
+        return None
     path = _sidecar_dir() / f"{slug}.json"
     if not path.exists():
         return None
@@ -1453,8 +1459,9 @@ def _render_loaded() -> str:
         "<table><tr><th>Slug</th><th>Type</th><th>Source / reason</th><th></th></tr>"
         + unload_html + "</table>"
         "<script>\n"
+        f"const CTX_MONITOR_TOKEN = {json.dumps(_MONITOR_TOKEN)};\n"
         "async function post(url, body) {\n"
-        "  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body || {})});\n"
+        "  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json', 'X-CTX-Monitor-Token':CTX_MONITOR_TOKEN}, body: JSON.stringify(body || {})});\n"
         "  const ok = r.status >= 200 && r.status < 300;\n"
         "  let msg = ''; try { msg = (await r.json()).detail || r.statusText; } catch(_) { msg = r.statusText; }\n"
         "  return {ok, msg};\n"
@@ -1606,19 +1613,21 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         return
 
     # CSRF defense. Dashboard mutation endpoints (/api/load, /api/unload)
-    # accept JSON POST only from the same origin we're serving from, so a
-    # hostile webpage open in the same browser can't trigger load/unload
-    # via a forged fetch(). Serve+bind to 127.0.0.1 by default keeps
-    # network-side exposure off the table too.
+    # require same-origin POSTs plus a per-process token injected into the
+    # served dashboard page.
     def _same_origin(self) -> bool:
         origin = self.headers.get("Origin") or ""
         if origin:
             host_header = self.headers.get("Host", "")
             expected = f"http://{host_header}"
             return origin == expected
-        # No Origin header (curl, direct tool calls) — accept, since the
-        # server is localhost-bound by default.
+        # No Origin header (curl, direct tool calls) is acceptable only
+        # when the mutation token below is also present.
         return True
+
+    def _mutation_authorized(self) -> bool:
+        token = self.headers.get("X-CTX-Monitor-Token") or ""
+        return bool(_MONITOR_TOKEN) and secrets.compare_digest(token, _MONITOR_TOKEN)
 
     def do_GET(self) -> None:  # noqa: N802 — stdlib signature
         # Parse once so we can reuse the query string for /graph?slug=…
@@ -1690,13 +1699,22 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         """Mutation endpoints. Same-origin only; JSON body required."""
         path = self.path.split("?", 1)[0]
         try:
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length) if length else b""
             if not self._same_origin():
                 self._send_json_status(
                     403, {"detail": "cross-origin POST denied"},
                 )
                 return
-            length = int(self.headers.get("Content-Length") or 0)
-            raw = self.rfile.read(length) if length else b""
+            if not self._mutation_authorized():
+                self._send_json_status(
+                    403, {"detail": "monitor token required"},
+                )
+                return
+            content_type = self.headers.get("Content-Type", "").split(";", 1)[0]
+            if content_type.lower() != "application/json":
+                self._send_json_status(415, {"detail": "JSON body required"})
+                return
             try:
                 body = json.loads(raw.decode("utf-8")) if raw else {}
             except (UnicodeDecodeError, json.JSONDecodeError):
@@ -1808,6 +1826,8 @@ class _MonitorHandler(BaseHTTPRequestHandler):
 
 def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
     """Run the monitor. Blocks until Ctrl+C."""
+    global _MONITOR_TOKEN
+    _MONITOR_TOKEN = secrets.token_urlsafe(32)
     server = HTTPServer((host, port), _MonitorHandler)
     url = f"http://{host}:{port}/"
     print(f"ctx-monitor serving at {url}  (Ctrl+C to stop)", flush=True)

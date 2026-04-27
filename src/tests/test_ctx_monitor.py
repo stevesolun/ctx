@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import threading
+import urllib.error
+import urllib.request
+from http.server import HTTPServer
 from pathlib import Path
 
 import pytest
@@ -39,6 +43,31 @@ def _write_sidecar(claude: Path, slug: str, body: dict) -> None:
     (claude / "skill-quality" / f"{slug}.json").write_text(
         json.dumps(body), encoding="utf-8",
     )
+
+
+def _post_json(port: int, path: str, body: dict, token: str | None = None) -> tuple[int, dict]:
+    headers = {"Content-Type": "application/json"}
+    if token is not None:
+        headers["X-CTX-Monitor-Token"] = token
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=json.dumps(body).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode("utf-8"))
+
+
+def _serve_monitor(monkeypatch: pytest.MonkeyPatch, token: str = "test-token"):
+    monkeypatch.setattr(cm, "_MONITOR_TOKEN", token)
+    server = HTTPServer(("127.0.0.1", 0), cm._MonitorHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread, server.server_port
 
 
 def test_summarize_sessions_merges_audit_and_events(fake_claude: Path) -> None:
@@ -205,6 +234,49 @@ def test_perform_unload_rejects_invalid_slug() -> None:
     ok, msg = cm._perform_unload("../../hostile")
     assert ok is False
     assert "invalid slug" in msg
+
+
+def test_load_sidecar_rejects_unsafe_slug(fake_claude: Path) -> None:
+    _write_sidecar(fake_claude, "python-patterns", {"slug": "python-patterns"})
+    assert cm._load_sidecar("../python-patterns") is None
+
+
+def test_monitor_post_requires_token(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        status, body = _post_json(port, "/api/load", {"slug": "python-patterns"})
+        assert status == 403
+        assert "token" in body["detail"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_monitor_post_accepts_valid_token(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_load(slug: str) -> tuple[bool, str]:
+        calls.append(slug)
+        return True, "loaded"
+
+    monkeypatch.setattr(cm, "_perform_load", fake_load)
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        status, body = _post_json(
+            port, "/api/load", {"slug": "python-patterns"}, token="test-token"
+        )
+        assert status == 200
+        assert body == {"ok": True, "detail": "loaded"}
+        assert calls == ["python-patterns"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_parse_frontmatter_basic() -> None:

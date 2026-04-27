@@ -421,6 +421,23 @@ Verification observed:
 - `python -m ruff check src\ctx_lifecycle.py src\tests\test_ctx_lifecycle.py` reported `All checks passed!`.
 - `python -m mypy src\ctx_lifecycle.py src\tests\test_ctx_lifecycle.py` reported `Success: no issues found in 2 source files`.
 
+### Phase 18: Monitor mutation and path boundary
+
+Status: implemented in this worktree.
+
+What changed:
+
+- `ctx-monitor` now generates a per-process mutation token and injects it into dashboard POST requests.
+- `/api/load` and `/api/unload` require `X-CTX-Monitor-Token` in addition to the existing same-origin check and JSON body requirement.
+- Mutation denial paths now consume the request body before responding, avoiding connection resets on Windows clients.
+- Sidecar reads now apply the same safe-slug boundary used by wiki, graph, load, and unload paths.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_ctx_monitor.py -q` reported `37 passed`.
+- `python -m ruff check src\ctx_monitor.py src\tests\test_ctx_monitor.py` reported `All checks passed!`.
+- `python -m mypy src\ctx_monitor.py src\tests\test_ctx_monitor.py` reported `Success: no issues found in 2 source files`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full 234-file `src` tree with zero mypy errors.
@@ -435,7 +452,7 @@ P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in 
 8. Resume trusts session metadata as executable MCP config. Fixed in Phase 15.
 9. Session ID reuse truncates existing JSONL transcripts. Fixed in Phase 16.
 10. Restore overwrites live state without a rollback snapshot. Fixed in Phase 17.
-11. Monitor dashboard has unauthenticated mutation endpoints and path traversal risks.
+11. Monitor dashboard has unauthenticated mutation endpoints and path traversal risks. Fixed in Phase 18.
 12. Wiki/install flows follow symlinks from wiki content into live Claude directories.
 13. Tar extraction and source install paths are stale/unsafe.
 14. CI/release can publish a tag without tests/package smoke/version alignment.
