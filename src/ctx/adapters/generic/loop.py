@@ -179,6 +179,7 @@ def run_loop(
     observer: LoopObserver | None = None,
     messages: list[Message] | None = None,
     compactor: Any | None = None,  # ctx.adapters.generic.compaction.ContextCompactor
+    append_task_after_messages: bool = False,
 ) -> LoopResult:
     """Drive a solo agent loop until it terminates.
 
@@ -215,12 +216,29 @@ def run_loop(
     totals = _RunningTotals()
 
     # Seed the conversation.
+    # Two ordering modes:
+    #   default                          : [system?] + task + messages
+    #   append_task_after_messages=True  : [system?] + messages + task
+    # The latter is what `ctx resume` wants: the replayed transcript
+    # leads, the follow-up task is appended at the end. If the replayed
+    # messages already begin with a system message, don't duplicate the
+    # caller-supplied one. Codex review fix #3.
     conversation: list[Message] = []
-    if system_prompt:
-        conversation.append(Message(role="system", content=system_prompt))
-    conversation.append(Message(role="user", content=task))
-    if messages:
-        conversation.extend(messages)
+    has_replayed_system = bool(
+        messages and messages[0].role == "system" and messages[0].content
+    )
+    if append_task_after_messages:
+        if system_prompt and not has_replayed_system:
+            conversation.append(Message(role="system", content=system_prompt))
+        if messages:
+            conversation.extend(messages)
+        conversation.append(Message(role="user", content=task))
+    else:
+        if system_prompt:
+            conversation.append(Message(role="system", content=system_prompt))
+        conversation.append(Message(role="user", content=task))
+        if messages:
+            conversation.extend(messages)
 
     # Build the tool-catalogue once. Router tools use "__" namespacing;
     # extra_tools are passed through verbatim. A caller-supplied extra
