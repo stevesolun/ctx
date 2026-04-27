@@ -216,9 +216,33 @@ Remaining legacy/test type debt after Phase 7:
 - Largest buckets: `var-annotated` 7, `import-untyped` 4, `arg-type` 4, `assignment` 4, `misc` 3.
 - Largest files: `src/ctx_monitor.py` 3, `src/tests/test_backup_watchdog.py` 2, `src/catalog_builder.py` 2, `src/batch_convert.py` 2, `src/tests/test_kpi_dashboard.py` 2, `src/tests/test_recommendations.py` 2.
 
+### Phase 8: Legacy/test mypy debt slice 3
+
+Status: implemented in this worktree.
+
+What changed:
+
+- Fixed 8 force-check mypy errors across `catalog_builder.py`, `batch_convert.py`, `test_recommendations.py`, and `test_backup_watchdog.py`.
+- Added concrete list/dict annotations where local inference fell back to ambiguous empty containers.
+- Replaced `max(..., key=dict.get)` with a lambda that always returns an `int`, avoiding an optional comparator result.
+- Replaced watchdog test lambdas with typed fake snapshot functions.
+
+Verification observed:
+
+- Red targeted mypy check initially reported 8 errors across those four files.
+- After the fix, the same four-file force-check reported `Success: no issues found in 4 source files`.
+- Focused tests passed: `24 passed`.
+- Static checks passed: `python -m ruff check ...` reported `All checks passed!`; `python -m mypy src` reported `Success: no issues found in 58 source files`; `python -m compileall -q src` completed.
+
+Remaining legacy/test type debt after Phase 8:
+
+- 20 errors remain if legacy flat modules and tests are force-checked with `--ignore-missing-imports`.
+- Largest buckets: `import-untyped` 4, `assignment` 4, `arg-type` 3, `var-annotated` 2.
+- Largest files: `src/ctx_monitor.py` 3 and `src/tests/test_kpi_dashboard.py` 2; the rest are single-file/single-error cleanups.
+
 ## Blocker Summary
 
-P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat is being burned down in phases: Phase 5 defined the package gate, and Phases 6-7 reduced the force-checked legacy/test debt from 72 to 28 errors.
+P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat is being burned down in phases: Phase 5 defined the package gate, and Phases 6-8 reduced the force-checked legacy/test debt from 72 to 20 errors.
 
 1. `ctx-init --hooks/--graph` invokes removed modules and still exits success.
 2. Installed Claude hooks point at files not shipped in the wheel and use non-portable shell commands.

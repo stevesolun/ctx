@@ -66,7 +66,7 @@ def test_slug_tokens_lowercases() -> None:
 def test_token_idf_rare_token_outweighs_common() -> None:
     """A token appearing in only one of many labels should outweigh a
     token in every label."""
-    entities = [
+    entities: list[tuple[str, list[str]]] = [
         ("python-foo", []),
         ("python-bar", []),
         ("python-baz", []),
@@ -108,8 +108,12 @@ def test_fastapi_query_surfaces_fastapi_skill_above_generic_python_skill() -> No
     # Build a realistic-ish corpus: 'python' is common, 'project' is
     # also fairly common (many *-project-* names), and 'fastapi' is
     # rare. With realistic IDFs, the fastapi-specific skill must win.
-    common_python = [(f"python-pro-{i}", ["python"]) for i in range(20)]
-    common_project = [(f"team-project-{i}", []) for i in range(10)]
+    common_python: list[tuple[str, list[str]]] = [
+        (f"python-pro-{i}", ["python"]) for i in range(20)
+    ]
+    common_project: list[tuple[str, list[str]]] = [
+        (f"team-project-{i}", []) for i in range(10)
+    ]
     G = _build_graph([
         # python-project-structure: hits common-python + common-project +
         # has python tag.

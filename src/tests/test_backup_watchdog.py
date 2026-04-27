@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -164,9 +165,11 @@ def test_watchdog_interval_clamped_low(fake_home):
 
     import backup_mirror as bm_mod
     original = bm_mod.snapshot_if_changed
-    bm_mod.snapshot_if_changed = lambda reason=None: type(
-        "R", (), {"snapshot_path": None, "report": None}
-    )()
+
+    def fake_snapshot_if_changed(reason: str | None = None) -> Any:
+        return type("R", (), {"snapshot_path": None, "report": None})()
+
+    bm_mod.snapshot_if_changed = fake_snapshot_if_changed
     try:
         bw.run_watchdog(
             interval=0.1,
@@ -186,9 +189,11 @@ def test_watchdog_interval_clamped_high(fake_home):
     seen: list[float] = []
     import backup_mirror as bm_mod
     original = bm_mod.snapshot_if_changed
-    bm_mod.snapshot_if_changed = lambda reason=None: type(
-        "R", (), {"snapshot_path": None, "report": None}
-    )()
+
+    def fake_snapshot_if_changed(reason: str | None = None) -> Any:
+        return type("R", (), {"snapshot_path": None, "report": None})()
+
+    bm_mod.snapshot_if_changed = fake_snapshot_if_changed
     try:
         bw.run_watchdog(
             interval=999_999,

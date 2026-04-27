@@ -94,13 +94,13 @@ def classify_section(header: str, body: str) -> str:
     if re.search(r"^---\n.*?^---", body, re.MULTILINE | re.DOTALL):
         scores["scope"] += 5
 
-    best = max(scores, key=scores.get)
+    best = max(scores, key=lambda name: scores[name])
     return best
 
 
 def extract_gate_questions(text: str) -> list[str]:
     """Extract and convert instructions into YES/NO gate questions."""
-    questions = []
+    questions: list[str] = []
     lines = text.split("\n")
 
     for line in lines:
@@ -143,7 +143,7 @@ def parse_sections(content: str) -> tuple[list[dict], str]:
     """Parse a markdown document into sections by ## headers."""
     sections = []
     current_header = ""
-    current_body_lines = []
+    current_body_lines: list[str] = []
 
     # Strip frontmatter
     content_stripped = content

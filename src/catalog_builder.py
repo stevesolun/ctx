@@ -29,7 +29,7 @@ TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 def scan_skills_dir(skills_dir: Path) -> list[dict]:
     """Scan a directory for skills (subdirs with SKILL.md)."""
-    results = []
+    results: list[dict[str, object]] = []
     if not skills_dir.exists():
         return results
 
@@ -54,7 +54,7 @@ def scan_skills_dir(skills_dir: Path) -> list[dict]:
 
 def scan_agents_dir(agents_dir: Path) -> list[dict]:
     """Scan a directory for flat agent .md files."""
-    results = []
+    results: list[dict[str, object]] = []
     if not agents_dir.exists():
         return results
 
