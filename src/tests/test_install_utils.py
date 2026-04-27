@@ -10,11 +10,93 @@ so tests here compound in value. Edge cases are exercised deliberately.
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 import pytest
 
 from ctx.adapters.claude_code.install import install_utils
+
+_SRC_ROOT = Path(__file__).resolve().parents[1]
+_MANIFEST_WORKER = r"""
+from __future__ import annotations
+
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[3])
+
+from ctx.adapters.claude_code.install import install_utils
+
+manifest = Path(sys.argv[1])
+start_file = Path(sys.argv[2])
+mode = sys.argv[4]
+slug = sys.argv[5]
+
+install_utils.MANIFEST_PATH = manifest
+
+original_save_manifest = install_utils.save_manifest
+
+def slow_save_manifest(manifest_data):
+    time.sleep(0.15)
+    original_save_manifest(manifest_data)
+
+install_utils.save_manifest = slow_save_manifest
+
+deadline = time.monotonic() + 5.0
+while not start_file.exists():
+    if time.monotonic() > deadline:
+        raise TimeoutError("worker did not receive start signal")
+    time.sleep(0.005)
+
+if mode == "install":
+    install_utils.record_install(slug, entity_type="skill", source="worker")
+elif mode == "uninstall":
+    install_utils.record_uninstall(slug, entity_type="skill", source="worker")
+else:
+    raise ValueError(mode)
+"""
+
+
+def _run_manifest_workers(
+    manifest: Path,
+    tmp_path: Path,
+    *,
+    mode: str,
+    slugs: list[str],
+) -> None:
+    start_file = tmp_path / f"{mode}.start"
+    code = textwrap.dedent(_MANIFEST_WORKER)
+    procs = [
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                code,
+                str(manifest),
+                str(start_file),
+                str(_SRC_ROOT),
+                mode,
+                slug,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for slug in slugs
+    ]
+    start_file.write_text("go", encoding="utf-8")
+    failures: list[str] = []
+    for proc in procs:
+        stdout, stderr = proc.communicate(timeout=20)
+        if proc.returncode:
+            failures.append(f"rc={proc.returncode}\nstdout={stdout}\nstderr={stderr}")
+    assert failures == []
+
+
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 
@@ -153,6 +235,22 @@ class TestRecordInstall:
         # The legacy entry is treated as (old, skill); re-install is a no-op.
         assert len(m["load"]) == 1
 
+    def test_parallel_installs_preserve_distinct_entries(
+        self, isolated_manifest: Path, tmp_path: Path
+    ) -> None:
+        slugs = [f"parallel-{i}" for i in range(8)]
+
+        _run_manifest_workers(
+            isolated_manifest,
+            tmp_path,
+            mode="install",
+            slugs=slugs,
+        )
+
+        m = install_utils.load_manifest()
+        loaded = {entry["skill"] for entry in m["load"]}
+        assert loaded == set(slugs)
+
 
 # ── record_uninstall ─────────────────────────────────────────────────────────
 
@@ -191,6 +289,31 @@ class TestRecordUninstall:
         install_utils.record_uninstall("ghost", entity_type="skill", source="s")
         m = install_utils.load_manifest()
         assert m["unload"][0]["skill"] == "ghost"
+
+    def test_parallel_uninstalls_preserve_distinct_entries(
+        self, isolated_manifest: Path, tmp_path: Path
+    ) -> None:
+        slugs = [f"parallel-{i}" for i in range(8)]
+        install_utils.save_manifest({
+            "load": [
+                {"skill": slug, "entity_type": "skill", "source": "seed"}
+                for slug in slugs
+            ],
+            "unload": [],
+            "warnings": [],
+        })
+
+        _run_manifest_workers(
+            isolated_manifest,
+            tmp_path,
+            mode="uninstall",
+            slugs=slugs,
+        )
+
+        m = install_utils.load_manifest()
+        assert m["load"] == []
+        unloaded = {entry["skill"] for entry in m["unload"]}
+        assert unloaded == set(slugs)
 
 
 # ── _render_scalar ───────────────────────────────────────────────────────────

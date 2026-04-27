@@ -33,9 +33,10 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
+from ctx.utils._file_lock import file_lock
 
 _logger = logging.getLogger(__name__)
 
@@ -97,6 +98,14 @@ def save_manifest(manifest: dict) -> None:
     _atomic_write_text(MANIFEST_PATH, json.dumps(manifest, indent=2))
 
 
+def _update_manifest(mutator: Callable[[dict], None]) -> None:
+    """Serialize manifest read-modify-write transactions."""
+    with file_lock(MANIFEST_PATH):
+        manifest = load_manifest()
+        mutator(manifest)
+        save_manifest(manifest)
+
+
 # ── Record install / uninstall ───────────────────────────────────────────────
 
 
@@ -120,29 +129,30 @@ def record_install(
     deduped on slug alone, which silently dropped the skill entry
     when an agent with the same slug already existed.)
     """
-    manifest = load_manifest()
-    loaded: set[tuple[str, str]] = {
-        (e.get("skill"), e.get("entity_type", "skill"))
-        for e in manifest["load"]
-    }
-    if (slug, entity_type) not in loaded:
-        entry: dict = {
-            "skill": slug,
-            "entity_type": entity_type,
-            "source": source,
+    def mutate(manifest: dict) -> None:
+        loaded: set[tuple[str, str]] = {
+            (e.get("skill"), e.get("entity_type", "skill"))
+            for e in manifest["load"]
         }
-        if extra:
-            entry.update(extra)
-        manifest["load"].append(entry)
+        if (slug, entity_type) not in loaded:
+            entry: dict = {
+                "skill": slug,
+                "entity_type": entity_type,
+                "source": source,
+            }
+            if extra:
+                entry.update(extra)
+            manifest["load"].append(entry)
 
-    manifest["unload"] = [
-        e for e in manifest["unload"]
-        if not (
-            e.get("skill") == slug
-            and e.get("entity_type", "skill") == entity_type
-        )
-    ]
-    save_manifest(manifest)
+        manifest["unload"] = [
+            e for e in manifest["unload"]
+            if not (
+                e.get("skill") == slug
+                and e.get("entity_type", "skill") == entity_type
+            )
+        ]
+
+    _update_manifest(mutate)
 
 
 def record_uninstall(slug: str, *, entity_type: EntityType, source: str) -> None:
@@ -151,25 +161,26 @@ def record_uninstall(slug: str, *, entity_type: EntityType, source: str) -> None
     The unload dedup also keys on (slug, entity_type); re-unloading
     the same pair doesn't produce duplicates.
     """
-    manifest = load_manifest()
-    manifest["load"] = [
-        e for e in manifest["load"]
-        if not (
-            e.get("skill") == slug
-            and e.get("entity_type", "skill") == entity_type
-        )
-    ]
-    unloaded: set[tuple[str, str]] = {
-        (e.get("skill"), e.get("entity_type", "skill"))
-        for e in manifest["unload"]
-    }
-    if (slug, entity_type) not in unloaded:
-        manifest["unload"].append({
-            "skill": slug,
-            "entity_type": entity_type,
-            "source": source,
-        })
-    save_manifest(manifest)
+    def mutate(manifest: dict) -> None:
+        manifest["load"] = [
+            e for e in manifest["load"]
+            if not (
+                e.get("skill") == slug
+                and e.get("entity_type", "skill") == entity_type
+            )
+        ]
+        unloaded: set[tuple[str, str]] = {
+            (e.get("skill"), e.get("entity_type", "skill"))
+            for e in manifest["unload"]
+        }
+        if (slug, entity_type) not in unloaded:
+            manifest["unload"].append({
+                "skill": slug,
+                "entity_type": entity_type,
+                "source": source,
+            })
+
+    _update_manifest(mutate)
 
 
 # ── Entity status frontmatter ────────────────────────────────────────────────

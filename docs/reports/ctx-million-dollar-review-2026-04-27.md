@@ -732,6 +732,29 @@ Verification observed:
 - `git diff --check` reported no whitespace errors.
 - `python -m pytest -q` reported `3237 passed, 7 skipped in 440.79s`.
 
+### Phase 34: Locked manifest transactions
+
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- `record_install()` and `record_uninstall()` now serialize the whole manifest read-modify-write transaction with `file_lock(MANIFEST_PATH)`.
+- Atomic writes are still used for the final save, but the lock now prevents lost updates between concurrent installer processes.
+- `src/tests/test_install_utils.py` now has subprocess race regressions for concurrent distinct installs and concurrent distinct uninstalls. The workers intentionally slow the save point to expose the original bug deterministically.
+
+Verification observed:
+
+- Red test: `python -m pytest src\tests\test_install_utils.py -q -k "parallel_installs or parallel_uninstalls"` failed before the production change. Concurrent installs collapsed to one loaded entry, and concurrent uninstalls left seven loaded entries behind.
+- Green test: the same command reported `2 passed, 59 deselected`.
+- `python -m pytest src\tests\test_install_utils.py src\tests\test_skill_install.py src\tests\test_agent_install.py src\tests\test_mcp_install.py -q` reported `194 passed`.
+- `python -m ruff check src\ctx\adapters\claude_code\install\install_utils.py src\tests\test_install_utils.py` reported `All checks passed!`.
+- `python -m mypy src\ctx\adapters\claude_code\install\install_utils.py src\tests\test_install_utils.py` reported `Success: no issues found in 2 source files`.
+- `python -m ruff check .` reported `All checks passed!`.
+- `python -m mypy src` reported `Success: no issues found in 236 source files`.
+- `python -m compileall -q src hooks scripts` completed successfully.
+- `git diff --check` reported no whitespace errors.
+- `python -m pytest -q` reported `3239 passed, 7 skipped in 392.77s`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -772,7 +795,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-33 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-34 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
 
 ## P0 Findings
 
@@ -1962,7 +1985,7 @@ The original P0/P1 remediation work is complete in this branch. The remaining wo
    - Kill processes during restore, wiki sync, manifest updates, and session writes.
    - Verify rollback snapshots, atomic temp-file replacement, and lock behavior.
    - Add regression tests for partial-write and parallel-writer cases not already covered.
-   - First narrow target: `record_install()` / `record_uninstall()` currently do read-modify-write manifest updates; atomic write prevents torn JSON but not lost updates under parallel installers.
+   - Manifest install/uninstall lost-update coverage was fixed in Phase 34; remaining crash-consistency work should focus on restore, wiki sync, and session/write interruption cases.
 
 5. Prepare release readiness material:
    - Generate a changelog from the remediation commits.
