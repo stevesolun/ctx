@@ -287,9 +287,34 @@ Remaining legacy/test type debt after Phase 10:
 - Remaining buckets: `arg-type` 3, `assignment` 2, and one each of `union-attr`, `str-bytes-safe`, `list-item`, `var-annotated`.
 - Remaining files: `ctx_lifecycle.py`, `skill_quality.py`, `test_mcp_server.py`, `backup_watchdog.py`, `ctx_audit_log.py`, `test_mcp_router.py`, `test_toolbox_verdict.py`, `usage_tracker.py`, and `test_litellm_provider.py`.
 
+### Phase 11: Legacy/test mypy debt slice 6
+
+Status: implemented in this worktree.
+
+What changed:
+
+- Fixed 4 force-check mypy errors across `ctx_lifecycle.py`, `skill_quality.py`, `backup_watchdog.py`, and `usage_tracker.py`.
+- `ctx_lifecycle.py` and `skill_quality.py` now narrow audit-log `subject_type` values to the `Literal["skill", "agent"]` contract before calling `ctx_audit_log.log`.
+- `backup_watchdog.py` now types saved signal handlers with the concrete `signal.signal` handler shape instead of round-tripping them as `object`.
+- `usage_tracker.py` replaced the untyped regex replacement lambda with a named `re.Match[str]` callback, removing the bytes-safety false positive.
+
+Verification observed:
+
+- Red targeted mypy check initially reported 4 errors across those four files.
+- After the fix, the same four-file force-check reported `Success: no issues found in 4 source files`.
+- Focused tests passed: `94 passed`.
+- Static checks passed: `python -m ruff check ...` reported `All checks passed!`; `python -m mypy src` reported `Success: no issues found in 58 source files`; `python -m compileall -q src` completed.
+- One parallel `python -m mypy src` run hit a transient mypy internal error while another mypy process was writing cache state. Two subsequent single-process reruns, including `--show-traceback`, passed.
+
+Remaining legacy/test type debt after Phase 11:
+
+- 5 errors remain if legacy flat modules and tests are force-checked with `--ignore-missing-imports`.
+- Remaining buckets: `assignment` 2, plus one each of `union-attr`, `list-item`, and `var-annotated`.
+- Remaining files: `test_toolbox_verdict.py`, `test_mcp_router.py`, `test_litellm_provider.py`, `ctx_audit_log.py`, and `test_mcp_server.py`.
+
 ## Blocker Summary
 
-P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat is being burned down in phases: Phase 5 defined the package gate, and Phases 6-10 reduced the force-checked legacy/test debt from 72 to 9 errors.
+P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat is being burned down in phases: Phase 5 defined the package gate, and Phases 6-11 reduced the force-checked legacy/test debt from 72 to 5 errors.
 
 1. `ctx-init --hooks/--graph` invokes removed modules and still exits success.
 2. Installed Claude hooks point at files not shipped in the wheel and use non-portable shell commands.

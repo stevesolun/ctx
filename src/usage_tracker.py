@@ -165,10 +165,13 @@ def _set_frontmatter_field(content: str, field: str, value: str) -> str:
     safe_value = str(value).replace("\r", " ").replace("\n", " ")
     pattern = rf"^({escaped}:\s*)(.+)$"
 
+    def replace_value(match: re.Match[str]) -> str:
+        return f"{match.group(1)}{safe_value}"
+
     # Replace first — the common path once the field exists.
     new_content, n = re.subn(
         pattern,
-        lambda m: f"{m.group(1)}{safe_value}",
+        replace_value,
         content,
         flags=re.MULTILINE,
     )

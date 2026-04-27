@@ -48,7 +48,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Protocol, runtime_checkable
+from typing import Any, Iterable, Literal, Mapping, Protocol, runtime_checkable
 
 from ctx.core.quality.quality_signals import (
     SignalResult,
@@ -824,7 +824,9 @@ def persist_quality(
     # so the monitor's per-session timeline can filter by session_id.
     try:
         from ctx_audit_log import log  # local import, no CLI dep
-        subject_type = "agent" if score.subject_type == "agent" else "skill"
+        subject_type: Literal["skill", "agent"] = (
+            "agent" if score.subject_type == "agent" else "skill"
+        )
         event = f"{subject_type}.score_updated"
         log(
             event, subject_type=subject_type, subject=score.slug,

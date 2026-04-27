@@ -41,13 +41,15 @@ import signal
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Callable
+from types import FrameType
+from typing import Any, Callable
 
 
 # Clamp so a mis-configured interval cannot turn the watchdog into a
 # busy loop or a near-dead process.
 _MIN_INTERVAL_SEC = 5
 _MAX_INTERVAL_SEC = 3600
+_SignalHandler = Callable[[int, FrameType | None], Any] | int | signal.Handlers | None
 
 
 @dataclass
@@ -75,13 +77,13 @@ class _StopFlag:
     def __init__(self) -> None:
         self.stop = False
 
-    def set(self, *_args) -> None:  # signal handler signature
+    def set(self, *_args: object) -> None:  # signal handler signature
         self.stop = True
 
 
-def _install_signal_handlers(flag: _StopFlag) -> list[tuple[int, object]]:
+def _install_signal_handlers(flag: _StopFlag) -> list[tuple[int, _SignalHandler]]:
     """Install SIGINT/SIGTERM handlers, return previous so we can restore."""
-    previous: list[tuple[int, object]] = []
+    previous: list[tuple[int, _SignalHandler]] = []
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             prev = signal.signal(sig, flag.set)
@@ -93,7 +95,7 @@ def _install_signal_handlers(flag: _StopFlag) -> list[tuple[int, object]]:
     return previous
 
 
-def _restore_signal_handlers(previous: list[tuple[int, object]]) -> None:
+def _restore_signal_handlers(previous: list[tuple[int, _SignalHandler]]) -> None:
     for sig, prev in previous:
         try:
             signal.signal(sig, prev)

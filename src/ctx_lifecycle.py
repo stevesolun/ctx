@@ -38,7 +38,7 @@ import sys
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write
 from skill_quality import (
@@ -853,7 +853,9 @@ def _apply_one(
         }
         verb = verb_map.get(proposal.target_state)
         if verb:
-            subject_type = proposal.subject_type if proposal.subject_type in ("skill", "agent") else "skill"
+            subject_type: Literal["skill", "agent"] = (
+                "agent" if proposal.subject_type == "agent" else "skill"
+            )
             log(
                 f"{subject_type}.{verb}",
                 subject_type=subject_type,
