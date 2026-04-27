@@ -81,6 +81,9 @@ dev = [
     "mypy>=1.8",
     "ruff>=0.4",
 ]
+browser = [
+    "playwright>=1.52",
+]
 embeddings = [
     "sentence-transformers>=2,<4",
     "torch>=2,<3",
@@ -197,6 +200,7 @@ packages = [
 testpaths = ["src/tests"]
 markers = [
     "integration: marks tests that require external models or network (deselect with -m 'not integration')",
+    "browser: marks tests that drive a real browser with Playwright",
 ]
 
 [tool.mypy]

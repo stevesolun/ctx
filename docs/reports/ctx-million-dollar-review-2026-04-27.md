@@ -781,6 +781,30 @@ Verification observed:
 - `git diff --check` reported no whitespace errors.
 - `python -m pytest -q` reported `3239 passed, 8 skipped in 419.62s`.
 
+### Phase 36: Browser-driven monitor security coverage
+
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- Added a `browser` optional dependency extra for Python Playwright and registered a `browser` pytest marker.
+- Added `src/tests/test_ctx_monitor_browser.py`, which starts a real local `ctx-monitor` server and drives Chromium through Playwright.
+- Browser coverage now proves `/loaded` injects a token that controls mutation requests, missing-token browser POSTs fail, cross-origin browser POSTs cannot mutate state, traversal slugs are rejected through browser-executed fetch, and two live `EventSource` streams do not block a concurrent JSON request.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_ctx_monitor_browser.py -q` reported `4 passed`.
+- `python -m ruff check pyproject.toml src\tests\test_ctx_monitor_browser.py` reported `All checks passed!`.
+- `python -m mypy src\tests\test_ctx_monitor_browser.py` reported `Success: no issues found in 1 source file`.
+- `python -m pytest src\tests\test_ctx_monitor_browser.py src\tests\test_ctx_monitor.py src\tests\test_ctx_monitor_3type.py -q` reported `71 passed`.
+- `python -m ruff check pyproject.toml src\tests\test_ctx_monitor_browser.py src\tests\test_ctx_monitor.py src\tests\test_ctx_monitor_3type.py` reported `All checks passed!`.
+- `python -m mypy src\tests\test_ctx_monitor_browser.py src\ctx_monitor.py` reported `Success: no issues found in 2 source files`.
+- `python -m ruff check .` reported `All checks passed!`.
+- `python -m mypy src` reported `Success: no issues found in 238 source files`.
+- `python -m compileall -q src hooks scripts` completed successfully.
+- `git diff --check` reported no whitespace errors.
+- `python -m pytest -q` reported `3243 passed, 8 skipped in 410.96s`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -821,7 +845,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-35 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-36 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
 
 ## P0 Findings
 
@@ -2000,21 +2024,13 @@ The original P0/P1 remediation work is complete in this branch. The remaining wo
    - Document any compatibility exceptions that require `inherit_env=True`.
    - Do not run `npx` or any third-party MCP command by default in CI.
 
-3. Browser-test the monitor dashboard security boundary:
-   - Use a browser-driven harness against `ctx-monitor`.
-   - Assert mutation requests without the token fail.
-   - Assert same-origin/token requests succeed.
-   - Assert path traversal and malformed sidecar paths are rejected.
-   - Exercise concurrent SSE connections while load/unload mutations run in a real browser. HTTP-level SSE concurrency is covered in Phase 30.
-   - Prefer Python Playwright if this becomes automated; the local environment has Python Playwright/Chromium, while the project has no Node browser-test stack.
-
-4. Stress crash consistency and concurrent writers:
+3. Stress crash consistency and concurrent writers:
    - Kill processes during restore, wiki sync, manifest updates, and session writes.
    - Verify rollback snapshots, atomic temp-file replacement, and lock behavior.
    - Add regression tests for partial-write and parallel-writer cases not already covered.
    - Manifest install/uninstall lost-update coverage was fixed in Phase 34; remaining crash-consistency work should focus on restore, wiki sync, and session/write interruption cases.
 
-5. Prepare release readiness material:
+4. Prepare release readiness material:
    - Generate a changelog from the remediation commits.
    - Document behavior changes around MCP env inheritance and tool policy.
    - Dry-run the tag/version/publish workflow before publishing.
