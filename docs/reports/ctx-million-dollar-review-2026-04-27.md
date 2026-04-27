@@ -938,6 +938,27 @@ Verification observed:
 - `python -m mypy src\tests\test_ctx_monitor_browser.py` reported `Success: no issues found in 1 source file`.
 - `python -c "import yaml, pathlib; yaml.safe_load(pathlib.Path('.github/workflows/test.yml').read_text()); print('workflow yaml parsed')"` reported `workflow yaml parsed`.
 
+### Phase 43: Release metadata and changelog readiness
+
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- Bumped `pyproject.toml` package metadata from `0.6.4` to `0.7.0`.
+- Bumped `ctx.__version__` from `0.6.4` to `0.7.0`.
+- Added a fresh empty `[Unreleased]` bucket to `CHANGELOG.md`.
+- Added a consolidated `0.7.0` changelog summary covering the hardening, harness, recommendation/wiki, CI, and release-gate work.
+- Converted the old top-level `[Unreleased]` MCP phase headings to `0.7.0` material so the changelog no longer advertises those historical phase notes as unreleased.
+
+Verification observed:
+
+- A version parity probe printed `0.7.0 0.7.0` after reading both `pyproject.toml` and `src/ctx/__init__.py`.
+- `python -m pytest src\tests\test_package_scaffold.py src\tests\test_public_api.py -q` reported `51 passed`.
+- `python -m ruff check src\ctx\__init__.py` reported `All checks passed!`.
+- `python -m mypy src\ctx\__init__.py` reported `Success: no issues found in 1 source file`.
+- `Select-String -Path 'CHANGELOG.md' -Pattern '^## \[Unreleased\]' | Measure-Object | Select-Object -ExpandProperty Count` reported `1`.
+- `git diff --check` reported no whitespace errors, only existing CRLF conversion warnings.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -978,7 +999,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-42 closed the original P0/P1 blocker list plus the newly surfaced wiki type-sync blocker and the first release-hardening slices in the current branch, with the remaining caveats now narrowed to live-host execution, live third-party MCP validation, release/tag readiness, and exhaustive process-kill crash-consistency scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-43 closed the original P0/P1 blocker list plus the newly surfaced wiki type-sync blocker and the first release-hardening slices in the current branch, with the remaining caveats now narrowed to live-host execution, live third-party MCP validation, final package dry-run, and exhaustive process-kill crash-consistency scenarios noted below.
 
 ## P0 Findings
 
@@ -2167,12 +2188,11 @@ The original P0/P1 remediation work is complete in this branch, and the parallel
    - Manifest install/uninstall lost-update coverage was fixed in Phase 34, active dashboard load/unload lost-update coverage was fixed in Phase 39, and wiki atomic write/lock coverage was hardened in Phase 38.
    - Remaining crash-consistency work should focus on process-kill restore/session interruption cases and any writer that still bypasses the shared atomic helpers.
 
-4. Prepare release readiness material:
-   - Generate a changelog from the remediation commits.
-   - Document behavior changes around MCP env inheritance and tool policy.
-   - Bump `pyproject.toml` and `src/ctx/__init__.py` off `0.6.4`; PyPI and the existing remote tag already use `0.6.4`.
-   - Reconcile the many `[Unreleased]` changelog sections into a real release section.
-   - Dry-run the tag/version/publish workflow before publishing.
+4. Finish release dry-run before publishing:
+   - Build the 0.7.0 sdist/wheel and run `twine check`.
+   - Install the wheel into a fresh venv and run `pip check`.
+   - Smoke the console entrypoints from the installed wheel.
+   - After merge, tag the merge commit as `v0.7.0`; do not reuse the existing `v0.6.4` tag.
 
 ## Residual Uncertainty
 

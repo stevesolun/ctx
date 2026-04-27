@@ -1,9 +1,64 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to the `ctx` project will be documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — MCP Phase 6a — cheap wins before scale
+## [Unreleased]
+
+- No unreleased changes yet.
+
+## [0.7.0] - 2026-04-28
+
+This release is the hardening and model-agnostic harness release. It
+consolidates the MCP phase work that had accumulated under Unreleased,
+then adds the full review remediation stack: shared recommendation
+semantics, safer harness execution/resume/tooling, locked and durable
+state writes, cleaner package/CI gates, and typed skill/agent/MCP
+handling across the dashboard, resolver, manifest, and wiki.
+
+### Security
+
+- Hardened monitor mutations with same-origin and token checks.
+- Locked manifest and wiki read-modify-write paths that can be hit by
+  concurrent sessions or dashboard actions.
+- Made MCP subprocess environment inheritance opt-in and validated
+  live MCP `inherit_env` configs as strict booleans.
+- Hardened install/archive/wiki paths against traversal, symlink, and
+  unsafe extraction cases.
+- Added an explicit approval/policy gate for model-driven tool calls.
+
+### Harness
+
+- Added the generic `ctx run`/`ctx resume`/`ctx sessions` harness and
+  standalone `ctx-mcp-server` surface.
+- Fixed resume ordering/tool restoration, terminal budget accounting,
+  empty/truncated completion handling, compaction usage charging, and
+  MCP request timeout behavior.
+- Added opt-in live-host gates for Claude Code and MCP compatibility
+  checks without spending quota or running third-party code by default.
+
+### Recommendation And Wiki
+
+- Unified recommendation behavior behind shared tag/entity logic across
+  CLI, library, MCP, and harness surfaces.
+- Made scan/resolve/manifests preserve typed skill, agent, and MCP
+  entries.
+- Made wiki sync write agents and MCP servers into their typed entity
+  locations, including sharded MCP paths, instead of treating every
+  manifest load as a skill.
+- Added durable atomic writes for wiki/state files.
+
+### CI And Release
+
+- Added wheel/package smoke checks, version/tag alignment protections,
+  clean-host contract coverage, and browser-monitor CI coverage.
+- Raised the local type gate to `python -m mypy src`.
+- This release bumps package metadata from `0.6.4` to `0.7.0`; do not
+  reuse the existing remote `v0.6.4` tag.
+
+Detailed phase notes for the MCP work included in 0.7.0 are retained below.
+
+## [0.7.0] — MCP Phase 6a — cheap wins before scale
 
 Three small items from the Phase 2.5, 5, and 6 backlogs, bundled so
 the scale work (6b–6f) starts from a clean base.
@@ -51,7 +106,7 @@ $ ctx-scan-repo --repo . --recommend
 ... 16 Skills / 0 MCP Servers (with helpful hint to populate) / 4 Notes
 ```
 
-## [Unreleased] — MCP Phase 5 — cross-type recommendations
+## [0.7.0] — MCP Phase 5 — cross-type recommendations
 
 Closes the loop on MCP integration: the graph already contained MCP
 nodes with cross-type edges (Phase 3c) and had per-MCP quality scores
@@ -127,7 +182,7 @@ Phase 3c; Phase 5 is the presentation layer.
   recommendations because no topical overlap exists. Phase 6 full
   ingest (~12k MCPs) will fix this organically.
 
-## [Unreleased] — MCP Phase 4 — six-signal quality scorer
+## [0.7.0] — MCP Phase 4 — six-signal quality scorer
 
 Adds the MCP-specific quality scorer with the six-signal model designed
 in the Phase 4 interview: popularity / freshness / structural / graph /
@@ -226,7 +281,7 @@ Phase 6 detail-page enrichment.
   decorate graph nodes. Phase 5 (recommender wiring) will update
   ``wiki_graphify`` to look in the ``mcp/`` subdir too.
 
-## [Unreleased] — MCP Phase 3.6 — cross-source canonical-key dedup
+## [0.7.0] — MCP Phase 3.6 — cross-source canonical-key dedup
 
 Phase 3c surfaced that two MCP catalog sources slugify the same upstream
 repo differently — awesome-mcp slugifies the README name, pulsemcp uses
@@ -289,7 +344,7 @@ file (not 2), sources field merged to ``[awesome-mcp, pulsemcp]``.
 Wiki entity count went 40 → 41 (not 42), proving the dedup blocked
 the duplicate.
 
-## [Unreleased] — MCP Phase 2.5 — reviewer cleanup
+## [0.7.0] — MCP Phase 2.5 — reviewer cleanup
 
 Rolls up the deferred python-reviewer + security-reviewer findings
 from Phase 2a/2b/2b.5 that didn't block merge but were worth a
@@ -329,7 +384,7 @@ focused cleanup pass.
   `ctx-mcp-fetch --source pulsemcp --limit 2` both produce valid
   JSONL with progress emitted to stderr (no longer pollutes stdout)
 
-## [Unreleased] — MCP Phase 2b.5 — pulsemcp switched to public HTML scraping
+## [0.7.0] — MCP Phase 2b.5 — pulsemcp switched to public HTML scraping
 
 The pulsemcp.com Sub-Registry API requires per-account credentials
 that aren't broadly available. Phase 2b.5 swaps the auth-gated JSON
@@ -389,7 +444,7 @@ Done: 5 added, 0 merged, 0 rejected, 0 errors
 Sharded paths verified: `entities/mcp-servers/{c,d,e,o,p}/<slug>.md`.
 Cleaned up before commit.
 
-## [Unreleased] — MCP Phase 2b — pulsemcp source
+## [0.7.0] — MCP Phase 2b — pulsemcp source
 
 Adds the second catalog source: `www.pulsemcp.com` Sub-Registry API
 (~12,975 servers as of today). Uses the official JSON API
@@ -475,7 +530,7 @@ to confirm.
 - `@dataclass(frozen=True)` for `_PulsemcpSource` (Python LOW)
 - Consolidate `noqa: no-any-return` suppressions (Python LOW)
 
-## [Unreleased] — MCP Phase 2a — fetcher + first source
+## [0.7.0] — MCP Phase 2a — fetcher + first source
 
 Adds the `Source` protocol, an SSRF-hardened HTTP fetcher, and the
 first real catalog source: `github.com/punkpeye/awesome-mcp-servers`.
@@ -533,7 +588,7 @@ tags (e.g. all five `aggregator`-tagged MCPs formed a clique).
   in `mcp_add`. Total: 1,515 / 1,517 passed (2 pre-existing skips,
   0 regressions).
 
-## [Unreleased] — MCP Phase 1 — foundation
+## [0.7.0] — MCP Phase 1 — foundation
 
 First-class **MCP server** entity type alongside skills and agents.
 Phase 1 ships the data model, intake hooks, and ingest CLI; no fetcher

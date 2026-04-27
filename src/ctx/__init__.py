@@ -33,7 +33,7 @@ See docs/plans/001-model-agnostic-harness.md for the roadmap + phase
 status.
 """
 
-__version__ = "0.6.4"
+__version__ = "0.7.0"
 
 
 # Public library surface — anything listed here is safe for third-
