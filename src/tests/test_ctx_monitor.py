@@ -506,7 +506,7 @@ def test_cli_argparser_exposes_serve() -> None:
     # Valid invocation parses (we don't actually start the server; parse_args
     # returns args but cm.main() would call serve() which blocks. So just
     # test the parser path.)
-    parser = __import__("argparse").ArgumentParser()
+    __import__("argparse").ArgumentParser()
     # Minimal smoke: main with --help exits 0.
     with pytest.raises(SystemExit) as exc:
         cm.main(["serve", "--help"])

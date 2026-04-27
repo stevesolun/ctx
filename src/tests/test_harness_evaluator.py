@@ -40,13 +40,11 @@ from ctx.adapters.generic.evaluator import (
     _build_revision_task,
     _coerce_score,
     _coerce_verdict,
-    _extract_json,
     _parse_criteria,
-    _safe_str,
     _UsageTotals,
     run_with_evaluation,
 )
-from ctx.adapters.generic.planner import PlanArtifact, Planner
+from ctx.adapters.generic.planner import Planner
 from ctx.adapters.generic.providers import (
     CompletionResponse,
     Message,
@@ -544,7 +542,7 @@ class TestRunWithEvaluation:
             _resp("revised attempt"),
             _resp(_PASS_JSON),
         ])
-        outcome = run_with_evaluation(
+        run_with_evaluation(
             provider=provider,
             system_prompt="sys",
             task="original task",
@@ -597,7 +595,6 @@ def fake_litellm_evaluator(monkeypatch: pytest.MonkeyPatch):
     calls: list[dict[str, Any]] = []
     # Pre-loaded queue of responses. Test-specific calls can override
     # before they call main() by setting ``fake._responses`` to a list.
-    responses: list[dict[str, Any]] = []
 
     def _mk(content: str) -> dict[str, Any]:
         return {

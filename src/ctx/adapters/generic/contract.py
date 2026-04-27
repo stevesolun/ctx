@@ -45,11 +45,9 @@ Plan 001 Phase H12 (final harness phase).
 
 from __future__ import annotations
 
-import json
 import logging
-import re
-from dataclasses import dataclass, field
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any
 
 from ctx.adapters.generic.planner import PlanArtifact, _extract_json, _safe_str
 from ctx.adapters.generic.providers import (

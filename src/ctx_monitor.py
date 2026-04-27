@@ -51,7 +51,6 @@ import os
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -536,7 +535,7 @@ def _render_home() -> str:
            "<p class='muted'>No sessions recorded yet. Hooks start logging "
            "once you run a Claude Code session with ctx installed.</p>")
         + "</div>"
-        f"<div class='card'><strong>Latest audit events</strong>"
+        "<div class='card'><strong>Latest audit events</strong>"
         + ("<table>"
            "<tr><th>Time</th><th>Event</th><th>Subject</th></tr>"
            + audit_rows

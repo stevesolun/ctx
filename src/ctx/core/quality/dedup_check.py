@@ -114,8 +114,8 @@ def load_allowlist(path: Path) -> set[tuple[str, str]]:
                 "dedup-allowlist: ignoring malformed line %r", raw,
             )
             continue
-        a, b = parts[0].strip(), parts[1].strip()
-        out.add(tuple(sorted([a, b])))
+        a, b = sorted((parts[0].strip(), parts[1].strip()))
+        out.add((a, b))
     return out
 
 
@@ -581,7 +581,7 @@ def _find_pairs_for_changed(
 
     if not changed_indices:
         return []
-    changed_set = set(changed_indices)
+    set(changed_indices)
     out_seen: set[tuple[int, int]] = set()
     out: list[tuple[int, int, float]] = []
     for chunk_start in range(0, len(changed_indices), chunk_size):

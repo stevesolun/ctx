@@ -34,7 +34,7 @@ import json
 import logging
 import re
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
@@ -421,7 +421,7 @@ def run_backfill(
     """Walk the catalog, propose backfills for empty-tag entities."""
     skills_root = Path.home() / ".claude" / "skills"
     agents_root = Path.home() / ".claude" / "agents"
-    all_paths = []
+    all_paths: list[Path] = []
     if skills_root.is_dir():
         all_paths.extend(skills_root.glob("*/SKILL.md"))
     if agents_root.is_dir():
@@ -439,7 +439,7 @@ def run_backfill(
             proposals.append(prop)
 
     return TagReport(
-        total_entities_scanned=sum(1 for _ in all_paths) or len(all_paths),
+        total_entities_scanned=len(all_paths),
         entities_with_empty_tags=len(targets),
         proposals=proposals,
     )

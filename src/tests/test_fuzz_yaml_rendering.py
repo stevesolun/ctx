@@ -266,7 +266,6 @@ class TestUnicodeLineSeparatorRegression:
         self, tmp_path: "__import__('pathlib').Path", fields: dict
     ) -> "__import__('pathlib').Path":
         from ctx.adapters.claude_code.install.install_utils import _render_scalar
-        from pathlib import Path  # noqa: PLC0415
         lines = ["---", "slug: demo"]
         for k, v in fields.items():
             lines.append(f"{k}: {_render_scalar(v)}")

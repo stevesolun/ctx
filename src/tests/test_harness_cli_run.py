@@ -28,8 +28,6 @@ from typing import Any
 import pytest
 
 from ctx.cli.run import (
-    _MCP_PRESETS,
-    _PROVIDER_KEY_ENV,
     _model_provider_prefix,
     _parse_mcp_spec,
     _resolve_api_key_env,
@@ -452,8 +450,8 @@ class TestResumeCommand:
         # Session file now has BOTH runs — count 'stop' events.
         text = (tmp_path / "resumable.jsonl").read_text(encoding="utf-8")
         stop_count = sum(
-            1 for l in text.splitlines()
-            if l and json.loads(l)["type"] == "stop"
+            1 for line in text.splitlines()
+            if line and json.loads(line)["type"] == "stop"
         )
         assert stop_count == 2
 

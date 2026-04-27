@@ -14,9 +14,7 @@ Covers:
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -31,7 +29,6 @@ from ctx.adapters.generic.providers import (
 )
 from ctx.adapters.generic.state import (
     JsonlObserver,
-    ReplayState,
     SessionStore,
     _safe_session_id,
     default_sessions_dir,
@@ -221,7 +218,7 @@ class TestSessionStore:
         s2.write_event("second", {})
         s2.close()
         lines = (tmp_path / "s1.jsonl").read_text(encoding="utf-8").strip().split("\n")
-        types = [json.loads(l)["type"] for l in lines]
+        types = [json.loads(line)["type"] for line in lines]
         assert types == ["first", "second"]
 
     def test_unicode_content_roundtrips(self, tmp_path: Path) -> None:
@@ -254,8 +251,8 @@ class TestConvenienceWriters:
                 )
             )
         events = [
-            json.loads(l) for l in
-            (tmp_path / "s.jsonl").read_text(encoding="utf-8").splitlines() if l
+            json.loads(line) for line in
+            (tmp_path / "s.jsonl").read_text(encoding="utf-8").splitlines() if line
         ]
         assert events[0]["role"] == "user"
         assert events[1]["tool_calls"][0]["arguments"] == {"x": 1}
@@ -558,8 +555,8 @@ class TestJsonlObserverRoundTrip:
         finally:
             store.close()
         events = [
-            json.loads(l) for l in
-            (tmp_path / "noe.jsonl").read_text(encoding="utf-8").splitlines() if l
+            json.loads(line) for line in
+            (tmp_path / "noe.jsonl").read_text(encoding="utf-8").splitlines() if line
         ]
         types = [e["type"] for e in events]
         assert "session_start" not in types

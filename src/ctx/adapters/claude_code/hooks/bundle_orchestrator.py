@@ -46,7 +46,6 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 CLAUDE_DIR = Path(os.path.expanduser("~/.claude"))
 PENDING_SKILLS = CLAUDE_DIR / "pending-skills.json"

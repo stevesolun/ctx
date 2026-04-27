@@ -85,7 +85,7 @@ def test_log_never_raises_on_unwritable_path(tmp_path: Path) -> None:
     # Point at a path inside a non-existent parent with no create
     # permission — mkdir(parents=True) handles that; this mainly asserts
     # that the exception swallow works.
-    target = tmp_path / "audit.jsonl"
+    tmp_path / "audit.jsonl"
     # Passing an open directory as the target — should not raise.
     (tmp_path / "dir").mkdir()
     # Append to the dir path; OSError swallowed.

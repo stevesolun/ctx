@@ -33,7 +33,6 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -808,7 +807,6 @@ class TestEmbedMissing:
         via the normal _chunk_text path (it always returns max(1,...)), so we
         directly call _embed_missing with a patched view.
         """
-        dim = 4
 
         def _embed(texts: list[str]) -> np.ndarray:
             return np.array([[1.0, 2.0, 3.0, 4.0]] * len(texts), dtype="float32")
@@ -1033,7 +1031,7 @@ class TestComputeSemanticEdgesIncrementalPath:
         min_cosine: float = 0.0,
     ) -> dict[tuple[str, str], float]:
         _save_topk_state(tmp_path, prior_state)
-        dim = embed_vecs.shape[1]
+        embed_vecs.shape[1]
 
         def _fake_embed_missing(missing, embedder, batch_size):
             rows = np.array(

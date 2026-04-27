@@ -8,6 +8,7 @@ and must confine resolved paths to SKILLS_DIR / AGENTS_DIR.
 
 from __future__ import annotations
 
+import json
 import importlib
 from pathlib import Path
 
@@ -106,8 +107,6 @@ def test_validate_skill_name_rejects_bad(fake_home):
 # Code-reviewer HIGH (P2.2). Prior impl deduped on slug alone and
 # wrote entries without an ``entity_type`` field. A same-slug
 # skill + agent collision silently dropped one of them.
-
-import json
 
 class TestUpdateManifestEntityType:
 

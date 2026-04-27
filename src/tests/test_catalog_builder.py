@@ -12,12 +12,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 import catalog_builder
-import ctx_config
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -581,8 +580,8 @@ class TestUpdateWikiIndex:
         catalog_builder.update_wiki_index(wiki_dir, self._stats())
         content = index_path.read_text(encoding="utf-8")
         lines = content.split("\n")
-        skills_idx = next(i for i, l in enumerate(lines) if l.strip() == "## Skills")
-        catalog_idx = next(i for i, l in enumerate(lines) if "[[catalog]]" in l)
+        skills_idx = next(i for i, line in enumerate(lines) if line.strip() == "## Skills")
+        catalog_idx = next(i for i, line in enumerate(lines) if "[[catalog]]" in line)
         assert catalog_idx == skills_idx + 1
 
     def test_catalog_ref_appended_when_no_skills_section(

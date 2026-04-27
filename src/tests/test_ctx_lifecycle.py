@@ -548,7 +548,9 @@ def cli_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     skills = tmp_path / "skills"
     agents = tmp_path / "agents"
     sidecar = tmp_path / "quality"
-    skills.mkdir(); agents.mkdir(); sidecar.mkdir()
+    skills.mkdir()
+    agents.mkdir()
+    sidecar.mkdir()
 
     class _FakeCfg:
         skills_dir = skills

@@ -426,7 +426,7 @@ class TestLoopIntegration:
     def test_compactor_never_triggers_is_noop(self) -> None:
         c = TokenBudgetCompactor(max_chars=10**9, max_messages=10**6)
         provider = _Scripted(responses=[_resp(content="done")])
-        result = run_loop(
+        run_loop(
             provider=provider,
             system_prompt="sys",
             task="task",

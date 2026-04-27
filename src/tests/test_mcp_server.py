@@ -44,7 +44,6 @@ from ctx.mcp_server.server import (
     _handle_initialize,
     _handle_tools_call,
     _handle_tools_list,
-    _process_line,
     _write_error,
     _write_frame,
     _write_response,

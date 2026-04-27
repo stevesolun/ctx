@@ -220,10 +220,7 @@ def _render_scalar(value: object) -> str:
         # otherwise see a quoted scalar as multiple frontmatter lines —
         # Strix vuln-0001 HIGH (CWE-116). The fix closes the injection
         # at the writer; the parsers stay unchanged.
-        safe = value.translate(str.maketrans({
-    "\r": " ", "\n": " ",
-    "\x85": " ", "\u2028": " ", "\u2029": " ",
-}))
+        safe = value.translate(str.maketrans("\r\n\x85\u2028\u2029", "     "))
         # Conservative: quote when the string contains ANY YAML-structural
         # / flow-indicator / reserved character, OR leads with a block-
         # indicator char, OR leads/trails whitespace. The unquoted path is

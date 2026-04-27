@@ -342,8 +342,8 @@ class TestTruncateIntentLog:
         monkeypatch.setattr(_ut, "INTENT_LOG", log)
         monkeypatch.setattr(_ut, "KEEP_DAYS", 3)
         truncate_intent_log()
-        lines = [l for l in log.read_text().strip().split("\n") if l]
-        dates = {json.loads(l)["date"] for l in lines}
+        lines = [line for line in log.read_text().strip().split("\n") if line]
+        dates = {json.loads(line)["date"] for line in lines}
         assert len(dates) <= 3
         # Most recent dates should be kept
         assert "2024-01-11" in dates
@@ -358,7 +358,7 @@ class TestTruncateIntentLog:
         monkeypatch.setattr(_ut, "INTENT_LOG", log)
         monkeypatch.setattr(_ut, "KEEP_DAYS", 5)
         truncate_intent_log()
-        lines = [l for l in log.read_text().strip().split("\n") if l]
+        lines = [line for line in log.read_text().strip().split("\n") if line]
         # The valid line should remain; bad line dropped
         assert len(lines) == 1
 

@@ -168,7 +168,7 @@ class TestInstallSkill:
         source = tmp_path / "SKILL.md"
         source.write_text("# skill\n")
         skills_dir = tmp_path / "skills"
-        installed = install_skill(source, skills_dir, "new-skill")
+        install_skill(source, skills_dir, "new-skill")
         assert (skills_dir / "new-skill").is_dir()
 
     def test_overwrites_existing(self, tmp_path):

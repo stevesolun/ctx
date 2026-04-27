@@ -165,7 +165,7 @@ class TestRenderBundleMessage:
         sugs = self._sug(*[(f"s-{i}", "skill", 100 - i) for i in range(10)])
         msg = _bo.render_bundle_message(sugs, [], [], top_k=3)
         # Count the bullet lines that start with "- " (our bundle-item marker).
-        item_lines = [l for l in msg.splitlines() if l.strip().startswith("- ")]
+        item_lines = [line for line in msg.splitlines() if line.strip().startswith("- ")]
         assert len(item_lines) == 3
 
 
@@ -257,7 +257,7 @@ class TestMainEndToEnd:
         out = capsys.readouterr().out
         payload = json.loads(out.strip())
         msg = payload["hookSpecificOutput"]["additionalContext"]
-        item_lines = [l for l in msg.splitlines() if l.strip().startswith("- ")]
+        item_lines = [line for line in msg.splitlines() if line.strip().startswith("- ")]
         assert len(item_lines) == 2, f"expected top_k=2 cap, got {len(item_lines)}"
 
 

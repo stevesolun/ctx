@@ -20,6 +20,7 @@ import os
 import sys
 import uuid
 from pathlib import Path
+from typing import Any
 
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 from ctx.core.wiki.wiki_utils import validate_skill_name
@@ -93,7 +94,7 @@ def update_manifest(name: str, entity_type: str = "skill") -> None:
     skills and agents via ``find_skill`` — the type is always known
     at the call site).
     """
-    manifest = {"load": [], "unload": [], "warnings": []}
+    manifest: dict[str, Any] = {"load": [], "unload": [], "warnings": []}
     if MANIFEST_PATH.exists():
         try:
             manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))

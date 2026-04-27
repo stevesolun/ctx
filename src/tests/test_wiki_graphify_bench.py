@@ -15,7 +15,6 @@ from collections import defaultdict
 from pathlib import Path
 
 import networkx as nx
-import pytest
 
 SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:

@@ -203,9 +203,9 @@ def main() -> None:
     if args.install:
         print()
         print("Next steps:")
-        print(f"  python src/catalog_builder.py")
-        print(f"  python src/wiki_batch_entities.py --all")
-        print(f"  python -m ctx.core.wiki.wiki_graphify")
+        print("  python src/catalog_builder.py")
+        print("  python src/wiki_batch_entities.py --all")
+        print("  python -m ctx.core.wiki.wiki_graphify")
 
 
 if __name__ == "__main__":

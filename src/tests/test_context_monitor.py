@@ -136,7 +136,7 @@ class TestAppendIntentLog:
         monkeypatch.setattr(_cm, "INTENT_LOG", log)
         entry = {"date": TODAY, "signals": ["react"]}
         append_intent_log(entry)
-        lines = [l for l in log.read_text().strip().split("\n") if l]
+        lines = [line for line in log.read_text().strip().split("\n") if line]
         assert len(lines) == 1
         assert json.loads(lines[0])["signals"] == ["react"]
 
@@ -146,7 +146,7 @@ class TestAppendIntentLog:
         monkeypatch.setattr(_cm, "INTENT_LOG", log)
         append_intent_log({"date": TODAY, "signals": ["react"]})
         append_intent_log({"date": TODAY, "signals": ["docker"]})
-        lines = [l for l in log.read_text().strip().split("\n") if l]
+        lines = [line for line in log.read_text().strip().split("\n") if line]
         assert len(lines) == 2
 
 
@@ -306,7 +306,7 @@ class TestMain:
         tool_input = json.dumps({"file_path": "Dockerfile"})
         monkeypatch.setattr(sys, "argv", ["context_monitor.py", "--tool", "Read", "--input", tool_input])
         _cm.main()
-        lines = [l for l in log.read_text().strip().split("\n") if l]
+        lines = [line for line in log.read_text().strip().split("\n") if line]
         assert len(lines) == 1
         entry = json.loads(lines[0])
         assert "docker" in entry["signals"]
@@ -323,7 +323,7 @@ class TestMain:
         monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
         monkeypatch.setattr(sys, "argv", ["context_monitor.py", "--from-stdin"])
         _cm.main()
-        lines = [l for l in log.read_text().strip().split("\n") if l]
+        lines = [line for line in log.read_text().strip().split("\n") if line]
         assert len(lines) == 1
         entry = json.loads(lines[0])
         assert "docker" in entry["signals"]

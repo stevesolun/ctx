@@ -467,7 +467,7 @@ class TestUpsertSkillPage:
         wiki = self._wiki(tmp_path)
         page = wiki / "entities" / "skills" / "my-skill.md"
         content = (
-            f"---\nupdated: 2020-01-01\nuse_count: NaN\nlast_used: 2020-01-01\n---\n# my-skill\n"
+            "---\nupdated: 2020-01-01\nuse_count: NaN\nlast_used: 2020-01-01\n---\n# my-skill\n"
         )
         page.write_text(content, encoding="utf-8")
         # Must not raise
@@ -764,7 +764,7 @@ class TestAppendLog:
         new_lines = (wiki / "log.md").read_text(encoding="utf-8").splitlines()
         # Header "## [date] init | wiki" plus blank line = 2 new lines
         appended_lines = new_lines[original_len:]
-        bullet_lines = [l for l in appended_lines if l.startswith("- ")]
+        bullet_lines = [line for line in appended_lines if line.startswith("- ")]
         assert bullet_lines == []
 
     def test_each_detail_line_starts_with_bullet(

@@ -54,7 +54,6 @@ from __future__ import annotations
 import json
 import logging
 import sys
-import traceback
 from dataclasses import dataclass
 from typing import Any, BinaryIO
 

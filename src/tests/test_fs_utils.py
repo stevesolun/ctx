@@ -8,7 +8,6 @@ import json
 import os
 import sys
 import threading
-import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,7 +18,7 @@ _SRC = Path(__file__).resolve().parent.parent
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from ctx.utils._fs_utils import atomic_write_bytes, atomic_write_json, atomic_write_text
+from ctx.utils._fs_utils import atomic_write_bytes, atomic_write_json, atomic_write_text  # noqa: E402
 
 
 # ── atomic_write_text ─────────────────────────────────────────────────────────

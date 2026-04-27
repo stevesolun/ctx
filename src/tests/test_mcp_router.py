@@ -11,7 +11,6 @@ so there's no cross-test state.
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -22,7 +21,6 @@ from ctx.adapters.generic.tools import (
     McpRouter,
     McpServerConfig,
     McpServerError,
-    TOOL_SEPARATOR,
     running_router,
 )
 

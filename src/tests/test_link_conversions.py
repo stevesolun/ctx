@@ -16,7 +16,6 @@ Covers:
   - main()                      (via argv)
 """
 
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -28,7 +27,6 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 import link_conversions as _lc
 from link_conversions import (
     ConvertedSkill,
-    ProcessResult,
     _build_new_entity_page,
     _inject_pipeline_fields,
     _infer_tags,

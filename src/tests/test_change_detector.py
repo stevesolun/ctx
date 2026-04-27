@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import stat
 from pathlib import Path
 from typing import Any
 
@@ -646,7 +644,7 @@ class TestDetectChanges:
         (claude_home / "new.json").write_bytes(b"fresh")
         # changed — present now, different hash in baseline
         (claude_home / "changed.json").write_bytes(b"modified")
-        changed_digest = hashlib.sha256(b"modified").hexdigest()
+        hashlib.sha256(b"modified").hexdigest()
         # unchanged — present now, same hash
         (claude_home / "same.json").write_bytes(b"identical")
         same_digest = hashlib.sha256(b"identical").hexdigest()

@@ -704,9 +704,9 @@ class TestCliContract:
         )
         # JSONL should carry a 'contract' event with the refined criteria.
         events = [
-            json.loads(l)
-            for l in (tmp_path / "cn-run.jsonl").read_text(encoding="utf-8").splitlines()
-            if l
+            json.loads(line)
+            for line in (tmp_path / "cn-run.jsonl").read_text(encoding="utf-8").splitlines()
+            if line
         ]
         contract_events = [e for e in events if e.get("type") == "contract"]
         assert len(contract_events) == 1

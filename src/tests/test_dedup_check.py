@@ -11,12 +11,10 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:

@@ -40,6 +40,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
+from toolbox_config import Toolbox, merged
+
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write
 
 _PLAN_HASH_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -57,8 +59,6 @@ def _validate_plan_hash(raw: str) -> str:
     if not isinstance(raw, str) or not _PLAN_HASH_RE.fullmatch(raw):
         raise ValueError(f"invalid plan_hash: {raw!r}")
     return raw
-
-from toolbox_config import Toolbox, merged
 
 
 RUNS_DIR = Path(os.path.expanduser("~/.claude/toolbox-runs"))

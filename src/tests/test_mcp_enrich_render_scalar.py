@@ -22,7 +22,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
@@ -111,10 +110,10 @@ class TestRenderScalar:
         # have injected one.
         fm = text.split("---", 2)[1]
         status_keys = [
-            l for l in fm.splitlines()
-            if l.lstrip().startswith("status:")
+            line for line in fm.splitlines()
+            if line.lstrip().startswith("status:")
             # Must be at column 0 (not inside a quoted scalar).
-            and not l.startswith(" ")
+            and not line.startswith(" ")
         ]
         assert len(status_keys) == 0, (
             f"YAML injection via newline succeeded — found status keys: "

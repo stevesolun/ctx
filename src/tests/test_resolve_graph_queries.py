@@ -19,10 +19,8 @@ from __future__ import annotations
 
 import json
 import sys
-from io import StringIO
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import networkx as nx
 import pytest
@@ -155,7 +153,6 @@ class TestLoadGraph:
 
     def test_networkx_deserialise_error_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Trigger the KeyError/TypeError/NetworkXError branch via monkeypatching."""
-        from networkx.readwrite import json_graph as _jg
         p = tmp_path / "graph.json"
         # Write a syntactically valid node-link dict so the schema check passes,
         # then force node_link_graph to raise TypeError — one of the caught exceptions.
@@ -397,7 +394,6 @@ class TestResolveByTags:
         Two nodes with identical tag overlap; higher degree wins.
         Score = overlap * 10 + log1p(degree).
         """
-        import math
         G = nx.Graph()
         G.add_node("skill:low", type="skill", label="Low", tags=["python"])
         G.add_node("skill:high", type="skill", label="High", tags=["python"])

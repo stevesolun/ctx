@@ -9,6 +9,403 @@ This report covers two related passes:
 
 The codebase under review is the Python package rooted at `C:\Steves_Files\Work\Research_and_Papers\ctx`.
 
+## Current-State Deep Audit Update - 2026-04-27
+
+This section supersedes any earlier "fixed" status claims where the
+current checked-out tree contradicts them. The working tree was re-read
+and verified after the parallel review lanes completed.
+
+### Static Gate Remediation
+
+The repo-wide static-analysis caveat has been fixed in the current
+working tree.
+
+Observed before remediation:
+
+- `python -m ruff check src hooks scripts --quiet --statistics`
+  - `61 F401`, `18 E741`, `11 F841`, `5 F541`, `3 E402`, `2 E702`
+- `python -m mypy --ignore-missing-imports src\ctx src\scan_repo.py`
+  - `11 errors in 7 files`
+
+What changed:
+
+- Removed unused imports and unused locals across production and test
+  files.
+- Renamed ambiguous one-letter JSONL loop variables in tests.
+- Split semicolon-compressed setup statements.
+- Added narrow type annotations for dictionaries and path lists.
+- Fixed the semantic-cache sentinel typing in
+  `ctx.core.resolve.recommendations`.
+- Fixed the `run_loop()` local `result` variable collision that made
+  mypy infer the function return as `str`.
+- Replaced the `str.maketrans(dict[str, str])` call in install scalar
+  rendering with the typed two-string form.
+
+Fresh verification after the persisted changes:
+
+- `python -m ruff check src hooks scripts --quiet`
+  - exit 0
+- `python -m mypy --ignore-missing-imports src\ctx src\scan_repo.py`
+  - `Success: no issues found in 58 source files`
+- `python -m compileall -q src hooks scripts`
+  - exit 0
+- `python -m pytest -q`
+  - `3169 passed, 7 skipped in 381.47s (0:06:21)`
+
+### Critical Correction
+
+The earlier Phase 6 section below says several ctx-init and
+recommendation-doc issues were fixed. The current checked-out tree does
+not match that claim.
+
+Current observations:
+
+- `src/ctx_init.py` still runs `python -m inject_hooks`.
+- `src/ctx_init.py` still runs `python -m wiki_graphify`.
+- `docs/knowledge-graph.md` still names `src/wiki_graphify.py`.
+- `docs/knowledge-graph.md` still describes
+  `resolve_by_seeds(G, matched_slugs)` and `graph neighbor` reasons.
+- `docs/skill-quality-install.md` still recommends
+  `python -m wiki_graphify --graph-only`.
+- `ctx.adapters.claude_code.hooks.context_monitor.graph_suggest()` still
+  implements a local scorer instead of calling `recommend_by_tags()`.
+- `resolve_skills.py` still imports and calls `resolve_by_seeds()`.
+
+This means the architecture is still partially split. Public ctx tools
+use the shared ranker, but Claude Code hook recommendations and resolver
+graph augmentation remain separate behavior surfaces.
+
+### Executive Verdict
+
+The project is materially better than a prototype, but it is not yet
+release-hard from a CTO/security/reliability perspective.
+
+The strongest parts:
+
+- Broad behavioral test suite: 3,169 passing tests in the current run.
+- Ruff and mypy can now pass repo-wide.
+- The generic harness has real abstractions for providers, sessions,
+  observers, tools, compaction, planning, and evaluation.
+- Security hardening exists in several places: slug validation,
+  path-containment checks, YAML scalar escaping, and atomic write helpers.
+
+The release blockers:
+
+- Setup entrypoints are still broken or stale in current source/docs.
+- Automatic hook recommendation behavior remains split from the shared
+  recommendation engine.
+- MCP subprocesses inherit the full parent environment, including secrets.
+- Dashboard APIs can expose or mutate local state if bound off localhost.
+- Backup code has path/symlink escape risks that contradict its safety
+  promise.
+- Packaging tests do not verify the built wheel, and the wheel likely
+  omits runtime config files.
+- CI publish is not gated by the same verification now proven to matter.
+
+### P0/P1 Findings
+
+#### P0 - `ctx-init` Optional Steps Still Call Removed Modules
+
+Evidence:
+
+- `src/ctx_init.py` invokes `sys.executable, "-m", "inject_hooks"`.
+- `src/ctx_init.py` invokes `sys.executable, "-m", "wiki_graphify"`.
+- The package module paths are
+  `ctx.adapters.claude_code.inject_hooks` and
+  `ctx.core.wiki.wiki_graphify`.
+
+Impact:
+
+- `ctx-init --hooks` and `ctx-init --graph` can fail while users think
+  initialization succeeded.
+- This breaks the first-user A-Z flow and makes hook/graph setup
+  unreliable.
+
+Required fix:
+
+- Change the invoked modules to package paths.
+- Propagate non-zero return codes for explicitly requested optional
+  steps.
+- Add tests asserting exact module names and non-zero failure behavior.
+
+#### P0 - Hook Installer Emits Dead/Non-Portable Commands
+
+Evidence:
+
+- `inject_hooks.make_hooks()` still emits direct script-style commands
+  such as `python3 ...context_monitor.py` and shell fragments like
+  `2>/dev/null || true`.
+- Current hook modules live under
+  `ctx.adapters.claude_code.hooks`, not flat package root scripts.
+
+Impact:
+
+- Installed Claude Code hooks can silently do nothing.
+- The POSIX-shell command shape is fragile on Windows.
+- `|| true` masks broken hook execution.
+
+Required fix:
+
+- Generate package-module commands with the current interpreter:
+  `python -m ctx.adapters.claude_code.hooks.context_monitor` and
+  package-module bundle hook equivalents.
+- Avoid shell-specific redirection in JSON hook commands where possible.
+- Stop swallowing hook failures during explicit install/test modes.
+
+#### P1 - Recommendation Unification Is Incomplete
+
+Evidence:
+
+- `context_monitor.graph_suggest()` locally scores labels, tag overlap,
+  and degree.
+- Public ctx tools use
+  `ctx.core.resolve.recommendations.recommend_by_tags()`.
+- `resolve_skills.py` imports and calls `resolve_by_seeds()`.
+
+Impact:
+
+- Recommendations differ by entrypoint.
+- A user can see different rankings or different empty/non-empty results
+  from hooks, public tools, and scan/resolve.
+- Documentation currently promises more consistency than the code
+  delivers.
+
+Required fix:
+
+- Make hook suggestions call the shared ranker.
+- Decide whether resolver is a tag recommender or a graph-neighbor loader.
+  If it is a recommender, use `recommend_by_tags()`. If it remains a
+  loader, update docs and product claims.
+- Add parity tests that monkeypatch or fixture the shared ranker and prove
+  hook/public/scan paths agree.
+
+#### P1 - MCP Servers Inherit All Parent Secrets
+
+Evidence:
+
+- `McpClient` builds subprocess environment from `os.environ.copy()`.
+- Configured MCP server commands receive unrelated credentials such as
+  API keys, cloud credentials, GitHub tokens, and `SSH_AUTH_SOCK`.
+
+Impact:
+
+- Any MCP process, including third-party `npx` servers, can exfiltrate
+  secrets without model-visible output.
+- This is the highest-risk security issue in the generic harness.
+
+Required fix:
+
+- Default to a minimal environment.
+- Allow explicit env pass-through by name.
+- Redact secrets in logs and metadata.
+- Add tests proving fake secrets are not visible to child processes unless
+  explicitly allowed.
+
+#### P1 - Backup Can Copy Files Outside The Intended Claude Home
+
+Evidence:
+
+- `backup_config.py` promises credential files are never copied.
+- Configurable `top_files` are joined under `CLAUDE_HOME` without a
+  resolved containment check.
+- Backup tree roots can start on a symlink/junction target even with
+  `os.walk(..., followlinks=False)`.
+
+Impact:
+
+- A malicious or corrupted backup config can snapshot credentials such as
+  SSH keys or cloud credentials into Claude backup directories.
+- Symlink/junction starting roots can bypass the "never follows symlinks"
+  safety statement.
+
+Required fix:
+
+- Validate every configured file/root by `resolve(strict=False)` against
+  the intended home.
+- Reject symlink/junction roots.
+- Enforce an explicit denylist for credential-like names even after
+  resolution.
+- Add traversal and symlink-root tests.
+
+#### P1 - Dashboard Entity APIs Have Path/Exposure Risks
+
+Evidence:
+
+- Skill sidecar lookup builds `_sidecar_dir() / f"{slug}.json"` from
+  route input without slug validation.
+- `ctx-monitor --host 0.0.0.0` exposes unauthenticated read and mutation
+  APIs.
+- The HTTP server is single-threaded, and the live SSE endpoint can hold
+  the only request thread indefinitely.
+
+Impact:
+
+- LAN clients can read local ctx state or trigger mutations if the
+  dashboard is bound off localhost.
+- Path traversal can read JSON files adjacent to the sidecar directory.
+- Opening the live events page can stall the rest of the dashboard.
+
+Required fix:
+
+- Validate slugs for all API routes.
+- Default-bind localhost and require an explicit unsafe flag/token for
+  non-localhost binding.
+- Use `ThreadingHTTPServer` or move SSE to a separate worker path.
+
+#### P1 - Packaging Artifact Is Not Verified
+
+Evidence:
+
+- `pyproject.toml` declares package data for `config.json` and
+  `skill-registry.json`, but those files live beside flat modules, not
+  inside a package.
+- `ctx_config.py` expects `config.json` next to `ctx_config.py`.
+- `ctx.__version__` reports `0.1.0-alpha` while package metadata reports
+  `0.6.4`.
+- The publish workflow builds and publishes without running tests, ruff,
+  mypy, `pip check`, `twine check`, or wheel smoke tests.
+
+Impact:
+
+- The installed artifact can differ from the tested source tree.
+- Runtime config can be missing after install.
+- Support/debug output can report the wrong version.
+- PyPI tags can ship unverified artifacts.
+
+Required fix:
+
+- Move config data into a package or configure setuptools data for
+  py-modules correctly.
+- Derive `ctx.__version__` from package metadata or keep it synchronized.
+- Add wheel-build, wheel-inspection, smoke-install, entrypoint, and
+  package-data tests.
+- Gate publish on the same checks used locally.
+
+### P2 Findings
+
+#### P2 - Model-Selected MCP Tools Execute Without Policy Confirmation
+
+The harness sends attached MCP tools to the model and dispatches returned
+tool calls directly. With filesystem, Git, browser, or GitHub MCPs
+attached, prompt injection in a hostile repository can steer the model
+into sensitive reads or mutations.
+
+Required fix: introduce a policy layer for dangerous tools, per-server
+allow/deny scopes, and optional user confirmation for side-effecting or
+secret-bearing tools.
+
+#### P2 - `--cmd-json` Bypasses MCP Install Command Policy
+
+The MCP installer validates command allowlists for `--cmd`, but raw
+`--cmd-json` is passed to `claude mcp add-json` after JSON parsing.
+
+Required fix: parse `--cmd-json` into the same normalized command model
+and apply the same executable/argument policy.
+
+#### P2 - Graph Incremental Patch Can Miss Changed Existing Nodes
+
+Graph patch recovery does not reliably compare prior and current content
+hashes for existing nodes before state overwrite, so semantic incident
+edges can remain stale after a page body/tag change.
+
+Required fix: compute affected IDs from the semantic edge pass before
+saving new state, or compare against the prior top-K state explicitly.
+
+#### P2 - Semantic `min_cosine` Is Not Enforced By Consumers
+
+Graph build exposes/configures semantic cosine thresholds, but consumers
+load raw graphs and walk all edges.
+
+Required fix: centralize graph loading through a filtered
+recommendation-graph loader or have `resolve_graph.load_graph()` apply the
+configured minimum by default.
+
+#### P2 - Graphify Dry-Run Still Writes Artifacts
+
+The `--dry-run` mode is documented as preview-only, but graph export
+happens before mutation dry-run handling.
+
+Required fix: make dry-run skip artifact writes or write only to an
+explicit temp/output path.
+
+#### P2 - Repo Scan Treats Optional Extras As Active Stack
+
+`read_toml_deps()` folds every optional dependency group into active
+dependencies. For this repo, optional `torch` can classify the project as
+ML even if the core package does not require ML.
+
+Required fix: distinguish active dependencies from optional extras and
+label extras separately in the profile.
+
+#### P2 - Monitor Cannot Open MCP Wiki Cards It Lists
+
+The index can list recursive MCP pages, but entity detail/graph lookup
+paths only search skills and agents in several routes.
+
+Required fix: include `entities/mcp-servers` in detail and neighborhood
+lookup, and disambiguate entity type in URLs.
+
+#### P2 - Wiki Writers Use Non-Atomic Read-Modify-Write Paths
+
+Several wiki/index/catalog/conversion paths still call `write_text()`
+directly even though the repo has atomic write helpers.
+
+Required fix: put wiki mutations under a per-wiki lock and use
+`atomic_write_text()` for entity pages, `index.md`, `catalog.md`, and
+conversion outputs.
+
+#### P2 - Skill Quality CLI Does Not Load Graph Inputs
+
+The quality score has a graph signal, but the normal CLI path constructs
+`SignalSources` without graph index data, so graph connectivity scores can
+be zeroed during normal recomputation.
+
+Required fix: load skill/agent graph index data the way MCP quality does
+and add recompute tests covering non-zero graph inputs.
+
+### P3 Findings
+
+- Graph JSON edge order can be nondeterministic because set iteration is
+  exported without canonical sorting.
+- `ctx__wiki_get` accepts only a slug and can return the wrong entity when
+  skill/agent/MCP slugs collide.
+- Configured/custom wiki paths are inconsistently honored; some modules
+  still hard-code `~/.claude/skill-wiki`.
+- `install.sh` references stale flat source paths.
+- Windows defaults such as `/tmp/stack-profile.json` are not ergonomic.
+- README and docs still drift from actual command behavior.
+
+### Recommended Remediation Order
+
+1. **Release blocker batch**:
+   - Fix `ctx-init` package module targets and exit codes.
+   - Fix hook installer commands.
+   - Fix MCP environment isolation.
+   - Fix dashboard slug validation and non-localhost exposure.
+   - Add wheel smoke tests and publish gating.
+
+2. **Recommendation consistency batch**:
+   - Route Claude Code hook suggestions through `recommend_by_tags()`.
+   - Decide and document resolver semantics.
+   - Add parity tests across hook, public tools, MCP, and scan/resolve.
+
+3. **Graph correctness batch**:
+   - Enforce semantic min-cosine on consumer graph loads.
+   - Fix incremental semantic affected-node detection.
+   - Make dry-run non-mutating.
+   - Canonically sort graph export.
+
+4. **Data safety batch**:
+   - Harden backup containment.
+   - Make wiki writes atomic and locked.
+   - Fix sidecar traversal and entity type disambiguation.
+
+5. **Packaging/CI batch**:
+   - Include runtime config files in the wheel.
+   - Synchronize `ctx.__version__`.
+   - Add `ruff`, `mypy`, `pip check`, `twine check`, wheel install, and
+     entrypoint smoke tests to CI and publish workflows.
+
 ## Phase 6 Update - 2026-04-27
 
 The four follow-up review findings were addressed in Phase 6.
