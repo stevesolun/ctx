@@ -604,6 +604,17 @@ Verification observed:
 - `python -m mypy src\tests\test_mcp_server.py` reported `Success: no issues found in 1 source file`.
 - `python -m compileall -q src\tests\test_mcp_server.py` completed.
 
+### Phase 28: Final branch verification
+
+Status: completed before merge.
+
+Verification observed:
+
+- `python -m ruff check src hooks scripts` reported `All checks passed!`.
+- `python -m mypy src` reported `Success: no issues found in 235 source files`.
+- `python -m compileall -q src hooks scripts` completed.
+- `python -m pytest -q` reported `3212 passed, 7 skipped in 431.94s`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
