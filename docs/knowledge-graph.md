@@ -36,8 +36,8 @@ Obsidian's native graph view if you prefer it to the web dashboard.
 
 ## How edges are built
 
-Two sources of connectivity, combined at build time by
-`src/wiki_graphify.py`:
+Two sources of connectivity, combined at build time by the
+`ctx-wiki-graphify` console script (`ctx.core.wiki.wiki_graphify`):
 
 1. **Explicit frontmatter tags** — each entity page's YAML `tags:`
    list contributes edges between every pair of entities that share
@@ -117,16 +117,24 @@ The node-link JSON schema's edges key is auto-detected (legacy
 NetworkX 2.x used `"links"`; current versions default to `"edges"`).
 The helper `resolve_graph.load_graph()` does this for you.
 
-### Via the recommendation path
+### Via recommendation paths
 
-The graph is load-bearing on `resolve_skills.resolve()`: after the
-static stack matrix matches a slug, the resolver seeds
-`resolve_by_seeds(G, matched_slugs)` to walk 1-hop neighbors with
-edge weight ≥ 1.5 and fold them into the recommendation with
-`reason="graph neighbor of <slug> via shared tags [...]"`. This is
-what makes a FastAPI repo surface `python-pro`, `test-automator`,
-`async-python-patterns` etc. alongside the direct `fastapi-pro`
-match.
+The graph backs two recommendation paths:
+
+- Free-text recommendation surfaces (`ctx.recommend_bundle`, MCP
+  `ctx__recommend_bundle`, generic harness tools, and Claude Code hook
+  suggestions) share `ctx.core.resolve.recommendations.recommend_by_tags`.
+  That engine ranks skills, agents, and MCP servers by slug-token matches,
+  tag overlap, graph degree, and semantic-cache signals when available.
+- Repository scans still start from stack detections and installed-entity
+  availability. `resolve_skills.resolve()` maps detected languages,
+  frameworks, infrastructure, and tools through the shared stack matrix, then
+  uses the graph as an advisory augmentation source for additional installed
+  skills, agents, and MCP server suggestions.
+
+This split is intentional: free-text query surfaces need identical ranking,
+while scan resolution also has to respect local installation state and the
+manifest cap.
 
 ## Rebuilding
 

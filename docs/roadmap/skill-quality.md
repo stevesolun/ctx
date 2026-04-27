@@ -75,8 +75,8 @@ All three triggers, each independently toggleable in `config.json::quality`:
 
 - **Stop-hook piggyback** — on session end, recompute for skills touched
   during the session. Cheap, incremental, keeps the score fresh.
-- **CLI** — `python src/skill_quality.py recompute [--all | --slug <name>]`
-  for on-demand recomputation.
+- **CLI** - `ctx-skill-quality recompute [--all | --slug <name>]` for
+  on-demand recomputation.
 - **Cron / scheduled** — optional daily full-corpus recompute for
   telemetry drift. Off by default; opt-in via `quality.cron.enabled`.
 

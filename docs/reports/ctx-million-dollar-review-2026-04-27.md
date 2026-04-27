@@ -713,6 +713,25 @@ Verification observed:
 - `git diff --check` reported no whitespace errors.
 - `python -m pytest -q` reported `3237 passed, 7 skipped in 433.15s`.
 
+### Phase 33: Post-migration docs audit cleanup
+
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- `docs/knowledge-graph.md` no longer names the removed flat `src/wiki_graphify.py` path as the graph build implementation.
+- The knowledge-graph recommendation section now distinguishes the shared free-text recommendation engine from repository scan resolution instead of describing the old seed-walk path as the whole product behavior.
+- `docs/skill-quality-install.md` now points graph rebuild troubleshooting at the supported `ctx-wiki-graphify` console script.
+- `docs/roadmap/skill-quality.md` now points on-demand quality recomputation at `ctx-skill-quality` instead of `python src/skill_quality.py`.
+
+Verification observed:
+
+- Targeted stale-doc search across the three edited docs found no remaining `python -m wiki_graphify`, `python -m inject_hooks`, `src/wiki_graphify.py`, `resolve_by_seeds`, current-behavior `graph neighbor`, or `python src/skill_quality.py` references.
+- `python -m ruff check .` reported `All checks passed!`.
+- `python -m mypy src` reported `Success: no issues found in 236 source files`.
+- `git diff --check` reported no whitespace errors.
+- `python -m pytest -q` reported `3237 passed, 7 skipped in 440.79s`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -753,7 +772,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-32 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-33 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
 
 ## P0 Findings
 
@@ -1923,11 +1942,13 @@ The original P0/P1 remediation work is complete in this branch. The remaining wo
    - Confirm generated hooks execute in the host, not only that they are written.
    - Validate real Claude Code's Windows/Linux hook command execution semantics, since Phase 32's fake host executes generated commands deterministically by argv rather than through an interactive Claude process.
    - Run `ctx-scan-repo --recommend` on a small real repo and verify the same bundle through CLI, Python API, MCP, and Claude Code hook surfaces.
+   - Keep this manual and quota-acknowledged: discovery showed `claude -p` can hit `error_max_budget_usd`, so the gate should require an explicit environment acknowledgement and a small `--max-budget-usd` cap before any live model call.
 
 2. Validate live third-party MCP behavior:
    - Test at least one trusted real MCP server for startup, `tools/list`, `tools/call`, timeout, stderr diagnostics, and env allowlist behavior.
    - Verify `ctx run --allow-tool/--deny-tool` UX when real model-visible tool names are involved.
    - Document any compatibility exceptions that require `inherit_env=True`.
+   - Make the test opt-in with a trusted local config file; do not run `npx` or any third-party MCP command by default in CI.
 
 3. Browser-test the monitor dashboard security boundary:
    - Use a browser-driven harness against `ctx-monitor`.
@@ -1935,18 +1956,15 @@ The original P0/P1 remediation work is complete in this branch. The remaining wo
    - Assert same-origin/token requests succeed.
    - Assert path traversal and malformed sidecar paths are rejected.
    - Exercise concurrent SSE connections while load/unload mutations run in a real browser. HTTP-level SSE concurrency is covered in Phase 30.
+   - Prefer Python Playwright if this becomes automated; the local environment has Python Playwright/Chromium, while the project has no Node browser-test stack.
 
 4. Stress crash consistency and concurrent writers:
    - Kill processes during restore, wiki sync, manifest updates, and session writes.
    - Verify rollback snapshots, atomic temp-file replacement, and lock behavior.
    - Add regression tests for partial-write and parallel-writer cases not already covered.
+   - First narrow target: `record_install()` / `record_uninstall()` currently do read-modify-write manifest updates; atomic write prevents torn JSON but not lost updates under parallel installers.
 
-5. Do a post-migration docs audit:
-   - Search docs/scripts for removed flat modules such as `python -m inject_hooks` and `python -m wiki_graphify`.
-   - Search for stale resolver descriptions such as `resolve_by_seeds` and "graph neighbor" ranking as current behavior.
-   - Update remaining historical docs or explicitly label them historical.
-
-6. Prepare release readiness material:
+5. Prepare release readiness material:
    - Generate a changelog from the remediation commits.
    - Document behavior changes around MCP env inheritance and tool policy.
    - Dry-run the tag/version/publish workflow before publishing.

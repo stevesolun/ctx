@@ -167,5 +167,5 @@ reason.
   `persist_quality` is idempotent via the HTML-comment markers. If it
   does, delete both blocks and rerun `recompute`; the first pass will
   re-emit exactly one.
-- **Graph view shows no color.** Run `python -m wiki_graphify
+- **Graph view shows no color.** Run `ctx-wiki-graphify
   --graph-only` to rebuild; it reads sidecars fresh on every build.
