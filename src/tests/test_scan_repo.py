@@ -19,6 +19,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 # Ensure the project root is importable regardless of working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -686,3 +687,70 @@ dependencies = ["fastapi>=0.100", "sqlalchemy>=2", "pydantic>=2"]
         assert "pytest" in test_names
         assert profile["project_type"] == "api-service"
         assert profile["monorepo"] is False
+
+
+# ===========================================================================
+# _print_recommendations
+# ===========================================================================
+
+
+class TestPrintRecommendations:
+    """test_print_recommendations -- terminal recommendation sections stay type-safe."""
+
+    def test_separates_skills_agents_and_mcp_scores(
+        self,
+        tmp_path: Path,
+        capsys,
+        monkeypatch,
+    ) -> None:
+        import ctx.core.resolve.resolve_skills as resolve_skills
+        import ctx_config
+
+        manifest = {
+            "load": [
+                {
+                    "skill": "fastapi-pro",
+                    "entity_type": "skill",
+                    "reason": "fastapi detected",
+                    "priority": 20,
+                },
+                {
+                    "skill": "code-reviewer",
+                    "entity_type": "agent",
+                    "reason": "graph neighbor",
+                    "priority": 15,
+                },
+            ],
+            "mcp_servers": [
+                {
+                    "name": "fastapi-docs",
+                    "score": 42.0,
+                    "normalized_score": 0.75,
+                    "shared_tags": ["fastapi"],
+                },
+            ],
+            "warnings": [],
+        }
+
+        monkeypatch.setattr(
+            ctx_config,
+            "cfg",
+            SimpleNamespace(
+                skills_dir=tmp_path / "skills",
+                wiki_dir=tmp_path / "wiki",
+                max_skills=10,
+            ),
+        )
+        monkeypatch.setattr(resolve_skills, "discover_available_skills", lambda _path: {})
+        monkeypatch.setattr(resolve_skills, "read_wiki_overrides", lambda _path: {})
+        monkeypatch.setattr(resolve_skills, "resolve", lambda *_args, **_kwargs: manifest)
+
+        sr._print_recommendations(str(tmp_path), {"repo_path": str(tmp_path)})
+        out = capsys.readouterr().out
+
+        assert "-- Skills (1) --" in out
+        assert "-- Agents (1) --" in out
+        assert "-- MCP Servers (1) --" in out
+        assert out.index("-- Skills") < out.index("fastapi-pro") < out.index("-- Agents")
+        assert out.index("-- Agents") < out.index("code-reviewer") < out.index("-- MCP")
+        assert "score=42.00  norm=0.75" in out

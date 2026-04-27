@@ -568,28 +568,45 @@ def _print_recommendations(repo: str, profile: dict) -> None:
     print("Recommended for this repo")
     print("=" * 60)
 
+    load_entries = manifest.get("load", [])
+    skills = [
+        e for e in load_entries
+        if (e.get("entity_type") or e.get("type") or "skill") == "skill"
+    ]
+    agents = [
+        e for e in load_entries
+        if (e.get("entity_type") or e.get("type")) == "agent"
+    ]
+
     # Skills section
-    print(f"\n-- Skills ({len(manifest['load'])}) --")
-    if manifest["load"]:
-        for entry in manifest["load"][:10]:
+    print(f"\n-- Skills ({len(skills)}) --")
+    if skills:
+        for entry in skills[:10]:
             reason = entry["reason"][:55]
             print(f"  {entry['skill']:<40s}  {reason}")
     else:
         print("  (no skills matched)")
 
     # Agents section — separate from skills by type
-    agents = [e for e in manifest["load"] if e.get("type") == "agent"]
+    print(f"\n-- Agents ({len(agents)}) --")
     if agents:
-        print(f"\n-- Agents ({len(agents)}) --")
         for entry in agents[:10]:
             print(f"  {entry['skill']:<40s}  {entry['reason'][:55]}")
+    else:
+        print("  (no agents matched)")
 
     # MCP servers section — Phase 5 populated this bucket
-    print(f"\n-- MCP Servers ({len(manifest['mcp_servers'])}) --")
-    if manifest["mcp_servers"]:
-        for m in manifest["mcp_servers"][:10]:
+    mcp_servers = manifest.get("mcp_servers", [])
+    print(f"\n-- MCP Servers ({len(mcp_servers)}) --")
+    if mcp_servers:
+        for m in mcp_servers[:10]:
             shared = ",".join(m.get("shared_tags", [])[:2]) or "-"
-            print(f"  {m['name']:<40s}  score={m['score']:.2f}  via={shared}")
+            score = float(m.get("score", 0.0) or 0.0)
+            norm = m.get("normalized_score")
+            score_text = f"score={score:.2f}"
+            if isinstance(norm, (int, float)):
+                score_text += f"  norm={norm:.2f}"
+            print(f"  {m['name']:<40s}  {score_text}  via={shared}")
     else:
         print("  (no MCP servers matched — try running")
         print("   `ctx-mcp-fetch --source awesome-mcp --limit 100 | ctx-mcp-add --from-stdin`")
