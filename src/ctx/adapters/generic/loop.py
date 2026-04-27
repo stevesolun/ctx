@@ -327,10 +327,19 @@ def run_loop(
         # Context compaction runs BEFORE budget checks so the summary
         # call's cost lands inside this iteration's budget window.
         # The compactor owns the should-compact decision + the
-        # summary call + the in-place message-list swap.
+        # summary call + the in-place message-list swap. Codex review
+        # fix #6: when the compactor exposes ``compact_with_usage``,
+        # fold the summary call's tokens + cost into the running
+        # totals so the budget enforcement and audit trail include
+        # what the summarisation actually cost.
         if compactor is not None and compactor.should_compact(conversation):
             try:
-                new_conversation = compactor.compact(conversation, provider)
+                if hasattr(compactor, "compact_with_usage"):
+                    cresult = compactor.compact_with_usage(conversation, provider)
+                    new_conversation = cresult.new_messages
+                    totals.add(cresult.usage)  # _RunningTotals handles None costs
+                else:
+                    new_conversation = compactor.compact(conversation, provider)
             except Exception as exc:  # noqa: BLE001
                 _logger.warning(
                     "compactor raised (%s); continuing with uncompacted "
