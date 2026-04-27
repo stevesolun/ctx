@@ -205,10 +205,6 @@ mypy_path = "src"
 namespace_packages = true
 explicit_package_bases = true
 ignore_missing_imports = true
-exclude = [
-    "^src/tests/",
-    "^src/(?!ctx/).*\\.py$",
-]
 
 [tool.ruff]
 line-length = 100

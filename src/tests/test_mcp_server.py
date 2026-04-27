@@ -59,7 +59,7 @@ def _encode_request(
     method: str,
     params: dict[str, Any] | None = None,
 ) -> bytes:
-    frame = {"jsonrpc": "2.0", "method": method}
+    frame: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
     if req_id is not None:
         frame["id"] = req_id
     if params is not None:
@@ -67,7 +67,7 @@ def _encode_request(
     return (json.dumps(frame) + "\n").encode("utf-8")
 
 
-def _encode_notification(method: str, params: dict | None = None) -> bytes:
+def _encode_notification(method: str, params: dict[str, Any] | None = None) -> bytes:
     return _encode_request(req_id=None, method=method, params=params)
 
 

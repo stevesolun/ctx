@@ -336,9 +336,31 @@ Remaining legacy/test type debt after Phase 12:
 - Remaining file: `test_mcp_server.py`.
 - Remaining bucket: `assignment`.
 
+### Phase 13: Full mypy gate
+
+Status: implemented in this worktree.
+
+What changed:
+
+- Fixed the final force-check mypy error in `test_mcp_server.py` by annotating JSON-RPC fixture frames as `dict[str, Any]`.
+- Removed the temporary `[tool.mypy].exclude` entries from `pyproject.toml`; `python -m mypy src` now checks the package, legacy flat modules, and tests together.
+
+Verification observed:
+
+- `python -m mypy src` reported `Success: no issues found in 234 source files`.
+- The old force-check command with `--config-file NUL --namespace-packages --explicit-package-bases --ignore-missing-imports src` reported `Success: no issues found in 234 source files`.
+- `python -m ruff check pyproject.toml src\tests\test_mcp_server.py` reported `All checks passed!`.
+- `python -m pytest src\tests\test_mcp_server.py -q` reported `32 passed`.
+- `python -m compileall -q src` completed.
+
+Remaining legacy/test type debt after Phase 13:
+
+- 0 force-check mypy errors remain under the same gate that initially exposed the legacy/test wall.
+- The caveat is no longer "hidden behind 506 errors"; the configured project gate now enforces the full `src` tree.
+
 ## Blocker Summary
 
-P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat is being burned down in phases: Phase 5 defined the package gate, and Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error.
+P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full 234-file `src` tree with zero mypy errors.
 
 1. `ctx-init --hooks/--graph` invokes removed modules and still exits success.
 2. Installed Claude hooks point at files not shipped in the wheel and use non-portable shell commands.
