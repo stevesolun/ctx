@@ -29,11 +29,13 @@ import pytest
 
 import ctx.cli.run as run_cli
 from ctx.cli.run import (
+    _compile_tool_policy,
     _model_provider_prefix,
     _parse_mcp_spec,
     _resolve_api_key_env,
     main,
 )
+from ctx.adapters.generic.providers import ToolCall
 
 
 # ── Fixture: fake litellm so --provider ollama (no key) works ───────────────
@@ -65,6 +67,27 @@ def fake_litellm(monkeypatch: pytest.MonkeyPatch):
     fake._calls = calls           # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "litellm", fake)
     return fake
+
+
+def _tool_call_completion(name: str) -> dict[str, Any]:
+    return {
+        "choices": [
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {"name": name, "arguments": "{}"},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+    }
 
 
 # ── _model_provider_prefix ─────────────────────────────────────────────────
@@ -155,6 +178,23 @@ class TestParseMcpSpec:
 
 
 # ── Subcommand: run ────────────────────────────────────────────────────────
+
+
+class TestToolPolicy:
+    def test_allow_and_deny_patterns(self) -> None:
+        policy = _compile_tool_policy(["ctx__*"], ["ctx__wiki_get"])
+        assert policy is not None
+
+        assert policy(ToolCall(id="1", name="ctx__recommend_bundle", arguments={})) is None
+        assert "matched deny pattern" in (
+            policy(ToolCall(id="2", name="ctx__wiki_get", arguments={})) or ""
+        )
+        assert "no allow pattern matched" in (
+            policy(ToolCall(id="3", name="filesystem__read_file", arguments={})) or ""
+        )
+
+    def test_empty_patterns_disable_policy(self) -> None:
+        assert _compile_tool_policy([], []) is None
 
 
 class TestRunCommand:
@@ -261,6 +301,54 @@ class TestRunCommand:
         assert event["model"] == "openrouter/anthropic/claude"
         assert event["provider_prefix"] == "openrouter"
         assert event["budget_usd"] == 1.5
+
+    def test_tool_policy_metadata_recorded(
+        self, fake_litellm: Any, tmp_path: Path,
+    ) -> None:
+        main(
+            [
+                "run",
+                "--model", "ollama/x",
+                "--task", "hi",
+                "--sessions-dir", str(tmp_path),
+                "--session-id", "policy-meta",
+                "--allow-tool", "ctx__*",
+                "--deny-tool", "ctx__wiki_get",
+                "--quiet",
+            ]
+        )
+        first_line = (tmp_path / "policy-meta.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()[0]
+        event = json.loads(first_line)
+        assert event["tool_policy"] == {
+            "allow": ["ctx__*"],
+            "deny": ["ctx__wiki_get"],
+        }
+
+    def test_deny_tool_blocks_model_tool_call(
+        self, fake_litellm: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            fake_litellm._calls.append(kwargs)
+            return _tool_call_completion("ctx__wiki_get")
+
+        fake_litellm.completion = completion
+        exit_code = main(
+            [
+                "run",
+                "--model", "ollama/x",
+                "--task", "call denied tool",
+                "--sessions-dir", str(tmp_path),
+                "--deny-tool", "ctx__wiki_get",
+                "--json",
+                "--quiet",
+            ]
+        )
+        payload = json.loads(capsys.readouterr().out)
+        assert exit_code == 2
+        assert payload["stop_reason"] == "tool_denied"
+        assert "matched deny pattern" in payload["detail"]
 
     def test_json_output(
         self, fake_litellm: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str],
@@ -520,6 +608,41 @@ class TestResumeCommand:
             if line and json.loads(line)["type"] == "stop"
         )
         assert stop_count == 2
+
+    def test_resume_inherits_recorded_tool_policy(
+        self, fake_litellm: Any, tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        main(
+            [
+                "run",
+                "--model", "ollama/x",
+                "--task", "first",
+                "--sessions-dir", str(tmp_path),
+                "--session-id", "policy-resume",
+                "--deny-tool", "ctx__wiki_get",
+                "--quiet",
+            ]
+        )
+        capsys.readouterr()
+
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            fake_litellm._calls.append(kwargs)
+            return _tool_call_completion("ctx__wiki_get")
+
+        fake_litellm.completion = completion
+        exit_code = main(
+            [
+                "resume", "policy-resume",
+                "--task", "follow-up",
+                "--sessions-dir", str(tmp_path),
+                "--json",
+                "--quiet",
+            ]
+        )
+        payload = json.loads(capsys.readouterr().out)
+        assert exit_code == 2
+        assert payload["stop_reason"] == "tool_denied"
 
     def test_resume_skips_recorded_mcp_by_default(
         self, fake_litellm: Any, tmp_path: Path,

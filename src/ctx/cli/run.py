@@ -27,16 +27,17 @@ import argparse
 import json
 import logging
 import sys
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
 from ctx.adapters.generic.compaction import TokenBudgetCompactor
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox, make_tool_executor
-from ctx.adapters.generic.loop import run_loop
+from ctx.adapters.generic.loop import ToolPolicy, run_loop
 from ctx.adapters.generic.contract import ContractBuilder
 from ctx.adapters.generic.evaluator import Evaluator, run_with_evaluation
 from ctx.adapters.generic.planner import Planner, augmented_system_prompt
-from ctx.adapters.generic.providers import ToolDefinition, get_provider
+from ctx.adapters.generic.providers import ToolCall, ToolDefinition, get_provider
 from ctx.adapters.generic.state import (
     JsonlObserver,
     SessionStore,
@@ -87,6 +88,72 @@ def _resolve_api_key_env(
 
 
 # ── MCP spec parsing ───────────────────────────────────────────────────────
+
+
+def _normalise_tool_patterns(patterns: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
+    return tuple(p.strip() for p in (patterns or []) if p and p.strip())
+
+
+def _compile_tool_policy(
+    allow_patterns: list[str] | tuple[str, ...] | None,
+    deny_patterns: list[str] | tuple[str, ...] | None,
+) -> ToolPolicy | None:
+    allow = _normalise_tool_patterns(allow_patterns)
+    deny = _normalise_tool_patterns(deny_patterns)
+    if not allow and not deny:
+        return None
+
+    def policy(call: ToolCall) -> str | None:
+        for pattern in deny:
+            if fnmatchcase(call.name, pattern):
+                return f"matched deny pattern {pattern!r}"
+        if allow and not any(fnmatchcase(call.name, pattern) for pattern in allow):
+            return f"no allow pattern matched {call.name!r}"
+        return None
+
+    return policy
+
+
+def _tool_policy_from_metadata(meta: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    raw = meta.get("tool_policy")
+    if not isinstance(raw, dict):
+        return (), ()
+    allow = raw.get("allow") if isinstance(raw.get("allow"), list) else []
+    deny = raw.get("deny") if isinstance(raw.get("deny"), list) else []
+    return _normalise_tool_patterns(allow), _normalise_tool_patterns(deny)
+
+
+def _resume_tool_policy_patterns(
+    args: argparse.Namespace,
+    meta: dict[str, Any],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    meta_allow, meta_deny = _tool_policy_from_metadata(meta)
+    cli_allow = _normalise_tool_patterns(args.allow_tool)
+    cli_deny = _normalise_tool_patterns(args.deny_tool)
+    return (*meta_allow, *cli_allow), (*meta_deny, *cli_deny)
+
+
+def _add_tool_policy_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--allow-tool",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help=(
+            "Allow only tool names matching this glob pattern. Repeatable. "
+            "If omitted, all attached tools are allowed unless denied."
+        ),
+    )
+    parser.add_argument(
+        "--deny-tool",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help=(
+            "Deny tool names matching this glob pattern before execution. "
+            "Repeatable; deny rules override allow rules."
+        ),
+    )
 
 
 def _parse_mcp_spec(spec: str) -> McpServerConfig:
@@ -301,6 +368,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not attach the built-in ctx__* tool surface.",
     )
+    _add_tool_policy_args(r)
     r.add_argument(
         "--api-key-env",
         help=(
@@ -453,6 +521,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "can contain executable command metadata."
         ),
     )
+    _add_tool_policy_args(rz)
     rz.add_argument(
         "--quiet", action="store_true",
     )
@@ -532,6 +601,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
         tool_executor = make_tool_executor(toolbox, fallback=None)
 
     compactor = None if args.no_compact else TokenBudgetCompactor()
+    allow_tools = _normalise_tool_patterns(args.allow_tool)
+    deny_tools = _normalise_tool_patterns(args.deny_tool)
+    tool_policy = _compile_tool_policy(allow_tools, deny_tools)
 
     try:
         store = SessionStore.create(
@@ -558,6 +630,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         "mcp": [{"name": c.name, "command": c.command, "args": list(c.args)}
                 for c in mcp_configs],
         "ctx_tools_enabled": not args.no_ctx_tools,
+        "tool_policy": {"allow": list(allow_tools), "deny": list(deny_tools)},
         "planner_used": plan_artifact is not None,
         "contract_used": bool(args.evaluator and args.contract),
         "evaluator_used": args.evaluator,
@@ -637,6 +710,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 router=router,
                 extra_tools=extra_tools or None,
                 tool_executor=tool_executor,
+                tool_policy=tool_policy,
                 model=args.model,
                 temperature=args.temperature,
                 max_tokens=args.max_tokens,
@@ -686,6 +760,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 router=router,
                 extra_tools=extra_tools or None,
                 tool_executor=tool_executor,
+                tool_policy=tool_policy,
                 model=args.model,
                 temperature=args.temperature,
                 max_tokens=args.max_tokens,
@@ -746,6 +821,8 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         ctx_toolbox = CtxCoreToolbox()
         extra_tools.extend(ctx_toolbox.tool_definitions())
         tool_executor = make_tool_executor(ctx_toolbox)
+    allow_tools, deny_tools = _resume_tool_policy_patterns(args, meta)
+    tool_policy = _compile_tool_policy(allow_tools, deny_tools)
 
     if not args.quiet:
         bits = []
@@ -757,6 +834,10 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             )
         if use_ctx_tools:
             bits.append("ctx-core tools")
+        if allow_tools or deny_tools:
+            bits.append(
+                f"tool policy allow={len(allow_tools)} deny={len(deny_tools)}"
+            )
         suffix = f" + {', '.join(bits)}" if bits else ""
         print(
             f"[ctx] resuming {args.session_id} "
@@ -785,6 +866,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             router=router,
             extra_tools=extra_tools or None,
             tool_executor=tool_executor,
+            tool_policy=tool_policy,
             # Resume must keep the replayed transcript first; the
             # follow-up task is appended at the end, not shoved before
             # the prior conversation.
@@ -882,11 +964,10 @@ def _emit_result(
                 print(f"[ctx] detail: {result.detail}", file=sys.stderr)
         print(result.final_message)
 
-    # Non-zero only on true errors. 'tool_error' is exit 2; everything
-    # else (including max_iterations / budget) is exit 0 since the
-    # session completed in the sense of "ran to a defined stopping
-    # point". Cancellation also exits 0.
-    if result.stop_reason == "tool_error":
+    # Non-zero only on true errors / policy blocks. Everything else
+    # (including max_iterations / budget) exits 0 since the session
+    # ran to a defined stopping point. Cancellation also exits 0.
+    if result.stop_reason in {"tool_error", "tool_denied"}:
         return 2
     return 0
 

@@ -550,6 +550,28 @@ Verification observed:
 - `python -m mypy src\ctx\adapters\generic\loop.py src\ctx\adapters\generic\evaluator.py src\tests\test_harness_loop.py` reported `Success: no issues found in 3 source files`.
 - `python -m mypy src` reported `Success: no issues found in 235 source files`.
 
+### Phase 25: CLI tool policy wiring
+
+Status: implemented in this worktree.
+
+What changed:
+
+- `ctx run` and `ctx resume` now accept repeatable `--allow-tool PATTERN` and `--deny-tool PATTERN` options.
+- Tool patterns use exact/glob matching against model-visible tool names such as `ctx__wiki_get` or `filesystem__read_file`.
+- Deny patterns override allow patterns. If allow patterns are present, calls that match no allow pattern are blocked before execution.
+- New sessions persist the effective tool policy in session metadata.
+- Resume inherits recorded tool policy from the session and can add stricter allow/deny patterns for the resumed turn.
+- CLI exit code `2` now covers both execution errors and policy-denied tool calls.
+- Focused CLI tests cover direct policy matching, metadata persistence, run-time denial, and resume-time inherited denial.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_harness_cli_run.py -q` reported `44 passed`.
+- `python -m ruff check src\ctx\cli\run.py src\tests\test_harness_cli_run.py` reported `All checks passed!`.
+- `python -m compileall -q src\ctx\cli\run.py src\tests\test_harness_cli_run.py` completed.
+- `python -m mypy src\ctx\cli\run.py src\tests\test_harness_cli_run.py` reported `Success: no issues found in 2 source files`.
+- `python -m mypy src` reported `Success: no issues found in 235 source files`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full 234-file `src` tree with zero mypy errors.
@@ -560,7 +582,7 @@ P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in 
 4. Harness budget caps are bypassed on terminal model responses. Fixed in Phase 4; retained as original review evidence.
 5. MCP request timeouts can hang forever on blocking stdout reads. Fixed in Phase 14.
 6. MCP subprocesses inherit all parent secrets by default. Fixed in Phase 14.
-7. Model tool calls execute without an approval/policy gate.
+7. Model tool calls execute without an approval/policy gate. Fixed across library/evaluator paths in Phase 24 and CLI run/resume paths in Phase 25.
 8. Resume trusts session metadata as executable MCP config. Fixed in Phase 15.
 9. Session ID reuse truncates existing JSONL transcripts. Fixed in Phase 16.
 10. Restore overwrites live state without a rollback snapshot. Fixed in Phase 17.
@@ -568,7 +590,7 @@ P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in 
 12. Wiki/install flows follow symlinks from wiki content into live Claude directories. Fixed across install copy paths in Phase 19 and wiki write paths in Phase 20.
 13. Tar extraction and source install paths are stale/unsafe. Source install paths fixed in Phase 21; tar member hardening fixed in Phase 22.
 14. CI/release can publish a tag without tests/package smoke/version alignment. Fixed in Phase 23.
-15. Tests mock the exact command boundaries that are currently broken.
+15. Tests mock the exact command boundaries that are currently broken. Mitigated by the clean wheel/entrypoint smoke in Phase 23 and CLI policy regression tests in Phase 25; live third-party MCP host execution remains out of scope for local CI.
 
 ## Product Intent As Understood
 
