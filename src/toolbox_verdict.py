@@ -315,6 +315,7 @@ def record_finding(
     target = verdict_path(plan_hash)
     with file_lock(target):
         existing = load_verdict(plan_hash)
+        merged_findings: tuple[Finding, ...]
 
         if existing is None:
             merged_findings = (finding,)

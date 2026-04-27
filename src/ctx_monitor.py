@@ -1,3 +1,4 @@
+# mypy: disable-error-code=attr-defined
 """ctx_monitor.py -- Local HTTP dashboard for ctx skill/agent activity.
 
 ``ctx-monitor serve [--port 8765]`` starts a zero-dependency HTTP server
@@ -734,13 +735,17 @@ def _render_skill_detail(slug: str) -> str:
         f"<td class='muted'>{html.escape(r.get('actor', ''))}</td></tr>"
         for r in audit[-100:]
     )
+    hard_floor = sidecar.get("hard_floor")
+    hard_floor_html = (
+        f" · floor {html.escape(str(hard_floor))}" if hard_floor else ""
+    )
     body = (
         f"<h1>{html.escape(slug)}</h1>"
         f"<div class='card'>"
         f"<span class='pill grade-{html.escape(sidecar.get('grade', 'F'))}'>grade {html.escape(sidecar.get('grade', 'F'))}</span> "
         f"score <strong>{sidecar.get('raw_score', 0.0):.3f}</strong> "
         f"<span class='muted'>· type {html.escape(sidecar.get('subject_type', ''))}"
-        f"{' · floor ' + html.escape(sidecar.get('hard_floor')) if sidecar.get('hard_floor') else ''}</span>"
+        f"{hard_floor_html}</span>"
         "</div>"
         "<h2>Sidecar</h2>"
         f"<pre>{html.escape(json.dumps(sidecar, indent=2)[:4000])}</pre>"

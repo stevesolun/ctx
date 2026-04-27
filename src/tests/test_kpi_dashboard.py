@@ -545,6 +545,6 @@ class TestCLI:
         assert "A: 1" in out
 
 
-# Keep a reference to SignalResult so the import isn't pruned by linters.
-_ = SignalResult  # noqa: F401
-_ = QualityScore  # noqa: F401
+# Keep references so these imports aren't pruned by linters.
+_SIGNAL_RESULT_TYPE = SignalResult
+_QUALITY_SCORE_TYPE = QualityScore

@@ -27,7 +27,7 @@ TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 def find_dual_version_skills(skills_dir: Path) -> list[dict]:
     """Find skills that have both original and transformed SKILL.md."""
-    results = []
+    results: list[dict[str, object]] = []
     if not skills_dir.exists():
         return results
 

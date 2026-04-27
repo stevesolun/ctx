@@ -240,9 +240,34 @@ Remaining legacy/test type debt after Phase 8:
 - Largest buckets: `import-untyped` 4, `assignment` 4, `arg-type` 3, `var-annotated` 2.
 - Largest files: `src/ctx_monitor.py` 3 and `src/tests/test_kpi_dashboard.py` 2; the rest are single-file/single-error cleanups.
 
+### Phase 9: Legacy/test mypy debt slice 4
+
+Status: implemented in this worktree.
+
+What changed:
+
+- Fixed 7 force-check mypy errors across `ctx_monitor.py`, `test_kpi_dashboard.py`, `versions_catalog.py`, and `toolbox_verdict.py`.
+- The monitor sidecar floor rendering now stringifies optional values before HTML escaping.
+- The monitor dashboard load helper keeps its heavy dynamic import but suppresses the one known dynamic attribute lookup at file scope.
+- Version catalog and toolbox verdict paths now declare tuple/list shapes where mypy could not infer them.
+- KPI dashboard import-retention sentinels no longer reuse `_` for different imported class types.
+
+Verification observed:
+
+- Red targeted mypy check initially reported 7 errors across those four files.
+- After the fix, the same four-file force-check reported `Success: no issues found in 4 source files`.
+- Focused tests passed: `72 passed`.
+- Static checks passed: `python -m ruff check ...` reported `All checks passed!`; `python -m mypy src` reported `Success: no issues found in 58 source files`; `python -m compileall -q src` completed.
+
+Remaining legacy/test type debt after Phase 9:
+
+- 13 errors remain if legacy flat modules and tests are force-checked with `--ignore-missing-imports`.
+- Remaining buckets: `import-untyped` 4, `arg-type` 3, `assignment` 2, plus four singletons (`union-attr`, `str-bytes-safe`, `var-annotated`, `list-item`).
+- Remaining files each have one error: `ctx_lifecycle.py`, `skill_add.py`, `skill_quality.py`, `test_mcp_server.py`, `backup_watchdog.py`, `test_skill_add_yaml_escape.py`, `mcp_add.py`, `test_litellm_provider.py`, `test_mcp_router.py`, `test_toolbox_verdict.py`, `ctx_audit_log.py`, `usage_tracker.py`, and `wiki_batch_entities.py`.
+
 ## Blocker Summary
 
-P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat is being burned down in phases: Phase 5 defined the package gate, and Phases 6-8 reduced the force-checked legacy/test debt from 72 to 20 errors.
+P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat is being burned down in phases: Phase 5 defined the package gate, and Phases 6-9 reduced the force-checked legacy/test debt from 72 to 13 errors.
 
 1. `ctx-init --hooks/--graph` invokes removed modules and still exits success.
 2. Installed Claude hooks point at files not shipped in the wheel and use non-portable shell commands.
