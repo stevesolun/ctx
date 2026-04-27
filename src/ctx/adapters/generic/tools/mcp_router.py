@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import subprocess
 import threading
 import time
@@ -51,12 +52,37 @@ _logger = logging.getLogger(__name__)
 
 _PROTOCOL_VERSION = "2024-11-05"
 _CLIENT_INFO = {"name": "ctx-harness", "version": "0.1"}
+_SAFE_PARENT_ENV_KEYS = frozenset({
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "TMP",
+    "TEMP",
+    "HOME",
+    "USERPROFILE",
+    "LANG",
+})
+_SAFE_PARENT_ENV_PREFIXES = ("LC_",)
 
 # Tool names combine server name and tool name; "__" is the separator
 # so a server named "github" with a tool "list_repos" surfaces to the
 # model as "github__list_repos". Uses a double underscore to avoid
 # colliding with legitimate snake_case identifiers.
 TOOL_SEPARATOR = "__"
+
+
+def _default_child_env() -> dict[str, str]:
+    """Return parent env entries that are process plumbing, not credentials."""
+    child_env: dict[str, str] = {}
+    for key, value in os.environ.items():
+        upper_key = key.upper()
+        if upper_key in _SAFE_PARENT_ENV_KEYS or any(
+            upper_key.startswith(prefix) for prefix in _SAFE_PARENT_ENV_PREFIXES
+        ):
+            child_env[key] = value
+    return child_env
 
 
 # ── Config ─────────────────────────────────────────────────────────────────
@@ -70,8 +96,11 @@ class McpServerConfig:
     so there is no shell interpolation — a server config cannot inject
     shell metacharacters into the spawn call.
 
-    ``env`` overlays onto the parent's environment; unset keys fall
-    through. Pass ``env={}`` to inherit verbatim.
+    ``env`` is the explicit child overlay. Parent secrets are not
+    inherited by default; only a small process-basics allowlist
+    (PATH, temp/home, locale, Windows runtime vars) is passed through.
+    Set ``inherit_env=True`` only for trusted local servers that need
+    legacy full-environment inheritance.
     """
 
     name: str
@@ -80,6 +109,7 @@ class McpServerConfig:
     env: dict[str, str] = field(default_factory=dict)
     startup_timeout: float = 10.0
     request_timeout: float = 30.0
+    inherit_env: bool = False
 
 
 class McpServerError(RuntimeError):
@@ -104,6 +134,8 @@ class McpClient:
         self._lock = threading.Lock()
         self._next_id = 0
         self._tools_cache: list[ToolDefinition] | None = None
+        self._stdout_frames: queue.Queue[dict[str, Any] | None] = queue.Queue()
+        self._stdout_thread: threading.Thread | None = None
         # Capture stderr for diagnostics; reading runs in a background
         # thread so a chatty server doesn't block the pipe.
         self._stderr_lines: list[str] = []
@@ -116,7 +148,8 @@ class McpClient:
         if self._proc is not None:
             raise RuntimeError(f"MCP client '{self._config.name}' already started")
 
-        env = os.environ.copy()
+        self._stdout_frames = queue.Queue()
+        env = os.environ.copy() if self._config.inherit_env else _default_child_env()
         env.update(self._config.env)
 
         self._proc = subprocess.Popen(
@@ -135,6 +168,10 @@ class McpClient:
             target=self._drain_stderr, daemon=True
         )
         self._stderr_thread.start()
+        self._stdout_thread = threading.Thread(
+            target=self._drain_stdout, daemon=True
+        )
+        self._stdout_thread.start()
 
         try:
             self._request(
@@ -181,6 +218,11 @@ class McpClient:
             _logger.debug(
                 "MCP server '%s' stop error: %s", self._config.name, exc
             )
+        for thread in (self._stdout_thread, self._stderr_thread):
+            if thread and thread.is_alive():
+                thread.join(timeout=0.2)
+        self._stdout_thread = None
+        self._stderr_thread = None
 
     def __enter__(self) -> "McpClient":
         self.start()
@@ -284,7 +326,15 @@ class McpClient:
                             f"{self._config.name}.{method}: timed out after "
                             f"{timeout if timeout is not None else self._config.request_timeout}s"
                         )
-                frame = self._read_frame()
+                try:
+                    frame = self._read_frame(
+                        timeout=remaining if deadline is not None else None
+                    )
+                except TimeoutError as exc:
+                    raise McpServerError(
+                        f"{self._config.name}.{method}: timed out after "
+                        f"{timeout if timeout is not None else self._config.request_timeout}s"
+                    ) from exc
                 if frame is None:
                     stderr_tail = "\n".join(self._stderr_lines[-20:])
                     raise McpServerError(
@@ -332,19 +382,32 @@ class McpClient:
         self._proc.stdin.write(payload)
         self._proc.stdin.flush()
 
-    def _read_frame(self) -> dict[str, Any] | None:
-        assert self._proc is not None and self._proc.stdout is not None
-        line = self._proc.stdout.readline()
-        if not line:
-            return None
+    def _read_frame(self, *, timeout: float | None) -> dict[str, Any] | None:
         try:
-            return json.loads(line.decode("utf-8", errors="replace"))
-        except json.JSONDecodeError as exc:
-            _logger.warning(
-                "MCP %s: dropping malformed frame: %s (raw=%r)",
-                self._config.name, exc, line,
-            )
-            return self._read_frame()
+            if timeout is None:
+                return self._stdout_frames.get()
+            return self._stdout_frames.get(timeout=timeout)
+        except queue.Empty as exc:
+            raise TimeoutError from exc
+
+    def _drain_stdout(self) -> None:
+        proc = self._proc
+        if proc is None or proc.stdout is None:
+            self._stdout_frames.put(None)
+            return
+        try:
+            for line in iter(proc.stdout.readline, b""):
+                try:
+                    self._stdout_frames.put(
+                        json.loads(line.decode("utf-8", errors="replace"))
+                    )
+                except json.JSONDecodeError as exc:
+                    _logger.warning(
+                        "MCP %s: dropping malformed frame: %s (raw=%r)",
+                        self._config.name, exc, line,
+                    )
+        finally:
+            self._stdout_frames.put(None)
 
     def _drain_stderr(self) -> None:
         """Consume stderr in the background; keep the last ~200 lines."""

@@ -9,6 +9,7 @@ Env vars (all optional):
   FAKE_MCP_FAIL_INIT=1          - respond with an error to initialize
   FAKE_MCP_CRASH_ON_TOOL=1      - crash (exit 1) on any tools/call
   FAKE_MCP_TOOL_ERROR=1         - return isError=True on any tools/call
+  FAKE_MCP_IGNORE_TOOL=1        - accept tools/call but never answer
   FAKE_MCP_NOISY_STDERR=1       - write a warning line to stderr on startup
   FAKE_MCP_EMIT_NOTIFICATION=1  - emit a progress notification before each
                                   tools/call response
@@ -49,7 +50,15 @@ def _add_tool(args: dict) -> dict:
     }
 
 
-TOOLS = {"echo": _echo_tool, "add": _add_tool}
+def _env_tool(args: dict) -> dict:
+    name = str(args.get("name", ""))
+    return {
+        "content": [{"type": "text", "text": os.environ.get(name, "")}],
+        "isError": False,
+    }
+
+
+TOOLS = {"echo": _echo_tool, "add": _add_tool, "echo_env": _env_tool}
 
 
 def _tool_defs() -> list[dict]:
@@ -73,6 +82,15 @@ def _tool_defs() -> list[dict]:
                     "b": {"type": "integer"},
                 },
                 "required": ["a", "b"],
+            },
+        },
+        {
+            "name": "echo_env",
+            "description": "Return the value of an environment variable.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
             },
         },
     ]
@@ -147,6 +165,8 @@ def main() -> None:
         if method == "tools/call":
             if os.environ.get("FAKE_MCP_CRASH_ON_TOOL") == "1":
                 sys.exit(1)
+            if os.environ.get("FAKE_MCP_IGNORE_TOOL") == "1":
+                continue
 
             name = params.get("name", "")
             args = params.get("arguments") or {}

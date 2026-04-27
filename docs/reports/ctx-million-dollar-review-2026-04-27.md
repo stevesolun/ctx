@@ -358,6 +358,22 @@ Remaining legacy/test type debt after Phase 13:
 - 0 force-check mypy errors remain under the same gate that initially exposed the legacy/test wall.
 - The caveat is no longer "hidden behind 506 errors"; the configured project gate now enforces the full `src` tree.
 
+### Phase 14: MCP timeout and environment hardening
+
+Status: implemented in this worktree.
+
+What changed:
+
+- `McpClient` no longer blocks directly on `stdout.readline()` in the request path. Stdout is drained by a background thread into a queue, and request timeout now applies to waiting for the next frame.
+- `McpServerConfig` no longer inherits the full parent environment by default. Child processes receive a small process-plumbing allowlist plus explicit `env` overlays; full inheritance now requires `inherit_env=True`.
+- The fake MCP server and router tests now reproduce a server that accepts `tools/call` but never answers, and they verify default secret non-inheritance, explicit env overlays, and opt-in legacy inheritance.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_mcp_router.py -q` reported `41 passed`.
+- `python -m ruff check src\ctx\adapters\generic\tools\mcp_router.py src\tests\test_mcp_router.py src\tests\fixtures\fake_mcp_server.py` reported `All checks passed!`.
+- `python -m mypy src\ctx\adapters\generic\tools\mcp_router.py src\tests\test_mcp_router.py src\tests\fixtures\fake_mcp_server.py` reported `Success: no issues found in 3 source files`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full 234-file `src` tree with zero mypy errors.
@@ -366,8 +382,8 @@ P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in 
 2. Installed Claude hooks point at files not shipped in the wheel and use non-portable shell commands.
 3. Recommendation ranking is still split between the shared recommender and Claude Code hooks.
 4. Harness budget caps are bypassed on terminal model responses. Fixed in Phase 4; retained as original review evidence.
-5. MCP request timeouts can hang forever on blocking stdout reads.
-6. MCP subprocesses inherit all parent secrets by default.
+5. MCP request timeouts can hang forever on blocking stdout reads. Fixed in Phase 14.
+6. MCP subprocesses inherit all parent secrets by default. Fixed in Phase 14.
 7. Model tool calls execute without an approval/policy gate.
 8. Resume trusts session metadata as executable MCP config.
 9. Session ID reuse truncates existing JSONL transcripts.

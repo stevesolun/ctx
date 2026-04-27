@@ -12,6 +12,7 @@ so there's no cross-test state.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,7 @@ def _make_config(
     extra_env: dict[str, str] | None = None,
     startup_timeout: float = 5.0,
     request_timeout: float = 5.0,
+    inherit_env: bool = False,
 ) -> McpServerConfig:
     """Return a config that launches the fake server via the test Python."""
     return McpServerConfig(
@@ -43,6 +45,7 @@ def _make_config(
         env=dict(extra_env or {}),
         startup_timeout=startup_timeout,
         request_timeout=request_timeout,
+        inherit_env=inherit_env,
     )
 
 
@@ -158,6 +161,42 @@ class TestClientRobustness:
         client = McpClient(_make_config())
         with pytest.raises(RuntimeError, match="not started"):
             client.list_tools()
+
+    def test_request_timeout_when_server_stays_silent(self) -> None:
+        cfg = _make_config(
+            extra_env={"FAKE_MCP_IGNORE_TOOL": "1"},
+            request_timeout=0.2,
+        )
+        with McpClient(cfg) as client:
+            started = time.monotonic()
+            with pytest.raises(McpServerError, match="timed out after 0.2s"):
+                client.call_tool("echo", {"text": "x"})
+            assert time.monotonic() - started < 1.5
+
+    def test_parent_env_is_not_inherited_by_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CTX_SECRET_SHOULD_NOT_LEAK", "leaked")
+        with McpClient(_make_config()) as client:
+            assert client.call_tool(
+                "echo_env", {"name": "CTX_SECRET_SHOULD_NOT_LEAK"}
+            ) == ""
+
+    def test_explicit_env_overlay_is_passed(self) -> None:
+        cfg = _make_config(extra_env={"CTX_ALLOWED_FOR_TEST": "visible"})
+        with McpClient(cfg) as client:
+            assert client.call_tool(
+                "echo_env", {"name": "CTX_ALLOWED_FOR_TEST"}
+            ) == "visible"
+
+    def test_full_env_inheritance_requires_opt_in(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CTX_LEGACY_INHERIT_TEST", "visible")
+        with McpClient(_make_config(inherit_env=True)) as client:
+            assert client.call_tool(
+                "echo_env", {"name": "CTX_LEGACY_INHERIT_TEST"}
+            ) == "visible"
 
 
 # ── McpRouter ─────────────────────────────────────────────────────────────────
