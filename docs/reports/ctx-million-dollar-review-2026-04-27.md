@@ -2,7 +2,7 @@
 
 This is the second-opinion, no-sugar-coating review requested after the Claude Code Opus 4.7 findings and the follow-up fixes/static cleanup.
 
-Short answer to "are you sure you did not miss anything?": no. A serious reviewer cannot guarantee full absence of missed bugs in a 733-file repository, especially with a dirty worktree and multiple long-running integration surfaces. What this review does provide is a much higher-confidence risk map: nine parallel expert passes plus local re-checks, focused on product architecture, recommendation consistency, harness/runtime behavior, security, data-loss paths, packaging/release, tests, and A-Z user flows.
+Short answer to "are you sure you did not miss anything?": no. A serious reviewer cannot guarantee full absence of missed bugs in a 733-file repository, especially with a long-running remediation branch and multiple integration surfaces. What this review does provide is a much higher-confidence risk map: nine parallel expert passes plus local re-checks, focused on product architecture, recommendation consistency, harness/runtime behavior, security, data-loss paths, packaging/release, tests, and A-Z user flows.
 
 The "CTO" and "devil advocate" language below means simulated review lenses, not actual company executives. The standard used here is what a senior architecture/release/security review would block before a public release.
 
@@ -10,17 +10,17 @@ The "CTO" and "devil advocate" language below means simulated review lenses, not
 
 ctx has a coherent product idea: a cross-host context/recommendation layer that turns repository/tool signals into skill, agent, and MCP recommendations, then exposes that through Claude Code hooks, a generic harness, a Python API, and an MCP server.
 
-The current codebase is not release-safe. The core problem is not one bug. The product has several partially-migrated architectures active at once:
+At the start of this review, the codebase was not release-safe. The core problem was not one bug. The product had several partially-migrated architectures active at once:
 
-- Bootstrap still calls removed flat modules while package entrypoints moved to canonical package paths.
-- Claude Code hooks still use their own local recommendation scorer while public/MCP/harness surfaces use a different recommender.
-- The generic harness has runtime contract breaks around budget enforcement, evaluator revision ordering, compaction persistence, MCP timeouts, tool approval, and exit semantics.
-- Security boundaries are too weak for a system that installs hooks, copies wiki content into live Claude directories, starts MCP subprocesses, exposes a dashboard, and lets models call tools.
-- Persistent state writes are not consistently locked or rollback-safe.
-- Test coverage is broad but often mocks the exact boundary that breaks in real user flows.
-- CI does not yet gate lint/type/package smoke/release alignment strongly enough.
+- Bootstrap called removed flat modules while package entrypoints had moved to canonical package paths.
+- Claude Code hooks used their own local recommendation scorer while public/MCP/harness surfaces used a different recommender.
+- The generic harness had runtime contract breaks around budget enforcement, evaluator revision ordering, compaction persistence, MCP timeouts, tool approval, and exit semantics.
+- Security boundaries were too weak for a system that installs hooks, copies wiki content into live Claude directories, starts MCP subprocesses, exposes a dashboard, and lets models call tools.
+- Persistent state writes were not consistently locked or rollback-safe.
+- Test coverage was broad but often mocked the exact boundary that breaks in real user flows.
+- CI did not gate lint/type/package smoke/release alignment strongly enough.
 
-My recommendation: do not cut a user-facing release until the P0/P1 items below are fixed and covered by end-to-end tests from a clean wheel install.
+That recommendation drove the remediation phases below. Do not cut a user-facing release from this branch without the final branch verification and clean wheel gates described in the implementation status.
 
 ## Scope And Method
 
@@ -58,9 +58,9 @@ Verification commands observed during this review wave or the immediately preced
 
 ## What Was Done Before This Report
 
-Earlier in this workstream, the repo was cleaned to satisfy static checks across many Python files and tests. That is why the current dirty worktree includes broad static-cleanup edits under `src/ctx`, `src/tests`, and related scripts. Those changes made Ruff, narrowed mypy, compileall, and the full pytest suite pass at that point.
+Earlier in this workstream, the repo was cleaned to satisfy static checks across many Python files and tests. That cleanup is now part of the remediation branch history rather than an unstaged dirty worktree. Those changes made Ruff, narrowed mypy, compileall, and the full pytest suite pass at that point.
 
-Earlier report work added a current-state audit section to `docs/reports/ctx-review-2026-04-26.md`. That report correctly showed that several previous "fixed" claims were not true in current source:
+Earlier report work added a current-state audit section to `docs/reports/ctx-review-2026-04-26.md`. That report correctly showed that several previous "fixed" claims were not true in then-current source:
 
 - `src/ctx_init.py` still calls `python -m inject_hooks`.
 - `src/ctx_init.py` still calls `python -m wiki_graphify`.
@@ -69,7 +69,7 @@ Earlier report work added a current-state audit section to `docs/reports/ctx-rev
 - `context_monitor.graph_suggest()` still implements a local recommendation scorer.
 - `resolve_skills.py` still uses `resolve_by_seeds()` and normalized scores incorrectly.
 
-This report originally documented the current risk surface and recommended remediation order. The worktree now contains follow-up remediation for the first recommendation/bootstrap phases; the blocker list below is retained as review evidence, and the implementation status is tracked here so future readers do not mistake old evidence for current source state.
+This report originally documented the current risk surface and recommended remediation order. The branch now contains follow-up remediation for the recommendation, bootstrap, harness, security, data-loss, packaging, and CI phases; the blocker list below is retained as review evidence, and the implementation status is tracked here so future readers do not mistake old evidence for current source state.
 
 ## Post-Review Implementation Status
 
@@ -572,13 +572,28 @@ Verification observed:
 - `python -m mypy src\ctx\cli\run.py src\tests\test_harness_cli_run.py` reported `Success: no issues found in 2 source files`.
 - `python -m mypy src` reported `Success: no issues found in 235 source files`.
 
+### Phase 26: Final report reconciliation
+
+Status: implemented in this worktree.
+
+What changed:
+
+- This report now clearly separates original review evidence from current remediation status.
+- Stale "current source" and "dirty worktree" wording was replaced with branch/history wording.
+- Remaining caveats were narrowed to live-host and exhaustive integration checks that were not proven locally.
+- The blocker summary now treats fixed items as fixed evidence, not as still-open defects.
+
+Verification observed:
+
+- Docs-only edit; final branch verification is recorded in the merge handoff rather than claimed here.
+
 ## Blocker Summary
 
-P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full 234-file `src` tree with zero mypy errors.
+P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke and targeted CLI policy tests, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
 
-1. `ctx-init --hooks/--graph` invokes removed modules and still exits success.
-2. Installed Claude hooks point at files not shipped in the wheel and use non-portable shell commands.
-3. Recommendation ranking is still split between the shared recommender and Claude Code hooks.
+1. `ctx-init --hooks/--graph` invokes removed modules and still exits success. Fixed in Phase 1.
+2. Installed Claude hooks point at files not shipped in the wheel and use non-portable shell commands. Fixed in Phase 1.
+3. Recommendation ranking is still split between the shared recommender and Claude Code hooks. Fixed in Phase 2.
 4. Harness budget caps are bypassed on terminal model responses. Fixed in Phase 4; retained as original review evidence.
 5. MCP request timeouts can hang forever on blocking stdout reads. Fixed in Phase 14.
 6. MCP subprocesses inherit all parent secrets by default. Fixed in Phase 14.
@@ -590,7 +605,7 @@ P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in 
 12. Wiki/install flows follow symlinks from wiki content into live Claude directories. Fixed across install copy paths in Phase 19 and wiki write paths in Phase 20.
 13. Tar extraction and source install paths are stale/unsafe. Source install paths fixed in Phase 21; tar member hardening fixed in Phase 22.
 14. CI/release can publish a tag without tests/package smoke/version alignment. Fixed in Phase 23.
-15. Tests mock the exact command boundaries that are currently broken. Mitigated by the clean wheel/entrypoint smoke in Phase 23 and CLI policy regression tests in Phase 25; live third-party MCP host execution remains out of scope for local CI.
+15. Tests mocked the exact command boundaries that were originally broken. Mitigated by the clean wheel/entrypoint smoke in Phase 23 and CLI policy regression tests in Phase 25; live third-party MCP host execution remains out of scope for local CI.
 
 ## Product Intent As Understood
 
@@ -612,7 +627,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-Current source violates all three invariants.
+The original reviewed source violated all three invariants. Phases 1-25 closed the P0/P1 blocker list above in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
 
 ## P0 Findings
 
@@ -1793,18 +1808,18 @@ Things I am not claiming:
 
 - I am not claiming every bug in the repo has been found.
 - I am not claiming every agent finding has a reproduction test yet.
-- I am not claiming the current dirty worktree is release-ready because tests once passed.
-- I am not claiming docs and code now agree.
-- I am not claiming the wheel contents were fully rebuilt and inspected during this final review wave.
+- I am not claiming every legacy documentation sentence in the repo has been re-audited after every remediation phase.
+- I am not claiming live Claude Code or third-party MCP hosts were exercised end to end on a real user machine.
+- I am not claiming exhaustive crash-consistency coverage beyond the targeted rollback/session/wiki cases that were tested.
 
 Things I am confident about:
 
-- The bootstrap missing-module bug is real and reproduced.
-- The hook path/package-layout mismatch is real from source inspection.
-- The recommendation split is real from source inspection.
-- The harness budget bypass is real from code path and agent probe.
-- The MCP timeout issue is real from blocking `readline()`.
-- The security/data-loss issues are plausible and high enough risk to block release until covered by tests or fixed.
+- The original bootstrap missing-module bug was real and reproduced.
+- The original hook path/package-layout mismatch was real from source inspection.
+- The original recommendation split was real from source inspection.
+- The original harness budget bypass was real from code path and agent probe.
+- The original MCP timeout issue was real from blocking `readline()`.
+- The security/data-loss issues were high enough risk to block release until covered by tests or fixed, and the remediation phases added focused regression coverage for the fixed paths.
 
 ## Appendix: Evidence Index
 
@@ -1855,17 +1870,16 @@ Observed:
 
 - Nine specialized agents were used because the user explicitly requested sub-agent review.
 - I re-checked the highest-risk paths locally with scoped file reads and command probes.
-- The report file itself is a documentation artifact; it does not fix code.
+- Code and CI fixes landed across the phased commits referenced above, and this report was updated to keep historical findings separate from current branch state.
 
 Inferred:
 
-- The architecture is not yet converged. The same product behavior is implemented in multiple places with different scoring, state, and safety assumptions.
-- The repo is closer to "prototype with many strong modules" than "release-safe platform".
+- The highest-risk architecture split around recommendations and harness tool policy has been converged in code; remaining convergence risk is in live host behavior, future migrations, and integration surfaces not fully reproducible in local unit tests.
+- The branch is much closer to a release candidate than the original reviewed source, but it should still be treated as requiring CI and clean-install validation before a public release.
 
 Not verified:
 
-- Full fresh wheel build/install smoke in a new venv.
 - Live Claude Code hook execution.
 - Live MCP host behavior against a real third-party MCP.
 - Browser-driven dashboard exploit reproduction.
-- Crash-consistency tests for restore/atomic writes.
+- Exhaustive crash-consistency tests beyond the targeted rollback/session/wiki cases.
