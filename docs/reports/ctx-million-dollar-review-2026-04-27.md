@@ -529,6 +529,27 @@ Verification observed:
 - Clean wheel virtualenv smoke reported `twine check` passed for the wheel, `pip check` reported `No broken requirements found`, `loaded 27 ctx console scripts from wheel 0.6.4`, and representative CLI help commands returned success.
 - The shared review environment still reports the pre-existing global `litellm`/`click` conflict on `python -m pip check`; the new gates were verified in clean virtualenvs.
 
+### Phase 24: Harness tool policy hook
+
+Status: implemented in this worktree; CLI wiring follows in Phase 25.
+
+What changed:
+
+- `run_loop()` now accepts a pre-dispatch `tool_policy` callback for every model-requested tool call.
+- A policy callback returns `None` to allow the call or a denial reason string to block it before router/executor dispatch.
+- Policy callback exceptions fail closed and stop the loop with `tool_denied`.
+- `LoopResult.stop_reason` now distinguishes `tool_denied` from actual `tool_error`.
+- `run_with_evaluation()` now forwards the same policy hook into generator rounds, so evaluator/planner mode cannot bypass the loop policy.
+- Regression tests cover policy denial before executor invocation and fail-closed policy exceptions.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_harness_loop.py src\tests\test_harness_evaluator.py -q` reported `88 passed`.
+- `python -m ruff check src\ctx\adapters\generic\loop.py src\ctx\adapters\generic\evaluator.py src\tests\test_harness_loop.py` reported `All checks passed!`.
+- `python -m compileall -q src\ctx\adapters\generic\loop.py src\ctx\adapters\generic\evaluator.py src\tests\test_harness_loop.py` completed.
+- `python -m mypy src\ctx\adapters\generic\loop.py src\ctx\adapters\generic\evaluator.py src\tests\test_harness_loop.py` reported `Success: no issues found in 3 source files`.
+- `python -m mypy src` reported `Success: no issues found in 235 source files`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full 234-file `src` tree with zero mypy errors.

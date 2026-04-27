@@ -50,7 +50,7 @@ from ctx.adapters.generic.contract import (
     ContractBuilder,
     augmented_system_prompt_with_contract,
 )
-from ctx.adapters.generic.loop import LoopObserver, LoopResult, run_loop
+from ctx.adapters.generic.loop import LoopObserver, LoopResult, ToolPolicy, run_loop
 from ctx.adapters.generic.planner import PlanArtifact, Planner, augmented_system_prompt
 from ctx.adapters.generic.providers import (
     CompletionResponse,
@@ -319,6 +319,7 @@ def run_with_evaluation(
     router: McpRouter | None = None,
     extra_tools: list[ToolDefinition] | None = None,
     tool_executor: Callable[..., str] | None = None,
+    tool_policy: ToolPolicy | None = None,
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int | None = None,
@@ -406,6 +407,7 @@ def run_with_evaluation(
             router=router,
             extra_tools=extra_tools,
             tool_executor=tool_executor,
+            tool_policy=tool_policy,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,

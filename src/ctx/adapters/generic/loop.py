@@ -22,7 +22,8 @@ Stop conditions (deterministic, in priority order):
   4. Total tokens exceeded ``budget_tokens``              → ``"token_budget"``
   5. Caller cancellation (``cancel_event`` set)           → ``"cancelled"``
   6. Provider returned finish_reason == 'content_filter' → ``"content_filter"``
-  7. An MCP tool call raised a non-recoverable error     → ``"tool_error"``
+  7. Tool policy denied a model-requested call           -> ``"tool_denied"``
+  8. A tool call raised a non-recoverable error          -> ``"tool_error"``
 
 The loop NEVER catches provider-level exceptions (import failures,
 HTTP errors, auth errors) — those bubble to the caller so a bad
@@ -63,8 +64,11 @@ StopReason = Literal[
     "token_budget",
     "cancelled",
     "content_filter",
+    "tool_denied",
     "tool_error",
 ]
+
+ToolPolicy = Callable[[ToolCall], str | None]
 
 
 # ── Event hooks (for H4 session state + H5 context compaction) ───────────
@@ -192,6 +196,7 @@ def run_loop(
     router: McpRouter | None = None,
     extra_tools: list[ToolDefinition] | None = None,
     tool_executor: Callable[[ToolCall], str] | None = None,
+    tool_policy: ToolPolicy | None = None,
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int | None = None,
@@ -218,6 +223,8 @@ def run_loop(
                            Called as tool_executor(ToolCall) → result string.
                            Raise ``McpServerError`` or ``RuntimeError`` for
                            non-recoverable failures.
+        tool_policy      - optional pre-dispatch policy. Return ``None`` to
+                           allow a call, or a denial reason string to block it.
 
     Safety limits:
         max_iterations   - hard cap on model calls (default 25)
@@ -347,16 +354,20 @@ def run_loop(
                 )
             break
 
-        # Execute every tool call. Errors end the loop (tool_error)
-        # rather than loop forever trying to recover; an Evaluator
-        # agent (H11) is where retry strategy will live.
+        # Execute every tool call. Policy denials and execution errors
+        # end the loop rather than loop forever trying to recover; an
+        # Evaluator agent (H11) is where retry strategy will live.
         tool_error_occurred = False
         for call in response.tool_calls:
-            tool_result, error = _execute_tool(
-                call,
-                router=router,
-                tool_executor=tool_executor,
-            )
+            denial = _check_tool_policy(call, tool_policy)
+            if denial is None:
+                tool_result, error = _execute_tool(
+                    call,
+                    router=router,
+                    tool_executor=tool_executor,
+                )
+            else:
+                tool_result, error = "", f"policy: {denial}"
             obs.on_tool_call(iteration, call, tool_result, error)
             conversation.append(
                 Message(
@@ -367,8 +378,12 @@ def run_loop(
                 )
             )
             if error is not None:
-                stop_reason = "tool_error"
-                stop_detail = f"tool {call.name!r} failed: {error}"
+                if denial is None:
+                    stop_reason = "tool_error"
+                    stop_detail = f"tool {call.name!r} failed: {error}"
+                else:
+                    stop_reason = "tool_denied"
+                    stop_detail = f"tool {call.name!r} denied: {denial}"
                 tool_error_occurred = True
                 break
         if tool_error_occurred:
@@ -493,3 +508,23 @@ def _execute_tool(
 
     # Unhandled
     return "", f"no dispatcher for tool {call.name!r}"
+
+
+def _check_tool_policy(
+    call: ToolCall,
+    tool_policy: ToolPolicy | None,
+) -> str | None:
+    """Return a denial reason when policy blocks ``call``.
+
+    Policy failures fail closed. A policy hook is part of the trust
+    boundary; if it raises, the model should not get the tool call.
+    """
+    if tool_policy is None:
+        return None
+    try:
+        denial = tool_policy(call)
+    except Exception as exc:  # noqa: BLE001
+        return f"policy raised {type(exc).__name__}: {exc}"
+    if denial is None:
+        return None
+    return str(denial) or "denied"

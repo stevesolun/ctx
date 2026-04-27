@@ -410,6 +410,51 @@ class TestToolDispatch:
         assert result.stop_reason == "tool_error"
         assert "kaboom" in result.detail
 
+    def test_tool_policy_denies_before_executor(self) -> None:
+        tc = ToolCall(id="c1", name="custom__delete", arguments={"path": "x"})
+        invoked = False
+
+        def exec_(_call: ToolCall) -> str:
+            nonlocal invoked
+            invoked = True
+            return "should-not-run"
+
+        provider = _Scripted([_tool_response(tc), _stop_response("unreached")])
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="call tool",
+            tool_executor=exec_,
+            tool_policy=lambda call: (
+                "write tools require explicit allow"
+                if call.name == "custom__delete"
+                else None
+            ),
+        )
+
+        assert result.stop_reason == "tool_denied"
+        assert "write tools require explicit allow" in result.detail
+        assert not invoked
+        tool_msgs = [m for m in result.messages if m.role == "tool"]
+        assert tool_msgs[-1].content.startswith("ERROR: policy:")
+
+    def test_tool_policy_failure_denies_closed(self) -> None:
+        tc = ToolCall(id="c1", name="custom__echo", arguments={})
+
+        def broken_policy(_call: ToolCall) -> str | None:
+            raise RuntimeError("policy state unavailable")
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(tc), _stop_response("unreached")]),
+            system_prompt="",
+            task="call tool",
+            tool_executor=lambda _call: "ok",
+            tool_policy=broken_policy,
+        )
+
+        assert result.stop_reason == "tool_denied"
+        assert "policy raised RuntimeError" in result.detail
+
     def test_router_dispatch(self, tmp_path) -> None:
         import sys
         from pathlib import Path as _Path
