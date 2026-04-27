@@ -20,7 +20,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import networkx as nx
-from networkx.algorithms.community import greedy_modularity_communities
+from networkx.algorithms.community import (
+    greedy_modularity_communities,  # legacy CNM — slow on 10K+ node graphs
+    louvain_communities,
+)
 
 from ctx.core.wiki.wiki_utils import parse_frontmatter as _parse_fm
 
@@ -367,6 +370,34 @@ def build_graph(
     # a compatible pickle on disk AND an incremental run. Anything
     # else falls through to a clean rebuild.
     prior_graph = load_prior_graph() if incremental else None
+
+    # ── Patch-path safety: detect "edge generation parameters changed"
+    # since the prior build (e.g. semantic backend went from
+    # unavailable → available between runs). The patch path's
+    # affected-nodes detector only catches *content* changes; it does
+    # NOT catch the case where the same content needs different edges
+    # because a signal source was just enabled/disabled. Without this
+    # guard, a freshly-computed semantic_sim never lands on edges that
+    # the patch path leaves "untouched", and the published graph
+    # silently ships with semantic_sim=0 everywhere.
+    #
+    # The check: if we just computed semantic pairs (len(sem_pairs) > 0)
+    # but the prior graph has zero edges with semantic_sim > 0, the
+    # prior was built without semantic. Force a full rebuild — the
+    # patch path cannot reconcile this without rebuilding every edge.
+    if prior_graph is not None and len(sem_pairs) > 0:
+        prior_with_sem = sum(
+            1 for _, _, d in prior_graph.edges(data=True)
+            if d.get("semantic_sim", 0.0) > 0
+        )
+        if prior_with_sem == 0:
+            print(
+                "graphify: prior graph has 0 semantic edges but current run "
+                f"computed {len(sem_pairs):,} semantic pairs — forcing full "
+                "rebuild (patch path cannot reconcile signal-source change).",
+                flush=True,
+            )
+            prior_graph = None
     current_node_info: dict[str, dict] = {
         nid: {
             "label": data.get("label", nid.split(":", 1)[-1]),
@@ -779,17 +810,37 @@ def _attach_quality_attrs(G: nx.Graph, sidecar_dir: Path) -> int:
 
 
 def detect_communities(G: nx.Graph) -> dict[int, list[str]]:
-    """Run greedy modularity community detection."""
+    """Run community detection.
+
+    Uses Louvain by default — it's near-linear in edge count and finishes
+    on a 13K-node / 800K-edge graph in seconds. Falls back to the slower
+    greedy-modularity (CNM) algorithm only if the env var
+    ``CTX_GRAPH_COMMUNITY=cnm`` is set, since CNM is O(n²) on dense
+    graphs and hangs on this dataset (~50min and counting was observed
+    on 2026-04-27).
+    """
     if G.number_of_nodes() == 0:
         return {}
 
-    # Filter to connected components for better detection
-    communities_gen = greedy_modularity_communities(G, weight="weight", resolution=1.2)
+    algo = os.environ.get("CTX_GRAPH_COMMUNITY", "louvain").lower()
+    if algo == "cnm":
+        communities_iter = greedy_modularity_communities(
+            G, weight="weight", resolution=1.2,
+        )
+    else:
+        # Louvain returns list[set[node]] directly. Resolution=1.2 to
+        # match the CNM resolution we shipped previously, so cluster
+        # granularity is comparable.
+        # seed=42 fixed so output is reproducible across runs.
+        communities_iter = louvain_communities(
+            G, weight="weight", resolution=1.2, seed=42,
+        )
+
     communities: dict[int, list[str]] = {}
-    for i, community in enumerate(communities_gen):
+    for i, community in enumerate(communities_iter):
         communities[i] = sorted(community)
 
-    print(f"Communities: {len(communities)} detected")
+    print(f"Communities: {len(communities)} detected (algo={algo})")
     for cid, members in sorted(communities.items(), key=lambda x: -len(x[1]))[:10]:
         print(f"  Community {cid}: {len(members)} members")
     return communities

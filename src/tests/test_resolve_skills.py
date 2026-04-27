@@ -172,7 +172,16 @@ class TestResolve:
         manifest = resolve(profile, available, {})
         suggestion_skills = [s["skill"] for s in manifest["suggestions"]]
         assert "react" in suggestion_skills
-        assert manifest["load"] == []
+        # The unavailable react skill must NOT be in load. Graph-matched
+        # agents (e.g. react-specialist found via the live knowledge graph)
+        # may legitimately appear in load — the assertion targets the
+        # specific skill, not the entire load list, so this test stays
+        # robust against richer graph-driven recommendations.
+        loaded_skills = [
+            e.get("skill") for e in manifest["load"]
+            if e.get("entity_type", "skill") == "skill"
+        ]
+        assert "react" not in loaded_skills
 
     def test_always_load_override_adds_skill(self, tmp_path):
         available = {"docker": {"path": str(tmp_path / "docker/SKILL.md"), "name": "docker"}}

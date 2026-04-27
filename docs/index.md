@@ -3,12 +3,12 @@ hide:
   - navigation
 ---
 
-# ctx — Skill & Agent Recommendation and Management for Claude Code
+# ctx — Skill, Agent & MCP Recommendation and Management for Claude Code
 
-Watches what you develop, walks a knowledge graph of **1,789 skills and
-464 agents**, and recommends the right ones on the fly — you decide what
-to load and unload. Powered by a Karpathy LLM wiki with persistent memory
-that gets smarter every session.
+Watches what you develop, walks a knowledge graph of **1,968 skills, 464
+agents, and 10,786 MCP servers**, and recommends the right ones on the
+fly — you decide what to load and unload. Powered by a Karpathy LLM wiki
+with persistent memory that gets smarter every session.
 
 !!! tip "Install"
 
@@ -27,8 +27,9 @@ that gets smarter every session.
 Claude Code skills and agents are powerful, but at scale they become
 unmanageable:
 
-- **Discovery problem** — with 1,700+ skills, how do you know which ones
-  exist and which are relevant to your current project?
+- **Discovery problem** — with 1,900+ skills, 460+ agents, and 10,000+
+  MCP servers, how do you know which ones exist and which are relevant
+  to your current project?
 - **Context budget** — loading all skills wastes tokens and degrades
   quality. You need exactly the right 10–15 skills and agents per
   session.
@@ -57,17 +58,18 @@ graph-based discovery:
 
 - A Karpathy 3-layer wiki at `~/.claude/skill-wiki/` is the single source
   of truth.
-- **2,253 entity pages** (1,789 skills + 464 agents) with frontmatter
-  tracking use count, last used date, tags, and status.
-- A **knowledge graph** (2,253 nodes, 454K edges, 93 communities)
-  connects skills and agents by shared tags, enabling context-aware
-  recommendations.
-- **74 auto-generated concept pages** group related skills into named
-  communities (e.g., *Security + Testing*, *Python + API + Database*).
+- **13,218 entity pages** (1,968 skills + 464 agents + 10,786 MCP servers)
+  with frontmatter tracking use count, last used date, tags, and status.
+- A **knowledge graph** (13,218 nodes, 963K edges, 24 Louvain
+  communities) blending semantic cosine + tag overlap + slug-token
+  overlap connects skills/agents/MCPs, enabling context-aware
+  recommendations across all three types.
+- **24 auto-generated concept pages** group related entities into named
+  communities (e.g., *AI + Devops + Frontend*, *Python + API*).
 - PostToolUse and Stop hooks update the wiki automatically during each
   Claude Code session.
 - Skills over 180 lines are converted to a gated 5-stage micro-skill
-  pipeline (956 converted) so the router can load them incrementally.
+  pipeline so the router can load them incrementally.
 - At session start, the skill-router scans your project and
   **recommends** the best-matching skills and agents.
 - Mid-session, the context monitor watches every tool call, detects new
@@ -86,10 +88,10 @@ from your usage. Stale ones are flagged. New ones self-ingest.
 
     ---
 
-    2,253 nodes (1,789 skills + 464 agents) connected by 454,719 weighted
-    edges across 93 communities. Ships pre-built in
-    `graph/wiki-graph.tar.gz` and powers the graph-aware skill
-    recommendations.
+    13,218 nodes (1,968 skills + 464 agents + 10,786 MCP servers)
+    connected by 963,068 weighted edges across 24 Louvain communities.
+    Ships pre-built in `graph/wiki-graph.tar.gz` and powers the
+    graph-aware recommendations + the pre-ship `ctx-dedup-check` gate.
 
     [:octicons-arrow-right-24: Knowledge graph](knowledge-graph.md)
 
@@ -144,12 +146,14 @@ from your usage. Stale ones are flagged. New ones self-ingest.
 
     ---
 
-    **v0.6.1** — MIT, CI-matrixed (Ubuntu + Windows × Python 3.11/3.12),
-    1,363 tests passing. Ships 10 console scripts including `ctx-init`
-    and `ctx-monitor` (local dashboard with graph + wiki + load/unload)
-    plus the 9.6 MB pre-built wiki tarball with **2,253 nodes /
-    454,719 edges / 93 communities**. Hardened across four Strix-audited
-    security findings.
+    **v0.7.x** — MIT, CI-matrixed (Ubuntu + Windows × Python 3.11/3.12),
+    3,180+ tests passing. Ships console scripts including `ctx-init`,
+    `ctx-monitor` (local dashboard with graph + wiki + load/unload),
+    `ctx-dedup-check` (pre-ship near-duplicate gate), and
+    `ctx-tag-backfill` (catalog hygiene), plus the ~25 MB pre-built
+    wiki tarball with **13,218 nodes / 963,068 edges / 24 Louvain
+    communities**. Hardened across the Strix audit + a 12-finding codex
+    review.
 
     [:octicons-arrow-right-24: CHANGELOG](https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md) ·
     [Repository](https://github.com/stevesolun/ctx)

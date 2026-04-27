@@ -1,8 +1,8 @@
 # Knowledge graph
 
-A pre-built weighted graph of every skill and agent in the ctx
-ecosystem, shipped as `graph/wiki-graph.tar.gz` and queryable via
-the `ctx-monitor` dashboard, the `resolve_graph` Python API, and
+A pre-built weighted graph of every skill, agent, and MCP server in
+the ctx ecosystem, shipped as `graph/wiki-graph.tar.gz` and queryable
+via the `ctx-monitor` dashboard, the `resolve_graph` Python API, and
 the on-disk JSON.
 
 ## What's in it
@@ -11,13 +11,13 @@ Authoritative numbers from the shipped tarball:
 
 | | Count |
 |---|---:|
-| Nodes | **2,253** (1,789 skills + 464 agents) |
-| Edges | **454,719** |
-| Communities | **93** |
-| Avg degree | **416.6** |
-| Max degree | **1,152** |
-| Skill ↔ agent cross-edges | **195,226** |
-| Isolated nodes | 71 (entities with no tags and no slug-token overlap) |
+| Nodes | **13,218** (1,968 skills + 464 agents + 10,786 MCP servers) |
+| Edges | **963,068** |
+| Communities | **24** (Louvain) |
+| Edge sources (overlap-deduped) | semantic 208,224 · tag 378,457 · token 300,317 |
+| Cross-type edges (skill ↔ agent) | ~204K |
+| Cross-type edges (skill ↔ MCP) | ~61K |
+| Cross-type edges (agent ↔ MCP) | ~13K |
 
 ## Install
 
@@ -58,12 +58,20 @@ security, _t:architect, ...]`).
 
 ## Communities
 
-After edges are built, `wiki_graphify` runs NetworkX's greedy
-modularity community detection (`resolution=1.2`). The result is
-93 communities ranging from single-member (isolated specialists) to
-hundreds of members (broad clusters like `AI + Security + DevOps`).
-Each community also gets an auto-generated `concepts/<community>.md`
-wiki page summarizing its members and top shared tags.
+After edges are built, `wiki_graphify` runs NetworkX's Louvain
+community detection (`resolution=1.2`, `seed=42` for determinism).
+The result is **24 communities** ranging from single-member isolated
+specialists to several thousand members in broad clusters like
+`Community + Official + AI`. Each community also gets an auto-generated
+`concepts/<community>.md` wiki page summarizing its members and top
+shared tags.
+
+The legacy CNM ("greedy modularity") algorithm is still available
+behind `CTX_GRAPH_COMMUNITY=cnm` — it's deterministic but O(n²) on
+dense graphs and hangs on the live 13K-node dataset (~50min run was
+killed on 2026-04-27 inside the priority-queue siftup). Louvain is
+the default because it finishes in seconds and produces equivalent
+quality clusters for the recommendation use case.
 
 ## Querying the graph
 
@@ -90,7 +98,7 @@ raw = json.loads(
 edges_key = "links" if "links" in raw else "edges"
 G = node_link_graph(raw, edges=edges_key)
 
-# 2,253 nodes, 454,719 edges
+# 13,218 nodes, 963,068 edges
 print(G.number_of_nodes(), G.number_of_edges())
 
 # Find skills related to 'fastapi-pro' by edge weight
@@ -132,15 +140,32 @@ The pre-commit hook (`.githooks/pre-commit`) re-runs this
 automatically when `skills/` or `agents/` are staged, and repacks
 the tarball on disk so `README.md` numbers never drift.
 
-## Why the edge count is 454K and not 642K
+## Edge-count history
 
-Earlier v0.5.x releases shipped a `graph.json` with 642K edges but
-from a build path that no longer exists in the repo. When anyone
-actually ran `wiki_graphify`, it silently produced 861 edges because
-`DENSE_TAG_THRESHOLD` was 20 and every semantically-useful tag (on
-300+ entities each) was being skipped. v0.6.0 fixed the threshold
-to 500, added slug-token pseudo-tags, and taught `parse_frontmatter`
-to read multi-line YAML lists — producing the 454K-edge graph that
-ships today and is **reproducible from the wiki content** rather
-than orphaned from a lost code path. See `CHANGELOG.md` v0.6.0 for
-the full postmortem.
+| Version | Edges | Note |
+|---|---|---|
+| v0.5.x | 642K (stale) / 861 (live) | Bundle had stale 642K; live rebuild silently produced 861 because `DENSE_TAG_THRESHOLD=20` dropped every popular tag. |
+| v0.6.0 | 454,719 | Threshold raised to 500, multi-line YAML lists parsed, slug-token pseudo-tags added. |
+| v0.7.x | 847,207 | Pulsemcp ingest added 10,786 MCP server nodes; sentence-embedding semantic edges added. |
+| 2026-04-27 (this release) | **963,068** | +21 mattpocock skills, +156 designdotmd designs (+106,702 edges); patch-path bug fixed (graphify now forces full rebuild when prior graph has 0 semantic edges but current run computed semantic pairs); community detection switched from CNM to Louvain. |
+
+The full audit history lives in `CHANGELOG.md`. The current build is
+fully reproducible from the wiki content.
+
+## Pre-ship gates
+
+Two advisory gates run before the tarball is repackaged. Both produce
+review reports and never auto-modify the catalog.
+
+- **`ctx-dedup-check`** — flags entity pairs (skill ↔ skill, skill ↔
+  agent, skill ↔ MCP, agent ↔ agent, agent ↔ MCP, MCP ↔ MCP) at or
+  above 0.85 cosine similarity. Incremental: keeps a `dedup-state.json`
+  next to the embedding cache, so follow-up runs only re-check pairs
+  involving entities whose content changed. Allowlist support via
+  `.dedup-allowlist.txt`. The current snapshot has 15,976 findings,
+  most of which are within-MCP near-duplicates (multiple wrappers
+  around the same upstream service).
+- **`ctx-tag-backfill`** — finds skills/agents with empty `tags:`
+  frontmatter and proposes a backfill drawn from slug tokens, body
+  keywords, and the existing tag vocabulary. Report-only by default;
+  pass `--apply` to write. Backfills are additive only.

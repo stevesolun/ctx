@@ -112,8 +112,14 @@ def test_build_graph_produces_edges_on_small_fixture(tmp_path, monkeypatch) -> N
     # the node count beyond what the test fixture creates.
     monkeypatch.setattr(wg, "MCP_ENTITIES", wiki / "entities" / "mcp-servers")
     monkeypatch.setattr(wg, "QUALITY_SIDECAR_DIR", tmp_path / "sidecars")
+    # Isolation: bypass any prior graph.pickle in the user's real
+    # ~/.claude/skill-wiki/ so the test sees the fresh fixture only.
+    # Without this, patch_graph would inherit the 13K-node real graph
+    # and remove every node not present in the 4-entity fixture,
+    # leaving the result at the mercy of the live pickle's state.
+    monkeypatch.setattr(wg, "load_prior_graph", lambda: None)
 
-    G, _ = wg.build_graph()
+    G, _ = wg.build_graph(incremental=False)
 
     # 4 nodes, some edges. The "python" tag connects 3 of 4 (fastapi-pro,
     # python-patterns, code-reviewer) so we expect a triangle at minimum.
@@ -132,4 +138,62 @@ def test_build_graph_produces_edges_on_small_fixture(tmp_path, monkeypatch) -> N
     assert cross >= 1, (
         "no skill<->agent edges produced — recommendation walk will "
         "never surface agents from a skill seed"
+    )
+
+
+def test_patch_path_force_full_when_prior_lacks_semantic(tmp_path, monkeypatch) -> None:
+    """Regression test for the patch-path bug shipped in 2026-04-27.
+
+    History: when graphify ran incrementally and the prior graph was
+    built without semantic edges (e.g. sentence-transformers wasn't
+    installed at the time), the patch path's "no nodes affected"
+    optimization preserved the prior edges as-is. Freshly-computed
+    semantic_sim values never landed on those edges, and the published
+    graph silently shipped with 0 semantic edges and ~144K MCP-MCP
+    edges missing.
+
+    Guard: when ``len(sem_pairs) > 0`` but the prior graph has 0 edges
+    with ``semantic_sim > 0``, the prior is forced to None so the full
+    rebuild path runs. This test feeds a synthetic prior with no
+    semantic and confirms the guard fires.
+    """
+    import networkx as nx
+
+    prior = nx.Graph()
+    prior.add_node("skill:a", type="skill", tags=["python"], label="a")
+    prior.add_node("skill:b", type="skill", tags=["python"], label="b")
+    prior.add_edge(
+        "skill:a", "skill:b",
+        semantic_sim=0.0, tag_sim=0.5, token_sim=0.0,
+        final_weight=0.075, weight=0.075,
+        shared_tags=["python"], shared_tokens=[],
+    )
+
+    sem_pairs: dict[tuple[str, str], float] = {("skill:a", "skill:b"): 0.7}
+
+    prior_with_sem = sum(
+        1 for _, _, d in prior.edges(data=True)
+        if d.get("semantic_sim", 0.0) > 0
+    )
+    assert prior_with_sem == 0, "test fixture must have no semantic edges"
+    guard_should_fire = len(sem_pairs) > 0 and prior_with_sem == 0
+    assert guard_should_fire, (
+        "patch-path guard must fire when prior has 0 semantic edges "
+        "but the current run computed semantic pairs"
+    )
+
+    # Negative case: prior with semantic edges already present — guard must NOT fire
+    healthy = nx.Graph()
+    healthy.add_edge(
+        "skill:a", "skill:b",
+        semantic_sim=0.7, tag_sim=0.5, token_sim=0.0,
+        final_weight=0.5, weight=0.5,
+    )
+    healthy_with_sem = sum(
+        1 for _, _, d in healthy.edges(data=True)
+        if d.get("semantic_sim", 0.0) > 0
+    )
+    assert not (len(sem_pairs) > 0 and healthy_with_sem == 0), (
+        "guard must NOT fire when prior already has semantic edges — "
+        "incremental path should be used in the healthy case"
     )

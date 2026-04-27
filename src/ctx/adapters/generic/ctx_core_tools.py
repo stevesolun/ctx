@@ -268,9 +268,12 @@ class CtxCoreToolbox:
                 "results": [],
             })
 
-        from ctx.core.graph.resolve_graph import resolve_by_tags  # noqa: PLC0415
+        from ctx.core.resolve.recommendations import recommend_by_tags  # noqa: PLC0415
 
-        raw = resolve_by_tags(graph, tags, top_n=top_k)
+        # Pass the original query through so the recommender can apply
+        # semantic-similarity scoring (in addition to tag/slug-token).
+        # Falls through silently if the embedding cache is missing.
+        raw = recommend_by_tags(graph, tags, top_n=top_k, query=query)
         results = [
             {
                 "name": r["name"],

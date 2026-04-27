@@ -1,15 +1,26 @@
 # Knowledge Graph
 
-Pre-built knowledge graph of **13,041 nodes** (1,791 skills + 464 agents + 10,786 MCP servers) with **847,207 edges** across **15 communities**. Cross-type connectivity: skill↔skill 211K, agent↔skill 198K, MCP↔MCP 303K, MCP↔skill 60K, agent↔agent 63K, agent↔MCP 13K. Edges are blended from three signals — semantic cosine (default weight 0.70), explicit `tags:` overlap (0.15), and slug-token overlap (0.15). Rebuild with `ctx-wiki-graphify` (incremental by default).
+Pre-built knowledge graph of **13,218 nodes** (1,968 skills + 464 agents + 10,786 MCP servers) with **963,068 edges** across **24 communities** (Louvain). Edges are blended from three signals — semantic cosine (208,224 edges, default weight 0.70), explicit `tags:` overlap (378,457 edges, weight 0.15), and slug-token overlap (300,317 edges, weight 0.15). Pairs that appear in multiple sources collapse into a single weighted edge. Rebuild with `python -m ctx.core.wiki.wiki_graphify` (use `--full` if the prior build's edge-generation parameters changed; see the bug note below).
 
-> v0.5.x shipped a stale `graph.json` with 642K edges from a build path that no longer existed; the live rebuild silently produced only 861 edges because `DENSE_TAG_THRESHOLD=20` dropped every tag with more than 20 nodes. v0.6.0 fixed the threshold + added slug-token pseudo-tags → reproducible 454K-edge graph. v0.7 (this release) ingested 10,786 MCP servers from pulsemcp (93% enriched with github_url + stars), added sentence-embedding semantic edges with a configurable `build_floor=0.50` / `min_cosine=0.80` split (filter at query time without a rebuild), wired the alive-loop cumulative-threshold trigger so the suggestion arm actually fires in production, and shipped install/uninstall CLIs for all three entity types.
+> **2026-04-27.** Two imports landed this day:
+> - **[mattpocock/skills](https://github.com/mattpocock/skills)** — 21 opinionated behavior skills (TDD, domain-model, ubiquitous-language, github-triage, plus 17 more) under the `mattpocock-` prefix.
+> - **[designdotmd.directory](https://designdotmd.directory)** — 156 DESIGN.md visual-identity files (color tokens, typography, spacing, component tokens, rationale) under the `designdotmd-` prefix. These are *reference designs* (data the agent reads when asked to build a UI), not behavior skills.
+>
+> Node count: 13,041 → **13,218** (+177 = 21 mattpocock + 156 designdotmd). Edge count: 847,207 → **963,068** (+106,702 from designdotmd-driven tag/token overlap with the existing catalog).
+
+> **Bugs fixed in this release:**
+>
+> - *Patch-path edge silence.* `wiki_graphify`'s incremental path used to keep stale edges when the semantic backend went from unavailable → available between runs (no node content changed, so the affected-set was empty, so freshly-computed semantic pairs never landed). Fixed: the build now detects "prior graph has 0 semantic edges but current run computed semantic pairs" and forces a full rebuild. Regression test added in `test_wiki_graphify_density.py`.
+> - *CNM community-detection hang.* The legacy CNM (greedy modularity) algorithm took 50+ minutes on the 13K-node graph stuck in `_siftup`. Fixed: switched default to **Louvain** (`networkx.algorithms.community.louvain_communities`) with deterministic seed=42. CNM still available behind `CTX_GRAPH_COMMUNITY=cnm` for legacy parity.
+
+> **Edge-count history.** v0.5.x shipped a stale `graph.json` with 642K edges from a build path that no longer existed; the live rebuild silently produced only 861 edges because `DENSE_TAG_THRESHOLD=20` dropped every tag with more than 20 nodes. v0.6.0 fixed the threshold + added slug-token pseudo-tags → 454K-edge graph. v0.7 ingested 10,786 MCP servers from pulsemcp (93% enriched with github_url + stars), added sentence-embedding semantic edges with a configurable `build_floor=0.50` / `min_cosine=0.80` split, wired the alive-loop cumulative-threshold trigger, and shipped install/uninstall CLIs for all three entity types → 847K edges. This release adds 21 mattpocock skills + 156 designdotmd designs, fixes the patch-path bug, and switches to Louvain → **963K edges**.
 
 ## Files
 
 | File | Size | Contents |
 |------|------|----------|
-| `wiki-graph.tar.gz` | 22.5 MB | **Full wiki** — entity cards, 1,772 converted skill bodies, 430 mirrored agent bodies, 13K-node knowledge graph, concept pages, catalog |
-| `communities.json` | 153 KB | 15 detected communities with labels + member lists |
+| `wiki-graph.tar.gz` | ~25 MB | **Full wiki** — entity cards, 1,793 converted skill bodies + 156 designdotmd designs, 430 mirrored agent bodies, 13K-node knowledge graph, concept pages, catalog |
+| `communities.json` | ~280 KB | 24 detected communities (Louvain) with labels + member lists |
 | `graph-report.md` | 31 KB | God nodes (most connected skills / agents / MCPs) + community summary |
 | `viz-overview.html` / `.png` | — | Plotly-rendered overview of the full graph |
 | `viz-python.html` | — | Python-skills sub-view |
@@ -19,14 +30,14 @@ Pre-built knowledge graph of **13,041 nodes** (1,791 skills + 464 agents + 10,78
 
 ### What's inside `wiki-graph.tar.gz`
 
-- `entities/skills/` — **1,791** skill entity pages with YAML frontmatter
+- `entities/skills/` — **1,968** skill entity pages with YAML frontmatter (includes 21 new `mattpocock-*` behavior skills + 156 new `designdotmd-*` reference designs)
 - `entities/agents/` — **464** agent entity pages
 - `entities/mcp-servers/<shard>/` — **10,786** MCP entity pages (sharded by first-char to keep dirs scannable)
-- `concepts/` — community concept pages
-- `converted/` — **1,772** skill bodies ready for `ctx-skill-install` (956 pipeline-converted + 816 short-skill mirrors + 9 existing)
+- `concepts/` — **24** community concept pages
+- `converted/` — **1,949** skill bodies ready for `ctx-skill-install` (956 pipeline-converted + 816 short-skill mirrors + 21 mattpocock + 156 designdotmd)
 - `converted-agents/` — **430** agent bodies ready for `ctx-agent-install`
-- `graphify-out/graph.json` — full knowledge graph (13,041 nodes, 847,207 edges)
-- `graphify-out/communities.json` — community detection results (15 communities)
+- `graphify-out/graph.json` — full knowledge graph (13,218 nodes, 963,068 edges)
+- `graphify-out/communities.json` — community detection results (24 communities, Louvain; top 5 cover 73% of nodes)
 - `catalog.md` — bulk listing of skills / agents / MCPs
 - `SCHEMA.md`, `index.md`, `log.md` — wiki infrastructure
 - `.obsidian/` — Obsidian vault config, so the extracted tree opens as a graph directly in Obsidian
@@ -64,7 +75,7 @@ raw = json.loads(Path("~/.claude/skill-wiki/graphify-out/graph.json").expanduser
 edges_key = "links" if "links" in raw else "edges"
 G = node_link_graph(raw, edges=edges_key)
 
-# 13,041 nodes, 847,207 edges
+# 13,218 nodes, 963,068 edges
 print(G.number_of_nodes(), G.number_of_edges())
 
 # Find skills related to "fastapi"
@@ -91,9 +102,32 @@ The extracted wiki is an Obsidian-compatible vault. Entity pages use `[[wikilink
 After adding new skills, agents, or MCP entities (or changing the wiki):
 
 ```bash
-python -m wiki_batch_entities --all     # regenerate entity cards
-python -m wiki_graphify                 # incremental by default; --full to force
+python src/wiki_batch_entities.py --all          # regenerate entity cards
+python -m ctx.core.wiki.wiki_graphify            # incremental by default; --full to force
+ctx-dedup-check --threshold 0.85                 # pre-ship dedup gate (flag-only, NEVER drops)
+ctx-tag-backfill                                 # report-only by default; --apply to write
 ```
+
+### Pre-ship gates
+
+Two gates run before the tarball is repackaged. Both are advisory: they
+generate review reports and never auto-modify the catalog.
+
+**`ctx-dedup-check`** — finds entity pairs (skill ↔ skill, skill ↔ agent,
+skill ↔ MCP, agent ↔ agent, agent ↔ MCP, MCP ↔ MCP) with cosine
+similarity ≥ 0.85. Emits `graph/dedup-report.md` (top-100 by
+similarity) + `graph/dedup-report.json.gz` (full set, gzipped).
+Incremental: a `dedup-state.json` next to the embeddings cache means
+follow-up runs only re-check pairs involving entities whose content
+changed. Pairs that are legitimately distinct can be added to
+`.dedup-allowlist.txt` to suppress them in future reports without
+silencing the underlying detection.
+
+**`ctx-tag-backfill`** — finds skills/agents with empty or missing
+`tags:` frontmatter and proposes a backfill set drawn from the slug
+tokens, body keywords, and the existing tag vocabulary. Report-only by
+default; pass `--apply` to write. Backfills are additive: the gate
+never removes or rewrites existing tags.
 
 Then re-archive. The pre-commit hook does this automatically when the wiki drifts beyond the tarball; the manual command below mirrors its exclusions:
 

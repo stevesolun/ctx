@@ -44,8 +44,8 @@ neighborhood).
 
 ### Explore the knowledge graph — `/graph`
 
-The graph tab is a cytoscape-rendered view over the 2,253-node
-skill↔agent graph. When you arrive with no slug selected, the page
+The graph tab is a cytoscape-rendered view over the 13,218-node
+skill↔agent↔MCP graph. When you arrive with no slug selected, the page
 shows:
 
 - a stats line with the total node + edge counts

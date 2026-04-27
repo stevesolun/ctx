@@ -53,6 +53,15 @@ ctx-mcp-uninstall = "ctx.adapters.claude_code.install.mcp_install:uninstall_main
 ctx-mcp-quality = "mcp_quality:main"
 ctx-mcp-rebuild-index = "mcp_rebuild_index:main"
 ctx-wiki-graphify = "ctx.core.wiki.wiki_graphify:main"
+# Pre-ship dedup gate: flag entity pairs at or above the given cosine
+# similarity threshold (default 0.85). Cross-type by design — finds
+# duplicates across skills, agents, and MCPs in any combination.
+ctx-dedup-check = "ctx.core.quality.dedup_check:main"
+# Pre-ship tag-completeness gate: scan skills/agents for empty
+# `tags:` frontmatter and propose backfills from slug tokens + body
+# keywords + the existing tag vocabulary. Report-only by default;
+# `--apply` to write.
+ctx-tag-backfill = "ctx.core.quality.tag_backfill:main"
 # Plan 001 phase H7: the generic harness CLI — `ctx run`,
 # `ctx resume`, `ctx sessions`. Ships v1 of the model-agnostic
 # harness; requires the [harness] optional dep for LiteLLM.

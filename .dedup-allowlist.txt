@@ -1,0 +1,18 @@
+# Dedup allowlist — pairs that look duplicate by cosine similarity
+# but are legitimately distinct. The dedup gate skips these in the
+# report.
+#
+# Format: one pair per line:
+#
+#     <slug_a> <slug_b>  # reason
+#
+# Slugs are matched case-sensitively against the entity's directory
+# name (e.g. `mattpocock-tdd`, not `mattpocock_tdd`). Order doesn't
+# matter — the gate canonicalises (low, high) before matching.
+#
+# Anything after `#` on a line is a comment.
+#
+# Examples (uncomment after reviewing the actual finding):
+#
+# strix-vulnerabilities-csrf strix-vulnerabilities-xss   # both web vuln playbooks; structurally similar but cover different attack classes
+# python-pro python-patterns                              # one is the agent prompt, the other is the pattern guide; intentional overlap
