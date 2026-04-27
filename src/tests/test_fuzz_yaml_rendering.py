@@ -19,7 +19,10 @@ the core invariants:
 
 from __future__ import annotations
 
-import yaml
+from pathlib import Path
+from typing import Literal
+
+import yaml  # type: ignore[import-untyped]
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from ctx.adapters.claude_code.install.install_utils import _render_scalar as iu_render_scalar
@@ -31,6 +34,7 @@ from mcp_enrich import _render_scalar as mcp_render_scalar
 
 _yaml_specials = ":#&*!|>%@`"
 _leading_specials = "-?[{"
+_surrogate_categories: list[Literal["Cs"]] = ["Cs"]
 
 
 _ascii_text = st.text(
@@ -39,7 +43,7 @@ _ascii_text = st.text(
 )
 _unicode_text = st.text(
     alphabet=st.characters(
-        blacklist_categories=("Cs",),  # surrogates unsupported by YAML dumper
+        blacklist_categories=_surrogate_categories,  # surrogates unsupported by YAML dumper
         min_codepoint=0x01,
     ),
     max_size=80,
@@ -263,8 +267,8 @@ class TestUnicodeLineSeparatorRegression:
     ]
 
     def _write_entity(
-        self, tmp_path: "__import__('pathlib').Path", fields: dict
-    ) -> "__import__('pathlib').Path":
+        self, tmp_path: Path, fields: dict[str, str]
+    ) -> Path:
         from ctx.adapters.claude_code.install.install_utils import _render_scalar
         lines = ["---", "slug: demo"]
         for k, v in fields.items():
@@ -275,7 +279,7 @@ class TestUnicodeLineSeparatorRegression:
         return path
 
     def test_install_utils_render_blocks_line_sep_injection(
-        self, tmp_path: "__import__('pathlib').Path"
+        self, tmp_path: Path
     ) -> None:
         """A rendered scalar containing U+2028 must not inject a new key
         when re-parsed by mcp_install._parse_entity_frontmatter."""
@@ -292,7 +296,7 @@ class TestUnicodeLineSeparatorRegression:
             )
 
     def test_install_utils_bump_entity_status_blocks_line_sep(
-        self, tmp_path: "__import__('pathlib').Path"
+        self, tmp_path: Path
     ) -> None:
         """Self-poisoning variant: bump_entity_status writes extra_fields
         through _render_scalar; a poisoned install_cmd must not leak a
@@ -318,7 +322,7 @@ class TestUnicodeLineSeparatorRegression:
             )
 
     def test_mcp_enrich_render_blocks_line_sep_injection(
-        self, tmp_path: "__import__('pathlib').Path"
+        self, tmp_path: Path
     ) -> None:
         """mcp_enrich._render_scalar must neutralise the same Unicode
         separators. Exercises the same reparse path."""

@@ -186,19 +186,25 @@ class TestExtractJson:
         assert _extract_json("plain prose") is None
 
     def test_clean_json(self) -> None:
-        data, ok = _extract_json(_VALID_JSON)
+        extracted = _extract_json(_VALID_JSON)
+        assert extracted is not None
+        data, ok = extracted
         assert ok is True
         assert data["summary"].startswith("Fix")
 
     def test_code_fenced_json(self) -> None:
         wrapped = f"```json\n{_VALID_JSON}\n```"
-        data, ok = _extract_json(wrapped)
+        extracted = _extract_json(wrapped)
+        assert extracted is not None
+        data, ok = extracted
         assert ok is False  # parsed after fallback, not clean
         assert data["summary"].startswith("Fix")
 
     def test_code_fenced_no_lang(self) -> None:
         wrapped = f"```\n{_VALID_JSON}\n```"
-        data, ok = _extract_json(wrapped)
+        extracted = _extract_json(wrapped)
+        assert extracted is not None
+        data, ok = extracted
         assert ok is False
         assert "summary" in data
 
@@ -208,13 +214,17 @@ class TestExtractJson:
             f"```json\n{_VALID_JSON}\n```\n\n"
             "Let me know if you want anything else."
         )
-        data, ok = _extract_json(wrapped)
+        extracted = _extract_json(wrapped)
+        assert extracted is not None
+        data, ok = extracted
         assert ok is False
         assert data["summary"].startswith("Fix")
 
     def test_prose_prefix_no_fence(self) -> None:
         wrapped = f"Here you go: {_VALID_JSON}"
-        data, ok = _extract_json(wrapped)
+        extracted = _extract_json(wrapped)
+        assert extracted is not None
+        data, ok = extracted
         assert ok is False
         assert data["summary"].startswith("Fix")
 

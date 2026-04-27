@@ -94,8 +94,11 @@ def test_main_with_hooks_flag_invokes_inject(tmp_path: Path, monkeypatch) -> Non
         stdout = ""
         stderr = ""
 
-    monkeypatch.setattr(ci.subprocess, "run",
-                        lambda cmd, **kw: (calls.append(list(cmd)) or _FakeResult()))
+    def _fake_run(cmd: list[str], **_kwargs: object) -> _FakeResult:
+        calls.append(list(cmd))
+        return _FakeResult()
+
+    monkeypatch.setattr(ci.subprocess, "run", _fake_run)
     rc = ci.main(["--hooks"])
     assert rc == 0
     assert any("ctx.adapters.claude_code.inject_hooks" in c for c in calls)
@@ -111,8 +114,11 @@ def test_main_with_graph_flag_invokes_graphify(tmp_path: Path, monkeypatch) -> N
         stdout = ""
         stderr = ""
 
-    monkeypatch.setattr(ci.subprocess, "run",
-                        lambda cmd, **kw: (calls.append(list(cmd)) or _FakeResult()))
+    def _fake_run(cmd: list[str], **_kwargs: object) -> _FakeResult:
+        calls.append(list(cmd))
+        return _FakeResult()
+
+    monkeypatch.setattr(ci.subprocess, "run", _fake_run)
     rc = ci.main(["--graph"])
     assert rc == 0
     assert any("ctx.core.wiki.wiki_graphify" in c for c in calls)

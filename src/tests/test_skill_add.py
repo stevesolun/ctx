@@ -20,6 +20,8 @@ Covers:
 
 import sys
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -67,7 +69,7 @@ _STUBS: list[tuple[str, MagicMock]] = [
     ("wiki_sync", _fake_wiki_sync),
     ("ctx.core.wiki.wiki_sync", _fake_wiki_sync),
 ]
-_SAVED_MODULES: dict[str, object] = {}
+_SAVED_MODULES: dict[str, ModuleType | None] = {}
 for _mod_name, _mod in _STUBS:
     _SAVED_MODULES[_mod_name] = sys.modules.get(_mod_name)
     sys.modules[_mod_name] = _mod
@@ -229,8 +231,8 @@ class TestMaybeConvert:
 # ---------------------------------------------------------------------------
 
 class TestBuildEntityPage:
-    def _call(self, **kwargs) -> str:
-        defaults = dict(
+    def _call(self, **kwargs: Any) -> str:
+        defaults: dict[str, Any] = dict(
             name="my-skill",
             tags=["python", "testing"],
             line_count=50,
