@@ -52,6 +52,15 @@ except ImportError:
     _MAX_SKILLS_DEFAULT = 15
 
 
+def _float_or_default(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def discover_available_skills(skills_dir: str) -> dict[str, dict]:
     """Find all SKILL.md files and extract metadata."""
     skills: dict[str, dict[str, Any]] = {}
@@ -261,13 +270,15 @@ def resolve(
                 for hit in graph_hits:
                     name = hit["name"]
                     hit_type = hit.get("type", "skill")
-                    raw_score = float(hit.get("score", 0.0))
+                    raw_score = _float_or_default(hit.get("score"))
                     # Use normalized_score when present (new schema);
                     # fall through to raw ``score`` for older graphs
                     # that predate the normalised field.
-                    rank_score = float(
-                        hit.get("normalized_score")
-                        if "normalized_score" in hit
+                    normalized_value = hit.get("normalized_score")
+                    has_normalized_score = normalized_value is not None
+                    rank_score = (
+                        _float_or_default(normalized_value, raw_score)
+                        if has_normalized_score
                         else raw_score
                     )
                     floor = (
@@ -297,7 +308,7 @@ def resolve(
                             "reason": reason,
                             "score": raw_score,
                             "normalized_score": (
-                                rank_score if "normalized_score" in hit else None
+                                rank_score if has_normalized_score else None
                             ),
                             "via": hit.get("via", [])[:4],
                             "shared_tags": shared,
@@ -307,7 +318,7 @@ def resolve(
                     # skill / agent path.
                     if name in needed or name not in available:
                         continue
-                    if "normalized_score" in hit:
+                    if has_normalized_score:
                         priority = 3 + min(round(rank_score * 12), 12)
                         confidence = min(0.6 + rank_score * 0.35, 0.95)
                     else:

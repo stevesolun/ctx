@@ -145,9 +145,32 @@ Verification observed:
 - Static checks: `python -m ruff check src` reported `All checks passed!`; `python -m compileall -q src` completed; touched-file mypy with `MYPYPATH=src --namespace-packages --explicit-package-bases` reported `Success: no issues found in 2 source files`.
 - Full-repo `python -m mypy src` is not a passing configured check in this repository; it reported 506 pre-existing errors across legacy modules/tests, mostly missing stubs/untyped import boundaries plus unrelated existing type errors.
 
+### Phase 5: Configured mypy gate
+
+Status: implemented in this worktree.
+
+What changed:
+
+- Added a `[tool.mypy]` configuration so `python -m mypy src` is now a deterministic project check for the actively packaged `src/ctx` tree.
+- The mypy gate uses the repo's `src` import layout and excludes legacy flat modules plus tests, which are not currently typed as a coherent package boundary.
+- Fixed the one real `src/ctx` type error exposed by that boundary: graph recommendation scores in `resolve_skills.py` now coerce optional/malformed numeric values through `_float_or_default()` instead of passing `None` into `float()`.
+
+Verification observed:
+
+- Before this phase, raw `python -m mypy src` reported 506 errors. With explicit `src` layout and missing-import suppression, the unresolved inventory dropped to 72 legacy/test errors; checking `src/ctx` alone exposed one real package error.
+- After the fix, `python -m mypy src` reported `Success: no issues found in 58 source files`.
+- Focused resolver/recommendation tests passed: `43 passed`.
+- Static check passed on touched files: `python -m ruff check pyproject.toml src\ctx\core\resolve\resolve_skills.py` reported `All checks passed!`.
+
+Remaining type debt outside the configured package gate:
+
+- 72 errors remain if legacy flat modules and tests are force-checked with `--ignore-missing-imports`.
+- Largest buckets: `arg-type` 25, `var-annotated` 9, `operator` 8, `misc` 8, `valid-type` 5, `assignment` 5.
+- Largest files: `src/tests/test_skill_install.py` 8, `src/tests/test_mcp_canonical_index.py` 7, `src/tests/test_skill_add.py` 7, `src/tests/test_fuzz_yaml_rendering.py` 7, `src/tests/test_harness_planner.py` 5.
+
 ## Blocker Summary
 
-P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible.
+P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat is also treated as of Phase 5 by defining the typed package boundary and keeping legacy/test type debt explicit.
 
 1. `ctx-init --hooks/--graph` invokes removed modules and still exits success.
 2. Installed Claude hooks point at files not shipped in the wheel and use non-portable shell commands.
