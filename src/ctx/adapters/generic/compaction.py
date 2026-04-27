@@ -42,12 +42,13 @@ Plan 001 Phase H5.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from ctx.adapters.generic.providers import (
     Message,
     ModelProvider,
+    Usage,
 )
 
 
@@ -90,11 +91,17 @@ class CompactionResult:
     """Return shape for ``compact_now`` — the explicit (non-Protocol)
     helper callers can use if they want the details (e.g. to log how
     many messages were collapsed).
+
+    ``usage`` carries the summary provider-call's tokens + cost so the
+    loop can fold it into running budget totals (codex review fix #6 —
+    summary calls are real provider calls and must count). Defaults to
+    a zeroed ``Usage`` for compactors that don't expose this.
     """
 
     new_messages: list[Message]
     compacted_count: int
     summary: str
+    usage: Usage = field(default_factory=Usage)
 
 
 class TokenBudgetCompactor:
@@ -177,23 +184,44 @@ class TokenBudgetCompactor:
         messages: list[Message],
         provider: ModelProvider,
     ) -> list[Message]:
-        """Condense the middle slice. Returns a NEW list (never mutates)."""
+        """Condense the middle slice. Returns a NEW list (never mutates).
+
+        Drops summary-call usage on the floor. Use ``compact_with_usage``
+        when you need to attribute the summary cost to running budget
+        totals.
+        """
+        return self.compact_with_usage(messages, provider).new_messages
+
+    def compact_with_usage(
+        self,
+        messages: list[Message],
+        provider: ModelProvider,
+    ) -> "CompactionResult":
+        """Condense the middle slice + return the summary-call usage.
+
+        Codex review fix #6: the summary provider call costs real
+        tokens and real money. ``compact()`` previously hid that cost.
+        ``compact_with_usage()`` surfaces it via ``CompactionResult.usage``
+        so the loop can add it to its running totals.
+        """
         if len(messages) <= self._keep_head + self._keep_tail + self._min_middle:
-            # Not enough middle to be worth compacting — caller's
-            # should_compact probably said True because of a huge
-            # single message. Nothing we can do here; leave alone.
             _logger.debug(
                 "compact: skipping, only %d messages (need > %d for middle)",
                 len(messages),
                 self._keep_head + self._keep_tail + self._min_middle,
             )
-            return messages
+            return CompactionResult(
+                new_messages=list(messages),
+                compacted_count=0,
+                summary="",
+                usage=Usage(),
+            )
 
         head = messages[: self._keep_head]
         tail = messages[-self._keep_tail :]
         middle = messages[self._keep_head : -self._keep_tail]
 
-        summary_text = self._summarise_middle(middle, provider)
+        summary_text, summary_usage = self._summarise_middle_with_usage(middle, provider)
         notice_count = len(middle)
         notice = Message(
             role="assistant",
@@ -202,7 +230,12 @@ class TokenBudgetCompactor:
                 f"{summary_text}"
             ),
         )
-        return [*head, notice, *tail]
+        return CompactionResult(
+            new_messages=[*head, notice, *tail],
+            compacted_count=notice_count,
+            summary=summary_text,
+            usage=summary_usage,
+        )
 
     # ── internals ───────────────────────────────────────────────────────
 
@@ -211,7 +244,20 @@ class TokenBudgetCompactor:
         middle: list[Message],
         provider: ModelProvider,
     ) -> str:
-        """Call the provider with a summary prompt over the middle slice."""
+        """Call the provider with a summary prompt over the middle slice.
+
+        Drops the usage; callers that need it call
+        ``_summarise_middle_with_usage`` directly.
+        """
+        text, _usage = self._summarise_middle_with_usage(middle, provider)
+        return text
+
+    def _summarise_middle_with_usage(
+        self,
+        middle: list[Message],
+        provider: ModelProvider,
+    ) -> tuple[str, Usage]:
+        """Like ``_summarise_middle`` but also returns the summary call's usage."""
         stringified = _render_messages_for_summary(middle)
         summary_messages = [
             Message(role="system", content=self._summary_prompt),
@@ -232,16 +278,14 @@ class TokenBudgetCompactor:
                 max_tokens=self._summary_max_tokens,
             )
         except Exception as exc:  # noqa: BLE001
-            # If the summary call fails, return a placeholder rather
-            # than crash the whole loop — the loop will keep running
-            # with the uncompacted messages, which may still fit.
             _logger.warning(
                 "compact: summary call failed (%s); leaving middle as "
                 "'[compaction failed]' stub",
                 exc,
             )
-            return "[compaction summary failed; original turns omitted]"
-        return response.content.strip() or "[summary was empty]"
+            return "[compaction summary failed; original turns omitted]", Usage()
+        text = response.content.strip() or "[summary was empty]"
+        return text, response.usage
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
