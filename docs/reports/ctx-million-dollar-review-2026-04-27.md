@@ -1657,6 +1657,8 @@ The strongest next testing investment is not more unit tests. It is a small set 
 
 ## Recommended Remediation Plan
 
+Historical note: this was the remediation plan generated from the original review findings. Phases 1-28 above record the implementation and verification work that followed it. It is retained as audit evidence, not as the current backlog.
+
 Follow the user's phase rule: no phase should touch more than five files.
 
 ### Phase 1: Bootstrap and hook install blockers
@@ -1812,23 +1814,50 @@ Success criteria:
 - Wheel entrypoints all smoke.
 - `pip check` gate is addressed.
 
-## What I Would Fix First
+## Current Next Steps
 
-If the goal is to stop user-visible breakage quickly:
+The original P0/P1 remediation work is complete in this branch. The remaining work is release-hardening, not another pass over the same fixed blockers.
 
-1. Fix `ctx-init` and hook command paths.
-2. Add clean wheel install smoke tests.
-3. Fix harness budget enforcement and MCP timeout.
-4. Remove hook-local recommender and unify ranking.
-5. Add MCP env allowlist and approval gate.
+1. Run a clean-machine A-Z host flow against a real Claude Code installation:
+   - Install from the built wheel into a clean virtualenv.
+   - Use an isolated temporary home/config directory.
+   - Run `ctx-init --hooks --graph`.
+   - Confirm generated hooks execute in the host, not only that they are written.
+   - Run `ctx-scan-repo --recommend` on a small real repo and verify the same bundle through CLI, Python API, MCP, and Claude Code hook surfaces.
 
-If the goal is to reduce worst-case damage:
+2. Add a CI/nightly clean-host contract job:
+   - Build wheel from source.
+   - Install into a fresh environment.
+   - Use a fake Claude CLI plus a fake MCP server.
+   - Exercise `ctx-init`, `ctx-scan-repo`, `ctx run`, `ctx resume`, compaction, tool policy denial, and package entrypoints.
+   - Keep this separate from fast unit CI if runtime is too high for every PR.
 
-1. Fix MCP env secret inheritance.
-2. Add tool approval/policy gate.
-3. Reject wiki symlinks and tar unsafe members.
-4. Lock manifest/session/wiki writes.
-5. Add restore rollback.
+3. Validate live third-party MCP behavior:
+   - Test at least one trusted real MCP server for startup, `tools/list`, `tools/call`, timeout, stderr diagnostics, and env allowlist behavior.
+   - Verify `ctx run --allow-tool/--deny-tool` UX when real model-visible tool names are involved.
+   - Document any compatibility exceptions that require `inherit_env=True`.
+
+4. Browser-test the monitor dashboard security boundary:
+   - Use a browser-driven harness against `ctx-monitor`.
+   - Assert mutation requests without the token fail.
+   - Assert same-origin/token requests succeed.
+   - Assert path traversal and malformed sidecar paths are rejected.
+   - Exercise concurrent SSE connections while load/unload mutations run.
+
+5. Stress crash consistency and concurrent writers:
+   - Kill processes during restore, wiki sync, manifest updates, and session writes.
+   - Verify rollback snapshots, atomic temp-file replacement, and lock behavior.
+   - Add regression tests for partial-write and parallel-writer cases not already covered.
+
+6. Do a post-migration docs audit:
+   - Search docs/scripts for removed flat modules such as `python -m inject_hooks` and `python -m wiki_graphify`.
+   - Search for stale resolver descriptions such as `resolve_by_seeds` and "graph neighbor" ranking as current behavior.
+   - Update remaining historical docs or explicitly label them historical.
+
+7. Prepare release readiness material:
+   - Generate a changelog from the remediation commits.
+   - Document behavior changes around MCP env inheritance and tool policy.
+   - Dry-run the tag/version/publish workflow before publishing.
 
 ## Residual Uncertainty
 
