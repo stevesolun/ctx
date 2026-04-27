@@ -472,7 +472,7 @@ class McpRouter:
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 
-def _flatten_content(content: list[dict[str, Any]] | None) -> str:
+def _flatten_content(content: list[Any] | None) -> str:
     """Concatenate a MCP tool-result content array into a single string.
 
     Text blocks pass through verbatim. Non-text blocks (image/resource)

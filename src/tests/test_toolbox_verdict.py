@@ -215,6 +215,7 @@ def test_clear_finding_missing_verdict_returns_none() -> None:
 def test_clear_finding_missing_id_is_noop() -> None:
     tv.record_finding("plan-6", tv.build_finding(level="HIGH", title="h"), now=1.0)
     before = tv.load_verdict("plan-6")
+    assert before is not None
     v = tv.clear_finding("plan-6", "nonexistent-id")
     assert v is not None
     assert v.to_dict() == before.to_dict()  # unchanged

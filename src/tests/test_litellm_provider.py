@@ -310,7 +310,7 @@ class TestNormaliseResponse:
         assert resp.usage.cost_usd == 0.0002
 
     def test_empty_choices_degrades_cleanly(self) -> None:
-        raw = {"choices": [], "usage": {}}
+        raw: dict[str, Any] = {"choices": [], "usage": {}}
         resp = _normalise_response(raw, provider="litellm", model="test")
         assert resp.content == ""
         assert resp.finish_reason == "other"

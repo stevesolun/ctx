@@ -139,7 +139,7 @@ def log(
             file=_sys.stderr,
         )
 
-    record = {
+    record: dict[str, Any] = {
         "ts": _now_iso(),
         "event": event,
         "subject_type": subject_type,
