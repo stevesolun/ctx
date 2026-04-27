@@ -38,7 +38,6 @@ import argparse
 import json
 import logging
 import os
-import shutil
 import sys
 import uuid
 from dataclasses import dataclass
@@ -49,6 +48,7 @@ from ctx.adapters.claude_code.install.install_utils import (
     bump_entity_status,
     emit_load_event,
     record_install,
+    safe_copy_file,
 )
 from ctx.core.wiki.wiki_utils import validate_skill_name
 
@@ -117,11 +117,10 @@ def _copy_references(src_dir: Path, dest_dir: Path) -> int:
     if not src_refs.is_dir():
         return 0
     dest_refs = dest_dir / "references"
-    dest_refs.mkdir(parents=True, exist_ok=True)
     copied = 0
     for md_file in sorted(src_refs.glob("*.md")):
         dest = dest_refs / md_file.name
-        shutil.copy2(md_file, dest)
+        safe_copy_file(md_file, dest, dest_root=dest_dir)
         copied += 1
     return copied
 
@@ -159,6 +158,12 @@ def install_skill(
         )
 
     converted = _converted_dir(wiki_dir, slug)
+    if converted.is_symlink():
+        return InstallResult(
+            slug=slug, status="failed", installed_path=None,
+            source_variant=None, references_copied=0,
+            message=f"unsafe symlinked wiki content at {converted}",
+        )
     if not converted.is_dir():
         return InstallResult(
             slug=slug, status="not-in-wiki", installed_path=None,
@@ -203,9 +208,15 @@ def install_skill(
             message="dry-run: no files written",
         )
 
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, dest)
-    refs_copied = _copy_references(converted, dest_dir)
+    try:
+        safe_copy_file(source, dest, dest_root=skills_dir)
+        refs_copied = _copy_references(converted, dest_dir)
+    except (OSError, ValueError) as exc:
+        return InstallResult(
+            slug=slug, status="failed", installed_path=None,
+            source_variant=variant, references_copied=0,
+            message=str(exc),
+        )
 
     record_install(slug, entity_type="skill", source="ctx-skill-install")
     bump_entity_status(_entity_path(wiki_dir, slug), status="installed")

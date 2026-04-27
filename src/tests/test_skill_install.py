@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from ctx.adapters.claude_code.install import agent_install
 from ctx.adapters.claude_code.install import install_utils
 from ctx.adapters.claude_code.install import skill_install
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -71,6 +72,13 @@ def _seed_skill(
         encoding="utf-8",
     )
     return d
+
+
+def _symlink_to(target: Path, link: Path, *, target_is_directory: bool) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
 
 
 # ── _pick_source ─────────────────────────────────────────────────────────────
@@ -265,6 +273,50 @@ class TestInstallSkill:
         content = (skills_dir / "s" / "SKILL.md").read_text(encoding="utf-8")
         assert "body" in content
         assert content != "old\n"
+
+    def test_rejects_symlinked_skill_destination_parent(
+        self,
+        wiki_dir: Path,
+        skills_dir: Path,
+        isolated_manifest: Path,
+        tmp_path: Path,
+    ) -> None:
+        _seed_skill(wiki_dir, "s")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        _symlink_to(outside, skills_dir / "s", target_is_directory=True)
+        r = skill_install.install_skill(
+            "s", wiki_dir=wiki_dir, skills_dir=skills_dir, force=True,
+        )
+        assert r.status == "failed"
+        assert "symlinked destination parent" in r.message
+        assert not (outside / "SKILL.md").exists()
+
+    def test_rejects_symlinked_agent_destination_file(
+        self, tmp_path: Path, isolated_manifest: Path,
+    ) -> None:
+        wiki = tmp_path / "agent-wiki"
+        agents_dir = tmp_path / "agents"
+        outside = tmp_path / "outside.md"
+        (wiki / "converted-agents").mkdir(parents=True)
+        (wiki / "entities" / "agents").mkdir(parents=True)
+        agents_dir.mkdir()
+        outside.write_text("outside\n", encoding="utf-8")
+        (wiki / "converted-agents" / "architect.md").write_text(
+            "---\nname: architect\nstatus: cataloged\n---\nbody\n",
+            encoding="utf-8",
+        )
+        (wiki / "entities" / "agents" / "architect.md").write_text(
+            "---\nname: architect\nstatus: cataloged\n---\nbody\n",
+            encoding="utf-8",
+        )
+        _symlink_to(outside, agents_dir / "architect.md", target_is_directory=False)
+        r = agent_install.install_agent(
+            "architect", wiki_dir=wiki, agents_dir=agents_dir, force=True,
+        )
+        assert r.status == "failed"
+        assert "symlinked destination file" in r.message
+        assert outside.read_text(encoding="utf-8") == "outside\n"
 
     def test_prefer_original_only_source(
         self,

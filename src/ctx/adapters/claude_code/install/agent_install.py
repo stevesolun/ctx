@@ -28,7 +28,6 @@ import argparse
 import json
 import logging
 import os
-import shutil
 import sys
 import uuid
 from dataclasses import dataclass
@@ -39,6 +38,7 @@ from ctx.adapters.claude_code.install.install_utils import (
     bump_entity_status,
     emit_load_event,
     record_install,
+    safe_copy_file,
 )
 from ctx.core.wiki.wiki_utils import validate_skill_name
 
@@ -114,8 +114,13 @@ def install_agent(
             message="dry-run: no files written",
         )
 
-    agents_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, dest)
+    try:
+        safe_copy_file(source, dest, dest_root=agents_dir)
+    except (OSError, ValueError) as exc:
+        return InstallResult(
+            slug=slug, status="failed", installed_path=None,
+            message=str(exc),
+        )
 
     record_install(slug, entity_type="agent", source="ctx-agent-install")
     bump_entity_status(_entity_path(wiki_dir, slug), status="installed")

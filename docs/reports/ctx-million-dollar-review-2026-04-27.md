@@ -438,6 +438,23 @@ Verification observed:
 - `python -m ruff check src\ctx_monitor.py src\tests\test_ctx_monitor.py` reported `All checks passed!`.
 - `python -m mypy src\ctx_monitor.py src\tests\test_ctx_monitor.py` reported `Success: no issues found in 2 source files`.
 
+### Phase 19: Claude install symlink hardening
+
+Status: implemented in this worktree.
+
+What changed:
+
+- Added shared `safe_copy_file()` install utility that refuses symlinked sources, symlinked destination roots/parents, destination symlink files, and destination paths escaping the configured install root.
+- `ctx-skill-install` now uses that helper for `SKILL.md` and reference copies and rejects symlinked converted wiki directories.
+- `ctx-agent-install` now uses the same helper for agent body installation.
+- Regression tests cover both skill destination directory symlink write-through and agent destination file symlink overwrite attempts.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_skill_install.py -q` reported `31 passed`.
+- `python -m ruff check src\ctx\adapters\claude_code\install\install_utils.py src\ctx\adapters\claude_code\install\skill_install.py src\ctx\adapters\claude_code\install\agent_install.py src\tests\test_skill_install.py` reported `All checks passed!`.
+- `python -m mypy src\ctx\adapters\claude_code\install\install_utils.py src\ctx\adapters\claude_code\install\skill_install.py src\ctx\adapters\claude_code\install\agent_install.py src\tests\test_skill_install.py` reported `Success: no issues found in 4 source files`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full 234-file `src` tree with zero mypy errors.
@@ -453,7 +470,7 @@ P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in 
 9. Session ID reuse truncates existing JSONL transcripts. Fixed in Phase 16.
 10. Restore overwrites live state without a rollback snapshot. Fixed in Phase 17.
 11. Monitor dashboard has unauthenticated mutation endpoints and path traversal risks. Fixed in Phase 18.
-12. Wiki/install flows follow symlinks from wiki content into live Claude directories.
+12. Wiki/install flows follow symlinks from wiki content into live Claude directories. Install copy paths fixed in Phase 19; wiki root hardening remains.
 13. Tar extraction and source install paths are stale/unsafe.
 14. CI/release can publish a tag without tests/package smoke/version alignment.
 15. Tests mock the exact command boundaries that are currently broken.

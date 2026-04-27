@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Literal
 
@@ -43,6 +44,30 @@ EntityType = Literal["skill", "agent", "mcp-server"]
 MANIFEST_PATH = Path(os.path.expanduser("~/.claude/skill-manifest.json"))
 
 _FRONTMATTER_HEAD_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
+
+
+def safe_copy_file(source: Path, dest: Path, *, dest_root: Path) -> None:
+    """Copy one file while refusing symlink write-through paths."""
+    if source.is_symlink() or source.parent.is_symlink():
+        raise ValueError(f"refusing to copy symlinked source: {source}")
+    if not source.is_file():
+        raise FileNotFoundError(f"copy source missing: {source}")
+    if dest_root.exists() and dest_root.is_symlink():
+        raise ValueError(f"refusing symlinked destination root: {dest_root}")
+
+    dest_root.mkdir(parents=True, exist_ok=True)
+    dest_parent = dest.parent
+    if dest_parent.exists() and dest_parent.is_symlink():
+        raise ValueError(f"refusing symlinked destination parent: {dest_parent}")
+    dest_parent.mkdir(parents=True, exist_ok=True)
+    if dest.is_symlink():
+        raise ValueError(f"refusing symlinked destination file: {dest}")
+
+    root_real = dest_root.resolve()
+    parent_real = dest_parent.resolve()
+    if parent_real != root_real and root_real not in parent_real.parents:
+        raise ValueError(f"destination escapes install root: {dest}")
+    shutil.copy2(source, dest, follow_symlinks=False)
 
 
 # ── Manifest I/O ─────────────────────────────────────────────────────────────
