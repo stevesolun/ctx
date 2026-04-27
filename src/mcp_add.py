@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from ctx_config import cfg
 from intake_pipeline import IntakeRejected, check_intake, record_embedding

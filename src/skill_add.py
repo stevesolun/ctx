@@ -17,7 +17,7 @@ import os
 import re
 import shutil
 import sys
-import yaml
+import yaml  # type: ignore[import-untyped]
 from datetime import datetime, timezone
 from pathlib import Path
 

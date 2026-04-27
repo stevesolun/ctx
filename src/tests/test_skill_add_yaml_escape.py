@@ -3,13 +3,10 @@
 import sys
 from pathlib import Path
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 # Ensure src/ is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from skill_add import build_entity_page
-
 
 def _parse_frontmatter(page: str) -> dict:
     """Extract and parse the YAML frontmatter block from a markdown page."""
@@ -23,6 +20,8 @@ class TestYamlFrontmatterEscape:
     """Paths with special YAML characters must not produce malformed frontmatter."""
 
     def _build(self, path_str: str) -> str:
+        from skill_add import build_entity_page  # noqa: PLC0415
+
         return build_entity_page(
             name="test-skill",
             tags=["python"],

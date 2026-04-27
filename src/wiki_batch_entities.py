@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 if TYPE_CHECKING:
     from mcp_entity import McpRecord
