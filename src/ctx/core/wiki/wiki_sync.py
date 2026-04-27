@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ctx.core.wiki.wiki_utils import SAFE_NAME_RE, get_field as _find_field
+from ctx.utils._file_lock import file_lock
+from ctx.utils._fs_utils import atomic_write_json, atomic_write_text
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -51,9 +53,10 @@ def ensure_wiki(wiki_path: str) -> None:
 
     # SCHEMA.md
     schema_path = wiki / "SCHEMA.md"
-    _reject_symlink(schema_path)
-    if not schema_path.exists():
-        schema_path.write_text(f"""# Skill Wiki Schema
+    with file_lock(schema_path):
+        _reject_symlink(schema_path)
+        if not schema_path.exists():
+            atomic_write_text(schema_path, f"""# Skill Wiki Schema
 
 ## Domain
 Catalog and management of all available skills, plugins, MCP servers, and
@@ -93,9 +96,10 @@ Created: {TODAY}
 
     # index.md
     index_path = wiki / "index.md"
-    _reject_symlink(index_path)
-    if not index_path.exists():
-        index_path.write_text(f"""# Skill Wiki Index
+    with file_lock(index_path):
+        _reject_symlink(index_path)
+        if not index_path.exists():
+            atomic_write_text(index_path, f"""# Skill Wiki Index
 
 > Content catalog. Every wiki page listed under its type with a one-line summary.
 > Last updated: {TODAY} | Total pages: 0
@@ -117,9 +121,10 @@ Created: {TODAY}
 
     # log.md
     log_path = wiki / "log.md"
-    _reject_symlink(log_path)
-    if not log_path.exists():
-        log_path.write_text(f"""# Skill Wiki Log
+    with file_lock(log_path):
+        _reject_symlink(log_path)
+        if not log_path.exists():
+            atomic_write_text(log_path, f"""# Skill Wiki Log
 
 > Chronological record of all wiki actions. Append-only.
 > Format: `## [YYYY-MM-DD] action | subject`
@@ -135,10 +140,9 @@ def save_scan(wiki_path: str, profile: dict) -> str:
     repo_name = Path(profile["repo_path"]).name
     filename = f"scan-{TODAY}-{repo_name}.json"
     scan_path = Path(wiki_path) / "raw" / "scans" / filename
-    _reject_symlink(scan_path)
-
-    with open(scan_path, "w", encoding="utf-8") as f:
-        json.dump(profile, f, indent=2)
+    with file_lock(scan_path):
+        _reject_symlink(scan_path)
+        atomic_write_json(scan_path, profile, indent=2)
 
     return str(scan_path)
 
@@ -165,25 +169,26 @@ def upsert_skill_page(wiki_path: str, skill_name: str, skill_info: dict) -> bool
     if not SAFE_NAME_RE.match(skill_name):
         raise ValueError(f"Invalid skill name: {skill_name!r}")
     page_path = Path(wiki_path) / "entities" / "skills" / f"{skill_name}.md"
-    _reject_symlink(page_path)
-    is_new = not page_path.exists()
+    with file_lock(page_path):
+        _reject_symlink(page_path)
+        is_new = not page_path.exists()
 
-    if is_new:
-        # Infer tags from reason
-        tags = []
-        reason = skill_info.get("reason", "").lower()
-        for tag in ["python", "javascript", "typescript", "react", "docker",
-                     "fastapi", "django", "langchain", "mcp", "testing"]:
-            if tag in reason or tag in skill_name:
-                tags.append(tag)
-        if not tags:
-            tags = ["uncategorized"]
+        if is_new:
+            # Infer tags from reason
+            tags = []
+            reason = skill_info.get("reason", "").lower()
+            for tag in ["python", "javascript", "typescript", "react", "docker",
+                         "fastapi", "django", "langchain", "mcp", "testing"]:
+                if tag in reason or tag in skill_name:
+                    tags.append(tag)
+            if not tags:
+                tags = ["uncategorized"]
 
-        safe_path = _sanitize_yaml_value(skill_info.get('path', 'unknown'))
-        safe_reason = _sanitize_yaml_value(skill_info.get('reason', 'Unknown'))
-        safe_repo = _sanitize_yaml_value(skill_info.get('repo', 'unknown'))
+            safe_path = _sanitize_yaml_value(skill_info.get('path', 'unknown'))
+            safe_reason = _sanitize_yaml_value(skill_info.get('reason', 'Unknown'))
+            safe_repo = _sanitize_yaml_value(skill_info.get('repo', 'unknown'))
 
-        content = f"""---
+            content = f"""---
 title: {skill_name}
 created: {TODAY}
 updated: {TODAY}
@@ -220,31 +225,31 @@ Detected and loaded by skill-router.
 |------|------|---------|
 | {TODAY} | {safe_repo} | Loaded by router |
 """
-        page_path.write_text(content, encoding="utf-8")
-    else:
-        # Update existing page: bump updated date and use_count
-        content = page_path.read_text(encoding="utf-8")
-        content = re.sub(
-            r"^updated: .+$", f"updated: {TODAY}",
-            content, count=1, flags=re.MULTILINE,
-        )
-        # Increment use_count
-        old_count = _find_field(content, "use_count")
-        if old_count:
-            try:
-                new_count = int(old_count) + 1
-                content = re.sub(
-                    r"^use_count: .+$", f"use_count: {new_count}",
-                    content, count=1, flags=re.MULTILINE,
-                )
-            except ValueError:
-                pass
+            atomic_write_text(page_path, content, encoding="utf-8")
+        else:
+            # Update existing page: bump updated date and use_count
+            content = page_path.read_text(encoding="utf-8")
+            content = re.sub(
+                r"^updated: .+$", f"updated: {TODAY}",
+                content, count=1, flags=re.MULTILINE,
+            )
+            # Increment use_count
+            old_count = _find_field(content, "use_count")
+            if old_count:
+                try:
+                    new_count = int(old_count) + 1
+                    content = re.sub(
+                        r"^use_count: .+$", f"use_count: {new_count}",
+                        content, count=1, flags=re.MULTILINE,
+                    )
+                except ValueError:
+                    pass
 
-        content = re.sub(
-            r"^last_used: .+$", f"last_used: {TODAY}",
-            content, count=1, flags=re.MULTILINE,
-        )
-        page_path.write_text(content, encoding="utf-8")
+            content = re.sub(
+                r"^last_used: .+$", f"last_used: {TODAY}",
+                content, count=1, flags=re.MULTILINE,
+            )
+            atomic_write_text(page_path, content, encoding="utf-8")
 
     return is_new
 
@@ -308,116 +313,120 @@ def update_index(
         )
 
     index_path = Path(wiki_path) / "index.md"
-    _reject_symlink(index_path)
-    content = index_path.read_text(encoding="utf-8")
-    lines = content.split("\n")
+    with file_lock(index_path):
+        _reject_symlink(index_path)
+        content = index_path.read_text(encoding="utf-8")
+        lines = content.split("\n")
 
-    section_header = _INDEX_SECTION_FOR_SUBJECT[subject_type]
+        section_header = _INDEX_SECTION_FOR_SUBJECT[subject_type]
 
-    # Locate the target section by scanning for its ## header. Track
-    # the index *after* the header so we insert before the next ##.
-    insert_idx: int | None = None
-    in_target_section = False
-    for i, line in enumerate(lines):
-        if line.strip() == section_header:
-            in_target_section = True
-            insert_idx = i + 1
-        elif in_target_section and line.startswith("## "):
-            # Stop at the next section.
-            break
+        # Locate the target section by scanning for its ## header. Track
+        # the index *after* the header so we insert before the next ##.
+        insert_idx: int | None = None
+        in_target_section = False
+        for i, line in enumerate(lines):
+            if line.strip() == section_header:
+                in_target_section = True
+                insert_idx = i + 1
+            elif in_target_section and line.startswith("## "):
+                # Stop at the next section.
+                break
 
-    if insert_idx is None:
-        # Section missing — create it at the end of the file. Older
-        # wikis don't have ## Agents for example.
-        if lines and lines[-1] != "":
+        if insert_idx is None:
+            # Section missing: create it at the end of the file. Older
+            # wikis do not have ## Agents for example.
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines.append(section_header)
             lines.append("")
-        lines.append(section_header)
-        lines.append("")
-        insert_idx = len(lines)
+            insert_idx = len(lines)
 
-    for slug in sorted(new_entries):
-        entry = (
-            f"- [[{_entity_index_link(subject_type, slug)}]] "
-            "- Auto-discovered by skill-router"
-        )
-        if entry not in content:
-            lines.insert(insert_idx, entry)
-            insert_idx += 1
+        for slug in sorted(new_entries):
+            entry = (
+                f"- [[{_entity_index_link(subject_type, slug)}]] "
+                "- Auto-discovered by skill-router"
+            )
+            if entry not in content:
+                lines.insert(insert_idx, entry)
+                insert_idx += 1
 
-    # Total-pages counter spans every entity type, not just skills.
-    total_count = sum(1 for ln in lines if "[[entities/" in ln)
-    for i, line in enumerate(lines):
-        if "Total pages:" in line:
-            lines[i] = re.sub(r"Total pages: \d+", f"Total pages: {total_count}", line)
-            lines[i] = re.sub(r"Last updated: [\d-]+", f"Last updated: {TODAY}", lines[i])
-            break
+        # Total-pages counter spans every entity type, not just skills.
+        total_count = sum(1 for ln in lines if "[[entities/" in ln)
+        for i, line in enumerate(lines):
+            if "Total pages:" in line:
+                lines[i] = re.sub(r"Total pages: \d+", f"Total pages: {total_count}", line)
+                lines[i] = re.sub(r"Last updated: [\d-]+", f"Last updated: {TODAY}", lines[i])
+                break
 
-    index_path.write_text("\n".join(lines), encoding="utf-8")
+        atomic_write_text(index_path, "\n".join(lines), encoding="utf-8")
 
 
 def append_log(wiki_path: str, action: str, subject: str, details: list[str]) -> None:
     """Append an entry to log.md."""
     log_path = Path(wiki_path) / "log.md"
-    _reject_symlink(log_path)
     entry = f"\n## [{TODAY}] {action} | {subject}\n"
     for detail in details:
         entry += f"- {detail}\n"
 
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(entry)
+    with file_lock(log_path):
+        _reject_symlink(log_path)
+        existing = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+        atomic_write_text(log_path, existing + entry, encoding="utf-8")
 
 
 def upsert_usage(wiki_path: str, skill_name: str, session_date: str, used: bool) -> None:
     """Update use_count and session_count for a skill page. Called by usage-tracker."""
     page_path = Path(wiki_path) / "entities" / "skills" / f"{skill_name}.md"
-    _reject_symlink(page_path)
-    if not page_path.exists():
-        return
-    content = page_path.read_text(encoding="utf-8")
+    with file_lock(page_path):
+        _reject_symlink(page_path)
+        if not page_path.exists():
+            return
+        content = page_path.read_text(encoding="utf-8")
 
-    # session_count
-    old_session = _find_field(content, "session_count")
-    if old_session:
-        try:
-            content = content.replace(
-                f"session_count: {old_session}",
-                f"session_count: {int(old_session) + 1}",
-            )
-        except ValueError:
-            pass
-    else:
-        # Add field after use_count if missing
-        content = re.sub(r"(use_count: \d+)", r"\1\nsession_count: 1", content, count=1)
-
-    if used:
-        old_count = _find_field(content, "use_count")
-        if old_count:
+        # session_count
+        old_session = _find_field(content, "session_count")
+        if old_session:
             try:
-                content = re.sub(
-                    r"^use_count: .+$", f"use_count: {int(old_count) + 1}",
-                    content, count=1, flags=re.MULTILINE,
+                content = content.replace(
+                    f"session_count: {old_session}",
+                    f"session_count: {int(old_session) + 1}",
                 )
             except ValueError:
                 pass
-        content = re.sub(
-            r"^last_used: .+$", f"last_used: {session_date}",
-            content, count=1, flags=re.MULTILINE,
-        )
+        else:
+            # Add field after use_count if missing
+            content = re.sub(r"(use_count: \d+)", r"\1\nsession_count: 1", content, count=1)
 
-    page_path.write_text(content, encoding="utf-8")
+        if used:
+            old_count = _find_field(content, "use_count")
+            if old_count:
+                try:
+                    content = re.sub(
+                        r"^use_count: .+$", f"use_count: {int(old_count) + 1}",
+                        content, count=1, flags=re.MULTILINE,
+                    )
+                except ValueError:
+                    pass
+            content = re.sub(
+                r"^last_used: .+$", f"last_used: {session_date}",
+                content, count=1, flags=re.MULTILINE,
+            )
+
+        atomic_write_text(page_path, content, encoding="utf-8")
 
 
 def mark_stale(wiki_path: str, skill_name: str) -> None:
     """Mark a skill entity page as stale."""
     page_path = Path(wiki_path) / "entities" / "skills" / f"{skill_name}.md"
-    _reject_symlink(page_path)
-    if not page_path.exists():
-        return
-    content = page_path.read_text(encoding="utf-8")
-    old_status = _find_field(content, "status")
-    if old_status:
-        content = content.replace(f"status: {old_status}", "status: stale")
-    page_path.write_text(content, encoding="utf-8")
+    with file_lock(page_path):
+        _reject_symlink(page_path)
+        if not page_path.exists():
+            return
+        content = page_path.read_text(encoding="utf-8")
+        old_status = _find_field(content, "status")
+        if old_status:
+            content = content.replace(f"status: {old_status}", "status: stale")
+        atomic_write_text(page_path, content, encoding="utf-8")
 
 
 def main():

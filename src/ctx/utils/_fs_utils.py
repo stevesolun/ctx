@@ -51,8 +51,11 @@ def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
     try:
         with os.fdopen(fd, "w", encoding=encoding) as fh:
             fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
         _chmod_private(tmp)
         _replace_with_retry(tmp, path)
+        _fsync_parent_dir(path.parent)
     except Exception:
         _unlink_silent(tmp)
         raise
@@ -70,8 +73,11 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
         _chmod_private(tmp)
         _replace_with_retry(tmp, path)
+        _fsync_parent_dir(path.parent)
     except Exception:
         _unlink_silent(tmp)
         raise
@@ -128,6 +134,23 @@ def _chmod_private(path: str) -> None:
         # temp placements may also return OSError. Non-fatal: the
         # replace still succeeds, just without the hardened mode.
         pass
+
+
+def _fsync_parent_dir(path: Path) -> None:
+    """Best-effort fsync of a directory after replacing one of its children."""
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def _unlink_silent(path: str) -> None:

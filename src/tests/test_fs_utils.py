@@ -18,6 +18,7 @@ _SRC = Path(__file__).resolve().parent.parent
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+from ctx.utils import _fs_utils as fs_utils  # noqa: E402
 from ctx.utils._fs_utils import atomic_write_bytes, atomic_write_json, atomic_write_text  # noqa: E402
 
 
@@ -65,6 +66,40 @@ def test_write_text_no_temp_file_left_on_error(tmp_path: Path) -> None:
             atomic_write_text(target, "data")
     leftover = list(tmp_path.glob("out.txt.*"))
     assert leftover == [], f"Temp file leaked: {leftover}"
+
+
+def test_write_text_fsyncs_temp_before_replace_and_parent_after(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "out.txt"
+    events: list[str] = []
+
+    def record_fsync(_fd: int) -> None:
+        events.append("fsync")
+
+    def record_replace(
+        src: str,
+        dst: Path,
+        *,
+        attempts: int = 10,
+        delay: float = 0.05,
+    ) -> None:
+        del attempts, delay
+        events.append("replace")
+        os.replace(src, dst)
+
+    def record_parent_fsync(path: Path) -> None:
+        assert path == target.parent
+        events.append("parent-fsync")
+
+    monkeypatch.setattr(fs_utils.os, "fsync", record_fsync)
+    monkeypatch.setattr(fs_utils, "_replace_with_retry", record_replace)
+    monkeypatch.setattr(fs_utils, "_fsync_parent_dir", record_parent_fsync, raising=False)
+
+    atomic_write_text(target, "durable")
+
+    assert events == ["fsync", "replace", "parent-fsync"]
 
 
 # ── atomic_write_bytes ────────────────────────────────────────────────────────

@@ -251,6 +251,29 @@ class TestSaveScan:
         loaded = json.loads(Path(result).read_text(encoding="utf-8"))
         assert loaded == profile
 
+    def test_save_scan_uses_atomic_json_writer(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _pin_today(monkeypatch)
+        wiki = self._wiki(tmp_path)
+        profile = {"repo_path": "/projects/test-repo", "project_type": "python"}
+        calls: list[tuple[Path, dict, int | None]] = []
+
+        def fake_atomic_write_json(path: Path, obj: dict, indent: int | None = 2) -> None:
+            calls.append((path, obj, indent))
+            path.write_text(json.dumps(obj, indent=indent) + "\n", encoding="utf-8")
+
+        monkeypatch.setattr(
+            wiki_sync,
+            "atomic_write_json",
+            fake_atomic_write_json,
+            raising=False,
+        )
+
+        result = wiki_sync.save_scan(str(wiki), profile)
+
+        assert calls == [(Path(result), profile, 2)]
+
     def test_repo_path_basename_only_used_in_filename(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -669,6 +692,33 @@ class TestUpdateIndex:
         content = (wiki / "index.md").read_text(encoding="utf-8")
         assert f"Last updated: {_FIXED_DATE}" in content
 
+    def test_atomic_write_failure_preserves_original_index(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        wiki = self._wiki_with_index(tmp_path, monkeypatch)
+        index = wiki / "index.md"
+        original = index.read_text(encoding="utf-8")
+
+        def fail_atomic_write_text(
+            path: Path,
+            text: str,
+            encoding: str = "utf-8",
+        ) -> None:
+            del path, text, encoding
+            raise OSError("atomic index write failed")
+
+        monkeypatch.setattr(
+            wiki_sync,
+            "atomic_write_text",
+            fail_atomic_write_text,
+            raising=False,
+        )
+
+        with pytest.raises(OSError, match="atomic index write failed"):
+            wiki_sync.update_index(str(wiki), ["some-skill"])
+
+        assert index.read_text(encoding="utf-8") == original
+
     def test_agent_entry_goes_into_agents_section(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -779,6 +829,33 @@ class TestAppendLog:
         assert "repo-b" in log
         assert "first" in log
         assert "second" in log
+
+    def test_atomic_write_failure_preserves_original_log(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        wiki = self._wiki(tmp_path, monkeypatch)
+        log_path = wiki / "log.md"
+        original = log_path.read_text(encoding="utf-8")
+
+        def fail_atomic_write_text(
+            path: Path,
+            text: str,
+            encoding: str = "utf-8",
+        ) -> None:
+            del path, text, encoding
+            raise OSError("atomic log write failed")
+
+        monkeypatch.setattr(
+            wiki_sync,
+            "atomic_write_text",
+            fail_atomic_write_text,
+            raising=False,
+        )
+
+        with pytest.raises(OSError, match="atomic log write failed"):
+            wiki_sync.append_log(str(wiki), "scan", "repo", ["detail"])
+
+        assert log_path.read_text(encoding="utf-8") == original
 
     def test_empty_details_list_produces_no_bullet_lines(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -895,6 +972,33 @@ class TestUpsertUsage:
         wiki_sync.upsert_usage(str(wiki), "my-skill", "2025-07-04", used=True)
         updated = (wiki / "entities" / "skills" / "my-skill.md").read_text(encoding="utf-8")
         assert "last_used: 2025-07-04" in updated
+
+    def test_atomic_write_failure_preserves_original_usage_page(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        wiki = self._wiki(tmp_path, monkeypatch)
+        page = self._write_page(wiki, "my-skill", _minimal_skill_page())
+        original = page.read_text(encoding="utf-8")
+
+        def fail_atomic_write_text(
+            path: Path,
+            text: str,
+            encoding: str = "utf-8",
+        ) -> None:
+            del path, text, encoding
+            raise OSError("atomic usage write failed")
+
+        monkeypatch.setattr(
+            wiki_sync,
+            "atomic_write_text",
+            fail_atomic_write_text,
+            raising=False,
+        )
+
+        with pytest.raises(OSError, match="atomic usage write failed"):
+            wiki_sync.upsert_usage(str(wiki), "my-skill", _FIXED_DATE, used=True)
+
+        assert page.read_text(encoding="utf-8") == original
 
     def test_does_not_update_last_used_when_used_false(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

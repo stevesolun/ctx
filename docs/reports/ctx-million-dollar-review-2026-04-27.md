@@ -834,6 +834,32 @@ Verification observed:
 - `git diff --check` reported no whitespace errors.
 - `python -m pytest -q` reported `3249 passed, 8 skipped in 456.87s`.
 
+### Phase 38: Durable wiki and atomic write hardening
+
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- `atomic_write_text` and `atomic_write_bytes` now flush and `fsync` temp-file contents before replace, then best-effort `fsync` the parent directory after replace.
+- `wiki_sync` now routes seed-file writes, raw scan writes, skill page create/update, index updates, log appends, usage updates, and stale marking through the shared atomic writers.
+- Wiki read-modify-write paths now use `file_lock` for the target file so concurrent writers that use the ctx helpers do not clobber each other.
+- Log appends are now implemented as locked read-plus-atomic-replace instead of direct append, preserving whole-file atomic visibility.
+- Added red-first regressions for temp/parent fsync ordering and for preserving original wiki files when atomic writes fail.
+
+Verification observed:
+
+- Red-first `python -m pytest src\tests\test_fs_utils.py src\tests\test_wiki_sync.py -q` failed in the expected places: missing temp fsync, missing parent fsync, non-atomic `save_scan`, non-atomic index update, non-atomic log append, and non-atomic usage write.
+- `python -m pytest src\tests\test_fs_utils.py src\tests\test_wiki_sync.py -q` reported `131 passed`.
+- `python -m ruff check src\ctx\utils\_fs_utils.py src\ctx\core\wiki\wiki_sync.py src\tests\test_fs_utils.py src\tests\test_wiki_sync.py` reported `All checks passed!`.
+- `python -m mypy src\ctx\utils\_fs_utils.py src\ctx\core\wiki\wiki_sync.py src\tests\test_fs_utils.py src\tests\test_wiki_sync.py` reported `Success: no issues found in 4 source files`.
+- `python -m pytest src\tests\test_harness_state.py src\tests\test_ctx_lifecycle.py src\tests\test_backup_mirror.py -q` reported `133 passed, 1 skipped`.
+- `python scripts\clean_host_contract.py --fast` built and installed `claude_ctx-0.6.4-py3-none-any.whl`, executed the installed clean-host flow, and reported `clean-host contract passed`.
+- `python -m ruff check .` reported `All checks passed!`.
+- `python -m mypy src` reported `Success: no issues found in 238 source files`.
+- `python -m compileall -q src hooks scripts` completed successfully.
+- `git diff --check` reported no whitespace errors.
+- `python -m pytest -q` reported `3254 passed, 8 skipped in 436.91s`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -874,7 +900,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-37 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host execution, live third-party integrations, release/tag readiness, and exhaustive crash-consistency scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-38 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host execution, live third-party integrations, release/tag readiness, and exhaustive process-kill crash-consistency scenarios noted below.
 
 ## P0 Findings
 
@@ -2059,7 +2085,8 @@ The original P0/P1 remediation work is complete in this branch. The remaining wo
    - Kill processes during restore, wiki sync, manifest updates, and session writes.
    - Verify rollback snapshots, atomic temp-file replacement, and lock behavior.
    - Add regression tests for partial-write and parallel-writer cases not already covered.
-   - Manifest install/uninstall lost-update coverage was fixed in Phase 34; remaining crash-consistency work should focus on restore, wiki sync, and session/write interruption cases.
+   - Manifest install/uninstall lost-update coverage was fixed in Phase 34, and wiki atomic write/lock coverage was hardened in Phase 38.
+   - Remaining crash-consistency work should focus on process-kill restore/session interruption cases and any writer that still bypasses the shared atomic helpers.
 
 4. Prepare release readiness material:
    - Generate a changelog from the remediation commits.
