@@ -24,9 +24,15 @@ from ctx.core.wiki.wiki_utils import SAFE_NAME_RE, get_field as _find_field
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+def _reject_symlink(path: Path) -> None:
+    if path.is_symlink():
+        raise ValueError(f"refusing to write through symlinked wiki path: {path}")
+
+
 def ensure_wiki(wiki_path: str) -> None:
     """Initialize wiki structure if it doesn't exist."""
     wiki = Path(wiki_path)
+    _reject_symlink(wiki)
 
     dirs = [
         wiki,
@@ -40,10 +46,12 @@ def ensure_wiki(wiki_path: str) -> None:
         wiki / "queries",
     ]
     for d in dirs:
+        _reject_symlink(d)
         d.mkdir(parents=True, exist_ok=True)
 
     # SCHEMA.md
     schema_path = wiki / "SCHEMA.md"
+    _reject_symlink(schema_path)
     if not schema_path.exists():
         schema_path.write_text(f"""# Skill Wiki Schema
 
@@ -85,6 +93,7 @@ Created: {TODAY}
 
     # index.md
     index_path = wiki / "index.md"
+    _reject_symlink(index_path)
     if not index_path.exists():
         index_path.write_text(f"""# Skill Wiki Index
 
@@ -108,6 +117,7 @@ Created: {TODAY}
 
     # log.md
     log_path = wiki / "log.md"
+    _reject_symlink(log_path)
     if not log_path.exists():
         log_path.write_text(f"""# Skill Wiki Log
 
@@ -125,6 +135,7 @@ def save_scan(wiki_path: str, profile: dict) -> str:
     repo_name = Path(profile["repo_path"]).name
     filename = f"scan-{TODAY}-{repo_name}.json"
     scan_path = Path(wiki_path) / "raw" / "scans" / filename
+    _reject_symlink(scan_path)
 
     with open(scan_path, "w", encoding="utf-8") as f:
         json.dump(profile, f, indent=2)
@@ -154,6 +165,7 @@ def upsert_skill_page(wiki_path: str, skill_name: str, skill_info: dict) -> bool
     if not SAFE_NAME_RE.match(skill_name):
         raise ValueError(f"Invalid skill name: {skill_name!r}")
     page_path = Path(wiki_path) / "entities" / "skills" / f"{skill_name}.md"
+    _reject_symlink(page_path)
     is_new = not page_path.exists()
 
     if is_new:
@@ -296,6 +308,7 @@ def update_index(
         )
 
     index_path = Path(wiki_path) / "index.md"
+    _reject_symlink(index_path)
     content = index_path.read_text(encoding="utf-8")
     lines = content.split("\n")
 
@@ -345,6 +358,7 @@ def update_index(
 def append_log(wiki_path: str, action: str, subject: str, details: list[str]) -> None:
     """Append an entry to log.md."""
     log_path = Path(wiki_path) / "log.md"
+    _reject_symlink(log_path)
     entry = f"\n## [{TODAY}] {action} | {subject}\n"
     for detail in details:
         entry += f"- {detail}\n"
@@ -356,6 +370,7 @@ def append_log(wiki_path: str, action: str, subject: str, details: list[str]) ->
 def upsert_usage(wiki_path: str, skill_name: str, session_date: str, used: bool) -> None:
     """Update use_count and session_count for a skill page. Called by usage-tracker."""
     page_path = Path(wiki_path) / "entities" / "skills" / f"{skill_name}.md"
+    _reject_symlink(page_path)
     if not page_path.exists():
         return
     content = page_path.read_text(encoding="utf-8")
@@ -395,6 +410,7 @@ def upsert_usage(wiki_path: str, skill_name: str, session_date: str, used: bool)
 def mark_stale(wiki_path: str, skill_name: str) -> None:
     """Mark a skill entity page as stale."""
     page_path = Path(wiki_path) / "entities" / "skills" / f"{skill_name}.md"
+    _reject_symlink(page_path)
     if not page_path.exists():
         return
     content = page_path.read_text(encoding="utf-8")

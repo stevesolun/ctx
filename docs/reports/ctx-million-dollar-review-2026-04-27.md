@@ -455,6 +455,21 @@ Verification observed:
 - `python -m ruff check src\ctx\adapters\claude_code\install\install_utils.py src\ctx\adapters\claude_code\install\skill_install.py src\ctx\adapters\claude_code\install\agent_install.py src\tests\test_skill_install.py` reported `All checks passed!`.
 - `python -m mypy src\ctx\adapters\claude_code\install\install_utils.py src\ctx\adapters\claude_code\install\skill_install.py src\ctx\adapters\claude_code\install\agent_install.py src\tests\test_skill_install.py` reported `Success: no issues found in 4 source files`.
 
+### Phase 20: Wiki sync symlink hardening
+
+Status: implemented in this worktree.
+
+What changed:
+
+- `wiki_sync` now refuses to write through symlinked wiki roots, required directories, seed files, raw scan outputs, entity pages, index, log, usage, and stale-marker paths.
+- Regression tests cover a symlinked wiki root and a symlinked `index.md` seed file.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_wiki_sync.py -q` reported `111 passed`.
+- `python -m ruff check src\ctx\core\wiki\wiki_sync.py src\tests\test_wiki_sync.py` reported `All checks passed!`.
+- `python -m mypy src\ctx\core\wiki\wiki_sync.py src\tests\test_wiki_sync.py` reported `Success: no issues found in 2 source files`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full 234-file `src` tree with zero mypy errors.
@@ -470,7 +485,7 @@ P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in 
 9. Session ID reuse truncates existing JSONL transcripts. Fixed in Phase 16.
 10. Restore overwrites live state without a rollback snapshot. Fixed in Phase 17.
 11. Monitor dashboard has unauthenticated mutation endpoints and path traversal risks. Fixed in Phase 18.
-12. Wiki/install flows follow symlinks from wiki content into live Claude directories. Install copy paths fixed in Phase 19; wiki root hardening remains.
+12. Wiki/install flows follow symlinks from wiki content into live Claude directories. Fixed across install copy paths in Phase 19 and wiki write paths in Phase 20.
 13. Tar extraction and source install paths are stale/unsafe.
 14. CI/release can publish a tag without tests/package smoke/version alignment.
 15. Tests mock the exact command boundaries that are currently broken.

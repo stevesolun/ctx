@@ -70,6 +70,13 @@ def _minimal_index(date: str = _FIXED_DATE) -> str:
     )
 
 
+def _symlink_to(target: Path, link: Path, *, target_is_directory: bool) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+
+
 # ---------------------------------------------------------------------------
 # TestEnsureWiki
 # ---------------------------------------------------------------------------
@@ -177,6 +184,24 @@ class TestEnsureWiki:
         wiki = tmp_path / "a" / "b" / "c" / "wiki"
         wiki_sync.ensure_wiki(str(wiki))
         assert (wiki / "entities" / "skills").is_dir()
+
+    def test_rejects_symlinked_wiki_root(self, tmp_path: Path) -> None:
+        target = tmp_path / "target"
+        link = tmp_path / "wiki-link"
+        target.mkdir()
+        _symlink_to(target, link, target_is_directory=True)
+        with pytest.raises(ValueError, match="symlinked wiki path"):
+            wiki_sync.ensure_wiki(str(link))
+
+    def test_rejects_symlinked_seed_file(self, tmp_path: Path) -> None:
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        outside = tmp_path / "outside-index.md"
+        outside.write_text("outside\n", encoding="utf-8")
+        _symlink_to(outside, wiki / "index.md", target_is_directory=False)
+        with pytest.raises(ValueError, match="symlinked wiki path"):
+            wiki_sync.ensure_wiki(str(wiki))
+        assert outside.read_text(encoding="utf-8") == "outside\n"
 
 
 # ---------------------------------------------------------------------------
