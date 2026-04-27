@@ -36,8 +36,7 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Literal, Protocol
 
 from ctx.adapters.generic.providers import (
@@ -56,6 +55,9 @@ _logger = logging.getLogger(__name__)
 
 StopReason = Literal[
     "completed",
+    "length",            # provider truncated (finish_reason=length)
+    "empty_response",    # no content + no tool calls
+    "provider_other",    # finish_reason='other' with no usable output
     "max_iterations",
     "cost_budget",
     "token_budget",
@@ -269,10 +271,30 @@ def run_loop(
             stop_detail = "provider reported content_filter finish"
             break
 
-        # No tool calls → the model answered in-line.
+        # No tool calls → the model answered in-line. Codex review fix #5:
+        # only call it ``completed`` when the answer is non-empty AND the
+        # provider ended on a normal finish. Truncated, empty, or oddly-
+        # finished responses get distinct stop reasons so a budget-hit
+        # truncation doesn't masquerade as success.
         if not response.tool_calls:
-            final_message = response.content
-            stop_reason = "completed"
+            final_message = response.content or ""
+            finish = (response.finish_reason or "").lower()
+            if finish == "length":
+                stop_reason = "length"
+                stop_detail = "provider truncated response (finish_reason=length)"
+            elif not final_message.strip():
+                stop_reason = "empty_response"
+                stop_detail = (
+                    f"empty content with no tool calls "
+                    f"(finish_reason={finish or 'unset'!r})"
+                )
+            elif finish in ("stop", "end_turn", ""):
+                stop_reason = "completed"
+            else:
+                stop_reason = "provider_other"
+                stop_detail = (
+                    f"unexpected finish_reason={finish!r} with no tool calls"
+                )
             break
 
         # Execute every tool call. Errors end the loop (tool_error)
@@ -280,16 +302,16 @@ def run_loop(
         # agent (H11) is where retry strategy will live.
         tool_error_occurred = False
         for call in response.tool_calls:
-            result, error = _execute_tool(
+            tool_result, error = _execute_tool(
                 call,
                 router=router,
                 tool_executor=tool_executor,
             )
-            obs.on_tool_call(iteration, call, result, error)
+            obs.on_tool_call(iteration, call, tool_result, error)
             conversation.append(
                 Message(
                     role="tool",
-                    content=result if error is None else f"ERROR: {error}",
+                    content=tool_result if error is None else f"ERROR: {error}",
                     tool_call_id=call.id,
                     name=call.name,
                 )
