@@ -64,7 +64,11 @@ def _build_synthetic_wiki(tmp_path: Path) -> Path:
     """Create a tiny wiki with a few entity pages + converted stubs."""
     wiki = tmp_path / "wiki"
     skills = wiki / "entities" / "skills"
+    agents = wiki / "entities" / "agents"
+    mcps = wiki / "entities" / "mcp-servers" / "f"
     skills.mkdir(parents=True)
+    agents.mkdir(parents=True)
+    mcps.mkdir(parents=True)
     (skills / "python-patterns.md").write_text(
         "---\n"
         "name: python-patterns\n"
@@ -85,6 +89,30 @@ def _build_synthetic_wiki(tmp_path: Path) -> Path:
         "---\n"
         "# FastAPI Pro\n\n"
         "Advanced FastAPI patterns for production.\n",
+        encoding="utf-8",
+    )
+    (agents / "code-reviewer.md").write_text(
+        "---\n"
+        "name: code-reviewer\n"
+        "title: Code Reviewer\n"
+        "type: agent\n"
+        "tags: [review, quality]\n"
+        "status: cataloged\n"
+        "---\n"
+        "# Code Reviewer\n\n"
+        "Reviews code for defects and quality risks.\n",
+        encoding="utf-8",
+    )
+    (mcps / "filesystem.md").write_text(
+        "---\n"
+        "name: filesystem\n"
+        "title: Filesystem MCP\n"
+        "type: mcp-server\n"
+        "tags: [filesystem, io]\n"
+        "status: cataloged\n"
+        "---\n"
+        "# Filesystem MCP\n\n"
+        "Filesystem tools for local files.\n",
         encoding="utf-8",
     )
     # Also a converted stub so wiki_query sees has_transformed=True.
@@ -325,7 +353,26 @@ class TestWikiSearch:
         )
         if result["results"]:
             row = result["results"][0]
-            assert {"slug", "title", "excerpt", "tags", "status", "score"} <= set(row)
+            assert {
+                "slug", "title", "entity_type", "wikilink",
+                "excerpt", "tags", "status", "score",
+            } <= set(row)
+
+    def test_search_includes_agents_and_mcps(self, toolbox: CtxCoreToolbox) -> None:
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1", name="ctx__wiki_search",
+                    arguments={"query": "filesystem review", "top_n": 10},
+                )
+            )
+        )
+
+        by_slug = {row["slug"]: row for row in result["results"]}
+        assert by_slug["code-reviewer"]["entity_type"] == "agent"
+        assert by_slug["code-reviewer"]["wikilink"] == "[[entities/agents/code-reviewer]]"
+        assert by_slug["filesystem"]["entity_type"] == "mcp-server"
+        assert by_slug["filesystem"]["wikilink"] == "[[entities/mcp-servers/f/filesystem]]"
 
 
 # ── wiki_get ───────────────────────────────────────────────────────────────
@@ -374,6 +421,37 @@ class TestWikiGet:
         )
         assert "error" in result
         assert "looked_in" in result
+
+    def test_entity_type_disambiguates_duplicate_slugs(self, tmp_path: Path) -> None:
+        wiki = _build_synthetic_wiki(tmp_path)
+        (wiki / "entities" / "skills" / "filesystem.md").write_text(
+            "---\n"
+            "name: filesystem\n"
+            "title: Filesystem Skill\n"
+            "type: skill\n"
+            "tags: [skill]\n"
+            "status: cataloged\n"
+            "---\n"
+            "# Filesystem Skill\n\n"
+            "This is the skill page, not the MCP page.\n",
+            encoding="utf-8",
+        )
+        toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=tmp_path / "missing.json")
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__wiki_get",
+                    arguments={"slug": "filesystem", "entity_type": "mcp-server"},
+                )
+            )
+        )
+
+        assert "error" not in result
+        assert result["entity_type"] == "mcp-server"
+        assert result["wikilink"] == "[[entities/mcp-servers/f/filesystem]]"
+        assert "Filesystem MCP" in result["body"]
 
 
 # ── _query_to_tags ────────────────────────────────────────────────────────

@@ -660,9 +660,31 @@ Verification observed:
 - `python scripts\clean_host_contract.py --fast` reported `clean-host contract passed`.
 - `python -m pytest -q` reported `3229 passed, 7 skipped in 403.51s`.
 
-New reviewer finding retained for next phase:
+### Phase 31: Wiki search three-type coverage
 
-- The Phase 30 agent review found that `ctx.core.wiki.wiki_query.load_all_pages()` still loads only `entities/skills/*.md`, so MCP/library `ctx__wiki_search` cannot search agent or sharded MCP pages even though monitor/wiki-get routes can now resolve them. This is outside the five-file monitor phase and should be the first item in the next implementation slice.
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- `ctx.core.wiki.wiki_query.load_all_pages()` now loads all three wiki entity types: flat skill pages, flat agent pages, and recursively sharded MCP server pages.
+- Loaded wiki pages now carry `entity_type`, canonical `wikilink`, and `description` metadata, so search results are no longer anonymous slugs.
+- MCP page loading validates both the slug and canonical shard path, including numeric `0-9` shards, and skips unsafe or mis-sharded files.
+- Keyword search now scores slug, title, description, tags, and body. Installed/use-count boosts now apply only after an actual query-field match, so widening the corpus does not leak unrelated installed pages into results.
+- `ctx__wiki_search` now returns `entity_type`, `wikilink`, and `description` for each hit.
+- `ctx__wiki_get` now accepts an optional `entity_type` argument from search results, which disambiguates duplicate skill/agent/MCP slugs instead of silently resolving by hardcoded candidate order.
+
+Verification observed:
+
+- Red-first query tests initially failed because loaded pages had no `entity_type`, no canonical `wikilink`, and agent/MCP pages were invisible.
+- Red-first follow-up tests initially failed because title/description-only pages did not score and typed `ctx__wiki_get` did not disambiguate duplicate slugs.
+- `python -m pytest src\tests\test_query.py src\tests\test_harness_ctx_core.py src\tests\test_public_api.py src\tests\test_mcp_server.py -q` reported `113 passed`.
+- `python -m ruff check src\ctx\core\wiki\wiki_query.py src\ctx\adapters\generic\ctx_core_tools.py src\tests\test_query.py src\tests\test_harness_ctx_core.py` reported `All checks passed!`.
+- `python -m mypy src\ctx\core\wiki\wiki_query.py src\ctx\adapters\generic\ctx_core_tools.py src\tests\test_query.py src\tests\test_harness_ctx_core.py` reported `Success: no issues found in 4 source files`.
+- `python -m ruff check src hooks scripts` reported `All checks passed!`.
+- `python -m mypy src` reported `Success: no issues found in 236 source files`.
+- `python -m compileall -q src hooks scripts` completed.
+- `python scripts\clean_host_contract.py --fast` built and installed `claude_ctx-0.6.4-py3-none-any.whl`, ran the installed A-Z clean-host contract, and reported `clean-host contract passed`.
+- `python -m pytest -q` reported `3235 passed, 7 skipped in 449.20s`.
 
 ## Blocker Summary
 
@@ -704,7 +726,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-30 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-31 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
 
 ## P0 Findings
 
@@ -1874,39 +1896,34 @@ The original P0/P1 remediation work is complete in this branch. The remaining wo
    - Confirm generated hooks execute in the host, not only that they are written.
    - Run `ctx-scan-repo --recommend` on a small real repo and verify the same bundle through CLI, Python API, MCP, and Claude Code hook surfaces.
 
-2. Fix the remaining wiki search route mismatch:
-   - `ctx.core.wiki.wiki_query.load_all_pages()` still reads only `entities/skills/*.md`.
-   - Extend it to search skills, agents, and sharded MCP server pages.
-   - Add a cross-surface regression proving `ctx__wiki_search` can return the same three-type wiki corpus that monitor `/wiki` and `ctx__wiki_get` can resolve.
-
-3. Promote the clean-host contract based on runtime data:
+2. Promote the clean-host contract based on runtime data:
    - The manual/weekly workflow and local runner now exist.
    - Decide whether it should stay weekly/manual, become nightly, or become a required pre-release job.
    - Add fake Claude CLI coverage for hook execution if the real-host flow remains manual-only.
 
-4. Validate live third-party MCP behavior:
+3. Validate live third-party MCP behavior:
    - Test at least one trusted real MCP server for startup, `tools/list`, `tools/call`, timeout, stderr diagnostics, and env allowlist behavior.
    - Verify `ctx run --allow-tool/--deny-tool` UX when real model-visible tool names are involved.
    - Document any compatibility exceptions that require `inherit_env=True`.
 
-5. Browser-test the monitor dashboard security boundary:
+4. Browser-test the monitor dashboard security boundary:
    - Use a browser-driven harness against `ctx-monitor`.
    - Assert mutation requests without the token fail.
    - Assert same-origin/token requests succeed.
    - Assert path traversal and malformed sidecar paths are rejected.
    - Exercise concurrent SSE connections while load/unload mutations run in a real browser. HTTP-level SSE concurrency is covered in Phase 30.
 
-6. Stress crash consistency and concurrent writers:
+5. Stress crash consistency and concurrent writers:
    - Kill processes during restore, wiki sync, manifest updates, and session writes.
    - Verify rollback snapshots, atomic temp-file replacement, and lock behavior.
    - Add regression tests for partial-write and parallel-writer cases not already covered.
 
-7. Do a post-migration docs audit:
+6. Do a post-migration docs audit:
    - Search docs/scripts for removed flat modules such as `python -m inject_hooks` and `python -m wiki_graphify`.
    - Search for stale resolver descriptions such as `resolve_by_seeds` and "graph neighbor" ranking as current behavior.
    - Update remaining historical docs or explicitly label them historical.
 
-8. Prepare release readiness material:
+7. Prepare release readiness material:
    - Generate a changelog from the remediation commits.
    - Document behavior changes around MCP env inheritance and tool policy.
    - Dry-run the tag/version/publish workflow before publishing.

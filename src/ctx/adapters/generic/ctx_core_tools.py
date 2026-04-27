@@ -209,6 +209,14 @@ class CtxCoreToolbox:
                     "type": "object",
                     "properties": {
                         "slug": {"type": "string"},
+                        "entity_type": {
+                            "type": "string",
+                            "enum": ["skill", "agent", "mcp-server"],
+                            "description": (
+                                "Optional entity type from wiki_search. "
+                                "Use it to disambiguate duplicate slugs."
+                            ),
+                        },
                     },
                     "required": ["slug"],
                 },
@@ -338,9 +346,9 @@ class CtxCoreToolbox:
             {
                 "slug": p.name,
                 "title": p.title or p.name,
-                # SkillPage doesn't have a description field; expose a
-                # short body excerpt instead so the model can rank by
-                # content snippet rather than an empty string.
+                "entity_type": p.entity_type,
+                "wikilink": p.wikilink,
+                "description": p.description,
                 "excerpt": _excerpt(p.body, 160),
                 "tags": list(p.tags),
                 "status": p.status,
@@ -354,6 +362,11 @@ class CtxCoreToolbox:
         slug = str(args.get("slug", "")).strip()
         if not slug:
             return json.dumps({"error": "slug must be non-empty"})
+        entity_type = str(args.get("entity_type", "")).strip()
+        if entity_type and entity_type not in {"skill", "agent", "mcp-server"}:
+            return json.dumps({
+                "error": "entity_type must be one of skill, agent, mcp-server",
+            })
 
         # Validate — ctx-core's validator rejects traversal shapes.
         from ctx.core.wiki.wiki_utils import validate_skill_name  # noqa: PLC0415
@@ -367,27 +380,18 @@ class CtxCoreToolbox:
         if wiki is None:
             return json.dumps({"error": "wiki_dir not configured"})
 
-        # Try each known entity layout.
-        candidates = [
-            wiki / "entities" / "skills" / f"{slug}.md",
-            wiki / "entities" / "agents" / f"{slug}.md",
-        ]
-        # MCP pages are sharded.
-        first = slug[0] if slug and slug[0].isalpha() else "0-9"
-        candidates.append(
-            wiki / "entities" / "mcp-servers" / first / f"{slug}.md"
-        )
+        candidates = _wiki_get_candidates(wiki, slug, entity_type or None)
 
-        for path in candidates:
+        for candidate_type, path, wikilink in candidates:
             if path.is_file():
-                return self._serialise_page(path)
+                return self._serialise_page(path, candidate_type, wikilink)
 
         return json.dumps({
             "error": f"no entity page found for slug {slug!r}",
-            "looked_in": [str(p) for p in candidates],
+            "looked_in": [str(p) for _, p, _ in candidates],
         })
 
-    def _serialise_page(self, path: Path) -> str:
+    def _serialise_page(self, path: Path, entity_type: str, wikilink: str) -> str:
         from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body  # noqa: PLC0415
 
         try:
@@ -397,6 +401,8 @@ class CtxCoreToolbox:
         fm, body = parse_frontmatter_and_body(text)
         return json.dumps({
             "slug": path.stem,
+            "entity_type": entity_type,
+            "wikilink": wikilink,
             "path": str(path),
             "frontmatter": fm,
             "body": body,
@@ -435,6 +441,39 @@ class CtxCoreToolbox:
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
+
+
+def _mcp_shard(slug: str) -> str:
+    first = slug[0].lower() if slug else ""
+    return first if first.isalpha() else "0-9"
+
+
+def _wiki_entity_path(wiki: Path, slug: str, entity_type: str) -> Path:
+    if entity_type == "agent":
+        return wiki / "entities" / "agents" / f"{slug}.md"
+    if entity_type == "mcp-server":
+        return wiki / "entities" / "mcp-servers" / _mcp_shard(slug) / f"{slug}.md"
+    return wiki / "entities" / "skills" / f"{slug}.md"
+
+
+def _wiki_entity_link(slug: str, entity_type: str) -> str:
+    if entity_type == "agent":
+        return f"[[entities/agents/{slug}]]"
+    if entity_type == "mcp-server":
+        return f"[[entities/mcp-servers/{_mcp_shard(slug)}/{slug}]]"
+    return f"[[entities/skills/{slug}]]"
+
+
+def _wiki_get_candidates(
+    wiki: Path,
+    slug: str,
+    entity_type: str | None,
+) -> list[tuple[str, Path, str]]:
+    entity_types = [entity_type] if entity_type else ["skill", "agent", "mcp-server"]
+    return [
+        (typ, _wiki_entity_path(wiki, slug, typ), _wiki_entity_link(slug, typ))
+        for typ in entity_types
+    ]
 
 
 def _query_to_tags(query: str) -> list[str]:

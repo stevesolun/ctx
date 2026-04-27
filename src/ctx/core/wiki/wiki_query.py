@@ -22,6 +22,7 @@ from typing import Optional
 
 from ctx_config import cfg
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body as _extract_frontmatter
+from ctx.utils._safe_name import is_safe_source_name
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -30,7 +31,10 @@ TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 class SkillPage:
     name: str
     path: Path
+    entity_type: str = "skill"
+    wikilink: str = ""
     title: str = ""
+    description: str = ""
     tags: list[str] = field(default_factory=list)
     status: str = ""
     use_count: int = 0
@@ -45,11 +49,13 @@ class SkillPage:
 @dataclass
 class QueryResult:
     name: str
+    entity_type: str
     score: float
     tags: list[str]
     status: str
     use_count: int
     has_pipeline: bool
+    description: str
     excerpt: str
     wikilink: str
 
@@ -67,7 +73,12 @@ def _parse_list_field(raw: str | list) -> list[str]:
     return [t.strip() for t in raw.split(",") if t.strip()] if raw else []
 
 
-def _parse_page(path: Path) -> Optional[SkillPage]:
+def _parse_page(
+    path: Path,
+    *,
+    entity_type: str = "skill",
+    wikilink: str | None = None,
+) -> Optional[SkillPage]:
     """Read and parse one entity page. Returns None on read error."""
     try:
         content = path.read_text(encoding="utf-8", errors="replace")
@@ -82,7 +93,10 @@ def _parse_page(path: Path) -> Optional[SkillPage]:
     return SkillPage(
         name=path.stem,
         path=path,
+        entity_type=entity_type,
+        wikilink=wikilink or f"[[entities/skills/{path.stem}]]",
         title=fields.get("title", path.stem),
+        description=fields.get("description", fields.get("summary", "")),
         tags=_parse_list_field(fields.get("tags", "")),
         status=fields.get("status", ""),
         use_count=_int("use_count"),
@@ -96,12 +110,57 @@ def _parse_page(path: Path) -> Optional[SkillPage]:
 
 # --- Wiki loading ---
 
-def load_all_pages(wiki: Path) -> list[SkillPage]:
-    """Load every .md file under entities/skills/."""
-    skills_dir = wiki / "entities" / "skills"
-    if not skills_dir.exists():
+def _mcp_shard(slug: str) -> str:
+    first = slug[0].lower() if slug else ""
+    return first if first.isalpha() else "0-9"
+
+
+def _wikilink(entity_type: str, slug: str) -> str:
+    if entity_type == "agent":
+        return f"[[entities/agents/{slug}]]"
+    if entity_type == "mcp-server":
+        return f"[[entities/mcp-servers/{_mcp_shard(slug)}/{slug}]]"
+    return f"[[entities/skills/{slug}]]"
+
+
+def _load_flat_entity_pages(root: Path, entity_type: str) -> list[SkillPage]:
+    if not root.exists():
         return []
-    return [p for path in sorted(skills_dir.glob("*.md")) if (p := _parse_page(path)) is not None]
+    pages: list[SkillPage] = []
+    for path in sorted(root.glob("*.md")):
+        slug = path.stem
+        if not is_safe_source_name(slug):
+            continue
+        page = _parse_page(path, entity_type=entity_type, wikilink=_wikilink(entity_type, slug))
+        if page is not None:
+            pages.append(page)
+    return pages
+
+
+def _load_sharded_mcp_pages(root: Path) -> list[SkillPage]:
+    if not root.exists():
+        return []
+    pages: list[SkillPage] = []
+    for path in sorted(root.glob("*/*.md")):
+        slug = path.stem
+        if not is_safe_source_name(slug):
+            continue
+        if path.parent.name != _mcp_shard(slug):
+            continue
+        page = _parse_page(path, entity_type="mcp-server", wikilink=_wikilink("mcp-server", slug))
+        if page is not None:
+            pages.append(page)
+    return pages
+
+
+def load_all_pages(wiki: Path) -> list[SkillPage]:
+    """Load skill, agent, and MCP entity pages from the wiki."""
+    entities = wiki / "entities"
+    pages: list[SkillPage] = []
+    pages.extend(_load_flat_entity_pages(entities / "skills", "skill"))
+    pages.extend(_load_flat_entity_pages(entities / "agents", "agent"))
+    pages.extend(_load_sharded_mcp_pages(entities / "mcp-servers"))
+    return pages
 
 
 # --- Scoring / search ---
@@ -115,16 +174,24 @@ _STOP_WORDS = {
 
 def _score_keyword(page: SkillPage, keywords: list[str]) -> float:
     name_l = page.name.lower()
+    title_l = page.title.lower()
+    description_l = page.description.lower()
     tags_l = [t.lower() for t in page.tags]
     body_l = page.body.lower()
     score = 0.0
     for kw in keywords:
         if kw in name_l:
             score += 10.0
+        if kw in title_l:
+            score += 8.0
+        if kw in description_l:
+            score += 5.0
         if kw in tags_l:
             score += 6.0
         score += sum(2.0 for t in tags_l if kw in t and kw != t)
         score += min(body_l.count(kw) * 0.5, 4.0)
+    if score <= 0:
+        return 0.0
     if page.status == "installed":
         score += 0.5
     score += min(page.use_count * 0.1, 1.0)
@@ -132,7 +199,7 @@ def _score_keyword(page: SkillPage, keywords: list[str]) -> float:
 
 
 def search_by_query(pages: list[SkillPage], query: str, top_n: int = 15) -> list[SkillPage]:
-    """Keyword search across name, tags, and body. Returns top_n scored pages."""
+    """Keyword search across slug, title, description, tags, and body."""
     keywords = [w for w in re.split(r"\W+", query.lower()) if w and w not in _STOP_WORDS]
     if not keywords:
         keywords = query.lower().split()
@@ -206,13 +273,15 @@ def _excerpt(page: SkillPage, max_chars: int = 120) -> str:
 def _to_result(page: SkillPage) -> QueryResult:
     return QueryResult(
         name=page.name,
+        entity_type=page.entity_type,
         score=round(page.score, 2),
         tags=page.tags,
         status=page.status,
         use_count=page.use_count,
         has_pipeline=page.has_transformed,
+        description=page.description,
         excerpt=_excerpt(page),
-        wikilink=f"[[entities/skills/{page.name}]]",
+        wikilink=page.wikilink,
     )
 
 
@@ -229,7 +298,7 @@ def render_markdown(results: list[QueryResult], heading: str, cited: list[str]) 
             "",
         ]
     if cited:
-        cite = "Based on " + " and ".join(f"[[entities/skills/{c}]]" for c in cited[:5])
+        cite = "Based on " + " and ".join(cited[:5])
         if len(cited) > 5:
             cite += f" (and {len(cited) - 5} more)"
         lines.append(f"_{cite}_")
@@ -238,7 +307,7 @@ def render_markdown(results: list[QueryResult], heading: str, cited: list[str]) 
 
 def render_stats_markdown(stats: dict) -> str:
     rows = [
-        ("Entity pages (skills)", stats["total_entity_pages"]),
+        ("Entity pages", stats["total_entity_pages"]),
         ("Installed", stats["installed"]),
         ("Stale", stats["stale"]),
         ("With micro-skill pipeline", stats["with_pipeline"]),
@@ -379,13 +448,14 @@ def main() -> None:
             "results": [
                 {"name": r.name, "score": r.score, "tags": r.tags, "status": r.status,
                  "use_count": r.use_count, "has_pipeline": r.has_pipeline,
-                 "excerpt": r.excerpt, "wikilink": r.wikilink}
+                 "description": r.description, "excerpt": r.excerpt, "wikilink": r.wikilink,
+                 "entity_type": r.entity_type}
                 for r in query_results
             ],
         }, indent=2))
         return
 
-    cited = [r.name for r in results]
+    cited = [r.wikilink for r in query_results]
     md_output = render_markdown(query_results, heading, cited)
     print(md_output)
 

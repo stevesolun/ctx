@@ -18,6 +18,37 @@ from ctx.core.wiki import wiki_query as wq  # noqa: E402
 from ._wiki_helpers import make_entity_page, make_wiki  # noqa: E402
 
 
+def _write_entity_page(
+    wiki: Path,
+    relpath: str,
+    *,
+    title: str,
+    entity_type: str,
+    tags: list[str],
+    body: str,
+    description: str = "",
+    status: str = "installed",
+) -> Path:
+    path = wiki / relpath
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tags_str = "[" + ", ".join(tags) + "]"
+    path.write_text(
+        "\n".join([
+            "---",
+            f"title: {title}",
+            f"type: {entity_type}",
+            *([f"description: {description}"] if description else []),
+            f"tags: {tags_str}",
+            f"status: {status}",
+            "---",
+            "",
+            body,
+        ]),
+        encoding="utf-8",
+    )
+    return path
+
+
 class TestQueryKeywordMatch:
     """test_query_keyword_match -- searching 'docker' finds skills with docker in name/body."""
 
@@ -33,6 +64,118 @@ class TestQueryKeywordMatch:
         names = [p.name for p in results]
         assert "docker-compose-pro" in names, "docker skill must be returned for 'docker' query"
         assert "python-basics" not in names, "unrelated skill must not appear"
+
+    def test_load_all_pages_includes_agents_and_sharded_mcps(self, tmp_path: Path) -> None:
+        wiki = make_wiki(tmp_path)
+        make_entity_page(wiki, "python-patterns", ["python"], body="Python skill.")
+        _write_entity_page(
+            wiki,
+            "entities/agents/code-reviewer.md",
+            title="Code Reviewer",
+            entity_type="agent",
+            tags=["review", "quality"],
+            body="Reviews code for defects.",
+        )
+        _write_entity_page(
+            wiki,
+            "entities/mcp-servers/f/filesystem.md",
+            title="Filesystem MCP",
+            entity_type="mcp-server",
+            tags=["filesystem", "io"],
+            body="Filesystem tools for local files.",
+        )
+
+        pages = wq.load_all_pages(wiki)
+
+        by_name = {p.name: p for p in pages}
+        assert by_name["python-patterns"].entity_type == "skill"
+        assert by_name["code-reviewer"].entity_type == "agent"
+        assert by_name["filesystem"].entity_type == "mcp-server"
+        assert by_name["filesystem"].wikilink == "[[entities/mcp-servers/f/filesystem]]"
+
+    def test_load_all_pages_validates_mcp_shards_and_slugs(self, tmp_path: Path) -> None:
+        wiki = make_wiki(tmp_path)
+        _write_entity_page(
+            wiki,
+            "entities/mcp-servers/0-9/1password.md",
+            title="1Password MCP",
+            entity_type="mcp-server",
+            tags=["secrets"],
+            body="Secret-management tools.",
+        )
+        _write_entity_page(
+            wiki,
+            "entities/mcp-servers/x/2wrong.md",
+            title="Mis-sharded MCP",
+            entity_type="mcp-server",
+            tags=["bad"],
+            body="Wrong shard.",
+        )
+        _write_entity_page(
+            wiki,
+            "entities/mcp-servers/f/Filesystem.md",
+            title="Uppercase MCP",
+            entity_type="mcp-server",
+            tags=["bad"],
+            body="Unsafe slug.",
+        )
+
+        pages = wq.load_all_pages(wiki)
+
+        by_name = {p.name: p for p in pages}
+        assert by_name["1password"].wikilink == "[[entities/mcp-servers/0-9/1password]]"
+        assert "2wrong" not in by_name
+        assert "Filesystem" not in by_name
+
+    def test_search_by_query_returns_agent_and_mcp_pages(self, tmp_path: Path) -> None:
+        wiki = make_wiki(tmp_path)
+        _write_entity_page(
+            wiki,
+            "entities/agents/code-reviewer.md",
+            title="Code Reviewer",
+            entity_type="agent",
+            tags=["review", "quality"],
+            body="Reviews code for defects.",
+        )
+        _write_entity_page(
+            wiki,
+            "entities/mcp-servers/f/filesystem.md",
+            title="Filesystem MCP",
+            entity_type="mcp-server",
+            tags=["filesystem", "io"],
+            body="Filesystem tools for local files.",
+        )
+
+        pages = wq.load_all_pages(wiki)
+        results = wq.search_by_query(pages, "filesystem review", top_n=10)
+
+        names = {p.name for p in results}
+        assert {"code-reviewer", "filesystem"} <= names
+        query_results = {r.name: r for r in map(wq._to_result, results)}
+        assert query_results["code-reviewer"].entity_type == "agent"
+        assert query_results["code-reviewer"].wikilink == "[[entities/agents/code-reviewer]]"
+        assert query_results["filesystem"].entity_type == "mcp-server"
+        assert query_results["filesystem"].wikilink == "[[entities/mcp-servers/f/filesystem]]"
+
+    def test_search_by_query_matches_title_and_description(self, tmp_path: Path) -> None:
+        wiki = make_wiki(tmp_path)
+        _write_entity_page(
+            wiki,
+            "entities/agents/sre-playbook.md",
+            title="Latency Debugger",
+            entity_type="agent",
+            description="Incident response runbook for production services.",
+            tags=[],
+            body="Operational checklist.",
+            status="",
+        )
+
+        pages = wq.load_all_pages(wiki)
+        title_hits = {p.name for p in wq.search_by_query(pages, "latency", top_n=10)}
+        description_hits = {p.name for p in wq.search_by_query(pages, "incident", top_n=10)}
+
+        assert "sre-playbook" in title_hits
+        assert "sre-playbook" in description_hits
 
 
 class TestQueryTagFilter:
@@ -96,9 +239,7 @@ class TestQueryNoResults:
 
     def test_query_no_results(self, tmp_path: Path) -> None:
         wiki = make_wiki(tmp_path)
-        # Use status="" so the installed bonus (+0.5) does not leak into an
-        # otherwise zero-scoring page when the query has no keyword match.
-        make_entity_page(wiki, "python-basics", ["python"], body="Learn Python.", status="")
+        make_entity_page(wiki, "python-basics", ["python"], body="Learn Python.")
 
         pages = wq.load_all_pages(wiki)
         results = wq.search_by_query(pages, "xyznonexistent")
