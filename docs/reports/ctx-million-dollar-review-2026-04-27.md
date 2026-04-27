@@ -901,6 +901,24 @@ Verification observed:
 - `python -m ruff check src\ctx\core\wiki\wiki_sync.py src\tests\test_wiki_sync.py` reported `All checks passed!`.
 - `python -m mypy src\ctx\core\wiki\wiki_sync.py src\tests\test_wiki_sync.py` reported `Success: no issues found in 2 source files` with the existing note about unchecked bodies in an untyped function.
 
+### Phase 41: Strict live MCP `inherit_env` parsing
+
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- The opt-in live MCP compatibility harness now treats `inherit_env` as a strict optional JSON boolean.
+- Omitted `inherit_env` still defaults to `False`.
+- Literal JSON `false` and `true` are accepted.
+- Strings, numbers, and null are rejected instead of being coerced with Python truthiness.
+
+Verification observed:
+
+- Red-first `python -m pytest src\tests\test_mcp_live_compat.py -q` failed before implementation because `"false"`, `"true"`, `0`, `1`, and `null` did not raise.
+- After implementation, `python -m pytest src\tests\test_mcp_live_compat.py -q` reported `8 passed, 1 skipped`.
+- `python -m ruff check src\tests\test_mcp_live_compat.py` reported `All checks passed!`.
+- `python -m mypy src\tests\test_mcp_live_compat.py` reported `Success: no issues found in 1 source file`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -941,7 +959,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-40 closed the original P0/P1 blocker list plus the newly surfaced wiki type-sync blocker and the first release-hardening slices in the current branch, with the remaining caveats now narrowed to live-host execution, live third-party integrations, browser CI ownership, release/tag readiness, and exhaustive process-kill crash-consistency scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-41 closed the original P0/P1 blocker list plus the newly surfaced wiki type-sync blocker and the first release-hardening slices in the current branch, with the remaining caveats now narrowed to live-host execution, live third-party MCP validation, browser CI ownership, release/tag readiness, and exhaustive process-kill crash-consistency scenarios noted below.
 
 ## P0 Findings
 
@@ -2120,7 +2138,7 @@ The original P0/P1 remediation work is complete in this branch, and the parallel
    - Test at least one trusted real third-party MCP server for startup, `tools/list`, `tools/call`, timeout, stderr diagnostics, and env allowlist behavior.
    - Verify `ctx run --allow-tool/--deny-tool` UX when real model-visible tool names are involved.
    - Document any compatibility exceptions that require `inherit_env=True`.
-   - Fix the live MCP config parser first: `inherit_env` must be a strict JSON boolean, not `bool(payload.get(...))`, because string values such as `"false"` currently become truthy in the opt-in test harness.
+   - The live MCP config parser now treats `inherit_env` as a strict boolean as of Phase 41.
    - Do not run `npx` or any third-party MCP command by default in CI.
 
 3. Stress crash consistency and concurrent writers:

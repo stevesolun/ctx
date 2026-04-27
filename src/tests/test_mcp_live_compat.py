@@ -19,6 +19,48 @@ from ctx.adapters.generic.tools.mcp_router import McpClient, McpServerConfig
 pytestmark = pytest.mark.integration
 
 
+def _trusted_payload(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "name": "trusted-server",
+        "command": "python",
+        "trust": {
+            "server_is_third_party_code": True,
+            "approved_by": "test",
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_server_config_inherit_env_defaults_false(tmp_path: Path) -> None:
+    config = _server_config_from_payload(_trusted_payload(), tmp_path)
+    assert config.inherit_env is False
+
+
+@pytest.mark.parametrize("inherit_env", [False, True])
+def test_server_config_accepts_boolean_inherit_env(
+    inherit_env: bool,
+    tmp_path: Path,
+) -> None:
+    config = _server_config_from_payload(
+        _trusted_payload(inherit_env=inherit_env),
+        tmp_path,
+    )
+    assert config.inherit_env is inherit_env
+
+
+@pytest.mark.parametrize("inherit_env", ["false", "true", 0, 1, None])
+def test_server_config_rejects_non_boolean_inherit_env(
+    inherit_env: object,
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(AssertionError, match="inherit_env"):
+        _server_config_from_payload(
+            _trusted_payload(inherit_env=inherit_env),
+            tmp_path,
+        )
+
+
 def test_live_mcp_servers_from_trusted_configs(
     pytestconfig: pytest.Config,
     tmp_path: Path,
@@ -76,7 +118,7 @@ def _server_config_from_payload(
         env=dict(_expand_placeholders(_string_dict(payload, "env"), tmp_path)),
         startup_timeout=float(payload.get("startup_timeout", 30.0)),
         request_timeout=float(payload.get("request_timeout", 10.0)),
-        inherit_env=bool(payload.get("inherit_env", False)),
+        inherit_env=_optional_bool(payload, "inherit_env", default=False),
     )
 
 
@@ -102,6 +144,15 @@ def _string_dict(payload: dict[str, Any], key: str) -> dict[str, str]:
     ):
         raise AssertionError(f"live MCP config field {key!r} must be a string map")
     return dict(value)
+
+
+def _optional_bool(payload: dict[str, Any], key: str, *, default: bool) -> bool:
+    if key not in payload:
+        return default
+    value = payload[key]
+    if not isinstance(value, bool):
+        raise AssertionError(f"live MCP config field {key!r} must be a boolean")
+    return value
 
 
 def _expand_placeholders(value: Any, tmp_path: Path) -> Any:
