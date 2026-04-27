@@ -530,16 +530,21 @@ def promote_archived(
         src = archive_root / f"{slug}.md"
         dst = sources.agents_dir / f"{slug}.md"
     _safe_mv(src, dst)
-    new_state = replace(
-        state,
-        state=STATE_ACTIVE,
-        state_since=ts,
-        consecutive_d_count=0,
-        history=_append_history(
-            state, event="promote", note="restored from archive", cfg=cfg, at=ts
-        ),
-    )
-    save_lifecycle_state(new_state, sidecar_dir=sources.sidecar_dir)
+    try:
+        new_state = replace(
+            state,
+            state=STATE_ACTIVE,
+            state_since=ts,
+            consecutive_d_count=0,
+            history=_append_history(
+                state, event="promote", note="restored from archive", cfg=cfg, at=ts
+            ),
+        )
+        save_lifecycle_state(new_state, sidecar_dir=sources.sidecar_dir)
+    except Exception:
+        if dst.exists() and not src.exists():
+            _safe_mv(dst, src)
+        raise
     return new_state
 
 

@@ -438,6 +438,35 @@ class TestPromoteArchived:
         assert (skills / "demo" / "SKILL.md").is_file()
         assert not (archive / "demo").exists()
 
+    def test_restore_rolls_back_move_when_state_save_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        skills = tmp_path / "skills"
+        sidecar_dir = tmp_path / "quality"
+        cfg = lc.LifecycleConfig()
+        archive = skills / cfg.archive_subdir
+        _make_fake_skill(archive, "demo")
+        sources = lc.LifecycleSources(
+            skills_dir=skills, agents_dir=tmp_path / "agents",
+            sidecar_dir=sidecar_dir,
+        )
+        state = lc.LifecycleState(
+            slug="demo", subject_type="skill", state=lc.STATE_ARCHIVE,
+            state_since=_iso(NOW - timedelta(days=30)),
+            consecutive_d_count=5,
+        )
+        lc.save_lifecycle_state(state, sidecar_dir=sidecar_dir)
+
+        def fail_save(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("sidecar write failed")
+
+        monkeypatch.setattr(lc, "save_lifecycle_state", fail_save)
+        with pytest.raises(RuntimeError, match="sidecar write failed"):
+            lc.promote_archived("demo", sources=sources, cfg=cfg, now=NOW)
+
+        assert (archive / "demo" / "SKILL.md").is_file()
+        assert not (skills / "demo").exists()
+
     def test_restore_missing_raises(self, tmp_path: Path) -> None:
         skills = tmp_path / "skills"
         skills.mkdir()
