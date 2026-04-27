@@ -63,22 +63,22 @@ def _load_semantic_index(
     sync — a stale cache silently degrades semantic ranking, but tag +
     token + degree ranking still work.
     """
-    cached = _semantic_cache.get(id(graph), False)
-    if cached is not False:
-        return cached
+    graph_key = id(graph)
+    if graph_key in _semantic_cache:
+        return _semantic_cache[graph_key]
 
     if cache_dir is None:
         try:
             from ctx_config import cfg  # noqa: PLC0415
             cache_dir = cfg.graph_semantic_cache_dir
         except Exception:
-            _semantic_cache[id(graph)] = None
+            _semantic_cache[graph_key] = None
             return None
 
     npz = cache_dir / "embeddings.npz"
     state = cache_dir / "topk-state.json"
     if not (npz.is_file() and state.is_file()):
-        _semantic_cache[id(graph)] = None
+        _semantic_cache[graph_key] = None
         return None
     try:
         import numpy as np  # noqa: PLC0415
@@ -115,20 +115,20 @@ def _load_semantic_index(
             ordered_ids.append(nid)
             ordered_vecs.append(vecs[idx])
         if not ordered_ids:
-            _semantic_cache[id(graph)] = None
+            _semantic_cache[graph_key] = None
             return None
         mat = np.asarray(ordered_vecs, dtype="float32")
         norms = np.linalg.norm(mat, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         mat = mat / norms
         result = (mat, tuple(ordered_ids), model_id)
-        _semantic_cache[id(graph)] = result
+        _semantic_cache[graph_key] = result
         return result
     except Exception:
         # Any exception path (numpy missing, file unreadable, malformed
         # state, etc.) silently disables semantic boost. The non-semantic
         # ranking still works.
-        _semantic_cache[id(graph)] = None
+        _semantic_cache[graph_key] = None
         return None
 
 
@@ -291,11 +291,13 @@ def recommend_by_tags(
         scored.append((label, score, node_data, matching_tags))
 
     ranked = sorted(scored, key=lambda item: -item[1])[:top_n]
+    top_score = ranked[0][1] if ranked else 0.0
     return [
         {
             "name": label,
             "type": node_data.get("type", "skill"),
             "score": round(score, 1),
+            "normalized_score": round(score / top_score, 4) if top_score else 0.0,
             "matching_tags": sorted(matching_tags),
         }
         for label, score, node_data, matching_tags in ranked

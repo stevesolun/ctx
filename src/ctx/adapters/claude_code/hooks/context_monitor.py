@@ -226,46 +226,12 @@ def graph_suggest(
     if not graph_path.exists():
         return []
     try:
-        from networkx.readwrite import node_link_graph
-        import math
-        with open(graph_path, encoding="utf-8") as f:
-            data = json.load(f)
-        # Auto-detect NetworkX 2.x "links" vs 3.x "edges" schema. Same
-        # bug that took out resolve_graph.py + wiki_visualize.py until
-        # rc4 — context_monitor has its own copy and silently returned
-        # [] graph_suggestions with a "Warning: graph suggest error:
-        # 'links'" on every PostToolUse call.
-        edges_key = "links" if isinstance(data, dict) and "links" in data else "edges"
-        G = node_link_graph(data, edges=edges_key)
-        tag_set = set(unmatched_tags)
-        scores: dict[str, float] = {}
-        for nid, data in G.nodes(data=True):
-            label = data.get("label", nid.split(":", 1)[-1]).lower()
-            node_tags = set(data.get("tags", []))
-            tag_overlap = tag_set & node_tags
-
-            score = 0.0
-            # Name-match bonus: if signal appears in the skill/agent name
-            for signal in unmatched_tags:
-                if signal.lower() in label:
-                    score += 50.0
-            # Tag overlap
-            score += len(tag_overlap) * 10.0
-            # Degree tiebreak (small)
-            if score > 0:
-                score += math.log1p(G.degree(nid))
-                scores[nid] = score
-
-        ranked = sorted(scores.items(), key=lambda x: -x[1])[:top_k]
-        return [
-            {
-                "name": G.nodes[nid].get("label", nid.split(":", 1)[-1]),
-                "type": G.nodes[nid].get("type", "skill"),
-                "score": round(sc, 1),
-                "matching_tags": sorted(tag_set & set(G.nodes[nid].get("tags", []))),
-            }
-            for nid, sc in ranked
-        ]
+        from ctx.core.graph.resolve_graph import load_graph  # noqa: PLC0415
+        from ctx.core.resolve.recommendations import recommend_by_tags  # noqa: PLC0415
+        graph = load_graph(graph_path)
+        if graph.number_of_nodes() == 0:
+            return []
+        return recommend_by_tags(graph, unmatched_tags, top_n=top_k)
     except Exception as exc:
         print(f"Warning: graph suggest error: {exc}", file=sys.stderr)
         return []

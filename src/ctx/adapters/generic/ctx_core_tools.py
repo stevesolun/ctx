@@ -45,7 +45,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -279,6 +278,7 @@ class CtxCoreToolbox:
                 "name": r["name"],
                 "type": r["type"],
                 "score": r["score"],
+                "normalized_score": r.get("normalized_score"),
                 "matching_tags": r.get("matching_tags", []),
             }
             for r in raw
@@ -437,34 +437,11 @@ class CtxCoreToolbox:
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
-_TAG_STOPWORDS: frozenset[str] = frozenset({
-    # Tiny stoplist for query→tags tokenisation. Not a real NLP
-    # pipeline — callers who need precision should use graph_query
-    # with explicit seed names instead.
-    "the", "a", "an", "and", "or", "but", "for", "with", "of", "to",
-    "on", "in", "at", "by", "as", "is", "are", "was", "were", "be",
-    "how", "what", "when", "where", "why", "which", "who", "can",
-    "i", "you", "me", "my", "your", "our", "we", "they", "their",
-    "help", "please", "need", "want", "use", "using", "find",
-    "looking", "looking-for", "task",
-})
-
-
 def _query_to_tags(query: str) -> list[str]:
-    """Extract tag-shaped tokens from a free-text query.
+    """Compatibility wrapper around the shared recommendation tokenizer."""
+    from ctx.core.resolve.recommendations import query_to_tags  # noqa: PLC0415
 
-    Lowercases, strips non-alnum chars except '-' and '_', drops
-    stopwords and tokens < 3 chars. Deduplicates while preserving
-    order (first occurrence wins). The resulting list is what
-    ``resolve_by_tags`` treats as candidate match tags.
-    """
-    tokens = re.findall(r"[A-Za-z0-9_\-]+", query.lower())
-    seen: dict[str, None] = {}
-    for t in tokens:
-        if len(t) < 3 or t in _TAG_STOPWORDS:
-            continue
-        seen.setdefault(t, None)
-    return list(seen.keys())
+    return query_to_tags(query)
 
 
 def _excerpt(body: str, max_chars: int) -> str:

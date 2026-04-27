@@ -54,7 +54,7 @@ except ImportError:
 
 def discover_available_skills(skills_dir: str) -> dict[str, dict]:
     """Find all SKILL.md files and extract metadata."""
-    skills = {}
+    skills: dict[str, dict[str, Any]] = {}
     skills_path = Path(skills_dir)
 
     if not skills_path.exists():
@@ -79,7 +79,7 @@ def discover_available_skills(skills_dir: str) -> dict[str, dict]:
 
 def read_wiki_overrides(wiki_path: str) -> dict[str, dict]:
     """Read entity pages from the wiki for always_load/never_load overrides."""
-    overrides = {}
+    overrides: dict[str, dict[str, Any]] = {}
     entities_dir = Path(wiki_path) / "entities" / "skills"
 
     if not entities_dir.exists():
@@ -261,19 +261,20 @@ def resolve(
                 for hit in graph_hits:
                     name = hit["name"]
                     hit_type = hit.get("type", "skill")
+                    raw_score = float(hit.get("score", 0.0))
                     # Use normalized_score when present (new schema);
                     # fall through to raw ``score`` for older graphs
                     # that predate the normalised field.
-                    score = float(
+                    rank_score = float(
                         hit.get("normalized_score")
                         if "normalized_score" in hit
-                        else hit.get("score", 0.0)
+                        else raw_score
                     )
                     floor = (
                         _MCP_NOISE_FLOOR if hit_type == "mcp-server"
                         else _SKILL_NOISE_FLOOR
                     )
-                    if score < floor:
+                    if rank_score < floor:
                         continue
 
                     via = ", ".join(hit.get("via", [])[:2]) or "graph"
@@ -294,20 +295,29 @@ def resolve(
                         manifest["mcp_servers"].append({
                             "name": name,
                             "reason": reason,
-                            "score": score,
+                            "score": raw_score,
+                            "normalized_score": (
+                                rank_score if "normalized_score" in hit else None
+                            ),
                             "via": hit.get("via", [])[:4],
                             "shared_tags": shared,
                         })
                         continue
 
-                    # skill / agent path — existing behaviour unchanged.
+                    # skill / agent path.
                     if name in needed or name not in available:
                         continue
-                    priority = 3 + min(int(score), 12)
+                    if "normalized_score" in hit:
+                        priority = 3 + min(round(rank_score * 12), 12)
+                        confidence = min(0.6 + rank_score * 0.35, 0.95)
+                    else:
+                        priority = 3 + min(int(raw_score), 12)
+                        confidence = min(0.6 + raw_score / 20.0, 0.95)
                     needed[name] = {
                         "reason": reason,
-                        "confidence": min(0.6 + score / 20.0, 0.95),
+                        "confidence": confidence,
                         "priority": priority,
+                        "entity_type": hit_type,
                     }
         except Exception as exc:  # noqa: BLE001 — graph is advisory
             manifest["warnings"].append(
@@ -373,8 +383,11 @@ def resolve(
     loaded_names = set()
     for skill_name, info in sorted_needed:
         skill_meta = available.get(skill_name, {})
+        entity_type = info.get("entity_type", "skill")
         manifest["load"].append({
             "skill": skill_name,
+            "entity_type": entity_type,
+            "type": entity_type,
             "path": skill_meta.get("path", f"/mnt/skills/unknown/{skill_name}/SKILL.md"),
             "reason": info["reason"],
             "priority": info["priority"],
@@ -387,6 +400,8 @@ def resolve(
         if ms not in loaded_names and ms in available:
             manifest["load"].append({
                 "skill": ms,
+                "entity_type": "skill",
+                "type": "skill",
                 "path": available[ms].get("path", ""),
                 "reason": "Meta skill (always loaded)",
                 "priority": 99 if ms == "skill-router" else 50,
