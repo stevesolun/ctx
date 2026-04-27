@@ -959,6 +959,31 @@ Verification observed:
 - `Select-String -Path 'CHANGELOG.md' -Pattern '^## \[Unreleased\]' | Measure-Object | Select-Object -ExpandProperty Count` reported `1`.
 - `git diff --check` reported no whitespace errors, only existing CRLF conversion warnings.
 
+### Final verification after Phase 43
+
+Status: completed on branch `codex/current-next-steps-hardening`.
+
+Observed:
+
+- `git status --short --branch` reported `## codex/current-next-steps-hardening`.
+- `python scripts\clean_host_contract.py --fast` built `claude_ctx-0.7.0-py3-none-any.whl`, installed it into an isolated venv, executed five generated hook commands through the fake host with `failed: 0`, exercised `ctx run`, `ctx resume`, and denied-tool policy, and ended with `clean-host contract passed`.
+- `python -m ruff check .` reported `All checks passed!`.
+- `python -m mypy src` reported `Success: no issues found in 238 source files` with existing notes about unchecked bodies in untyped functions.
+- `python -m compileall -q src hooks scripts` completed successfully.
+- `git diff --check` completed successfully.
+- `python -m pytest -q` reported `3266 passed, 8 skipped in 419.08s (0:06:59)`.
+- Package dry-run in a temporary dist/venv completed successfully:
+  - `python -m build --outdir <temp>` built `claude_ctx-0.7.0.tar.gz` and `claude_ctx-0.7.0-py3-none-any.whl`.
+  - `python -m twine check <temp>\*` reported `PASSED` for both artifacts.
+  - Fresh venv wheel install succeeded.
+  - `python -m pip check` in the fresh venv reported `No broken requirements found.`
+  - Entry point probe reported `loaded 27 ctx console scripts from wheel 0.7.0`.
+  - Installed `ctx-init --help`, `ctx-scan-repo --help`, `ctx-wiki-graphify --help`, and `ctx --help` all executed.
+
+Caveat:
+
+- The build emitted a Setuptools deprecation warning for `project.license` being a TOML table. It is not a current failure, but it should be changed to a SPDX string before the 2027-Feb-18 deprecation deadline.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -999,7 +1024,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-43 closed the original P0/P1 blocker list plus the newly surfaced wiki type-sync blocker and the first release-hardening slices in the current branch, with the remaining caveats now narrowed to live-host execution, live third-party MCP validation, final package dry-run, and exhaustive process-kill crash-consistency scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-43 closed the original P0/P1 blocker list plus the newly surfaced wiki type-sync blocker and the first release-hardening slices in the current branch, with final local verification now green. The remaining caveats are live-host execution, live third-party MCP validation, exhaustive process-kill crash-consistency scenarios, and tagging only after merge.
 
 ## P0 Findings
 
@@ -2188,11 +2213,11 @@ The original P0/P1 remediation work is complete in this branch, and the parallel
    - Manifest install/uninstall lost-update coverage was fixed in Phase 34, active dashboard load/unload lost-update coverage was fixed in Phase 39, and wiki atomic write/lock coverage was hardened in Phase 38.
    - Remaining crash-consistency work should focus on process-kill restore/session interruption cases and any writer that still bypasses the shared atomic helpers.
 
-4. Finish release dry-run before publishing:
-   - Build the 0.7.0 sdist/wheel and run `twine check`.
-   - Install the wheel into a fresh venv and run `pip check`.
-   - Smoke the console entrypoints from the installed wheel.
-   - After merge, tag the merge commit as `v0.7.0`; do not reuse the existing `v0.6.4` tag.
+4. Tag only after merge:
+   - The 0.7.0 package dry-run passed locally.
+   - After branch review/merge, tag the merge commit as `v0.7.0`.
+   - Do not reuse the existing `v0.6.4` tag.
+   - Before a later packaging cleanup release, update `project.license` from the deprecated TOML table form to a SPDX string.
 
 ## Residual Uncertainty
 
