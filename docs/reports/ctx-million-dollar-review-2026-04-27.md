@@ -485,6 +485,26 @@ Verification observed:
 - `python -m ruff check src\skill_add.py src\agent_add.py src\tests\test_skill_add.py` reported `All checks passed!`.
 - `python -m mypy src\skill_add.py src\agent_add.py src\tests\test_skill_add.py` reported `Success: no issues found in 3 source files`.
 
+### Phase 22: Tar member hardening
+
+Status: implemented in this worktree.
+
+What changed:
+
+- `update_repo_stats` now accepts only exact normalized `graphify-out/graph.json` and `graphify-out/communities.json` archive members instead of suffix matches.
+- Archive names are normalized and rejected if they are absolute, Windows-drive absolute, empty, dotted, or contain `..` path components.
+- Entity counts only include safe regular Markdown files under the expected `entities/skills/`, `entities/agents/`, and `entities/mcp-servers/` prefixes.
+- JSON archive members must be regular files and must stay under an explicit uncompressed size cap.
+- Regression tests cover safe archive reads, suffix impersonation, non-regular JSON members, and oversized JSON members.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_update_repo_stats.py -q` reported `4 passed`.
+- `python -m ruff check src\update_repo_stats.py src\tests\test_update_repo_stats.py` reported `All checks passed!`.
+- `python -m compileall -q src\update_repo_stats.py src\tests\test_update_repo_stats.py` completed.
+- `python -m mypy src\update_repo_stats.py src\tests\test_update_repo_stats.py` reported `Success: no issues found in 2 source files`.
+- `python -m mypy src` reported `Success: no issues found in 235 source files`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full 234-file `src` tree with zero mypy errors.
@@ -501,7 +521,7 @@ P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in 
 10. Restore overwrites live state without a rollback snapshot. Fixed in Phase 17.
 11. Monitor dashboard has unauthenticated mutation endpoints and path traversal risks. Fixed in Phase 18.
 12. Wiki/install flows follow symlinks from wiki content into live Claude directories. Fixed across install copy paths in Phase 19 and wiki write paths in Phase 20.
-13. Tar extraction and source install paths are stale/unsafe. Source install paths fixed in Phase 21; tar member hardening remains.
+13. Tar extraction and source install paths are stale/unsafe. Source install paths fixed in Phase 21; tar member hardening fixed in Phase 22.
 14. CI/release can publish a tag without tests/package smoke/version alignment.
 15. Tests mock the exact command boundaries that are currently broken.
 
