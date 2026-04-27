@@ -1616,7 +1616,7 @@ def _perform_unload(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
     except ImportError as exc:
         return False, f"skill_unload import failed: {exc}"
     try:
-        removed = unload_from_session([slug])
+        removed = unload_from_session([slug], entity_type=entity_type)
     except Exception as exc:  # noqa: BLE001
         return False, f"{type(exc).__name__}: {exc}"
     if not removed:

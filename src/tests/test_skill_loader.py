@@ -10,9 +10,141 @@ from __future__ import annotations
 
 import json
 import importlib
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 import pytest
+
+_SRC_ROOT = Path(__file__).resolve().parents[1]
+_MANIFEST_DASHBOARD_WORKER = r"""
+from __future__ import annotations
+
+import os
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[3])
+
+home = Path(sys.argv[1])
+start_file = Path(sys.argv[2])
+mode = sys.argv[4]
+slug = sys.argv[5]
+
+os.environ["HOME"] = str(home)
+os.environ["USERPROFILE"] = str(home)
+
+deadline = time.monotonic() + 5.0
+while not start_file.exists():
+    if time.monotonic() > deadline:
+        raise TimeoutError("worker did not receive start signal")
+    time.sleep(0.005)
+
+if mode == "load":
+    from ctx.adapters.claude_code import skill_loader
+
+    original_write = skill_loader._atomic_write_text
+
+    def slow_write(path, text):
+        time.sleep(0.15)
+        original_write(path, text)
+
+    skill_loader._atomic_write_text = slow_write
+    skill_loader.update_manifest(slug, entity_type="skill")
+elif mode == "unload":
+    from ctx.adapters.claude_code.install import skill_unload
+
+    original_save = skill_unload.save_manifest
+
+    def slow_save(manifest):
+        time.sleep(0.15)
+        original_save(manifest)
+
+    skill_unload.save_manifest = slow_save
+    skill_unload.unload_from_session([slug])
+else:
+    raise ValueError(mode)
+"""
+
+
+def _run_dashboard_manifest_workers(
+    home: Path,
+    tmp_path: Path,
+    *,
+    mode: str,
+    slugs: list[str],
+) -> None:
+    start_file = tmp_path / f"{mode}.start"
+    code = textwrap.dedent(_MANIFEST_DASHBOARD_WORKER)
+    procs = [
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                code,
+                str(home),
+                str(start_file),
+                str(_SRC_ROOT),
+                mode,
+                slug,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for slug in slugs
+    ]
+    start_file.write_text("go", encoding="utf-8")
+    failures: list[str] = []
+    for proc in procs:
+        stdout, stderr = proc.communicate(timeout=20)
+        if proc.returncode:
+            failures.append(f"rc={proc.returncode}\nstdout={stdout}\nstderr={stderr}")
+    assert failures == []
+
+
+def test_dashboard_agent_unload_preserves_same_slug_skill(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ctx_monitor as cm
+    from ctx.adapters.claude_code.install import skill_unload
+
+    class _AuditLog:
+        @staticmethod
+        def log_skill_event(*args: object, **kwargs: object) -> None:
+            return None
+
+    claude_dir = tmp_path / ".claude"
+    manifest_path = claude_dir / "skill-manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(
+        json.dumps({
+            "load": [
+                {"skill": "debugger", "entity_type": "skill", "source": "seed"},
+                {"skill": "debugger", "entity_type": "agent", "source": "seed"},
+            ],
+            "unload": [],
+            "warnings": [],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(skill_unload, "CLAUDE_DIR", claude_dir)
+    monkeypatch.setattr(skill_unload, "MANIFEST_PATH", manifest_path)
+    monkeypatch.setitem(sys.modules, "ctx_audit_log", _AuditLog)
+
+    ok, message = cm._perform_unload("debugger", entity_type="agent")
+
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert ok, message
+    assert data["load"] == [
+        {"skill": "debugger", "entity_type": "skill", "source": "seed"}
+    ]
+    assert data["unload"] == [
+        {"skill": "debugger", "entity_type": "agent", "source": "seed"}
+    ]
 
 
 @pytest.fixture()
@@ -178,3 +310,49 @@ class TestUpdateManifestEntityType:
             "legacy entry got duplicated — missing entity_type should "
             "default to 'skill' for dedup purposes"
         )
+
+    def test_concurrent_dashboard_loads_preserve_all_manifest_entries(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        home = tmp_path / "home"
+        manifest_path = home / ".claude" / "skill-manifest.json"
+        manifest_path.parent.mkdir(parents=True)
+        slugs = [f"skill-{i}" for i in range(8)]
+
+        _run_dashboard_manifest_workers(home, tmp_path, mode="load", slugs=slugs)
+
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        loaded = {entry["skill"] for entry in data["load"]}
+        assert loaded == set(slugs)
+
+    def test_concurrent_dashboard_unloads_preserve_all_manifest_removals(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        home = tmp_path / "home"
+        manifest_path = home / ".claude" / "skill-manifest.json"
+        manifest_path.parent.mkdir(parents=True)
+        slugs = [f"skill-{i}" for i in range(8)]
+        manifest_path.write_text(
+            json.dumps({
+                "load": [
+                    {
+                        "skill": slug,
+                        "entity_type": "skill",
+                        "source": "seed",
+                    }
+                    for slug in slugs
+                ],
+                "unload": [],
+                "warnings": [],
+            }),
+            encoding="utf-8",
+        )
+
+        _run_dashboard_manifest_workers(home, tmp_path, mode="unload", slugs=slugs)
+
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        unloaded = {entry["skill"] for entry in data["unload"]}
+        assert data["load"] == []
+        assert unloaded == set(slugs)

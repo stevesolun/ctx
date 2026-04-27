@@ -22,8 +22,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 from ctx.core.wiki.wiki_utils import validate_skill_name
+from ctx.utils._file_lock import file_lock
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 
 _logger = logging.getLogger(__name__)
 
@@ -94,27 +95,33 @@ def update_manifest(name: str, entity_type: str = "skill") -> None:
     skills and agents via ``find_skill`` — the type is always known
     at the call site).
     """
-    manifest: dict[str, Any] = {"load": [], "unload": [], "warnings": []}
-    if MANIFEST_PATH.exists():
-        try:
-            manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
+    with file_lock(MANIFEST_PATH):
+        manifest: dict[str, Any] = {"load": [], "unload": [], "warnings": []}
+        if MANIFEST_PATH.exists():
+            try:
+                manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
+        manifest.setdefault("load", [])
+        manifest.setdefault("unload", [])
+        manifest.setdefault("warnings", [])
 
-    # (slug, entity_type) tuple dedup — missing entity_type in an
-    # existing entry defaults to "skill" to preserve the pre-fix
-    # implicit contract.
-    loaded_pairs = {
-        (e.get("skill"), e.get("entity_type", "skill"))
-        for e in manifest.get("load", [])
-    }
-    if (name, entity_type) not in loaded_pairs:
-        manifest["load"].append({
-            "skill": name,
-            "entity_type": entity_type,
-            "source": "user-approved",
-        })
-        _atomic_write_text(MANIFEST_PATH, json.dumps(manifest, indent=2))
+        # (slug, entity_type) tuple dedup — missing entity_type in an
+        # existing entry defaults to "skill" to preserve the pre-fix
+        # implicit contract.
+        loaded_pairs = {
+            (e.get("skill"), e.get("entity_type", "skill"))
+            for e in manifest.get("load", [])
+        }
+        if (name, entity_type) not in loaded_pairs:
+            manifest["load"].append(
+                {
+                    "skill": name,
+                    "entity_type": entity_type,
+                    "source": "user-approved",
+                }
+            )
+            _atomic_write_text(MANIFEST_PATH, json.dumps(manifest, indent=2))
 
 
 def emit_load_event(

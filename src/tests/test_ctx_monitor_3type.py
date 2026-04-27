@@ -240,8 +240,9 @@ class TestPerformUnloadByEntityType:
     def test_skill_type_calls_skill_unload(self, monkeypatch):
         calls = {}
 
-        def fake_unload_from_session(slugs):
+        def fake_unload_from_session(slugs, *, entity_type=None):
             calls["slugs"] = slugs
+            calls["entity_type"] = entity_type
             return slugs
 
         from ctx.adapters.claude_code.install import skill_unload
@@ -250,6 +251,7 @@ class TestPerformUnloadByEntityType:
         ok, msg = _cm._perform_unload("python-patterns", entity_type="skill")
         assert ok
         assert calls["slugs"] == ["python-patterns"]
+        assert calls["entity_type"] == "skill"
 
     def test_mcp_type_calls_mcp_install_uninstall(self, monkeypatch):
         """The MCP path must go through mcp_install.uninstall_mcp,

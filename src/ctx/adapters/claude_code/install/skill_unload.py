@@ -19,8 +19,9 @@ import re
 import sys
 from pathlib import Path
 
-from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 from ctx.core.wiki.wiki_utils import validate_skill_name
+from ctx.utils._file_lock import file_lock
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 
 CLAUDE_DIR = Path(os.path.expanduser("~/.claude"))
 MANIFEST_PATH = CLAUDE_DIR / "skill-manifest.json"
@@ -104,7 +105,11 @@ def clear_pending_unload(names: list[str]) -> None:
         print(f"Warning: failed to clear pending unload: {exc}", file=sys.stderr)
 
 
-def unload_from_session(names: list[str]) -> list[str]:
+def unload_from_session(
+    names: list[str],
+    *,
+    entity_type: str | None = None,
+) -> list[str]:
     """Remove skills/agents from the current session manifest.
 
     Emits one ``unload`` line per removed skill to
@@ -117,17 +122,23 @@ def unload_from_session(names: list[str]) -> list[str]:
     import uuid
     from datetime import datetime, timezone
 
-    manifest = load_manifest()
-    removed: list[str] = []
-    remaining = []
-    for entry in manifest.get("load", []):
-        if entry["skill"] in names:
-            removed.append(entry["skill"])
-            manifest.setdefault("unload", []).append(entry)
-        else:
-            remaining.append(entry)
-    manifest["load"] = remaining
-    save_manifest(manifest)
+    names_set = set(names)
+    with file_lock(MANIFEST_PATH):
+        manifest = load_manifest()
+        removed: list[str] = []
+        remaining = []
+        for entry in manifest.get("load", []):
+            entry_type = entry.get("entity_type", "skill")
+            if (
+                entry["skill"] in names_set
+                and (entity_type is None or entry_type == entity_type)
+            ):
+                removed.append(entry["skill"])
+                manifest.setdefault("unload", []).append(entry)
+            else:
+                remaining.append(entry)
+        manifest["load"] = remaining
+        save_manifest(manifest)
 
     # Emit ground-truth unload events. Best-effort — a disk failure on
     # the event log must not block the manifest save above.
