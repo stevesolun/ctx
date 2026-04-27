@@ -118,7 +118,7 @@ def install_hooks(*, ctx_src_dir: Path, settings_path: Path | None = None) -> in
     """Run ``inject_hooks.main()`` to wire PostToolUse + Stop hooks."""
     target_settings = settings_path or (_claude_dir() / "settings.json")
     cmd = [
-        sys.executable, "-m", "inject_hooks",
+        sys.executable, "-m", "ctx.adapters.claude_code.inject_hooks",
         "--settings", str(target_settings),
         "--ctx-dir", str(ctx_src_dir),
     ]
@@ -147,7 +147,7 @@ def _resolve_ctx_src_dir() -> Path:
 def build_graph() -> int:
     """Run ``wiki_graphify`` to rebuild the knowledge graph."""
     result = subprocess.run(
-        [sys.executable, "-m", "wiki_graphify"],
+        [sys.executable, "-m", "ctx.core.wiki.wiki_graphify"],
         capture_output=True, text=True, check=False,
     )
     if result.stdout.strip():
@@ -195,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  [skip] skill-system-config.json already present (use --force to overwrite)")
 
     toolbox_rc = seed_toolboxes(force=args.force)
+    final_rc = 0
     if toolbox_rc == 0:
         print("  [ok] toolboxes seeded")
     else:
@@ -206,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
             print("  [ok] PostToolUse + Stop hooks injected")
         else:
             print(f"  [warn] hook injection returned {rc}", file=sys.stderr)
+            final_rc = rc
     else:
         print("  [skip] hook injection (pass --hooks to enable)")
 
@@ -215,6 +217,8 @@ def main(argv: list[str] | None = None) -> int:
             print("  [ok] knowledge graph rebuilt")
         else:
             print(f"  [warn] graph build returned {rc}", file=sys.stderr)
+            if final_rc == 0:
+                final_rc = rc
     else:
         print("  [skip] graph build (pass --graph to rebuild)")
 
@@ -226,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  - ctx-init --hooks                 # wire live observation")
     if not args.graph:
         print("  - ctx-init --graph                 # build knowledge graph")
-    return 0
+    return final_rc
 
 
 if __name__ == "__main__":

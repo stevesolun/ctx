@@ -32,35 +32,31 @@ def load_settings(path: Path) -> dict:
 
 def make_hooks(ctx_dir: str) -> dict:
     """Return the hooks config block for this installation."""
+    _ = ctx_dir  # Kept for CLI/API compatibility; commands now use modules.
     # shlex.quote() ensures paths with spaces, $, or quotes don't break the shell command.
     # Tool input is delivered by Claude Code on stdin as JSON; --from-stdin reads it
     # from there instead of interpolating $CLAUDE_TOOL_INPUT into argv (which would
     # allow shell injection via malicious tool-input blobs).
-    q = shlex.quote(ctx_dir)
-    monitor_cmd = (
-        f'python3 {q}/context_monitor.py --from-stdin 2>/dev/null || true'
+    monitor_cmd = _module_cmd(
+        "ctx.adapters.claude_code.hooks.context_monitor", "--from-stdin"
     )
-    tracker_cmd = (
-        f'python3 {q}/usage_tracker.py --sync 2>/dev/null || true'
-    )
-    quality_cmd = (
-        f'python3 {q}/../hooks/quality_on_session_end.py 2>/dev/null || true'
+    tracker_cmd = _module_cmd("usage_tracker", "--sync")
+    quality_cmd = _module_cmd(
+        "ctx.adapters.claude_code.hooks.lifecycle_hooks",
+        "quality-on-session-end",
     )
     # Skill-add detection: when Write/Edit/Bash touches a SKILL.md path → register in wiki
-    skill_add_cmd = (
-        f'python3 {q}/skill_add_detector.py --from-stdin 2>/dev/null || true'
-    )
+    skill_add_cmd = _module_cmd("skill_add_detector", "--from-stdin")
     # Graph-based skill suggestion: surfaces pending-skills.json to Claude for user approval
-    suggest_cmd = (
-        f'python3 {q}/skill_suggest.py 2>/dev/null || true'
-    )
+    suggest_cmd = _module_cmd("ctx.adapters.claude_code.hooks.bundle_orchestrator")
     # Change-triggered backup: fires on every Edit/Write/MultiEdit, takes a
     # snapshot into ~/.claude/backups/ ONLY when tracked files actually
     # changed. SHA-gated so no-op edits don't create folders. Without this,
     # Claude-driven edits of ~/.claude/settings.json, agents/*, skills/*
     # have no rollback target.
-    backup_cmd = (
-        f'python3 {q}/../hooks/backup_on_change.py 2>/dev/null || true'
+    backup_cmd = _module_cmd(
+        "ctx.adapters.claude_code.hooks.lifecycle_hooks",
+        "backup-on-change",
     )
 
     return {
@@ -115,6 +111,12 @@ def make_hooks(ctx_dir: str) -> dict:
 
 
 # Old filenames that were renamed — remove stale hook entries referencing them
+def _module_cmd(module: str, *args: str) -> str:
+    """Return a hook command that targets an installed Python module."""
+    parts = [sys.executable, "-m", module, *args]
+    return " ".join(shlex.quote(part) for part in parts)
+
+
 _STALE_PATTERNS = ["context-monitor.py", "usage-tracker.py", "skill-transformer.py"]
 
 

@@ -44,6 +44,18 @@ def _all_commands(hooks_block: dict) -> list[str]:
     return cmds
 
 
+def _all_modules(hooks_block: dict) -> list[str]:
+    """Return every module invoked through ``python -m`` hook commands."""
+    modules: list[str] = []
+    for cmd in _all_commands(hooks_block):
+        parts = cmd.split()
+        if "-m" in parts:
+            idx = parts.index("-m")
+            if idx + 1 < len(parts):
+                modules.append(parts[idx + 1])
+    return modules
+
+
 def _run_inject(ctx_dir: str, settings_path: Path) -> None:
     """Run the full inject pipeline (load → merge → atomic write)."""
     from ctx.adapters.claude_code.inject_hooks import load_settings, _remove_stale_hooks
@@ -144,16 +156,16 @@ class TestStopHooks:
         ctx_dir = str(tmp_path / "ctx")
         hooks = make_hooks(ctx_dir)
         stop_cmds = self._stop_commands(hooks)
-        assert any("usage_tracker.py" in c for c in stop_cmds), (
-            f"usage_tracker.py not found in Stop hooks: {stop_cmds}"
+        assert any("-m usage_tracker" in c for c in stop_cmds), (
+            f"usage_tracker module not found in Stop hooks: {stop_cmds}"
         )
 
     def test_stop_contains_quality_on_session_end(self, tmp_path: Path) -> None:
         ctx_dir = str(tmp_path / "ctx")
         hooks = make_hooks(ctx_dir)
         stop_cmds = self._stop_commands(hooks)
-        assert any("quality_on_session_end.py" in c for c in stop_cmds), (
-            f"quality_on_session_end.py not found in Stop hooks: {stop_cmds}"
+        assert any("ctx.adapters.claude_code.hooks.lifecycle_hooks quality-on-session-end" in c for c in stop_cmds), (
+            f"quality hook module not found in Stop hooks: {stop_cmds}"
         )
 
     def test_stop_contains_both_in_generated_settings(self, tmp_path: Path) -> None:
@@ -164,11 +176,11 @@ class TestStopHooks:
         data = json.loads(settings_path.read_text(encoding="utf-8"))
         stop_cmds = self._stop_commands(data.get("hooks", {}))
 
-        assert any("usage_tracker.py" in c for c in stop_cmds), (
-            f"usage_tracker.py missing from persisted Stop hooks: {stop_cmds}"
+        assert any("-m usage_tracker" in c for c in stop_cmds), (
+            f"usage_tracker module missing from persisted Stop hooks: {stop_cmds}"
         )
-        assert any("quality_on_session_end.py" in c for c in stop_cmds), (
-            f"quality_on_session_end.py missing from persisted Stop hooks: {stop_cmds}"
+        assert any("ctx.adapters.claude_code.hooks.lifecycle_hooks quality-on-session-end" in c for c in stop_cmds), (
+            f"quality hook module missing from persisted Stop hooks: {stop_cmds}"
         )
 
     def test_stop_hook_count_is_two(self, tmp_path: Path) -> None:
@@ -213,6 +225,28 @@ class TestCtxDirQuoting:
                 assert f" {ctx_dir}/" not in cmd, (
                     f"Unquoted $ path found in: {cmd!r}"
                 )
+
+
+class TestPackagedHookCommands:
+    def test_commands_use_importable_modules_not_repo_paths(
+        self, tmp_path: Path
+    ) -> None:
+        hooks = make_hooks(str(tmp_path / "ctx"))
+        cmds = _all_commands(hooks)
+
+        assert cmds
+        assert all(".py" not in cmd for cmd in cmds)
+        assert all("/../hooks/" not in cmd and "\\..\\hooks\\" not in cmd for cmd in cmds)
+        assert all(" 2>/dev/null" not in cmd and "|| true" not in cmd for cmd in cmds)
+
+        modules = _all_modules(hooks)
+        assert {
+            "ctx.adapters.claude_code.hooks.context_monitor",
+            "skill_add_detector",
+            "ctx.adapters.claude_code.hooks.bundle_orchestrator",
+            "usage_tracker",
+            "ctx.adapters.claude_code.hooks.lifecycle_hooks",
+        } <= set(modules)
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +319,6 @@ class TestAtomicWrite:
         from ctx.adapters.claude_code import inject_hooks as _ih
 
         settings_path = tmp_path / "settings.json"
-        original_replace = _os.replace
 
         call_count = {"n": 0}
 
