@@ -26,7 +26,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -37,7 +36,7 @@ from ctx.adapters.generic.loop import run_loop
 from ctx.adapters.generic.contract import ContractBuilder
 from ctx.adapters.generic.evaluator import Evaluator, run_with_evaluation
 from ctx.adapters.generic.planner import Planner, augmented_system_prompt
-from ctx.adapters.generic.providers import Message, get_provider
+from ctx.adapters.generic.providers import ToolDefinition, get_provider
 from ctx.adapters.generic.state import (
     JsonlObserver,
     SessionStore,
@@ -157,6 +156,49 @@ _MCP_PRESETS: dict[str, McpServerConfig] = {
 
 
 # ── Default system prompt ──────────────────────────────────────────────────
+
+
+def _mcp_configs_from_metadata(meta: dict) -> list[McpServerConfig]:
+    """Recreate MCP server configs from a session's metadata block.
+
+    Codex review fix #3: ``ctx resume`` was creating a router from
+    scratch with no MCP servers, so a resumed session lost access to
+    every tool the original run had. This helper reads the session's
+    recorded MCP server list (a list of ``{name, command, args[, env]}``
+    dicts written by ``cmd_run`` under either the ``mcp`` or
+    ``mcp_servers`` key) and reconstructs the configs.
+
+    Tolerates missing/malformed metadata — returns ``[]`` rather than
+    raising, so resume on an old session without recorded MCP info
+    still works (just without MCP tools).
+    """
+    raw = meta.get("mcp") or meta.get("mcp_servers") or []
+    if not isinstance(raw, list):
+        return []
+    out: list[McpServerConfig] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        command = entry.get("command")
+        if not isinstance(name, str) or not isinstance(command, str):
+            continue
+        args = entry.get("args") or []
+        env = entry.get("env") or {}
+        if not isinstance(args, list):
+            args = []
+        if not isinstance(env, dict):
+            env = {}
+        try:
+            out.append(McpServerConfig(
+                name=name,
+                command=command,
+                args=tuple(str(a) for a in args),
+                env={str(k): str(v) for k, v in env.items()} if env else {},
+            ))
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 _DEFAULT_SYSTEM_PROMPT = """\
@@ -660,13 +702,38 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     observer = JsonlObserver(store, session_metadata={}, emit_session_start=False)
     compactor = TokenBudgetCompactor()
 
+    # Codex review fix #3: a resumed session must see the same world
+    # the original run did — recreate the MCP router from session
+    # metadata, and recreate the ctx-core toolbox unless the original
+    # run disabled it. Without these, tool calls from the replayed
+    # transcript would resolve against an empty tool set.
+    mcp_configs = _mcp_configs_from_metadata(meta)
+    router = McpRouter(mcp_configs) if mcp_configs else None
+
+    extra_tools: list[ToolDefinition] = []
+    tool_executor = None
+    use_ctx_tools = bool(meta.get("ctx_tools_enabled", True))
+    if use_ctx_tools:
+        ctx_toolbox = CtxCoreToolbox()
+        extra_tools.extend(ctx_toolbox.tool_definitions())
+        tool_executor = make_tool_executor(ctx_toolbox)
+
     if not args.quiet:
+        bits = []
+        if mcp_configs:
+            bits.append(f"{len(mcp_configs)} MCP server(s)")
+        if use_ctx_tools:
+            bits.append("ctx-core tools")
+        suffix = f" + {', '.join(bits)}" if bits else ""
         print(
-            f"[ctx] resuming {args.session_id} ({len(state.messages)} prior messages)",
+            f"[ctx] resuming {args.session_id} "
+            f"({len(state.messages)} prior messages{suffix})",
             file=sys.stderr,
         )
 
     try:
+        if router is not None:
+            router.start()
         result = run_loop(
             provider=provider,
             system_prompt=system_prompt,
@@ -675,9 +742,24 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             model=model,
             observer=observer,
             compactor=compactor,
+            router=router,
+            extra_tools=extra_tools or None,
+            tool_executor=tool_executor,
+            # Resume must keep the replayed transcript first; the
+            # follow-up task is appended at the end, not shoved before
+            # the prior conversation.
+            append_task_after_messages=True,
+            # Inherit the original run's safety limits when present
+            # so the resume doesn't blow past the original ceiling.
+            max_iterations=int(meta.get("max_iterations") or 25),
+            temperature=float(meta.get("temperature") or 0.7),
+            budget_usd=meta.get("budget_usd"),
+            budget_tokens=meta.get("budget_tokens"),
         )
     finally:
         store.close()
+        if router is not None:
+            router.stop()
 
     return _emit_result(result, args.session_id, as_json=args.json, quiet=args.quiet)
 
