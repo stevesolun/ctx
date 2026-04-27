@@ -860,6 +860,27 @@ Verification observed:
 - `git diff --check` reported no whitespace errors.
 - `python -m pytest -q` reported `3254 passed, 8 skipped in 436.91s`.
 
+### Phase 39: Dashboard manifest transaction hardening
+
+Status: implemented in branch `codex/current-next-steps-hardening`, commit `e558a5e`.
+
+What changed:
+
+- `skill_loader.update_manifest()` now wraps the whole dashboard load read-dedup-write sequence in `file_lock(MANIFEST_PATH)`.
+- `skill_unload.unload_from_session()` now wraps the whole dashboard unload read-filter-write sequence in `file_lock(MANIFEST_PATH)`.
+- Dashboard unload now forwards `entity_type` to `skill_unload`, so unloading an agent no longer removes a same-slug skill from mixed-type manifests.
+- `unload_from_session()` keeps backward-compatible slug-wide behavior when called without `entity_type`, preserving existing CLI semantics while allowing typed dashboard calls.
+- Added subprocess race regressions for concurrent dashboard loads and unloads, with intentionally delayed save points to expose the previous lost-update bug.
+- Added a same-slug skill/agent regression for dashboard agent unload.
+
+Verification observed:
+
+- Red-first `python -m pytest src\tests\test_skill_loader.py -q` failed before implementation with two failures: concurrent dashboard loads left only one surviving entry, and concurrent dashboard unloads left most entries loaded.
+- After implementation, `python -m pytest src\tests\test_skill_loader.py src\tests\test_skill_unload.py src\tests\test_ctx_monitor_3type.py -q` reported `62 passed`.
+- `python -m ruff check src\ctx\adapters\claude_code\skill_loader.py src\ctx\adapters\claude_code\install\skill_unload.py src\ctx_monitor.py src\tests\test_skill_loader.py src\tests\test_ctx_monitor_3type.py` reported `All checks passed!`.
+- `python -m mypy src\ctx\adapters\claude_code\skill_loader.py src\ctx\adapters\claude_code\install\skill_unload.py src\ctx_monitor.py src\tests\test_skill_loader.py src\tests\test_ctx_monitor_3type.py` reported `Success: no issues found in 5 source files` with existing notes about unchecked bodies in untyped test functions.
+- `git diff --check` reported no whitespace errors, only existing CRLF conversion warnings.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -900,7 +921,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-38 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host execution, live third-party integrations, release/tag readiness, and exhaustive process-kill crash-consistency scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-39 closed the original P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats now narrowed to one newly surfaced wiki type-sync blocker, live-host execution, live third-party integrations, browser CI ownership, release/tag readiness, and exhaustive process-kill crash-consistency scenarios noted below.
 
 ## P0 Findings
 
@@ -2061,9 +2082,15 @@ Success criteria:
 
 ## Current Next Steps
 
-The original P0/P1 remediation work is complete in this branch. The remaining work is release-hardening, not another pass over the same fixed blockers.
+The original P0/P1 remediation work is complete in this branch, but the parallel Phase 39 review surfaced one new P1 merge blocker and several release-hardening items that still need treatment before merge/release.
 
-1. Run a clean-machine A-Z host flow against a real Claude Code installation:
+1. Make wiki sync type-aware for mixed manifests:
+   - `wiki_sync.main()` still iterates `manifest["load"]` entries as skills and calls `upsert_skill_page()`/`update_index()` with skill defaults.
+   - A manifest entry such as `{"skill": "github-mcp", "entity_type": "mcp-server"}` can be written under `entities/skills/` and indexed as a skill.
+   - Required fix: route skill, agent, and mcp-server manifest entries through typed wiki page/index helpers, including sharded MCP paths.
+   - Required tests: sync a manifest containing skill, agent, and mcp-server entries and assert the entity paths, frontmatter type, and index sections are correct.
+
+2. Run a clean-machine A-Z host flow against a real Claude Code installation:
    - The opt-in live Claude host gate exists as of Phase 37.
    - Install from the built wheel into a clean virtualenv.
    - Use an isolated temporary home/config directory.
@@ -2074,23 +2101,31 @@ The original P0/P1 remediation work is complete in this branch. The remaining wo
    - Run `ctx-scan-repo --recommend` on a small real repo and verify the same bundle through CLI, Python API, MCP, and Claude Code hook surfaces.
    - Keep this manual and quota-acknowledged: discovery showed `claude -p` can hit `error_max_budget_usd`, and this branch now requires an explicit environment acknowledgement plus a small `--max-budget-usd` cap before any live model call.
 
-2. Validate live third-party MCP behavior:
+3. Validate live third-party MCP behavior:
    - The opt-in live MCP compatibility gate exists as of Phase 35.
    - Test at least one trusted real third-party MCP server for startup, `tools/list`, `tools/call`, timeout, stderr diagnostics, and env allowlist behavior.
    - Verify `ctx run --allow-tool/--deny-tool` UX when real model-visible tool names are involved.
    - Document any compatibility exceptions that require `inherit_env=True`.
+   - Fix the live MCP config parser first: `inherit_env` must be a strict JSON boolean, not `bool(payload.get(...))`, because string values such as `"false"` currently become truthy in the opt-in test harness.
    - Do not run `npx` or any third-party MCP command by default in CI.
 
-3. Stress crash consistency and concurrent writers:
+4. Stress crash consistency and concurrent writers:
    - Kill processes during restore, wiki sync, manifest updates, and session writes.
    - Verify rollback snapshots, atomic temp-file replacement, and lock behavior.
    - Add regression tests for partial-write and parallel-writer cases not already covered.
-   - Manifest install/uninstall lost-update coverage was fixed in Phase 34, and wiki atomic write/lock coverage was hardened in Phase 38.
+   - Manifest install/uninstall lost-update coverage was fixed in Phase 34, active dashboard load/unload lost-update coverage was fixed in Phase 39, and wiki atomic write/lock coverage was hardened in Phase 38.
    - Remaining crash-consistency work should focus on process-kill restore/session interruption cases and any writer that still bypasses the shared atomic helpers.
 
-4. Prepare release readiness material:
+5. Make browser security coverage real in CI:
+   - `.github/workflows/test.yml` still installs `.[dev]`, while Playwright is in the `browser` extra.
+   - Add a dedicated browser job that installs `.[dev,browser]`, installs Chromium, and runs `src/tests/test_ctx_monitor_browser.py` under the `browser` marker.
+   - Harden the SSE browser test by waiting for both EventSource connections to open before writing the single audit event.
+
+6. Prepare release readiness material:
    - Generate a changelog from the remediation commits.
    - Document behavior changes around MCP env inheritance and tool policy.
+   - Bump `pyproject.toml` and `src/ctx/__init__.py` off `0.6.4`; PyPI and the existing remote tag already use `0.6.4`.
+   - Reconcile the many `[Unreleased]` changelog sections into a real release section.
    - Dry-run the tag/version/publish workflow before publishing.
 
 ## Residual Uncertainty
