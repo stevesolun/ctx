@@ -11,13 +11,51 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
+
+
+LIVE_CLAUDE_ACK_ENV = "CTX_LIVE_CLAUDE_ACK"
+LIVE_CLAUDE_ACK_VALUE = "uses_quota"
+LIVE_CLAUDE_DEFAULT_BUDGET_USD = 0.05
+LIVE_CLAUDE_MAX_BUDGET_USD = 1.0
+LIVE_CLAUDE_PROMPT_TIMEOUT_SECONDS = 180.0
+LIVE_CLAUDE_PREFLIGHT_TIMEOUT_SECONDS = 30.0
+
+_LIVE_CLAUDE_AUTH_EXACT_ENV = {
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_BETA_HEADERS",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+}
+_LIVE_CLAUDE_AUTH_PREFIX_ENV = (
+    "AWS_",
+    "GOOGLE_",
+    "GCLOUD_",
+    "VERTEXAI_",
+    "ANTHROPIC_",
+)
+_LIVE_CLAUDE_PLATFORM_ENV = {
+    "PATH",
+    "Path",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "SystemRoot",
+    "WINDIR",
+    "COMSPEC",
+    "TEMP",
+    "TMP",
+}
+_EXPECTED_LIVE_CLAUDE_EVENTS = ("PostToolUse", "Stop")
 
 
 @dataclass(frozen=True)
@@ -53,16 +91,23 @@ class CommandRunner:
         cwd: Path,
         env: Mapping[str, str],
         check: bool = True,
+        timeout_seconds: float | None = None,
     ) -> CompletedCommand:
         print("+ " + " ".join(args), flush=True)
-        result = subprocess.run(
-            list(args),
-            cwd=cwd,
-            env=dict(env),
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                list(args),
+                cwd=cwd,
+                env=dict(env),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise SystemExit(
+                f"command timed out after {timeout_seconds}s: {' '.join(args)}"
+            ) from exc
         if result.stdout.strip():
             print(result.stdout.rstrip())
         if result.stderr.strip():
@@ -130,12 +175,37 @@ def isolated_env(paths: ContractPaths, *, extra_pythonpath: Path | None = None) 
     env.pop("CTX_WIKI_DIR", None)
     env.pop("CTX_GRAPH_PATH", None)
     env.pop("CLAUDE_HOME", None)
+    env.pop("PYTHONPATH", None)
     if extra_pythonpath is not None:
-        existing = env.get("PYTHONPATH")
-        parts = [str(extra_pythonpath)]
-        if existing:
-            parts.append(existing)
-        env["PYTHONPATH"] = os.pathsep.join(parts)
+        env["PYTHONPATH"] = str(extra_pythonpath)
+    return env
+
+
+def live_claude_env(paths: ContractPaths) -> dict[str, str]:
+    """Build a narrow env for opt-in live Claude checks.
+
+    The fake contract can inherit the parent env because it never calls a
+    hosted model. The live gate is different: it should keep auth and platform
+    plumbing, but not point Claude back at the user's real home/config tree.
+    """
+    env: dict[str, str] = {}
+    for key, value in os.environ.items():
+        if (
+            key in _LIVE_CLAUDE_PLATFORM_ENV
+            or key in _LIVE_CLAUDE_AUTH_EXACT_ENV
+            or key.startswith(_LIVE_CLAUDE_AUTH_PREFIX_ENV)
+        ):
+            env[key] = value
+    env.update({
+        "HOME": str(paths.home),
+        "USERPROFILE": str(paths.home),
+        "APPDATA": str(paths.appdata),
+        "LOCALAPPDATA": str(paths.localappdata),
+        "XDG_CONFIG_HOME": str(paths.xdg_config),
+        "XDG_CACHE_HOME": str(paths.xdg_cache),
+        "PYTHONUTF8": "1",
+    })
+    env.pop("CLAUDE_HOME", None)
     return env
 
 
@@ -362,12 +432,222 @@ def _assert_fake_claude_hook_output(stdout: str) -> None:
             raise AssertionError(f"fake Claude hook smoke did not run {expected}")
 
 
+def _quote_command(parts: Sequence[str | Path]) -> str:
+    return " ".join(shlex.quote(str(part)) for part in parts)
+
+
+def write_live_claude_sentinel_script(path: Path) -> None:
+    path.write_text(
+        '''"""Append Claude Code hook events to a clean-host sentinel file."""\n'''
+        "from __future__ import annotations\n\n"
+        "import argparse\n"
+        "import json\n"
+        "import os\n"
+        "import sys\n"
+        "from pathlib import Path\n\n"
+        "def main() -> int:\n"
+        "    parser = argparse.ArgumentParser()\n"
+        "    parser.add_argument('--event', required=True)\n"
+        "    parser.add_argument('--out', required=True)\n"
+        "    args = parser.parse_args()\n"
+        "    raw = sys.stdin.read()\n"
+        "    try:\n"
+        "        payload = json.loads(raw) if raw.strip() else {}\n"
+        "    except json.JSONDecodeError:\n"
+        "        payload = {'invalid_json_prefix': raw[:200]}\n"
+        "    out = Path(args.out)\n"
+        "    out.parent.mkdir(parents=True, exist_ok=True)\n"
+        "    record = {\n"
+        "        'event': args.event,\n"
+        "        'hook_event_name': payload.get('hook_event_name'),\n"
+        "        'tool_name': payload.get('tool_name'),\n"
+        "        'cwd': os.getcwd(),\n"
+        "        'argv': sys.argv[1:],\n"
+        "    }\n"
+        "    with out.open('a', encoding='utf-8') as handle:\n"
+        "        handle.write(json.dumps(record, sort_keys=True) + '\\n')\n"
+        "    return 0\n\n"
+        "if __name__ == '__main__':\n"
+        "    raise SystemExit(main())\n",
+        encoding="utf-8",
+    )
+
+
+def _append_live_claude_sentinel_hooks(
+    *,
+    settings_json: Path,
+    python_bin: Path,
+    sentinel_script: Path,
+    sentinel_jsonl: Path,
+) -> None:
+    settings = json.loads(settings_json.read_text(encoding="utf-8"))
+    hooks = settings.setdefault("hooks", {})
+    post_command = _quote_command((
+        python_bin,
+        sentinel_script,
+        "--event",
+        "PostToolUse",
+        "--out",
+        sentinel_jsonl,
+    ))
+    stop_command = _quote_command((
+        python_bin,
+        sentinel_script,
+        "--event",
+        "Stop",
+        "--out",
+        sentinel_jsonl,
+    ))
+    hooks.setdefault("PostToolUse", []).append({
+        "matcher": ".*",
+        "hooks": [{"type": "command", "command": post_command}],
+    })
+    hooks.setdefault("Stop", []).append({
+        "hooks": [{"type": "command", "command": stop_command}],
+    })
+    tmp_path = settings_json.with_name(f"{settings_json.name}.live.tmp")
+    tmp_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp_path, settings_json)
+
+
+def _sentinel_records(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        raise AssertionError(f"live Claude sentinel was not written: {path}")
+    records: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise AssertionError(f"live Claude sentinel has invalid JSONL: {line}") from exc
+        if not isinstance(record, dict):
+            raise AssertionError(f"live Claude sentinel record is not an object: {line}")
+        records.append(record)
+    return records
+
+
+def _assert_live_claude_sentinel(path: Path, *, expected_cwd: Path) -> None:
+    records = _sentinel_records(path)
+    events = {str(record.get("event") or "") for record in records}
+    for expected in _EXPECTED_LIVE_CLAUDE_EVENTS:
+        if expected not in events:
+            raise AssertionError(f"live Claude sentinel did not record {expected}")
+    expected_resolved = expected_cwd.resolve()
+    for record in records:
+        cwd = record.get("cwd")
+        if cwd is None or Path(str(cwd)).resolve() != expected_resolved:
+            raise AssertionError(
+                "live Claude sentinel recorded unexpected cwd: "
+                f"{cwd!r}, expected {expected_resolved}"
+            )
+        hook_event = record.get("hook_event_name")
+        event = record.get("event")
+        if hook_event not in (None, event):
+            raise AssertionError(
+                f"live Claude sentinel event mismatch: event={event!r}, "
+                f"hook_event_name={hook_event!r}"
+            )
+
+
+def _require_live_claude_ack(max_budget_usd: float) -> None:
+    if os.environ.get(LIVE_CLAUDE_ACK_ENV) != LIVE_CLAUDE_ACK_VALUE:
+        raise AssertionError(
+            f"set {LIVE_CLAUDE_ACK_ENV}={LIVE_CLAUDE_ACK_VALUE} to run "
+            "the quota-consuming live Claude Code gate"
+        )
+    if max_budget_usd <= 0 or max_budget_usd > LIVE_CLAUDE_MAX_BUDGET_USD:
+        raise AssertionError(
+            "live Claude budget must be greater than 0 and no more than "
+            f"{LIVE_CLAUDE_MAX_BUDGET_USD} USD"
+        )
+
+
+def _live_claude_command(
+    *,
+    claude_bin: Path,
+    settings_json: Path,
+    max_budget_usd: float,
+) -> list[str]:
+    return [
+        str(claude_bin),
+        "--settings",
+        str(settings_json),
+        "--setting-sources",
+        "user",
+        "--output-format",
+        "stream-json",
+        "--include-hook-events",
+        "--no-session-persistence",
+        "--max-budget-usd",
+        str(max_budget_usd),
+        "--allowedTools",
+        "Bash(python --version)",
+        "-p",
+        "Use Bash to run exactly `python --version`, then stop.",
+    ]
+
+
+def _run_live_claude_gate(
+    *,
+    runner: CommandRunner,
+    paths: ContractPaths,
+    python_bin: Path,
+    settings_json: Path,
+    max_budget_usd: float,
+    claude_bin: Path | None,
+) -> None:
+    _require_live_claude_ack(max_budget_usd)
+    resolved_claude = claude_bin if claude_bin is not None else None
+    if resolved_claude is None:
+        claude = shutil.which("claude")
+        resolved_claude = Path(claude) if claude is not None else None
+    if resolved_claude is None:
+        raise AssertionError("claude executable was not found on PATH")
+    live_env = live_claude_env(paths)
+    runner.run(
+        [str(resolved_claude), "--version"],
+        cwd=paths.tiny_repo,
+        env=live_env,
+        timeout_seconds=LIVE_CLAUDE_PREFLIGHT_TIMEOUT_SECONDS,
+    )
+    runner.run(
+        [str(resolved_claude), "auth", "status"],
+        cwd=paths.tiny_repo,
+        env=live_env,
+        timeout_seconds=LIVE_CLAUDE_PREFLIGHT_TIMEOUT_SECONDS,
+    )
+    sentinel_script = paths.root / "live-claude-hook-sentinel.py"
+    sentinel_jsonl = paths.root / "live-claude-hooks.jsonl"
+    write_live_claude_sentinel_script(sentinel_script)
+    _append_live_claude_sentinel_hooks(
+        settings_json=settings_json,
+        python_bin=python_bin,
+        sentinel_script=sentinel_script,
+        sentinel_jsonl=sentinel_jsonl,
+    )
+    runner.run(
+        _live_claude_command(
+            claude_bin=resolved_claude,
+            settings_json=settings_json,
+            max_budget_usd=max_budget_usd,
+        ),
+        cwd=paths.tiny_repo,
+        env=live_env,
+        timeout_seconds=LIVE_CLAUDE_PROMPT_TIMEOUT_SECONDS,
+    )
+    _assert_live_claude_sentinel(sentinel_jsonl, expected_cwd=paths.tiny_repo)
+
+
 def run_contract(
     *,
     project_root: Path,
     temp_root: Path,
     fast: bool,
     runner: CommandRunner | None = None,
+    run_live_claude: bool = False,
+    live_claude_max_budget_usd: float = LIVE_CLAUDE_DEFAULT_BUDGET_USD,
+    live_claude_bin: Path | None = None,
 ) -> None:
     runner = runner or CommandRunner()
     paths = make_paths(temp_root)
@@ -421,6 +701,15 @@ def run_contract(
         env=run_env,
     )
     _assert_fake_claude_hook_output(fake_claude_result.stdout)
+    if run_live_claude:
+        _run_live_claude_gate(
+            runner=runner,
+            paths=paths,
+            python_bin=py,
+            settings_json=claude_dir / "settings.json",
+            max_budget_usd=live_claude_max_budget_usd,
+            claude_bin=live_claude_bin,
+        )
 
     stack_profile = paths.root / "stack-profile.json"
     runner.run(
@@ -534,6 +823,28 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=repo_root(),
         help="Repository root to build. Default: inferred from this script.",
     )
+    parser.add_argument(
+        "--run-live-claude",
+        action="store_true",
+        help=(
+            "Also run a real Claude Code host smoke. Requires "
+            f"{LIVE_CLAUDE_ACK_ENV}={LIVE_CLAUDE_ACK_VALUE} and can consume quota."
+        ),
+    )
+    parser.add_argument(
+        "--live-claude-max-budget-usd",
+        type=float,
+        default=LIVE_CLAUDE_DEFAULT_BUDGET_USD,
+        help=(
+            "Maximum live Claude Code API budget for --run-live-claude. "
+            f"Default: {LIVE_CLAUDE_DEFAULT_BUDGET_USD}."
+        ),
+    )
+    parser.add_argument(
+        "--claude-bin",
+        type=Path,
+        help="Explicit Claude Code executable path for --run-live-claude.",
+    )
     return parser.parse_args(argv)
 
 
@@ -543,14 +854,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.temp_root is not None:
         temp_root = args.temp_root.resolve()
         temp_root.mkdir(parents=True, exist_ok=True)
-        run_contract(project_root=project_root, temp_root=temp_root, fast=args.fast)
+        run_contract(
+            project_root=project_root,
+            temp_root=temp_root,
+            fast=args.fast,
+            run_live_claude=args.run_live_claude,
+            live_claude_max_budget_usd=args.live_claude_max_budget_usd,
+            live_claude_bin=args.claude_bin,
+        )
         print(f"clean-host contract passed; temp root kept at {temp_root}")
         return 0
 
     temp_dir = tempfile.mkdtemp(prefix="ctx-clean-host-")
     temp_root = Path(temp_dir).resolve()
     try:
-        run_contract(project_root=project_root, temp_root=temp_root, fast=args.fast)
+        run_contract(
+            project_root=project_root,
+            temp_root=temp_root,
+            fast=args.fast,
+            run_live_claude=args.run_live_claude,
+            live_claude_max_budget_usd=args.live_claude_max_budget_usd,
+            live_claude_bin=args.claude_bin,
+        )
         print(f"clean-host contract passed under {temp_root}")
         return 0
     finally:

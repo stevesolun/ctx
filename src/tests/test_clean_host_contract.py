@@ -13,7 +13,12 @@ import pytest
 from scripts.clean_host_contract import (
     CommandRunner,
     CompletedCommand,
+    LIVE_CLAUDE_ACK_ENV,
+    LIVE_CLAUDE_ACK_VALUE,
     _assert_fake_claude_hook_output,
+    _assert_live_claude_sentinel,
+    _append_live_claude_sentinel_hooks,
+    _live_claude_command,
     assert_inside,
     isolated_env,
     make_paths,
@@ -37,8 +42,9 @@ class RecordingRunner(CommandRunner):
         cwd: Path,
         env: Mapping[str, str],
         check: bool = True,
+        timeout_seconds: float | None = None,
     ) -> CompletedCommand:
-        del cwd, env, check
+        del cwd, env, check, timeout_seconds
         call = tuple(args)
         self.calls.append(call)
         if call[:4] == (sys.executable, "-m", "pip", "wheel"):
@@ -74,6 +80,25 @@ class RecordingRunner(CommandRunner):
                 ],
             })
             return CompletedCommand(call, Path.cwd(), 0, stdout, "")
+        elif call and Path(call[0]).name.startswith("claude"):
+            if "-p" in call:
+                sentinel = self.venv.parent / "live-claude-hooks.jsonl"
+                sentinel.write_text(
+                    "\n".join([
+                        json.dumps({
+                            "event": "PostToolUse",
+                            "hook_event_name": "PostToolUse",
+                            "cwd": str(self.venv.parent / "tiny-fastapi-repo"),
+                        }),
+                        json.dumps({
+                            "event": "Stop",
+                            "hook_event_name": "Stop",
+                            "cwd": str(self.venv.parent / "tiny-fastapi-repo"),
+                        }),
+                    ]),
+                    encoding="utf-8",
+                )
+            return CompletedCommand(call, Path.cwd(), 0, "claude preflight\n", "")
         stdout = '{"stop_reason": "tool_denied"}' if "--deny-tool" in call else ""
         rc = 2 if "--deny-tool" in call else 0
         return CompletedCommand(call, Path.cwd(), rc, stdout, "")
@@ -91,6 +116,20 @@ def test_isolated_env_redirects_user_state(tmp_path: Path) -> None:
     assert env["XDG_CACHE_HOME"] == str(paths.xdg_cache)
     assert env["PIP_CACHE_DIR"] == str(paths.pip_cache)
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(paths.fake_modules)
+
+
+def test_isolated_env_does_not_inherit_caller_pythonpath(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = make_paths(tmp_path)
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "src"))
+
+    no_extra = isolated_env(paths)
+    with_extra = isolated_env(paths, extra_pythonpath=paths.fake_modules)
+
+    assert "PYTHONPATH" not in no_extra
+    assert with_extra["PYTHONPATH"] == str(paths.fake_modules)
 
 
 def test_assert_inside_rejects_escape(tmp_path: Path) -> None:
@@ -182,3 +221,137 @@ def test_contract_command_sequence_without_real_build(tmp_path: Path, monkeypatc
     assert any("ctx-scan-repo" in call and "--recommend" in call for call in joined)
     assert any("ctx run" in call or "ctx.exe run" in call for call in joined)
     assert any("--deny-tool ctx__wiki_get" in call for call in joined)
+
+
+def test_live_claude_command_is_bounded_and_streamed(tmp_path: Path) -> None:
+    command = _live_claude_command(
+        claude_bin=tmp_path / "claude",
+        settings_json=tmp_path / "settings.json",
+        max_budget_usd=0.02,
+    )
+
+    assert command[:2] == [str(tmp_path / "claude"), "--settings"]
+    assert "--output-format" in command
+    assert "stream-json" in command
+    assert "--include-hook-events" in command
+    assert "--max-budget-usd" in command
+    assert "0.02" in command
+    assert "--allowedTools" in command
+    assert "Bash(python --version)" in command
+    assert "-p" in command
+
+
+def test_live_claude_sentinel_hooks_are_appended_to_settings(tmp_path: Path) -> None:
+    settings_json = tmp_path / "settings.json"
+    sentinel_script = tmp_path / "live_sentinel.py"
+    sentinel_jsonl = tmp_path / "live_sentinel.jsonl"
+    settings_json.write_text(
+        json.dumps({
+            "hooks": {
+                "PostToolUse": [{"matcher": ".*", "hooks": []}],
+                "Stop": [{"hooks": []}],
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    _append_live_claude_sentinel_hooks(
+        settings_json=settings_json,
+        python_bin=tmp_path / "python",
+        sentinel_script=sentinel_script,
+        sentinel_jsonl=sentinel_jsonl,
+    )
+
+    settings = json.loads(settings_json.read_text(encoding="utf-8"))
+    commands = [
+        hook["command"]
+        for entries in settings["hooks"].values()
+        for entry in entries
+        for hook in entry["hooks"]
+        if hook.get("command")
+    ]
+    joined = "\n".join(commands)
+    assert str(sentinel_script) in joined
+    assert str(sentinel_jsonl) in joined
+    assert "PostToolUse" in settings["hooks"]
+    assert "Stop" in settings["hooks"]
+
+
+def test_live_claude_sentinel_requires_post_tool_and_stop(tmp_path: Path) -> None:
+    sentinel_jsonl = tmp_path / "sentinel.jsonl"
+    sentinel_jsonl.write_text(
+        "\n".join([
+            json.dumps({"event": "PostToolUse", "cwd": str(tmp_path)}),
+            json.dumps({"event": "Stop", "cwd": str(tmp_path)}),
+        ]),
+        encoding="utf-8",
+    )
+    _assert_live_claude_sentinel(sentinel_jsonl, expected_cwd=tmp_path)
+
+    sentinel_jsonl.write_text(
+        json.dumps({"event": "PostToolUse", "cwd": str(tmp_path)}),
+        encoding="utf-8",
+    )
+    with pytest.raises(AssertionError):
+        _assert_live_claude_sentinel(sentinel_jsonl, expected_cwd=tmp_path)
+
+
+def test_live_claude_ack_required_before_running_live_host(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = make_paths(tmp_path)
+    runner = RecordingRunner(paths.venv)
+    monkeypatch.setenv("CTX_TEST_HOME_OVERRIDE", str(paths.home))
+    monkeypatch.delenv(LIVE_CLAUDE_ACK_ENV, raising=False)
+
+    with pytest.raises(AssertionError, match=LIVE_CLAUDE_ACK_ENV):
+        run_contract(
+            project_root=tmp_path,
+            temp_root=tmp_path,
+            fast=True,
+            runner=runner,
+            run_live_claude=True,
+        )
+
+    assert not any(
+        call and Path(call[0]).name.startswith("claude")
+        for call in runner.calls
+    )
+
+
+def test_live_claude_gate_runs_only_when_acknowledged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = make_paths(tmp_path)
+    runner = RecordingRunner(paths.venv)
+    claude_bin = tmp_path / ("claude.exe" if os.name == "nt" else "claude")
+    monkeypatch.setenv("CTX_TEST_HOME_OVERRIDE", str(paths.home))
+    monkeypatch.setenv(LIVE_CLAUDE_ACK_ENV, LIVE_CLAUDE_ACK_VALUE)
+
+    run_contract(
+        project_root=tmp_path,
+        temp_root=tmp_path,
+        fast=True,
+        runner=runner,
+        run_live_claude=True,
+        live_claude_max_budget_usd=0.02,
+        live_claude_bin=claude_bin,
+    )
+
+    live_calls = [
+        call
+        for call in runner.calls
+        if call and Path(call[0]).name.startswith("claude")
+    ]
+    assert [call[1:] for call in live_calls[:2]] == [("--version",), ("auth", "status")]
+    prompt_calls = [call for call in live_calls if "-p" in call]
+    assert len(prompt_calls) == 1
+    live_call = prompt_calls[0]
+    assert "--settings" in live_call
+    assert str(paths.home / ".claude" / "settings.json") in live_call
+    assert "--include-hook-events" in live_call
+    assert "--max-budget-usd" in live_call
+    assert "0.02" in live_call
+    assert (paths.root / "live-claude-hooks.jsonl").exists()

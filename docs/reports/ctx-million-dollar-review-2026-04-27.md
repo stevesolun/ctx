@@ -805,6 +805,35 @@ Verification observed:
 - `git diff --check` reported no whitespace errors.
 - `python -m pytest -q` reported `3243 passed, 8 skipped in 410.96s`.
 
+### Phase 37: Opt-in live Claude host gate
+
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- Extended `scripts/clean_host_contract.py` with `--run-live-claude`, `--live-claude-max-budget-usd`, and `--claude-bin`.
+- The live path is unreachable unless `CTX_LIVE_CLAUDE_ACK=uses_quota` is present, and the budget must be greater than zero and no more than 1 USD.
+- The live path runs non-spending `claude --version` and `claude auth status` preflights before constructing the quota-consuming `claude -p` command.
+- The live prompt is budget-capped, streamed with hook events, uses an argv command list, disables session persistence, and allows only `Bash(python --version)`.
+- Hook execution proof no longer depends on model stdout: the contract appends temporary PostToolUse and Stop sentinel hooks to the isolated `settings.json` and requires both records in `live-claude-hooks.jsonl` under the temp root.
+- The live host environment is narrowed to platform plumbing plus explicit provider/auth variables while keeping home/config/cache redirected to the temp root.
+- The default fake-host path strips caller `PYTHONPATH`, so a developer shell cannot accidentally mask wheel packaging problems by importing source-tree modules.
+- `docs/harness/clean-host-contract.md` now documents the manual live-host command, auth assumptions, budget acknowledgement, and sentinel artifact.
+
+Verification observed:
+
+- Red-first `python -m pytest src\tests\test_clean_host_contract.py -q` failed before implementation because the new live-gate symbols did not exist.
+- `claude --help` showed local support for `--settings`, `--setting-sources`, `--output-format stream-json`, `--include-hook-events`, and `--max-budget-usd`.
+- `python -m pytest src\tests\test_clean_host_contract.py -q` reported `14 passed`.
+- `python -m ruff check scripts\clean_host_contract.py src\tests\test_clean_host_contract.py` reported `All checks passed!`.
+- `python -m mypy scripts\clean_host_contract.py src\tests\test_clean_host_contract.py` reported `Success: no issues found in 2 source files`.
+- `python scripts\clean_host_contract.py --fast` built and installed `claude_ctx-0.6.4-py3-none-any.whl`, executed five generated hook commands through the fake host with `failed: 0`, ran the rest of the installed clean-host contract, and reported `clean-host contract passed`.
+- `python -m ruff check .` reported `All checks passed!`.
+- `python -m mypy src` reported `Success: no issues found in 238 source files`.
+- `python -m compileall -q src hooks scripts` completed successfully.
+- `git diff --check` reported no whitespace errors.
+- `python -m pytest -q` reported `3249 passed, 8 skipped in 456.87s`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -845,7 +874,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-36 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-37 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host execution, live third-party integrations, release/tag readiness, and exhaustive crash-consistency scenarios noted below.
 
 ## P0 Findings
 
@@ -2009,13 +2038,15 @@ Success criteria:
 The original P0/P1 remediation work is complete in this branch. The remaining work is release-hardening, not another pass over the same fixed blockers.
 
 1. Run a clean-machine A-Z host flow against a real Claude Code installation:
+   - The opt-in live Claude host gate exists as of Phase 37.
    - Install from the built wheel into a clean virtualenv.
    - Use an isolated temporary home/config directory.
    - Run `ctx-init --hooks --graph`.
-   - Confirm generated hooks execute in the host, not only that they are written.
-   - Validate real Claude Code's Windows/Linux hook command execution semantics, since Phase 32's fake host executes generated commands deterministically by argv rather than through an interactive Claude process.
+   - Run `CTX_LIVE_CLAUDE_ACK=uses_quota python scripts/clean_host_contract.py --fast --run-live-claude --live-claude-max-budget-usd 0.05`.
+   - Confirm generated hooks execute in the host by inspecting the sentinel records written under the temp root.
+   - Validate real Claude Code's Windows/Linux hook command execution semantics on at least one trusted Windows host and one trusted Linux host.
    - Run `ctx-scan-repo --recommend` on a small real repo and verify the same bundle through CLI, Python API, MCP, and Claude Code hook surfaces.
-   - Keep this manual and quota-acknowledged: discovery showed `claude -p` can hit `error_max_budget_usd`, so the gate should require an explicit environment acknowledgement and a small `--max-budget-usd` cap before any live model call.
+   - Keep this manual and quota-acknowledged: discovery showed `claude -p` can hit `error_max_budget_usd`, and this branch now requires an explicit environment acknowledgement plus a small `--max-budget-usd` cap before any live model call.
 
 2. Validate live third-party MCP behavior:
    - The opt-in live MCP compatibility gate exists as of Phase 35.
