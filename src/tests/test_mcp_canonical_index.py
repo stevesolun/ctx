@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -228,7 +229,7 @@ class TestRebuild:
 class TestMcpAddIntegration:
     """Exercise the cached dedup path through mcp_add's public helper."""
 
-    def _import_find(self) -> object:
+    def _import_find(self) -> Callable[[Path, str | None], Path | None]:
         # Lazy import to keep this test file loadable when mcp_add's
         # heavier deps (yaml, wiki_sync) have a transient issue.
         from mcp_add import _find_existing_by_github_url  # noqa: PLC0415

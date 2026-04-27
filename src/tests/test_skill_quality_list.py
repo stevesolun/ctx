@@ -7,6 +7,7 @@ Asserts that lifecycle sidecars written by ctx_lifecycle do not appear in
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -128,9 +129,8 @@ class TestCmdListFiltersLifecycleSidecars:
         assert rows == [], f"Expected empty list, got: {rows}"
 
 
-def _make_list_args(*, grade: str | None, json_out: bool) -> object:
+def _make_list_args(*, grade: str | None, json_out: bool) -> argparse.Namespace:
     """Return a namespace-like object for cmd_list."""
-    import argparse
     ns = argparse.Namespace()
     ns.grade = grade
     ns.json = json_out

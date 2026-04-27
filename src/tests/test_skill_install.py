@@ -8,6 +8,7 @@ selection logic, multi-slug dedup, references mirror, and the CLI.
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -285,10 +286,13 @@ class TestInstallSkill:
 
 
 class TestSplitSlugs:
-    def _ns(self, **kwargs: object) -> object:
-        import argparse as _a
-        ns = _a.Namespace()
-        defaults = {"slug": None, "slugs": None, "slugs_positional": []}
+    def _ns(self, **kwargs: object) -> argparse.Namespace:
+        ns = argparse.Namespace()
+        defaults: dict[str, object] = {
+            "slug": None,
+            "slugs": None,
+            "slugs_positional": [],
+        }
         defaults.update(kwargs)
         for k, v in defaults.items():
             setattr(ns, k, v)
