@@ -158,6 +158,29 @@ class _RunningTotals:
         )
 
 
+def _budget_stop_reason(
+    totals: _RunningTotals,
+    *,
+    budget_usd: float | None,
+    budget_tokens: int | None,
+) -> tuple[StopReason | None, str]:
+    if budget_usd is not None and totals.cost_usd > budget_usd:
+        return (
+            "cost_budget",
+            f"cumulative cost ${totals.cost_usd:.4f} exceeded budget "
+            f"${budget_usd:.4f}",
+        )
+    if budget_tokens is not None:
+        total_tokens = totals.input_tokens + totals.output_tokens
+        if total_tokens > budget_tokens:
+            return (
+                "token_budget",
+                f"cumulative tokens {total_tokens} exceeded budget "
+                f"{budget_tokens}",
+            )
+    return None, ""
+
+
 # ── Main loop ──────────────────────────────────────────────────────────────
 
 
@@ -296,6 +319,15 @@ def run_loop(
         # truncation doesn't masquerade as success.
         if not response.tool_calls:
             final_message = response.content or ""
+            budget_stop, budget_detail = _budget_stop_reason(
+                totals,
+                budget_usd=budget_usd,
+                budget_tokens=budget_tokens,
+            )
+            if budget_stop is not None:
+                stop_reason = budget_stop
+                stop_detail = budget_detail
+                break
             finish = (response.finish_reason or "").lower()
             if finish == "length":
                 stop_reason = "length"
@@ -373,22 +405,15 @@ def run_loop(
         # Budget checks run AFTER the tool responses land in the
         # conversation — the caller sees the model's last pre-budget
         # action in the session log.
-        if budget_usd is not None and totals.cost_usd > budget_usd:
-            stop_reason = "cost_budget"
-            stop_detail = (
-                f"cumulative cost ${totals.cost_usd:.4f} exceeded budget "
-                f"${budget_usd:.4f}"
-            )
+        budget_stop, budget_detail = _budget_stop_reason(
+            totals,
+            budget_usd=budget_usd,
+            budget_tokens=budget_tokens,
+        )
+        if budget_stop is not None:
+            stop_reason = budget_stop
+            stop_detail = budget_detail
             break
-        if budget_tokens is not None:
-            total_tokens = totals.input_tokens + totals.output_tokens
-            if total_tokens > budget_tokens:
-                stop_reason = "token_budget"
-                stop_detail = (
-                    f"cumulative tokens {total_tokens} exceeded budget "
-                    f"{budget_tokens}"
-                )
-                break
 
     else:
         # Fell out of while via hitting max_iterations without break.

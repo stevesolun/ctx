@@ -265,6 +265,40 @@ class TestBudgets:
         assert result.stop_reason == "token_budget"
         assert result.usage.input_tokens + result.usage.output_tokens > 250
 
+    def test_cost_budget_trips_on_terminal_response(self) -> None:
+        provider = _Scripted(
+            [_stop_response("done", usage=Usage(cost_usd=0.50))]
+        )
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="spend once",
+            budget_usd=0.25,
+        )
+        assert result.stop_reason == "cost_budget"
+        assert result.final_message == "done"
+        assert result.usage.cost_usd is not None
+        assert result.usage.cost_usd > 0.25
+
+    def test_token_budget_trips_on_terminal_response(self) -> None:
+        provider = _Scripted(
+            [
+                _stop_response(
+                    "done",
+                    usage=Usage(input_tokens=100, output_tokens=50),
+                )
+            ]
+        )
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="burn once",
+            budget_tokens=100,
+        )
+        assert result.stop_reason == "token_budget"
+        assert result.final_message == "done"
+        assert result.usage.input_tokens + result.usage.output_tokens > 100
+
 
 # ── Termination: cancellation ───────────────────────────────────────────────
 

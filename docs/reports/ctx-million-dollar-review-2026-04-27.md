@@ -126,14 +126,33 @@ Verification observed:
 - Static checks passed: ruff produced no output; mypy reported `Success: no issues found in 59 source files`; compileall completed.
 - A monolithic `python -m pytest -q` run timed out after 15 minutes and was stopped. The same test set then passed in two alphabetical shards: `1752 passed, 6 skipped` and `1427 passed, 1 skipped`.
 
+### Phase 4: Terminal response budget enforcement
+
+Status: implemented in this worktree.
+
+What changed:
+
+- `run_loop()` now checks accumulated cost/token budgets before a no-tool provider response can be classified as `completed`, `length`, `empty_response`, or `provider_other`.
+- Budget stop detail construction is centralized in `_budget_stop_reason()` so terminal and post-tool budget handling stay consistent.
+- Existing post-tool budget behavior is preserved: budget checks still run after tool responses and compaction usage are recorded.
+
+Verification observed:
+
+- Red-first budget tests failed as expected: terminal high-cost and high-token responses returned `completed`.
+- Focused budget suite passed after the fix: `4 passed`.
+- Focused harness/compaction suite passed: `58 passed`.
+- Broader generic harness suite passed: `235 passed`.
+- Static checks: `python -m ruff check src` reported `All checks passed!`; `python -m compileall -q src` completed; touched-file mypy with `MYPYPATH=src --namespace-packages --explicit-package-bases` reported `Success: no issues found in 2 source files`.
+- Full-repo `python -m mypy src` is not a passing configured check in this repository; it reported 506 pre-existing errors across legacy modules/tests, mostly missing stubs/untyped import boundaries plus unrelated existing type errors.
+
 ## Blocker Summary
 
-P0/P1 blockers I would not ship over. Items 1-3 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible.
+P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible.
 
 1. `ctx-init --hooks/--graph` invokes removed modules and still exits success.
 2. Installed Claude hooks point at files not shipped in the wheel and use non-portable shell commands.
 3. Recommendation ranking is still split between the shared recommender and Claude Code hooks.
-4. Harness budget caps are bypassed on terminal model responses.
+4. Harness budget caps are bypassed on terminal model responses. Fixed in Phase 4; retained as original review evidence.
 5. MCP request timeouts can hang forever on blocking stdout reads.
 6. MCP subprocesses inherit all parent secrets by default.
 7. Model tool calls execute without an approval/policy gate.
@@ -231,6 +250,10 @@ Required fix:
 - Add cross-platform hook command smoke tests.
 
 ### P0-3: Harness budget limits are bypassed by final answers
+
+Current status:
+
+Implemented in Phase 4. `run_loop()` now checks `_budget_stop_reason()` inside the terminal no-tool response path before any successful completion classification, and the same helper is reused for post-tool/compaction budget checks.
 
 Evidence:
 
