@@ -22,12 +22,12 @@ Usage
 
 import argparse
 import os
-import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ctx_config import cfg
+from ctx.adapters.claude_code.install.install_utils import safe_copy_file
 from intake_pipeline import IntakeRejected, check_intake, record_embedding
 from wiki_batch_entities import generate_agent_page
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
@@ -45,9 +45,8 @@ def install_agent(source: Path, agents_dir: Path, name: str) -> Path:
     Unlike :func:`skill_add.install_skill`, agents are flat single-file
     entries — no per-agent subdirectory.
     """
-    agents_dir.mkdir(parents=True, exist_ok=True)
     dest = agents_dir / f"{name}.md"
-    shutil.copy2(source, dest)
+    safe_copy_file(source, dest, dest_root=agents_dir)
     return dest
 
 

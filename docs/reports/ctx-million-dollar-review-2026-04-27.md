@@ -470,6 +470,21 @@ Verification observed:
 - `python -m ruff check src\ctx\core\wiki\wiki_sync.py src\tests\test_wiki_sync.py` reported `All checks passed!`.
 - `python -m mypy src\ctx\core\wiki\wiki_sync.py src\tests\test_wiki_sync.py` reported `Success: no issues found in 2 source files`.
 
+### Phase 21: Source-add symlink hardening
+
+Status: implemented in this worktree.
+
+What changed:
+
+- Flat `skill_add.install_skill()` and `agent_add.install_agent()` now use the shared guarded copy helper rather than raw `shutil.copy2`.
+- Regression tests cover symlinked source rejection and agent destination symlink overwrite rejection.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_skill_add.py -q` reported `51 passed`.
+- `python -m ruff check src\skill_add.py src\agent_add.py src\tests\test_skill_add.py` reported `All checks passed!`.
+- `python -m mypy src\skill_add.py src\agent_add.py src\tests\test_skill_add.py` reported `Success: no issues found in 3 source files`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full 234-file `src` tree with zero mypy errors.
@@ -486,7 +501,7 @@ P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in 
 10. Restore overwrites live state without a rollback snapshot. Fixed in Phase 17.
 11. Monitor dashboard has unauthenticated mutation endpoints and path traversal risks. Fixed in Phase 18.
 12. Wiki/install flows follow symlinks from wiki content into live Claude directories. Fixed across install copy paths in Phase 19 and wiki write paths in Phase 20.
-13. Tar extraction and source install paths are stale/unsafe.
+13. Tar extraction and source install paths are stale/unsafe. Source install paths fixed in Phase 21; tar member hardening remains.
 14. CI/release can publish a tag without tests/package smoke/version alignment.
 15. Tests mock the exact command boundaries that are currently broken.
 

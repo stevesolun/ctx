@@ -15,7 +15,6 @@ Usage:
 import argparse
 import os
 import re
-import shutil
 import sys
 import yaml  # type: ignore[import-untyped]
 from datetime import datetime, timezone
@@ -24,6 +23,7 @@ from pathlib import Path
 from batch_convert import convert_skill
 from ctx_config import cfg
 from intake_pipeline import IntakeRejected, check_intake, record_embedding
+from ctx.adapters.claude_code.install.install_utils import safe_copy_file
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
 from ctx.core.wiki.wiki_utils import validate_skill_name
 
@@ -44,9 +44,8 @@ def infer_tags(name: str, content: str) -> list[str]:
 def install_skill(source: Path, skills_dir: Path, name: str) -> Path:
     """Copy SKILL.md into skills_dir/<name>/SKILL.md. Returns the installed path."""
     dest_dir = skills_dir / name
-    dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / "SKILL.md"
-    shutil.copy2(source, dest)
+    safe_copy_file(source, dest, dest_root=skills_dir)
     return dest
 
 

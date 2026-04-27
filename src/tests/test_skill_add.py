@@ -110,10 +110,19 @@ for _name in ("wiki_sync", "ctx.core.wiki.wiki_sync",
         else:
             sys.modules[_name] = original
 
+import agent_add as _agent_add  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _symlink_to(target: Path, link: Path, *, target_is_directory: bool) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+
 
 def _make_entity_page(wiki: Path, name: str, tags: list[str]) -> None:
     entities = wiki / "entities" / "skills"
@@ -182,6 +191,26 @@ class TestInstallSkill:
         (existing_dir / "SKILL.md").write_text("# old\n")
         installed = install_skill(source, skills_dir, "existing")
         assert installed.read_text() == "# new content\n"
+
+    def test_rejects_symlinked_source(self, tmp_path):
+        real_source = tmp_path / "real.md"
+        link_source = tmp_path / "SKILL.md"
+        real_source.write_text("# source\n", encoding="utf-8")
+        _symlink_to(real_source, link_source, target_is_directory=False)
+        with pytest.raises(ValueError, match="symlinked source"):
+            install_skill(link_source, tmp_path / "skills", "linked-source")
+
+    def test_agent_install_rejects_symlinked_destination(self, tmp_path):
+        source = tmp_path / "agent.md"
+        outside = tmp_path / "outside.md"
+        agents_dir = tmp_path / "agents"
+        source.write_text("# agent\n", encoding="utf-8")
+        outside.write_text("outside\n", encoding="utf-8")
+        agents_dir.mkdir()
+        _symlink_to(outside, agents_dir / "agent.md", target_is_directory=False)
+        with pytest.raises(ValueError, match="symlinked destination file"):
+            _agent_add.install_agent(source, agents_dir, "agent")
+        assert outside.read_text(encoding="utf-8") == "outside\n"
 
 
 # ---------------------------------------------------------------------------
