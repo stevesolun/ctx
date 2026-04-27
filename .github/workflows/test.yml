@@ -32,6 +32,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[dev]"
 
+      - name: Run static quality gates
+        run: |
+          python -m ruff check src hooks scripts
+          python -m mypy src
+          python -m pip check
+
       - name: Run tests with coverage gate
         # --cov-fail-under=40 is the FLOOR, not the goal. QA-expert
         # flagged zero coverage on install CLIs, install_utils,
@@ -82,6 +88,64 @@ jobs:
             src/tests/test_alive_loop_e2e.py \
             src/tests/test_fuzz_yaml_rendering.py
 
+  package-smoke:
+    name: "Wheel package smoke"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Build and inspect wheel
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Install wheel in clean venv
+        run: |
+          python -m venv .venv-smoke
+          . .venv-smoke/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          python -m pip check
+          python - <<'PY'
+          from importlib.metadata import entry_points, version
+
+          import ctx
+
+          dist_version = version("claude-ctx")
+          if ctx.__version__ != dist_version:
+              raise SystemExit(
+                  f"ctx.__version__={ctx.__version__!r} != metadata {dist_version!r}"
+              )
+
+          scripts = [
+              ep for ep in entry_points(group="console_scripts")
+              if ep.name == "ctx" or ep.name.startswith("ctx-")
+          ]
+          failures = []
+          for ep in scripts:
+              try:
+                  ep.load()
+              except Exception as exc:
+                  failures.append(f"{ep.name}: {exc!r}")
+          if failures:
+              raise SystemExit("console script load failures:\n" + "\n".join(failures))
+          print(f"loaded {len(scripts)} ctx console scripts from wheel {dist_version}")
+          PY
+          ctx-init --help >/dev/null
+          ctx-scan-repo --help >/dev/null
+          ctx-wiki-graphify --help >/dev/null
+          ctx --help >/dev/null
+
   no-test-no-merge:
     name: "Every src/*.py change must touch a src/tests/*.py"
     runs-on: ubuntu-latest
@@ -104,6 +168,7 @@ jobs:
           set -euo pipefail
           BASE="${{ github.event.pull_request.base.sha }}"
           HEAD="${{ github.event.pull_request.head.sha }}"
+          LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
           CHANGED=$(git diff --name-only "$BASE" "$HEAD" -- 'src/**/*.py' 'src/**/*.json' || true)
           SRC=$(echo "$CHANGED" | grep -E '^src/.*\.py$' | grep -v '^src/tests/' || true)
           TEST=$(echo "$CHANGED" | grep -E '^src/tests/.*\.py$' || true)
@@ -113,6 +178,10 @@ jobs:
             exit 0
           fi
           if [ -z "$TEST" ]; then
+            if echo "$LABELS" | grep -q '"no-tests-needed"'; then
+              echo "Policy exempted by no-tests-needed label."
+              exit 0
+            fi
             echo "::error::Policy violation — src/*.py changed but no src/tests/*.py touched in this PR."
             echo "Source files changed without accompanying test:"
             echo "$SRC"

@@ -40,13 +40,72 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install build backend
+      - name: Install release tooling
         run: |
           python -m pip install --upgrade pip
-          python -m pip install build
+          python -m pip install build packaging twine
+
+      - name: Validate tag matches package version
+        if: github.event_name == 'push'
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from packaging.version import Version
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          if not tag.startswith("v"):
+              raise SystemExit(f"release tag must start with v: {tag}")
+
+          with open("pyproject.toml", "rb") as fh:
+              package_version = tomllib.load(fh)["project"]["version"]
+
+          tag_version = str(Version(tag[1:]))
+          normalized_package_version = str(Version(package_version))
+          if tag_version != normalized_package_version:
+              raise SystemExit(
+                  f"tag {tag!r} does not match pyproject version {package_version!r}"
+              )
+          print(f"release version {package_version} matches tag {tag}")
+          PY
 
       - name: Build distributions
         run: python -m build
+
+      - name: Check distributions
+        run: python -m twine check dist/*
+
+      - name: Smoke install wheel
+        run: |
+          python -m venv .venv-smoke
+          . .venv-smoke/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          python -m pip check
+          python - <<'PY'
+          from importlib.metadata import entry_points, version
+
+          import ctx
+
+          dist_version = version("claude-ctx")
+          if ctx.__version__ != dist_version:
+              raise SystemExit(
+                  f"ctx.__version__={ctx.__version__!r} != metadata {dist_version!r}"
+              )
+          scripts = [
+              ep for ep in entry_points(group="console_scripts")
+              if ep.name == "ctx" or ep.name.startswith("ctx-")
+          ]
+          failures = []
+          for ep in scripts:
+              try:
+                  ep.load()
+              except Exception as exc:
+                  failures.append(f"{ep.name}: {exc!r}")
+          if failures:
+              raise SystemExit("console script load failures:\n" + "\n".join(failures))
+          print(f"loaded {len(scripts)} ctx console scripts from wheel {dist_version}")
+          PY
 
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4

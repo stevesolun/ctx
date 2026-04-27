@@ -505,6 +505,30 @@ Verification observed:
 - `python -m mypy src\update_repo_stats.py src\tests\test_update_repo_stats.py` reported `Success: no issues found in 2 source files`.
 - `python -m mypy src` reported `Success: no issues found in 235 source files`.
 
+### Phase 23: CI and release quality gates
+
+Status: implemented in this worktree.
+
+What changed:
+
+- The main test workflow now runs Ruff, full configured mypy, and `pip check` before pytest in the OS/Python matrix.
+- The test workflow now includes a clean wheel smoke job that builds distributions, runs `twine check`, installs the wheel into a fresh virtualenv, runs `pip check`, validates `ctx.__version__` against installed metadata, loads all `ctx` console script entrypoints, and runs representative CLI help commands.
+- The no-test-no-merge workflow's documented `no-tests-needed` label exemption is now implemented instead of only mentioned in the error text.
+- The publish workflow now validates that a pushed release tag matches `pyproject.toml` version using normalized Python package versions.
+- The publish workflow now runs `twine check` and the same clean wheel install/entrypoint smoke before uploading publishable artifacts.
+- `ctx.__version__` now matches the current package version, and the new smoke gates fail if it drifts from installed metadata.
+
+Verification observed:
+
+- `python -m ruff check src hooks scripts` reported `All checks passed!`.
+- `python -m mypy src` reported `Success: no issues found in 235 source files`.
+- `python -m compileall -q src\ctx\__init__.py` completed.
+- Workflow YAML parse probe reported `workflow yaml parsed`.
+- `PYTHONPATH=src python -c "import ctx; ..."` reported source `ctx.__version__` as `0.6.4`.
+- Clean dev virtualenv `pip install ".[dev]"` followed by `python -m pip check` reported `No broken requirements found`.
+- Clean wheel virtualenv smoke reported `twine check` passed for the wheel, `pip check` reported `No broken requirements found`, `loaded 27 ctx console scripts from wheel 0.6.4`, and representative CLI help commands returned success.
+- The shared review environment still reports the pre-existing global `litellm`/`click` conflict on `python -m pip check`; the new gates were verified in clean virtualenvs.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full 234-file `src` tree with zero mypy errors.
@@ -522,7 +546,7 @@ P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in 
 11. Monitor dashboard has unauthenticated mutation endpoints and path traversal risks. Fixed in Phase 18.
 12. Wiki/install flows follow symlinks from wiki content into live Claude directories. Fixed across install copy paths in Phase 19 and wiki write paths in Phase 20.
 13. Tar extraction and source install paths are stale/unsafe. Source install paths fixed in Phase 21; tar member hardening fixed in Phase 22.
-14. CI/release can publish a tag without tests/package smoke/version alignment.
+14. CI/release can publish a tag without tests/package smoke/version alignment. Fixed in Phase 23.
 15. Tests mock the exact command boundaries that are currently broken.
 
 ## Product Intent As Understood
