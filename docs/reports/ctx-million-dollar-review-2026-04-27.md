@@ -374,6 +374,22 @@ Verification observed:
 - `python -m ruff check src\ctx\adapters\generic\tools\mcp_router.py src\tests\test_mcp_router.py src\tests\fixtures\fake_mcp_server.py` reported `All checks passed!`.
 - `python -m mypy src\ctx\adapters\generic\tools\mcp_router.py src\tests\test_mcp_router.py src\tests\fixtures\fake_mcp_server.py` reported `Success: no issues found in 3 source files`.
 
+### Phase 15: Resume MCP execution gate
+
+Status: implemented in this worktree.
+
+What changed:
+
+- `ctx resume` no longer starts MCP servers reconstructed from mutable session metadata by default.
+- Added `--restore-session-mcp` as an explicit opt-in. When used, the CLI prints the restored MCP server names and argv before starting them.
+- CLI regression tests now prove that a session containing an executable MCP command is skipped by default and restored only with the explicit flag.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_harness_cli_run.py -q` reported `37 passed`.
+- `python -m ruff check src\ctx\cli\run.py src\tests\test_harness_cli_run.py` reported `All checks passed!`.
+- `python -m mypy src\ctx\cli\run.py src\tests\test_harness_cli_run.py` reported `Success: no issues found in 2 source files`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in the current worktree; the list is retained to show the original review basis and to keep the remaining risk map visible. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full 234-file `src` tree with zero mypy errors.
@@ -385,7 +401,7 @@ P0/P1 blockers I would not ship over. Items 1-4 have remediation implemented in 
 5. MCP request timeouts can hang forever on blocking stdout reads. Fixed in Phase 14.
 6. MCP subprocesses inherit all parent secrets by default. Fixed in Phase 14.
 7. Model tool calls execute without an approval/policy gate.
-8. Resume trusts session metadata as executable MCP config.
+8. Resume trusts session metadata as executable MCP config. Fixed in Phase 15.
 9. Session ID reuse truncates existing JSONL transcripts.
 10. Restore overwrites live state without a rollback snapshot.
 11. Monitor dashboard has unauthenticated mutation endpoints and path traversal risks.

@@ -27,6 +27,7 @@ from typing import Any
 
 import pytest
 
+import ctx.cli.run as run_cli
 from ctx.cli.run import (
     _model_provider_prefix,
     _parse_mcp_spec,
@@ -420,6 +421,28 @@ class TestSessionsCommand:
 
 
 class TestResumeCommand:
+    @staticmethod
+    def _write_session_with_mcp(tmp_path: Path, session_id: str) -> None:
+        (tmp_path / f"{session_id}.jsonl").write_text(
+            json.dumps({
+                "type": "session_start",
+                "ts": "t",
+                "session_id": session_id,
+                "task": "old",
+                "model": "ollama/x",
+                "ctx_tools_enabled": False,
+                "mcp": [
+                    {
+                        "name": "danger",
+                        "command": "definitely-not-a-real-mcp-command",
+                        "args": ["--from-session"],
+                    }
+                ],
+            })
+            + "\n",
+            encoding="utf-8",
+        )
+
     def test_resume_after_initial_run(
         self, fake_litellm: Any, tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
@@ -454,6 +477,61 @@ class TestResumeCommand:
             if line and json.loads(line)["type"] == "stop"
         )
         assert stop_count == 2
+
+    def test_resume_skips_recorded_mcp_by_default(
+        self, fake_litellm: Any, tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        self._write_session_with_mcp(tmp_path, "tampered")
+        exit_code = main(
+            [
+                "resume", "tampered",
+                "--task", "follow-up",
+                "--sessions-dir", str(tmp_path),
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        assert "recorded MCP server(s) skipped" in captured.err
+
+    def test_resume_restores_recorded_mcp_only_with_flag(
+        self, fake_litellm: Any, tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        restored: list[Any] = []
+
+        class FakeRouter:
+            def __init__(self, configs: list[Any]) -> None:
+                restored.extend(configs)
+
+            def start(self) -> None:
+                pass
+
+            def stop(self) -> None:
+                pass
+
+            def list_tools(self) -> list[Any]:
+                return []
+
+            def call(self, name: str, arguments: dict[str, Any]) -> str:
+                raise AssertionError(f"unexpected tool call: {name} {arguments}")
+
+        monkeypatch.setattr(run_cli, "McpRouter", FakeRouter)
+        self._write_session_with_mcp(tmp_path, "restore-mcp")
+        exit_code = main(
+            [
+                "resume", "restore-mcp",
+                "--task", "follow-up",
+                "--sessions-dir", str(tmp_path),
+                "--restore-session-mcp",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        assert len(restored) == 1
+        assert restored[0].command == "definitely-not-a-real-mcp-command"
+        assert "restoring MCP server danger" in captured.err
 
     def test_resume_without_model_in_session_requires_flag(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str],

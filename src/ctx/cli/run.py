@@ -437,6 +437,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override sessions directory.",
     )
     rz.add_argument(
+        "--restore-session-mcp",
+        action="store_true",
+        help=(
+            "Restore MCP servers recorded in the session metadata. "
+            "Off by default because session logs are local files and "
+            "can contain executable command metadata."
+        ),
+    )
+    rz.add_argument(
         "--quiet", action="store_true",
     )
     rz.add_argument(
@@ -702,12 +711,11 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     observer = JsonlObserver(store, session_metadata={}, emit_session_start=False)
     compactor = TokenBudgetCompactor()
 
-    # Codex review fix #3: a resumed session must see the same world
-    # the original run did — recreate the MCP router from session
-    # metadata, and recreate the ctx-core toolbox unless the original
-    # run disabled it. Without these, tool calls from the replayed
-    # transcript would resolve against an empty tool set.
-    mcp_configs = _mcp_configs_from_metadata(meta)
+    # Session logs are mutable local JSONL files. Recreate ctx-core
+    # tools by default, but never execute MCP command metadata from a
+    # transcript unless the user explicitly opts in for this resume.
+    recorded_mcp_configs = _mcp_configs_from_metadata(meta)
+    mcp_configs = recorded_mcp_configs if args.restore_session_mcp else []
     router = McpRouter(mcp_configs) if mcp_configs else None
 
     extra_tools: list[ToolDefinition] = []
@@ -722,6 +730,10 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         bits = []
         if mcp_configs:
             bits.append(f"{len(mcp_configs)} MCP server(s)")
+        elif recorded_mcp_configs:
+            bits.append(
+                f"{len(recorded_mcp_configs)} recorded MCP server(s) skipped"
+            )
         if use_ctx_tools:
             bits.append("ctx-core tools")
         suffix = f" + {', '.join(bits)}" if bits else ""
@@ -730,6 +742,13 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             f"({len(state.messages)} prior messages{suffix})",
             file=sys.stderr,
         )
+        if mcp_configs:
+            for cfg in mcp_configs:
+                argv = " ".join([cfg.command, *cfg.args])
+                print(
+                    f"[ctx] restoring MCP server {cfg.name}: {argv}",
+                    file=sys.stderr,
+                )
 
     try:
         if router is not None:
