@@ -1,0 +1,2038 @@
+{
+  "upstream": "https://designdotmd.directory",
+  "upstream_api": "https://designdotmd.directory/api/designs",
+  "fetched_on": "2026-04-27",
+  "license": "unknown (see ATTRIBUTION.md)",
+  "namespace": "designdotmd",
+  "total": 156,
+  "entries": [
+    {
+      "name": "3D Sculpt",
+      "tagline": "3D viewport: studio grey, mesh cyan, normal magenta.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "dark",
+        "sans"
+      ],
+      "slug": "3d-sculpt",
+      "source_path": "designs/3d-sculpt.md",
+      "lines": 75
+    },
+    {
+      "name": "AI Labs",
+      "tagline": "Research-paper white, terminal-green prompts.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "minimal",
+        "sans"
+      ],
+      "slug": "ai-labs",
+      "source_path": "designs/ai-labs.md",
+      "lines": 74
+    },
+    {
+      "name": "Airline Altitude",
+      "tagline": "Boarding-pass minimal: sky grey, contrail teal.",
+      "author": "Rofi",
+      "tags": [
+        "travel",
+        "minimal",
+        "cool"
+      ],
+      "slug": "airline-altitude",
+      "source_path": "designs/airline-altitude.md",
+      "lines": 76
+    },
+    {
+      "name": "Airport Departures",
+      "tagline": "Departure board: flap black, amber status, gate mono.",
+      "author": "Rofi",
+      "tags": [
+        "travel",
+        "technical",
+        "mono"
+      ],
+      "slug": "airport-departures",
+      "source_path": "designs/airport-departures.md",
+      "lines": 74
+    },
+    {
+      "name": "Analytics Crisp",
+      "tagline": "Analytics: crisp white, chart iris, chart peach.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "minimal",
+        "sans"
+      ],
+      "slug": "analytics-crisp",
+      "source_path": "designs/analytics-crisp.md",
+      "lines": 76
+    },
+    {
+      "name": "Aqua Mint",
+      "tagline": "Seaglass, mint, chilled glass surfaces.",
+      "author": "Rofi",
+      "tags": [
+        "soft",
+        "cool",
+        "sans"
+      ],
+      "slug": "aqua-mint",
+      "source_path": "designs/aqua-mint.md",
+      "lines": 75
+    },
+    {
+      "name": "Arcade Neon Pop",
+      "tagline": "Chunky buttons, rainbow XP bars, candy physics.",
+      "author": "Rofi",
+      "tags": [
+        "gameplay",
+        "playful",
+        "bold"
+      ],
+      "slug": "arcade-neon-pop",
+      "source_path": "designs/arcade-neon-pop.md",
+      "lines": 76
+    },
+    {
+      "name": "Architect Blueprint",
+      "tagline": "Drafting-table blue, tracing paper, pencil-line grid.",
+      "author": "Rofi",
+      "tags": [
+        "architecture",
+        "minimal",
+        "technical"
+      ],
+      "slug": "architect-blueprint",
+      "source_path": "designs/architect-blueprint.md",
+      "lines": 75
+    },
+    {
+      "name": "Arctic",
+      "tagline": "Glacier white, ice blue, breath of steam.",
+      "author": "Rofi",
+      "tags": [
+        "cool",
+        "minimal",
+        "sans"
+      ],
+      "slug": "arctic",
+      "source_path": "designs/arctic.md",
+      "lines": 75
+    },
+    {
+      "name": "Atelier Noir",
+      "tagline": "Fashion-week black, silk ivory, thin everything.",
+      "author": "Rofi",
+      "tags": [
+        "fashion",
+        "minimal",
+        "serif"
+      ],
+      "slug": "atelier-noir",
+      "source_path": "designs/atelier-noir.md",
+      "lines": 75
+    },
+    {
+      "name": "Bakery Flour",
+      "tagline": "Artisan bakery: flour dust, rye, sourdough crust.",
+      "author": "Rofi",
+      "tags": [
+        "food",
+        "warm",
+        "soft"
+      ],
+      "slug": "bakery-flour",
+      "source_path": "designs/bakery-flour.md",
+      "lines": 75
+    },
+    {
+      "name": "Barbershop Pole",
+      "tagline": "Classic barbershop: stripe red, ivory lather, nickel.",
+      "author": "Rofi",
+      "tags": [
+        "lifestyle",
+        "bold",
+        "serif"
+      ],
+      "slug": "barbershop-pole",
+      "source_path": "designs/barbershop-pole.md",
+      "lines": 76
+    },
+    {
+      "name": "Battle Royale",
+      "tagline": "Drop-in HUD: blood-orange alerts, squad chevrons.",
+      "author": "Rofi",
+      "tags": [
+        "gameplay",
+        "dark",
+        "bold"
+      ],
+      "slug": "battle-royale",
+      "source_path": "designs/battle-royale.md",
+      "lines": 75
+    },
+    {
+      "name": "Bauhaus",
+      "tagline": "Primary red, primary yellow, primary blue.",
+      "author": "Rofi",
+      "tags": [
+        "bold",
+        "primary",
+        "geometric"
+      ],
+      "slug": "bauhaus",
+      "source_path": "designs/bauhaus.md",
+      "lines": 75
+    },
+    {
+      "name": "Tavern Tabletop",
+      "tagline": "Tabletop tavern: parchment map, wax-seal red, inked routes.",
+      "author": "Rofi",
+      "tags": [
+        "gameplay",
+        "warm",
+        "serif"
+      ],
+      "slug": "board-game-tavern",
+      "source_path": "designs/board-game-tavern.md",
+      "lines": 75
+    },
+    {
+      "name": "Botanical",
+      "tagline": "Pressed leaves, tea-stained paper, a copper ink.",
+      "author": "Rofi",
+      "tags": [
+        "organic",
+        "serif",
+        "warm"
+      ],
+      "slug": "botanical",
+      "source_path": "designs/botanical.md",
+      "lines": 75
+    },
+    {
+      "name": "Botanical Apothecary",
+      "tagline": "Herb apothecary: amber bottle, linen label, eucalyptus.",
+      "author": "Rofi",
+      "tags": [
+        "beauty",
+        "organic",
+        "serif"
+      ],
+      "slug": "botanical-apothecary",
+      "source_path": "designs/botanical-apothecary.md",
+      "lines": 76
+    },
+    {
+      "name": "Broadsheet 01",
+      "tagline": "Newsprint ink, column rules, masthead gravitas.",
+      "author": "Rofi",
+      "tags": [
+        "news",
+        "editorial",
+        "serif"
+      ],
+      "slug": "broadsheet-01",
+      "source_path": "designs/broadsheet-01.md",
+      "lines": 75
+    },
+    {
+      "name": "Brutalist Office",
+      "tagline": "Concrete, grids, and a single warning-yellow.",
+      "author": "Rofi",
+      "tags": [
+        "brutalist",
+        "mono",
+        "high-contrast"
+      ],
+      "slug": "brutalist-office",
+      "source_path": "designs/brutalist-office.md",
+      "lines": 75
+    },
+    {
+      "name": "Cafe Racer",
+      "tagline": "Cafe-racer: engine black, tank stripe, chrome spoke.",
+      "author": "Rofi",
+      "tags": [
+        "automotive",
+        "dark",
+        "mono"
+      ],
+      "slug": "cafe-racer",
+      "source_path": "designs/cafe-racer.md",
+      "lines": 75
+    },
+    {
+      "name": "Campaign Rally",
+      "tagline": "Campaign signage: stars blue, bunting red, placard white.",
+      "author": "Rofi",
+      "tags": [
+        "government",
+        "bold",
+        "serif"
+      ],
+      "slug": "campaign-rally",
+      "source_path": "designs/campaign-rally.md",
+      "lines": 75
+    },
+    {
+      "name": "Campus Collegiate",
+      "tagline": "Ivy-league collegiate: maroon, oatmeal, crest gold.",
+      "author": "Rofi",
+      "tags": [
+        "education",
+        "bold",
+        "serif"
+      ],
+      "slug": "campus-collegiate",
+      "source_path": "designs/campus-collegiate.md",
+      "lines": 76
+    },
+    {
+      "name": "Candy Shop",
+      "tagline": "Bubble gum, cherry red, sugar rush.",
+      "author": "Rofi",
+      "tags": [
+        "playful",
+        "bold",
+        "warm"
+      ],
+      "slug": "candy-shop",
+      "source_path": "designs/candy-shop.md",
+      "lines": 75
+    },
+    {
+      "name": "Candy Tap",
+      "tagline": "Soft gradients, chewy taps, confetti everywhere.",
+      "author": "Rofi",
+      "tags": [
+        "gameplay",
+        "playful",
+        "soft"
+      ],
+      "slug": "candy-tap",
+      "source_path": "designs/candy-tap.md",
+      "lines": 76
+    },
+    {
+      "name": "Ceramics Kiln",
+      "tagline": "Wood-fired ceramics: clay beige, ash grey, iron glaze.",
+      "author": "Rofi",
+      "tags": [
+        "craft",
+        "warm",
+        "serif"
+      ],
+      "slug": "ceramics-kiln",
+      "source_path": "designs/ceramics-kiln.md",
+      "lines": 75
+    },
+    {
+      "name": "Chapel Stained",
+      "tagline": "Chapel hymnal: stained-glass blue, gilt, parchment.",
+      "author": "Rofi",
+      "tags": [
+        "spiritual",
+        "dark",
+        "serif"
+      ],
+      "slug": "chapel-stained",
+      "source_path": "designs/chapel-stained.md",
+      "lines": 75
+    },
+    {
+      "name": "Chat App Plum",
+      "tagline": "Messaging: plum bubbles, chat-pop, read receipts.",
+      "author": "Rofi",
+      "tags": [
+        "social",
+        "soft",
+        "playful"
+      ],
+      "slug": "chat-app-plum",
+      "source_path": "designs/chat-app-plum.md",
+      "lines": 76
+    },
+    {
+      "name": "Civic Register",
+      "tagline": "Civic site: gov navy, paper beige, official serif.",
+      "author": "Rofi",
+      "tags": [
+        "government",
+        "minimal",
+        "serif"
+      ],
+      "slug": "civic-register",
+      "source_path": "designs/civic-register.md",
+      "lines": 76
+    },
+    {
+      "name": "Classroom Paper",
+      "tagline": "Composition notebook, red-line margin, graphite.",
+      "author": "Rofi",
+      "tags": [
+        "education",
+        "warm",
+        "serif"
+      ],
+      "slug": "classroom-paper",
+      "source_path": "designs/classroom-paper.md",
+      "lines": 75
+    },
+    {
+      "name": "Climate Atlas",
+      "tagline": "Climate data: chart green, heatmap amber, atlas paper.",
+      "author": "Rofi",
+      "tags": [
+        "climate",
+        "organic",
+        "sans"
+      ],
+      "slug": "climate-atlas",
+      "source_path": "designs/climate-atlas.md",
+      "lines": 75
+    },
+    {
+      "name": "Clinic Sage",
+      "tagline": "Clinical calm. Sage greens, paper white, zero alarm.",
+      "author": "Rofi",
+      "tags": [
+        "healthcare",
+        "calm",
+        "minimal"
+      ],
+      "slug": "clinic-sage",
+      "source_path": "designs/clinic-sage.md",
+      "lines": 76
+    },
+    {
+      "name": "Clinical",
+      "tagline": "Hospital-grade legibility, but warm.",
+      "author": "Rofi",
+      "tags": [
+        "minimal",
+        "sans",
+        "cool"
+      ],
+      "slug": "clinical",
+      "source_path": "designs/clinical.md",
+      "lines": 75
+    },
+    {
+      "name": "Cobalt Product",
+      "tagline": "A shippable SaaS palette with spine.",
+      "author": "Rofi",
+      "tags": [
+        "sans",
+        "cool",
+        "corporate"
+      ],
+      "slug": "cobalt-product",
+      "source_path": "designs/cobalt-product.md",
+      "lines": 76
+    },
+    {
+      "name": "Coffee Roast",
+      "tagline": "Third-wave roaster: espresso brown, kraft paper, latte.",
+      "author": "Rofi",
+      "tags": [
+        "food",
+        "warm",
+        "sans"
+      ],
+      "slug": "coffee-roast",
+      "source_path": "designs/coffee-roast.md",
+      "lines": 76
+    },
+    {
+      "name": "Comic Ink",
+      "tagline": "Comic panel: pulp yellow, hero red, ink-black panel rules.",
+      "author": "Rofi",
+      "tags": [
+        "media",
+        "bold",
+        "playful"
+      ],
+      "slug": "comic-ink",
+      "source_path": "designs/comic-ink.md",
+      "lines": 75
+    },
+    {
+      "name": "Concrete Lemon",
+      "tagline": "Raw concrete, structural grid, lemon accent.",
+      "author": "Rofi",
+      "tags": [
+        "brutalist",
+        "bold",
+        "sans"
+      ],
+      "slug": "concrete-lemon",
+      "source_path": "designs/concrete-lemon.md",
+      "lines": 75
+    },
+    {
+      "name": "Coworking Loft",
+      "tagline": "Loft coworking: warm concrete, mustard, exposed brick.",
+      "author": "Rofi",
+      "tags": [
+        "architecture",
+        "warm",
+        "sans"
+      ],
+      "slug": "coworking-loft",
+      "source_path": "designs/coworking-loft.md",
+      "lines": 75
+    },
+    {
+      "name": "Criterion Letterbox",
+      "tagline": "Arthouse film label: cream sleeve, spine red, 4:3 crops.",
+      "author": "Rofi",
+      "tags": [
+        "cinema",
+        "editorial",
+        "serif"
+      ],
+      "slug": "criterion-letterbox",
+      "source_path": "designs/criterion-letterbox.md",
+      "lines": 76
+    },
+    {
+      "name": "Crypto Violet",
+      "tagline": "Web3 violet: holo gradients, mono addresses.",
+      "author": "Rofi",
+      "tags": [
+        "finance",
+        "dark",
+        "bold"
+      ],
+      "slug": "crypto-violet",
+      "source_path": "designs/crypto-violet.md",
+      "lines": 75
+    },
+    {
+      "name": "Cyber Matrix",
+      "tagline": "Cyberpunk neon grid meets operator terminal.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "dark",
+        "bold"
+      ],
+      "slug": "cyber-matrix",
+      "source_path": "designs/cyber-matrix.md",
+      "lines": 75
+    },
+    {
+      "name": "Cyberpunk City",
+      "tagline": "Neon signage, acid yellow, deep violet.",
+      "author": "Rofi",
+      "tags": [
+        "dark",
+        "playful",
+        "bold"
+      ],
+      "slug": "cyberpunk-city",
+      "source_path": "designs/cyberpunk-city.md",
+      "lines": 75
+    },
+    {
+      "name": "Dating Blush",
+      "tagline": "Dating app: blush cream, lipstick red, flirty serif.",
+      "author": "Rofi",
+      "tags": [
+        "dating",
+        "warm",
+        "playful"
+      ],
+      "slug": "dating-blush",
+      "source_path": "designs/dating-blush.md",
+      "lines": 76
+    },
+    {
+      "name": "DAW Waveform",
+      "tagline": "Audio-production UI: waveform teal, signal red, rack black.",
+      "author": "Rofi",
+      "tags": [
+        "audio",
+        "dark",
+        "technical"
+      ],
+      "slug": "daw-waveform",
+      "source_path": "designs/daw-waveform.md",
+      "lines": 75
+    },
+    {
+      "name": "DeFi Chrome",
+      "tagline": "Trading-floor neon: emerald gains, bloody losses.",
+      "author": "Rofi",
+      "tags": [
+        "finance",
+        "dark",
+        "bold"
+      ],
+      "slug": "defi-chrome",
+      "source_path": "designs/defi-chrome.md",
+      "lines": 75
+    },
+    {
+      "name": "Denim Workwear",
+      "tagline": "Heritage workwear: selvedge indigo, rivet copper.",
+      "author": "Rofi",
+      "tags": [
+        "fashion",
+        "warm",
+        "bold"
+      ],
+      "slug": "denim-workwear",
+      "source_path": "designs/denim-workwear.md",
+      "lines": 75
+    },
+    {
+      "name": "Desert Rose",
+      "tagline": "Sandstone, dusty rose, sunburnt ink.",
+      "author": "Rofi",
+      "tags": [
+        "warm",
+        "serif",
+        "soft"
+      ],
+      "slug": "desert-rose",
+      "source_path": "designs/desert-rose.md",
+      "lines": 75
+    },
+    {
+      "name": "DevOps Graphite",
+      "tagline": "Prod-green, staging-amber, build-pipeline blue.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "dark",
+        "sans"
+      ],
+      "slug": "devops-graphite",
+      "source_path": "designs/devops-graphite.md",
+      "lines": 75
+    },
+    {
+      "name": "Dispatch Mono",
+      "tagline": "Independent-press monospace. Bulletin-board energy.",
+      "author": "Rofi",
+      "tags": [
+        "news",
+        "mono",
+        "technical"
+      ],
+      "slug": "dispatch-mono",
+      "source_path": "designs/dispatch-mono.md",
+      "lines": 75
+    },
+    {
+      "name": "Dungeon Crawl",
+      "tagline": "Torchlight, parchment, dice rolls in the dark.",
+      "author": "Rofi",
+      "tags": [
+        "gameplay",
+        "dark",
+        "serif"
+      ],
+      "slug": "dungeon-crawl",
+      "source_path": "designs/dungeon-crawl.md",
+      "lines": 74
+    },
+    {
+      "name": "EV Silver",
+      "tagline": "Electric-vehicle showroom: liquid silver, voltage blue.",
+      "author": "Rofi",
+      "tags": [
+        "automotive",
+        "minimal",
+        "cool"
+      ],
+      "slug": "ev-silver",
+      "source_path": "designs/ev-silver.md",
+      "lines": 77
+    },
+    {
+      "name": "Exchange Tick",
+      "tagline": "Order book green/red. Zero ornament. Every tick earns.",
+      "author": "Rofi",
+      "tags": [
+        "finance",
+        "dark",
+        "mono"
+      ],
+      "slug": "exchange-tick",
+      "source_path": "designs/exchange-tick.md",
+      "lines": 74
+    },
+    {
+      "name": "Farmers Market",
+      "tagline": "Chalkboard signs, crate wood, tomato red.",
+      "author": "Rofi",
+      "tags": [
+        "food",
+        "warm",
+        "serif"
+      ],
+      "slug": "farmers-market",
+      "source_path": "designs/farmers-market.md",
+      "lines": 75
+    },
+    {
+      "name": "Farmsim Harvest",
+      "tagline": "Cozy farm sim: golden wheat, rosy blush, soft sky.",
+      "author": "Rofi",
+      "tags": [
+        "gameplay",
+        "warm",
+        "playful"
+      ],
+      "slug": "farmsim-harvest",
+      "source_path": "designs/farmsim-harvest.md",
+      "lines": 75
+    },
+    {
+      "name": "Festival Fluoro",
+      "tagline": "Open-air festival: sunset magenta, lime wash, neon type.",
+      "author": "Rofi",
+      "tags": [
+        "music",
+        "playful",
+        "bold"
+      ],
+      "slug": "festival-fluoro",
+      "source_path": "designs/festival-fluoro.md",
+      "lines": 75
+    },
+    {
+      "name": "Field Notes",
+      "tagline": "Botanist's notebook: moss, bark, pressed leaves.",
+      "author": "Rofi",
+      "tags": [
+        "nature",
+        "organic",
+        "serif"
+      ],
+      "slug": "field-notes",
+      "source_path": "designs/field-notes.md",
+      "lines": 74
+    },
+    {
+      "name": "Film Photography",
+      "tagline": "35mm grain: gelatin silver, kodak yellow, frame number.",
+      "author": "Rofi",
+      "tags": [
+        "photography",
+        "warm",
+        "mono"
+      ],
+      "slug": "film-photography",
+      "source_path": "designs/film-photography.md",
+      "lines": 75
+    },
+    {
+      "name": "Florist Bouquet",
+      "tagline": "Boutique florist: petal blush, stem green, kraft paper.",
+      "author": "Rofi",
+      "tags": [
+        "retail",
+        "warm",
+        "serif"
+      ],
+      "slug": "florist-bouquet",
+      "source_path": "designs/florist-bouquet.md",
+      "lines": 76
+    },
+    {
+      "name": "Forest Floor",
+      "tagline": "Moss, bark, and a ribbon of copper.",
+      "author": "Rofi",
+      "tags": [
+        "organic",
+        "warm",
+        "serif"
+      ],
+      "slug": "forest-floor",
+      "source_path": "designs/forest-floor.md",
+      "lines": 75
+    },
+    {
+      "name": "Forest Trail",
+      "tagline": "Trail-map forest: moss green, bark brown, trail red.",
+      "author": "Rofi",
+      "tags": [
+        "nature",
+        "organic",
+        "sans"
+      ],
+      "slug": "forest-trail",
+      "source_path": "designs/forest-trail.md",
+      "lines": 76
+    },
+    {
+      "name": "Forum Usenet",
+      "tagline": "BBS nostalgia: teletype ink, PhpBB gridlines.",
+      "author": "Rofi",
+      "tags": [
+        "social",
+        "mono",
+        "technical"
+      ],
+      "slug": "forum-usenet",
+      "source_path": "designs/forum-usenet.md",
+      "lines": 74
+    },
+    {
+      "name": "Gallery Avant",
+      "tagline": "Contemporary-art gallery: white cube, tight caps.",
+      "author": "Rofi",
+      "tags": [
+        "fashion",
+        "minimal",
+        "serif"
+      ],
+      "slug": "gallery-avant",
+      "source_path": "designs/gallery-avant.md",
+      "lines": 76
+    },
+    {
+      "name": "Gallery White",
+      "tagline": "Contemporary gallery: nothing on the walls but art.",
+      "author": "Rofi",
+      "tags": [
+        "minimal",
+        "serif",
+        "warm"
+      ],
+      "slug": "gallery-white",
+      "source_path": "designs/gallery-white.md",
+      "lines": 75
+    },
+    {
+      "name": "Glassline",
+      "tagline": "Fog-grey neutrals with a cobalt pinprick.",
+      "author": "Rofi",
+      "tags": [
+        "minimal",
+        "sans",
+        "cool"
+      ],
+      "slug": "glassline",
+      "source_path": "designs/glassline.md",
+      "lines": 76
+    },
+    {
+      "name": "Graphite",
+      "tagline": "Cool greys, one lime signal.",
+      "author": "Rofi",
+      "tags": [
+        "dark",
+        "sans",
+        "technical"
+      ],
+      "slug": "graphite",
+      "source_path": "designs/graphite.md",
+      "lines": 75
+    },
+    {
+      "name": "Gym Kettlebell",
+      "tagline": "Barbell black: chalk white, rep red, rubber mat.",
+      "author": "Rofi",
+      "tags": [
+        "fitness",
+        "bold",
+        "mono"
+      ],
+      "slug": "gym-kettlebell",
+      "source_path": "designs/gym-kettlebell.md",
+      "lines": 75
+    },
+    {
+      "name": "Hackerspace",
+      "tagline": "Solder room: PCB green, header amber, silkscreen white.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "dark",
+        "mono"
+      ],
+      "slug": "hackerspace",
+      "source_path": "designs/hackerspace.md",
+      "lines": 74
+    },
+    {
+      "name": "Heritage",
+      "tagline": "Architectural minimalism meets journalistic gravitas.",
+      "author": "Rofi",
+      "tags": [
+        "editorial",
+        "serif",
+        "warm"
+      ],
+      "slug": "heritage",
+      "source_path": "designs/heritage.md",
+      "lines": 75
+    },
+    {
+      "name": "Horology Chronograph",
+      "tagline": "Swiss watchmaking: dial black, subdial silver, second red.",
+      "author": "Rofi",
+      "tags": [
+        "fashion",
+        "dark",
+        "serif"
+      ],
+      "slug": "horology-chronograph",
+      "source_path": "designs/horology-chronograph.md",
+      "lines": 76
+    },
+    {
+      "name": "Hotel Riviera",
+      "tagline": "C\u00f4te d'Azur: sea-wash blue, sun-bleached sand, soft gold.",
+      "author": "Rofi",
+      "tags": [
+        "hospitality",
+        "warm",
+        "serif"
+      ],
+      "slug": "hotel-riviera",
+      "source_path": "designs/hotel-riviera.md",
+      "lines": 75
+    },
+    {
+      "name": "Indie Festival",
+      "tagline": "Film-festival grid: mono schedule, spotlight orange.",
+      "author": "Rofi",
+      "tags": [
+        "cinema",
+        "bold",
+        "mono"
+      ],
+      "slug": "indie-festival",
+      "source_path": "designs/indie-festival.md",
+      "lines": 75
+    },
+    {
+      "name": "IoT Home",
+      "tagline": "Smart-home dashboard: warm dark, peach glow, cool teal.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "soft",
+        "cool"
+      ],
+      "slug": "iot-home",
+      "source_path": "designs/iot-home.md",
+      "lines": 76
+    },
+    {
+      "name": "Jazz Club",
+      "tagline": "Blue Note vibe: ink blue, cream, trumpet gold.",
+      "author": "Rofi",
+      "tags": [
+        "music",
+        "dark",
+        "serif"
+      ],
+      "slug": "jazz-club",
+      "source_path": "designs/jazz-club.md",
+      "lines": 75
+    },
+    {
+      "name": "Kids Crayon",
+      "tagline": "Crayon-bright: primary colors, chunky radii, silly big type.",
+      "author": "Rofi",
+      "tags": [
+        "kids",
+        "playful",
+        "bold"
+      ],
+      "slug": "kids-crayon",
+      "source_path": "designs/kids-crayon.md",
+      "lines": 76
+    },
+    {
+      "name": "Kraft Paper",
+      "tagline": "Brown paper, stamp ink, handmade feel.",
+      "author": "Rofi",
+      "tags": [
+        "warm",
+        "organic",
+        "sans"
+      ],
+      "slug": "kraft-paper",
+      "source_path": "designs/kraft-paper.md",
+      "lines": 75
+    },
+    {
+      "name": "Law Chambers",
+      "tagline": "Chambers: oxblood, foolscap cream, barrister grey.",
+      "author": "Rofi",
+      "tags": [
+        "corporate",
+        "serif",
+        "minimal"
+      ],
+      "slug": "law-chambers",
+      "source_path": "designs/law-chambers.md",
+      "lines": 76
+    },
+    {
+      "name": "Linen",
+      "tagline": "Hand-woven textures, tea stains, slow.",
+      "author": "Rofi",
+      "tags": [
+        "soft",
+        "serif",
+        "warm"
+      ],
+      "slug": "linen",
+      "source_path": "designs/linen.md",
+      "lines": 75
+    },
+    {
+      "name": "Luxe Commerce",
+      "tagline": "DTC luxury: porcelain, bone ink, brushed copper.",
+      "author": "Rofi",
+      "tags": [
+        "retail",
+        "minimal",
+        "serif"
+      ],
+      "slug": "luxe-commerce",
+      "source_path": "designs/luxe-commerce.md",
+      "lines": 76
+    },
+    {
+      "name": "Magazine Rouge",
+      "tagline": "Fashion-magazine red, ivory spreads, giant display.",
+      "author": "Rofi",
+      "tags": [
+        "news",
+        "bold",
+        "serif"
+      ],
+      "slug": "magazine-rouge",
+      "source_path": "designs/magazine-rouge.md",
+      "lines": 76
+    },
+    {
+      "name": "Matcha",
+      "tagline": "Soft green, bamboo, steam.",
+      "author": "Rofi",
+      "tags": [
+        "organic",
+        "sans",
+        "calm"
+      ],
+      "slug": "matcha",
+      "source_path": "designs/matcha.md",
+      "lines": 75
+    },
+    {
+      "name": "Meditation Zen",
+      "tagline": "Sitting practice: bone paper, breath blue, ink brush.",
+      "author": "Rofi",
+      "tags": [
+        "wellness",
+        "soft",
+        "serif"
+      ],
+      "slug": "meditation-zen",
+      "source_path": "designs/meditation-zen.md",
+      "lines": 76
+    },
+    {
+      "name": "Dream Engine",
+      "tagline": "Generative AI: obsidian surface, dream violet, seed amber.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "dark",
+        "soft"
+      ],
+      "slug": "midjourney-dream",
+      "source_path": "designs/midjourney-dream.md",
+      "lines": 75
+    },
+    {
+      "name": "Mint Receipt",
+      "tagline": "Thermal paper, mint stripe, tidy numbers.",
+      "author": "Rofi",
+      "tags": [
+        "mono",
+        "warm",
+        "minimal"
+      ],
+      "slug": "mint-receipt",
+      "source_path": "designs/mint-receipt.md",
+      "lines": 75
+    },
+    {
+      "name": "Motorsport Livery",
+      "tagline": "F1 livery: carbon black, racing red, pit-lane yellow.",
+      "author": "Rofi",
+      "tags": [
+        "automotive",
+        "bold",
+        "technical"
+      ],
+      "slug": "motorsport-livery",
+      "source_path": "designs/motorsport-livery.md",
+      "lines": 75
+    },
+    {
+      "name": "Museum Plaque",
+      "tagline": "Museum-wall white: didone, hairline rules, placard caps.",
+      "author": "Rofi",
+      "tags": [
+        "museum",
+        "minimal",
+        "serif"
+      ],
+      "slug": "museum-plaque",
+      "source_path": "designs/museum-plaque.md",
+      "lines": 76
+    },
+    {
+      "name": "Mutual Aid",
+      "tagline": "Mutual-aid zine: risograph orange, handbill mono, masking tape.",
+      "author": "Rofi",
+      "tags": [
+        "nonprofit",
+        "warm",
+        "sans"
+      ],
+      "slug": "mutual-aid",
+      "source_path": "designs/mutual-aid.md",
+      "lines": 75
+    },
+    {
+      "name": "National Park",
+      "tagline": "Park signage: pine green, canyon rust, trail ochre.",
+      "author": "Rofi",
+      "tags": [
+        "nature",
+        "warm",
+        "serif"
+      ],
+      "slug": "national-park",
+      "source_path": "designs/national-park.md",
+      "lines": 76
+    },
+    {
+      "name": "Natural Wine",
+      "tagline": "P\u00e9t-nat: fresh lees, paper labels, soft burgundy.",
+      "author": "Rofi",
+      "tags": [
+        "food",
+        "warm",
+        "organic"
+      ],
+      "slug": "natural-wine",
+      "source_path": "designs/natural-wine.md",
+      "lines": 74
+    },
+    {
+      "name": "Neobank Mint",
+      "tagline": "Fresh mint, generous gutters, calm money.",
+      "author": "Rofi",
+      "tags": [
+        "finance",
+        "minimal",
+        "cool"
+      ],
+      "slug": "neobank-mint",
+      "source_path": "designs/neobank-mint.md",
+      "lines": 76
+    },
+    {
+      "name": "Neon Arcade",
+      "tagline": "Synthwave violet and hot magenta.",
+      "author": "Rofi",
+      "tags": [
+        "dark",
+        "playful",
+        "mono"
+      ],
+      "slug": "neon-arcade",
+      "source_path": "designs/neon-arcade.md",
+      "lines": 75
+    },
+    {
+      "name": "Newsletter Sunday",
+      "tagline": "Long-form Sunday edition: linen paper, reading serif.",
+      "author": "Rofi",
+      "tags": [
+        "news",
+        "warm",
+        "serif"
+      ],
+      "slug": "newsletter-sunday",
+      "source_path": "designs/newsletter-sunday.md",
+      "lines": 76
+    },
+    {
+      "name": "Nightclub Strobe",
+      "tagline": "Berlin techno: stark black, strobe white, bass magenta.",
+      "author": "Rofi",
+      "tags": [
+        "music",
+        "dark",
+        "bold"
+      ],
+      "slug": "nightclub-strobe",
+      "source_path": "designs/nightclub-strobe.md",
+      "lines": 76
+    },
+    {
+      "name": "Notion Beige",
+      "tagline": "Workspace-calm: warm beige, soft ink, lots of breathing.",
+      "author": "Rofi",
+      "tags": [
+        "minimal",
+        "warm",
+        "sans"
+      ],
+      "slug": "notion-beige",
+      "source_path": "designs/notion-beige.md",
+      "lines": 76
+    },
+    {
+      "name": "Observatory",
+      "tagline": "Deep-sky catalog: nebula black, star cream, redshift.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "dark",
+        "serif"
+      ],
+      "slug": "observatory",
+      "source_path": "designs/observatory.md",
+      "lines": 75
+    },
+    {
+      "name": "Obsidian",
+      "tagline": "Volcanic glass, phosphor purple, edge.",
+      "author": "Rofi",
+      "tags": [
+        "dark",
+        "mono",
+        "technical"
+      ],
+      "slug": "obsidian",
+      "source_path": "designs/obsidian.md",
+      "lines": 76
+    },
+    {
+      "name": "Ocean Depth",
+      "tagline": "Midnight blue foundation with a teal pulse.",
+      "author": "Rofi",
+      "tags": [
+        "cool",
+        "dark",
+        "sans"
+      ],
+      "slug": "ocean-depth",
+      "source_path": "designs/ocean-depth.md",
+      "lines": 75
+    },
+    {
+      "name": "Old Money",
+      "tagline": "Hunter green, gold leaf, embossed cream.",
+      "author": "Rofi",
+      "tags": [
+        "serif",
+        "warm",
+        "editorial"
+      ],
+      "slug": "old-money",
+      "source_path": "designs/old-money.md",
+      "lines": 75
+    },
+    {
+      "name": "OSS Terminal",
+      "tagline": "README-first OSS: bone paper, diff green, PR purple.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "mono",
+        "minimal"
+      ],
+      "slug": "oss-terminal",
+      "source_path": "designs/oss-terminal.md",
+      "lines": 75
+    },
+    {
+      "name": "Paper White",
+      "tagline": "The e-reader palette: ink, cream, nothing else.",
+      "author": "Rofi",
+      "tags": [
+        "minimal",
+        "serif",
+        "reading"
+      ],
+      "slug": "paper-white",
+      "source_path": "designs/paper-white.md",
+      "lines": 75
+    },
+    {
+      "name": "Pastel Candy",
+      "tagline": "Marshmallow pink, mint, butter.",
+      "author": "Rofi",
+      "tags": [
+        "playful",
+        "soft",
+        "sans"
+      ],
+      "slug": "pastel-candy",
+      "source_path": "designs/pastel-candy.md",
+      "lines": 75
+    },
+    {
+      "name": "Payday Punch",
+      "tagline": "Gen-Z wallet: lime, bubble, confetti payouts.",
+      "author": "Rofi",
+      "tags": [
+        "finance",
+        "playful",
+        "bold"
+      ],
+      "slug": "payday-punch",
+      "source_path": "designs/payday-punch.md",
+      "lines": 75
+    },
+    {
+      "name": "Pet Pawprint",
+      "tagline": "Pet care: biscuit tan, wag blue, squeak yellow.",
+      "author": "Rofi",
+      "tags": [
+        "pet",
+        "warm",
+        "playful"
+      ],
+      "slug": "pet-pawprint",
+      "source_path": "designs/pet-pawprint.md",
+      "lines": 76
+    },
+    {
+      "name": "Pharma Clean",
+      "tagline": "Hospital-white, FDA-blue, sterile hairlines.",
+      "author": "Rofi",
+      "tags": [
+        "healthcare",
+        "minimal",
+        "cool"
+      ],
+      "slug": "pharma-clean",
+      "source_path": "designs/pharma-clean.md",
+      "lines": 76
+    },
+    {
+      "name": "Pixel Quest",
+      "tagline": "8-bit health bars and CRT ink.",
+      "author": "Rofi",
+      "tags": [
+        "gameplay",
+        "retro",
+        "mono"
+      ],
+      "slug": "pixel-quest",
+      "source_path": "designs/pixel-quest.md",
+      "lines": 73
+    },
+    {
+      "name": "Podcast Studio",
+      "tagline": "Late-night show: mic amber, felt maroon, velvet curtain.",
+      "author": "Rofi",
+      "tags": [
+        "audio",
+        "warm",
+        "serif"
+      ],
+      "slug": "podcast-studio",
+      "source_path": "designs/podcast-studio.md",
+      "lines": 75
+    },
+    {
+      "name": "Poker Felt",
+      "tagline": "Poker table: felt green, card ivory, chip red.",
+      "author": "Rofi",
+      "tags": [
+        "gameplay",
+        "dark",
+        "serif"
+      ],
+      "slug": "poker-felt",
+      "source_path": "designs/poker-felt.md",
+      "lines": 76
+    },
+    {
+      "name": "Portfolio Studio",
+      "tagline": "Designer portfolio: off-white, ink, one deliberate accent.",
+      "author": "Rofi",
+      "tags": [
+        "portfolio",
+        "minimal",
+        "serif"
+      ],
+      "slug": "portfolio-studio",
+      "source_path": "designs/portfolio-studio.md",
+      "lines": 75
+    },
+    {
+      "name": "Quantum Lab",
+      "tagline": "Physics-lab dark: cold plasma blue, superfluid teal.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "dark",
+        "cool"
+      ],
+      "slug": "quantum-lab",
+      "source_path": "designs/quantum-lab.md",
+      "lines": 75
+    },
+    {
+      "name": "Rave Poster",
+      "tagline": "Warehouse flyer: acid yellow, smudge ink, 4am energy.",
+      "author": "Rofi",
+      "tags": [
+        "music",
+        "bold",
+        "playful"
+      ],
+      "slug": "rave-poster",
+      "source_path": "designs/rave-poster.md",
+      "lines": 75
+    },
+    {
+      "name": "Realty Open House",
+      "tagline": "Open-house listing: linen warm, brass accents.",
+      "author": "Rofi",
+      "tags": [
+        "architecture",
+        "warm",
+        "serif"
+      ],
+      "slug": "realty-open-house",
+      "source_path": "designs/realty-open-house.md",
+      "lines": 76
+    },
+    {
+      "name": "Record Sleeve",
+      "tagline": "1970s gatefold: ochre, umber, liner notes in serif.",
+      "author": "Rofi",
+      "tags": [
+        "music",
+        "warm",
+        "serif"
+      ],
+      "slug": "record-sleeve",
+      "source_path": "designs/record-sleeve.md",
+      "lines": 74
+    },
+    {
+      "name": "Remote Hub",
+      "tagline": "Remote-team dashboard: horizon blue, timezone teal.",
+      "author": "Rofi",
+      "tags": [
+        "social",
+        "cool",
+        "sans"
+      ],
+      "slug": "remote-hub",
+      "source_path": "designs/remote-hub.md",
+      "lines": 76
+    },
+    {
+      "name": "Risograph",
+      "tagline": "Misregistered, grainy, joyful.",
+      "author": "Rofi",
+      "tags": [
+        "playful",
+        "print",
+        "bold"
+      ],
+      "slug": "risograph",
+      "source_path": "designs/risograph.md",
+      "lines": 75
+    },
+    {
+      "name": "Roblox Bubble",
+      "tagline": "Kid-MMO energy: chunky 3D buttons, primary bubbles.",
+      "author": "Rofi",
+      "tags": [
+        "gameplay",
+        "playful",
+        "bold"
+      ],
+      "slug": "roblox-bubble",
+      "source_path": "designs/roblox-bubble.md",
+      "lines": 76
+    },
+    {
+      "name": "Robotics Lab",
+      "tagline": "Lab-bench white, safety-orange kill switch.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "minimal",
+        "sans"
+      ],
+      "slug": "robotics-lab",
+      "source_path": "designs/robotics-lab.md",
+      "lines": 74
+    },
+    {
+      "name": "Running Kilometer",
+      "tagline": "Runner app: track orange, split white, PR green.",
+      "author": "Rofi",
+      "tags": [
+        "fitness",
+        "playful",
+        "sans"
+      ],
+      "slug": "running-kilometer",
+      "source_path": "designs/running-kilometer.md",
+      "lines": 76
+    },
+    {
+      "name": "Scandi Pine",
+      "tagline": "Scandi interior: birch, oat, one forest pine.",
+      "author": "Rofi",
+      "tags": [
+        "retail",
+        "soft",
+        "sans"
+      ],
+      "slug": "scandi-pine",
+      "source_path": "designs/scandi-pine.md",
+      "lines": 76
+    },
+    {
+      "name": "Science Journal",
+      "tagline": "Scientific-journal: paper-white column, abstract-blue plates.",
+      "author": "Rofi",
+      "tags": [
+        "editorial",
+        "minimal",
+        "serif"
+      ],
+      "slug": "science-journal",
+      "source_path": "designs/science-journal.md",
+      "lines": 76
+    },
+    {
+      "name": "Skate Deck",
+      "tagline": "Skate-deck graphic: griptape black, neon green, spray pink.",
+      "author": "Rofi",
+      "tags": [
+        "sports",
+        "bold",
+        "playful"
+      ],
+      "slug": "skate-deck",
+      "source_path": "designs/skate-deck.md",
+      "lines": 75
+    },
+    {
+      "name": "Ski Alpine",
+      "tagline": "Alpine signage: glacier blue, piste red, powder white.",
+      "author": "Rofi",
+      "tags": [
+        "sports",
+        "cool",
+        "bold"
+      ],
+      "slug": "ski-alpine",
+      "source_path": "designs/ski-alpine.md",
+      "lines": 75
+    },
+    {
+      "name": "Skincare Matte",
+      "tagline": "Matte bottle minimal: oat, stone grey, graphite label.",
+      "author": "Rofi",
+      "tags": [
+        "beauty",
+        "minimal",
+        "soft"
+      ],
+      "slug": "skincare-matte",
+      "source_path": "designs/skincare-matte.md",
+      "lines": 76
+    },
+    {
+      "name": "Social Dusk",
+      "tagline": "Late-night feed: indigo dusk, lilac strokes, amber taps.",
+      "author": "Rofi",
+      "tags": [
+        "social",
+        "dark",
+        "soft"
+      ],
+      "slug": "social-dusk",
+      "source_path": "designs/social-dusk.md",
+      "lines": 76
+    },
+    {
+      "name": "Solarpunk",
+      "tagline": "Optimistic eco: plant green, sun yellow, soft terracotta.",
+      "author": "Rofi",
+      "tags": [
+        "climate",
+        "playful",
+        "organic"
+      ],
+      "slug": "solarpunk",
+      "source_path": "designs/solarpunk.md",
+      "lines": 76
+    },
+    {
+      "name": "Spa Onsen",
+      "tagline": "Onsen: wet-stone grey, steam-rose, cedar accent.",
+      "author": "Rofi",
+      "tags": [
+        "wellness",
+        "soft",
+        "serif"
+      ],
+      "slug": "spa-onsen",
+      "source_path": "designs/spa-onsen.md",
+      "lines": 76
+    },
+    {
+      "name": "Space Mission",
+      "tagline": "Mission-control amber on black. Telemetry forever.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "dark",
+        "mono"
+      ],
+      "slug": "space-mission",
+      "source_path": "designs/space-mission.md",
+      "lines": 75
+    },
+    {
+      "name": "Spatial Glass",
+      "tagline": "AR OS: frosted lens, aurora gradient, depth hairline.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "soft",
+        "cool"
+      ],
+      "slug": "spatial-glass",
+      "source_path": "designs/spatial-glass.md",
+      "lines": 75
+    },
+    {
+      "name": "Speakeasy",
+      "tagline": "Hidden bar: velvet black, candle amber, brass knob.",
+      "author": "Rofi",
+      "tags": [
+        "hospitality",
+        "dark",
+        "serif"
+      ],
+      "slug": "speakeasy",
+      "source_path": "designs/speakeasy.md",
+      "lines": 76
+    },
+    {
+      "name": "Speedrun Clock",
+      "tagline": "Split timer aesthetic: green splits, red losses, mono forever.",
+      "author": "Rofi",
+      "tags": [
+        "gameplay",
+        "mono",
+        "dark"
+      ],
+      "slug": "speedrun-clock",
+      "source_path": "designs/speedrun-clock.md",
+      "lines": 74
+    },
+    {
+      "name": "Sports HUD",
+      "tagline": "Stadium energy. Angled badges, neon scoreline.",
+      "author": "Rofi",
+      "tags": [
+        "gameplay",
+        "bold",
+        "technical"
+      ],
+      "slug": "sports-hud",
+      "source_path": "designs/sports-hud.md",
+      "lines": 76
+    },
+    {
+      "name": "Storybook Paper",
+      "tagline": "Children's storybook: butter paper, crayon scribbles.",
+      "author": "Rofi",
+      "tags": [
+        "kids",
+        "warm",
+        "serif"
+      ],
+      "slug": "storybook-paper",
+      "source_path": "designs/storybook-paper.md",
+      "lines": 76
+    },
+    {
+      "name": "Street Food",
+      "tagline": "Night-market neon on butcher paper.",
+      "author": "Rofi",
+      "tags": [
+        "food",
+        "bold",
+        "playful"
+      ],
+      "slug": "street-food",
+      "source_path": "designs/street-food.md",
+      "lines": 76
+    },
+    {
+      "name": "Streetwear Block",
+      "tagline": "Supreme-energy: box logo, off-white, siren red.",
+      "author": "Rofi",
+      "tags": [
+        "fashion",
+        "bold",
+        "sans"
+      ],
+      "slug": "streetwear-block",
+      "source_path": "designs/streetwear-block.md",
+      "lines": 75
+    },
+    {
+      "name": "Stripe Gradient",
+      "tagline": "Deep navy, sky, a whisper of violet.",
+      "author": "Rofi",
+      "tags": [
+        "corporate",
+        "sans",
+        "cool"
+      ],
+      "slug": "stripe-gradient",
+      "source_path": "designs/stripe-gradient.md",
+      "lines": 76
+    },
+    {
+      "name": "Sunset Magazine",
+      "tagline": "Dusk over the pacific \u2014 peach, plum, bone.",
+      "author": "Rofi",
+      "tags": [
+        "editorial",
+        "warm",
+        "gradient-free"
+      ],
+      "slug": "sunset-magazine",
+      "source_path": "designs/sunset-magazine.md",
+      "lines": 75
+    },
+    {
+      "name": "Surf Daybreak",
+      "tagline": "Surf forecast: ocean teal, dawn coral, seafoam.",
+      "author": "Rofi",
+      "tags": [
+        "sports",
+        "warm",
+        "soft"
+      ],
+      "slug": "surf-daybreak",
+      "source_path": "designs/surf-daybreak.md",
+      "lines": 76
+    },
+    {
+      "name": "Swiss Grid",
+      "tagline": "Helvetica, a 12-column grid, and a single red.",
+      "author": "Rofi",
+      "tags": [
+        "minimal",
+        "sans",
+        "corporate"
+      ],
+      "slug": "swiss-grid",
+      "source_path": "designs/swiss-grid.md",
+      "lines": 76
+    },
+    {
+      "name": "Tailwind Base",
+      "tagline": "Safe, shipping-ready, infinitely remixable.",
+      "author": "Rofi",
+      "tags": [
+        "sans",
+        "corporate",
+        "cool"
+      ],
+      "slug": "tailwind-base",
+      "source_path": "designs/tailwind-base.md",
+      "lines": 76
+    },
+    {
+      "name": "Tarot Deck",
+      "tagline": "Rider-Waite vibes: midnight blue, gilt edges, mystic sigils.",
+      "author": "Rofi",
+      "tags": [
+        "esoteric",
+        "dark",
+        "serif"
+      ],
+      "slug": "tarot-deck",
+      "source_path": "designs/tarot-deck.md",
+      "lines": 75
+    },
+    {
+      "name": "Tattoo Studio",
+      "tagline": "Tattoo parlor: ink black, stencil blue, flash-sheet red.",
+      "author": "Rofi",
+      "tags": [
+        "lifestyle",
+        "dark",
+        "bold"
+      ],
+      "slug": "tattoo-studio",
+      "source_path": "designs/tattoo-studio.md",
+      "lines": 75
+    },
+    {
+      "name": "Tea House",
+      "tagline": "Matcha ceremony: rice paper, bamboo green, clay red.",
+      "author": "Rofi",
+      "tags": [
+        "food",
+        "soft",
+        "serif"
+      ],
+      "slug": "tea-house",
+      "source_path": "designs/tea-house.md",
+      "lines": 75
+    },
+    {
+      "name": "Terminal",
+      "tagline": "Phosphor green on deep black. Fast, loud, honest.",
+      "author": "Rofi",
+      "tags": [
+        "mono",
+        "dark",
+        "technical"
+      ],
+      "slug": "terminal",
+      "source_path": "designs/terminal.md",
+      "lines": 75
+    },
+    {
+      "name": "Terracotta",
+      "tagline": "Sun-baked clay, ink, and weathered paper.",
+      "author": "Rofi",
+      "tags": [
+        "warm",
+        "editorial",
+        "serif"
+      ],
+      "slug": "terracotta",
+      "source_path": "designs/terracotta.md",
+      "lines": 75
+    },
+    {
+      "name": "Theatre Playbill",
+      "tagline": "Playbill cream: stage black, curtain red, footlight gold.",
+      "author": "Rofi",
+      "tags": [
+        "culture",
+        "bold",
+        "serif"
+      ],
+      "slug": "theatre-playbill",
+      "source_path": "designs/theatre-playbill.md",
+      "lines": 76
+    },
+    {
+      "name": "Therapy Room",
+      "tagline": "Mental-health app: clay, breath-blue, hush.",
+      "author": "Rofi",
+      "tags": [
+        "healthcare",
+        "soft",
+        "warm"
+      ],
+      "slug": "therapy-room",
+      "source_path": "designs/therapy-room.md",
+      "lines": 76
+    },
+    {
+      "name": "Tokyo Midnight",
+      "tagline": "Rain-slick streets, neon reflections, focused.",
+      "author": "Rofi",
+      "tags": [
+        "dark",
+        "bold",
+        "cool"
+      ],
+      "slug": "tokyo-midnight",
+      "source_path": "designs/tokyo-midnight.md",
+      "lines": 75
+    },
+    {
+      "name": "Transit Map",
+      "tagline": "Tokyo metro: primary colored lines, precise signage.",
+      "author": "Rofi",
+      "tags": [
+        "travel",
+        "bold",
+        "sans"
+      ],
+      "slug": "transit-map",
+      "source_path": "designs/transit-map.md",
+      "lines": 76
+    },
+    {
+      "name": "Typewriter",
+      "tagline": "Ribbon black on manila, nothing else.",
+      "author": "Rofi",
+      "tags": [
+        "editorial",
+        "mono",
+        "warm"
+      ],
+      "slug": "typewriter",
+      "source_path": "designs/typewriter.md",
+      "lines": 75
+    },
+    {
+      "name": "Vercel Ink",
+      "tagline": "Surgical black, surgical white, sharp geometry.",
+      "author": "Rofi",
+      "tags": [
+        "minimal",
+        "sans",
+        "dark"
+      ],
+      "slug": "vercel-ink",
+      "source_path": "designs/vercel-ink.md",
+      "lines": 76
+    },
+    {
+      "name": "Wealth Noir",
+      "tagline": "Private-banking black, champagne letterforms.",
+      "author": "Rofi",
+      "tags": [
+        "finance",
+        "dark",
+        "serif"
+      ],
+      "slug": "wealth-noir",
+      "source_path": "designs/wealth-noir.md",
+      "lines": 75
+    },
+    {
+      "name": "Weather Stratus",
+      "tagline": "Forecast app: stratus grey, rain blue, storm amber.",
+      "author": "Rofi",
+      "tags": [
+        "weather",
+        "cool",
+        "minimal"
+      ],
+      "slug": "weather-stratus",
+      "source_path": "designs/weather-stratus.md",
+      "lines": 76
+    },
+    {
+      "name": "Wellness Coral",
+      "tagline": "Sunrise coral, cotton grey, breathwork pastels.",
+      "author": "Rofi",
+      "tags": [
+        "healthcare",
+        "warm",
+        "soft"
+      ],
+      "slug": "wellness-coral",
+      "source_path": "designs/wellness-coral.md",
+      "lines": 75
+    },
+    {
+      "name": "Whisky Peat",
+      "tagline": "Peated scotch: smoke black, barrel oak, burnt orange.",
+      "author": "Rofi",
+      "tags": [
+        "food",
+        "dark",
+        "serif"
+      ],
+      "slug": "whisky-peat",
+      "source_path": "designs/whisky-peat.md",
+      "lines": 76
+    },
+    {
+      "name": "Wine Country",
+      "tagline": "Bordeaux, cream, long golden afternoons.",
+      "author": "Rofi",
+      "tags": [
+        "warm",
+        "serif",
+        "editorial"
+      ],
+      "slug": "wine-country",
+      "source_path": "designs/wine-country.md",
+      "lines": 75
+    },
+    {
+      "name": "Y2K Chrome",
+      "tagline": "Frutiger Aero meets the CD-ROM menu.",
+      "author": "Rofi",
+      "tags": [
+        "playful",
+        "bold",
+        "cool"
+      ],
+      "slug": "y2k-chrome",
+      "source_path": "designs/y2k-chrome.md",
+      "lines": 75
+    },
+    {
+      "name": "Yacht Club",
+      "tagline": "Regatta: navy, rope cream, signal flag red.",
+      "author": "Rofi",
+      "tags": [
+        "hospitality",
+        "warm",
+        "serif"
+      ],
+      "slug": "yacht-club",
+      "source_path": "designs/yacht-club.md",
+      "lines": 76
+    },
+    {
+      "name": "Zed Dev",
+      "tagline": "Editor-dark, warmer than pitch, glyph-sharp.",
+      "author": "Rofi",
+      "tags": [
+        "technical",
+        "dark",
+        "mono"
+      ],
+      "slug": "zed-dev",
+      "source_path": "designs/zed-dev.md",
+      "lines": 74
+    },
+    {
+      "name": "Zine Risograph",
+      "tagline": "Riso-printed zines: fluoro pink on pulp paper.",
+      "author": "Rofi",
+      "tags": [
+        "editorial",
+        "playful",
+        "bold"
+      ],
+      "slug": "zine-risograph",
+      "source_path": "designs/zine-risograph.md",
+      "lines": 75
+    }
+  ]
+}
