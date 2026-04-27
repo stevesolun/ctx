@@ -587,9 +587,26 @@ Verification observed:
 
 - Docs-only edit; final branch verification is recorded in the merge handoff rather than claimed here.
 
+### Phase 27: MCP subprocess test environment
+
+Status: implemented in this worktree.
+
+What changed:
+
+- Full-suite verification exposed that the MCP subprocess round-trip tests invoked `python -m ctx.mcp_server.server` without an explicit source-tree `PYTHONPATH`.
+- This failure was caused by the intentional Phase 14 security hardening that stopped MCP subprocesses from inheriting the full parent environment.
+- The tests now pass only the required `src/` path through the explicit MCP env overlay, preserving the production no-secret-inheritance behavior.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_mcp_server.py -q` reported `32 passed`.
+- `python -m ruff check src\tests\test_mcp_server.py` reported `All checks passed!`.
+- `python -m mypy src\tests\test_mcp_server.py` reported `Success: no issues found in 1 source file`.
+- `python -m compileall -q src\tests\test_mcp_server.py` completed.
+
 ## Blocker Summary
 
-P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke and targeted CLI policy tests, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
+P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
 
 1. `ctx-init --hooks/--graph` invokes removed modules and still exits success. Fixed in Phase 1.
 2. Installed Claude hooks point at files not shipped in the wheel and use non-portable shell commands. Fixed in Phase 1.

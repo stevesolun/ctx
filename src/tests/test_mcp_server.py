@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,8 @@ from ctx.mcp_server.server import (
     _write_response,
     run_server,
 )
+
+_SRC_DIR = Path(__file__).resolve().parents[1]
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -79,6 +82,18 @@ def _drive(input_bytes: bytes) -> list[dict[str, Any]]:
     assert rc == 0, f"server exited {rc}"
     raw = out_stream.getvalue().decode("utf-8")
     return [json.loads(line) for line in raw.splitlines() if line.strip()]
+
+
+def _mcp_subprocess_env(wiki: Path, graph_path: Path) -> dict[str, str]:
+    pythonpath = str(_SRC_DIR)
+    existing_pythonpath = os.environ.get("PYTHONPATH")
+    if existing_pythonpath:
+        pythonpath = os.pathsep.join((pythonpath, existing_pythonpath))
+    return {
+        "CTX_WIKI_DIR": str(wiki),
+        "CTX_GRAPH_PATH": str(graph_path),
+        "PYTHONPATH": pythonpath,
+    }
 
 
 # ── Server-level loop behaviour ─────────────────────────────────────────────
@@ -372,10 +387,7 @@ class TestRoundTripWithH2Client:
             args=(
                 "-m", "ctx.mcp_server.server",
             ),
-            env={
-                "CTX_WIKI_DIR": str(wiki),
-                "CTX_GRAPH_PATH": str(graph_path),
-            },
+            env=_mcp_subprocess_env(wiki, graph_path),
             startup_timeout=10.0,
             request_timeout=10.0,
         )
@@ -396,10 +408,7 @@ class TestRoundTripWithH2Client:
             name="ctx",
             command=sys.executable,
             args=("-m", "ctx.mcp_server.server"),
-            env={
-                "CTX_WIKI_DIR": str(wiki),
-                "CTX_GRAPH_PATH": str(graph_path),
-            },
+            env=_mcp_subprocess_env(wiki, graph_path),
             startup_timeout=10.0,
             request_timeout=10.0,
         )
