@@ -29,7 +29,6 @@ from ctx.adapters.generic.loop import (
 )
 from ctx.adapters.generic.providers import (
     CompletionResponse,
-    FinishReason,
     Message,
     ModelProvider,
     ToolCall,
@@ -38,8 +37,6 @@ from ctx.adapters.generic.providers import (
 )
 from ctx.adapters.generic.tools import (
     McpRouter,
-    McpServerError,
-    TOOL_SEPARATOR,
 )
 
 
@@ -153,6 +150,46 @@ class TestCompletion:
             task="task",
         )
         assert result.messages[0].role == "user"
+
+    def test_length_finish_reason_is_not_completed(self) -> None:
+        """Codex F5: finish_reason='length' (provider truncation) with
+        no tool calls must NOT be reported as ``completed`` — that
+        masks budget-hit truncation as success.
+        """
+        truncated = CompletionResponse(
+            content="The first three steps are",  # cut off
+            tool_calls=(),
+            finish_reason="length",
+            usage=Usage(input_tokens=10, output_tokens=4096),
+            provider="scripted",
+            model="x",
+        )
+        result = run_loop(
+            provider=_Scripted([truncated]),
+            system_prompt="",
+            task="enumerate every step",
+        )
+        assert result.stop_reason == "length"
+
+    def test_empty_stop_response_is_not_completed(self) -> None:
+        """Codex F5: empty content + no tool calls is empty_response,
+        not a successful completion. This is the provider-side
+        safety-stop / silent-finish failure mode.
+        """
+        empty = CompletionResponse(
+            content="",
+            tool_calls=(),
+            finish_reason="stop",
+            usage=Usage(input_tokens=5, output_tokens=0),
+            provider="scripted",
+            model="x",
+        )
+        result = run_loop(
+            provider=_Scripted([empty]),
+            system_prompt="",
+            task="answer me",
+        )
+        assert result.stop_reason == "empty_response"
 
 
 # ── Termination: max_iterations ─────────────────────────────────────────────
@@ -474,6 +511,44 @@ class TestUsage:
         )
         assert result.usage.cost_usd == pytest.approx(0.03)
 
+    def test_compaction_usage_counts_toward_total(self) -> None:
+        """Codex F6: ``compactor.compact_with_usage`` returns the
+        summary call's tokens + cost; the loop must add them to the
+        running totals so budget enforcement and audit accuracy
+        reflect the true session cost.
+        """
+        from ctx.adapters.generic.compaction import CompactionResult
+
+        class _StubCompactor:
+            def should_compact(self, messages):
+                return True
+
+            def compact_with_usage(self, messages, provider):
+                return CompactionResult(
+                    new_messages=list(messages),
+                    compacted_count=0,
+                    summary="(stub)",
+                    usage=Usage(input_tokens=100, output_tokens=50, cost_usd=0.005),
+                )
+
+        tc = ToolCall(id="c1", name="x__a", arguments={})
+        a = _tool_response(tc, usage=Usage(input_tokens=1, output_tokens=1))
+        b = _stop_response("done", usage=Usage(input_tokens=2, output_tokens=2))
+        provider = _Scripted([a, b])
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            tool_executor=lambda _c: "ok",
+            compactor=_StubCompactor(),
+        )
+        # Generator: 3 input + 3 output.
+        # Compactor: 100 input + 50 output + $0.005.
+        # Both must be in the totals.
+        assert result.usage.input_tokens == 103
+        assert result.usage.output_tokens == 53
+        assert result.usage.cost_usd == pytest.approx(0.005)
+
 
 # ── Observer hooks ──────────────────────────────────────────────────────────
 
@@ -568,3 +643,50 @@ class TestResumePath:
         roles = [m.role for m in result.messages]
         # Order: system, user(task), assistant(prior), user(prior), assistant(current)
         assert roles == ["system", "user", "assistant", "user", "assistant"]
+
+    def test_task_can_be_appended_after_replayed_messages(self) -> None:
+        """Codex F3: ``append_task_after_messages=True`` (the resume
+        mode) places the follow-up task AFTER the replayed history.
+        Without it, a resumed transcript would have its follow-up
+        shoved before the prior conversation.
+        """
+        provider = _Scripted([_stop_response("done")])
+        prior = [
+            Message(role="user", content="original question"),
+            Message(role="assistant", content="original answer"),
+        ]
+        result = run_loop(
+            provider=provider,
+            system_prompt="sys",
+            task="follow up",
+            messages=prior,
+            append_task_after_messages=True,
+        )
+        roles = [m.role for m in result.messages]
+        contents = [m.content for m in result.messages]
+        # Order: system, user(prior), assistant(prior), user(follow-up), assistant
+        assert roles == ["system", "user", "assistant", "user", "assistant"]
+        assert contents[1] == "original question"
+        assert contents[3] == "follow up"
+
+    def test_existing_system_in_replayed_messages_not_duplicated(self) -> None:
+        """When the replayed messages already start with a system
+        message, the harness must NOT prepend its own system prompt
+        (would create two system messages).
+        """
+        provider = _Scripted([_stop_response("done")])
+        prior = [
+            Message(role="system", content="prior system"),
+            Message(role="user", content="prior user"),
+        ]
+        result = run_loop(
+            provider=provider,
+            system_prompt="new system",
+            task="task",
+            messages=prior,
+            append_task_after_messages=True,
+        )
+        roles = [m.role for m in result.messages]
+        # Only ONE system message — the prior one is preserved.
+        assert roles.count("system") == 1
+        assert result.messages[0].content == "prior system"
