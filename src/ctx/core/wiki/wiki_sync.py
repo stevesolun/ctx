@@ -41,6 +41,7 @@ def ensure_wiki(wiki_path: str) -> None:
         wiki / "raw" / "scans",
         wiki / "raw" / "marketplace-dumps",
         wiki / "entities" / "skills",
+        wiki / "entities" / "agents",
         wiki / "entities" / "plugins",
         wiki / "entities" / "mcp-servers",
         wiki / "concepts",
@@ -164,11 +165,52 @@ def _sanitize_yaml_value(value: str) -> str:
     return sanitized.strip()
 
 
-def upsert_skill_page(wiki_path: str, skill_name: str, skill_info: dict) -> bool:
-    """Create or update a skill entity page. Returns True if created new."""
+_SUBJECT_TYPE_FOR_ENTITY_TYPE: dict[str, str] = {
+    "skill": "skills",
+    "agent": "agents",
+    "mcp-server": "mcp-servers",
+    "plugin": "plugins",
+}
+_ENTITY_TYPE_FOR_SUBJECT_TYPE: dict[str, str] = {
+    value: key for key, value in _SUBJECT_TYPE_FOR_ENTITY_TYPE.items()
+}
+
+
+def _subject_type_for_manifest_entry(entry: dict) -> str:
+    entity_type = entry.get("entity_type", "skill")
+    try:
+        return _SUBJECT_TYPE_FOR_ENTITY_TYPE[entity_type]
+    except KeyError as exc:
+        raise ValueError(
+            f"unknown entity_type {entity_type!r}; "
+            f"expected one of {sorted(_SUBJECT_TYPE_FOR_ENTITY_TYPE)!r}"
+        ) from exc
+
+
+def _entity_page_path(wiki_path: str, subject_type: str, slug: str) -> Path:
+    target = _entity_index_link(subject_type, slug)
+    return Path(wiki_path) / f"{target}.md"
+
+
+def upsert_skill_page(
+    wiki_path: str,
+    skill_name: str,
+    skill_info: dict,
+    *,
+    subject_type: str = "skills",
+) -> bool:
+    """Create or update an entity page. Returns True if created new."""
     if not SAFE_NAME_RE.match(skill_name):
         raise ValueError(f"Invalid skill name: {skill_name!r}")
-    page_path = Path(wiki_path) / "entities" / "skills" / f"{skill_name}.md"
+    if subject_type not in _ENTITY_TYPE_FOR_SUBJECT_TYPE:
+        raise ValueError(
+            f"unknown subject_type {subject_type!r}; "
+            f"expected one of {sorted(_ENTITY_TYPE_FOR_SUBJECT_TYPE)!r}"
+        )
+    entity_type = _ENTITY_TYPE_FOR_SUBJECT_TYPE[subject_type]
+    page_path = _entity_page_path(wiki_path, subject_type, skill_name)
+    page_path.parent.mkdir(parents=True, exist_ok=True)
+    _reject_symlink(page_path.parent)
     with file_lock(page_path):
         _reject_symlink(page_path)
         is_new = not page_path.exists()
@@ -184,7 +226,9 @@ def upsert_skill_page(wiki_path: str, skill_name: str, skill_info: dict) -> bool
             if not tags:
                 tags = ["uncategorized"]
 
-            safe_path = _sanitize_yaml_value(skill_info.get('path', 'unknown'))
+            safe_path = _sanitize_yaml_value(
+                skill_info.get('path') or skill_info.get('command', 'unknown')
+            )
             safe_reason = _sanitize_yaml_value(skill_info.get('reason', 'Unknown'))
             safe_repo = _sanitize_yaml_value(skill_info.get('repo', 'unknown'))
 
@@ -192,7 +236,7 @@ def upsert_skill_page(wiki_path: str, skill_name: str, skill_info: dict) -> bool
 title: {skill_name}
 created: {TODAY}
 updated: {TODAY}
-type: skill
+type: {entity_type}
 status: installed
 tags: [{', '.join(tags)}]
 source: local
@@ -458,35 +502,55 @@ def main():
     # Save raw scan
     scan_file = save_scan(args.wiki, profile)
 
-    # Upsert skill pages
-    new_skills = []
+    # Upsert typed entity pages.
+    new_entries_by_subject: dict[str, list[str]] = {
+        "skills": [],
+        "agents": [],
+        "mcp-servers": [],
+        "plugins": [],
+    }
     for skill_entry in manifest["load"]:
         skill_name = skill_entry["skill"]
+        subject_type = _subject_type_for_manifest_entry(skill_entry)
         skill_info = {**skill_entry, "repo": Path(profile["repo_path"]).name}
-        is_new = upsert_skill_page(args.wiki, skill_name, skill_info)
+        is_new = upsert_skill_page(
+            args.wiki,
+            skill_name,
+            skill_info,
+            subject_type=subject_type,
+        )
         if is_new:
-            new_skills.append(skill_name)
+            new_entries_by_subject[subject_type].append(skill_name)
 
-    # Update index
-    update_index(args.wiki, new_skills)
+    # Update index.
+    for subject_type, new_entries in new_entries_by_subject.items():
+        update_index(args.wiki, new_entries, subject_type=subject_type)
 
     # Log
     repo_name = Path(profile["repo_path"]).name
     details = [
         f"Repo: {profile['repo_path']}",
         f"Type: {profile.get('project_type', 'unknown')}",
-        f"Skills loaded: {len(manifest['load'])}",
-        f"Skills unloaded: {len(manifest['unload'])}",
-        f"New wiki pages: {len(new_skills)}",
+        f"Entities loaded: {len(manifest['load'])}",
+        f"Entities unloaded: {len(manifest['unload'])}",
+        f"New wiki pages: {sum(len(v) for v in new_entries_by_subject.values())}",
         f"Warnings: {len(manifest.get('warnings', []))}",
         f"Scan saved: {scan_file}",
     ]
-    if new_skills:
-        details.append(f"New pages: {', '.join(new_skills)}")
+    new_pages = [
+        slug
+        for new_entries in new_entries_by_subject.values()
+        for slug in new_entries
+    ]
+    if new_pages:
+        details.append(f"New pages: {', '.join(new_pages)}")
 
     append_log(args.wiki, "scan", repo_name, details)
 
-    print(f"Wiki synced: {len(new_skills)} new pages, {len(manifest['load'])} skills tracked")
+    print(
+        f"Wiki synced: {len(new_pages)} new pages, "
+        f"{len(manifest['load'])} entities tracked"
+    )
 
 
 if __name__ == "__main__":

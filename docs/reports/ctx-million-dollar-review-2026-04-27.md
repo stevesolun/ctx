@@ -881,6 +881,26 @@ Verification observed:
 - `python -m mypy src\ctx\adapters\claude_code\skill_loader.py src\ctx\adapters\claude_code\install\skill_unload.py src\ctx_monitor.py src\tests\test_skill_loader.py src\tests\test_ctx_monitor_3type.py` reported `Success: no issues found in 5 source files` with existing notes about unchecked bodies in untyped test functions.
 - `git diff --check` reported no whitespace errors, only existing CRLF conversion warnings.
 
+### Phase 40: Typed wiki sync for mixed manifests
+
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- `wiki_sync.ensure_wiki()` now creates `entities/agents/` alongside skills, plugins, and MCP server roots.
+- Manifest entries are routed by `entity_type`: `skill` -> `entities/skills`, `agent` -> `entities/agents`, `mcp-server` -> sharded `entities/mcp-servers/<shard>/`.
+- `upsert_skill_page()` remains backward compatible for old callers, but now accepts `subject_type` for typed entity pages and writes the correct frontmatter `type`.
+- MCP wiki pages use `command` as the path-like frontmatter value when a file path is not present.
+- Index updates are grouped by subject type, so skill, agent, plugin, and MCP links go into their own sections.
+- The sync log and console summary now say entities rather than skills when counting mixed manifests.
+
+Verification observed:
+
+- Red-first `python -m pytest src\tests\test_wiki_sync.py::TestMain::test_full_sync_routes_mixed_manifest_entries_by_entity_type -q` failed before implementation because the agent page was not created under `entities/agents/`.
+- After implementation, `python -m pytest src\tests\test_wiki_sync.py -q` reported `116 passed`.
+- `python -m ruff check src\ctx\core\wiki\wiki_sync.py src\tests\test_wiki_sync.py` reported `All checks passed!`.
+- `python -m mypy src\ctx\core\wiki\wiki_sync.py src\tests\test_wiki_sync.py` reported `Success: no issues found in 2 source files` with the existing note about unchecked bodies in an untyped function.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -921,7 +941,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-39 closed the original P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats now narrowed to one newly surfaced wiki type-sync blocker, live-host execution, live third-party integrations, browser CI ownership, release/tag readiness, and exhaustive process-kill crash-consistency scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-40 closed the original P0/P1 blocker list plus the newly surfaced wiki type-sync blocker and the first release-hardening slices in the current branch, with the remaining caveats now narrowed to live-host execution, live third-party integrations, browser CI ownership, release/tag readiness, and exhaustive process-kill crash-consistency scenarios noted below.
 
 ## P0 Findings
 
@@ -2082,15 +2102,9 @@ Success criteria:
 
 ## Current Next Steps
 
-The original P0/P1 remediation work is complete in this branch, but the parallel Phase 39 review surfaced one new P1 merge blocker and several release-hardening items that still need treatment before merge/release.
+The original P0/P1 remediation work is complete in this branch, and the parallel Phase 39 review's newly surfaced wiki P1 was fixed in Phase 40. The remaining work is release-hardening and live-integration validation.
 
-1. Make wiki sync type-aware for mixed manifests:
-   - `wiki_sync.main()` still iterates `manifest["load"]` entries as skills and calls `upsert_skill_page()`/`update_index()` with skill defaults.
-   - A manifest entry such as `{"skill": "github-mcp", "entity_type": "mcp-server"}` can be written under `entities/skills/` and indexed as a skill.
-   - Required fix: route skill, agent, and mcp-server manifest entries through typed wiki page/index helpers, including sharded MCP paths.
-   - Required tests: sync a manifest containing skill, agent, and mcp-server entries and assert the entity paths, frontmatter type, and index sections are correct.
-
-2. Run a clean-machine A-Z host flow against a real Claude Code installation:
+1. Run a clean-machine A-Z host flow against a real Claude Code installation:
    - The opt-in live Claude host gate exists as of Phase 37.
    - Install from the built wheel into a clean virtualenv.
    - Use an isolated temporary home/config directory.
@@ -2101,7 +2115,7 @@ The original P0/P1 remediation work is complete in this branch, but the parallel
    - Run `ctx-scan-repo --recommend` on a small real repo and verify the same bundle through CLI, Python API, MCP, and Claude Code hook surfaces.
    - Keep this manual and quota-acknowledged: discovery showed `claude -p` can hit `error_max_budget_usd`, and this branch now requires an explicit environment acknowledgement plus a small `--max-budget-usd` cap before any live model call.
 
-3. Validate live third-party MCP behavior:
+2. Validate live third-party MCP behavior:
    - The opt-in live MCP compatibility gate exists as of Phase 35.
    - Test at least one trusted real third-party MCP server for startup, `tools/list`, `tools/call`, timeout, stderr diagnostics, and env allowlist behavior.
    - Verify `ctx run --allow-tool/--deny-tool` UX when real model-visible tool names are involved.
@@ -2109,19 +2123,19 @@ The original P0/P1 remediation work is complete in this branch, but the parallel
    - Fix the live MCP config parser first: `inherit_env` must be a strict JSON boolean, not `bool(payload.get(...))`, because string values such as `"false"` currently become truthy in the opt-in test harness.
    - Do not run `npx` or any third-party MCP command by default in CI.
 
-4. Stress crash consistency and concurrent writers:
+3. Stress crash consistency and concurrent writers:
    - Kill processes during restore, wiki sync, manifest updates, and session writes.
    - Verify rollback snapshots, atomic temp-file replacement, and lock behavior.
    - Add regression tests for partial-write and parallel-writer cases not already covered.
    - Manifest install/uninstall lost-update coverage was fixed in Phase 34, active dashboard load/unload lost-update coverage was fixed in Phase 39, and wiki atomic write/lock coverage was hardened in Phase 38.
    - Remaining crash-consistency work should focus on process-kill restore/session interruption cases and any writer that still bypasses the shared atomic helpers.
 
-5. Make browser security coverage real in CI:
+4. Make browser security coverage real in CI:
    - `.github/workflows/test.yml` still installs `.[dev]`, while Playwright is in the `browser` extra.
    - Add a dedicated browser job that installs `.[dev,browser]`, installs Chromium, and runs `src/tests/test_ctx_monitor_browser.py` under the `browser` marker.
    - Harden the SSE browser test by waiting for both EventSource connections to open before writing the single audit event.
 
-6. Prepare release readiness material:
+5. Prepare release readiness material:
    - Generate a changelog from the remediation commits.
    - Document behavior changes around MCP env inheritance and tool policy.
    - Bump `pyproject.toml` and `src/ctx/__init__.py` off `0.6.4`; PyPI and the existing remote tag already use `0.6.4`.

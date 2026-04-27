@@ -1201,6 +1201,79 @@ class TestMain:
         skill_page = wiki_dir / "entities" / "skills" / "python-testing.md"
         assert skill_page.exists()
 
+    def test_full_sync_routes_mixed_manifest_entries_by_entity_type(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        _pin_today(monkeypatch)
+        wiki_dir = tmp_path / "wiki"
+        wiki_sync.ensure_wiki(str(wiki_dir))
+
+        profile = {
+            "repo_path": str(tmp_path / "mixed-repo"),
+            "project_type": "python",
+        }
+        manifest = {
+            "load": [
+                {
+                    "skill": "python-testing",
+                    "entity_type": "skill",
+                    "path": "/skills/python-testing",
+                    "reason": "python testing",
+                    "priority": 5,
+                },
+                {
+                    "skill": "code-reviewer",
+                    "entity_type": "agent",
+                    "path": "/agents/code-reviewer.md",
+                    "reason": "review agent",
+                    "priority": 4,
+                },
+                {
+                    "skill": "github-mcp",
+                    "entity_type": "mcp-server",
+                    "command": "npx -y @modelcontextprotocol/server-github",
+                    "reason": "github mcp integration",
+                    "priority": 3,
+                },
+            ],
+            "unload": [],
+            "warnings": [],
+        }
+
+        profile_path = tmp_path / "profile-mixed.json"
+        manifest_path = tmp_path / "manifest-mixed.json"
+        profile_path.write_text(json.dumps(profile), encoding="utf-8")
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "wiki_sync",
+                "--profile", str(profile_path),
+                "--manifest", str(manifest_path),
+                "--wiki", str(wiki_dir),
+            ],
+        )
+        wiki_sync.main()
+        capsys.readouterr()
+
+        skill_page = wiki_dir / "entities" / "skills" / "python-testing.md"
+        agent_page = wiki_dir / "entities" / "agents" / "code-reviewer.md"
+        mcp_page = wiki_dir / "entities" / "mcp-servers" / "g" / "github-mcp.md"
+        assert skill_page.exists()
+        assert agent_page.exists()
+        assert mcp_page.exists()
+        assert not (wiki_dir / "entities" / "skills" / "code-reviewer.md").exists()
+        assert not (wiki_dir / "entities" / "skills" / "github-mcp.md").exists()
+        assert "type: skill" in skill_page.read_text(encoding="utf-8")
+        assert "type: agent" in agent_page.read_text(encoding="utf-8")
+        assert "type: mcp-server" in mcp_page.read_text(encoding="utf-8")
+
+        index = (wiki_dir / "index.md").read_text(encoding="utf-8")
+        assert "[[entities/skills/python-testing]]" in index
+        assert "[[entities/agents/code-reviewer]]" in index
+        assert "[[entities/mcp-servers/g/github-mcp]]" in index
+
     def test_full_sync_appends_to_log(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
     ) -> None:
