@@ -15,6 +15,9 @@ contract stabilizes.
 - The built wheel installs into a clean virtualenv.
 - Console-script entrypoints execute from the installed wheel.
 - `ctx-init --hooks` writes Claude settings only under an isolated temp home.
+- A deterministic fake Claude host reads the generated settings and executes
+  the installed PostToolUse and Stop hook commands without calling Anthropic
+  APIs.
 - `ctx-scan-repo --recommend` can scan a tiny FastAPI-like repo from the wheel.
 - `ctx run` can start a session with a process-local fake LiteLLM provider.
 - `ctx resume` can continue that session from the same isolated session store.
@@ -23,7 +26,9 @@ contract stabilizes.
 ## What It Skips
 
 - It does not run `ctx-init --graph`; graph builds are intentionally slow.
-- It does not execute real Claude Code hooks inside a live Claude Code process.
+- It does not execute hooks inside a live Claude Code process. The fake host
+  proves generated hook commands execute from the installed wheel; a true
+  Claude Code host run remains a manual release gate.
 - It does not connect to a real third-party MCP server.
 - It does not browser-test the monitor dashboard.
 - It does not simulate process kills or power loss during writes.
@@ -53,16 +58,17 @@ python scripts/clean_host_contract.py --fast --temp-root /tmp/ctx-clean-host-deb
 
 ## CI Usage
 
-The `.github/workflows/clean-host-contract.yml` workflow runs this contract
-manually via `workflow_dispatch` and weekly on a schedule. It is not part of
-the fast PR matrix yet; keep it that way until runtime and flake rate are
-measured.
+The main `.github/workflows/test.yml` workflow runs this contract on pushes and
+pull requests. The standalone `.github/workflows/clean-host-contract.yml`
+workflow remains available for manual runs and weekly scheduled drift checks.
 
 ## Failure Triage
 
 - Wheel build failure: inspect package metadata and `pyproject.toml`.
 - Install failure: inspect dependency constraints and `pip check` output.
 - `ctx-init` failure: inspect packaged entrypoints and hook module paths.
+- Fake Claude hook-smoke failure: inspect generated `settings.json`, packaged
+  hook module paths, and whether PostToolUse/Stop hook schemas changed.
 - `ctx-scan-repo` failure: inspect installed flat-module entrypoints and
   resolver imports.
 - `ctx run` or `ctx resume` failure: inspect LiteLLM provider import behavior,

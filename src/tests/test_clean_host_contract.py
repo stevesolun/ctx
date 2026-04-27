@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -12,11 +13,13 @@ import pytest
 from scripts.clean_host_contract import (
     CommandRunner,
     CompletedCommand,
+    _assert_fake_claude_hook_output,
     assert_inside,
     isolated_env,
     make_paths,
     run_contract,
     venv_script,
+    write_fake_claude_cli,
     write_fake_litellm,
     write_tiny_repo,
 )
@@ -58,6 +61,19 @@ class RecordingRunner(CommandRunner):
         elif call and Path(call[0]).name.startswith("ctx-scan-repo"):
             output = Path(call[call.index("--output") + 1])
             output.write_text("{}", encoding="utf-8")
+        elif any(Path(part).name == "fake_claude.py" for part in call):
+            stdout = json.dumps({
+                "hook_commands": 5,
+                "failed": 0,
+                "commands": [
+                    {"command": "ctx.adapters.claude_code.hooks.context_monitor"},
+                    {"command": "skill_add_detector"},
+                    {"command": "ctx.adapters.claude_code.hooks.bundle_orchestrator"},
+                    {"command": "usage_tracker"},
+                    {"command": "ctx.adapters.claude_code.hooks.lifecycle_hooks"},
+                ],
+            })
+            return CompletedCommand(call, Path.cwd(), 0, stdout, "")
         stdout = '{"stop_reason": "tool_denied"}' if "--deny-tool" in call else ""
         rc = 2 if "--deny-tool" in call else 0
         return CompletedCommand(call, Path.cwd(), rc, stdout, "")
@@ -106,6 +122,38 @@ def test_fake_litellm_can_emit_stop_or_tool_call(tmp_path: Path) -> None:
     assert "tool_calls" in body
 
 
+def test_fake_claude_cli_executes_post_tool_and_stop_hooks(tmp_path: Path) -> None:
+    fake = write_fake_claude_cli(tmp_path)
+    body = fake.read_text(encoding="utf-8")
+
+    assert "PostToolUse" in body
+    assert "Stop" in body
+    assert "subprocess.run" in body
+
+
+def test_fake_claude_hook_output_requires_all_generated_hooks() -> None:
+    good = json.dumps({
+        "hook_commands": 5,
+        "failed": 0,
+        "commands": [
+            {"command": "ctx.adapters.claude_code.hooks.context_monitor"},
+            {"command": "skill_add_detector"},
+            {"command": "ctx.adapters.claude_code.hooks.bundle_orchestrator"},
+            {"command": "usage_tracker"},
+            {"command": "ctx.adapters.claude_code.hooks.lifecycle_hooks"},
+        ],
+    })
+    _assert_fake_claude_hook_output(good)
+
+    missing = json.dumps({
+        "hook_commands": 4,
+        "failed": 0,
+        "commands": [{"command": "usage_tracker"}],
+    })
+    with pytest.raises(AssertionError):
+        _assert_fake_claude_hook_output(missing)
+
+
 def test_tiny_repo_contains_fastapi_signals(tmp_path: Path) -> None:
     write_tiny_repo(tmp_path)
 
@@ -130,6 +178,7 @@ def test_contract_command_sequence_without_real_build(tmp_path: Path, monkeypatc
     assert any("-m venv" in call for call in joined)
     assert any("-m pip install" in call for call in joined)
     assert any("ctx-init" in call and "--hooks" in call for call in joined)
+    assert any("fake_claude.py" in call and "--settings" in call for call in joined)
     assert any("ctx-scan-repo" in call and "--recommend" in call for call in joined)
     assert any("ctx run" in call or "ctx.exe run" in call for call in joined)
     assert any("--deny-tool ctx__wiki_get" in call for call in joined)

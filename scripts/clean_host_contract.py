@@ -9,6 +9,7 @@ entrypoint yet; this is release infrastructure.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -196,6 +197,98 @@ def write_fake_litellm(fake_modules: Path) -> Path:
     return path
 
 
+def write_fake_claude_cli(fake_modules: Path) -> Path:
+    """Write a tiny Claude-Code-like host that executes generated hooks.
+
+    This does not call Anthropic APIs. It reads the isolated settings.json
+    produced by ctx-init and invokes the configured hook command strings with
+    representative stdin payloads, which catches broken module paths and hook
+    schema drift from the installed wheel.
+    """
+    fake_modules.mkdir(parents=True, exist_ok=True)
+    path = fake_modules / "fake_claude.py"
+    path.write_text(
+        '''"""Deterministic Claude Code hook smoke host for clean-host tests."""\n'''
+        "from __future__ import annotations\n\n"
+        "import argparse\n"
+        "import json\n"
+        "import os\n"
+        "import re\n"
+        "import shlex\n"
+        "import subprocess\n"
+        "import sys\n"
+        "from pathlib import Path\n\n"
+        "PAYLOADS = {\n"
+        "    'PostToolUse': {\n"
+        "        'hook_event_name': 'PostToolUse',\n"
+        "        'tool_name': 'Bash',\n"
+        "        'tool_input': {'command': 'pip install fastapi pytest'},\n"
+        "    },\n"
+        "    'Stop': {\n"
+        "        'hook_event_name': 'Stop',\n"
+        "        'session_id': 'clean-host-fake-claude',\n"
+        "    },\n"
+        "}\n\n"
+        "def _settings_path(raw: str) -> Path:\n"
+        "    if raw:\n"
+        "        return Path(raw)\n"
+        "    return Path(os.path.expanduser('~/.claude/settings.json'))\n\n"
+        "def _commands(settings: dict, event: str) -> list[str]:\n"
+        "    payload = PAYLOADS[event]\n"
+        "    tool_name = str(payload.get('tool_name') or '')\n"
+        "    out: list[str] = []\n"
+        "    for entry in settings.get('hooks', {}).get(event, []):\n"
+        "        if not isinstance(entry, dict):\n"
+        "            continue\n"
+        "        matcher = str(entry.get('matcher') or '.*')\n"
+        "        if event == 'PostToolUse' and not re.search(matcher, tool_name):\n"
+        "            continue\n"
+        "        for hook in entry.get('hooks', []):\n"
+        "            if isinstance(hook, dict) and hook.get('type') == 'command':\n"
+        "                command = hook.get('command')\n"
+        "                if isinstance(command, str) and command.strip():\n"
+        "                    out.append(command)\n"
+        "    return out\n\n"
+        "def main() -> int:\n"
+        "    parser = argparse.ArgumentParser()\n"
+        "    parser.add_argument('--settings', default='')\n"
+        "    parser.add_argument('--cwd', default='')\n"
+        "    parser.add_argument('-p', '--print', action='store_true')\n"
+        "    parser.add_argument('prompt', nargs='*')\n"
+        "    args = parser.parse_args()\n"
+        "    settings = json.loads(_settings_path(args.settings).read_text(encoding='utf-8'))\n"
+        "    cwd = args.cwd or os.getcwd()\n"
+        "    records = []\n"
+        "    for event in ('PostToolUse', 'Stop'):\n"
+        "        payload = json.dumps(PAYLOADS[event])\n"
+        "        for command in _commands(settings, event):\n"
+        "            argv = shlex.split(command)\n"
+        "            result = subprocess.run(\n"
+        "                argv,\n"
+        "                cwd=cwd,\n"
+        "                env=os.environ.copy(),\n"
+        "                input=payload,\n"
+        "                text=True,\n"
+        "                capture_output=True,\n"
+        "                check=False,\n"
+        "            )\n"
+        "            records.append({\n"
+        "                'event': event,\n"
+        "                'command': command,\n"
+        "                'returncode': result.returncode,\n"
+        "                'stdout': result.stdout[-500:],\n"
+        "                'stderr': result.stderr[-500:],\n"
+        "            })\n"
+        "    failed = [r for r in records if r['returncode'] != 0]\n"
+        "    print(json.dumps({'hook_commands': len(records), 'failed': len(failed), 'commands': records}))\n"
+        "    return 1 if failed else 0\n\n"
+        "if __name__ == '__main__':\n"
+        "    raise SystemExit(main())\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def write_tiny_repo(path: Path) -> None:
     (path / "app").mkdir(parents=True, exist_ok=True)
     (path / "tests").mkdir(parents=True, exist_ok=True)
@@ -243,6 +336,32 @@ def _prepare_dirs(paths: ContractPaths) -> None:
         path.mkdir(parents=True, exist_ok=True)
 
 
+def _assert_fake_claude_hook_output(stdout: str) -> None:
+    try:
+        result = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(f"fake Claude hook smoke returned invalid JSON: {stdout!r}") from exc
+    if result.get("failed") != 0:
+        raise AssertionError(f"fake Claude hook smoke had failures: {stdout}")
+    hook_commands = int(result.get("hook_commands") or 0)
+    if hook_commands < 5:
+        raise AssertionError(f"expected at least 5 generated hook commands, got {hook_commands}")
+    rendered = "\n".join(
+        str(row.get("command", ""))
+        for row in result.get("commands", [])
+        if isinstance(row, dict)
+    )
+    for expected in (
+        "ctx.adapters.claude_code.hooks.context_monitor",
+        "skill_add_detector",
+        "ctx.adapters.claude_code.hooks.bundle_orchestrator",
+        "usage_tracker",
+        "ctx.adapters.claude_code.hooks.lifecycle_hooks",
+    ):
+        if expected not in rendered:
+            raise AssertionError(f"fake Claude hook smoke did not run {expected}")
+
+
 def run_contract(
     *,
     project_root: Path,
@@ -255,6 +374,7 @@ def run_contract(
     _prepare_dirs(paths)
     write_tiny_repo(paths.tiny_repo)
     write_fake_litellm(paths.fake_modules)
+    fake_claude = write_fake_claude_cli(paths.fake_modules)
 
     env = isolated_env(paths)
     runner.run(
@@ -286,6 +406,21 @@ def run_contract(
     assert_inside(claude_dir, paths.root)
     if not (claude_dir / "settings.json").exists():
         raise AssertionError("ctx-init --hooks did not write isolated settings.json")
+    fake_claude_result = runner.run(
+        [
+            str(py),
+            str(fake_claude),
+            "--settings",
+            str(claude_dir / "settings.json"),
+            "--cwd",
+            str(paths.tiny_repo),
+            "-p",
+            "trigger clean-host hook smoke",
+        ],
+        cwd=paths.tiny_repo,
+        env=run_env,
+    )
+    _assert_fake_claude_hook_output(fake_claude_result.stdout)
 
     stack_profile = paths.root / "stack-profile.json"
     runner.run(
