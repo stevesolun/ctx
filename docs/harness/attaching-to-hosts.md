@@ -96,6 +96,49 @@ The server reads JSON-RPC 2.0 on stdin, writes on stdout, speaks
 MCP protocol version `2024-11-05`. Any client that does the standard
 `initialize` handshake + `tools/list` + `tools/call` flow works.
 
+### Live MCP compatibility gate
+
+The regular test suite never starts arbitrary third-party MCP servers.
+Those commands run as local subprocesses and can read files, use the
+network, and inherit whatever environment you explicitly allow.
+
+To validate a trusted server, provide a local config and opt in:
+
+```bash
+python -m pytest src/tests/test_mcp_live_compat.py \
+  --run-live-mcp \
+  --live-mcp-config /path/to/trusted-mcp.json
+```
+
+Example config:
+
+```json
+{
+  "name": "trusted-filesystem",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-filesystem", "${tmp_path}"],
+  "startup_timeout": 30,
+  "request_timeout": 10,
+  "inherit_env": false,
+  "env": {},
+  "expected_tools": ["list_directory"],
+  "probe": {
+    "tool": "list_directory",
+    "arguments": {"path": "."},
+    "expect_text_contains": ""
+  },
+  "trust": {
+    "server_is_third_party_code": true,
+    "approved_by": "your-name"
+  }
+}
+```
+
+`command` and `args` are passed as an argv list, not through a shell.
+Parent secrets are not inherited unless you set `inherit_env: true`; prefer
+explicit `env` keys for servers that need credentials. `${tmp_path}` expands
+to a pytest temporary directory so filesystem probes can avoid real user data.
+
 ---
 
 ## 2. Python library path

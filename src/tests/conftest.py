@@ -23,6 +23,23 @@ from ctx.core.wiki.wiki_sync import ensure_wiki  # noqa: E402  (import after pat
 # ---------------------------------------------------------------------------
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register opt-in integration gates."""
+    parser.addoption(
+        "--run-live-mcp",
+        action="store_true",
+        default=False,
+        help="run trusted live MCP compatibility tests",
+    )
+    parser.addoption(
+        "--live-mcp-config",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="trusted live MCP server config JSON; may be passed more than once",
+    )
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers so pytest doesn't warn on unknown-mark usage.
 

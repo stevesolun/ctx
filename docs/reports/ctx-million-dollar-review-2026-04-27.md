@@ -755,6 +755,32 @@ Verification observed:
 - `git diff --check` reported no whitespace errors.
 - `python -m pytest -q` reported `3239 passed, 7 skipped in 392.77s`.
 
+### Phase 35: Opt-in live MCP compatibility gate
+
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- Added `--run-live-mcp` and repeatable `--live-mcp-config PATH` pytest options.
+- Added `src/tests/test_mcp_live_compat.py`, an integration-marked gate that is skipped by default and runs only when explicitly enabled with trusted local config JSON.
+- The live gate builds `McpServerConfig` with argv-form `command` / `args`, explicit env overlay, optional env inheritance, startup/request timeouts, expected tool assertions, and one optional safe probe call.
+- `docs/harness/attaching-to-hosts.md` now documents the trust boundary, config shape, argv/no-shell behavior, env inheritance caveat, and `${tmp_path}` placeholder for safe filesystem probes.
+
+Verification observed:
+
+- Red test: `python -m pytest src\tests\test_mcp_live_compat.py -q --run-live-mcp` failed before registering the pytest option with `unrecognized arguments: --run-live-mcp`.
+- `python -m pytest src\tests\test_mcp_live_compat.py -q` reported `1 skipped`.
+- `python -m ruff check src\tests\conftest.py src\tests\test_mcp_live_compat.py` reported `All checks passed!`.
+- `python -m mypy src\tests\conftest.py src\tests\test_mcp_live_compat.py` reported `Success: no issues found in 2 source files`.
+- First fake-config live run exposed a Windows UTF-8 BOM parsing issue from PowerShell-authored JSON; the config reader now uses `utf-8-sig`.
+- `python -m pytest src\tests\test_mcp_live_compat.py -q --run-live-mcp --live-mcp-config <fake-mcp-config>` reported `1 passed` against the repo's fake MCP subprocess.
+- `python -m pytest src\tests\test_mcp_router.py src\tests\test_harness_cli_run.py -q` reported `85 passed`.
+- `python -m ruff check .` reported `All checks passed!`.
+- `python -m mypy src` reported `Success: no issues found in 237 source files`.
+- `python -m compileall -q src hooks scripts` completed successfully.
+- `git diff --check` reported no whitespace errors.
+- `python -m pytest -q` reported `3239 passed, 8 skipped in 419.62s`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -795,7 +821,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-34 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-35 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
 
 ## P0 Findings
 
@@ -1968,10 +1994,11 @@ The original P0/P1 remediation work is complete in this branch. The remaining wo
    - Keep this manual and quota-acknowledged: discovery showed `claude -p` can hit `error_max_budget_usd`, so the gate should require an explicit environment acknowledgement and a small `--max-budget-usd` cap before any live model call.
 
 2. Validate live third-party MCP behavior:
-   - Test at least one trusted real MCP server for startup, `tools/list`, `tools/call`, timeout, stderr diagnostics, and env allowlist behavior.
+   - The opt-in live MCP compatibility gate exists as of Phase 35.
+   - Test at least one trusted real third-party MCP server for startup, `tools/list`, `tools/call`, timeout, stderr diagnostics, and env allowlist behavior.
    - Verify `ctx run --allow-tool/--deny-tool` UX when real model-visible tool names are involved.
    - Document any compatibility exceptions that require `inherit_env=True`.
-   - Make the test opt-in with a trusted local config file; do not run `npx` or any third-party MCP command by default in CI.
+   - Do not run `npx` or any third-party MCP command by default in CI.
 
 3. Browser-test the monitor dashboard security boundary:
    - Use a browser-driven harness against `ctx-monitor`.
