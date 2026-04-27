@@ -6,7 +6,6 @@ import json
 import threading
 import urllib.error
 import urllib.request
-from http.server import HTTPServer
 from pathlib import Path
 
 import pytest
@@ -64,7 +63,7 @@ def _post_json(port: int, path: str, body: dict, token: str | None = None) -> tu
 
 def _serve_monitor(monkeypatch: pytest.MonkeyPatch, token: str = "test-token"):
     monkeypatch.setattr(cm, "_MONITOR_TOKEN", token)
-    server = HTTPServer(("127.0.0.1", 0), cm._MonitorHandler)
+    server = cm._make_monitor_server("127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, thread, server.server_port
@@ -296,8 +295,61 @@ def test_parse_frontmatter_missing_returns_empty_meta() -> None:
 def test_wiki_entity_path_rejects_unsafe_slug(fake_claude: Path) -> None:
     assert cm._wiki_entity_path("../../etc/passwd") is None
     assert cm._wiki_entity_path("path/with/slash") is None
+    assert cm._wiki_entity_path("con.txt") is None
     # Absent slug returns None but doesn't raise.
     assert cm._wiki_entity_path("no-such-skill") is None
+
+
+@pytest.mark.parametrize("slug", ["python-patterns", "mcp.v2", "0-service"])
+def test_monitor_slug_validator_accepts_safe_values(slug: str) -> None:
+    assert cm._is_safe_slug(slug)
+
+
+@pytest.mark.parametrize("slug", ["con.txt", "nul.", "COM1", "LPT9.ini"])
+def test_monitor_slug_validator_rejects_windows_reserved_names(slug: str) -> None:
+    assert not cm._is_safe_slug(slug)
+
+
+def test_monitor_sse_stream_does_not_block_json_requests(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_audit(fake_claude, [
+        {"ts": "t", "event": "skill.loaded", "subject": "python-patterns",
+         "session_id": "s1"},
+    ])
+    server, thread, port = _serve_monitor(monkeypatch)
+    stream = urllib.request.urlopen(
+        f"http://127.0.0.1:{port}/api/events.stream", timeout=2
+    )
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/sessions.json", timeout=2,
+        ) as response:
+            assert response.status == 200
+            body = json.loads(response.read().decode("utf-8"))
+        assert body[0]["session_id"] == "s1"
+    finally:
+        stream.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_monitor_shutdown_signals_open_sse_workers(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server, thread, port = _serve_monitor(monkeypatch)
+    stream = urllib.request.urlopen(
+        f"http://127.0.0.1:{port}/api/events.stream", timeout=2
+    )
+    try:
+        server.shutdown()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+        assert server._ctx_shutdown.is_set()
+    finally:
+        stream.close()
+        server.server_close()
 
 
 def test_wiki_entity_path_finds_skill_page(fake_claude: Path) -> None:
@@ -338,6 +390,26 @@ def test_render_graph_emits_cytoscape_mount() -> None:
 def test_graph_neighborhood_rejects_unsafe_slug() -> None:
     result = cm._graph_neighborhood("../../evil")
     assert result == {"nodes": [], "edges": [], "center": None}
+
+
+def test_graph_neighborhood_supports_mcp_nodes(monkeypatch) -> None:
+    import networkx as nx
+    import sys
+
+    G = nx.Graph()
+    G.add_node(
+        "mcp-server:anthropic-python-sdk",
+        label="anthropic-python-sdk",
+        type="mcp-server",
+        tags=["sdk"],
+    )
+    fake = type("M", (), {"load_graph": staticmethod(lambda: G)})
+    monkeypatch.setitem(sys.modules, "ctx.core.graph.resolve_graph", fake)
+    monkeypatch.setitem(sys.modules, "resolve_graph", fake)
+
+    result = cm._graph_neighborhood("anthropic-python-sdk")
+    assert result["center"] == "mcp-server:anthropic-python-sdk"
+    assert result["nodes"][0]["data"]["type"] == "mcp-server"
 
 
 def test_graph_neighborhood_empty_when_graph_absent(monkeypatch) -> None:

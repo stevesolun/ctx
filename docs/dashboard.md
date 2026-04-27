@@ -12,8 +12,9 @@ ctx-monitor serve --host 0.0.0.0 --port 8888  # LAN-visible (explicit opt-in)
 ```
 
 Zero Python dependencies added by the dashboard. Everything runs on
-stdlib `http.server`. Cytoscape.js is loaded from a CDN on the
-`/graph` route only.
+stdlib `http.server`, using daemon request threads so a live
+`/api/events.stream` client cannot block normal dashboard or JSON API
+requests. Cytoscape.js is loaded from a CDN on the `/graph` route only.
 
 ## Usage
 
@@ -24,16 +25,19 @@ how you explore the ctx corpus without ever touching the CLI.
 ### Browse the LLM wiki — `/wiki`
 
 The wiki tab is a filterable card grid of **every entity page** under
-`~/.claude/skill-wiki/entities/{skills,agents}/`. Each card shows:
+`~/.claude/skill-wiki/entities/{skills,agents,mcp-servers}/`. MCP
+server pages use the sharded layout
+`entities/mcp-servers/<first-char-or-0-9>/<slug>.md`; the dashboard
+routes `/wiki/<slug>` to the same shard convention. Each card shows:
 
 - the slug (click to open `/wiki/<slug>`)
 - the quality grade pill (A/B/C/D/F) when the entity has a sidecar,
-  otherwise a "skill" or "agent" type badge
+  otherwise a `skill`, `agent`, or `mcp-server` type badge
 - the frontmatter `description`
 - up to 6 tags
 
 The **left sidebar** has a text search that matches across slug,
-description, and tags, plus skill/agent type checkboxes. Pair them to
+description, and tags, plus skill/agent/MCP type checkboxes. Pair them to
 answer questions like "show me all grade-B agents related to
 testing" — check `agent`, type `testing` in the search box.
 
@@ -52,7 +56,7 @@ shows:
 - a **Popular seed slugs** panel — the 18 highest-degree entities
   rendered as clickable chips (skills in indigo, agents in amber).
   Click a chip to explore that entity's 1-hop neighborhood
-- a search box — type any valid skill or agent slug and press
+- a search box — type any valid skill, agent, or MCP slug and press
   `explore` (or hit Enter)
 - the cytoscape canvas itself, which activates as soon as you pick a
   seed
@@ -62,11 +66,12 @@ Inside the cytoscape view, node colors mean:
 - **emerald** — the focus node you searched for
 - **indigo** — skills
 - **amber** — agents
+- **red diamond** — MCP servers
 
 Edge width encodes the `weight` attribute (count of shared tags), so
 thicker lines = stronger semantic relationships. **Tap any node** to
-navigate to that entity's wiki page. The `agents only` toggle hides
-skill nodes, useful when you're looking for agent pairings.
+navigate to that entity's wiki page. The type checkboxes hide or show
+skills, agents, and MCP servers without reloading the graph.
 
 ### Read the quality KPIs — `/kpi`
 
@@ -112,13 +117,13 @@ Home · Loaded · Skills · Wiki · Graph · KPIs · Sessions · Logs · Live
 | Route | What it shows |
 |---|---|
 | `/` | Home: six stat cards (loaded, sidecars, wiki entities, graph nodes, audit events, sessions), grade distribution pills, recent sessions table, recent audit events |
-| `/loaded` | **Currently-loaded skills** from `~/.claude/skill-manifest.json` with per-row **unload** buttons + a text-input to load a new slug |
+| `/loaded` | **Currently-loaded skills, agents, and MCP servers** from `~/.claude/skill-manifest.json` with per-row **unload** buttons + a text-input to load a new skill slug |
 | `/skills` | Every sidecar as a filterable **card grid**: left sidebar (search by slug, grade checkboxes, skill/agent toggle, hide-floored), card shows grade pill + raw score + links to sidecar/wiki/graph |
 | `/skill/<slug>` | Full sidecar breakdown: four-signal score (telemetry · intake · graph · routing), hard-floor reason, computed_at timestamp, per-skill audit timeline |
-| `/wiki` | **Wiki entity index** — card grid of every page under `~/.claude/skill-wiki/entities/{skills,agents}/`. Left sidebar: text search (slug · description · tag), skill/agent checkboxes. Each card shows the grade pill (when a sidecar exists), description, and tag preview. Click to open the entity page |
+| `/wiki` | **Wiki entity index** — card grid of every page under `~/.claude/skill-wiki/entities/{skills,agents,mcp-servers}/`, including sharded MCP server pages. Left sidebar: text search (slug · description · tag), skill/agent/MCP checkboxes. Each card shows the grade pill (when a sidecar exists), description, and tag preview. Click to open the entity page |
 | `/wiki/<slug>` | Wiki entity page rendered: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views |
 | `/graph` | **Graph explorer landing page** — node/edge count header, a "Popular seed slugs" block (18 highest-degree entities as clickable chips), search box for any slug, and the cytoscape canvas. Clicking a seed chip navigates to `/graph?slug=<slug>` |
-| `/graph?slug=<slug>` | **Cytoscape-rendered** 1-hop neighborhood around the target slug. Node colors: emerald=focus, indigo=skill, amber=agent. Edge width maps to shared-tag count. Tap any node → navigate to that entity's wiki page. Toggle to filter agents only |
+| `/graph?slug=<slug>` | **Cytoscape-rendered** 1-hop neighborhood around the target slug. Node colors: emerald=focus, indigo=skill, amber=agent, red diamond=MCP server. Edge width maps to shared-tag count. Tap any node → navigate to that entity's wiki page. Type and tag filters run client-side |
 | `/kpi` | **KPI dashboard** — total entity count with subject breakdown, grade distribution pills, two-column tables for grade counts and lifecycle tiers (active · watch · demote · archive), hard-floor reasons with counts, **By category** table (count · avg score · A/B/C/D/F mix per category), **Top demotion candidates** (active/watch entries graded D or F, sorted by consecutive-D streak desc then score asc), and the **Archived** list. Same shape as `python -m kpi_dashboard render` but HTML |
 | `/sessions` | Index of every session (audit + skill-events), first/last seen, counts of skills loaded/unloaded/agents/lifecycle transitions |
 | `/session/<id>` | Per-session audit timeline showing the load → score_updated → unload triad with timestamps |
@@ -139,13 +144,17 @@ Home · Loaded · Skills · Wiki · Graph · KPIs · Sessions · Logs · Live
 ### Mutation endpoints
 
 Both POST endpoints enforce same-origin (browser tab open on another
-origin can't forge a request) and reject any slug failing
-`^[a-z0-9][a-z0-9_.-]{0,127}$`.
+origin can't forge a request), require the per-process
+`X-CTX-Monitor-Token` injected into the dashboard page, and reject any
+slug failing the shared safe-name validator. That validator blocks path
+separators, Windows drive-relative strings, malformed names, and Windows
+reserved device names such as `con.txt` and `nul.`.
 
 | Route | Body | Calls |
 |---|---|---|
 | `POST /api/load` | `{"slug": "..."}` | `skill_loader.load_skill(slug)` |
-| `POST /api/unload` | `{"slug": "..."}` | `skill_unload.unload_from_session([slug])` |
+| `POST /api/unload` | `{"slug": "...", "entity_type": "skill"}` | `skill_unload.unload_from_session([slug])` |
+| `POST /api/unload` | `{"slug": "...", "entity_type": "mcp-server"}` | `mcp_install.uninstall_mcp(slug, force=True)` |
 
 Both emit a matching `skill.loaded` / `skill.unloaded` audit row
 with `actor=user, meta.via="ctx-monitor"` so the dashboard-driven
@@ -163,7 +172,7 @@ the raw sidecar that produced it.
 |---|---|
 | **Currently loaded** | Count of entries in `skill-manifest.json[load]`. Clicking the card drills to `/loaded` |
 | **Sidecars** | Total sidecars in `~/.claude/skill-quality/` |
-| **Wiki entities** | Count of wiki pages (skills + agents) |
+| **Wiki entities** | Count of wiki pages (skills + agents + MCP servers) |
 | **Knowledge graph** | Node count + edge count from `graphify-out/graph.json` |
 | **Audit events** | Line count of `~/.claude/ctx-audit.jsonl` |
 | **Sessions** | Unique session IDs seen across audit + events |
@@ -225,11 +234,12 @@ observability proof that ctx's telemetry pipeline is live.
   tool calls are allowed (no Origin header at all).
 - **Slug allowlist on all paths**. Anywhere the dashboard resolves
   a slug to a file path (`/wiki/<slug>`, `/graph?slug=<slug>`,
-  `/api/graph/<slug>.json`), the slug is validated against
-  `^[a-z0-9][a-z0-9_.-]{0,127}$` — no path traversal, no absolute
-  paths, no UNC shares.
+  `/api/graph/<slug>.json`), the slug is validated through the shared
+  safe-name helper — no path traversal, no absolute paths, no UNC
+  shares, no Windows reserved device names.
 
 ## Stopping
 
-Ctrl+C in the terminal. The server is single-threaded (enough for
-local dev); not suitable for shared/production serving.
+Ctrl+C in the terminal. Request handling is threaded for local dashboard
+responsiveness, and shutdown signals any open SSE workers. The monitor is
+still not suitable for shared/production serving.

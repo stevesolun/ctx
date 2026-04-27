@@ -125,6 +125,12 @@ class TestWikiIndexEntries:
         slugs = {e["slug"] for e in entries if e["type"] == "mcp-server"}
         assert slugs == {"anthropic-python-sdk", "atlassian-cloud", "pulsemcp-meta"}
 
+    def test_wiki_entity_path_resolves_sharded_mcp_pages(self, wiki_3type):
+        path = _cm._wiki_entity_path("anthropic-python-sdk")
+        assert path == (
+            wiki_3type / "entities" / "mcp-servers" / "a" / "anthropic-python-sdk.md"
+        )
+
 
 # ────────────────────────────────────────────────────────────────────
 # _render_home — 3-type card

@@ -615,6 +615,55 @@ Verification observed:
 - `python -m compileall -q src hooks scripts` completed.
 - `python -m pytest -q` reported `3212 passed, 7 skipped in 431.94s`.
 
+### Phase 29: Clean-host contract harness
+
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- Added `scripts/clean_host_contract.py`, which builds the current wheel, installs it into a fresh virtualenv, redirects user/config/cache state to a temp root, creates a tiny repo, and runs the installed console scripts through the core A-Z path.
+- Added a GitHub Actions workflow for manual/weekly clean-host contract execution.
+- Added focused unit coverage for the contract runner's environment isolation, path safety, fake LiteLLM module, venv script resolution, and command sequencing.
+- Added `docs/harness/clean-host-contract.md` and a phase plan for the remaining release-hardening work.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_clean_host_contract.py -q` reported `6 passed`.
+- `python -m ruff check src hooks scripts` reported `All checks passed!`.
+- `python -m mypy src` reported `Success: no issues found in 236 source files`.
+- `python -m compileall -q src hooks scripts` completed.
+- `python scripts\clean_host_contract.py --fast` built and installed `claude_ctx-0.6.4-py3-none-any.whl`, ran `ctx-init --hooks`, `ctx-scan-repo --recommend`, `ctx run`, `ctx resume`, and a denied-tool policy run, then reported `clean-host contract passed`.
+- `python -m pytest -q` reported `3218 passed, 7 skipped in 448.61s`.
+
+### Phase 30: Monitor SSE concurrency and route safety
+
+Status: implemented in branch `codex/current-next-steps-hardening`.
+
+What changed:
+
+- `ctx-monitor` now serves through a daemon-threaded `ThreadingHTTPServer` wrapper instead of a single-request `HTTPServer`, so one open `/api/events.stream` client cannot block `/api/sessions.json` or other dashboard routes.
+- Monitor shutdown now signals open SSE workers through a per-server event instead of relying only on daemon-thread cleanup.
+- Monitor slug validation now delegates to the shared safe-name validator, including Windows reserved-name rejection such as `con.txt`, `nul.`, and `LPT9.ini`.
+- `/wiki/<slug>` now resolves sharded MCP wiki pages using the canonical `entities/mcp-servers/<first-char-or-0-9>/<slug>.md` route.
+- `/graph?slug=<slug>` and `/api/graph/<slug>.json` now support MCP graph nodes with the `mcp-server:` prefix.
+- `docs/dashboard.md` now documents threaded SSE behavior, three-type wiki/graph routing, MCP unload routing, token-gated mutations, and shared slug safety.
+
+Verification observed:
+
+- Red-first monitor regression run initially reported `2 failed, 1 passed`; failures were the missing threaded server factory and missing sharded MCP wiki route.
+- Additional red-first checks showed the missing SSE shutdown signal and missing MCP graph focus support.
+- `python -m pytest src\tests\test_ctx_monitor.py::test_monitor_sse_stream_does_not_block_json_requests src\tests\test_ctx_monitor.py::test_monitor_shutdown_signals_open_sse_workers src\tests\test_ctx_monitor.py::test_graph_neighborhood_supports_mcp_nodes src\tests\test_ctx_monitor.py::test_monitor_slug_validator_rejects_windows_reserved_names src\tests\test_ctx_monitor_3type.py::TestWikiIndexEntries::test_wiki_entity_path_resolves_sharded_mcp_pages -q` reported `8 passed`.
+- `python -m pytest src\tests\test_ctx_monitor.py src\tests\test_ctx_monitor_3type.py src\tests\test_safe_name.py -q` reported `142 passed, 1 skipped`.
+- `python -m ruff check src\ctx_monitor.py src\tests\test_ctx_monitor.py src\tests\test_ctx_monitor_3type.py` reported `All checks passed!`.
+- `python -m mypy src\ctx_monitor.py src\tests\test_ctx_monitor.py src\tests\test_ctx_monitor_3type.py` reported `Success: no issues found in 3 source files`.
+- `python -m mypy src` reported `Success: no issues found in 236 source files`.
+- `python scripts\clean_host_contract.py --fast` reported `clean-host contract passed`.
+- `python -m pytest -q` reported `3229 passed, 7 skipped in 403.51s`.
+
+New reviewer finding retained for next phase:
+
+- The Phase 30 agent review found that `ctx.core.wiki.wiki_query.load_all_pages()` still loads only `entities/skills/*.md`, so MCP/library `ctx__wiki_search` cannot search agent or sharded MCP pages even though monitor/wiki-get routes can now resolve them. This is outside the five-file monitor phase and should be the first item in the next implementation slice.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -655,7 +704,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-25 closed the P0/P1 blocker list above in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
+The original reviewed source violated all three invariants. Phases 1-30 closed the P0/P1 blocker list plus the first release-hardening slices in the current branch, with the remaining caveats limited to live-host behavior and exhaustive integration scenarios noted below.
 
 ## P0 Findings
 
@@ -1825,36 +1874,39 @@ The original P0/P1 remediation work is complete in this branch. The remaining wo
    - Confirm generated hooks execute in the host, not only that they are written.
    - Run `ctx-scan-repo --recommend` on a small real repo and verify the same bundle through CLI, Python API, MCP, and Claude Code hook surfaces.
 
-2. Add a CI/nightly clean-host contract job:
-   - Build wheel from source.
-   - Install into a fresh environment.
-   - Use a fake Claude CLI plus a fake MCP server.
-   - Exercise `ctx-init`, `ctx-scan-repo`, `ctx run`, `ctx resume`, compaction, tool policy denial, and package entrypoints.
-   - Keep this separate from fast unit CI if runtime is too high for every PR.
+2. Fix the remaining wiki search route mismatch:
+   - `ctx.core.wiki.wiki_query.load_all_pages()` still reads only `entities/skills/*.md`.
+   - Extend it to search skills, agents, and sharded MCP server pages.
+   - Add a cross-surface regression proving `ctx__wiki_search` can return the same three-type wiki corpus that monitor `/wiki` and `ctx__wiki_get` can resolve.
 
-3. Validate live third-party MCP behavior:
+3. Promote the clean-host contract based on runtime data:
+   - The manual/weekly workflow and local runner now exist.
+   - Decide whether it should stay weekly/manual, become nightly, or become a required pre-release job.
+   - Add fake Claude CLI coverage for hook execution if the real-host flow remains manual-only.
+
+4. Validate live third-party MCP behavior:
    - Test at least one trusted real MCP server for startup, `tools/list`, `tools/call`, timeout, stderr diagnostics, and env allowlist behavior.
    - Verify `ctx run --allow-tool/--deny-tool` UX when real model-visible tool names are involved.
    - Document any compatibility exceptions that require `inherit_env=True`.
 
-4. Browser-test the monitor dashboard security boundary:
+5. Browser-test the monitor dashboard security boundary:
    - Use a browser-driven harness against `ctx-monitor`.
    - Assert mutation requests without the token fail.
    - Assert same-origin/token requests succeed.
    - Assert path traversal and malformed sidecar paths are rejected.
-   - Exercise concurrent SSE connections while load/unload mutations run.
+   - Exercise concurrent SSE connections while load/unload mutations run in a real browser. HTTP-level SSE concurrency is covered in Phase 30.
 
-5. Stress crash consistency and concurrent writers:
+6. Stress crash consistency and concurrent writers:
    - Kill processes during restore, wiki sync, manifest updates, and session writes.
    - Verify rollback snapshots, atomic temp-file replacement, and lock behavior.
    - Add regression tests for partial-write and parallel-writer cases not already covered.
 
-6. Do a post-migration docs audit:
+7. Do a post-migration docs audit:
    - Search docs/scripts for removed flat modules such as `python -m inject_hooks` and `python -m wiki_graphify`.
    - Search for stale resolver descriptions such as `resolve_by_seeds` and "graph neighbor" ranking as current behavior.
    - Update remaining historical docs or explicitly label them historical.
 
-7. Prepare release readiness material:
+8. Prepare release readiness material:
    - Generate a changelog from the remediation commits.
    - Document behavior changes around MCP env inheritance and tool policy.
    - Dry-run the tag/version/publish workflow before publishing.

@@ -1,7 +1,7 @@
 # mypy: disable-error-code=attr-defined
 """ctx_monitor.py -- Local HTTP dashboard for ctx skill/agent activity.
 
-``ctx-monitor serve [--port 8765]`` starts a zero-dependency HTTP server
+``ctx-monitor serve [--port 8765]`` starts a zero-dependency threaded HTTP server
 (stdlib http.server) that renders the audit log + skill-events.jsonl +
 sidecars into a browser UI at http://localhost:8765/.
 
@@ -29,9 +29,8 @@ Routes:
 Design notes:
 
 - No Flask / Starlette / FastAPI dependency. stdlib only — keeps
-  ``pip install claude-ctx`` lean. Server is single-threaded (good
-  enough for a local dev dashboard; not meant to be exposed on the
-  network).
+  ``pip install claude-ctx`` lean. Request handling is threaded so one
+  open SSE client cannot monopolize the local dashboard.
 - Reads append-only files; never mutates them.
 - SSE endpoint tails ``~/.claude/ctx-audit.jsonl`` and pushes each new
   line as a server-sent event. Clients auto-reconnect.
@@ -51,11 +50,14 @@ import json
 import os
 import secrets
 import sys
+import threading
 import time
 from collections import defaultdict
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+from ctx.utils._safe_name import is_safe_source_name
 
 
 _MONITOR_TOKEN = ""
@@ -90,19 +92,28 @@ def _wiki_dir() -> Path:
     return _claude_dir() / "skill-wiki"
 
 
+def _mcp_shard(slug: str) -> str:
+    first = slug[0] if slug else ""
+    return first if first.isalpha() else "0-9"
+
+
 def _wiki_entity_path(slug: str) -> Path | None:
     """Resolve a slug to its wiki entity page under skills/ or agents/.
 
-    Wiki layout: ``entities/skills/<slug>.md`` or ``entities/agents/<slug>.md``.
+    Wiki layout: ``entities/skills/<slug>.md``, ``entities/agents/<slug>.md``,
+    or sharded ``entities/mcp-servers/<first-char>/<slug>.md``.
     Returns the first match, or ``None`` if neither exists.
     """
     # Validate slug so a crafted request can't escape the wiki tree.
-    if not _SAFE_SLUG_RE.match(slug):
+    if not _is_safe_slug(slug):
         return None
     for sub in ("skills", "agents"):
         p = _wiki_dir() / "entities" / sub / f"{slug}.md"
         if p.exists():
             return p
+    p = _wiki_dir() / "entities" / "mcp-servers" / _mcp_shard(slug) / f"{slug}.md"
+    if p.exists():
+        return p
     return None
 
 
@@ -153,7 +164,7 @@ def _read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
 
 
 def _load_sidecar(slug: str) -> dict | None:
-    if not _SAFE_SLUG_RE.match(slug):
+    if not _is_safe_slug(slug):
         return None
     path = _sidecar_dir() / f"{slug}.json"
     if not path.exists():
@@ -347,7 +358,7 @@ def _graph_neighborhood(slug: str, hops: int = 1, limit: int = 40) -> dict:
     schema is handled centrally. Returns an empty shape if the graph
     hasn't been built or the slug isn't a node.
     """
-    if not _SAFE_SLUG_RE.match(slug):
+    if not _is_safe_slug(slug):
         return {"nodes": [], "edges": [], "center": None}
     try:
         from ctx.core.graph.resolve_graph import load_graph as _lg  # type: ignore
@@ -358,7 +369,7 @@ def _graph_neighborhood(slug: str, hops: int = 1, limit: int = 40) -> dict:
         return {"nodes": [], "edges": [], "center": None}
 
     center = None
-    for prefix in ("skill:", "agent:"):
+    for prefix in ("skill:", "agent:", "mcp-server:"):
         candidate = f"{prefix}{slug}"
         if candidate in G:
             center = candidate
@@ -376,7 +387,12 @@ def _graph_neighborhood(slug: str, hops: int = 1, limit: int = 40) -> dict:
             return
         data = G.nodes.get(nid, {})
         label = data.get("label", nid.split(":", 1)[-1])
-        ntype = data.get("type") or ("agent" if nid.startswith("agent:") else "skill")
+        default_type = (
+            "mcp-server" if nid.startswith("mcp-server:")
+            else "agent" if nid.startswith("agent:")
+            else "skill"
+        )
+        ntype = data.get("type") or default_type
         nodes_out[nid] = {
             "data": {
                 "id": nid,
@@ -780,9 +796,14 @@ def _top_degree_seeds(limit: int = 18) -> list[dict]:
     out: list[dict] = []
     for node_id, degree in ranked:
         prefix, _, slug = node_id.partition(":")
+        seed_type = (
+            "mcp-server" if prefix == "mcp-server"
+            else "agent" if prefix == "agent"
+            else "skill"
+        )
         out.append({
             "slug": slug,
-            "type": "agent" if prefix == "agent" else "skill",
+            "type": seed_type,
             "degree": int(degree),
             "label": G.nodes[node_id].get("label", slug),
         })
@@ -1046,7 +1067,7 @@ def _wiki_index_entries() -> list[dict]:
         paths = sorted(d.rglob("*.md") if recursive else d.glob("*.md"))
         for path in paths:
             slug = path.stem
-            if not _SAFE_SLUG_RE.match(slug):
+            if not _is_safe_slug(slug):
                 continue
             try:
                 # Read only the first ~2 KB — enough for frontmatter.
@@ -1538,12 +1559,13 @@ def _render_logs() -> str:
 # ─── Mutation endpoints ──────────────────────────────────────────────────────
 
 
-_SAFE_SLUG_RE = __import__("re").compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
+def _is_safe_slug(slug: str) -> bool:
+    return is_safe_source_name(slug)
 
 
 def _perform_load(slug: str) -> tuple[bool, str]:
     """Invoke skill_loader.load_skill(slug). Returns (ok, message)."""
-    if not _SAFE_SLUG_RE.match(slug):
+    if not _is_safe_slug(slug):
         return False, f"invalid slug: {slug!r}"
     try:
         from ctx.adapters.claude_code.skill_loader import load_skill  # local import — heavy module
@@ -1573,7 +1595,7 @@ def _perform_unload(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
         ``claude mcp remove`` subprocess. Requires the claude CLI on
         PATH; errors surface to the caller.
     """
-    if not _SAFE_SLUG_RE.match(slug):
+    if not _is_safe_slug(slug):
         return False, f"invalid slug: {slug!r}"
     if entity_type == "mcp-server":
         try:
@@ -1603,6 +1625,11 @@ def _perform_unload(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
 
 
 # ─── HTTP handler ────────────────────────────────────────────────────────────
+
+
+def _server_shutdown_requested(server: Any) -> bool:
+    event = getattr(server, "_ctx_shutdown", None)
+    return bool(event is not None and event.is_set())
 
 
 class _MonitorHandler(BaseHTTPRequestHandler):
@@ -1798,7 +1825,7 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         position = path.stat().st_size if path.exists() else 0
         last_heartbeat = time.monotonic()
         try:
-            while True:
+            while not _server_shutdown_requested(self.server):
                 if path.exists() and path.stat().st_size > position:
                     with path.open("r", encoding="utf-8") as f:
                         f.seek(position)
@@ -1824,11 +1851,32 @@ class _MonitorHandler(BaseHTTPRequestHandler):
 # ─── CLI ─────────────────────────────────────────────────────────────────────
 
 
+class _MonitorServer(ThreadingHTTPServer):
+    daemon_threads = True
+    block_on_close = False
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self._ctx_shutdown = threading.Event()
+        super().__init__(*args, **kwargs)
+
+    def shutdown(self) -> None:
+        self._ctx_shutdown.set()
+        super().shutdown()
+
+    def server_close(self) -> None:
+        self._ctx_shutdown.set()
+        super().server_close()
+
+
+def _make_monitor_server(host: str, port: int) -> _MonitorServer:
+    return _MonitorServer((host, port), _MonitorHandler)
+
+
 def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
     """Run the monitor. Blocks until Ctrl+C."""
     global _MONITOR_TOKEN
     _MONITOR_TOKEN = secrets.token_urlsafe(32)
-    server = HTTPServer((host, port), _MonitorHandler)
+    server = _make_monitor_server(host, port)
     url = f"http://{host}:{port}/"
     print(f"ctx-monitor serving at {url}  (Ctrl+C to stop)", flush=True)
     try:
