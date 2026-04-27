@@ -191,13 +191,14 @@ class SessionStore:
         session_id: str,
         path: Path,
         append: bool = False,
+        overwrite: bool = False,
     ) -> None:
         self._session_id = _safe_session_id(session_id)
         self._path = path
         self._lock = threading.Lock()
         self._closed = False
         path.parent.mkdir(parents=True, exist_ok=True)
-        mode = "a" if append else "w"
+        mode = "a" if append else ("w" if overwrite else "x")
         # Line-buffered so crash-ish terminations still flush per line.
         self._fh = path.open(mode, encoding="utf-8", buffering=1)
 
@@ -208,12 +209,13 @@ class SessionStore:
         cls,
         session_id: str | None = None,
         sessions_dir: Path | None = None,
+        overwrite: bool = False,
     ) -> "SessionStore":
         """Open a fresh session file; generates an id if none given."""
         sid = session_id if session_id is not None else new_session_id()
         sdir = sessions_dir if sessions_dir is not None else default_sessions_dir()
         path = sdir / f"{_safe_session_id(sid)}.jsonl"
-        return cls(session_id=sid, path=path, append=False)
+        return cls(session_id=sid, path=path, append=False, overwrite=overwrite)
 
     @classmethod
     def attach(

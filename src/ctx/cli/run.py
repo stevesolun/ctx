@@ -342,6 +342,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Pin the session id. Default: auto-generated uuid.",
     )
     r.add_argument(
+        "--overwrite-session",
+        action="store_true",
+        help=(
+            "Allow --session-id to replace an existing session log. "
+            "Default: reject reuse to preserve transcripts."
+        ),
+    )
+    r.add_argument(
         "--sessions-dir",
         default=None,
         help="Override sessions directory (default ~/.ctx/sessions).",
@@ -512,14 +520,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
 
-    # MCP router startup.
     mcp_configs = [_parse_mcp_spec(spec) for spec in args.mcp]
     router = McpRouter(mcp_configs) if mcp_configs else None
-    if router is not None:
-        if not args.quiet:
-            print(f"[ctx] starting MCP servers: {[c.name for c in mcp_configs]}",
-                  file=sys.stderr)
-        router.start()
 
     # ctx-core tools.
     extra_tools = []
@@ -531,7 +533,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     compactor = None if args.no_compact else TokenBudgetCompactor()
 
-    store = SessionStore.create(session_id=session_id, sessions_dir=sdir)
+    try:
+        store = SessionStore.create(
+            session_id=session_id,
+            sessions_dir=sdir,
+            overwrite=args.overwrite_session,
+        )
+    except FileExistsError:
+        print(
+            f"error: session {session_id!r} already exists; "
+            "use --overwrite-session to replace it or ctx resume to continue it.",
+            file=sys.stderr,
+        )
+        return 1
     metadata = {
         "task": args.task,
         "model": args.model,
@@ -570,6 +584,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     evaluator_rounds: list[dict[str, Any]] | None = None
     contract_artifact = None  # populated only on P/C/G/E path
     try:
+        if router is not None:
+            if not args.quiet:
+                print(
+                    f"[ctx] starting MCP servers: {[c.name for c in mcp_configs]}",
+                    file=sys.stderr,
+                )
+            router.start()
         if args.evaluator:
             if args.contract and not args.planner:
                 # Contracts refine planner output; without a plan

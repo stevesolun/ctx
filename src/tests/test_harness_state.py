@@ -187,6 +187,26 @@ class TestSessionStore:
         assert event["key"] == "value"
         assert "ts" in event
 
+    def test_create_rejects_existing_session_by_default(self, tmp_path: Path) -> None:
+        path = tmp_path / "s1.jsonl"
+        path.write_text("sentinel\n", encoding="utf-8")
+        with pytest.raises(FileExistsError):
+            SessionStore.create(session_id="s1", sessions_dir=tmp_path)
+        assert path.read_text(encoding="utf-8") == "sentinel\n"
+
+    def test_create_can_overwrite_existing_session_explicitly(
+        self, tmp_path: Path,
+    ) -> None:
+        path = tmp_path / "s1.jsonl"
+        path.write_text("sentinel\n", encoding="utf-8")
+        store = SessionStore.create(
+            session_id="s1",
+            sessions_dir=tmp_path,
+            overwrite=True,
+        )
+        store.close()
+        assert path.read_text(encoding="utf-8") == ""
+
     def test_context_manager(self, tmp_path: Path) -> None:
         with SessionStore.create(session_id="s1", sessions_dir=tmp_path) as store:
             store.write_event("x", {})

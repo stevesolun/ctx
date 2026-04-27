@@ -195,6 +195,49 @@ class TestRunCommand:
         )
         assert (tmp_path / "pinned-session.jsonl").is_file()
 
+    def test_session_id_reuse_is_rejected_without_overwrite(
+        self, fake_litellm: Any, tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        path = tmp_path / "pinned-session.jsonl"
+        path.write_text("sentinel\n", encoding="utf-8")
+        exit_code = main(
+            [
+                "run",
+                "--model", "ollama/llama3",
+                "--task", "hi",
+                "--sessions-dir", str(tmp_path),
+                "--session-id", "pinned-session",
+                "--no-ctx-tools",
+                "--quiet",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert path.read_text(encoding="utf-8") == "sentinel\n"
+        assert "already exists" in captured.err
+
+    def test_session_id_reuse_can_overwrite_with_flag(
+        self, fake_litellm: Any, tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        path = tmp_path / "pinned-session.jsonl"
+        path.write_text("sentinel\n", encoding="utf-8")
+        exit_code = main(
+            [
+                "run",
+                "--model", "ollama/llama3",
+                "--task", "hi",
+                "--sessions-dir", str(tmp_path),
+                "--session-id", "pinned-session",
+                "--overwrite-session",
+                "--no-ctx-tools",
+                "--quiet",
+            ]
+        )
+        assert exit_code == 0
+        assert "sentinel" not in path.read_text(encoding="utf-8")
+
     def test_metadata_recorded(
         self, fake_litellm: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str],
     ) -> None:
