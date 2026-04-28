@@ -307,7 +307,14 @@ class McpClient:
                 "method": method,
                 "params": params or {},
             }
-            self._write_frame(request)
+            try:
+                self._write_frame(request)
+            except (BrokenPipeError, OSError) as exc:
+                stderr_tail = "\n".join(self._stderr_lines[-20:])
+                raise McpServerError(
+                    f"{self._config.name}.{method}: write failed; server pipe "
+                    f"closed. stderr tail:\n{stderr_tail}"
+                ) from exc
 
             deadline = None
             if timeout is not None:

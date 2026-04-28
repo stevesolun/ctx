@@ -142,6 +142,21 @@ class TestClientRobustness:
             with pytest.raises(McpServerError, match="pipe closed"):
                 c.call_tool("echo", {"text": "x"})
 
+    def test_killed_child_after_tool_listing_raises_mcp_error(self) -> None:
+        client = McpClient(_make_config())
+        client.start()
+        try:
+            client.list_tools()
+            proc = client._proc
+            assert proc is not None
+            proc.kill()
+            proc.wait(timeout=2.0)
+
+            with pytest.raises(McpServerError, match="write failed"):
+                client.call_tool("echo", {"text": "x"})
+        finally:
+            client.stop()
+
     def test_server_notification_is_skipped(self) -> None:
         """The client ignores notifications that interleave with a response."""
         cfg = _make_config(extra_env={"FAKE_MCP_EMIT_NOTIFICATION": "1"})
