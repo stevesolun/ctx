@@ -21,7 +21,6 @@ Pre-built knowledge graph of **13,218 nodes** (1,968 skills + 464 agents + 10,78
 |------|------|----------|
 | `wiki-graph.tar.gz` | ~25 MB | **Full wiki** — entity cards, 1,793 converted skill bodies + 156 designdotmd designs, 430 mirrored agent bodies, 13K-node knowledge graph, concept pages, catalog |
 | `communities.json` | ~280 KB | 24 detected communities (Louvain) with labels + member lists |
-| `graph-report.md` | 31 KB | God nodes (most connected skills / agents / MCPs) + community summary |
 | `viz-overview.html` / `.png` | — | Plotly-rendered overview of the full graph |
 | `viz-python.html` | — | Python-skills sub-view |
 | `viz-security.html` / `.png` | — | Security-skills sub-view |
@@ -111,23 +110,26 @@ ctx-tag-backfill                                 # report-only by default; --app
 ### Pre-ship gates
 
 Two gates run before the tarball is repackaged. Both are advisory: they
-generate review reports and never auto-modify the catalog.
+generate local review reports and never auto-modify the catalog. Those
+reports are intentionally ignored by git because they can include local
+filesystem paths and human review notes.
 
 **`ctx-dedup-check`** — finds entity pairs (skill ↔ skill, skill ↔ agent,
 skill ↔ MCP, agent ↔ agent, agent ↔ MCP, MCP ↔ MCP) with cosine
-similarity ≥ 0.85. Emits `graph/dedup-report.md` (top-100 by
-similarity) + `graph/dedup-report.json.gz` (full set, gzipped).
-Incremental: a `dedup-state.json` next to the embeddings cache means
-follow-up runs only re-check pairs involving entities whose content
-changed. Pairs that are legitimately distinct can be added to
+similarity ≥ 0.85. Emits ignored local files under `graph/`, including a
+top-results markdown report and gzipped JSON sidecar. Incremental: a
+`dedup-state.json` next to the embeddings cache means follow-up runs only
+re-check pairs involving entities whose content changed. Pairs that are
+legitimately distinct can be added to
 `.dedup-allowlist.txt` to suppress them in future reports without
 silencing the underlying detection.
 
 **`ctx-tag-backfill`** — finds skills/agents with empty or missing
 `tags:` frontmatter and proposes a backfill set drawn from the slug
 tokens, body keywords, and the existing tag vocabulary. Report-only by
-default; pass `--apply` to write. Backfills are additive: the gate
-never removes or rewrites existing tags.
+default; pass `--apply` to write. The generated markdown and JSON reports
+are ignored by git. Backfills are additive: the gate never removes or
+rewrites existing tags.
 
 Then re-archive. The pre-commit hook does this automatically when the wiki drifts beyond the tarball; the manual command below mirrors its exclusions:
 
