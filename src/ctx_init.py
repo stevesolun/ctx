@@ -16,12 +16,18 @@ What it does:
      is missing (otherwise leaves the user's config alone).
   3. Seeds the starter toolboxes via ``ctx-toolbox init`` if the
      global toolboxes file is empty.
-  4. Optionally: injects PostToolUse + Stop hooks via
-     ``ctx-install-hooks``. Skipped unless ``--hooks`` is passed so
-     the user has to opt in to modifying ``~/.claude/settings.json``.
-  5. Optionally: runs the initial graph/wiki build if missing.
-     Skipped unless ``--graph`` is passed — building graph from 2k+
-     skills is a multi-minute operation and not everyone wants it.
+  4. In a terminal, guides first-time users through hooks, graph build,
+     model profile, and harness recommendation setup. Automation can
+     keep the non-interactive path by passing explicit flags such as
+     ``--model-mode skip``; ``--wizard`` forces the prompts.
+  5. Optionally: injects PostToolUse + Stop hooks via
+     ``ctx-install-hooks``. Skipped unless the wizard or ``--hooks`` asks
+     for it, so the user has to opt in to modifying
+     ``~/.claude/settings.json``.
+  6. Optionally: runs the initial graph/wiki build if missing.
+     Skipped unless the wizard or ``--graph`` asks for it — building
+     graph from 2k+ skills is a multi-minute operation and not everyone
+     wants it.
 
 Idempotent: re-running only writes what's missing. Never overwrites
 a user's config or hook settings without an explicit ``--force`` flag.
@@ -257,21 +263,109 @@ def validate_model_connection(
     return 0
 
 
-def _prompt_model_mode() -> str:
-    answer = input(
-        "Use Claude Code or a custom model with ctx? "
-        "[claude-code/custom/skip] "
-    ).strip().lower()
-    return answer or "claude-code"
+def _prompt_yes_no(prompt: str, *, default: bool = False) -> bool:
+    suffix = "Y/n" if default else "y/N"
+    while True:
+        answer = input(f"{prompt} [{suffix}] ").strip().lower()
+        if not answer:
+            return default
+        if answer in {"y", "yes"}:
+            return True
+        if answer in {"n", "no"}:
+            return False
+        print("  Please answer yes or no.")
+
+
+def _prompt_text(prompt: str, *, default: str | None = None) -> str:
+    suffix = f" [{default}]" if default else ""
+    answer = input(f"{prompt}{suffix}: ").strip()
+    return answer or (default or "")
+
+
+def _prompt_model_mode(default: str = "claude-code") -> str:
+    while True:
+        answer = input(
+            "Use Claude Code or a custom model with ctx? "
+            f"[{default}; choices: claude-code/custom/skip] "
+        ).strip().lower()
+        mode = answer or default
+        if mode in {"claude-code", "custom", "skip"}:
+            return mode
+        print("  Please choose claude-code, custom, or skip.")
+
+
+def _stdio_is_interactive() -> bool:
+    return bool(
+        getattr(sys.stdin, "isatty", lambda: False)()
+        and getattr(sys.stdout, "isatty", lambda: False)()
+    )
+
+
+def _should_run_wizard(
+    args: argparse.Namespace,
+    raw_argv: list[str],
+) -> bool:
+    return bool(args.wizard or (not raw_argv and _stdio_is_interactive()))
+
+
+def run_wizard(args: argparse.Namespace) -> None:
+    """Prompt for first-run choices and mutate parsed args in place."""
+    print("ctx-init wizard:")
+    args.hooks = _prompt_yes_no(
+        "Install Claude Code observation hooks now?",
+        default=args.hooks,
+    )
+    args.graph = _prompt_yes_no(
+        "Build the knowledge graph now? This can take a while.",
+        default=args.graph,
+    )
+
+    args.model_mode = _prompt_model_mode(args.model_mode or "claude-code")
+    if args.model_mode == "skip":
+        return
+
+    if args.model_mode == "custom":
+        args.model = _prompt_text(
+            "Model slug, e.g. openai/gpt-5.5 or ollama/llama3.1",
+            default=args.model,
+        )
+        provider_default = args.model_provider or (
+            _model_provider_prefix(args.model) if args.model else None
+        )
+        args.model_provider = _prompt_text(
+            "Provider prefix",
+            default=provider_default,
+        ) or None
+        api_key_default = _resolve_api_key_env(
+            args.api_key_env,
+            args.model,
+            args.model_provider,
+        )
+        args.api_key_env = _prompt_text(
+            "API key environment variable (blank for local/no key)",
+            default=api_key_default,
+        )
+        args.base_url = _prompt_text(
+            "Provider base URL (blank for default)",
+            default=args.base_url,
+        ) or None
+
+    args.goal = _prompt_text(
+        "What do you want ctx to help you build or maintain?",
+        default=args.goal,
+    )
+    if args.model_mode == "custom":
+        args.validate_model = _prompt_yes_no(
+            "Validate the model with one tiny provider call now?",
+            default=args.validate_model,
+        )
 
 
 def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
     """Record model choice and print harness recommendations."""
     mode = args.model_mode
-    if mode is None and sys.stdin.isatty():
-        mode = _prompt_model_mode()
     if mode is None or mode == "skip":
-        print("  [skip] model onboarding (pass --model-mode to configure)")
+        print("  [skip] model onboarding (run ctx-init --wizard to configure)")
         return 0
     if mode not in {"claude-code", "custom"}:
         print(f"  [warn] unknown model mode: {mode}", file=sys.stderr)
@@ -348,6 +442,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Overwrite existing config files if present",
     )
     parser.add_argument(
+        "--wizard",
+        action="store_true",
+        help=(
+            "Prompt for hooks, graph build, model profile, and harness "
+            "recommendation setup. Plain ctx-init does this automatically "
+            "when run in an interactive terminal."
+        ),
+    )
+    parser.add_argument(
         "--model-mode",
         choices=("claude-code", "custom", "skip"),
         help="Record whether this install uses Claude Code or a custom model",
@@ -368,7 +471,10 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Make one tiny provider call to validate the custom model connection",
     )
-    args = parser.parse_args(argv)
+    raw_argv = sys.argv[1:] if argv is None else list(argv)
+    args = parser.parse_args(raw_argv)
+    if _should_run_wizard(args, raw_argv):
+        run_wizard(args)
 
     claude = _claude_dir()
     print(f"ctx-init: setting up {claude}")

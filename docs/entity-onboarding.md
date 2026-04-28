@@ -134,7 +134,18 @@ decide before running anything.
 
 ## Initialize Model Choice
 
-During setup, record whether you use Claude Code or your own model:
+During setup, record whether you use Claude Code or your own model. Plain
+`ctx-init` starts a small wizard when it is attached to an interactive
+terminal; use `ctx-init --wizard` to force the prompts, or pass explicit flags
+such as `--model-mode skip` for non-interactive automation.
+
+```bash
+ctx-init
+ctx-init --wizard
+ctx-init --model-mode skip
+```
+
+For Claude Code:
 
 ```bash
 ctx-init --model-mode claude-code --goal "maintain a FastAPI service"

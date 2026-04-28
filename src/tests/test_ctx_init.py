@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 from pathlib import Path
 
@@ -84,6 +85,90 @@ def test_main_creates_everything_in_dry_mode(tmp_path: Path, monkeypatch,
     assert "[ok]" in out
     assert "[skip] hook injection" in out
     assert "[skip] graph build" in out
+
+
+def test_main_auto_wizard_in_terminal_configures_custom_model(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(ci, "_stdio_is_interactive", lambda: True)
+    monkeypatch.setattr(ci, "recommend_harnesses", lambda goal, top_k=5: [])
+
+    answers = iter([
+        "y",                  # hooks
+        "n",                  # graph
+        "custom",             # model mode
+        "openai/gpt-5.5",     # model
+        "",                   # provider default: openai
+        "",                   # api key env default: OPENAI_API_KEY
+        "",                   # base URL
+        "build CAD artifacts",
+        "n",                  # validate model
+    ])
+    monkeypatch.setattr(builtins, "input", lambda _prompt: next(answers))
+    calls: list[list[str]] = []
+
+    class _FakeResult:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **_kwargs: object) -> _FakeResult:
+        calls.append(list(cmd))
+        return _FakeResult()
+
+    monkeypatch.setattr(ci.subprocess, "run", _fake_run)
+
+    rc = ci.main([])
+
+    assert rc == 0
+    assert any("ctx.adapters.claude_code.inject_hooks" in c for c in calls)
+    assert not any("ctx.core.wiki.wiki_graphify" in c for c in calls)
+    profile = json.loads((tmp_path / "ctx-model-profile.json").read_text())
+    assert profile["mode"] == "custom"
+    assert profile["provider"] == "openai"
+    assert profile["model"] == "openai/gpt-5.5"
+    assert profile["api_key_env"] == "OPENAI_API_KEY"
+    assert profile["goal"] == "build CAD artifacts"
+
+
+def test_wizard_flag_prompts_without_tty(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(ci, "_stdio_is_interactive", lambda: False)
+    monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
+    monkeypatch.setattr(ci, "recommend_harnesses", lambda goal, top_k=5: [])
+
+    answers = iter([
+        "n",                  # hooks
+        "n",                  # graph
+        "claude-code",        # model mode
+        "maintain FastAPI services",
+    ])
+    monkeypatch.setattr(builtins, "input", lambda _prompt: next(answers))
+
+    rc = ci.main(["--wizard"])
+
+    assert rc == 0
+    profile = json.loads((tmp_path / "ctx-model-profile.json").read_text())
+    assert profile["mode"] == "claude-code"
+    assert profile["goal"] == "maintain FastAPI services"
+
+
+def test_explicit_args_do_not_auto_wizard_in_terminal(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(ci, "_stdio_is_interactive", lambda: True)
+    monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
+    monkeypatch.setattr(
+        builtins,
+        "input",
+        lambda _prompt: (_ for _ in ()).throw(AssertionError("unexpected prompt")),
+    )
+
+    assert ci.main(["--model-mode", "skip"]) == 0
 
 
 def test_main_with_hooks_flag_invokes_inject(tmp_path: Path, monkeypatch) -> None:

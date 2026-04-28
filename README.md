@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-3291_passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-3294_passing-brightgreen.svg)](#)
 [![Graph](https://img.shields.io/badge/Graph-13%2C218_nodes_/_963K_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
@@ -24,7 +24,9 @@ Watches what you develop, walks a knowledge graph of **1,968 skills, 464 agents,
 
 ```bash
 pip install claude-ctx
-ctx-init --hooks            # one-shot setup: directories, hooks, starter toolboxes
+ctx-init                    # terminal wizard: hooks, graph, model, harness goal
+ctx-init --wizard           # force the same wizard from scripts/tests
+ctx-init --model-mode skip  # non-interactive setup for automation
 ctx-init --model-mode custom --model openai/gpt-5.5 --goal "build a CAD agent"
 ```
 
