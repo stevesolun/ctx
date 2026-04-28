@@ -107,6 +107,7 @@ def synthetic_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # Patch the function directly so list_all_entities + callers see
     # the synthetic wiki regardless of what ctx_config thinks.
     monkeypatch.setattr(ctx.api, "default_wiki_dir", lambda: wiki)
+    monkeypatch.setattr(ctx, "default_wiki_dir", lambda: wiki)
     return home
 
 

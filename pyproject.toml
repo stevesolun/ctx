@@ -133,6 +133,7 @@ py-modules = [
     "ctx_init",
     "ctx_lifecycle",
     "ctx_monitor",
+    "harness_add",
     "harness_install",
     "embedding_backend",
     "flatten_agents",

@@ -91,6 +91,36 @@ def test_pyproject_declares_all_subpackages() -> None:
     )
 
 
+def test_flat_console_scripts_are_packaged() -> None:
+    """Flat console-script targets must be listed in py-modules.
+
+    The package smoke job installs the wheel in a clean venv, where
+    editable-source imports are unavailable. A flat entrypoint like
+    ``ctx-harness-add = "harness_add:main"`` only works from the wheel when
+    the target module is declared in ``tool.setuptools.py-modules``.
+    """
+    try:
+        import tomllib  # py 3.11+
+    except ImportError:
+        import tomli as tomllib  # type: ignore[no-redef]
+
+    root = Path(__file__).resolve().parent.parent.parent
+    with open(root / "pyproject.toml", "rb") as fh:
+        data = tomllib.load(fh)
+
+    packaged_modules = set(data["tool"]["setuptools"].get("py-modules", []))
+    flat_targets = {
+        target.split(":", 1)[0]
+        for target in data["project"]["scripts"].values()
+        if "." not in target.split(":", 1)[0]
+    }
+    missing = flat_targets - packaged_modules
+    assert not missing, (
+        "Flat console script targets missing from py-modules: "
+        f"{sorted(missing)}"
+    )
+
+
 def test_no_legacy_flat_shadow() -> None:
     """Phase R0 adds the ctx package alongside the legacy flat modules;
     no flat module should share a name with a ctx subpackage yet

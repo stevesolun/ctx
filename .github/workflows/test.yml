@@ -33,10 +33,7 @@ jobs:
           python -m pip install ".[dev]"
 
       - name: Run static quality gates
-        run: |
-          python -m ruff check src hooks scripts
-          python -m mypy src
-          python -m pip check
+        run: python -m ruff check src hooks scripts && python -m mypy src && python -m pip check
 
       - name: Run tests with coverage gate
         # --cov-fail-under=40 is the FLOOR, not the goal. QA-expert

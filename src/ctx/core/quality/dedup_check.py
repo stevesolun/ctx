@@ -403,8 +403,8 @@ def find_high_similarity_pairs(
             i_abs = chunk_start + i_local
             row = sims[i_local]
             # We only want j > i. Mask everything else.
-            for j_abs in np.nonzero(row >= threshold)[0]:
-                j_abs = int(j_abs)
+            for raw_j_abs in np.nonzero(row >= threshold)[0]:
+                j_abs = int(raw_j_abs)
                 if j_abs <= i_abs:
                     continue
                 score = float(row[j_abs])
@@ -590,8 +590,8 @@ def _find_pairs_for_changed(
         sims = chunk @ vecs.T
         for local_i, abs_i in enumerate(chunk_idx):
             row = sims[local_i]
-            for j_abs in np.nonzero(row >= threshold)[0]:
-                j_abs = int(j_abs)
+            for raw_j_abs in np.nonzero(row >= threshold)[0]:
+                j_abs = int(raw_j_abs)
                 if j_abs == abs_i:
                     continue
                 lo, hi = (abs_i, j_abs) if abs_i < j_abs else (j_abs, abs_i)
