@@ -105,7 +105,8 @@ When the resolver identifies a gap (stack detected, no skill available):
    a. Query GitHub topics
    b. Query npm/pypi if relevant language
    c. Cache results in raw/marketplace-dumps/
-   d. Create/update entity pages for discovered skills
+   d. Create new entity pages for discovered skills, or emit an update review
+      for existing pages
 4. Present findings to user with install commands
 ```
 
@@ -141,7 +142,9 @@ The install flow:
    cp -r /tmp/terraform-skill /mnt/skills/user/terraform/
    rm -rf /tmp/terraform-skill
    ```
-4. Create entity page in wiki
+4. Create the entity page in the wiki; if one already exists, show the
+   benefits/risks update review and require `--update-existing` before
+   replacing it
 5. Add to current manifest and load
 6. Log the install
 

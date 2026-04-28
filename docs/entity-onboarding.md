@@ -18,6 +18,43 @@ ctx-wiki-graphify
 ctx-scan-repo --repo . --recommend
 ```
 
+## Updating an Existing Entity
+
+The add commands are non-destructive by default when the target skill, agent,
+MCP server, or harness already exists. The first add attempt prints an update
+review instead of replacing files. That review lists changed fields, expected
+benefits, possible regressions, and a recommendation.
+
+Use this flow for every entity type:
+
+1. Run the normal add command.
+2. If ctx prints `Existing <type> already exists`, read the benefits and risks.
+3. Keep the current entity by doing nothing, or re-run with `--skip-existing`
+   in batch jobs where you do not want reviews.
+4. Apply the replacement only after review with `--update-existing`.
+5. Rebuild the graph with `ctx-wiki-graphify` when the update should affect
+   recommendations.
+
+Examples:
+
+```bash
+ctx-skill-add --skill-path ./SKILL.md --name fastapi-review
+ctx-skill-add --skill-path ./SKILL.md --name fastapi-review --update-existing
+
+ctx-agent-add --agent-path ./code-reviewer.md --name code-reviewer
+ctx-agent-add --agent-path ./code-reviewer.md --name code-reviewer --update-existing
+
+ctx-mcp-add --from-json ./github-mcp.json
+ctx-mcp-add --from-json ./github-mcp.json --update-existing
+
+ctx-harness-add --from-json ./text-to-cad-harness.json
+ctx-harness-add --from-json ./text-to-cad-harness.json --update-existing
+```
+
+`ctx-harness-install --update` is different: it refreshes an installed harness
+checkout under `~/.claude/harnesses/<slug>`. Catalog entity replacement uses
+`ctx-harness-add --update-existing`.
+
 ## Add a Skill
 
 Use this when you have a local `SKILL.md` that should be installed under
@@ -42,7 +79,7 @@ What happens:
 Use this when you have a local Claude Code agent markdown file.
 
 ```bash
-python -m agent_add \
+ctx-agent-add \
   --agent-path ./code-reviewer.md \
   --name code-reviewer
 ```
@@ -50,7 +87,7 @@ python -m agent_add \
 Batch-add every top-level `.md` file in a directory:
 
 ```bash
-python -m agent_add --scan-dir ./agents --skip-existing
+ctx-agent-add --scan-dir ./agents --skip-existing
 ```
 
 Agents are copied into `~/.claude/agents/` and mirrored into
@@ -83,8 +120,9 @@ ctx-mcp-add --from-json ./github-mcp.json
 ```
 
 MCP pages live under `entities/mcp-servers/<shard>/<slug>.md`. The add command
-deduplicates by canonical GitHub URL when possible, so two catalogs pointing at
-the same upstream repository merge into one entity.
+detects existing pages by slug and, when possible, canonical GitHub URL. If a
+match exists, ctx prints the update review and skips replacement unless
+`--update-existing` is passed.
 
 ## Add a Harness
 

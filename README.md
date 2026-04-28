@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-3304_passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-3314_passing-brightgreen.svg)](#)
 [![Graph](https://img.shields.io/badge/Graph-13%2C218_nodes_/_963K_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
@@ -51,6 +51,7 @@ After install, the `ctx` hooks integrate automatically with Claude Code's `PostT
 ```bash
 ctx-scan-repo --repo .     # scan current repo and stack signals
 ctx-scan-repo --repo . --recommend  # include skill/agent/MCP/harness recommendations
+ctx-agent-add --agent-path ./code-reviewer.md --name code-reviewer
 ctx-harness-add --repo https://github.com/earthtojake/text-to-cad --tag cad
 ctx-harness-install text-to-cad --dry-run   # inspect before cloning/running anything
 ctx-harness-install text-to-cad --update --dry-run
@@ -63,6 +64,11 @@ ctx-monitor serve          # local dashboard: http://127.0.0.1:8765/
 ```
 
 The **`ctx-monitor`** dashboard shows currently loaded skills, agents, and MCP servers with load/unload buttons, a cytoscape graph view (`/graph?slug=…`), the LLM-wiki entity browser (`/wiki/<slug>`), a filterable skills grid, a session timeline, an audit log viewer, and a live SSE event stream. Dashboard harness exposure is not yet present; harnesses are cataloged and recommended through the CLI/API surfaces.
+
+When `ctx-skill-add`, `ctx-agent-add`, `ctx-mcp-add`, or `ctx-harness-add`
+finds an existing entity, ctx prints a benefits/risks update review and skips
+replacement by default. Re-run with `--update-existing` to apply the catalog or
+local asset update after review.
 
 Step-by-step entity onboarding:
 **<https://stevesolun.github.io/ctx/entity-onboarding/>**

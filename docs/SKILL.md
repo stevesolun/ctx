@@ -374,11 +374,15 @@ what's been used, what works well, and user preferences.
 
 ## Page Thresholds
 - Create a page when a skill/plugin/MCP server is discovered (installed or available)
-- Update when used, configured, or when a new version is found
+- Update usage/configuration metadata when the local user changes preferences
+- When a new version or replacement content is found, emit an update review
+  first; do not replace the entity by default
 - Archive when deprecated or superseded with a note pointing to the replacement
 
 ## Update Policy
-- New version of a skill: update the entity page, note version change
+- New version of a skill, agent, MCP server, or harness: compare the existing
+  entity/local asset with the proposed replacement, list benefits and risks,
+  and require the explicit update flag before replacing content
 - Skill conflict discovered: create a comparison page, update both entity pages
 - User preference expressed: update entity frontmatter (always_load/never_load)
 ```
@@ -478,7 +482,8 @@ When the router detects a stack element with no matching installed skill:
 1. Check marketplace entity pages for `last_refreshed`
 2. If stale (> `refresh_interval_days`), re-query the marketplace
 3. Save new listing dump to `raw/marketplace-dumps/`
-4. Update or create entity pages for newly discovered skills
+4. Create entity pages for newly discovered skills; existing pages require an
+   update review and explicit update flag before replacement
 5. Include in the manifest's `suggestions` array
 
 ---
