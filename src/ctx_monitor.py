@@ -61,6 +61,8 @@ from ctx.utils._safe_name import is_safe_source_name
 
 
 _MONITOR_TOKEN = ""
+_GRAPH_CACHE_KEY: tuple[Path, float, int, int] | None = None
+_GRAPH_CACHE_VALUE: Any | None = None
 
 
 # ─── Data sources ────────────────────────────────────────────────────────────
@@ -90,6 +92,29 @@ def _sidecar_dir() -> Path:
 
 def _wiki_dir() -> Path:
     return _claude_dir() / "skill-wiki"
+
+
+def _load_dashboard_graph() -> Any:
+    """Load the wiki graph once per graph.json file version."""
+    global _GRAPH_CACHE_KEY, _GRAPH_CACHE_VALUE
+
+    graph_path = _wiki_dir() / "graphify-out" / "graph.json"
+    from ctx.core.graph.resolve_graph import load_graph as _lg  # type: ignore
+
+    if not graph_path.exists():
+        _GRAPH_CACHE_KEY = None
+        _GRAPH_CACHE_VALUE = None
+        return _lg(graph_path)
+
+    stat = graph_path.stat()
+    cache_key = (graph_path.resolve(), stat.st_mtime, stat.st_size, id(_lg))
+    if _GRAPH_CACHE_KEY == cache_key and _GRAPH_CACHE_VALUE is not None:
+        return _GRAPH_CACHE_VALUE
+
+    graph = _lg(graph_path)
+    _GRAPH_CACHE_KEY = cache_key
+    _GRAPH_CACHE_VALUE = graph
+    return graph
 
 
 def _mcp_shard(slug: str) -> str:
@@ -361,8 +386,7 @@ def _graph_neighborhood(slug: str, hops: int = 1, limit: int = 40) -> dict:
     if not _is_safe_slug(slug):
         return {"nodes": [], "edges": [], "center": None}
     try:
-        from ctx.core.graph.resolve_graph import load_graph as _lg  # type: ignore
-        G = _lg()
+        G = _load_dashboard_graph()
     except Exception:  # noqa: BLE001 — graph is advisory; blank on error
         return {"nodes": [], "edges": [], "center": None}
     if G.number_of_nodes() == 0:
@@ -444,10 +468,9 @@ def _graph_neighborhood(slug: str, hops: int = 1, limit: int = 40) -> dict:
 
 
 def _graph_stats() -> dict:
-    """Top-line graph stats for the home page. Cached per-request."""
+    """Top-line graph stats for the home page."""
     try:
-        from ctx.core.graph.resolve_graph import load_graph as _lg  # type: ignore
-        G = _lg()
+        G = _load_dashboard_graph()
     except Exception:  # noqa: BLE001
         return {"nodes": 0, "edges": 0, "available": False}
     return {
@@ -786,8 +809,7 @@ def _top_degree_seeds(limit: int = 18) -> list[dict]:
     something to click. Falls back to empty on any graph-load failure.
     """
     try:
-        from ctx.core.graph.resolve_graph import load_graph as _lg  # type: ignore
-        G = _lg()
+        G = _load_dashboard_graph()
     except Exception:  # noqa: BLE001
         return []
     if G.number_of_nodes() == 0:
@@ -1866,6 +1888,15 @@ class _MonitorServer(ThreadingHTTPServer):
     def server_close(self) -> None:
         self._ctx_shutdown.set()
         super().server_close()
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        exc_type, _, _ = sys.exc_info()
+        if exc_type is not None and issubclass(
+            exc_type,
+            (BrokenPipeError, ConnectionAbortedError, ConnectionResetError),
+        ):
+            return
+        super().handle_error(request, client_address)
 
 
 def _make_monitor_server(host: str, port: int) -> _MonitorServer:

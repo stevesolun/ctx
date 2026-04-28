@@ -403,13 +403,44 @@ def test_graph_neighborhood_supports_mcp_nodes(monkeypatch) -> None:
         type="mcp-server",
         tags=["sdk"],
     )
-    fake = type("M", (), {"load_graph": staticmethod(lambda: G)})
+    fake = type("M", (), {"load_graph": staticmethod(lambda _path=None: G)})
     monkeypatch.setitem(sys.modules, "ctx.core.graph.resolve_graph", fake)
     monkeypatch.setitem(sys.modules, "resolve_graph", fake)
 
     result = cm._graph_neighborhood("anthropic-python-sdk")
     assert result["center"] == "mcp-server:anthropic-python-sdk"
     assert result["nodes"][0]["data"]["type"] == "mcp-server"
+
+
+def test_graph_helpers_reuse_graph_loaded_from_same_file(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import networkx as nx
+    import sys
+
+    graph_file = fake_claude / "skill-wiki" / "graphify-out" / "graph.json"
+    graph_file.parent.mkdir(parents=True)
+    graph_file.write_text("{}", encoding="utf-8")
+    G = nx.Graph()
+    G.add_edge("skill:python-patterns", "skill:fastapi-pro", weight=2)
+    G.nodes["skill:python-patterns"]["label"] = "python-patterns"
+
+    calls: list[Path | None] = []
+
+    def _load_graph(path: Path | None = None):
+        calls.append(path)
+        return G
+
+    fake = type("M", (), {"load_graph": staticmethod(_load_graph)})
+    monkeypatch.setitem(sys.modules, "ctx.core.graph.resolve_graph", fake)
+    monkeypatch.setattr(cm, "_GRAPH_CACHE_KEY", None)
+    monkeypatch.setattr(cm, "_GRAPH_CACHE_VALUE", None)
+
+    assert cm._graph_stats()["nodes"] == 2
+    assert cm._top_degree_seeds(limit=1)[0]["slug"] == "python-patterns"
+    assert cm._graph_neighborhood("python-patterns")["center"] == "skill:python-patterns"
+    assert calls == [graph_file]
 
 
 def test_graph_neighborhood_empty_when_graph_absent(monkeypatch) -> None:
@@ -604,7 +635,7 @@ def test_render_graph_landing_shows_seeds_when_available(monkeypatch) -> None:
                  "agent:code-reviewer", "skill:pydantic", "skill:sqlalchemy"):
         G.add_edge("skill:python-patterns", peer, weight=2)
     G.nodes["skill:python-patterns"]["label"] = "python-patterns"
-    fake = type("M", (), {"load_graph": staticmethod(lambda: G)})
+    fake = type("M", (), {"load_graph": staticmethod(lambda _path=None: G)})
     import sys
     # ctx_monitor lazy-imports 'from ctx.core.graph.resolve_graph import load_graph'
     # at call time; inject at the canonical dotted path so the lazy import
@@ -655,3 +686,21 @@ def test_cli_argparser_exposes_serve() -> None:
     with pytest.raises(SystemExit) as exc:
         cm.main(["serve", "--help"])
     assert exc.value.code == 0
+
+
+def test_monitor_server_suppresses_aborted_connection_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    server = cm._make_monitor_server("127.0.0.1", 0)
+    try:
+        monkeypatch.setattr(
+            cm.sys,
+            "exc_info",
+            lambda: (ConnectionAbortedError, ConnectionAbortedError(), None),
+        )
+        server.handle_error(object(), ("127.0.0.1", 12345))
+        captured = capsys.readouterr()
+        assert captured.err == ""
+    finally:
+        server.server_close()
