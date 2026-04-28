@@ -50,6 +50,12 @@ CLAUDE.md
 # Intent log and pending signals (session runtime)
 # These live in ~/.claude/ so already outside the repo
 
+# Internal review artifacts and working notes (not public docs)
+/docs/reports/
+/docs/plans/20[0-9][0-9]-*/
+/docs/plans/20[0-9][0-9]-*.md
+/internal/reviews/
+
 # Secrets / config overrides
 skill-system-config.json
 .env.local
