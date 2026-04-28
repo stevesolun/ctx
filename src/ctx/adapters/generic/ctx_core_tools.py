@@ -51,6 +51,11 @@ from typing import Any, Callable
 
 from ctx.adapters.generic.providers import ToolCall, ToolDefinition
 from ctx.adapters.generic.tools import TOOL_SEPARATOR
+from ctx.core.entity_types import (
+    RECOMMENDABLE_ENTITY_TYPES,
+    entity_page_path,
+    entity_wikilink,
+)
 
 
 _logger = logging.getLogger(__name__)
@@ -114,7 +119,7 @@ class CtxCoreToolbox:
                 name=f"{_NAMESPACE}recommend_bundle",
                 description=(
                     "Recommend a top-K bundle of skills / agents / MCP "
-                    "servers relevant to a free-text query. Returns a "
+                    "servers / harnesses relevant to a free-text query. Returns a "
                     "JSON array of entries with name, type, score, and "
                     "shared tags. Use when the user asks 'what tools "
                     "should I use for X?' or mid-task to find a more "
@@ -179,7 +184,7 @@ class CtxCoreToolbox:
                 name=f"{_NAMESPACE}wiki_search",
                 description=(
                     "Keyword search across the llm-wiki entity pages "
-                    "(skills + agents + mcp-servers). Matches against "
+                    "(skills + agents + mcp-servers + harnesses). Matches against "
                     "title, description, and tags. Returns slug + "
                     "description for each hit."
                 ),
@@ -211,7 +216,7 @@ class CtxCoreToolbox:
                         "slug": {"type": "string"},
                         "entity_type": {
                             "type": "string",
-                            "enum": ["skill", "agent", "mcp-server"],
+                            "enum": list(RECOMMENDABLE_ENTITY_TYPES),
                             "description": (
                                 "Optional entity type from wiki_search. "
                                 "Use it to disambiguate duplicate slugs."
@@ -363,9 +368,12 @@ class CtxCoreToolbox:
         if not slug:
             return json.dumps({"error": "slug must be non-empty"})
         entity_type = str(args.get("entity_type", "")).strip()
-        if entity_type and entity_type not in {"skill", "agent", "mcp-server"}:
+        if entity_type and entity_type not in RECOMMENDABLE_ENTITY_TYPES:
             return json.dumps({
-                "error": "entity_type must be one of skill, agent, mcp-server",
+                "error": (
+                    "entity_type must be one of "
+                    + ", ".join(RECOMMENDABLE_ENTITY_TYPES)
+                ),
             })
 
         # Validate — ctx-core's validator rejects traversal shapes.
@@ -443,25 +451,18 @@ class CtxCoreToolbox:
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
-def _mcp_shard(slug: str) -> str:
-    first = slug[0].lower() if slug else ""
-    return first if first.isalpha() else "0-9"
-
-
 def _wiki_entity_path(wiki: Path, slug: str, entity_type: str) -> Path:
-    if entity_type == "agent":
-        return wiki / "entities" / "agents" / f"{slug}.md"
-    if entity_type == "mcp-server":
-        return wiki / "entities" / "mcp-servers" / _mcp_shard(slug) / f"{slug}.md"
-    return wiki / "entities" / "skills" / f"{slug}.md"
+    path = entity_page_path(wiki, entity_type, slug)
+    if path is None:
+        raise ValueError(f"unknown entity type {entity_type!r}")
+    return path
 
 
 def _wiki_entity_link(slug: str, entity_type: str) -> str:
-    if entity_type == "agent":
-        return f"[[entities/agents/{slug}]]"
-    if entity_type == "mcp-server":
-        return f"[[entities/mcp-servers/{_mcp_shard(slug)}/{slug}]]"
-    return f"[[entities/skills/{slug}]]"
+    link = entity_wikilink(entity_type, slug)
+    if link is None:
+        raise ValueError(f"unknown entity type {entity_type!r}")
+    return link
 
 
 def _wiki_get_candidates(
@@ -469,7 +470,7 @@ def _wiki_get_candidates(
     slug: str,
     entity_type: str | None,
 ) -> list[tuple[str, Path, str]]:
-    entity_types = [entity_type] if entity_type else ["skill", "agent", "mcp-server"]
+    entity_types = [entity_type] if entity_type else list(RECOMMENDABLE_ENTITY_TYPES)
     return [
         (typ, _wiki_entity_path(wiki, slug, typ), _wiki_entity_link(slug, typ))
         for typ in entity_types

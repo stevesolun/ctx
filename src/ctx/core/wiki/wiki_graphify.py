@@ -25,6 +25,12 @@ from networkx.algorithms.community import (
     louvain_communities,
 )
 
+from ctx.core.entity_types import (
+    RELATED_SECTION_FOR_ENTITY_TYPE,
+    entity_page_path,
+    entity_wikilink,
+    mcp_shard,
+)
 from ctx.core.wiki.wiki_utils import parse_frontmatter as _parse_fm
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -36,6 +42,7 @@ AGENT_ENTITIES = WIKI_DIR / "entities" / "agents"
 # (entities/mcp-servers/<shard>/<slug>.md) — see McpRecord.entity_relpath.
 # Iterate recursively so the shard layout is transparent here.
 MCP_ENTITIES = WIKI_DIR / "entities" / "mcp-servers"
+HARNESS_ENTITIES = WIKI_DIR / "entities" / "harnesses"
 CONCEPTS_DIR = WIKI_DIR / "concepts"
 GRAPH_OUT = WIKI_DIR / "graphify-out"
 # Source of truth for per-node quality: sidecars produced by
@@ -60,39 +67,33 @@ def parse_frontmatter(filepath: Path) -> dict:
 
 def _mcp_shard(slug: str) -> str:
     """Return the shard segment for an MCP slug (matches McpRecord.entity_relpath)."""
-    first = slug[0] if slug else ""
-    return first if first.isalpha() else "0-9"
+    return mcp_shard(slug)
 
 
 def _entity_page_path(entity_type: str, slug: str) -> Path | None:
     """Resolve (entity_type, slug) to its on-disk page path. None for unknown types."""
+    wiki = WIKI_DIR
     if entity_type == "skill":
-        return SKILL_ENTITIES / f"{slug}.md"
-    if entity_type == "agent":
-        return AGENT_ENTITIES / f"{slug}.md"
-    if entity_type == "mcp-server":
-        return MCP_ENTITIES / _mcp_shard(slug) / f"{slug}.md"
-    return None
+        wiki = SKILL_ENTITIES.parents[1]
+    elif entity_type == "agent":
+        wiki = AGENT_ENTITIES.parents[1]
+    elif entity_type == "mcp-server":
+        wiki = MCP_ENTITIES.parents[1]
+    elif entity_type == "harness":
+        wiki = HARNESS_ENTITIES.parents[1]
+    else:
+        return None
+    return entity_page_path(wiki, entity_type, slug)
 
 
 def _entity_wikilink(entity_type: str, slug: str) -> str | None:
     """Wikilink target for an entity. None for unknown types."""
-    if entity_type == "skill":
-        return f"[[entities/skills/{slug}]]"
-    if entity_type == "agent":
-        return f"[[entities/agents/{slug}]]"
-    if entity_type == "mcp-server":
-        return f"[[entities/mcp-servers/{_mcp_shard(slug)}/{slug}]]"
-    return None
+    return entity_wikilink(entity_type, slug)
 
 
 def _related_section_header(entity_type: str) -> str:
     """Section header under which graph-derived backlinks land."""
-    return {
-        "skill": "## Related Skills",
-        "agent": "## Related Agents",
-        "mcp-server": "## Related MCP Servers",
-    }.get(entity_type, "## Related")
+    return RELATED_SECTION_FOR_ENTITY_TYPE.get(entity_type, "## Related")
 
 
 SLUG_STOP: frozenset[str] = frozenset({
@@ -123,7 +124,7 @@ def _load_full_body(meta: dict, slug: str, entity_type: str) -> str:
         Claude Code agent prompt (populated by ``ctx-agent-mirror``).
         Falls back to the entity card body when the mirror hasn't
         run for a particular slug.
-      - **mcp-server**: entity cards are the only body we have; the
+      - **mcp-server** and **harness**: entity cards are the only body we have; the
         pulsemcp description + tags + related links inside the
         card are the full context. Phase 6f.B detail-enrichment
         could later pull the GitHub README here, but that's out of
@@ -264,6 +265,7 @@ def build_graph(
         (SKILL_ENTITIES, "skill", "*.md"),
         (AGENT_ENTITIES, "agent", "*.md"),
         (MCP_ENTITIES, "mcp-server", "**/*.md"),
+        (HARNESS_ENTITIES, "harness", "*.md"),
     ]
 
     # ── Phase 1: discover nodes + collect embedding texts ─────────────

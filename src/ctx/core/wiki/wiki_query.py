@@ -21,6 +21,12 @@ from pathlib import Path
 from typing import Optional
 
 from ctx_config import cfg
+from ctx.core.entity_types import (
+    RECOMMENDABLE_ENTITY_TYPES,
+    SUBJECT_TYPE_FOR_ENTITY_TYPE,
+    entity_wikilink,
+    mcp_shard,
+)
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body as _extract_frontmatter
 from ctx.utils._safe_name import is_safe_source_name
 
@@ -110,17 +116,8 @@ def _parse_page(
 
 # --- Wiki loading ---
 
-def _mcp_shard(slug: str) -> str:
-    first = slug[0].lower() if slug else ""
-    return first if first.isalpha() else "0-9"
-
-
 def _wikilink(entity_type: str, slug: str) -> str:
-    if entity_type == "agent":
-        return f"[[entities/agents/{slug}]]"
-    if entity_type == "mcp-server":
-        return f"[[entities/mcp-servers/{_mcp_shard(slug)}/{slug}]]"
-    return f"[[entities/skills/{slug}]]"
+    return entity_wikilink(entity_type, slug) or f"[[entities/skills/{slug}]]"
 
 
 def _load_flat_entity_pages(root: Path, entity_type: str) -> list[SkillPage]:
@@ -145,7 +142,7 @@ def _load_sharded_mcp_pages(root: Path) -> list[SkillPage]:
         slug = path.stem
         if not is_safe_source_name(slug):
             continue
-        if path.parent.name != _mcp_shard(slug):
+        if path.parent.name != mcp_shard(slug):
             continue
         page = _parse_page(path, entity_type="mcp-server", wikilink=_wikilink("mcp-server", slug))
         if page is not None:
@@ -154,12 +151,15 @@ def _load_sharded_mcp_pages(root: Path) -> list[SkillPage]:
 
 
 def load_all_pages(wiki: Path) -> list[SkillPage]:
-    """Load skill, agent, and MCP entity pages from the wiki."""
+    """Load recommendable entity pages from the wiki."""
     entities = wiki / "entities"
     pages: list[SkillPage] = []
-    pages.extend(_load_flat_entity_pages(entities / "skills", "skill"))
-    pages.extend(_load_flat_entity_pages(entities / "agents", "agent"))
-    pages.extend(_load_sharded_mcp_pages(entities / "mcp-servers"))
+    for entity_type in RECOMMENDABLE_ENTITY_TYPES:
+        subject_type = SUBJECT_TYPE_FOR_ENTITY_TYPE[entity_type]
+        if entity_type == "mcp-server":
+            pages.extend(_load_sharded_mcp_pages(entities / subject_type))
+        else:
+            pages.extend(_load_flat_entity_pages(entities / subject_type, entity_type))
     return pages
 
 
