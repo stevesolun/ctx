@@ -383,6 +383,22 @@ class TestLoadSession:
         assert tool_msg.tool_call_id == "c1"
         assert tool_msg.name == "srv__fetch"
 
+    def test_replay_repairs_unresolved_tool_call_tail(self, tmp_path: Path) -> None:
+        """Crash after assistant tool_call message persists must resume safely."""
+        tc = ToolCall(id="c1", name="srv__fetch", arguments={"url": "https://x"})
+        with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
+            store.write_message(Message(role="user", content="go"))
+            store.write_model_response(1, _tool_response(tc))
+            store.write_message(Message(role="assistant", content="", tool_calls=(tc,)))
+
+        state = load_session("s", sessions_dir=tmp_path)
+
+        assert [m.role for m in state.messages] == ["user", "assistant", "tool"]
+        tool_msg = state.messages[2]
+        assert tool_msg.tool_call_id == "c1"
+        assert tool_msg.name == "srv__fetch"
+        assert tool_msg.content.startswith("ERROR:")
+
     def test_malformed_line_is_skipped_not_fatal(self, tmp_path: Path) -> None:
         path = tmp_path / "s.jsonl"
         path.write_text(

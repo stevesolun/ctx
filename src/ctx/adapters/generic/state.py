@@ -154,6 +154,55 @@ def _dict_to_message(d: dict[str, Any]) -> Message:
     )
 
 
+def _repair_unresolved_tool_call_tail(
+    messages: list[Message],
+    *,
+    session_id: str,
+) -> list[Message]:
+    """Add error tool messages when a crash left the replay tail invalid."""
+    idx = len(messages) - 1
+    seen_tool_results: set[str] = set()
+    while idx >= 0 and messages[idx].role == "tool":
+        tool_call_id = messages[idx].tool_call_id
+        if tool_call_id:
+            seen_tool_results.add(tool_call_id)
+        idx -= 1
+
+    if idx < 0:
+        return messages
+
+    assistant = messages[idx]
+    if assistant.role != "assistant" or not assistant.tool_calls:
+        return messages
+
+    missing = [
+        call for call in assistant.tool_calls
+        if call.id not in seen_tool_results
+    ]
+    if not missing:
+        return messages
+
+    repaired = list(messages)
+    for call in missing:
+        repaired.append(
+            Message(
+                role="tool",
+                content=(
+                    "ERROR: tool call did not complete before session replay; "
+                    "no persisted tool result was found."
+                ),
+                tool_call_id=call.id,
+                name=call.name,
+            )
+        )
+    _logger.warning(
+        "session %s: repaired %d unresolved tool call(s) at replay tail",
+        session_id,
+        len(missing),
+    )
+    return repaired
+
+
 def _usage_to_dict(usage: Usage) -> dict[str, Any]:
     return {
         "input_tokens": usage.input_tokens,
@@ -544,7 +593,9 @@ def load_session(
     return ReplayState(
         session_id=session_id,
         path=path,
-        messages=tuple(messages),
+        messages=tuple(_repair_unresolved_tool_call_tail(
+            messages, session_id=session_id,
+        )),
         metadata=metadata,
         stopped=stopped,
         stop_reason=stop_reason,
