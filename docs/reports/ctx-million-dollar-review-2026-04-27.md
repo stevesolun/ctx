@@ -1043,6 +1043,31 @@ Verification observed:
 - Plan file was reviewed after writing.
 - No product behavior was changed in this phase.
 
+### Phase 47: Final pre-tag release verification
+
+Status: verified in branch `codex/crash-consistency-and-harness-plan` before merge/tag.
+
+What changed:
+
+- No code behavior changed in this phase.
+- Re-ran the final release gates after the process-kill tests and harness-onboarding plan commits.
+- Confirmed `v0.7.0` did not already exist locally before tagging.
+- Cleaned the generated untracked `claude_ctx-0.7.0/` extraction directory left by the Windows build cleanup warning.
+
+Verification observed:
+
+- `python -m ruff check .` reported `All checks passed!`.
+- `python -m mypy src` reported `Success: no issues found in 239 source files`.
+- `python -m compileall -q src hooks scripts` exited 0.
+- `git diff --check` exited 0.
+- `python scripts\clean_host_contract.py --fast` built and installed `claude_ctx-0.7.0-py3-none-any.whl`, exercised fake-host hooks, `ctx-scan-repo --recommend`, `ctx run`, `ctx resume`, and deny-tool policy, and reported `clean-host contract passed`.
+- `python -m pytest -q` reported `3270 passed, 8 skipped in 479.31s (0:07:59)`.
+- `python -m build --outdir <temp-dist>` exited 0 and produced `claude_ctx-0.7.0.tar.gz` plus `claude_ctx-0.7.0-py3-none-any.whl`.
+- The build stderr did not contain the old `SetuptoolsDeprecationWarning` or deprecated `project.license` metadata warning.
+- The Windows build emitted cleanup warnings while removing the temporary extracted sdist tree, and left an untracked `claude_ctx-0.7.0/` directory in the repo root. That artifact was resolved to the repo root, removed, and the worktree returned clean.
+- `python -m twine check <temp-dist>\*` reported `PASSED` for both wheel and sdist.
+- Fresh virtualenv install from the wheel succeeded, `python -m pip check` reported `No broken requirements found`, and `--help` probes passed for `ctx`, `ctx-init`, `ctx-scan-repo`, `ctx-wiki-graphify`, `ctx-skill-add`, and `ctx-mcp-add`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -2244,7 +2269,7 @@ Success criteria:
 
 ## Current Next Steps
 
-The original P0/P1 remediation work is complete in this branch, and the parallel Phase 39 review's newly surfaced wiki P1 was fixed in Phase 40. The remaining work is release-hardening and live-integration validation.
+The original P0/P1 remediation work is complete in this branch, and the parallel Phase 39 review's newly surfaced wiki P1 was fixed in Phase 40. Local static gates, full pytest, clean-host contract, process-kill crash-consistency coverage, and package smoke have passed. The remaining work is live-integration validation and the pending harness/entity-onboarding feature decision.
 
 1. Run a clean-machine A-Z host flow against a real Claude Code installation:
    - The opt-in live Claude host gate exists as of Phase 37.
@@ -2270,10 +2295,16 @@ The original P0/P1 remediation work is complete in this branch, and the parallel
    - Manifest install/uninstall lost-update coverage was fixed in Phase 34, active dashboard load/unload lost-update coverage was fixed in Phase 39, and wiki atomic write/lock coverage was hardened in Phase 38.
    - Any future writer that bypasses the shared atomic helpers or `file_lock` should add its own process-kill regression before release.
 
-4. Tag only after merge:
-   - The 0.7.0 package dry-run passed locally.
+4. Tag and publish release artifacts only after merge:
+   - Phase 47 passed the final 0.7.0 package smoke locally.
+   - `v0.7.0` did not exist locally at the start of the final verification.
    - After branch review/merge, tag the merge commit as `v0.7.0`.
    - Do not reuse the existing `v0.6.4` tag.
+
+5. Implement first-class harness recommendations only after explicit approval:
+   - The plan is `docs/plans/2026-04-28-harness-recommendations-and-entity-onboarding.md`.
+   - The recommended direction is a real fourth entity type, not a doc-only or scan-only special case.
+   - `text-to-cad` is a strong seed candidate for a catalog-only harness entry; `obsidian-second-brain` is better treated as a skill/onboarding pattern; `claude-mem` should remain an architecture reference unless an AGPL policy decision is made.
 
 ## Residual Uncertainty
 
@@ -2344,11 +2375,12 @@ Observed:
 - Nine specialized agents were used because the user explicitly requested sub-agent review.
 - I re-checked the highest-risk paths locally with scoped file reads and command probes.
 - Code and CI fixes landed across the phased commits referenced above, and this report was updated to keep historical findings separate from current branch state.
+- Final pre-tag verification passed locally: ruff, mypy, compileall, clean-host contract, full pytest, build, twine check, fresh wheel install, pip check, and key console-script help probes.
 
 Inferred:
 
 - The highest-risk architecture split around recommendations and harness tool policy has been converged in code; remaining convergence risk is in live host behavior, future migrations, and integration surfaces not fully reproducible in local unit tests.
-- The branch is much closer to a release candidate than the original reviewed source, but it should still be treated as requiring CI and clean-install validation before a public release.
+- The branch is a local release candidate after clean-install/package smoke; remaining pre-public caveats are remote CI, live Claude Code host validation, and live third-party MCP validation.
 
 Not verified:
 
