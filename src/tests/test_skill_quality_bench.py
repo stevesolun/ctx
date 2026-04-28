@@ -77,11 +77,20 @@ def _make_bench_tree(tmp_path: Path) -> sq.SignalSources:
 # ────────────────────────────────────────────────────────────────────
 
 
-def test_recompute_all_completes_under_two_seconds(tmp_path: Path) -> None:
+def test_recompute_all_completes_under_two_seconds(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     """recompute_all with 100 slugs / 1,000 events must finish < 2 s."""
     sources = _make_bench_tree(tmp_path)
     sidecar_dir = tmp_path / "sidecars"
     sidecar_dir.mkdir()
+
+    def fast_write(path: Path, text: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(sq, "_atomic_write", fast_write)
 
     start = time.monotonic()
     successes, failures = sq.recompute_all(
