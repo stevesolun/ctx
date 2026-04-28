@@ -147,7 +147,7 @@ from your usage. Stale ones are flagged. New ones self-ingest.
     ---
 
     **v0.7.x** — MIT, CI-matrixed (Ubuntu + Windows × Python 3.11/3.12),
-    3,180+ tests passing. Ships console scripts including `ctx-init`,
+    3,270+ tests passing. Ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload),
     `ctx-dedup-check` (pre-ship near-duplicate gate), and
     `ctx-tag-backfill` (catalog hygiene), plus the ~25 MB pre-built

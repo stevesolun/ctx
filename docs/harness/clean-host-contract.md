@@ -38,8 +38,8 @@ contract stabilizes.
 - It does not browser-test the monitor dashboard.
 - It does not simulate process kills or power loss during writes.
 
-Those checks are tracked as later hardening phases in
-`docs/plans/2026-04-27-current-next-steps-hardening.md`.
+Those checks stay intentionally manual or opt-in until they are stable enough
+for the default CI path.
 
 ## Local Usage
 
