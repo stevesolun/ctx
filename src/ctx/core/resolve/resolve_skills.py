@@ -164,6 +164,7 @@ def resolve(
         "load": [],
         "unload": [],
         "mcp_servers": [],
+        "harnesses": [],
         "plugins": [],
         "warnings": [],
         "suggestions": [],
@@ -262,11 +263,11 @@ def resolve(
                 # underweight popular hits (on the real 13k-node
                 # graph where ``docker`` accumulates scores of ~300).
                 # Normalised [0,1] thresholds are scale-invariant.
-                # MCPs keep a slightly lower floor because the type
-                # is historically sparser; a single strong link is
-                # still signal, not noise.
+                # MCPs and harnesses keep a slightly lower floor because
+                # those types are historically sparser; a single strong
+                # link is still signal, not noise.
                 _SKILL_NOISE_FLOOR = 0.30     # 30% of top hit's score
-                _MCP_NOISE_FLOOR   = 0.20     # 20% (MCPs sparser)
+                _TOOLING_NOISE_FLOOR = 0.20   # 20% (MCPs/harnesses sparser)
                 for hit in graph_hits:
                     name = hit["name"]
                     hit_type = hit.get("type", "skill")
@@ -282,7 +283,8 @@ def resolve(
                         else raw_score
                     )
                     floor = (
-                        _MCP_NOISE_FLOOR if hit_type == "mcp-server"
+                        _TOOLING_NOISE_FLOOR
+                        if hit_type in {"mcp-server", "harness"}
                         else _SKILL_NOISE_FLOOR
                     )
                     if rank_score < floor:
@@ -293,17 +295,20 @@ def resolve(
                     shared_str = f" via shared tags {shared}" if shared else ""
                     reason = f"graph neighbor of {via}{shared_str}"
 
-                    # Phase 5: MCP servers land in their own manifest
-                    # bucket. Users don't "load" MCPs the way they load
-                    # skills; they see the recommendation and opt into
-                    # registering the server in ~/.claude/mcp.json
-                    # themselves (ctx-mcp-install will automate this
-                    # in Phase 6+). We still surface them here so the
-                    # monitor/dashboard has something to show.
-                    if hit_type == "mcp-server":
-                        if any(m.get("name") == name for m in manifest["mcp_servers"]):
+                    # MCP servers and harnesses land in dedicated
+                    # recommendation buckets. Users don't "load" these the
+                    # way they load skills; they review the recommendation
+                    # and opt into setup through the relevant installer or
+                    # host-specific instructions.
+                    if hit_type in {"mcp-server", "harness"}:
+                        bucket = (
+                            "mcp_servers"
+                            if hit_type == "mcp-server"
+                            else "harnesses"
+                        )
+                        if any(m.get("name") == name for m in manifest[bucket]):
                             continue  # already listed
-                        manifest["mcp_servers"].append({
+                        manifest[bucket].append({
                             "name": name,
                             "reason": reason,
                             "score": raw_score,

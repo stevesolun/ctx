@@ -25,7 +25,7 @@ Three delivery paths, in increasing order of coupling to ctx:
 Public functions:
 
     recommend_bundle(query, *, top_k=5)
-        Free-text → ranked skill/agent/MCP list.
+        Free-text → ranked skill/agent/MCP/harness list.
 
     graph_query(seeds, *, max_hops=2, top_n=10)
         Walk the knowledge graph from seed entity names.
@@ -55,6 +55,10 @@ from typing import Any
 
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.providers import ToolCall
+from ctx.core.entity_types import (
+    RECOMMENDABLE_ENTITY_TYPES,
+    SUBJECT_TYPE_FOR_ENTITY_TYPE,
+)
 
 
 __all__ = [
@@ -174,28 +178,28 @@ def list_all_entities(
     """Return every entity slug in the wiki.
 
     ``entity_type`` filters by type when given; valid values:
-    ``'skill'``, ``'agent'``, ``'mcp-server'``. Pass None (default)
-    to get every entity across all types.
+    ``'skill'``, ``'agent'``, ``'mcp-server'``, ``'harness'``. Pass
+    None (default) to get every entity across all recommendable types.
     """
     wiki = default_wiki_dir()
     if wiki is None or not wiki.is_dir():
         return []
+    if entity_type is not None and entity_type not in RECOMMENDABLE_ENTITY_TYPES:
+        return []
 
     slugs: list[str] = []
-    if entity_type in (None, "skill"):
-        slugs.extend(
-            p.stem for p in (wiki / "entities" / "skills").glob("*.md")
-        )
-    if entity_type in (None, "agent"):
-        slugs.extend(
-            p.stem for p in (wiki / "entities" / "agents").glob("*.md")
-        )
-    if entity_type in (None, "mcp-server"):
-        mcp_root = wiki / "entities" / "mcp-servers"
-        if mcp_root.is_dir():
-            for shard in mcp_root.iterdir():
-                if shard.is_dir():
-                    slugs.extend(p.stem for p in shard.glob("*.md"))
+    for current_type in RECOMMENDABLE_ENTITY_TYPES:
+        if entity_type is not None and entity_type != current_type:
+            continue
+        subject_type = SUBJECT_TYPE_FOR_ENTITY_TYPE[current_type]
+        root = wiki / "entities" / subject_type
+        if current_type == "mcp-server":
+            if root.is_dir():
+                for shard in root.iterdir():
+                    if shard.is_dir():
+                        slugs.extend(p.stem for p in shard.glob("*.md"))
+        else:
+            slugs.extend(p.stem for p in root.glob("*.md"))
     return sorted(set(slugs))
 
 
