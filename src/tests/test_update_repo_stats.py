@@ -109,3 +109,62 @@ def test_tarball_stats_reject_oversized_json_member(
     )
 
     assert urs._read_graph_from_tarball() is None
+
+
+def test_test_badge_is_labeled_collected_not_passing() -> None:
+    text = "[![Tests](https://img.shields.io/badge/Tests-12_passing-brightgreen.svg)](#)"
+    stats = {
+        "nodes": None,
+        "edges": None,
+        "skills": None,
+        "agents": None,
+        "mcps": None,
+        "communities": None,
+    }
+    patched = text
+    for pattern, replacement in urs.build_replacements(stats, tests=34, converted=None):
+        patched = pattern.sub(replacement, patched)
+
+    assert "Tests-34_collected" in patched
+    assert "_passing" not in patched
+
+
+def test_read_test_count_prefers_project_python(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def _collect(candidate: str) -> int | None:
+        calls.append(candidate)
+        return 34 if candidate == "python" else 30
+
+    monkeypatch.setattr(urs.sys, "executable", "python3")
+    monkeypatch.setattr(urs, "_pytest_collect", _collect)
+
+    assert urs.read_test_count() == 34
+    assert calls == ["python"]
+
+
+def test_uncollected_importorskip_tests_are_added_to_collection_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(urs, "REPO_ROOT", tmp_path)
+    tests_dir = tmp_path / "src" / "tests"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_browser.py").write_text(
+        "import pytest\n"
+        "pytest.importorskip('playwright.sync_api')\n"
+        "def test_one(): pass\n"
+        "def test_two(): pass\n",
+        encoding="utf-8",
+    )
+    (tests_dir / "test_present.py").write_text(
+        "import pytest\n"
+        "pytest.importorskip('already.available')\n"
+        "def test_present(): pass\n",
+        encoding="utf-8",
+    )
+
+    stdout = "src/tests/test_present.py::test_present\n1 test collected\n"
+    assert urs._uncollected_importorskip_test_count(stdout) == 2

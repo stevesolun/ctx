@@ -10,7 +10,7 @@ Sources of truth:
   - graph/communities.json      -> total_communities
   - ~/.claude/skill-wiki/graphify-out/graph.json  -> nodes, edges, skill/agent counts
   - ~/.claude/skill-wiki/entities/{skills,agents}/  -> fallback entity counts
-  - pytest --collect-only -q    -> test count
+  - pytest --collect-only -q    -> collected test count
 
 Usage:
   python src/update_repo_stats.py          # patch README.md in place
@@ -209,8 +209,30 @@ def _pytest_collect(interpreter: str) -> int | None:
     for line in reversed(result.stdout.strip().splitlines()):
         match = re.match(r"(\d+)\s+tests?\s+collected", line.strip())
         if match:
-            return int(match.group(1))
+            return int(match.group(1)) + _uncollected_importorskip_test_count(result.stdout)
     return None
+
+
+def _uncollected_importorskip_test_count(collected_stdout: str) -> int:
+    """Count tests hidden by module-level pytest.importorskip during collection."""
+    tests_dir = REPO_ROOT / "src" / "tests"
+    if not tests_dir.exists():
+        return 0
+
+    count = 0
+    for path in tests_dir.rglob("test_*.py"):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "pytest.importorskip(" not in text:
+            continue
+        repo_rel = path.relative_to(REPO_ROOT).as_posix()
+        src_rel = path.relative_to(REPO_ROOT / "src").as_posix()
+        if repo_rel in collected_stdout or src_rel in collected_stdout:
+            continue
+        count += sum(1 for line in text.splitlines() if re.match(r"\s*def\s+test_", line))
+    return count
 
 
 def _static_test_count() -> int | None:
@@ -230,15 +252,15 @@ def _static_test_count() -> int | None:
 
 
 def read_test_count() -> int | None:
-    """Count pytest tests. Tries multiple interpreters, falls back to static count.
+    """Count collected pytest tests. Tries interpreters, falls back to static count.
 
     Pytest collection is the authoritative source (accounts for parametrization)
-    but requires pytest installed in the chosen interpreter. On mixed-python
-    systems (e.g. Windows with pyenv) the hook's default `python3` may not
-    have pytest; we try common fallbacks before giving up.
+    but it is not a pass count because collect-only never executes tests.
+    On mixed-python systems (e.g. Windows with pyenv) the hook's default
+    `python3` may not have pytest; we try common fallbacks before giving up.
     """
     seen: set[str] = set()
-    candidates = [sys.executable, "python", "python3", "py"]
+    candidates = ["python", sys.executable, "python3", "py"]
     for candidate in candidates:
         if not candidate or candidate in seen:
             continue
@@ -354,7 +376,10 @@ def build_replacements(stats: dict, tests: int | None, converted: int | None) ->
             ))
 
     if tests is not None:
-        reps.append((re.compile(r"badge/Tests-[0-9]+_passing-"), f"badge/Tests-{tests}_passing-"))
+        reps.append((
+            re.compile(r"badge/Tests-[0-9]+_(?:passing|collected)-"),
+            f"badge/Tests-{tests}_collected-",
+        ))
         reps.append((re.compile(r"#\s*([\d,]+)\s+pytest tests"), f"# {tests} pytest tests"))
 
     if converted is not None:
