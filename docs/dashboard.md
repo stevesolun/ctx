@@ -1,9 +1,10 @@
 # Dashboard (`ctx-monitor`)
 
-Local HTTP dashboard for every live observable in ctx: currently-
-loaded skills, session timelines, the knowledge graph, the LLM-wiki
-browser, quality grades + scores, filterable audit logs, and a live
-event stream.
+Local HTTP dashboard for ctx's currently supported live observables:
+loaded skills, agents, and MCP servers; session timelines; the
+knowledge graph; the LLM-wiki browser; quality grades + scores;
+filterable audit logs; and a live event stream. Dashboard harness
+exposure is not yet present.
 
 ```bash
 ctx-monitor serve              # http://127.0.0.1:8765
@@ -20,15 +21,21 @@ requests. Cytoscape.js is loaded from a CDN on the `/graph` route only.
 
 Every page in the dashboard has the same top nav, so getting around
 is `Home → jump anywhere`. The three feature tabs new in v0.6.4 are
-how you explore the ctx corpus without ever touching the CLI.
+how you explore the dashboard-supported ctx corpus without ever touching
+the CLI. The underlying ctx catalog can include harness pages and
+recommendations, but `ctx-monitor` does not yet index, render, filter,
+load, unload, or score harness entries.
 
 ### Browse the LLM wiki — `/wiki`
 
-The wiki tab is a filterable card grid of **every entity page** under
+The wiki tab is a filterable card grid of **every dashboard-supported
+entity page** under
 `~/.claude/skill-wiki/entities/{skills,agents,mcp-servers}/`. MCP
 server pages use the sharded layout
 `entities/mcp-servers/<first-char-or-0-9>/<slug>.md`; the dashboard
-routes `/wiki/<slug>` to the same shard convention. Each card shows:
+routes `/wiki/<slug>` to the same shard convention. Harness pages may
+exist under `entities/harnesses/`, but dashboard wiki exposure for
+harnesses is not yet present. Each card shows:
 
 - the slug (click to open `/wiki/<slug>`)
 - the quality grade pill (A/B/C/D/F) when the entity has a sidecar,
@@ -41,15 +48,17 @@ description, and tags, plus skill/agent/MCP type checkboxes. Pair them to
 answer questions like "show me all grade-B agents related to
 testing" — check `agent`, type `testing` in the search box.
 
-Per-entity pages (`/wiki/<slug>`) render the full markdown body, the
-frontmatter table on the right, and a quality banner with deep links
-to `/skill/<slug>` (sidecar detail) and `/graph?slug=<slug>` (1-hop
-neighborhood).
+Dashboard-supported entity pages (`/wiki/<slug>`) render the full
+markdown body, the frontmatter table on the right, and a quality banner
+with deep links to `/skill/<slug>` (sidecar detail) and
+`/graph?slug=<slug>` (1-hop neighborhood).
 
 ### Explore the knowledge graph — `/graph`
 
 The graph tab is a cytoscape-rendered view over the 13,218-node
-skill↔agent↔MCP graph. When you arrive with no slug selected, the page
+skill↔agent↔MCP graph. The graph build and recommendation APIs can be
+harness-aware, but this dashboard view does not yet render harness nodes
+as first-class entities. When you arrive with no slug selected, the page
 shows:
 
 - a stats line with the total node + edge counts
@@ -71,7 +80,8 @@ Inside the cytoscape view, node colors mean:
 Edge width encodes the `weight` attribute (count of shared tags), so
 thicker lines = stronger semantic relationships. **Tap any node** to
 navigate to that entity's wiki page. The type checkboxes hide or show
-skills, agents, and MCP servers without reloading the graph.
+skills, agents, and MCP servers without reloading the graph. There is no
+harness filter or harness node styling yet.
 
 ### Read the quality KPIs — `/kpi`
 
@@ -105,8 +115,8 @@ yet), the page shows a helpful empty-state pointing at
 
 ### Top navigation
 
-Every page shows the same nav bar. The nine tabs cover the observable
-surface of ctx:
+Every page shows the same nav bar. The nine tabs cover the
+dashboard-supported observable surface of ctx:
 
 ```
 Home · Loaded · Skills · Wiki · Graph · KPIs · Sessions · Logs · Live
@@ -114,16 +124,19 @@ Home · Loaded · Skills · Wiki · Graph · KPIs · Sessions · Logs · Live
 
 ### HTML views
 
+Harness catalog entries are absent from these routes today; they remain
+available through the CLI/API recommendation surfaces.
+
 | Route | What it shows |
 |---|---|
 | `/` | Home: six stat cards (loaded, sidecars, wiki entities, graph nodes, audit events, sessions), grade distribution pills, recent sessions table, recent audit events |
 | `/loaded` | **Currently-loaded skills, agents, and MCP servers** from `~/.claude/skill-manifest.json` with per-row **unload** buttons + a text-input to load a new skill slug |
 | `/skills` | Every sidecar as a filterable **card grid**: left sidebar (search by slug, grade checkboxes, skill/agent toggle, hide-floored), card shows grade pill + raw score + links to sidecar/wiki/graph |
 | `/skill/<slug>` | Full sidecar breakdown: four-signal score (telemetry · intake · graph · routing), hard-floor reason, computed_at timestamp, per-skill audit timeline |
-| `/wiki` | **Wiki entity index** — card grid of every page under `~/.claude/skill-wiki/entities/{skills,agents,mcp-servers}/`, including sharded MCP server pages. Left sidebar: text search (slug · description · tag), skill/agent/MCP checkboxes. Each card shows the grade pill (when a sidecar exists), description, and tag preview. Click to open the entity page |
-| `/wiki/<slug>` | Wiki entity page rendered: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views |
-| `/graph` | **Graph explorer landing page** — node/edge count header, a "Popular seed slugs" block (18 highest-degree entities as clickable chips), search box for any slug, and the cytoscape canvas. Clicking a seed chip navigates to `/graph?slug=<slug>` |
-| `/graph?slug=<slug>` | **Cytoscape-rendered** 1-hop neighborhood around the target slug. Node colors: emerald=focus, indigo=skill, amber=agent, red diamond=MCP server. Edge width maps to shared-tag count. Tap any node → navigate to that entity's wiki page. Type and tag filters run client-side |
+| `/wiki` | **Wiki entity index** — card grid of every dashboard-supported page under `~/.claude/skill-wiki/entities/{skills,agents,mcp-servers}/`, including sharded MCP server pages. Left sidebar: text search (slug · description · tag), skill/agent/MCP checkboxes. Harness pages are not indexed yet. |
+| `/wiki/<slug>` | Dashboard-supported wiki entity page rendered: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views |
+| `/graph` | **Graph explorer landing page** — node/edge count header, a "Popular seed slugs" block (18 highest-degree skill/agent/MCP entities as clickable chips), search box for any skill/agent/MCP slug, and the cytoscape canvas. Clicking a seed chip navigates to `/graph?slug=<slug>` |
+| `/graph?slug=<slug>` | **Cytoscape-rendered** 1-hop neighborhood around the target skill/agent/MCP slug. Node colors: emerald=focus, indigo=skill, amber=agent, red diamond=MCP server. Edge width maps to shared-tag count. Tap any node → navigate to that entity's wiki page. Type and tag filters run client-side; no harness filter or styling exists yet. |
 | `/kpi` | **KPI dashboard** — total entity count with subject breakdown, grade distribution pills, two-column tables for grade counts and lifecycle tiers (active · watch · demote · archive), hard-floor reasons with counts, **By category** table (count · avg score · A/B/C/D/F mix per category), **Top demotion candidates** (active/watch entries graded D or F, sorted by consecutive-D streak desc then score asc), and the **Archived** list. Same shape as `python -m kpi_dashboard render` but HTML |
 | `/sessions` | Index of every session (audit + skill-events), first/last seen, counts of skills loaded/unloaded/agents/lifecycle transitions |
 | `/session/<id>` | Per-session audit timeline showing the load → score_updated → unload triad with timestamps |
@@ -137,7 +150,7 @@ Home · Loaded · Skills · Wiki · Graph · KPIs · Sessions · Logs · Live
 | `GET /api/sessions.json` | All sessions with aggregated counts |
 | `GET /api/manifest.json` | Raw `skill-manifest.json` passthrough |
 | `GET /api/skill/<slug>.json` | Raw sidecar for one slug |
-| `GET /api/graph/<slug>.json?hops=1&limit=40` | Cytoscape-shaped `{nodes, edges, center}`; `hops` ∈ [1, 3], `limit` ∈ [5, 150] |
+| `GET /api/graph/<slug>.json?hops=1&limit=40` | Dashboard-shaped skill/agent/MCP `{nodes, edges, center}`; `hops` ∈ [1, 3], `limit` ∈ [5, 150]. Harness graph exposure is not yet present here. |
 | `GET /api/kpi.json` | `DashboardSummary` passthrough — `{total, by_subject, grade_counts, lifecycle_counts, category_breakdown, hard_floor_counts, low_quality_candidates, archived, generated_at}`. Returns `{total: 0, detail: "no sidecars yet"}` when the quality directory is empty |
 | `GET /api/events.stream` | Server-sent events tail of `~/.claude/ctx-audit.jsonl` |
 
@@ -148,7 +161,8 @@ origin can't forge a request), require the per-process
 `X-CTX-Monitor-Token` injected into the dashboard page, and reject any
 slug failing the shared safe-name validator. That validator blocks path
 separators, Windows drive-relative strings, malformed names, and Windows
-reserved device names such as `con.txt` and `nul.`.
+reserved device names such as `con.txt` and `nul.`. There is no harness
+load/unload mutation endpoint yet.
 
 | Route | Body | Calls |
 |---|---|---|
@@ -162,9 +176,10 @@ action is visible in the session timeline.
 
 ## KPIs, measures, scores
 
-The dashboard surfaces every quality signal ctx computes. Nothing
-is aggregated-only — you can always drill from a headline number to
-the raw sidecar that produced it.
+The dashboard surfaces every quality signal ctx currently computes for
+sidecar-backed skills, agents, and MCP servers. Harness scoring is not
+yet exposed in the dashboard. Nothing is aggregated-only — you can
+always drill from a headline number to the raw sidecar that produced it.
 
 ### On the home page
 
@@ -172,8 +187,8 @@ the raw sidecar that produced it.
 |---|---|
 | **Currently loaded** | Count of entries in `skill-manifest.json[load]`. Clicking the card drills to `/loaded` |
 | **Sidecars** | Total sidecars in `~/.claude/skill-quality/` |
-| **Wiki entities** | Count of wiki pages (skills + agents + MCP servers) |
-| **Knowledge graph** | Node count + edge count from `graphify-out/graph.json` |
+| **Wiki entities** | Count of dashboard-supported wiki pages (skills + agents + MCP servers; no harness pages yet) |
+| **Knowledge graph** | Dashboard-supported skill/agent/MCP node count + edge count from `graphify-out/graph.json` |
 | **Audit events** | Line count of `~/.claude/ctx-audit.jsonl` |
 | **Sessions** | Unique session IDs seen across audit + events |
 | **Grade pills** | A / B / C / D / F counts across all sidecars, colored |
@@ -233,8 +248,9 @@ observability proof that ctx's telemetry pipeline is live.
   header that doesn't match `Host` returns 403. Curl and direct
   tool calls are allowed (no Origin header at all).
 - **Slug allowlist on all paths**. Anywhere the dashboard resolves
-  a slug to a file path (`/wiki/<slug>`, `/graph?slug=<slug>`,
-  `/api/graph/<slug>.json`), the slug is validated through the shared
+  a skill, agent, or MCP slug to a file path (`/wiki/<slug>`,
+  `/graph?slug=<slug>`, `/api/graph/<slug>.json`), the slug is
+  validated through the shared
   safe-name helper — no path traversal, no absolute paths, no UNC
   shares, no Windows reserved device names.
 

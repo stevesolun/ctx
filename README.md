@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-3287_passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-3291_passing-brightgreen.svg)](#)
 [![Graph](https://img.shields.io/badge/Graph-13%2C218_nodes_/_963K_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
@@ -16,7 +16,7 @@ Watches what you develop, walks a knowledge graph of **1,968 skills, 464 agents,
 
 ## Why it exists
 
-- **Discovery** — with 1,700+ skills, 400+ agents, and 10K+ MCPs, you can't possibly know which exist or which apply to your current work.
+- **Discovery** — with 1,900+ skills, 460+ agents, 10K+ MCP servers, and cataloged harnesses, you can't possibly know which exist or which apply to your current work.
 - **Context budget** — loading everything wastes tokens and degrades quality. You need the right 10–15 per session.
 - **Skill rot** — skills you installed months ago and never used are cluttering context. Stale ones should be flagged automatically.
 
@@ -47,8 +47,8 @@ tar xzf graph/wiki-graph.tar.gz -C ~/.claude/skill-wiki/
 After install, the `ctx` hooks integrate automatically with Claude Code's `PostToolUse` + `Stop` events. Typical flow:
 
 ```bash
-ctx-scan-repo --repo .     # scan current repo, surface recommended skills/agents
-ctx-scan-repo --repo . --recommend  # include MCP/harness recommendations
+ctx-scan-repo --repo .     # scan current repo and stack signals
+ctx-scan-repo --repo . --recommend  # include skill/agent/MCP/harness recommendations
 ctx-harness-add --repo https://github.com/earthtojake/text-to-cad --tag cad
 ctx-skill-quality list     # four-signal quality score for every skill
 ctx-skill-quality explain python-patterns   # drill into a single skill
@@ -57,7 +57,7 @@ ctx-toolbox run --event pre-commit          # run a council on the current diff
 ctx-monitor serve          # local dashboard: http://127.0.0.1:8765/
 ```
 
-The **`ctx-monitor`** dashboard shows currently loaded skills with load/unload buttons, a cytoscape graph view (`/graph?slug=…`), the LLM-wiki entity browser (`/wiki/<slug>`), a filterable skills grid, a session timeline, an audit log viewer, and a live SSE event stream.
+The **`ctx-monitor`** dashboard shows currently loaded skills, agents, and MCP servers with load/unload buttons, a cytoscape graph view (`/graph?slug=…`), the LLM-wiki entity browser (`/wiki/<slug>`), a filterable skills grid, a session timeline, an audit log viewer, and a live SSE event stream. Dashboard harness exposure is not yet present; harnesses are cataloged and recommended through the CLI/API surfaces.
 
 Step-by-step entity onboarding:
 **<https://stevesolun.github.io/ctx/entity-onboarding/>**

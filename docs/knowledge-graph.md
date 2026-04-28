@@ -1,13 +1,17 @@
 # Knowledge graph
 
-A pre-built weighted graph of every skill, agent, and MCP server in
-the ctx ecosystem, shipped as `graph/wiki-graph.tar.gz` and queryable
-via the `ctx-monitor` dashboard, the `resolve_graph` Python API, and
-the on-disk JSON.
+A pre-built weighted graph of skills, agents, MCP servers, and cataloged
+harnesses in the ctx ecosystem, shipped as `graph/wiki-graph.tar.gz`.
+The on-disk JSON and `resolve_graph` Python API are harness-aware;
+`ctx-monitor` currently exposes skill/agent/MCP graph and wiki views
+only. Dashboard harness exposure is not yet present.
 
 ## What's in it
 
-Authoritative numbers from the shipped tarball:
+Authoritative numbers from the shipped tarball. The 13,218-node snapshot
+is the current skill/agent/MCP inventory; harness pages under
+`entities/harnesses/` are ingested into local rebuilds and recommendation
+output when cataloged.
 
 | | Count |
 |---|---:|
@@ -22,8 +26,9 @@ Authoritative numbers from the shipped tarball:
 ## Install
 
 Extract the tarball into your `~/.claude/skill-wiki/` to get a
-ready-to-query graph plus every entity page, concept page, and
-converted micro-skill pipeline:
+ready-to-query graph plus every shipped skill/agent/MCP entity page,
+cataloged harness pages when present, concept pages, and converted
+micro-skill pipelines:
 
 ```bash
 mkdir -p ~/.claude/skill-wiki
@@ -81,9 +86,12 @@ quality clusters for the recommendation use case.
 ctx-monitor serve              # http://127.0.0.1:8765
 ```
 
-Then open `/graph?slug=<any-slug>` for a cytoscape neighborhood view,
-or `/api/graph/<slug>.json?hops=1&limit=40` for the raw JSON. See the
-[dashboard reference](dashboard.md) for the full route catalogue.
+Then open `/graph?slug=<skill-agent-or-mcp-slug>` for a cytoscape
+neighborhood view, or `/api/graph/<slug>.json?hops=1&limit=40` for the
+dashboard-shaped JSON. `ctx-monitor` does not yet offer harness filters,
+styling, or wiki routes; use the Python/API recommendation surfaces for
+harness-aware graph results. See the [dashboard reference](dashboard.md)
+for the full route catalogue.
 
 ### Via Python
 
@@ -101,7 +109,7 @@ G = node_link_graph(raw, edges=edges_key)
 # 13,218 nodes, 963,068 edges
 print(G.number_of_nodes(), G.number_of_edges())
 
-# Find skills related to 'fastapi-pro' by edge weight
+# Find entities related to 'fastapi-pro' by edge weight
 seed = "skill:fastapi-pro"
 neighbors = sorted(
     G.neighbors(seed),
@@ -124,13 +132,15 @@ The graph backs two recommendation paths:
 - Free-text recommendation surfaces (`ctx.recommend_bundle`, MCP
   `ctx__recommend_bundle`, generic harness tools, and Claude Code hook
   suggestions) share `ctx.core.resolve.recommendations.recommend_by_tags`.
-  That engine ranks skills, agents, and MCP servers by slug-token matches,
-  tag overlap, graph degree, and semantic-cache signals when available.
+  That engine ranks skills, agents, MCP servers, and harnesses by
+  slug-token matches, tag overlap, graph degree, and semantic-cache
+  signals when available.
 - Repository scans still start from stack detections and installed-entity
   availability. `resolve_skills.resolve()` maps detected languages,
   frameworks, infrastructure, and tools through the shared stack matrix, then
   uses the graph as an advisory augmentation source for additional installed
-  skills, agents, and MCP server suggestions.
+  skills, agents, and MCP server suggestions, plus catalog-only harness
+  recommendations where the scan includes them.
 
 This split is intentional: free-text query surfaces need identical ranking,
 while scan resolution also has to respect local installation state and the
@@ -138,7 +148,7 @@ manifest cap.
 
 ## Rebuilding
 
-After you add skills or edit entity pages:
+After you add a skill, agent, MCP server, or harness entity page:
 
 ```bash
 ctx-wiki-graphify          # rebuild entity graph + communities
@@ -146,7 +156,9 @@ ctx-wiki-graphify          # rebuild entity graph + communities
 
 The pre-commit hook (`.githooks/pre-commit`) re-runs this
 automatically when `skills/` or `agents/` are staged, and repacks
-the tarball on disk so `README.md` numbers never drift.
+the tarball on disk so `README.md` numbers never drift. Run
+`ctx-wiki-graphify` directly for MCP server or harness catalog changes
+if your hook config does not include those paths.
 
 ## Edge-count history
 
