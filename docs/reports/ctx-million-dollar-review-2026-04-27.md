@@ -1027,6 +1027,22 @@ Verification observed:
 - `python -m ruff check src\tests\test_crash_consistency.py` reported `All checks passed!`.
 - `python -m mypy src\tests\test_crash_consistency.py` reported `Success: no issues found in 1 source file`.
 
+### Phase 46: Harness recommendation and entity onboarding plan
+
+Status: plan written in branch `codex/crash-consistency-and-harness-plan`; implementation is intentionally pending user approval.
+
+What changed:
+
+- Added `docs/plans/2026-04-28-harness-recommendations-and-entity-onboarding.md`.
+- Reviewed `earthtojake/text-to-cad`, `eugeniughelbur/obsidian-second-brain`, and `thedotmack/claude-mem`.
+- Concluded that first-class harness recommendation support is feasible, but it must be implemented as a fourth entity type across wiki, graph, recommender, resolver, scan rendering, dashboard/API, and docs.
+- Concluded that `text-to-cad` is a good seed harness candidate, `obsidian-second-brain` is useful as a skill/onboarding pattern, and `claude-mem` should be treated as an architecture reference only unless an AGPL/code-vendoring decision is made.
+
+Verification observed:
+
+- Plan file was reviewed after writing.
+- No product behavior was changed in this phase.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
