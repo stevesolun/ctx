@@ -45,6 +45,7 @@ ctx-bundle-suggest = "ctx.adapters.claude_code.hooks.bundle_orchestrator:main"
 ctx-agent-mirror = "agent_mirror:main"
 ctx-agent-install = "ctx.adapters.claude_code.install.agent_install:main"
 ctx-harness-add = "harness_add:main"
+ctx-harness-install = "harness_install:main"
 ctx-mcp-add = "mcp_add:main"
 ctx-mcp-fetch = "mcp_fetch:main"
 ctx-mcp-ingest = "mcp_ingest:main"
@@ -131,6 +132,7 @@ py-modules = [
     "ctx_init",
     "ctx_lifecycle",
     "ctx_monitor",
+    "harness_install",
     "embedding_backend",
     "flatten_agents",
     "import_strix_skills",

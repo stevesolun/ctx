@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-3294_passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-3300_passing-brightgreen.svg)](#)
 [![Graph](https://img.shields.io/badge/Graph-13%2C218_nodes_/_963K_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
@@ -52,6 +52,7 @@ After install, the `ctx` hooks integrate automatically with Claude Code's `PostT
 ctx-scan-repo --repo .     # scan current repo and stack signals
 ctx-scan-repo --repo . --recommend  # include skill/agent/MCP/harness recommendations
 ctx-harness-add --repo https://github.com/earthtojake/text-to-cad --tag cad
+ctx-harness-install text-to-cad --dry-run   # inspect before cloning/running anything
 ctx-skill-quality list     # four-signal quality score for every skill
 ctx-skill-quality explain python-patterns   # drill into a single skill
 ctx-skill-health dashboard # structural health + drift detection

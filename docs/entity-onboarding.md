@@ -132,6 +132,22 @@ Harness pages live under `entities/harnesses/<slug>.md`. Setup and verification
 commands are documentation only; ctx records them so the user can inspect and
 decide before running anything.
 
+To inspect and install a cataloged harness:
+
+```bash
+ctx-harness-install text-to-cad --dry-run
+ctx-harness-install text-to-cad
+```
+
+The installer clones or copies the harness into `~/.claude/harnesses/<slug>` and
+writes `~/.claude/harness-installs/<slug>.json`. It does not run setup commands
+unless you pass `--approve-commands`, and it does not run verification commands
+unless you also pass `--run-verify`.
+
+```bash
+ctx-harness-install text-to-cad --approve-commands --run-verify
+```
+
 ## Initialize Model Choice
 
 During setup, record whether you use Claude Code or your own model. Plain
