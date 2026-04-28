@@ -28,7 +28,6 @@ class TestYamlFrontmatterEscape:
             line_count=50,
             has_pipeline=False,
             original_path=Path(path_str),
-            pipeline_path=None,
             related=[],
             scan_sources=[],
         )

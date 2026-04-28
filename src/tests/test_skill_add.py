@@ -267,7 +267,6 @@ class TestBuildEntityPage:
             line_count=50,
             has_pipeline=False,
             original_path=Path("/tmp/skills/my-skill/SKILL.md"),
-            pipeline_path=None,
             related=[],
             scan_sources=[],
         )
@@ -279,7 +278,7 @@ class TestBuildEntityPage:
         assert "title: react-hooks" in content
 
     def test_has_pipeline_true(self):
-        content = self._call(has_pipeline=True, pipeline_path=Path("/tmp/wiki/converted/my-skill"))
+        content = self._call(has_pipeline=True)
         assert "has_pipeline: true" in content
 
     def test_has_pipeline_false(self):

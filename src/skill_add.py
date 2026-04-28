@@ -92,7 +92,6 @@ def build_entity_page(
     line_count: int,
     has_pipeline: bool,
     original_path: Path,
-    pipeline_path: Path | None,
     related: list[str],
     scan_sources: list[str],
 ) -> str:
@@ -309,7 +308,6 @@ def add_skill(
         line_count=line_count,
         has_pipeline=converted,
         original_path=installed_path,
-        pipeline_path=pipeline_path,
         related=related,
         scan_sources=scan_sources,
     )
