@@ -73,7 +73,11 @@ from typing import TYPE_CHECKING, Iterable
 # derived from it at import time and kept as tuples so tests and hot
 # paths can continue to monkeypatch or iterate them directly without
 # paying a per-call config read.
-from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
+from ctx.utils._fs_utils import (
+    _fsync_parent_dir,
+    _replace_with_retry,
+    atomic_write_text as _atomic_write_text,
+)
 from backup_config import BackupConfig, from_ctx_config
 
 # ── Intentional import cycle with backup_watchdog ───────────────────────────
@@ -132,6 +136,7 @@ MEMORY_GLOB: bool = _CFG.memory_glob
 # Microsecond suffix avoids collisions when snapshots are taken in quick
 # succession (e.g. test runs or scripted automation).
 SNAPSHOT_FMT: str = _CFG.timestamp_format
+_SNAPSHOT_TEMP_PREFIX = ".tmp-"
 
 
 # ── Data model ──────────────────────────────────────────────────────────────
@@ -322,6 +327,13 @@ def _new_snapshot_id(now: float | None = None,
     return name.rstrip("-_.")
 
 
+def _publish_snapshot_dir(tmp_path: Path, snap_path: Path) -> None:
+    if snap_path.exists():
+        raise FileExistsError(snap_path)
+    _replace_with_retry(str(tmp_path), snap_path)
+    _fsync_parent_dir(snap_path.parent)
+
+
 def create_snapshot(backups_dir: Path | None = None,
                     now: float | None = None,
                     reason: str | None = None) -> Path:
@@ -338,37 +350,50 @@ def create_snapshot(backups_dir: Path | None = None,
     backups_dir.mkdir(parents=True, exist_ok=True)
     snap_id = _new_snapshot_id(now, reason)
     snap_path = backups_dir / snap_id
-    snap_path.mkdir(parents=True, exist_ok=False)
+    if snap_path.exists():
+        raise FileExistsError(snap_path)
 
     entries: list[ManifestEntry] = []
-
-    for src in _iter_top_files():
-        entries.append(_capture_file(src, snap_path, src.name))
-
-    for src_rel, dest_rel in TREE_SOURCES:
-        root = claude_home / src_rel
-        for src in _iter_tree(src_rel):
-            rel = src.relative_to(root)
-            dest_rel_path = Path(dest_rel) / rel
-            entries.append(_capture_file(src, snap_path, dest_rel_path.as_posix()))
-
-    for slug, src in _iter_memory_files():
-        memory_root = claude_home / "projects" / slug / "memory"
-        rel = src.relative_to(memory_root)
-        dest_rel_path = Path("memory") / slug / rel
-        entries.append(_capture_file(src, snap_path, dest_rel_path.as_posix()))
-
-    manifest = {
-        "snapshot_id": snap_id,
-        "created_at": now if now is not None else time.time(),
-        "claude_home": str(claude_home),
-        "reason": reason or None,
-        "entries": [e.to_dict() for e in entries],
-    }
-    _atomic_write_text(
-        snap_path / "manifest.json",
-        json.dumps(manifest, indent=2),
+    tmp_path = Path(
+        tempfile.mkdtemp(
+            prefix=f"{_SNAPSHOT_TEMP_PREFIX}{snap_id}-",
+            dir=str(backups_dir),
+        )
     )
+
+    try:
+        for src in _iter_top_files():
+            entries.append(_capture_file(src, tmp_path, src.name))
+
+        for src_rel, dest_rel in TREE_SOURCES:
+            root = claude_home / src_rel
+            for src in _iter_tree(src_rel):
+                rel = src.relative_to(root)
+                dest_rel_path = Path(dest_rel) / rel
+                entries.append(_capture_file(src, tmp_path, dest_rel_path.as_posix()))
+
+        for slug, src in _iter_memory_files():
+            memory_root = claude_home / "projects" / slug / "memory"
+            rel = src.relative_to(memory_root)
+            dest_rel_path = Path("memory") / slug / rel
+            entries.append(_capture_file(src, tmp_path, dest_rel_path.as_posix()))
+
+        manifest = {
+            "snapshot_id": snap_id,
+            "created_at": now if now is not None else time.time(),
+            "claude_home": str(claude_home),
+            "reason": reason or None,
+            "entries": [e.to_dict() for e in entries],
+        }
+        _atomic_write_text(
+            tmp_path / "manifest.json",
+            json.dumps(manifest, indent=2),
+        )
+        _publish_snapshot_dir(tmp_path, snap_path)
+    except Exception:
+        if tmp_path.exists():
+            shutil.rmtree(tmp_path, ignore_errors=True)
+        raise
     return snap_path
 
 
@@ -433,6 +458,8 @@ def list_snapshots(backups_dir: Path | None = None) -> list[SnapshotInfo]:
     out: list[SnapshotInfo] = []
     for child in sorted(backups_dir.iterdir(), reverse=True):
         if not child.is_dir():
+            continue
+        if child.name.startswith(_SNAPSHOT_TEMP_PREFIX):
             continue
         manifest = child / "manifest.json"
         if not manifest.is_file():

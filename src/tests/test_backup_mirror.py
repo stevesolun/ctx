@@ -114,6 +114,23 @@ def test_snapshot_ids_sort_chronologically(fake_home):
     assert a.name < b.name
 
 
+def test_create_failure_does_not_leave_final_snapshot_dir(fake_home, monkeypatch):
+    _seed_home(fake_home)
+    now = 1700000000.123456
+    final_path = bm.BACKUPS_DIR / bm._new_snapshot_id(now)
+
+    def fail_manifest_write(path: Path, text: str) -> None:
+        raise OSError("manifest write failed")
+
+    monkeypatch.setattr(bm, "_atomic_write_text", fail_manifest_write)
+
+    with pytest.raises(OSError, match="manifest write failed"):
+        bm.create_snapshot(now=now)
+
+    assert not final_path.exists()
+    assert bm.list_snapshots() == []
+
+
 # ── list_snapshots ──────────────────────────────────────────────────────────
 
 
@@ -134,6 +151,21 @@ def test_list_skips_corrupt_manifest(fake_home):
     snap = bm.create_snapshot()
     (snap / "manifest.json").write_text("not json", encoding="utf-8")
     assert bm.list_snapshots() == []
+
+
+def test_list_ignores_snapshot_temp_dirs(fake_home):
+    _seed_home(fake_home)
+    snap = bm.create_snapshot(now=1700000000.0)
+    temp_snap = bm.BACKUPS_DIR / f".tmp-{snap.name}-crash"
+    temp_snap.mkdir()
+    (temp_snap / "manifest.json").write_text(
+        (snap / "manifest.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    infos = bm.list_snapshots()
+
+    assert [i.path for i in infos] == [str(snap)]
 
 
 # ── verify_snapshot ─────────────────────────────────────────────────────────
