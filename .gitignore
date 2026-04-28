@@ -56,6 +56,13 @@ CLAUDE.md
 /docs/plans/20[0-9][0-9]-*.md
 /internal/reviews/
 
+# Generated graph review artifacts (regenerate locally when needed)
+/graph/*-report.md
+/graph/*-report.json
+/graph/*-report.json.gz
+/graph/tag-backfill.md
+/graph/tag-backfill.json
+
 # Secrets / config overrides
 skill-system-config.json
 .env.local
