@@ -245,6 +245,21 @@ def _write_manifest(
     return path
 
 
+def _manifest_path(manifest_dir: Path, slug: str) -> Path:
+    validate_skill_name(slug)
+    return manifest_dir / f"{slug}.json"
+
+
+def _read_manifest(manifest_dir: Path, slug: str) -> dict[str, Any]:
+    path = _manifest_path(manifest_dir, slug)
+    if not path.is_file():
+        raise LookupError(f"harness {slug!r} is not installed")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"install manifest {path} is not an object")
+    return data
+
+
 def install_harness(
     identifier: str,
     *,
@@ -332,6 +347,111 @@ def install_harness(
     )
 
 
+def uninstall_harness(
+    identifier: str,
+    *,
+    manifest_dir: Path,
+    installs_root: Path | None = None,
+    keep_files: bool = False,
+    dry_run: bool = False,
+) -> InstallResult:
+    slug = identifier.strip()
+    try:
+        validate_skill_name(slug)
+        manifest_path = _manifest_path(manifest_dir, slug)
+        manifest = _read_manifest(manifest_dir, slug)
+    except Exception as exc:  # noqa: BLE001
+        return InstallResult(slug or identifier, "not-installed", message=str(exc))
+
+    target = Path(str(manifest.get("target") or "")).expanduser().resolve()
+    if installs_root is not None:
+        root = installs_root.expanduser().resolve()
+        if target and not _is_within(target, root):
+            return InstallResult(
+                slug,
+                "invalid-target",
+                target=target,
+                manifest_path=manifest_path,
+                message=f"manifest target is outside installs root {root}",
+            )
+
+    print(f"Uninstall harness: {slug}")
+    print(f"Target: {target}")
+    print(f"Manifest: {manifest_path}")
+    if keep_files:
+        print("Files: keep installed target; remove manifest only")
+    if dry_run:
+        return InstallResult(slug, "dry-run", target=target, manifest_path=manifest_path)
+
+    try:
+        if not keep_files and target.exists():
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        manifest_path.unlink(missing_ok=True)
+    except Exception as exc:  # noqa: BLE001
+        return InstallResult(
+            slug,
+            "uninstall-failed",
+            target=target,
+            manifest_path=manifest_path,
+            message=str(exc),
+        )
+    return InstallResult(slug, "uninstalled", target=target, manifest_path=manifest_path)
+
+
+def update_harness(
+    identifier: str,
+    *,
+    wiki_path: Path,
+    installs_root: Path,
+    manifest_dir: Path,
+    dry_run: bool = False,
+    approve_commands: bool = False,
+    run_verify: bool = False,
+) -> InstallResult:
+    try:
+        record = resolve_harness(identifier, wiki_path=wiki_path)
+        manifest = _read_manifest(manifest_dir, record.slug)
+    except Exception as exc:  # noqa: BLE001
+        return InstallResult(identifier, "not-installed", message=str(exc))
+
+    target = Path(str(manifest.get("target") or "")).expanduser()
+    if not target:
+        return InstallResult(
+            record.slug,
+            "invalid-target",
+            message="install manifest does not include target",
+        )
+    if dry_run:
+        target_path = target.resolve()
+        print("Update harness:")
+        print(render_plan(record, target=target_path))
+        print("Action: replace installed target from cataloged source")
+        return InstallResult(record.slug, "dry-run", target=target_path)
+
+    result = install_harness(
+        record.slug,
+        wiki_path=wiki_path,
+        installs_root=installs_root,
+        manifest_dir=manifest_dir,
+        target=target,
+        force=True,
+        approve_commands=approve_commands,
+        run_verify=run_verify,
+    )
+    if result.status != "installed":
+        return result
+    return InstallResult(
+        record.slug,
+        "updated",
+        target=result.target,
+        manifest_path=result.manifest_path,
+        message=result.message,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Install a cataloged harness into ~/.claude/harnesses"
@@ -352,6 +472,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Print plan only")
     parser.add_argument("--force", action="store_true", help="Replace target if it exists")
     parser.add_argument(
+        "--update",
+        action="store_true",
+        help="Replace an installed harness target from the current catalog source",
+    )
+    parser.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="Remove a harness install manifest and installed target",
+    )
+    parser.add_argument(
+        "--keep-files",
+        action="store_true",
+        help="With --uninstall, remove only the manifest and keep installed files",
+    )
+    parser.add_argument(
         "--approve-commands",
         action="store_true",
         help="Run cataloged setup commands after materializing the harness",
@@ -363,18 +498,54 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    result = install_harness(
-        args.identifier,
-        wiki_path=Path(os.path.expanduser(args.wiki)),
-        installs_root=Path(os.path.expanduser(args.installs_root)),
-        manifest_dir=Path(os.path.expanduser(args.manifest_dir)),
-        target=Path(os.path.expanduser(args.target)) if args.target else None,
-        dry_run=args.dry_run,
-        force=args.force,
-        approve_commands=args.approve_commands,
-        run_verify=args.run_verify,
-    )
-    if result.status in {"installed", "dry-run", "skipped-existing"}:
+    wiki_path = Path(os.path.expanduser(args.wiki))
+    installs_root = Path(os.path.expanduser(args.installs_root))
+    manifest_dir = Path(os.path.expanduser(args.manifest_dir))
+    target = Path(os.path.expanduser(args.target)) if args.target else None
+
+    if args.update and args.uninstall:
+        print("Error: choose only one of --update or --uninstall", file=sys.stderr)
+        return 2
+    if args.keep_files and not args.uninstall:
+        print("Error: --keep-files requires --uninstall", file=sys.stderr)
+        return 2
+    if args.uninstall:
+        result = uninstall_harness(
+            args.identifier,
+            manifest_dir=manifest_dir,
+            installs_root=installs_root,
+            keep_files=args.keep_files,
+            dry_run=args.dry_run,
+        )
+    elif args.update:
+        result = update_harness(
+            args.identifier,
+            wiki_path=wiki_path,
+            installs_root=installs_root,
+            manifest_dir=manifest_dir,
+            dry_run=args.dry_run,
+            approve_commands=args.approve_commands,
+            run_verify=args.run_verify,
+        )
+    else:
+        result = install_harness(
+            args.identifier,
+            wiki_path=wiki_path,
+            installs_root=installs_root,
+            manifest_dir=manifest_dir,
+            target=target,
+            dry_run=args.dry_run,
+            force=args.force,
+            approve_commands=args.approve_commands,
+            run_verify=args.run_verify,
+        )
+    if result.status in {
+        "installed",
+        "updated",
+        "uninstalled",
+        "dry-run",
+        "skipped-existing",
+    }:
         print(f"{result.status}: {result.slug}")
         if result.target is not None:
             print(f"target: {result.target}")

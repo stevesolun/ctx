@@ -137,6 +137,8 @@ To inspect and install a cataloged harness:
 ```bash
 ctx-harness-install text-to-cad --dry-run
 ctx-harness-install text-to-cad
+ctx-harness-install text-to-cad --update --dry-run
+ctx-harness-install text-to-cad --uninstall --dry-run
 ```
 
 The installer clones or copies the harness into `~/.claude/harnesses/<slug>` and
@@ -146,6 +148,9 @@ unless you also pass `--run-verify`.
 
 ```bash
 ctx-harness-install text-to-cad --approve-commands --run-verify
+ctx-harness-install text-to-cad --update --approve-commands --run-verify
+ctx-harness-install text-to-cad --uninstall
+ctx-harness-install text-to-cad --uninstall --keep-files
 ```
 
 ## Initialize Model Choice

@@ -168,3 +168,98 @@ def test_missing_harness_fails_clearly(tmp_path: Path) -> None:
 
     assert result.status == "not-found"
     assert "missing" in result.message
+
+
+def test_uninstall_removes_target_and_manifest(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "README.md").write_text("v1", encoding="utf-8")
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=str(source))
+    manifest_dir = tmp_path / "manifests"
+    install = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=manifest_dir,
+    )
+    assert install.target is not None
+    assert install.manifest_path is not None
+
+    result = harness_install.uninstall_harness(
+        "text-to-cad",
+        manifest_dir=manifest_dir,
+    )
+
+    assert result.status == "uninstalled"
+    assert not install.target.exists()
+    assert not install.manifest_path.exists()
+
+
+def test_uninstall_keep_files_only_removes_manifest(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "README.md").write_text("v1", encoding="utf-8")
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=str(source))
+    manifest_dir = tmp_path / "manifests"
+    install = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=manifest_dir,
+    )
+    assert install.target is not None
+    assert install.manifest_path is not None
+
+    result = harness_install.uninstall_harness(
+        "text-to-cad",
+        manifest_dir=manifest_dir,
+        keep_files=True,
+    )
+
+    assert result.status == "uninstalled"
+    assert install.target.exists()
+    assert not install.manifest_path.exists()
+
+
+def test_update_replaces_installed_target_from_catalog_source(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "README.md").write_text("v1", encoding="utf-8")
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=str(source))
+    manifest_dir = tmp_path / "manifests"
+    installs_root = tmp_path / "installs"
+    install = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=installs_root,
+        manifest_dir=manifest_dir,
+    )
+    assert install.target is not None
+    (source / "README.md").write_text("v2", encoding="utf-8")
+
+    result = harness_install.update_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=installs_root,
+        manifest_dir=manifest_dir,
+    )
+
+    assert result.status == "updated"
+    assert (install.target / "README.md").read_text(encoding="utf-8") == "v2"
+
+
+def test_update_requires_existing_manifest(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki)
+
+    result = harness_install.update_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=tmp_path / "manifests",
+    )
+
+    assert result.status == "not-installed"
