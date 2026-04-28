@@ -997,6 +997,18 @@ Observed:
   - Entry point probe reported `loaded 27 ctx console scripts from wheel 0.7.0`.
   - Installed `ctx-init --help`, `ctx-scan-repo --help`, `ctx-wiki-graphify --help`, and `ctx --help` all executed.
 
+### Main integration
+
+Status: completed.
+
+Observed:
+
+- `main` was clean before integration.
+- `git merge --ff-only codex/current-next-steps-hardening` fast-forwarded `main` from `191ee3e` to `2972d78`.
+- After the fast-forward, `main` and `codex/current-next-steps-hardening` both resolved to commit `2972d78b79634d991c678ece7760538e9af9c033`.
+- Post-merge checks on `main` reported a clean worktree, `git diff --check` success, `python -m ruff check .` success, and `python -m mypy src` success.
+- The full pytest, clean-host, and package-smoke gates above were run on the same tree before the fast-forward; they were not rerun after this documentation-only integration note.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
