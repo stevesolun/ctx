@@ -553,6 +553,36 @@ class TestAddSkill:
         _fake_intake.record_embedding.return_value = None
         _fake_intake.record_embedding.side_effect = None
 
+    def _skill_text(
+        self,
+        *,
+        description: str = "A test skill for validation purposes that is long enough to pass the intake gate requirements.",
+        tags: list[str] | None = None,
+        setup_commands: list[str] | None = None,
+        body: str | None = None,
+    ) -> str:
+        tags = tags or ["python", "testing"]
+        setup_commands = setup_commands or ["pytest"]
+        body = body or (
+            "This is a test skill with sufficient body content to pass the "
+            "intake validation. It needs at least 120 characters of text "
+            "outside the frontmatter block.\n\n## Usage\n\nUse this skill for testing."
+        )
+        lines = [
+            "---",
+            "name: myskill",
+            f"description: {description}",
+            "tags:",
+            *[f"  - {tag}" for tag in tags],
+            "setup_commands:",
+            *[f"  - {cmd}" for cmd in setup_commands],
+            "---",
+            "# myskill",
+            "",
+            body,
+        ]
+        return "\n".join(lines)
+
     def test_happy_path_returns_dict(self, tmp_path, monkeypatch):
         wiki = self._setup_wiki(tmp_path)
         skills_dir = tmp_path / "skills"
@@ -709,6 +739,87 @@ class TestAddSkill:
         )
         assert result["converted"] is True
 
+    def test_existing_skill_review_skips_without_mutating_files(
+        self, tmp_path, monkeypatch
+    ):
+        wiki = self._setup_wiki(tmp_path)
+        skills_dir = tmp_path / "skills"
+        installed = skills_dir / "myskill" / "SKILL.md"
+        installed.parent.mkdir(parents=True)
+        existing_text = self._skill_text(
+            description="Detailed skill with setup and testing workflow.",
+            tags=["python", "testing"],
+            setup_commands=["pytest", "ruff check ."],
+        )
+        installed.write_text(existing_text, encoding="utf-8")
+        entity = wiki / "entities" / "skills" / "myskill.md"
+        entity.write_text("# existing entity\n", encoding="utf-8")
+        entity_text = entity.read_text(encoding="utf-8")
+        source = tmp_path / "SKILL.md"
+        source.write_text(
+            self._skill_text(
+                description="Short skill.",
+                tags=["python"],
+                setup_commands=[],
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(_sa, "update_index", MagicMock())
+        monkeypatch.setattr(_sa, "append_log", MagicMock())
+        _fake_intake.check_intake.reset_mock()
+
+        result = add_skill(
+            source_path=source,
+            name="myskill",
+            wiki_path=wiki,
+            skills_dir=skills_dir,
+            review_existing=True,
+        )
+
+        assert result["skipped"] is True
+        assert result["update_required"] is True
+        assert "Existing skill already exists: myskill" in result["update_review"]
+        assert installed.read_text(encoding="utf-8") == existing_text
+        assert entity.read_text(encoding="utf-8") == entity_text
+        _fake_intake.check_intake.assert_not_called()
+
+    def test_existing_skill_update_existing_applies_change(
+        self, tmp_path, monkeypatch
+    ):
+        wiki = self._setup_wiki(tmp_path)
+        skills_dir = tmp_path / "skills"
+        installed = skills_dir / "myskill" / "SKILL.md"
+        installed.parent.mkdir(parents=True)
+        installed.write_text(self._skill_text(), encoding="utf-8")
+        entity = wiki / "entities" / "skills" / "myskill.md"
+        entity.write_text("# existing entity\n", encoding="utf-8")
+        source = tmp_path / "SKILL.md"
+        updated_text = self._skill_text(
+            description="Updated skill with more detail and review guidance.",
+            tags=["python", "testing", "api"],
+            setup_commands=["pytest", "ruff check ."],
+        )
+        source.write_text(updated_text, encoding="utf-8")
+        self._setup_intake_allow()
+        _fake_batch_convert.convert_skill.return_value = {"status": "error"}
+        monkeypatch.setattr(_sa, "update_index", MagicMock())
+        monkeypatch.setattr(_sa, "append_log", MagicMock())
+
+        result = add_skill(
+            source_path=source,
+            name="myskill",
+            wiki_path=wiki,
+            skills_dir=skills_dir,
+            review_existing=True,
+            update_existing=True,
+        )
+
+        assert result["skipped"] is False
+        assert result["update_required"] is False
+        assert result["is_new_page"] is False
+        assert installed.read_text(encoding="utf-8") == updated_text
+        assert entity.read_text(encoding="utf-8").startswith("---\n")
+
     def test_main_with_skip_existing_skips(self, tmp_path, monkeypatch, capsys):
         """--skip-existing skips already-installed skills."""
         skills_dir = tmp_path / "skills"
@@ -731,3 +842,34 @@ class TestAddSkill:
         _sa.main()
         out = capsys.readouterr().out
         assert "skipped" in out
+
+    def test_main_existing_skill_prints_update_review(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        skills_dir = tmp_path / "skills"
+        wiki = self._setup_wiki(tmp_path)
+        installed = skills_dir / "myskill" / "SKILL.md"
+        installed.parent.mkdir(parents=True)
+        installed.write_text(self._skill_text(), encoding="utf-8")
+        scan_dir = tmp_path / "scan"
+        skill_dir = scan_dir / "myskill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            self._skill_text(description="Replacement skill."),
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(sys, "argv", [
+            "skill_add.py",
+            "--scan-dir", str(scan_dir),
+            "--wiki", str(wiki),
+            "--skills-dir", str(skills_dir),
+        ])
+        _fake_wiki_sync.ensure_wiki.return_value = None
+
+        _sa.main()
+
+        out = capsys.readouterr().out
+        assert "Existing skill already exists: myskill" in out
+        assert "Use the explicit update flag" in out
+        assert "Replacement skill." not in installed.read_text(encoding="utf-8")

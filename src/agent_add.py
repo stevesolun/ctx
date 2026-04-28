@@ -26,6 +26,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ctx.core.entity_update import build_update_review, render_update_review
 from ctx_config import cfg
 from ctx.adapters.claude_code.install.install_utils import safe_copy_file
 from intake_pipeline import IntakeRejected, check_intake, record_embedding
@@ -66,6 +67,8 @@ def add_agent(
     name: str,
     wiki_path: Path,
     agents_dir: Path,
+    review_existing: bool = False,
+    update_existing: bool = False,
 ) -> dict:
     """Add a single agent: validate, gate, install, ingest, log.
 
@@ -83,10 +86,41 @@ def add_agent(
     content = source_path.read_text(encoding="utf-8", errors="replace")
     line_count = len(content.splitlines())
 
-    # Intake gate: reject broken/duplicate agents before we install.
-    decision = check_intake(content, "agents")
-    if not decision.allow:
-        raise IntakeRejected(decision)
+    installed_path = agents_dir / f"{name}.md"
+    entity_page = wiki_path / "entities" / "agents" / f"{name}.md"
+    existing_path = (
+        installed_path
+        if installed_path.exists()
+        else entity_page if entity_page.exists() else None
+    )
+    has_existing = existing_path is not None
+
+    if review_existing and has_existing and not update_existing:
+        assert existing_path is not None
+        existing_text = existing_path.read_text(encoding="utf-8", errors="replace")
+        review = build_update_review(
+            entity_type="agent",
+            slug=name,
+            existing_text=existing_text,
+            proposed_text=content,
+        )
+        return {
+            "name": name,
+            "installed": str(installed_path),
+            "is_new_page": False,
+            "skipped": True,
+            "update_required": True,
+            "update_review": render_update_review(review),
+        }
+
+    decision = None
+    if not has_existing:
+        # Intake gate: reject broken/duplicate agents before we install.
+        # Existing updates bypass similarity intake because they compare
+        # against their own cached embedding.
+        decision = check_intake(content, "agents")
+        if not decision.allow:
+            raise IntakeRejected(decision)
 
     # 1. Install into agents-dir.
     installed_path = install_agent(source_path, agents_dir, name)
@@ -115,7 +149,7 @@ def add_agent(
         f"Installed: {installed_path}",
         f"Lines: {line_count}",
     ]
-    warnings = decision.warnings
+    warnings = decision.warnings if decision is not None else ()
     if warnings:
         log_details.append(
             "Warnings: " + "; ".join(f"{w.code}:{w.message}" for w in warnings)
@@ -126,6 +160,8 @@ def add_agent(
         "name": name,
         "installed": str(installed_path),
         "is_new_page": is_new,
+        "skipped": False,
+        "update_required": False,
     }
 
 
@@ -143,6 +179,11 @@ def main() -> None:
         "--skip-existing",
         action="store_true",
         help="Skip agents already installed (prevents overwrites)",
+    )
+    parser.add_argument(
+        "--update-existing",
+        action="store_true",
+        help="Apply the reviewed replacement when an agent already exists",
     )
     parser.add_argument("--wiki", default=str(cfg.wiki_dir), help="Wiki path")
     parser.add_argument(
@@ -193,7 +234,7 @@ def main() -> None:
             print(f"No agent .md files found under {scan_root}.", file=sys.stderr)
             sys.exit(0)
 
-    added = skipped = rejected = errors = 0
+    added = updated = skipped = rejected = errors = 0
     total = len(candidates)
     for i, (source_path, name) in enumerate(candidates, 1):
         if args.skip_existing and (agents_dir / f"{name}.md").exists():
@@ -202,14 +243,27 @@ def main() -> None:
                 print(f"  [{i}/{total}] [skipped] {name}")
             continue
         try:
-            add_agent(
+            result = add_agent(
                 source_path=source_path,
                 name=name,
                 wiki_path=wiki_path,
                 agents_dir=agents_dir,
+                review_existing=True,
+                update_existing=args.update_existing,
             )
-            added += 1
-            print(f"  [{i}/{total}] [installed] {name}")
+            if result.get("skipped"):
+                skipped += 1
+                if result.get("update_review"):
+                    print(result["update_review"])
+                print(f"  [{i}/{total}] [update-review] {name}")
+                continue
+            if result["is_new_page"]:
+                added += 1
+                status = "installed"
+            else:
+                updated += 1
+                status = "updated"
+            print(f"  [{i}/{total}] [{status}] {name}")
         except IntakeRejected as exc:
             rejected += 1
             codes = ", ".join(f.code for f in exc.decision.failures) or "unknown"
@@ -219,7 +273,7 @@ def main() -> None:
             print(f"  [{i}/{total}] ERROR: {name}: {exc}", file=sys.stderr)
 
     print(
-        f"\nDone: {added} added, {skipped} skipped, "
+        f"\nDone: {added} added, {updated} updated, {skipped} skipped, "
         f"{rejected} rejected, {errors} errors"
     )
 

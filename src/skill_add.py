@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from batch_convert import convert_skill
+from ctx.core.entity_update import build_update_review, render_update_review
 from ctx_config import cfg
 from intake_pipeline import IntakeRejected, check_intake, record_embedding
 from ctx.adapters.claude_code.install.install_utils import safe_copy_file
@@ -242,6 +243,8 @@ def add_skill(
     name: str,
     wiki_path: Path,
     skills_dir: Path,
+    review_existing: bool = False,
+    update_existing: bool = False,
 ) -> dict:
     """Add a single skill: install, convert if needed, ingest into wiki.
 
@@ -260,12 +263,41 @@ def add_skill(
     content = source_path.read_text(encoding="utf-8", errors="replace")
     line_count = len(content.splitlines())
 
-    # Intake gate: reject broken/duplicate candidates before we touch
-    # skills-dir. Raising keeps the rejection visible in the batch
-    # summary at the CLI layer without any half-written state.
-    decision = check_intake(content, "skills")
-    if not decision.allow:
-        raise IntakeRejected(decision)
+    installed_path = skills_dir / name / "SKILL.md"
+    entity_page = wiki_path / "entities" / "skills" / f"{name}.md"
+    existing_path = (
+        installed_path
+        if installed_path.exists()
+        else entity_page if entity_page.exists() else None
+    )
+    has_existing = existing_path is not None
+
+    if review_existing and has_existing and not update_existing:
+        assert existing_path is not None
+        existing_text = existing_path.read_text(encoding="utf-8", errors="replace")
+        review = build_update_review(
+            entity_type="skill",
+            slug=name,
+            existing_text=existing_text,
+            proposed_text=content,
+        )
+        return {
+            "name": name,
+            "installed": str(installed_path),
+            "converted": False,
+            "is_new_page": False,
+            "skipped": True,
+            "update_required": True,
+            "update_review": render_update_review(review),
+        }
+
+    if not has_existing:
+        # Intake gate: reject broken/duplicate candidates before we touch
+        # skills-dir. Existing updates bypass similarity intake because
+        # they compare against their own cached embedding.
+        decision = check_intake(content, "skills")
+        if not decision.allow:
+            raise IntakeRejected(decision)
 
     tags = infer_tags(name, content)
 
@@ -358,7 +390,14 @@ def add_skill(
     except Exception:  # noqa: BLE001 — audit is best-effort
         pass
 
-    return {"name": name, "installed": str(installed_path), "converted": converted, "is_new_page": is_new}
+    return {
+        "name": name,
+        "installed": str(installed_path),
+        "converted": converted,
+        "is_new_page": is_new,
+        "skipped": False,
+        "update_required": False,
+    }
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -369,6 +408,11 @@ def main() -> None:
     parser.add_argument("--name", help="Skill name (required with --skill-path)")
     parser.add_argument("--scan-dir", help="Directory of skills to batch-add (each subdir with SKILL.md)")
     parser.add_argument("--skip-existing", action="store_true", help="Skip skills already installed (prevents overwrites)")
+    parser.add_argument(
+        "--update-existing",
+        action="store_true",
+        help="Apply the reviewed replacement when a skill already exists",
+    )
     parser.add_argument("--wiki", default=str(cfg.wiki_dir), help="Wiki path")
     parser.add_argument("--skills-dir", default=str(cfg.skills_dir), help="Skills install path")
     args = parser.parse_args()
@@ -413,7 +457,7 @@ def main() -> None:
             print(f"No SKILL.md files found under {scan_root}.", file=sys.stderr)
             sys.exit(0)
 
-    added = converted = skipped = errors = 0
+    added = updated = converted = skipped = errors = 0
     total = len(candidates)
     for i, (source_path, name) in enumerate(candidates, 1):
         # Skip if already installed and --skip-existing is set
@@ -428,17 +472,35 @@ def main() -> None:
                 name=name,
                 wiki_path=wiki_path,
                 skills_dir=skills_dir,
+                review_existing=True,
+                update_existing=args.update_existing,
             )
-            added += 1
+            if result.get("skipped"):
+                skipped += 1
+                if result.get("update_review"):
+                    print(result["update_review"])
+                print(f"  [{i}/{total}] [update-review] {name}")
+                continue
+            if result["is_new_page"]:
+                added += 1
+            else:
+                updated += 1
             if result["converted"]:
                 converted += 1
-            status = "converted" if result["converted"] else "installed"
+            status = (
+                "updated"
+                if not result["is_new_page"]
+                else "converted" if result["converted"] else "installed"
+            )
             print(f"  [{i}/{total}] [{status}] {name}")
         except Exception as exc:
             errors += 1
             print(f"  [{i}/{total}] ERROR: {name}: {exc}", file=sys.stderr)
 
-    print(f"\nDone: {added} added, {converted} converted, {skipped} skipped, {errors} errors")
+    print(
+        f"\nDone: {added} added, {updated} updated, {converted} converted, "
+        f"{skipped} skipped, {errors} errors"
+    )
 
 
 if __name__ == "__main__":
