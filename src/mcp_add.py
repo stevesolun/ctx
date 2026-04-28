@@ -31,6 +31,7 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
+from ctx.core.entity_update import build_update_review, render_update_review
 from ctx_config import cfg
 from intake_pipeline import IntakeRejected, check_intake, record_embedding
 import mcp_canonical_index
@@ -239,6 +240,8 @@ def add_mcp(
     record: McpRecord,
     wiki_path: Path,
     dry_run: bool = False,
+    review_existing: bool = False,
+    update_existing: bool = False,
 ) -> dict[str, Any]:
     """Add (or merge sources for) one MCP record into the wiki catalog.
 
@@ -263,6 +266,8 @@ def add_mcp(
         record: Populated McpRecord dataclass instance.
         wiki_path: Absolute path to the wiki root directory.
         dry_run: Compute everything but skip writes and embeddings.
+        review_existing: Return an update review instead of mutating existing pages.
+        update_existing: Apply an existing-page update after review.
 
     Returns:
         dict with keys: slug, is_new_page, merged_sources, path
@@ -321,20 +326,37 @@ def add_mcp(
         merged_sources = sorted(record.sources)
         kept_description = record.description
 
+    if is_new_page:
+        final_text = generate_mcp_page(record)
+    else:
+        updated_fm = {
+            **existing_fm,
+            "sources": merged_sources,
+            "description": kept_description,
+            "updated": TODAY,
+        }
+        final_text = _rewrite_frontmatter(existing_text, updated_fm)
+
+    if review_existing and not is_new_page and not update_existing:
+        review = build_update_review(
+            entity_type="mcp-server",
+            slug=record.slug,
+            existing_text=existing_text,
+            proposed_text=final_text,
+        )
+        return {
+            "slug": record.slug,
+            "is_new_page": False,
+            "merged_sources": merged_sources,
+            "path": str(target_path),
+            "skipped": True,
+            "update_required": True,
+            "update_review": render_update_review(review),
+        }
+
     if not dry_run:
         # Phase 2 of branching: render and write. Any YAML serialization
         # failure now is a real error, not a dry-run side-effect.
-        if is_new_page:
-            final_text = generate_mcp_page(record)
-        else:
-            updated_fm = {
-                **existing_fm,
-                "sources": merged_sources,
-                "description": kept_description,
-                "updated": TODAY,
-            }
-            final_text = _rewrite_frontmatter(existing_text, updated_fm)
-
         target_path.write_text(final_text, encoding="utf-8")
 
         # Phase 6b: keep the canonical sidecar index hot. Upsert on
@@ -402,6 +424,8 @@ def add_mcp(
         "is_new_page": is_new_page,
         "merged_sources": merged_sources,
         "path": str(target_path),
+        "skipped": False,
+        "update_required": False,
     }
 
 
@@ -413,10 +437,11 @@ def _process_batch(
     wiki_path: Path,
     dry_run: bool,
     skip_existing: bool,
+    update_existing: bool,
     mcp_entity_dir: Path,
-) -> tuple[int, int, int, int]:
-    """Process a batch of raw dicts. Returns (added, merged, rejected, errors)."""
-    added = merged = rejected = errors = 0
+) -> tuple[int, int, int, int, int]:
+    """Process records. Returns (added, merged, reviewed, rejected, errors)."""
+    added = merged = reviewed = rejected = errors = 0
     total = len(records)
 
     for i, raw in enumerate(records, 1):
@@ -437,13 +462,24 @@ def _process_batch(
             continue
 
         try:
-            result = add_mcp(record=record, wiki_path=wiki_path, dry_run=dry_run)
+            result = add_mcp(
+                record=record,
+                wiki_path=wiki_path,
+                dry_run=dry_run,
+                review_existing=True,
+                update_existing=update_existing,
+            )
             if result["is_new_page"]:
                 added += 1
                 status = "added"
+            elif result.get("update_required"):
+                reviewed += 1
+                status = "update-review"
+                if result.get("update_review"):
+                    print(result["update_review"])
             else:
                 merged += 1
-                status = "merged"
+                status = "updated" if update_existing else "merged"
             print(f"  [{i}/{total}] [{status}] {record.slug}")
         except IntakeRejected as exc:
             rejected += 1
@@ -453,7 +489,7 @@ def _process_batch(
             errors += 1
             print(f"  [{i}/{total}] ERROR: {record.slug}: {exc}", file=sys.stderr)
 
-    return added, merged, rejected, errors
+    return added, merged, reviewed, rejected, errors
 
 
 def main() -> None:
@@ -485,6 +521,11 @@ def main() -> None:
         "--skip-existing",
         action="store_true",
         help="Skip records whose entity page already exists (no source merge)",
+    )
+    parser.add_argument(
+        "--update-existing",
+        action="store_true",
+        help="Apply the reviewed replacement when an MCP entity already exists",
     )
     args = parser.parse_args()
 
@@ -535,18 +576,19 @@ def main() -> None:
         print("No records to process.", file=sys.stderr)
         sys.exit(0)
 
-    added, merged, rejected, errors = _process_batch(
+    added, merged, reviewed, rejected, errors = _process_batch(
         records=raw_records,
         wiki_path=wiki_path,
         dry_run=args.dry_run,
         skip_existing=args.skip_existing,
+        update_existing=args.update_existing,
         mcp_entity_dir=mcp_entity_dir,
     )
 
     dry_label = " (dry-run)" if args.dry_run else ""
     print(
-        f"\nDone{dry_label}: {added} added, {merged} merged, "
-        f"{rejected} rejected, {errors} errors"
+        f"\nDone{dry_label}: {added} added, {merged} updated, "
+        f"{reviewed} reviewed, {rejected} rejected, {errors} errors"
     )
 
 

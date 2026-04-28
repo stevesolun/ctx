@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 
 import yaml  # type: ignore[import-untyped]
 
+from ctx.core.entity_update import build_update_review, render_update_review
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
 from ctx_config import cfg
 from mcp_entity import canonicalize_github_url, normalize_slug
@@ -254,6 +255,8 @@ def add_harness(
     wiki_path: Path,
     dry_run: bool = False,
     skip_existing: bool = False,
+    review_existing: bool = False,
+    update_existing: bool = False,
 ) -> dict[str, Any]:
     target_path = wiki_path / _HARNESS_ENTITY_SUBDIR / f"{record.slug}.md"
     is_new_page = not target_path.exists()
@@ -268,6 +271,7 @@ def add_harness(
         }
 
     existing_fm: dict[str, Any] = {}
+    existing_text = ""
     created = TODAY
     merged_sources = record.sources
     if target_path.exists():
@@ -277,14 +281,29 @@ def add_harness(
         merged_sources = _merge_sources(existing_fm, record.sources)
 
     final_record = replace(record, sources=merged_sources)
+    proposed_text = generate_harness_page(final_record, created=created)
+
+    if review_existing and not is_new_page and not update_existing:
+        review = build_update_review(
+            entity_type="harness",
+            slug=record.slug,
+            existing_text=existing_text,
+            proposed_text=proposed_text,
+        )
+        return {
+            "slug": record.slug,
+            "is_new_page": False,
+            "skipped": True,
+            "update_required": True,
+            "update_review": render_update_review(review),
+            "path": str(target_path),
+            "sources": list(merged_sources),
+        }
 
     if not dry_run:
         ensure_wiki(str(wiki_path))
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(
-            generate_harness_page(final_record, created=created),
-            encoding="utf-8",
-        )
+        target_path.write_text(proposed_text, encoding="utf-8")
         if is_new_page:
             update_index(str(wiki_path), [record.slug], subject_type="harnesses")
         append_log(
@@ -302,6 +321,7 @@ def add_harness(
         "slug": record.slug,
         "is_new_page": is_new_page,
         "skipped": False,
+        "update_required": False,
         "path": str(target_path),
         "sources": list(merged_sources),
     }
@@ -349,6 +369,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--wiki", default=str(cfg.wiki_dir), help="Wiki path")
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
     parser.add_argument("--skip-existing", action="store_true", help="Do not rewrite existing page")
+    parser.add_argument(
+        "--update-existing",
+        action="store_true",
+        help="Apply the reviewed replacement when the harness already exists",
+    )
     args = parser.parse_args(argv)
 
     if bool(args.repo) == bool(args.from_json):
@@ -365,6 +390,8 @@ def main(argv: list[str] | None = None) -> None:
             wiki_path=Path(os.path.expanduser(args.wiki)),
             dry_run=args.dry_run,
             skip_existing=args.skip_existing,
+            review_existing=True,
+            update_existing=args.update_existing,
         )
     except Exception as exc:  # noqa: BLE001
         print(f"Error: {exc}", file=sys.stderr)
@@ -373,6 +400,8 @@ def main(argv: list[str] | None = None) -> None:
     action = "would add" if args.dry_run else "added"
     if result["skipped"]:
         action = "skipped"
+    if result.get("update_review"):
+        print(result["update_review"])
     print(f"{action}: {result['slug']} -> {result['path']}")
 
 

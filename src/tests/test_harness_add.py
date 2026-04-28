@@ -85,6 +85,64 @@ def test_readd_merges_sources_without_duplicate_file(tmp_path: Path) -> None:
     assert len(list((wiki / "entities" / "harnesses").glob("*.md"))) == 1
 
 
+def test_existing_harness_review_skips_without_mutating_page(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    harness_add.add_harness(
+        record=_record(
+            sources=["manual"],
+            setup_commands=["pip install -e .", "python app.py"],
+            verify_commands=["pytest"],
+        ),
+        wiki_path=wiki,
+    )
+    page = wiki / "entities" / "harnesses" / "text-to-cad.md"
+    original_text = page.read_text(encoding="utf-8")
+
+    result = harness_add.add_harness(
+        record=_record(
+            sources=["external-review"],
+            setup_commands=[],
+            verify_commands=[],
+            capabilities=[],
+        ),
+        wiki_path=wiki,
+        review_existing=True,
+    )
+
+    assert result["is_new_page"] is False
+    assert result["skipped"] is True
+    assert result["update_required"] is True
+    assert "Existing harness already exists: text-to-cad" in result["update_review"]
+    assert "Risks:" in result["update_review"]
+    assert page.read_text(encoding="utf-8") == original_text
+
+
+def test_existing_harness_update_existing_applies_reviewed_change(
+    tmp_path: Path,
+) -> None:
+    wiki = tmp_path / "wiki"
+    harness_add.add_harness(record=_record(sources=["manual"]), wiki_path=wiki)
+
+    result = harness_add.add_harness(
+        record=_record(
+            sources=["external-review"],
+            capabilities=["Generate CAD artifacts", "Verify CAD artifacts"],
+            verify_commands=["pytest", "python smoke.py"],
+        ),
+        wiki_path=wiki,
+        review_existing=True,
+        update_existing=True,
+    )
+
+    page = wiki / "entities" / "harnesses" / "text-to-cad.md"
+    fm = _frontmatter(page)
+    assert result["is_new_page"] is False
+    assert result["skipped"] is False
+    assert result["sources"] == ["external-review", "manual"]
+    assert fm["sources"] == ["external-review", "manual"]
+    assert fm["verify_commands"] == ["pytest", "python smoke.py"]
+
+
 def test_cli_from_json_adds_harness(
     tmp_path: Path,
     capsys: Any,

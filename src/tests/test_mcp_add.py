@@ -211,6 +211,68 @@ class TestAddMcpSourceMerging:
         assert result2["is_new_page"] is False
 
 
+class TestAddMcpExistingReview:
+    def test_review_existing_skips_and_preserves_existing_page(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record_a = _make_record(
+            name="github-mcp",
+            sources=["awesome-mcp"],
+            description="A GitHub MCP server with repository management support.",
+        )
+        patched_mcp_add.add_mcp(record=record_a, wiki_path=wiki_dir)
+        page = wiki_dir / "entities" / "mcp-servers" / "g" / "github-mcp.md"
+        original_text = page.read_text(encoding="utf-8")
+
+        record_b = _make_record(
+            name="github-mcp",
+            sources=["pulsemcp"],
+            description="GitHub MCP.",
+        )
+        result = patched_mcp_add.add_mcp(
+            record=record_b,
+            wiki_path=wiki_dir,
+            review_existing=True,
+        )
+
+        assert result["is_new_page"] is False
+        assert result["skipped"] is True
+        assert result["update_required"] is True
+        assert result["merged_sources"] == ["awesome-mcp", "pulsemcp"]
+        assert "Existing mcp-server already exists: github-mcp" in result["update_review"]
+        assert "Benefits:" in result["update_review"]
+        assert page.read_text(encoding="utf-8") == original_text
+
+    def test_update_existing_applies_reviewed_merge(
+        self, patched_mcp_add: Any, wiki_dir: Path
+    ) -> None:
+        record_a = _make_record(name="github-mcp", sources=["awesome-mcp"])
+        patched_mcp_add.add_mcp(record=record_a, wiki_path=wiki_dir)
+
+        record_b = _make_record(
+            name="github-mcp",
+            sources=["pulsemcp"],
+            description="A longer GitHub MCP server description with more detail.",
+        )
+        result = patched_mcp_add.add_mcp(
+            record=record_b,
+            wiki_path=wiki_dir,
+            review_existing=True,
+            update_existing=True,
+        )
+
+        page = wiki_dir / "entities" / "mcp-servers" / "g" / "github-mcp.md"
+        text = page.read_text(encoding="utf-8")
+        _, fm_block, _ = text.split("---", 2)
+        fm = yaml.safe_load(fm_block)
+        assert isinstance(fm, dict)
+        assert result["is_new_page"] is False
+        assert result["skipped"] is False
+        assert result["merged_sources"] == ["awesome-mcp", "pulsemcp"]
+        assert fm["sources"] == ["awesome-mcp", "pulsemcp"]
+        assert fm["description"] == record_b.description
+
+
 # ---------------------------------------------------------------------------
 # dry_run
 # ---------------------------------------------------------------------------
