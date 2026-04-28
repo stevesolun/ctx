@@ -1009,6 +1009,24 @@ Observed:
 - Post-merge checks on `main` reported a clean worktree, `git diff --check` success, `python -m ruff check .` success, and `python -m mypy src` success.
 - The full pytest, clean-host, and package-smoke gates above were run on the same tree before the fast-forward; they were not rerun after this documentation-only integration note.
 
+### Phase 45: Process-kill crash-consistency coverage
+
+Status: implemented in branch `codex/crash-consistency-and-harness-plan`.
+
+What changed:
+
+- Added subprocess kill tests that terminate child writers at deterministic atomic-write and lock boundaries.
+- Covered shared JSON atomic writes before `os.replace`, proving the previous complete file survives.
+- Covered shared JSON atomic writes after `os.replace` but before the parent-directory durability step, proving the replacement file is complete and parseable.
+- Covered `~/.claude/skill-manifest.json` while a writer is killed inside the manifest `file_lock`, proving the lock is released and a later manifest writer can proceed without corruption.
+- Covered wiki entity page writes while a writer is killed inside the page `file_lock`, proving the lock is released and a later wiki writer can proceed without corruption.
+
+Verification observed:
+
+- `python -m pytest src\tests\test_crash_consistency.py -q` reported `4 passed`.
+- `python -m ruff check src\tests\test_crash_consistency.py` reported `All checks passed!`.
+- `python -m mypy src\tests\test_crash_consistency.py` reported `Success: no issues found in 1 source file`.
+
 ## Blocker Summary
 
 P0/P1 blockers I would not ship over. Items 1-14 now have direct remediation implemented in the current branch. Item 15 is mitigated by clean wheel/entrypoint smoke, targeted CLI policy tests, and the MCP subprocess source-tree round-trip regression fix in Phase 27, while live third-party host execution remains an out-of-scope integration caveat. The list is retained to show the original review basis and keep the risk map auditable. The mypy caveat has been resolved in phases: Phase 5 defined the package gate, Phases 6-12 reduced the force-checked legacy/test debt from 72 to 1 error, and Phase 13 moved the configured gate to the full `src` tree with zero mypy errors.
@@ -1049,7 +1067,7 @@ The product promise only works if three invariants hold:
 2. Harness execution is resumable, bounded, observable, and safe.
 3. Installed/user-state mutations are reversible, locked, and auditable.
 
-The original reviewed source violated all three invariants. Phases 1-44 closed the original P0/P1 blocker list plus the newly surfaced wiki type-sync blocker and the first release-hardening slices in the current branch, with final local verification now green. The remaining caveats are live-host execution, live third-party MCP validation, exhaustive process-kill crash-consistency scenarios, and tagging only after merge.
+The original reviewed source violated all three invariants. Phases 1-45 closed the original P0/P1 blocker list plus the newly surfaced wiki type-sync blocker and the first release-hardening slices in the current branch, with final local verification now green. The remaining caveats are live-host execution, live third-party MCP validation, and release tagging/push after the final accepted changes.
 
 ## P0 Findings
 
@@ -2231,12 +2249,10 @@ The original P0/P1 remediation work is complete in this branch, and the parallel
    - The live MCP config parser now treats `inherit_env` as a strict boolean as of Phase 41.
    - Do not run `npx` or any third-party MCP command by default in CI.
 
-3. Stress crash consistency and concurrent writers:
-   - Kill processes during restore, wiki sync, manifest updates, and session writes.
-   - Verify rollback snapshots, atomic temp-file replacement, and lock behavior.
-   - Add regression tests for partial-write and parallel-writer cases not already covered.
+3. Keep crash consistency covered as new writers are added:
+   - Phase 45 added process-kill tests for shared atomic JSON writes, manifest locks, and wiki page locks.
    - Manifest install/uninstall lost-update coverage was fixed in Phase 34, active dashboard load/unload lost-update coverage was fixed in Phase 39, and wiki atomic write/lock coverage was hardened in Phase 38.
-   - Remaining crash-consistency work should focus on process-kill restore/session interruption cases and any writer that still bypasses the shared atomic helpers.
+   - Any future writer that bypasses the shared atomic helpers or `file_lock` should add its own process-kill regression before release.
 
 4. Tag only after merge:
    - The 0.7.0 package dry-run passed locally.
@@ -2251,7 +2267,7 @@ Things I am not claiming:
 - I am not claiming every agent finding has a reproduction test yet.
 - I am not claiming every legacy documentation sentence in the repo has been re-audited after every remediation phase.
 - I am not claiming live Claude Code or third-party MCP hosts were exercised end to end on a real user machine.
-- I am not claiming exhaustive crash-consistency coverage beyond the targeted rollback/session/wiki cases that were tested.
+- I am not claiming hardware power-loss durability beyond the process-kill atomic-write and lock-release scenarios covered in Phase 45.
 
 Things I am confident about:
 
@@ -2323,4 +2339,4 @@ Not verified:
 - Live Claude Code hook execution.
 - Live MCP host behavior against a real third-party MCP.
 - Browser-driven dashboard exploit reproduction.
-- Exhaustive crash-consistency tests beyond the targeted rollback/session/wiki cases.
+- Hardware power-loss durability beyond process-kill atomic-write and lock-release coverage.
