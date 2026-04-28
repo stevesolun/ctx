@@ -44,6 +44,7 @@ def ensure_wiki(wiki_path: str) -> None:
         wiki / "entities" / "agents",
         wiki / "entities" / "plugins",
         wiki / "entities" / "mcp-servers",
+        wiki / "entities" / "harnesses",
         wiki / "concepts",
         wiki / "comparisons",
         wiki / "queries",
@@ -60,8 +61,8 @@ def ensure_wiki(wiki_path: str) -> None:
             atomic_write_text(schema_path, f"""# Skill Wiki Schema
 
 ## Domain
-Catalog and management of all available skills, plugins, MCP servers, and
-marketplace sources for the agent development environment.
+Catalog and management of all available skills, plugins, MCP servers,
+harnesses, and marketplace sources for the agent development environment.
 
 ## Conventions
 - File names: lowercase, hyphens, no spaces
@@ -76,14 +77,14 @@ marketplace sources for the agent development environment.
 - Framework: react, vue, angular, nextjs, fastapi, django, express, flask
 - Infra: docker, kubernetes, terraform, ci-cd, aws, gcp, azure
 - Data: sql, nosql, redis, kafka, spark, dbt, airflow
-- AI: llm, agents, mcp, langchain, embeddings, fine-tuning, rag
+- AI: llm, agents, mcp, harnesses, langchain, embeddings, fine-tuning, rag
 - Quality: testing, linting, typing, security, performance
 - Docs: documentation, api-spec, markdown, diagrams
 - Meta: comparison, decision, pattern, troubleshooting
 - Management: marketplace, registry, versioning, compatibility
 
 ## Page Thresholds
-- Create a page when a skill/plugin/MCP server is discovered
+- Create a page when a skill/plugin/MCP server/harness is discovered
 - Update when used, configured, or when a new version is found
 - Archive when deprecated or superseded
 
@@ -113,6 +114,8 @@ Created: {TODAY}
 
 ## MCP Servers
 
+## Harnesses
+
 ## Concepts
 
 ## Comparisons
@@ -131,7 +134,7 @@ Created: {TODAY}
 > Format: `## [YYYY-MM-DD] action | subject`
 
 ## [{TODAY}] create | Wiki initialized
-- Domain: Skills, plugins, and MCP server catalog
+- Domain: Skills, plugins, MCP server catalog, and harness catalog
 - Structure created with SCHEMA.md, index.md, log.md
 """, encoding="utf-8")
 
@@ -170,6 +173,7 @@ _SUBJECT_TYPE_FOR_ENTITY_TYPE: dict[str, str] = {
     "agent": "agents",
     "mcp-server": "mcp-servers",
     "plugin": "plugins",
+    "harness": "harnesses",
 }
 _ENTITY_TYPE_FOR_SUBJECT_TYPE: dict[str, str] = {
     value: key for key, value in _SUBJECT_TYPE_FOR_ENTITY_TYPE.items()
@@ -309,13 +313,14 @@ _INDEX_SECTION_FOR_SUBJECT: dict[str, str] = {
     "agents": "## Agents",
     "mcp-servers": "## MCP Servers",
     "plugins": "## Plugins",
+    "harnesses": "## Harnesses",
 }
 
 
 def _entity_index_link(subject_type: str, slug: str) -> str:
     """Return the wikilink target for an entity in the index.
 
-    Skills, agents, and plugins live in flat directories. MCP servers
+    Skills, agents, plugins, and harnesses live in flat directories. MCP servers
     are sharded by first character (``g/github-mcp``, ``0-9/007-mcp``)
     to keep ``ls`` and Obsidian fast at the projected ~12k+ scale —
     so their links must include the shard segment.
@@ -338,8 +343,8 @@ def update_index(
         wiki_path: Path to the wiki root.
         new_entries: Slugs to insert. Empty list is a no-op.
         subject_type: One of ``skills``, ``agents``, ``mcp-servers``,
-            ``plugins``. Defaults to ``"skills"`` for backward compat
-            with callers that predate the subject-type param.
+            ``plugins``, ``harnesses``. Defaults to ``"skills"`` for
+            backward compat with callers that predate the subject-type param.
 
     The total-pages counter at the top counts every ``[[entities/``
     link across all sections, so multi-type wikis show the true total.
@@ -508,6 +513,7 @@ def main():
         "agents": [],
         "mcp-servers": [],
         "plugins": [],
+        "harnesses": [],
     }
     for skill_entry in manifest["load"]:
         skill_name = skill_entry["skill"]
