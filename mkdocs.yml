@@ -94,6 +94,7 @@ plugins:
 nav:
   - Home: index.md
   - Knowledge graph: knowledge-graph.md
+  - Entity onboarding: entity-onboarding.md
   - Dashboard: dashboard.md
   - Toolbox:
       - Overview: toolbox/index.md

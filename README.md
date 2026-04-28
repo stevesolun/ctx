@@ -1,4 +1,4 @@
-# ctx — Skill, Agent & MCP Recommendation for Claude Code
+# ctx — Skill, Agent, MCP & Harness Recommendation
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
@@ -7,7 +7,7 @@
 [![Graph](https://img.shields.io/badge/Graph-13%2C218_nodes_/_963K_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
-Watches what you develop, walks a knowledge graph of **1,968 skills, 464 agents, and 10,786 MCP servers**, and recommends the right bundle on the fly. You approve, it installs; you stop using, it unloads. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+Watches what you develop, walks a knowledge graph of **1,968 skills, 464 agents, 10,786 MCP servers, and cataloged harnesses**, and recommends the right bundle on the fly. You approve what loads, installs, or gets adopted. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 > **2026-04-27 updates.**
 > - Imported [mattpocock/skills](https://github.com/mattpocock/skills) — 21 opinionated skills (TDD, domain-model, ubiquitous-language, github-triage, caveman compression mode, write-a-skill, plus 15 more) deployed under the `mattpocock-` prefix. See [`imported-skills/mattpocock/ATTRIBUTION.md`](imported-skills/mattpocock/ATTRIBUTION.md).
@@ -25,6 +25,7 @@ Watches what you develop, walks a knowledge graph of **1,968 skills, 464 agents,
 ```bash
 pip install claude-ctx
 ctx-init --hooks            # one-shot setup: directories, hooks, starter toolboxes
+ctx-init --model-mode custom --model openai/gpt-5.5 --goal "build a CAD agent"
 ```
 
 Optional extras: `pip install "claude-ctx[embeddings]"` for the semantic backend, `pip install "claude-ctx[dev]"` for the test toolchain.
@@ -47,6 +48,8 @@ After install, the `ctx` hooks integrate automatically with Claude Code's `PostT
 
 ```bash
 ctx-scan-repo --repo .     # scan current repo, surface recommended skills/agents
+ctx-scan-repo --repo . --recommend  # include MCP/harness recommendations
+ctx-harness-add --repo https://github.com/earthtojake/text-to-cad --tag cad
 ctx-skill-quality list     # four-signal quality score for every skill
 ctx-skill-quality explain python-patterns   # drill into a single skill
 ctx-skill-health dashboard # structural health + drift detection
@@ -55,6 +58,9 @@ ctx-monitor serve          # local dashboard: http://127.0.0.1:8765/
 ```
 
 The **`ctx-monitor`** dashboard shows currently loaded skills with load/unload buttons, a cytoscape graph view (`/graph?slug=…`), the LLM-wiki entity browser (`/wiki/<slug>`), a filterable skills grid, a session timeline, an audit log viewer, and a live SSE event stream.
+
+Step-by-step entity onboarding:
+**<https://stevesolun.github.io/ctx/entity-onboarding/>**
 
 Full docs, architecture, and every module: **<https://stevesolun.github.io/ctx/>**
 

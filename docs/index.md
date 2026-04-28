@@ -3,12 +3,12 @@ hide:
   - navigation
 ---
 
-# ctx — Skill, Agent & MCP Recommendation and Management for Claude Code
+# ctx — Skill, Agent, MCP & Harness Recommendation and Management
 
 Watches what you develop, walks a knowledge graph of **1,968 skills, 464
-agents, and 10,786 MCP servers**, and recommends the right ones on the
-fly — you decide what to load and unload. Powered by a Karpathy LLM wiki
-with persistent memory that gets smarter every session.
+agents, 10,786 MCP servers, and cataloged harnesses**, and recommends the
+right ones on the fly — you decide what to load, install, or adopt. Powered
+by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 !!! tip "Install"
 
@@ -22,14 +22,18 @@ with persistent memory that gets smarter every session.
     `ctx-skill-quality`, `ctx-skill-health`, and `ctx-toolbox` console
     scripts are on PATH.
 
+    Custom-model users can run
+    `ctx-init --model-mode custom --model <provider/model> --goal "<task>"`
+    to record the model profile and surface harness recommendations.
+
 ## Why this exists
 
 Claude Code skills and agents are powerful, but at scale they become
 unmanageable:
 
-- **Discovery problem** — with 1,900+ skills, 460+ agents, and 10,000+
-  MCP servers, how do you know which ones exist and which are relevant
-  to your current project?
+- **Discovery problem** — with 1,900+ skills, 460+ agents, 10,000+
+  MCP servers, and an expanding harness catalog, how do you know which
+  ones exist and which are relevant to your current project?
 - **Context budget** — loading all skills wastes tokens and degrades
   quality. You need exactly the right 10–15 skills and agents per
   session.
@@ -58,12 +62,14 @@ graph-based discovery:
 
 - A Karpathy 3-layer wiki at `~/.claude/skill-wiki/` is the single source
   of truth.
-- **13,218 entity pages** (1,968 skills + 464 agents + 10,786 MCP servers)
-  with frontmatter tracking use count, last used date, tags, and status.
+- **13,218+ entity pages** (skills + agents + MCP servers + harnesses)
+  with frontmatter tracking tags, status, provenance, and usage where it
+  applies.
 - A **knowledge graph** (13,218 nodes, 963K edges, 24 Louvain
   communities) blending semantic cosine + tag overlap + slug-token
-  overlap connects skills/agents/MCPs, enabling context-aware
-  recommendations across all three types.
+  overlap connects skills, agents, MCP servers, and harnesses, enabling
+  context-aware recommendations across installable and catalog-only entity
+  types.
 - **24 auto-generated concept pages** group related entities into named
   communities (e.g., *AI + Devops + Frontend*, *Python + API*).
 - PostToolUse and Stop hooks update the wiki automatically during each
@@ -71,14 +77,16 @@ graph-based discovery:
 - Skills over 180 lines are converted to a gated 5-stage micro-skill
   pipeline so the router can load them incrementally.
 - At session start, the skill-router scans your project and
-  **recommends** the best-matching skills and agents.
+  **recommends** the best-matching skills, agents, MCP servers, and
+  harnesses.
 - Mid-session, the context monitor watches every tool call, detects new
-  stack signals, walks the graph, and **recommends** relevant skills and
-  agents in real time — **nothing loads without your approval**.
+  stack signals, walks the graph, and **recommends** relevant skills,
+  agents, MCP servers, and harnesses in real time — **nothing loads or
+  installs without your approval**.
 
-The result: you always know what skills and agents are available for
-your current task. The graph reveals hidden connections. The wiki learns
-from your usage. Stale ones are flagged. New ones self-ingest.
+The result: you always know what skills, agents, MCP servers, and harnesses are
+available for your current task. The graph reveals hidden connections. The wiki
+learns from your usage. Stale ones are flagged. New ones self-ingest.
 
 ## Explore the docs
 
@@ -94,6 +102,16 @@ from your usage. Stale ones are flagged. New ones self-ingest.
     graph-aware recommendations + the pre-ship `ctx-dedup-check` gate.
 
     [:octicons-arrow-right-24: Knowledge graph](knowledge-graph.md)
+
+-   **Entity onboarding**
+
+    ---
+
+    Step-by-step commands for adding a skill, agent, MCP server, or
+    harness to the wiki and graph. Includes the `text-to-cad` harness
+    pattern for custom-model users.
+
+    [:octicons-arrow-right-24: Entity onboarding](entity-onboarding.md)
 
 -   **Dashboard**
 
@@ -147,7 +165,7 @@ from your usage. Stale ones are flagged. New ones self-ingest.
     ---
 
     **v0.7.x** — MIT, CI-matrixed (Ubuntu + Windows × Python 3.11/3.12),
-    3,270+ tests passing. Ships console scripts including `ctx-init`,
+    3,287+ tests passing. Ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload),
     `ctx-dedup-check` (pre-ship near-duplicate gate), and
     `ctx-tag-backfill` (catalog hygiene), plus the ~25 MB pre-built
