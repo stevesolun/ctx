@@ -30,10 +30,12 @@ a user's config or hook settings without an explicit ``--force`` flag.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 
 # ─── Directory layout ───────────────────────────────────────────────────────
@@ -46,6 +48,8 @@ _STANDARD_SUBDIRS = (
     "skill-wiki/entities",
     "skill-wiki/entities/skills",
     "skill-wiki/entities/agents",
+    "skill-wiki/entities/mcp-servers",
+    "skill-wiki/entities/harnesses",
     "skill-wiki/concepts",
     "skill-wiki/converted",
     "skill-wiki/graphify-out",
@@ -157,6 +161,172 @@ def build_graph() -> int:
     return result.returncode
 
 
+# ─── Model onboarding ───────────────────────────────────────────────────────
+
+
+_MODEL_PROFILE_NAME = "ctx-model-profile.json"
+
+_PROVIDER_KEY_ENV: dict[str, str] = {
+    "openrouter": "OPENROUTER_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "ollama": "",
+}
+
+
+def _model_provider_prefix(model: str) -> str:
+    return model.split("/", 1)[0] if "/" in model else model
+
+
+def _resolve_api_key_env(
+    explicit: str | None,
+    model: str | None,
+    provider: str | None,
+) -> str | None:
+    if explicit is not None:
+        return explicit or None
+    prefix = provider or (_model_provider_prefix(model) if model else "")
+    env_name = _PROVIDER_KEY_ENV.get(prefix, "")
+    return env_name or None
+
+
+def write_model_profile(
+    claude: Path,
+    profile: dict[str, Any],
+    *,
+    force: bool = False,
+) -> Path | None:
+    """Write the user's ctx model/onboarding profile if allowed."""
+    target = claude / _MODEL_PROFILE_NAME
+    if target.exists() and not force:
+        return None
+    target.write_text(json.dumps(profile, indent=2) + "\n", encoding="utf-8")
+    return target
+
+
+def recommend_harnesses(goal: str, *, top_k: int = 5) -> list[dict[str, Any]]:
+    """Return harness recommendations from the shared recommendation API."""
+    if not goal.strip():
+        return []
+    try:
+        from ctx.api import recommend_bundle  # noqa: PLC0415
+
+        results = recommend_bundle(goal, top_k=top_k * 3)
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"  [warn] harness recommendation failed: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return []
+    return [row for row in results if row.get("type") == "harness"][:top_k]
+
+
+def validate_model_connection(
+    *,
+    model: str,
+    api_key_env: str | None,
+    base_url: str | None,
+) -> int:
+    """Make one tiny provider call when the user explicitly asks."""
+    try:
+        from ctx.adapters.generic.providers import Message, get_provider  # noqa: PLC0415
+
+        client = get_provider(
+            default_model=model,
+            base_url=base_url,
+            api_key_env=api_key_env,
+            timeout=30.0,
+        )
+        client.complete(
+            [Message(role="user", content="Reply exactly: ctx-ok")],
+            model=model,
+            temperature=0.0,
+            max_tokens=8,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"  [warn] model validation failed: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+def _prompt_model_mode() -> str:
+    answer = input(
+        "Use Claude Code or a custom model with ctx? "
+        "[claude-code/custom/skip] "
+    ).strip().lower()
+    return answer or "claude-code"
+
+
+def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
+    """Record model choice and print harness recommendations."""
+    mode = args.model_mode
+    if mode is None and sys.stdin.isatty():
+        mode = _prompt_model_mode()
+    if mode is None or mode == "skip":
+        print("  [skip] model onboarding (pass --model-mode to configure)")
+        return 0
+    if mode not in {"claude-code", "custom"}:
+        print(f"  [warn] unknown model mode: {mode}", file=sys.stderr)
+        return 1
+
+    goal = args.goal or ""
+    if mode == "custom" and not args.model:
+        print("  [warn] --model-mode custom requires --model", file=sys.stderr)
+        return 1
+
+    provider = args.model_provider or (
+        _model_provider_prefix(args.model) if args.model else None
+    )
+    api_key_env = _resolve_api_key_env(args.api_key_env, args.model, provider)
+    profile: dict[str, Any] = {
+        "mode": mode,
+        "provider": provider,
+        "model": args.model,
+        "api_key_env": api_key_env,
+        "base_url": args.base_url,
+        "goal": goal,
+    }
+    written = write_model_profile(claude, profile, force=args.force)
+    if written:
+        print(f"  [ok] wrote {written.name}")
+    else:
+        print(f"  [skip] {_MODEL_PROFILE_NAME} already present (use --force)")
+
+    rc = 0
+    if mode == "custom" and api_key_env and not os.environ.get(api_key_env):
+        print(f"  [warn] set {api_key_env} before running ctx with this model")
+    if mode == "custom" and args.validate_model:
+        rc = validate_model_connection(
+            model=args.model,
+            api_key_env=api_key_env,
+            base_url=args.base_url,
+        )
+        if rc == 0:
+            print("  [ok] model connection validated")
+
+    recommendation_query = " ".join(
+        part for part in [goal, provider or "", args.model or "", "harness"]
+        if part
+    )
+    harnesses = recommend_harnesses(recommendation_query)
+    if harnesses:
+        print("  [ok] recommended harnesses:")
+        for row in harnesses:
+            score = float(row.get("score") or 0.0)
+            print(f"       - {row.get('name')} ({score:.2f})")
+    elif goal or mode == "custom":
+        print("  [info] no harness recommendations matched yet")
+    return rc
+
+
 # ─── CLI ────────────────────────────────────────────────────────────────────
 
 
@@ -176,6 +346,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--force", action="store_true",
         help="Overwrite existing config files if present",
+    )
+    parser.add_argument(
+        "--model-mode",
+        choices=("claude-code", "custom", "skip"),
+        help="Record whether this install uses Claude Code or a custom model",
+    )
+    parser.add_argument("--model-provider", help="Custom model provider prefix")
+    parser.add_argument("--model", help="Custom model slug, e.g. openai/gpt-5.5")
+    parser.add_argument(
+        "--api-key-env",
+        help="Environment variable that stores the custom provider API key",
+    )
+    parser.add_argument("--base-url", help="Custom provider base URL")
+    parser.add_argument(
+        "--goal",
+        help="What the user wants to build; used for harness recommendations",
+    )
+    parser.add_argument(
+        "--validate-model",
+        action="store_true",
+        help="Make one tiny provider call to validate the custom model connection",
     )
     args = parser.parse_args(argv)
 
@@ -221,6 +412,10 @@ def main(argv: list[str] | None = None) -> int:
                 final_rc = rc
     else:
         print("  [skip] graph build (pass --graph to rebuild)")
+
+    rc = run_model_onboarding(args, claude)
+    if rc != 0 and final_rc == 0:
+        final_rc = rc
 
     print("\nctx-init: done. Next steps:")
     print("  - ctx-toolbox list                 # see starter toolboxes")

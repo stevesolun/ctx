@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import ctx_init as ci
@@ -144,3 +145,69 @@ def test_main_with_requested_hook_failure_exits_nonzero(
     monkeypatch.setattr(ci.subprocess, "run", fake_run)
 
     assert ci.main(["--hooks"]) == 7
+
+
+def test_main_custom_model_writes_profile_and_recommends_harness(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
+    monkeypatch.setattr(
+        ci,
+        "recommend_harnesses",
+        lambda goal, top_k=5: [
+            {"name": "text-to-cad", "type": "harness", "score": 0.8}
+        ],
+    )
+
+    rc = ci.main([
+        "--model-mode", "custom",
+        "--model", "openai/gpt-5.5",
+        "--goal", "turn text prompts into CAD",
+    ])
+
+    assert rc == 0
+    profile = json.loads((tmp_path / "ctx-model-profile.json").read_text())
+    assert profile["mode"] == "custom"
+    assert profile["provider"] == "openai"
+    assert profile["model"] == "openai/gpt-5.5"
+    assert profile["api_key_env"] == "OPENAI_API_KEY"
+    assert "text-to-cad" in capsys.readouterr().out
+
+
+def test_main_custom_model_requires_model(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
+
+    assert ci.main(["--model-mode", "custom"]) == 1
+
+
+def test_validate_model_flag_invokes_connection_check(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
+    monkeypatch.setattr(ci, "recommend_harnesses", lambda goal, top_k=5: [])
+    calls: list[dict] = []
+
+    def fake_validate(**kwargs):
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr(ci, "validate_model_connection", fake_validate)
+
+    rc = ci.main([
+        "--model-mode", "custom",
+        "--model", "ollama/llama3.1",
+        "--validate-model",
+    ])
+
+    assert rc == 0
+    assert calls == [{
+        "model": "ollama/llama3.1",
+        "api_key_env": None,
+        "base_url": None,
+    }]
