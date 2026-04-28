@@ -974,7 +974,7 @@ Verification observed:
 - `python -m pytest src\tests\test_package_scaffold.py src\tests\test_public_api.py -q` reported `51 passed`.
 - A clean package build captured stdout/stderr, found no `SetuptoolsDeprecationWarning` or `project.license` warning, and then `python -m twine check <temp>\*` reported `PASSED` for both `claude_ctx-0.7.0` artifacts.
 
-### Final verification after Phase 43
+### Final verification after Phase 44
 
 Status: completed on branch `codex/current-next-steps-hardening`.
 
@@ -986,18 +986,16 @@ Observed:
 - `python -m mypy src` reported `Success: no issues found in 238 source files` with existing notes about unchecked bodies in untyped functions.
 - `python -m compileall -q src hooks scripts` completed successfully.
 - `git diff --check` completed successfully.
-- `python -m pytest -q` reported `3266 passed, 8 skipped in 419.08s (0:06:59)`.
-- Package dry-run in a temporary dist/venv completed successfully:
+- No npm package is configured in this Python repository: `package.json: False`, `tsconfig.json: False`, and `eslint config: none`.
+- `python -m pytest -q` reported `3266 passed, 8 skipped in 489.30s (0:08:09)`.
+- Post-Phase-44 package dry-run in a temporary dist/venv completed successfully:
   - `python -m build --outdir <temp>` built `claude_ctx-0.7.0.tar.gz` and `claude_ctx-0.7.0-py3-none-any.whl`.
+  - Captured build output contained no `SetuptoolsDeprecationWarning` and no `project.license` deprecation warning.
   - `python -m twine check <temp>\*` reported `PASSED` for both artifacts.
   - Fresh venv wheel install succeeded.
   - `python -m pip check` in the fresh venv reported `No broken requirements found.`
   - Entry point probe reported `loaded 27 ctx console scripts from wheel 0.7.0`.
   - Installed `ctx-init --help`, `ctx-scan-repo --help`, `ctx-wiki-graphify --help`, and `ctx --help` all executed.
-
-Follow-up:
-
-- Phase 44 removed the Setuptools `project.license` deprecation warning observed in this dry-run.
 
 ## Blocker Summary
 
