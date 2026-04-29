@@ -3,9 +3,9 @@
 A pre-built weighted graph of skills, agents, MCP servers, and cataloged
 harnesses in the ctx ecosystem, shipped as `graph/wiki-graph.tar.gz`.
 The on-disk JSON and `resolve_graph` Python API are harness-aware, including
-plain-slug graph walks from `harness:<slug>` nodes;
-`ctx-monitor` currently exposes skill/agent/MCP graph and wiki views
-only. Dashboard harness exposure is not yet present.
+plain-slug graph walks from `harness:<slug>` nodes. `ctx-monitor`
+exposes skill/agent/MCP/harness wiki and graph views; harness install,
+update, load/unload, and quality scoring remain CLI/API workflows.
 
 ## What's in it
 
@@ -100,12 +100,12 @@ quality clusters for the recommendation use case.
 ctx-monitor serve              # http://127.0.0.1:8765
 ```
 
-Then open `/graph?slug=<skill-agent-or-mcp-slug>` for a cytoscape
-neighborhood view, or `/api/graph/<slug>.json?hops=1&limit=40` for the
-dashboard-shaped JSON. `ctx-monitor` does not yet offer harness filters,
-styling, or wiki routes; use the Python/API recommendation surfaces for
-harness-aware graph results. See the [dashboard reference](dashboard.md)
-for the full route catalogue.
+Then open `/graph?slug=<entity-slug>&type=<entity-type>` for a
+cytoscape neighborhood view, or
+`/api/graph/<slug>.json?type=<entity-type>&hops=1&limit=40` for the
+dashboard-shaped JSON. The `type` query is optional for unique slugs and
+recommended for duplicate slugs such as `langgraph`. See the
+[dashboard reference](dashboard.md) for the full route catalogue.
 
 ### Via Python
 

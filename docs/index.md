@@ -123,9 +123,9 @@ learns from your usage. Stale ones are flagged. New ones self-ingest.
     ---
 
     `ctx-monitor serve` opens a local HTTP dashboard with live graph,
-    skill grades + four-signal scores, session timelines, and one-click
-    load/unload for skills, agents, and MCP servers. Dashboard harness
-    exposure is not yet present. Zero dependencies beyond stdlib.
+    skill grades + four-signal scores, session timelines, one-click
+    load/unload for skills, agents, and MCP servers, plus harness wiki
+    and graph browsing. Zero dependencies beyond stdlib.
 
     [:octicons-arrow-right-24: Dashboard reference](dashboard.md)
 
@@ -173,7 +173,7 @@ learns from your usage. Stale ones are flagged. New ones self-ingest.
     **v0.7.x** — MIT, CI-matrixed (Ubuntu + Windows × Python 3.11/3.12),
     3,333+ tests passing. Ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
-    skills, agents, and MCP servers; harness exposure not yet present),
+    skills, agents, and MCP servers, plus harness wiki/graph browsing),
     `ctx-dedup-check` (pre-ship near-duplicate gate), and
     `ctx-tag-backfill` (catalog hygiene), plus the ~43 MiB pre-built
     wiki tarball with **104,078 nodes / 1,033,253 edges / 23 curated-core
