@@ -823,27 +823,35 @@ def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str,
     if not isinstance(skills, list):
         return graph
 
-    skills_sh_ids = {
+    legacy_skills_sh_ids = {
         str(node.get("id"))
         for node in nodes
         if str(node.get("id") or "").startswith(LEGACY_EXTERNAL_NODE_PREFIX)
-        or str(node.get("id") or "").startswith(SKILLS_SH_NODE_PREFIX + "skills-sh-")
         or (
             node.get("external_catalog") == "skills.sh"
             and node.get("type") == "external-skill"
         )
-        or (
-            node.get("source_catalog") == "skills.sh"
-            and node.get("type") == "skill"
-        )
     }
-    if skills_sh_ids:
-        nodes = [node for node in nodes if str(node.get("id")) not in skills_sh_ids]
+    if legacy_skills_sh_ids:
+        nodes = [node for node in nodes if str(node.get("id")) not in legacy_skills_sh_ids]
         edges = [
             edge for edge in edges
-            if str(edge.get("source")) not in skills_sh_ids
-            and str(edge.get("target")) not in skills_sh_ids
+            if str(edge.get("source")) not in legacy_skills_sh_ids
+            and str(edge.get("target")) not in legacy_skills_sh_ids
         ]
+    edges = [edge for edge in edges if edge.get("source_catalog") != "skills.sh"]
+    node_by_id = {
+        str(node.get("id")): node
+        for node in nodes
+        if str(node.get("id") or "")
+    }
+    existing_skills_sh_incident_edges: dict[str, int] = {}
+    for edge in edges:
+        for endpoint in (str(edge.get("source") or ""), str(edge.get("target") or "")):
+            if endpoint.startswith(SKILLS_SH_NODE_PREFIX + "skills-sh-"):
+                existing_skills_sh_incident_edges[endpoint] = (
+                    existing_skills_sh_incident_edges.get(endpoint, 0) + 1
+                )
 
     degree: dict[str, int] = {}
     for edge in edges:
@@ -860,7 +868,10 @@ def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str,
         node_id = str(node.get("id") or "")
         if not node_id:
             continue
-        if node.get("source_catalog") == "skills.sh":
+        if (
+            node_id.startswith(SKILLS_SH_NODE_PREFIX + "skills-sh-")
+            or node.get("source_catalog") == "skills.sh"
+        ):
             continue
         label_index.setdefault(_node_label(node).lower(), []).append(node_id)
         for tag in _meaningful_tags(node.get("tags")):
@@ -894,7 +905,7 @@ def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str,
         item["duplicate_targets"] = duplicate_targets
         item["quality_score"] = quality["score"]
         item["quality_signals"] = quality
-        nodes.append({
+        node_payload = {
             "id": external_id,
             "label": ctx_slug,
             "type": "skill",
@@ -912,7 +923,19 @@ def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str,
             "quality_score": item["quality_score"],
             "quality_signals": item["quality_signals"],
             "entity_path": item["entity_path"],
-        })
+        }
+        existing_node = node_by_id.get(external_id)
+        if existing_node is None:
+            nodes.append(node_payload)
+            node_by_id[external_id] = node_payload
+        else:
+            existing_node.update(node_payload)
+
+        # Full graphify can already emit semantic/tag/token edges for hydrated
+        # Skills.sh pages. Preserve those and only fall back to sparse metadata
+        # edges for catalog-only nodes with no graphify-produced connectivity.
+        if existing_skills_sh_incident_edges.get(external_id, 0) > 0:
+            continue
 
         targets: list[tuple[str, list[str], list[str]]] = []
         for target in duplicate_targets:

@@ -141,6 +141,94 @@ def test_update_wiki_tarball_adds_skills_sh_as_first_class_skill_nodes_and_pages
     assert "Security review: metadata-only" in page
 
 
+def test_update_wiki_tarball_preserves_existing_skills_sh_semantic_edges(
+    tmp_path: Path,
+) -> None:
+    tarball = tmp_path / "wiki-graph.tar.gz"
+    graph = {
+        "directed": False,
+        "multigraph": False,
+        "graph": {},
+        "nodes": [
+            {
+                "id": "skill:lark-doc",
+                "label": "lark-doc",
+                "type": "skill",
+                "tags": ["docs"],
+            },
+            {
+                "id": "skill:skills-sh-open-feishu-cn-lark-doc",
+                "label": "skills-sh-open-feishu-cn-lark-doc",
+                "type": "skill",
+                "tags": ["docs"],
+            },
+        ],
+        "edges": [
+            {
+                "source": "skill:lark-doc",
+                "target": "skill:skills-sh-open-feishu-cn-lark-doc",
+                "semantic_sim": 0.91,
+                "tag_sim": 0.2,
+                "token_sim": 0.0,
+                "final_weight": 0.667,
+                "weight": 0.667,
+                "shared_tags": ["docs"],
+                "shared_tokens": [],
+            }
+        ],
+    }
+    with tarfile.open(tarball, "w:gz") as tf:
+        _add_text(tf, "./graphify-out/graph.json", json.dumps(graph))
+
+    catalog: dict[str, Any] = {
+        "schema_version": 1,
+        "source": "skills.sh",
+        "api": "https://skills.sh/api/search",
+        "fetched_at": "2026-04-29T00:00:00+00:00",
+        "site_reported_total": 1,
+        "observed_unique_skills": 1,
+        "coverage_vs_site_reported_total": 1.0,
+        "query_count": 1,
+        "query_error_count": 0,
+        "overlap": {"existing_wiki_skill_pages": 1},
+        "skills": [
+            {
+                "id": "open.feishu.cn/lark-doc",
+                "ctx_slug": "skills-sh-open-feishu-cn-lark-doc",
+                "source": "open.feishu.cn",
+                "skill_id": "lark-doc",
+                "name": "lark-doc",
+                "type": "skill",
+                "status": "remote-cataloged",
+                "source_catalog": "skills.sh",
+                "installs": 18029,
+                "tags": ["docs"],
+                "detail_url": "https://skills.sh/site/open.feishu.cn/lark-doc",
+                "install_command": "npx skills add https://open.feishu.cn",
+            }
+        ],
+    }
+
+    update_wiki_tarball(tarball, catalog)
+
+    with tarfile.open(tarball, "r:gz") as tf:
+        graph_out = _read_json(tf, "./graphify-out/graph.json")
+
+    node = next(
+        node for node in graph_out["nodes"]
+        if node["id"] == "skill:skills-sh-open-feishu-cn-lark-doc"
+    )
+    assert node["source_catalog"] == "skills.sh"
+    edges = [
+        edge for edge in graph_out["edges"]
+        if edge["target"] == "skill:skills-sh-open-feishu-cn-lark-doc"
+        or edge["source"] == "skill:skills-sh-open-feishu-cn-lark-doc"
+    ]
+    assert len(edges) == 1
+    assert edges[0]["semantic_sim"] == 0.91
+    assert edges[0].get("source_catalog") != "skills.sh"
+
+
 def test_extract_skill_body_from_skills_sh_detail_html() -> None:
     html = """
     <html>

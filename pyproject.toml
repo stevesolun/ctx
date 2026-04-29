@@ -100,6 +100,11 @@ harness = [
     # dep optional means users who only want the Claude Code
     # integration (ctx-skill-install, the hooks pipeline) don't pay
     # the LiteLLM dependency-tree cost.
+    # LiteLLM 1.83.x pins click==8.1.8. Typer 0.17+ requires newer
+    # click, so cap Typer for users who install [embeddings,harness]
+    # together through sentence-transformers/transformers.
+    "click==8.1.8",
+    "typer>=0.16,<0.17",
     "litellm>=1.40,<2",
 ]
 
