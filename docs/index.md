@@ -5,7 +5,7 @@ hide:
 
 # ctx — Skill, Agent, MCP & Harness Recommendation and Management
 
-Watches what you develop, walks a knowledge graph of **1,968 skills, 464
+Watches what you develop, walks a knowledge graph of **1,969 skills, 464
 agents, 10,786 MCP servers, and cataloged harnesses**, and recommends the
 right ones on the fly — you decide what to load, install, or adopt. Powered
 by a Karpathy LLM wiki with persistent memory that gets smarter every session.
@@ -63,15 +63,17 @@ graph-based discovery:
 
 - A Karpathy 3-layer wiki at `~/.claude/skill-wiki/` is the single source
   of truth.
-- **13,218+ entity pages** for the shipped skill/agent/MCP inventory, plus
-  harness pages under `entities/harnesses/` when you catalog them. Each
-  page tracks tags, status, provenance, and usage where it applies.
-- A **knowledge graph** (13,218 nodes, 963K edges, 24 Louvain
-  communities) blending semantic cosine + tag overlap + slug-token
-  overlap connects skills, agents, MCP servers, and cataloged harnesses,
-  enabling context-aware recommendations across installable and
-  catalog-only entity types.
-- **24 auto-generated concept pages** group related entities into named
+- **13,219 curated entity pages** for the shipped skill/agent/MCP
+  inventory, plus harness pages under `entities/harnesses/` when you
+  catalog them. Each page tracks tags, status, provenance, and usage
+  where it applies.
+- A **knowledge graph** (104,065 nodes, 1,030,831 edges) built from a
+  13,219-node curated core plus 90,846 Skills.sh `external-skill` nodes.
+  The curated core has 22 Louvain communities and blends semantic cosine
+  + tag overlap + slug-token overlap; the external overlay adds sparse
+  duplicate/tag edges so upstream skill installs can be recommended
+  without being treated as reviewed local skills.
+- **22 Louvain communities** group related entities into named
   communities (e.g., *AI + Devops + Frontend*, *Python + API*).
 - PostToolUse and Stop hooks update the wiki automatically during each
   Claude Code session.
@@ -97,9 +99,10 @@ learns from your usage. Stale ones are flagged. New ones self-ingest.
 
     ---
 
-    13,218 shipped skill/agent/MCP nodes, plus cataloged harnesses when
-    present, connected by 963,068 weighted edges across 24 Louvain
-    communities.
+    104,065 shipped graph nodes: 13,219 curated skill/agent/MCP nodes
+    plus 90,846 Skills.sh external-skill nodes. The graph has 1,030,831
+    weighted edges; Louvain communities are generated for the curated
+    core.
     Ships pre-built in `graph/wiki-graph.tar.gz` and powers the
     graph-aware recommendations + the pre-ship `ctx-dedup-check` gate.
 
@@ -172,10 +175,10 @@ learns from your usage. Stale ones are flagged. New ones self-ingest.
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers; harness exposure not yet present),
     `ctx-dedup-check` (pre-ship near-duplicate gate), and
-    `ctx-tag-backfill` (catalog hygiene), plus the ~25 MB pre-built
-    wiki tarball with **13,218 nodes / 963,068 edges / 24 Louvain
-    communities**. Hardened across the Strix audit + a 12-finding codex
-    review.
+    `ctx-tag-backfill` (catalog hygiene), plus the ~46 MB pre-built
+    wiki tarball with **104,065 nodes / 1,030,831 edges / 22 curated-core
+    Louvain communities**. Hardened across the Strix audit + a 12-finding
+    codex review.
 
     [:octicons-arrow-right-24: CHANGELOG](https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md) ·
     [Repository](https://github.com/stevesolun/ctx)

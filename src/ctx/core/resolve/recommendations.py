@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 import re
@@ -175,6 +176,8 @@ def _token_idf(graph: Any) -> dict[str, float]:
     df: dict[str, int] = defaultdict(int)
     n = 0
     for node_id, data in graph.nodes(data=True):
+        if data.get("external") or data.get("type") == "external-skill":
+            continue
         label = str(data.get("label") or _node_name(node_id))
         n += 1
         for tok in _slug_tokens(label):
@@ -206,6 +209,7 @@ def recommend_by_tags(
     query: str | None = None,
     semantic_cache_dir: Path | None = None,
     semantic_weight: float = 100.0,
+    external_catalog_path: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Rank graph entities by name match, tag overlap, and graph degree.
 
@@ -292,16 +296,165 @@ def recommend_by_tags(
 
     ranked = sorted(scored, key=lambda item: -item[1])[:top_n]
     top_score = ranked[0][1] if ranked else 0.0
-    return [
+    graph_results = [
         {
             "name": label,
             "type": node_data.get("type", "skill"),
             "score": round(score, 1),
             "normalized_score": round(score / top_score, 4) if top_score else 0.0,
             "matching_tags": sorted(matching_tags),
+            "external": node_data.get("external", False),
+            "external_catalog": node_data.get("external_catalog"),
+            "source": node_data.get("source"),
+            "skill_id": node_data.get("skill_id"),
+            "installs": _safe_int(node_data.get("installs")),
+            "detail_url": node_data.get("detail_url"),
+            "install_command": node_data.get("install_command"),
         }
         for label, score, node_data, matching_tags in ranked
     ]
+    external_results: list[dict[str, Any]] = []
+    if not _graph_has_external_catalog_nodes(graph, "skills.sh"):
+        external_results = _recommend_external_catalog(
+            graph,
+            signals,
+            top_n=top_n,
+            query=query,
+            catalog_path=external_catalog_path,
+        )
+    if not external_results:
+        return graph_results
+    merged = sorted(
+        [*graph_results, *external_results],
+        key=lambda item: -float(item.get("score", 0.0)),
+    )[:top_n]
+    merged_top = float(merged[0].get("score", 0.0)) if merged else 0.0
+    if merged_top > 0:
+        for item in merged:
+            item["normalized_score"] = round(float(item.get("score", 0.0)) / merged_top, 4)
+    return merged
+
+
+def _graph_has_external_catalog_nodes(graph: Any, catalog_name: str) -> bool:
+    try:
+        external_counts = graph.graph.get("external_catalog_nodes")
+    except AttributeError:
+        return False
+    if isinstance(external_counts, dict):
+        return _safe_int(external_counts.get(catalog_name)) > 0
+    return False
+
+
+@functools.lru_cache(maxsize=8)
+def _load_external_catalog_cached(path_str: str, mtime_ns: int, size: int) -> tuple[dict[str, Any], ...]:
+    del mtime_ns, size  # cache-key salt; the values are not needed inside the loader.
+    path = Path(path_str)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return ()
+    skills = data.get("skills") if isinstance(data, dict) else None
+    if not isinstance(skills, list):
+        return ()
+    return tuple(s for s in skills if isinstance(s, dict))
+
+
+def _infer_external_catalog_path(graph: Any) -> Path | None:
+    graph_path = None
+    try:
+        graph_path = graph.graph.get("ctx_graph_path")
+    except AttributeError:
+        graph_path = None
+    if not graph_path:
+        return None
+    path = Path(str(graph_path))
+    return path.parent.parent / "external-catalogs" / "skills-sh" / "catalog.json"
+
+
+def _load_external_catalog(path: Path | None) -> tuple[dict[str, Any], ...]:
+    if path is None or not path.is_file():
+        return ()
+    try:
+        stat = path.stat()
+    except OSError:
+        return ()
+    return _load_external_catalog_cached(str(path), stat.st_mtime_ns, stat.st_size)
+
+
+def _recommend_external_catalog(
+    graph: Any,
+    signals: list[str],
+    *,
+    top_n: int,
+    query: str | None,
+    catalog_path: Path | None,
+) -> list[dict[str, Any]]:
+    """Rank remote Skills.sh catalog entries alongside graph entities.
+
+    These entries are external: they carry install instructions and detail URLs,
+    but they do not pretend to be local ``converted/<slug>/SKILL.md`` wiki
+    bodies. This keeps the curated graph useful while making the 90K+ Skills.sh
+    catalog available as a fallback recommendation source.
+    """
+    path = catalog_path or _infer_external_catalog_path(graph)
+    skills = _load_external_catalog(path)
+    if not skills:
+        return []
+
+    signal_set = set(signals)
+    query_l = (query or " ".join(signals)).lower()
+    scored: list[tuple[float, dict[str, Any], set[str]]] = []
+    for skill in skills:
+        name = str(skill.get("name") or skill.get("skill_id") or "")
+        full_id = str(skill.get("id") or "")
+        source = str(skill.get("source") or "")
+        skill_id = str(skill.get("skill_id") or "")
+        tags = {str(t).lower() for t in skill.get("tags", []) if t}
+        haystack = " ".join([name, full_id, source, skill_id, " ".join(sorted(tags))]).lower()
+        slug_toks = {tok for tok in re.findall(r"[a-z0-9]+", haystack) if tok}
+        matching = signal_set & tags
+
+        score = 0.0
+        for signal in signals:
+            if signal in slug_toks:
+                score += 42.0
+            elif signal in haystack:
+                score += 14.0
+        score += 16.0 * len(matching)
+        if query_l and query_l in haystack:
+            score += 35.0
+        installs = _safe_int(skill.get("installs"))
+        if installs > 0:
+            score += min(math.log10(installs + 1) * 8.0, 48.0)
+        if score <= 0:
+            continue
+        scored.append((score, skill, matching))
+
+    ranked = sorted(scored, key=lambda item: -item[0])[:top_n]
+    return [
+        {
+            "name": str(skill.get("id") or skill.get("name") or ""),
+            "type": "external-skill",
+            "score": round(score, 1),
+            "normalized_score": 0.0,
+            "matching_tags": sorted(matching),
+            "external": True,
+            "external_catalog": "skills.sh",
+            "source": skill.get("source"),
+            "skill_id": skill.get("skill_id"),
+            "installs": _safe_int(skill.get("installs")),
+            "detail_url": skill.get("detail_url"),
+            "install_command": skill.get("install_command"),
+        }
+        for score, skill, matching in ranked
+    ]
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _normalise_signals(tags: list[str]) -> list[str]:

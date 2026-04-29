@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +16,7 @@ class UpdateReview:
     changed_fields: tuple[str, ...]
     benefits: tuple[str, ...]
     risks: tuple[str, ...]
+    security_findings: tuple[str, ...]
     existing_body_lines: int
     proposed_body_lines: int
     recommendation: str
@@ -44,6 +46,25 @@ def _line_count(body: str) -> int:
 
 def _sorted_join(values: set[str]) -> str:
     return ", ".join(sorted(values))
+
+
+_SECURITY_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"\b(curl|wget)\b[^\n|;]*(\||;)\s*(sh|bash|zsh|pwsh|powershell)\b", "network-fetched shell code"),
+    (r"\bInvoke-Expression\b|\biex\b", "PowerShell dynamic execution"),
+    (r"\brm\s+-rf\s+(/|\$HOME|~|\*)", "broad destructive deletion"),
+    (r"\bgit\s+reset\s+--hard\b|\bgit\s+clean\s+-[fdx]+", "destructive git cleanup"),
+    (r"\bchmod\s+777\b", "world-writable permission change"),
+    (r"\b(disable|bypass|turn off)\b[^\n]*(auth|tls|ssl|sandbox|audit|ci|test|lint)", "disables a safety control"),
+    (r"\b(AWS|GITHUB|OPENAI|ANTHROPIC|GOOGLE|AZURE)_[A-Z0-9_]*\b[^\n]*(curl|http|post|upload)", "possible secret exfiltration"),
+)
+
+
+def _security_findings(text: str) -> tuple[str, ...]:
+    findings: list[str] = []
+    for pattern, label in _SECURITY_PATTERNS:
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            findings.append(f"manual security review: {label}")
+    return tuple(dict.fromkeys(findings))
 
 
 def build_update_review(
@@ -102,9 +123,11 @@ def build_update_review(
     elif proposed_lines < existing_lines:
         risks.append(f"body loses {existing_lines - proposed_lines} line(s)")
 
-    if not changed_fields and existing_lines == proposed_lines:
+    security_findings = _security_findings(proposed_text)
+
+    if not changed_fields and existing_lines == proposed_lines and not security_findings:
         recommendation = "skip-no-change"
-    elif risks:
+    elif risks or security_findings:
         recommendation = "review-before-update"
     else:
         recommendation = "apply-update"
@@ -115,6 +138,7 @@ def build_update_review(
         changed_fields=changed_fields,
         benefits=tuple(benefits),
         risks=tuple(risks),
+        security_findings=security_findings,
         existing_body_lines=existing_lines,
         proposed_body_lines=proposed_lines,
         recommendation=recommendation,
@@ -134,6 +158,9 @@ def render_update_review(review: UpdateReview) -> str:
     if review.risks:
         lines.append("Risks:")
         lines.extend(f"  - {item}" for item in review.risks)
+    if review.security_findings:
+        lines.append("Security review:")
+        lines.extend(f"  ! {item}" for item in review.security_findings)
     if not review.has_changes:
         lines.append("No content or frontmatter changes detected.")
     lines.append("Use the explicit update flag to apply this replacement.")

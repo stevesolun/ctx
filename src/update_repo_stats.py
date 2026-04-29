@@ -32,6 +32,7 @@ README = REPO_ROOT / "README.md"
 _MAX_TAR_JSON_BYTES = 512 * 1024 * 1024
 _GRAPH_JSON_MEMBER = "graphify-out/graph.json"
 _COMMUNITIES_JSON_MEMBER = "graphify-out/communities.json"
+_PYTEST_COLLECT_TIMEOUT_SECONDS = 180
 
 
 def _safe_tar_name(name: str) -> str | None:
@@ -200,7 +201,7 @@ def _pytest_collect(interpreter: str) -> int | None:
             cwd=REPO_ROOT / "src",
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=_PYTEST_COLLECT_TIMEOUT_SECONDS,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return None

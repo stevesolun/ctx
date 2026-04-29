@@ -24,6 +24,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 UPDATER="$REPO_ROOT/src/update_repo_stats.py"
 WIKI_DIR="$HOME/.claude/skill-wiki"
 TARBALL="$REPO_ROOT/graph/wiki-graph.tar.gz"
+SKILLS_SH_CATALOG="$REPO_ROOT/graph/skills-sh-catalog.json.gz"
+SKILLS_SH_IMPORTER="$REPO_ROOT/src/import_skills_sh_catalog.py"
 
 PYTHON="${PYTHON:-python3}"
 command -v "$PYTHON" >/dev/null 2>&1 || PYTHON="python"
@@ -94,7 +96,7 @@ if [[ $NEEDS_WIKI_REBUILD -eq 1 ]]; then
          2> >(sed 's/^/[pre-commit wiki] /' >&2); then
       log "entity regen failed — continuing"
     fi
-    if ! "$PYTHON" "$REPO_ROOT/src/wiki_graphify.py" \
+    if ! PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON" -m ctx.core.wiki.wiki_graphify \
          2> >(sed 's/^/[pre-commit wiki] /' >&2); then
       log "graph rebuild failed — continuing"
     fi
@@ -126,7 +128,7 @@ if [[ $NEEDS_WIKI_REBUILD -eq 1 ]]; then
       #   - graphify-out/graph-delta.json + graph.pickle: the delta
       #     is a single-run artifact; pickle was removed as an RCE
       #     vector in 86a1688 but a stale one on disk must not ship.
-      ( cd "$WIKI_DIR" && tar --force-local -czf "$TARBALL" \
+      if ( cd "$WIKI_DIR" && tar --force-local -czf "$TARBALL" \
           --exclude='.trash' \
           --exclude='__pycache__' \
           --exclude='./raw' \
@@ -135,9 +137,22 @@ if [[ $NEEDS_WIKI_REBUILD -eq 1 ]]; then
           --exclude='./.enrich-checkpoint' \
           --exclude='./graphify-out/graph-delta.json' \
           --exclude='./graphify-out/graph.pickle' \
-          . ) \
-        && { git add "$TARBALL"; log "wiki tarball rebuilt and re-staged ($(du -h "$TARBALL" | cut -f1))"; } \
-        || log "tar repack failed — tarball left as-is"
+          . ); then
+        if [[ -f "$SKILLS_SH_CATALOG" && -f "$SKILLS_SH_IMPORTER" ]]; then
+          "$PYTHON" "$SKILLS_SH_IMPORTER" \
+            --from-catalog "$SKILLS_SH_CATALOG" \
+            --catalog-out "$SKILLS_SH_CATALOG" \
+            --wiki-tar "$TARBALL" \
+            --update-wiki-tar \
+            2> >(sed 's/^/[pre-commit skills.sh] /' >&2) \
+            || log "Skills.sh overlay refresh failed — continuing with curated tarball"
+        fi
+        git add "$TARBALL"
+        [[ -f "$SKILLS_SH_CATALOG" ]] && git add "$SKILLS_SH_CATALOG"
+        log "wiki tarball rebuilt and re-staged ($(du -h "$TARBALL" | cut -f1))"
+      else
+        log "tar repack failed — tarball left as-is"
+      fi
     else
       log "tar not available — skipping tarball repack"
     fi

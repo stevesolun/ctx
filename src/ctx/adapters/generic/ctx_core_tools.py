@@ -293,6 +293,13 @@ class CtxCoreToolbox:
                 "score": r["score"],
                 "normalized_score": r.get("normalized_score"),
                 "matching_tags": r.get("matching_tags", []),
+                "external": r.get("external", False),
+                "external_catalog": r.get("external_catalog"),
+                "source": r.get("source"),
+                "skill_id": r.get("skill_id"),
+                "installs": r.get("installs"),
+                "detail_url": r.get("detail_url"),
+                "install_command": r.get("install_command"),
             }
             for r in raw
         ]

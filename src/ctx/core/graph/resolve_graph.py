@@ -58,7 +58,9 @@ def load_graph(path: Path | None = None) -> nx.Graph:
         # which schema the file actually uses and pass it explicitly so
         # both old and new graph.json files round-trip cleanly.
         edges_key = "links" if "links" in data else "edges"
-        return node_link_graph(data, edges=edges_key)
+        graph = node_link_graph(data, edges=edges_key)
+        graph.graph.setdefault("ctx_graph_path", str(graph_path))
+        return graph
     except json.JSONDecodeError as exc:
         logger.warning("graph.json is not valid JSON (%s); returning empty graph", exc)
     except UnicodeDecodeError as exc:

@@ -55,11 +55,12 @@ with deep links to `/skill/<slug>` (sidecar detail) and
 
 ### Explore the knowledge graph — `/graph`
 
-The graph tab is a cytoscape-rendered view over the 13,218-node
-skill↔agent↔MCP graph. The graph build and recommendation APIs can be
-harness-aware, but this dashboard view does not yet render harness nodes
-as first-class entities. When you arrive with no slug selected, the page
-shows:
+The graph tab is a cytoscape-rendered view over the dashboard-supported
+skill/agent/MCP graph. The shipped graph bundle also contains Skills.sh
+`external-skill` nodes and the graph build/recommendation APIs can be
+harness-aware, but this dashboard view does not yet render harness or
+external-skill nodes as first-class entities. When you arrive with no
+slug selected, the page shows:
 
 - a stats line with the total node + edge counts
 - a **Popular seed slugs** panel — the 18 highest-degree entities

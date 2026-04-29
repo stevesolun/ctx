@@ -18,12 +18,61 @@ ctx-wiki-graphify
 ctx-scan-repo --repo . --recommend
 ```
 
+## Updating the Graph and LLM Wiki
+
+Use this sequence for every accepted skill, agent, MCP server, or harness
+change. The graph and LLM-wiki are shippable artifacts, not scratch output, so
+the update is treated like a release step.
+
+1. Add or update the entity through the matching command:
+   `ctx-skill-add`, `ctx-agent-add`, `ctx-mcp-add`, or `ctx-harness-add`.
+2. If the entity already exists, read the update review. It lists changed
+   fields, likely benefits, regressions, and security findings. Do not pass
+   `--update-existing` until those findings are acceptable.
+3. Run the security/cyber check below.
+4. Rebuild the curated wiki graph with `ctx-wiki-graphify`.
+5. Repack `graph/wiki-graph.tar.gz` with the exclusions in
+   `graph/README.md`; never commit local review reports or raw caches.
+6. Refresh the Skills.sh external overlay when shipping catalog coverage.
+   This adds catalog-only `external-skill` graph nodes, sharded metadata
+   pages, install commands, duplicate hints, and metadata-only
+   quality/security signals:
+
+   ```bash
+   python src/import_skills_sh_catalog.py --from-api-union <raw.json> \
+     --catalog-out graph/skills-sh-catalog.json.gz \
+     --wiki-tar graph/wiki-graph.tar.gz \
+     --update-wiki-tar
+   ```
+7. Refresh published counts with `python src/update_repo_stats.py`.
+8. Verify the changed entity can be recommended through
+   `ctx-scan-repo --repo . --recommend` or `ctx__recommend_bundle`.
+
+## Security and Cyber Check
+
+Run this before applying `--update-existing`, before installing a harness with
+approved commands, and before shipping a refreshed graph tarball.
+
+- Inspect changed entity markdown and frontmatter for shell commands, setup
+  commands, install commands, URLs, requested permissions, and model/provider
+  access.
+- Treat these as manual-review blockers: `curl | sh`, `wget | bash`,
+  `Invoke-Expression`, broad `rm -rf`, `git reset --hard`, `chmod 777`, secret
+  upload, disabled auth/TLS/sandboxing/audit/tests, or unpinned package sources.
+- For MCP and harness updates, check network access, filesystem scope, auth
+  material, command transports, and whether setup or verify commands execute
+  remote code.
+- Prefer dry-run first: `ctx-harness-install <slug> --dry-run` and
+  `ctx-harness-install <slug> --update --dry-run`.
+- If a candidate is useful but risky, document the safer install path or keep it
+  as catalog-only metadata instead of shipping it as an installed skill.
+
 ## Updating an Existing Entity
 
 The add commands are non-destructive by default when the target skill, agent,
 MCP server, or harness already exists. The first add attempt prints an update
 review instead of replacing files. That review lists changed fields, expected
-benefits, possible regressions, and a recommendation.
+benefits, possible regressions, security findings, and a recommendation.
 
 Use this flow for every entity type:
 
