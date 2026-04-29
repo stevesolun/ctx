@@ -106,11 +106,11 @@ The extracted wiki is an Obsidian-compatible vault. Entity pages use `[[wikilink
 
 ## Rebuild
 
-After adding new skills, agents, MCP entities, or harnesses (or changing the wiki):
+After adding or changing skills, agents, MCP entities, or harnesses:
 
 ```bash
-python src/wiki_batch_entities.py --all          # regenerate entity cards
-python -m ctx.core.wiki.wiki_graphify            # incremental by default; --full to force
+python src/wiki_batch_entities.py --all          # skills/agents only; MCPs/harnesses already write entity pages
+python -m ctx.core.wiki.wiki_graphify            # rebuild graph + communities; --full to force semantic top-K
 ctx-dedup-check --threshold 0.85                 # pre-ship dedup gate (flag-only, NEVER drops)
 ctx-tag-backfill                                 # report-only by default; --apply to write
 ```

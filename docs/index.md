@@ -63,12 +63,12 @@ graph-based discovery:
 
 - A Karpathy 3-layer wiki at `~/.claude/skill-wiki/` is the single source
   of truth.
-- **104,065 entity pages/nodes** for the shipped skill/agent/MCP
-  inventory, including 90,846 remote-cataloged Skills.sh skill pages,
-  plus harness pages under `entities/harnesses/` when you catalog them.
+- **104,066 entity pages/nodes** for the shipped skill/agent/MCP/harness
+  inventory, including 90,846 remote-cataloged Skills.sh skill pages
+  and the first cataloged harness page under `entities/harnesses/`.
   Each page tracks tags, status, provenance, and usage where it applies.
-- A **knowledge graph** (104,065 nodes, 1,030,831 edges) built from a
-  13,219-node curated core plus 90,846 remote-cataloged Skills.sh `skill`
+- A **knowledge graph** (104,066 nodes, 1,031,011 edges) built from a
+  13,220-node curated core plus 90,846 remote-cataloged Skills.sh `skill`
   nodes. The curated core has 22 Louvain communities and blends semantic
   cosine + tag overlap + slug-token overlap; the current Skills.sh pass
   adds sparse metadata edges and keeps metadata-only security status until
@@ -99,8 +99,8 @@ learns from your usage. Stale ones are flagged. New ones self-ingest.
 
     ---
 
-    104,065 shipped graph nodes: 13,219 curated skill/agent/MCP nodes
-    plus 90,846 remote-cataloged Skills.sh skill nodes. The graph has 1,030,831
+    104,066 shipped graph nodes: 13,220 curated skill/agent/MCP/harness
+    nodes plus 90,846 remote-cataloged Skills.sh skill nodes. The graph has 1,031,011
     weighted edges; Louvain communities are generated for the curated
     core.
     Ships pre-built in `graph/wiki-graph.tar.gz` and powers the
@@ -171,12 +171,12 @@ learns from your usage. Stale ones are flagged. New ones self-ingest.
     ---
 
     **v0.7.x** — MIT, CI-matrixed (Ubuntu + Windows × Python 3.11/3.12),
-    3,287+ tests passing. Ships console scripts including `ctx-init`,
+    3,333+ tests passing. Ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers; harness exposure not yet present),
     `ctx-dedup-check` (pre-ship near-duplicate gate), and
     `ctx-tag-backfill` (catalog hygiene), plus the ~46 MB pre-built
-    wiki tarball with **104,065 nodes / 1,030,831 edges / 22 curated-core
+    wiki tarball with **104,066 nodes / 1,031,011 edges / 22 curated-core
     Louvain communities**. Hardened across the Strix audit + a 12-finding
     codex review.
 
