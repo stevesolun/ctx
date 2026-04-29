@@ -12,6 +12,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from ctx.core.graph import resolve_graph
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+CURATED_HARNESS_SLUGS = {
+    "agentops",
+    "autogen",
+    "crewai",
+    "google-adk",
+    "haystack",
+    "langfuse",
+    "langgraph",
+    "litellm",
+    "mastra",
+    "openai-agents-sdk",
+    "pydantic-ai",
+    "semantic-kernel",
+    "text-to-cad",
+}
 
 
 def _write_graph_file(tmp_path: Path, content: bytes | str) -> Path:
@@ -84,18 +99,25 @@ class TestLoadGraphIntegrity:
         assert G.number_of_nodes() == 2
         assert G.number_of_edges() == 1
 
-    def test_shipped_wiki_graph_contains_text_to_cad_harness(self) -> None:
+    def test_shipped_wiki_graph_contains_curated_harness_catalog(self) -> None:
         tarball = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
         with tarfile.open(tarball, "r:gz") as tf:
             names = {member.name for member in tf.getmembers()}
-            assert "./entities/harnesses/text-to-cad.md" in names
+            expected_pages = {
+                f"./entities/harnesses/{slug}.md"
+                for slug in CURATED_HARNESS_SLUGS
+            }
+            assert expected_pages <= names
             graph_file = tf.extractfile("./graphify-out/graph.json")
             assert graph_file is not None
             graph = json.loads(graph_file.read().decode("utf-8"))
 
-        harness_node = next(
-            node for node in graph["nodes"]
-            if node["id"] == "harness:text-to-cad"
-        )
-        assert harness_node["type"] == "harness"
-        assert "cad" in harness_node["tags"]
+        harness_nodes = {
+            node["id"]: node
+            for node in graph["nodes"]
+            if node.get("type") == "harness"
+        }
+        assert set(harness_nodes) == {
+            f"harness:{slug}" for slug in CURATED_HARNESS_SLUGS
+        }
+        assert "cad" in harness_nodes["harness:text-to-cad"]["tags"]
