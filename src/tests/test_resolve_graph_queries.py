@@ -58,13 +58,15 @@ def _build_simple_graph() -> nx.Graph:
 
 
 def _build_mcp_graph() -> nx.Graph:
-    """Graph with mixed node types (skill, agent, mcp-server) for seed-prefix tests."""
+    """Graph with mixed node types for seed-prefix tests."""
     G = nx.Graph()
     G.add_node("skill:fastapi", type="skill", label="FastAPI", tags=["python"])
     G.add_node("agent:devops", type="agent", label="DevOps Agent", tags=["docker"])
     G.add_node("mcp-server:github", type="mcp-server", label="GitHub MCP", tags=["git"])
+    G.add_node("harness:text-to-cad", type="harness", label="text-to-cad", tags=["cad"])
     G.add_edge("skill:fastapi", "agent:devops", weight=0.9, shared_tags=[])
     G.add_edge("mcp-server:github", "skill:fastapi", weight=0.7, shared_tags=["python"])
+    G.add_edge("harness:text-to-cad", "skill:fastapi", weight=0.8, shared_tags=["cad"])
     return G
 
 
@@ -332,6 +334,12 @@ class TestResolveBySeeds:
     def test_agent_prefix_resolved(self) -> None:
         G = _build_mcp_graph()
         results = resolve_graph.resolve_by_seeds(G, ["devops"], max_hops=1)
+        names = [r["name"] for r in results]
+        assert "FastAPI" in names
+
+    def test_harness_prefix_resolved(self) -> None:
+        G = _build_mcp_graph()
+        results = resolve_graph.resolve_by_seeds(G, ["text-to-cad"], max_hops=1)
         names = [r["name"] for r in results]
         assert "FastAPI" in names
 

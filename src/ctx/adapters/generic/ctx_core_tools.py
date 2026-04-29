@@ -148,7 +148,7 @@ class CtxCoreToolbox:
                     "Walk the knowledge graph from a list of seed "
                     "entities and return related entities ranked by "
                     "edge weight over up to max_hops. Use when you "
-                    "already know a specific skill or MCP and want "
+                    "already know a specific skill, agent, MCP, or harness and want "
                     "to find its close neighbours."
                 ),
                 parameters={
@@ -158,7 +158,7 @@ class CtxCoreToolbox:
                             "type": "array",
                             "items": {"type": "string"},
                             "description": (
-                                "Seed entity names (skill / agent / "
+                                "Seed entity names (skill / agent / harness / "
                                 "mcp-server slugs). No type prefix — "
                                 "the walker tries every entity type."
                             ),

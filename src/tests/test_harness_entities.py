@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import networkx as nx
+from networkx.readwrite import node_link_data
+
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.providers import ToolCall
 from ctx.core.wiki import wiki_graphify as wg
@@ -63,6 +66,30 @@ def test_ctx_core_wiki_get_disambiguates_harness(tmp_path: Path) -> None:
     assert result["entity_type"] == "harness"
     assert result["wikilink"] == "[[entities/harnesses/text-to-cad]]"
     assert result["frontmatter"]["harness_kind"] == "domain-workbench"
+
+
+def test_ctx_core_graph_query_walks_from_harness_seed(tmp_path: Path) -> None:
+    graph = nx.Graph()
+    graph.add_node("harness:text-to-cad", type="harness", label="text-to-cad", tags=["cad"])
+    graph.add_node("skill:cad-review", type="skill", label="cad-review", tags=["cad"])
+    graph.add_edge(
+        "harness:text-to-cad",
+        "skill:cad-review",
+        weight=0.8,
+        shared_tags=["cad"],
+    )
+    graph_path = tmp_path / "graph.json"
+    graph_path.write_text(json.dumps(node_link_data(graph, edges="edges")), encoding="utf-8")
+    toolbox = CtxCoreToolbox(wiki_dir=tmp_path / "wiki", graph_path=graph_path)
+
+    result = json.loads(toolbox.dispatch(ToolCall(
+        id="c1",
+        name="ctx__graph_query",
+        arguments={"seeds": ["text-to-cad"], "max_hops": 1},
+    )))
+
+    assert result["results"][0]["name"] == "cad-review"
+    assert result["results"][0]["type"] == "skill"
 
 
 def test_wiki_graphify_includes_harness_nodes(

@@ -2,7 +2,8 @@
 
 A pre-built weighted graph of skills, agents, MCP servers, and cataloged
 harnesses in the ctx ecosystem, shipped as `graph/wiki-graph.tar.gz`.
-The on-disk JSON and `resolve_graph` Python API are harness-aware;
+The on-disk JSON and `resolve_graph` Python API are harness-aware, including
+plain-slug graph walks from `harness:<slug>` nodes;
 `ctx-monitor` currently exposes skill/agent/MCP graph and wiki views
 only. Dashboard harness exposure is not yet present.
 
