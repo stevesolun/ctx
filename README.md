@@ -7,11 +7,11 @@
 [![Graph](https://img.shields.io/badge/Graph-104%2C065_nodes_/_1.0M_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
-Watches what you develop, walks a graph that combines **1,969 curated skills, 464 agents, 10,786 MCP servers, cataloged harnesses, and 90,846 Skills.sh external-skill nodes**, and recommends the right bundle on the fly. Skills.sh entries include upstream `npx skills` install instructions, duplicate hints, and metadata-only quality/security signals without being treated as reviewed local skills. You approve what loads, installs, or gets adopted. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+Watches what you develop, walks a graph that combines **92,815 skills, 464 agents, 10,786 MCP servers, and cataloged harnesses**, and recommends the right bundle on the fly. The skill count includes 1,969 curated ctx skills plus 90,846 remote-cataloged Skills.sh skill nodes with upstream `npx skills` install instructions, duplicate hints, and metadata-only quality/security signals. You approve what loads, installs, or gets adopted. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 > **2026-04-29 updates.**
 > - Added the curated `find-skills` workflow, backed by the canonical upstream install command `npx skills add https://github.com/vercel-labs/skills --skill find-skills`.
-> - Shipped a 90,846-entry Skills.sh external-skill overlay inside `graph/wiki-graph.tar.gz` and as `graph/skills-sh-catalog.json.gz`.
+> - Shipped 90,846 Skills.sh entries as first-class remote-cataloged `skill` nodes inside `graph/wiki-graph.tar.gz` and as `graph/skills-sh-catalog.json.gz`.
 > - Added security/cyber review warnings to entity update reviews and documented the graph/wiki update procedure.
 
 > **2026-04-27 updates.**
@@ -21,7 +21,7 @@ Watches what you develop, walks a graph that combines **1,969 curated skills, 46
 
 ## Why it exists
 
-- **Discovery** — with 1,900+ curated skills, 90K+ graph-visible external Skills.sh entries, 460+ agents, 10K+ MCP servers, and cataloged harnesses, you can't possibly know which exist or which apply to your current work.
+- **Discovery** — with 92K+ skill nodes, 460+ agents, 10K+ MCP servers, and cataloged harnesses, you can't possibly know which exist or which apply to your current work.
 - **Context budget** — loading everything wastes tokens and degrades quality. You need the right 10–15 per session.
 - **Skill rot** — skills you installed months ago and never used are cluttering context. Stale ones should be flagged automatically.
 
@@ -39,7 +39,7 @@ Optional extras: `pip install "claude-ctx[embeddings]"` for the semantic backend
 
 ### Pre-built knowledge graph (optional)
 
-A pre-built knowledge graph of 104,065 nodes and 1,030,831 edges ships as a tarball. The same tarball includes `external-catalogs/skills-sh/catalog.json` and `entities/external-skills/` with 90,846 observed Skills.sh entries. Extract to get a ready-to-use `~/.claude/skill-wiki/`:
+A pre-built knowledge graph of 104,065 nodes and 1,030,831 edges ships as a tarball. The same tarball includes `external-catalogs/skills-sh/catalog.json` and 90,846 remote-cataloged Skills.sh skill pages under `entities/skills/skills-sh-*.md`. Extract to get a ready-to-use `~/.claude/skill-wiki/`:
 
 ```bash
 # after `git clone` — or download graph/wiki-graph.tar.gz from the GitHub release

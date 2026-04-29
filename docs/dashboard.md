@@ -56,10 +56,10 @@ with deep links to `/skill/<slug>` (sidecar detail) and
 ### Explore the knowledge graph — `/graph`
 
 The graph tab is a cytoscape-rendered view over the dashboard-supported
-skill/agent/MCP graph. The shipped graph bundle also contains Skills.sh
-`external-skill` nodes and the graph build/recommendation APIs can be
-harness-aware, but this dashboard view does not yet render harness or
-external-skill nodes as first-class entities. When you arrive with no
+skill/agent/MCP graph. The shipped graph bundle also contains remote-cataloged
+Skills.sh `skill` nodes and the graph build/recommendation APIs can be
+harness-aware, but this dashboard view does not yet expose harness-specific
+filters or install actions. When you arrive with no
 slug selected, the page shows:
 
 - a stats line with the total node + edge counts

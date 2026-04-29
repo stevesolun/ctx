@@ -59,7 +59,9 @@ def test_normalize_catalog_resolves_truncated_ctx_slug_collisions(monkeypatch) -
     assert any(item["overlap"]["ctx_slug_collision_resolved"] for item in catalog["skills"])
 
 
-def test_update_wiki_tarball_adds_external_skill_nodes_and_pages(tmp_path: Path) -> None:
+def test_update_wiki_tarball_adds_skills_sh_as_first_class_skill_nodes_and_pages(
+    tmp_path: Path,
+) -> None:
     tarball = tmp_path / "wiki-graph.tar.gz"
     graph = {
         "directed": False,
@@ -97,8 +99,9 @@ def test_update_wiki_tarball_adds_external_skill_nodes_and_pages(tmp_path: Path)
                 "source": "open.feishu.cn",
                 "skill_id": "lark-doc",
                 "name": "lark-doc",
-                "type": "external-skill",
-                "external_catalog": "skills.sh",
+                "type": "skill",
+                "status": "remote-cataloged",
+                "source_catalog": "skills.sh",
                 "installs": 18029,
                 "tags": ["docs"],
                 "detail_url": "https://skills.sh/site/open.feishu.cn/lark-doc",
@@ -113,7 +116,7 @@ def test_update_wiki_tarball_adds_external_skill_nodes_and_pages(tmp_path: Path)
         graph_out = _read_json(tf, "./graphify-out/graph.json")
         catalog_out = _read_json(tf, "./external-catalogs/skills-sh/catalog.json")
         names = {member.name for member in tf.getmembers()}
-        page_name = "./entities/external-skills/o/skills-sh-open-feishu-cn-lark-doc.md"
+        page_name = "./entities/skills/skills-sh-open-feishu-cn-lark-doc.md"
         assert page_name in names
         page_member = tf.getmember(page_name)
         page_file = tf.extractfile(page_member)
@@ -122,12 +125,13 @@ def test_update_wiki_tarball_adds_external_skill_nodes_and_pages(tmp_path: Path)
 
     external_node = next(
         node for node in graph_out["nodes"]
-        if node["id"] == "external-skill:skills-sh:skills-sh-open-feishu-cn-lark-doc"
+        if node["id"] == "skill:skills-sh-open-feishu-cn-lark-doc"
     )
-    assert external_node["type"] == "external-skill"
-    assert external_node["external_catalog"] == "skills.sh"
+    assert external_node["type"] == "skill"
+    assert external_node["status"] == "remote-cataloged"
+    assert external_node["source_catalog"] == "skills.sh"
     assert external_node["duplicate_of"] == "skill:lark-doc"
-    assert graph_out["graph"]["external_catalog_nodes"]["skills.sh"] == 1
+    assert graph_out["graph"]["source_catalog_nodes"]["skills.sh"] == 1
     assert catalog_out["skills"][0]["graph_node_id"] == external_node["id"]
     assert catalog_out["skills"][0]["entity_path"] == page_name.removeprefix("./")
     assert catalog_out["skills"][0]["quality_signals"]["security_review"] == "metadata-only"

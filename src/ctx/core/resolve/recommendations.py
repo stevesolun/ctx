@@ -305,6 +305,8 @@ def recommend_by_tags(
             "matching_tags": sorted(matching_tags),
             "external": node_data.get("external", False),
             "external_catalog": node_data.get("external_catalog"),
+            "source_catalog": node_data.get("source_catalog"),
+            "status": node_data.get("status"),
             "source": node_data.get("source"),
             "skill_id": node_data.get("skill_id"),
             "installs": _safe_int(node_data.get("installs")),
@@ -338,10 +340,14 @@ def recommend_by_tags(
 def _graph_has_external_catalog_nodes(graph: Any, catalog_name: str) -> bool:
     try:
         external_counts = graph.graph.get("external_catalog_nodes")
+        source_counts = graph.graph.get("source_catalog_nodes")
     except AttributeError:
         return False
     if isinstance(external_counts, dict):
-        return _safe_int(external_counts.get(catalog_name)) > 0
+        if _safe_int(external_counts.get(catalog_name)) > 0:
+            return True
+    if isinstance(source_counts, dict):
+        return _safe_int(source_counts.get(catalog_name)) > 0
     return False
 
 
@@ -434,12 +440,14 @@ def _recommend_external_catalog(
     return [
         {
             "name": str(skill.get("id") or skill.get("name") or ""),
-            "type": "external-skill",
+            "type": "skill",
             "score": round(score, 1),
             "normalized_score": 0.0,
             "matching_tags": sorted(matching),
-            "external": True,
-            "external_catalog": "skills.sh",
+            "external": False,
+            "external_catalog": None,
+            "source_catalog": "skills.sh",
+            "status": "remote-cataloged",
             "source": skill.get("source"),
             "skill_id": skill.get("skill_id"),
             "installs": _safe_int(skill.get("installs")),

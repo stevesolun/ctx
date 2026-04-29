@@ -295,6 +295,8 @@ class CtxCoreToolbox:
                 "matching_tags": r.get("matching_tags", []),
                 "external": r.get("external", False),
                 "external_catalog": r.get("external_catalog"),
+                "source_catalog": r.get("source_catalog"),
+                "status": r.get("status"),
                 "source": r.get("source"),
                 "skill_id": r.get("skill_id"),
                 "installs": r.get("installs"),

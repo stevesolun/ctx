@@ -320,21 +320,23 @@ def test_external_skills_sh_catalog_can_rank_when_graph_has_no_match(tmp_path) -
     out = recommend_by_tags(G, ["lark", "docs"], top_n=3, query="lark docs")
 
     assert out[0]["name"] == "open.feishu.cn/lark-doc"
-    assert out[0]["external"] is True
-    assert out[0]["external_catalog"] == "skills.sh"
-    assert out[0]["type"] == "external-skill"
+    assert out[0]["external"] is False
+    assert out[0]["external_catalog"] is None
+    assert out[0]["source_catalog"] == "skills.sh"
+    assert out[0]["status"] == "remote-cataloged"
+    assert out[0]["type"] == "skill"
     assert out[0]["install_command"] == "npx skills add https://open.feishu.cn"
 
 
 def test_external_skill_graph_node_ranks_without_sidecar_catalog() -> None:
     G = _build_graph([("unrelated-python", ["python"])])
-    G.graph["external_catalog_nodes"] = {"skills.sh": 1}
+    G.graph["source_catalog_nodes"] = {"skills.sh": 1}
     G.add_node(
-        "external-skill:skills-sh-open-feishu-cn-lark-doc",
-        label="open.feishu.cn/lark-doc",
-        type="external-skill",
-        external=True,
-        external_catalog="skills.sh",
+        "skill:skills-sh-open-feishu-cn-lark-doc",
+        label="skills-sh-open-feishu-cn-lark-doc",
+        type="skill",
+        status="remote-cataloged",
+        source_catalog="skills.sh",
         source="open.feishu.cn",
         skill_id="lark-doc",
         tags=["docs"],
@@ -345,8 +347,8 @@ def test_external_skill_graph_node_ranks_without_sidecar_catalog() -> None:
 
     out = recommend_by_tags(G, ["lark", "docs"], top_n=3, query="lark docs")
 
-    assert out[0]["name"] == "open.feishu.cn/lark-doc"
-    assert out[0]["type"] == "external-skill"
-    assert out[0]["external"] is True
-    assert out[0]["external_catalog"] == "skills.sh"
+    assert out[0]["name"] == "skills-sh-open-feishu-cn-lark-doc"
+    assert out[0]["type"] == "skill"
+    assert out[0]["external"] is False
+    assert out[0]["source_catalog"] == "skills.sh"
     assert out[0]["install_command"] == "npx skills add https://open.feishu.cn"

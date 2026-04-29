@@ -5,7 +5,7 @@ hide:
 
 # ctx — Skill, Agent, MCP & Harness Recommendation and Management
 
-Watches what you develop, walks a knowledge graph of **1,969 skills, 464
+Watches what you develop, walks a knowledge graph of **92,815 skills, 464
 agents, 10,786 MCP servers, and cataloged harnesses**, and recommends the
 right ones on the fly — you decide what to load, install, or adopt. Powered
 by a Karpathy LLM wiki with persistent memory that gets smarter every session.
@@ -31,7 +31,7 @@ by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 Claude Code skills, agents, MCP servers, and model harness profiles are
 powerful, but at scale they become unmanageable:
 
-- **Discovery problem** — with 1,900+ skills, 460+ agents, 10,000+
+- **Discovery problem** — with 92K+ skills, 460+ agents, 10,000+
   MCP servers, and an expanding harness catalog, how do you know which
   ones exist and which are relevant to your current project?
 - **Context budget** — loading every installable entity wastes tokens and
@@ -63,16 +63,16 @@ graph-based discovery:
 
 - A Karpathy 3-layer wiki at `~/.claude/skill-wiki/` is the single source
   of truth.
-- **13,219 curated entity pages** for the shipped skill/agent/MCP
-  inventory, plus harness pages under `entities/harnesses/` when you
-  catalog them. Each page tracks tags, status, provenance, and usage
-  where it applies.
+- **104,065 entity pages/nodes** for the shipped skill/agent/MCP
+  inventory, including 90,846 remote-cataloged Skills.sh skill pages,
+  plus harness pages under `entities/harnesses/` when you catalog them.
+  Each page tracks tags, status, provenance, and usage where it applies.
 - A **knowledge graph** (104,065 nodes, 1,030,831 edges) built from a
-  13,219-node curated core plus 90,846 Skills.sh `external-skill` nodes.
-  The curated core has 22 Louvain communities and blends semantic cosine
-  + tag overlap + slug-token overlap; the external overlay adds sparse
-  duplicate/tag edges so upstream skill installs can be recommended
-  without being treated as reviewed local skills.
+  13,219-node curated core plus 90,846 remote-cataloged Skills.sh `skill`
+  nodes. The curated core has 22 Louvain communities and blends semantic
+  cosine + tag overlap + slug-token overlap; the current Skills.sh pass
+  adds sparse metadata edges and keeps metadata-only security status until
+  full SKILL.md body hydration runs.
 - **22 Louvain communities** group related entities into named
   communities (e.g., *AI + Devops + Frontend*, *Python + API*).
 - PostToolUse and Stop hooks update the wiki automatically during each
@@ -100,7 +100,7 @@ learns from your usage. Stale ones are flagged. New ones self-ingest.
     ---
 
     104,065 shipped graph nodes: 13,219 curated skill/agent/MCP nodes
-    plus 90,846 Skills.sh external-skill nodes. The graph has 1,030,831
+    plus 90,846 remote-cataloged Skills.sh skill nodes. The graph has 1,030,831
     weighted edges; Louvain communities are generated for the curated
     core.
     Ships pre-built in `graph/wiki-graph.tar.gz` and powers the

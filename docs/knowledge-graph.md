@@ -9,34 +9,35 @@ only. Dashboard harness exposure is not yet present.
 ## What's in it
 
 Authoritative numbers from the shipped tarball. The curated-core snapshot
-is **13,219 nodes** (skills + agents + MCP servers); harness pages under
-`entities/harnesses/` are ingested into local rebuilds and recommendation
-output when cataloged. The tarball also carries a graph-visible Skills.sh
-overlay: **90,846 `external-skill` nodes**, **90,846 sharded metadata
-pages**, and **67,519 sparse edges** back to curated entities. Those
-records are catalog-only upstream recommendations, not reviewed local
-skills.
+is **13,219 nodes** (1,969 curated skills + agents + MCP servers); harness
+pages under `entities/harnesses/` are ingested into local rebuilds and
+recommendation output when cataloged. The tarball also carries **90,846
+remote-cataloged Skills.sh `skill` nodes**, matching skill pages under
+`entities/skills/skills-sh-*.md`, and **67,519 sparse metadata edges** back
+to curated entities. These records are first-class skills by graph type,
+but remain metadata-only until their upstream SKILL.md bodies are hydrated
+and reviewed.
 
 | | Count |
 |---|---:|
 | Total nodes | **104,065** |
 | Curated core nodes | **13,219** (1,969 skills + 464 agents + 10,786 MCP servers) |
-| External Skills.sh nodes | **90,846** (`external-skill`, catalog-only) |
+| Remote-cataloged Skills.sh skill nodes | **90,846** (`skill`, `status=remote-cataloged`) |
 | Total edges | **1,030,831** |
 | Curated core edges | **963,312** |
-| External overlay edges | **67,519** |
+| Skills.sh metadata edges | **67,519** |
 | Communities | **22** (Louvain over the curated core) |
 | Edge sources (overlap-deduped) | semantic 210,227 - tag 543,938 - token 300,345 |
 | Cross-type edges (skill <-> agent) | ~222K |
 | Cross-type edges (skill <-> MCP) | ~62K |
 | Cross-type edges (agent <-> MCP) | ~13K |
-| External Skills.sh catalog | **90,846** observed entries (`external-catalogs/skills-sh/catalog.json` + `entities/external-skills/`) |
+| Skills.sh catalog | **90,846** observed entries (`external-catalogs/skills-sh/catalog.json` + `entities/skills/skills-sh-*.md`) |
 
 ## Install
 
 Extract the tarball into your `~/.claude/skill-wiki/` to get a
 ready-to-query graph plus every shipped skill/agent/MCP entity page,
-cataloged harness pages when present, Skills.sh external-skill metadata
+cataloged harness pages when present, remote-cataloged Skills.sh skill
 pages, concept pages, and converted micro-skill pipelines. The extracted
 tree also includes the Skills.sh catalog JSON used by the shared
 recommender:
@@ -143,13 +144,13 @@ The graph backs two recommendation paths:
 - Free-text recommendation surfaces (`ctx.recommend_bundle`, MCP
   `ctx__recommend_bundle`, generic harness tools, and Claude Code hook
   suggestions) share `ctx.core.resolve.recommendations.recommend_by_tags`.
-  That engine ranks skills, agents, MCP servers, harnesses, and
-  `external-skill` nodes by slug-token matches, tag overlap, graph
-  degree, and semantic-cache signals when available. Skills.sh results
-  carry `external_catalog`, `detail_url`, `install_command`, duplicate
+  That engine ranks skills, agents, MCP servers, and harnesses by
+  slug-token matches, tag overlap, graph degree, and semantic-cache
+  signals when available. Skills.sh results are `skill` nodes with
+  `source_catalog=skills.sh`, `detail_url`, `install_command`, duplicate
   hints, and metadata-only quality/security signals. If an older
-  extracted wiki has the Skills.sh catalog JSON but no external graph
-  nodes, the same recommender falls back to the catalog file.
+  extracted wiki has the Skills.sh catalog JSON but no graph nodes for
+  those records, the same recommender falls back to the catalog file.
 - Repository scans still start from stack detections and installed-entity
   availability. `resolve_skills.resolve()` maps detected languages,
   frameworks, infrastructure, and tools through the shared stack matrix, then
@@ -183,7 +184,7 @@ if your hook config does not include those paths.
 | v0.6.0 | 454,719 | Threshold raised to 500, multi-line YAML lists parsed, slug-token pseudo-tags added. |
 | v0.7.x | 847,207 | Pulsemcp ingest added 10,786 MCP server nodes; sentence-embedding semantic edges added. |
 | 2026-04-27 (this release) | **963,068** | +21 mattpocock skills, +156 designdotmd designs (+106,702 edges); patch-path bug fixed (graphify now forces full rebuild when prior graph has 0 semantic edges but current run computed semantic pairs); community detection switched from CNM to Louvain. |
-| 2026-04-29 Skills.sh overlay | **1,030,831** | +90,846 catalog-only `external-skill` nodes, +90,846 external metadata pages, and +67,519 sparse duplicate/tag edges to the curated graph. |
+| 2026-04-29 Skills.sh remote-cataloged pass | **1,030,831** | +90,846 first-class `skill` nodes, +90,846 skill pages, and +67,519 sparse duplicate/tag metadata edges to the curated graph. Full-body semantic edges are intentionally deferred to the hydration pass. |
 
 The full audit history lives in `CHANGELOG.md`. The current build is
 fully reproducible from the wiki content.

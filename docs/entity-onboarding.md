@@ -33,10 +33,10 @@ the update is treated like a release step.
 4. Rebuild the curated wiki graph with `ctx-wiki-graphify`.
 5. Repack `graph/wiki-graph.tar.gz` with the exclusions in
    `graph/README.md`; never commit local review reports or raw caches.
-6. Refresh the Skills.sh external overlay when shipping catalog coverage.
-   This adds catalog-only `external-skill` graph nodes, sharded metadata
-   pages, install commands, duplicate hints, and metadata-only
-   quality/security signals:
+6. Refresh the Skills.sh catalog overlay when shipping catalog coverage.
+   This adds remote-cataloged first-class `skill` nodes under the
+   `skills-sh-` prefix, skill pages under `entities/skills/`, install
+   commands, duplicate hints, and metadata-only quality/security signals:
 
    ```bash
    python src/import_skills_sh_catalog.py --from-api-union <raw.json> \
