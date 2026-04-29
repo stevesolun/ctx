@@ -1,5 +1,5 @@
 """
-test_ctx_monitor_3type.py -- pins the 3-type dashboard contract.
+test_ctx_monitor_3type.py -- pins the dashboard entity contract.
 
 The dashboard audit (Phase 5c) surfaced that ctx_monitor.py was MCP-
 unaware across every route. This file pins the fixes so a future
@@ -7,17 +7,17 @@ refactor can't silently regress back to the pre-v0.7 skill+agent-only
 framing.
 
 Scope:
-  - _wiki_stats counts MCPs alongside skills + agents
-  - _wiki_index_entries includes mcp-server entries
-  - _render_home shows the 3-type breakdown in the Wiki entities card
-  - _render_wiki_index has a type filter that includes mcp-server
+  - _wiki_stats counts MCPs and harnesses alongside skills + agents
+  - _wiki_index_entries includes mcp-server and harness entries
+  - _render_home shows the entity-type breakdown in the Wiki entities card
+  - _render_wiki_index has a type filter that includes mcp-server and harness
   - _render_loaded renders a Skills / Agents / MCP servers section
     layout and carries entity_type on every unload button
   - _perform_unload routes by entity_type (skill+agent -> skill_unload,
     mcp-server -> mcp_install.uninstall_mcp)
   - _render_graph has a left-sidebar filter panel (type checkboxes
-    + tag filter) and cytoscape styles `node[type="mcp-server"]` in
-    a distinct colour.
+    + tag filter) and cytoscape styles for MCP and harness nodes in
+    distinct colours.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import networkx as nx
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
@@ -33,16 +34,15 @@ import ctx_monitor as _cm
 
 
 # ────────────────────────────────────────────────────────────────────
-# Fixture — synthetic wiki with all three entity types
+# Fixture — synthetic wiki with all dashboard entity types
 # ────────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture()
 def wiki_3type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Build a minimal wiki with skills + agents + MCPs and point ctx_monitor
-    at it via ``_wiki_dir``."""
+    """Build a minimal wiki and point ctx_monitor at it via ``_wiki_dir``."""
     wiki = tmp_path / "skill-wiki"
-    for sub in ("skills", "agents"):
+    for sub in ("skills", "agents", "harnesses"):
         (wiki / "entities" / sub).mkdir(parents=True)
     # MCP dirs are sharded — put one under 'a/', one under 'p/'.
     (wiki / "entities" / "mcp-servers" / "a").mkdir(parents=True)
@@ -72,6 +72,11 @@ def wiki_3type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "---\ntype: mcp-server\nslug: pulsemcp-meta\ntags: [meta]\n---\n# pulsemcp-meta\n",
         encoding="utf-8",
     )
+    # 1 harness
+    (wiki / "entities" / "harnesses" / "langgraph.md").write_text(
+        "---\ntype: harness\nslug: langgraph\ntags: [agent, orchestration]\n---\n# langgraph\n",
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(_cm, "_wiki_dir", lambda: wiki)
     return wiki
@@ -88,7 +93,8 @@ class TestWikiStats:
         assert s["skills"] == 2
         assert s["agents"] == 1
         assert s["mcps"] == 3
-        assert s["total"] == 6
+        assert s["harnesses"] == 1
+        assert s["total"] == 7
 
     def test_mcps_sharded_dirs_scanned_recursively(self, wiki_3type):
         """MCPs live under entities/mcp-servers/<first-char>/<slug>.md —
@@ -104,6 +110,7 @@ class TestWikiStats:
         monkeypatch.setattr(_cm, "_wiki_dir", lambda: wiki)
         s = _cm._wiki_stats()
         assert s["mcps"] == 0
+        assert s["harnesses"] == 0
         assert "mcps" in s  # key present even at zero
 
 
@@ -117,6 +124,7 @@ class TestWikiIndexEntries:
         entries = _cm._wiki_index_entries()
         types = {e["type"] for e in entries}
         assert "mcp-server" in types
+        assert "harness" in types
         assert "skill" in types
         assert "agent" in types
 
@@ -131,9 +139,13 @@ class TestWikiIndexEntries:
             wiki_3type / "entities" / "mcp-servers" / "a" / "anthropic-python-sdk.md"
         )
 
+    def test_wiki_entity_path_resolves_harness_pages(self, wiki_3type):
+        path = _cm._wiki_entity_path("langgraph", entity_type="harness")
+        assert path == wiki_3type / "entities" / "harnesses" / "langgraph.md"
+
 
 # ────────────────────────────────────────────────────────────────────
-# _render_home — 3-type card
+# _render_home — entity-type card
 # ────────────────────────────────────────────────────────────────────
 
 
@@ -154,6 +166,7 @@ class TestRenderHome3Type:
         assert "2 skills" in html or "2 skill" in html
         assert "1 agent" in html
         assert "3 MCPs" in html
+        assert "1 harness" in html
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -166,8 +179,10 @@ class TestRenderWikiIndex3Type:
         monkeypatch.setattr(_cm, "_all_sidecars", lambda: [])
         html = _cm._render_wiki_index()
         assert "value='mcp-server' checked" in html
+        assert "value='harness' checked" in html
         # Count for the mcp-server bucket should render.
         assert ">3</span>" in html  # 3 MCPs in fixture
+        assert ">1</span>" in html  # 1 harness in fixture
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -319,10 +334,11 @@ class TestRenderGraphSidebar:
                             lambda: {"nodes": 10, "edges": 20, "available": True})
         monkeypatch.setattr(_cm, "_top_degree_seeds", lambda: [])
         html = _cm._render_graph()
-        # Three type checkboxes: skill, agent, mcp-server.
+        # Four type checkboxes: skill, agent, mcp-server, harness.
         assert "class='graph-type-filter' value='skill'" in html
         assert "class='graph-type-filter' value='agent'" in html
         assert "class='graph-type-filter' value='mcp-server'" in html
+        assert "class='graph-type-filter' value='harness'" in html
 
     def test_sidebar_has_tag_filter(self, monkeypatch):
         monkeypatch.setattr(_cm, "_graph_stats",
@@ -331,8 +347,8 @@ class TestRenderGraphSidebar:
         html = _cm._render_graph()
         assert "id='tag-filter'" in html
 
-    def test_cytoscape_styles_mcp_node_distinctly(self, monkeypatch):
-        """The graph view shows three types; each must be visually
+    def test_cytoscape_styles_mcp_and_harness_nodes_distinctly(self, monkeypatch):
+        """The graph view shows four types; each must be visually
         distinct or users can't tell them apart. Before the fix, MCPs
         rendered in the default skill color because no CSS rule
         matched node[type="mcp-server"]."""
@@ -341,17 +357,101 @@ class TestRenderGraphSidebar:
         monkeypatch.setattr(_cm, "_top_degree_seeds", lambda: [])
         html = _cm._render_graph()
         assert 'node[type = "mcp-server"]' in html
+        assert 'node[type = "harness"]' in html
         # The current design uses red for MCPs to distinguish from
         # indigo (skill) and amber (agent). A future restyle can
         # loosen this — just require SOME style block exists.
         assert "shape" in html.split('node[type = "mcp-server"]')[1][:300]
+        assert "shape" in html.split('node[type = "harness"]')[1][:300]
 
     def test_tap_handler_strips_mcp_server_prefix(self, monkeypatch):
         """Clicking an MCP node must route to /wiki/<slug> — the
-        prefix-stripping regex has to know all three types."""
+        prefix-stripping regex has to know all four types."""
         monkeypatch.setattr(_cm, "_graph_stats",
                             lambda: {"nodes": 0, "edges": 0, "available": False})
         monkeypatch.setattr(_cm, "_top_degree_seeds", lambda: [])
         html = _cm._render_graph()
-        # Regex should include mcp-server in the prefix alternation.
-        assert "(skill|agent|mcp-server)" in html
+        # Regex should include mcp-server and harness in the prefix alternation.
+        assert "(skill|agent|mcp-server|harness)" in html
+
+    def test_graph_neighborhood_can_disambiguate_harness_slug(self, monkeypatch):
+        graph = nx.Graph()
+        graph.add_node("skill:langgraph", label="langgraph", type="skill", tags=["python"])
+        graph.add_node("harness:langgraph", label="langgraph", type="harness", tags=["agent"])
+        graph.add_node("skill:agent-patterns", label="agent-patterns", type="skill", tags=["agent"])
+        graph.add_edge("harness:langgraph", "skill:agent-patterns", weight=2, shared_tags=["agent"])
+        monkeypatch.setattr(_cm, "_load_dashboard_graph", lambda: graph)
+
+        out = _cm._graph_neighborhood("langgraph", entity_type="harness")
+
+        assert out["center"] == "harness:langgraph"
+        assert any(n["data"]["type"] == "harness" for n in out["nodes"])
+
+
+class TestMonitorRoutesPreserveEntityType:
+    def _run_get(self, path: str, *, html_fn=None, json_fn=None):
+        handler = type("FakeHandler", (), {})()
+        handler.path = path
+        sent: dict[str, object] = {}
+        handler._send_html = lambda body: sent.setdefault("html", body)
+        handler._send_json = lambda body: sent.setdefault("json", body)
+        handler._send_404 = lambda detail: sent.setdefault("404", detail)
+        handler._send_500 = lambda exc: sent.setdefault("500", exc)
+        if html_fn is not None:
+            handler._send_html = html_fn
+        if json_fn is not None:
+            handler._send_json = json_fn
+        _cm._MonitorHandler.do_GET(handler)
+        return sent
+
+    def test_graph_route_passes_type_query(self, monkeypatch):
+        calls = {}
+
+        def fake_render_graph(slug, focus_type=None):
+            calls["slug"] = slug
+            calls["focus_type"] = focus_type
+            return "graph"
+
+        monkeypatch.setattr(_cm, "_render_graph", fake_render_graph)
+
+        sent = self._run_get("/graph?slug=langgraph&type=harness")
+
+        assert sent["html"] == "graph"
+        assert calls == {"slug": "langgraph", "focus_type": "harness"}
+
+    def test_wiki_route_passes_type_query(self, monkeypatch):
+        calls = {}
+
+        def fake_render_wiki_entity(slug, entity_type=None):
+            calls["slug"] = slug
+            calls["entity_type"] = entity_type
+            return "wiki"
+
+        monkeypatch.setattr(_cm, "_render_wiki_entity", fake_render_wiki_entity)
+
+        sent = self._run_get("/wiki/langgraph?type=harness")
+
+        assert sent["html"] == "wiki"
+        assert calls == {"slug": "langgraph", "entity_type": "harness"}
+
+    def test_graph_api_route_passes_type_query(self, monkeypatch):
+        calls = {}
+
+        def fake_graph_neighborhood(slug, hops=1, limit=40, entity_type=None):
+            calls["slug"] = slug
+            calls["hops"] = hops
+            calls["limit"] = limit
+            calls["entity_type"] = entity_type
+            return {"center": "harness:langgraph", "nodes": [], "edges": []}
+
+        monkeypatch.setattr(_cm, "_graph_neighborhood", fake_graph_neighborhood)
+
+        sent = self._run_get("/api/graph/langgraph.json?type=harness&hops=2&limit=55")
+
+        assert sent["json"] == {"center": "harness:langgraph", "nodes": [], "edges": []}
+        assert calls == {
+            "slug": "langgraph",
+            "hops": 2,
+            "limit": 55,
+            "entity_type": "harness",
+        }

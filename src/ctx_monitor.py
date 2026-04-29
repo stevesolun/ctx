@@ -1,5 +1,5 @@
 # mypy: disable-error-code=attr-defined
-"""ctx_monitor.py -- Local HTTP dashboard for ctx skill/agent activity.
+"""ctx_monitor.py -- Local HTTP dashboard for ctx runtime and catalog activity.
 
 ``ctx-monitor serve [--port 8765]`` starts a zero-dependency threaded HTTP server
 (stdlib http.server) that renders the audit log + skill-events.jsonl +
@@ -14,16 +14,16 @@ Routes:
     /skills                     Sidecar card grid with grade + score filters
     /skill/<slug>               Sidecar breakdown + timeline of audit events
     /wiki                       Wiki entity index — all pages with search
-    /wiki/<slug>                One wiki entity page (frontmatter + body)
+    /wiki/<slug>?type=<entity>  One wiki entity page (frontmatter + body)
     /graph                      Cytoscape graph explorer + popular seeds
-    /graph?slug=<slug>          Focus cytoscape on a specific slug
+    /graph?slug=<slug>&type=... Focus cytoscape on a specific entity
     /kpi                        Grade / lifecycle / category KPIs
     /logs                       Filterable tail of ctx-audit.jsonl
     /events                     Live SSE stream of new audit-log lines
     /api/sessions.json          JSON index for scripting
     /api/manifest.json          Raw ~/.claude/skill-manifest.json
     /api/skill/<slug>.json      Sidecar passthrough
-    /api/graph/<slug>.json      Cytoscape-shaped neighborhood
+    /api/graph/<slug>.json      Cytoscape-shaped neighborhood; accepts type
     /api/kpi.json               DashboardSummary passthrough
 
 Design notes:
@@ -122,23 +122,38 @@ def _mcp_shard(slug: str) -> str:
     return first if first.isalpha() else "0-9"
 
 
-def _wiki_entity_path(slug: str) -> Path | None:
-    """Resolve a slug to its wiki entity page under skills/ or agents/.
+_DASHBOARD_ENTITY_SOURCES: tuple[tuple[str, str, bool], ...] = (
+    ("skills", "skill", False),
+    ("agents", "agent", False),
+    ("mcp-servers", "mcp-server", True),
+    ("harnesses", "harness", False),
+)
+_DASHBOARD_ENTITY_TYPES: tuple[str, ...] = tuple(
+    entity_type for _, entity_type, _ in _DASHBOARD_ENTITY_SOURCES
+)
+
+
+def _wiki_entity_path(slug: str, entity_type: str | None = None) -> Path | None:
+    """Resolve a slug to its wiki entity page.
 
     Wiki layout: ``entities/skills/<slug>.md``, ``entities/agents/<slug>.md``,
-    or sharded ``entities/mcp-servers/<first-char>/<slug>.md``.
-    Returns the first match, or ``None`` if neither exists.
+    ``entities/harnesses/<slug>.md``, or sharded
+    ``entities/mcp-servers/<first-char>/<slug>.md``. Returns the first match
+    unless ``entity_type`` disambiguates duplicate slugs.
     """
     # Validate slug so a crafted request can't escape the wiki tree.
     if not _is_safe_slug(slug):
         return None
-    for sub in ("skills", "agents"):
-        p = _wiki_dir() / "entities" / sub / f"{slug}.md"
+    for sub, current_type, recursive in _DASHBOARD_ENTITY_SOURCES:
+        if entity_type is not None and entity_type != current_type:
+            continue
+        p = (
+            _wiki_dir() / "entities" / sub / _mcp_shard(slug) / f"{slug}.md"
+            if recursive
+            else _wiki_dir() / "entities" / sub / f"{slug}.md"
+        )
         if p.exists():
             return p
-    p = _wiki_dir() / "entities" / "mcp-servers" / _mcp_shard(slug) / f"{slug}.md"
-    if p.exists():
-        return p
     return None
 
 
@@ -376,7 +391,12 @@ def _layout(title: str, body: str) -> str:
 # ─── Graph neighborhood (for /graph) ────────────────────────────────────────
 
 
-def _graph_neighborhood(slug: str, hops: int = 1, limit: int = 40) -> dict:
+def _graph_neighborhood(
+    slug: str,
+    hops: int = 1,
+    limit: int = 40,
+    entity_type: str | None = None,
+) -> dict:
     """Return cytoscape-shaped {nodes, edges} for the N-hop neighborhood.
 
     Uses ``resolve_graph.load_graph`` so the NetworkX 'links' vs 'edges'
@@ -393,8 +413,13 @@ def _graph_neighborhood(slug: str, hops: int = 1, limit: int = 40) -> dict:
         return {"nodes": [], "edges": [], "center": None}
 
     center = None
-    for prefix in ("skill:", "agent:", "mcp-server:"):
-        candidate = f"{prefix}{slug}"
+    entity_types = (
+        (entity_type,)
+        if entity_type in _DASHBOARD_ENTITY_TYPES
+        else _DASHBOARD_ENTITY_TYPES
+    )
+    for current_type in entity_types:
+        candidate = f"{current_type}:{slug}"
         if candidate in G:
             center = candidate
             break
@@ -413,6 +438,7 @@ def _graph_neighborhood(slug: str, hops: int = 1, limit: int = 40) -> dict:
         label = data.get("label", nid.split(":", 1)[-1])
         default_type = (
             "mcp-server" if nid.startswith("mcp-server:")
+            else "harness" if nid.startswith("harness:")
             else "agent" if nid.startswith("agent:")
             else "skill"
         )
@@ -481,12 +507,12 @@ def _graph_stats() -> dict:
 
 
 def _wiki_stats() -> dict:
-    """Entity counts across all three types.
+    """Entity counts across all dashboard-supported entity types.
 
     MCPs are sharded by first-char under ``entities/mcp-servers/<shard>/``
     so we recurse rather than the flat glob used for skills + agents.
     Home page consumes ``total`` for the headline number and the
-    individual counts for the "N skills . M agents . K MCPs" detail
+    individual counts for the dashboard entity-type detail
     line.
     """
     base = _wiki_dir() / "entities"
@@ -494,11 +520,13 @@ def _wiki_stats() -> dict:
     agents = len(list((base / "agents").glob("*.md"))) if (base / "agents").is_dir() else 0
     mcp_dir = base / "mcp-servers"
     mcps = len(list(mcp_dir.rglob("*.md"))) if mcp_dir.is_dir() else 0
+    harnesses = len(list((base / "harnesses").glob("*.md"))) if (base / "harnesses").is_dir() else 0
     return {
         "skills": skills,
         "agents": agents,
         "mcps": mcps,
-        "total": skills + agents + mcps,
+        "harnesses": harnesses,
+        "total": skills + agents + mcps + harnesses,
     }
 
 
@@ -550,7 +578,7 @@ def _render_home() -> str:
         f"<div style='font-size:1.6rem; font-weight:600;'>{wstats['total']:,}</div>"
         f"<span class='muted' style='font-size:0.75rem;'>"
         f"{wstats['skills']:,} skills · {wstats['agents']:,} agents · "
-        f"{wstats['mcps']:,} MCPs</span></div>"
+        f"{wstats['mcps']:,} MCPs · {wstats['harnesses']:,} harnesses</span></div>"
         + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Knowledge graph</div>"
         f"<div style='font-size:1.6rem; font-weight:600;'>{gstats['nodes']}</div>"
         f"<span class='muted' style='font-size:0.75rem;'>{gstats['edges']:,} edges</span>"
@@ -820,6 +848,7 @@ def _top_degree_seeds(limit: int = 18) -> list[dict]:
         prefix, _, slug = node_id.partition(":")
         seed_type = (
             "mcp-server" if prefix == "mcp-server"
+            else "harness" if prefix == "harness"
             else "agent" if prefix == "agent"
             else "skill"
         )
@@ -832,7 +861,7 @@ def _top_degree_seeds(limit: int = 18) -> list[dict]:
     return out
 
 
-def _render_graph(focus: str | None = None) -> str:
+def _render_graph(focus: str | None = None, focus_type: str | None = None) -> str:
     """Interactive graph view — cytoscape-rendered N-hop neighborhood.
 
     Cytoscape.js is loaded from a CDN. This is a local-dev dashboard
@@ -841,14 +870,15 @@ def _render_graph(focus: str | None = None) -> str:
     """
     focus_slug = focus or ""
     focus_js = json.dumps(focus_slug)
+    focus_type_js = json.dumps(focus_type or "")
     gstats = _graph_stats()
     seeds = _top_degree_seeds() if not focus_slug and gstats.get("available") else []
     seed_html = ""
     if seeds:
         chips = "".join(
-            f"<a href='/graph?slug={html.escape(s['slug'])}' "
+            f"<a href='/graph?slug={html.escape(s['slug'])}&amp;type={html.escape(s['type'])}' "
             f"style='display:inline-block; margin:0.2rem 0.25rem; padding:0.25rem 0.6rem; "
-            f"border-radius:999px; background:{'#fef3c7' if s['type']=='agent' else '#e0e7ff'}; "
+            f"border-radius:999px; background:{'#fef3c7' if s['type']=='agent' else '#fee2e2' if s['type']=='mcp-server' else '#dcfce7' if s['type']=='harness' else '#e0e7ff'}; "
             f"color:#111; font-size:0.82rem; text-decoration:none;'>"
             f"<code style='background:transparent;'>{html.escape(s['slug'])}</code> "
             f"<span class='muted' style='font-size:0.72rem;'>· deg {s['degree']}</span>"
@@ -881,7 +911,7 @@ def _render_graph(focus: str | None = None) -> str:
         "<aside style='position:sticky; top:1rem;'>"
         "<div class='card'><strong>Focus</strong>"
         "<input type='text' id='focus' "
-        "placeholder='skill / agent / mcp slug' "
+        "placeholder='skill / agent / mcp / harness slug' "
         f"value='{html.escape(focus_slug)}' "
         "style='width:100%; margin-top:0.4rem; padding:0.35rem 0.5rem; "
         "border:1px solid #ccc; border-radius:4px;'>"
@@ -897,6 +927,9 @@ def _render_graph(focus: str | None = None) -> str:
         "<label style='display:flex; justify-content:space-between; padding:0.25rem 0;'>"
         "<span><input type='checkbox' class='graph-type-filter' value='mcp-server' checked> mcp-server</span>"
         "<span class='muted' id='graph-count-mcp-server' style='font-size:0.78rem;'>—</span></label>"
+        "<label style='display:flex; justify-content:space-between; padding:0.25rem 0;'>"
+        "<span><input type='checkbox' class='graph-type-filter' value='harness' checked> harness</span>"
+        "<span class='muted' id='graph-count-harness' style='font-size:0.78rem;'>-</span></label>"
         "</div>"
         "<div class='card'><strong>Tag filter</strong>"
         "<input type='text' id='tag-filter' "
@@ -917,6 +950,7 @@ def _render_graph(focus: str | None = None) -> str:
         "<script src='https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js'></script>"
         "<script>\n"
         f"const initial = {focus_js};\n"
+        f"const initialType = {focus_type_js};\n"
         "const cy = cytoscape({\n"
         "  container: document.getElementById('cy'),\n"
         "  style: [\n"
@@ -930,8 +964,12 @@ def _render_graph(focus: str | None = None) -> str:
         "    }},\n"
         "    { selector: 'node[type = \"mcp-server\"]', style: {\n"
         "      'background-color': '#ef4444',\n"  # red for MCPs so the
-        # three types are visually distinct at a glance in the graph.
+        # dashboard entity types are visually distinct at a glance in the graph.
         "      'shape': 'diamond', 'width': 24, 'height': 24,\n"
+        "    }},\n"
+        "    { selector: 'node[type = \"harness\"]', style: {\n"
+        "      'background-color': '#22c55e',\n"
+        "      'shape': 'hexagon', 'width': 26, 'height': 26,\n"
         "    }},\n"
         "    { selector: 'node[depth = 0]', style: {\n"
         "      'background-color': '#10b981', 'width': 34, 'height': 34,\n"
@@ -948,9 +986,11 @@ def _render_graph(focus: str | None = None) -> str:
         "  layout: { name: 'cose', animate: false, padding: 30 },\n"
         "});\n"
         "cy.on('tap', 'node', (e) => {\n"
-        # Node IDs are prefixed "skill:", "agent:", or "mcp-server:".
-        "  const slug = e.target.id().replace(/^(skill|agent|mcp-server):/, '');\n"
-        "  window.location.href = '/wiki/' + encodeURIComponent(slug);\n"
+        # Node IDs are prefixed by their entity type.
+        "  const nodeType = e.target.data('type') || '';\n"
+        "  const slug = e.target.id().replace(/^(skill|agent|mcp-server|harness):/, '');\n"
+        "  const suffix = nodeType ? '?type=' + encodeURIComponent(nodeType) : '';\n"
+        "  window.location.href = '/wiki/' + encodeURIComponent(slug) + suffix;\n"
         "});\n"
         # ── Client-side filtering (type + tag substring) ─────────────
         "function applyFilters() {\n"
@@ -959,7 +999,7 @@ def _render_graph(focus: str | None = None) -> str:
         "      .filter(cb => cb.checked).map(cb => cb.value));\n"
         "  const tagQ = (document.getElementById('tag-filter').value || '')\n"
         "    .trim().toLowerCase();\n"
-        "  const counts = {skill: 0, agent: 0, 'mcp-server': 0};\n"
+        "  const counts = {skill: 0, agent: 0, 'mcp-server': 0, harness: 0};\n"
         "  let visible = 0;\n"
         "  cy.nodes().forEach(n => {\n"
         "    const t = n.data('type');\n"
@@ -984,12 +1024,14 @@ def _render_graph(focus: str | None = None) -> str:
         "  document.getElementById('graph-count-skill').textContent = counts.skill;\n"
         "  document.getElementById('graph-count-agent').textContent = counts.agent;\n"
         "  document.getElementById('graph-count-mcp-server').textContent = counts['mcp-server'];\n"
+        "  document.getElementById('graph-count-harness').textContent = counts.harness;\n"
         "  document.getElementById('graph-match-count').textContent = visible + ' visible';\n"
         "}\n"
-        "async function load(slug) {\n"
+        "async function load(slug, entityType = '') {\n"
         "  if (!slug) return;\n"
         "  document.getElementById('msg').textContent = 'loading…';\n"
-        "  const r = await fetch('/api/graph/' + encodeURIComponent(slug) + '.json');\n"
+        "  const suffix = entityType ? '?type=' + encodeURIComponent(entityType) : '';\n"
+        "  const r = await fetch('/api/graph/' + encodeURIComponent(slug) + '.json' + suffix);\n"
         "  if (!r.ok) { document.getElementById('msg').textContent = 'not found'; return; }\n"
         "  const g = await r.json();\n"
         "  if (!g.center) { document.getElementById('msg').textContent = 'slug not in graph'; return; }\n"
@@ -1003,15 +1045,15 @@ def _render_graph(focus: str | None = None) -> str:
         "document.getElementById('focus').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') load(ev.target.value.trim()); });\n"
         "document.querySelectorAll('.graph-type-filter').forEach(cb => cb.addEventListener('change', applyFilters));\n"
         "document.getElementById('tag-filter').addEventListener('input', applyFilters);\n"
-        "if (initial) load(initial);\n"
+        "if (initial) load(initial, initialType);\n"
         "</script>"
     )
     return _layout("Graph", body)
 
 
-def _render_wiki_entity(slug: str) -> str:
+def _render_wiki_entity(slug: str, entity_type: str | None = None) -> str:
     """Render one wiki entity page (frontmatter + body)."""
-    path = _wiki_entity_path(slug)
+    path = _wiki_entity_path(slug, entity_type=entity_type)
     if path is None:
         return _layout(
             slug,
@@ -1028,6 +1070,11 @@ def _render_wiki_entity(slug: str) -> str:
         )
     meta, md_body = _parse_frontmatter(raw)
     sidecar = _load_sidecar(slug)
+    type_suffix = (
+        f"&amp;type={html.escape(entity_type)}"
+        if entity_type in _DASHBOARD_ENTITY_TYPES
+        else ""
+    )
 
     fm_rows = "".join(
         f"<tr><td class='muted'>{html.escape(k)}</td>"
@@ -1045,7 +1092,7 @@ def _render_wiki_entity(slug: str) -> str:
             f"{' · floor ' + html.escape(sidecar.get('hard_floor','')) if sidecar.get('hard_floor') else ''}"
             f"<div style='margin-top:0.4rem;'>"
             f"<a href='/skill/{html.escape(slug)}'>sidecar detail →</a> · "
-            f"<a href='/graph?slug={html.escape(slug)}'>graph neighborhood →</a>"
+            f"<a href='/graph?slug={html.escape(slug)}{type_suffix}'>graph neighborhood →</a>"
             "</div></div>"
         )
 
@@ -1074,13 +1121,9 @@ def _wiki_index_entries() -> list[dict]:
     base = _wiki_dir() / "entities"
     if not base.is_dir():
         return []
-    # Iterate all three entity subdirs. MCPs are sharded (one dir per
-    # first-char) so we glob recursively; skills + agents are flat.
-    sources: list[tuple[str, str, bool]] = [
-        ("skills", "skill", False),        # dir_name, entity_type, recursive
-        ("agents", "agent", False),
-        ("mcp-servers", "mcp-server", True),
-    ]
+    # MCPs are sharded (one dir per first-char) so we glob recursively;
+    # all other dashboard entity types are flat.
+    sources = _DASHBOARD_ENTITY_SOURCES
     out: list[dict] = []
     for sub, entity_type, recursive in sources:
         d = base / sub
@@ -1126,7 +1169,7 @@ def _render_wiki_index() -> str:
         if slug:
             grade_by_slug[slug] = sc.get("grade", "")
 
-    type_counts = {"skill": 0, "agent": 0, "mcp-server": 0}
+    type_counts = {entity_type: 0 for entity_type in _DASHBOARD_ENTITY_TYPES}
     for e in entries:
         type_counts[e["type"]] = type_counts.get(e["type"], 0) + 1
 
@@ -1135,7 +1178,7 @@ def _render_wiki_index() -> str:
         f"data-slug='{html.escape(e['slug'])}' "
         f"data-type='{html.escape(e['type'])}' "
         f"data-tags='{html.escape(' '.join(e['tags']).lower())}' "
-        f"href='/wiki/{html.escape(e['slug'])}' "
+        f"href='/wiki/{html.escape(e['slug'])}?type={html.escape(e['type'])}' "
         "style='border:1px solid #e5e7eb; border-radius:6px; "
         "padding:0.6rem 0.8rem; text-decoration:none; color:inherit; "
         "display:flex; flex-direction:column; gap:0.25rem;'>"
@@ -1161,7 +1204,7 @@ def _render_wiki_index() -> str:
         f"<span><input type='checkbox' class='wiki-type-filter' value='{t}' checked> {t}</span>"
         f"<span class='muted' style='font-size:0.78rem;'>{type_counts.get(t, 0):,}</span>"
         f"</label>"
-        for t in ("skill", "agent", "mcp-server")
+        for t in _DASHBOARD_ENTITY_TYPES
     )
 
     body = (
@@ -1702,12 +1745,12 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             elif path == "/logs":
                 self._send_html(_render_logs())
             elif path == "/graph":
-                self._send_html(_render_graph(qs.get("slug")))
+                self._send_html(_render_graph(qs.get("slug"), qs.get("type")))
             elif path == "/wiki":
                 self._send_html(_render_wiki_index())
             elif path.startswith("/wiki/"):
                 slug = path.split("/wiki/", 1)[1]
-                self._send_html(_render_wiki_entity(slug))
+                self._send_html(_render_wiki_entity(slug, qs.get("type")))
             elif path == "/kpi":
                 self._send_html(_render_kpi())
             elif path == "/events":
@@ -1732,7 +1775,9 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 slug = path[len("/api/graph/"): -len(".json")]
                 hops = max(1, min(int(qs.get("hops", 1)), 3))
                 limit = max(5, min(int(qs.get("limit", 40)), 150))
-                self._send_json(_graph_neighborhood(slug, hops=hops, limit=limit))
+                self._send_json(_graph_neighborhood(
+                    slug, hops=hops, limit=limit, entity_type=qs.get("type"),
+                ))
             elif path == "/api/events.stream":
                 self._stream_audit_log()
             else:

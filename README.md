@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-3346_collected-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-3351_collected-brightgreen.svg)](#)
 [![Graph](https://img.shields.io/badge/Graph-104%2C078_nodes_/_1.0M_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
@@ -69,7 +69,7 @@ ctx-toolbox run --event pre-commit          # run a council on the current diff
 ctx-monitor serve          # local dashboard: http://127.0.0.1:8765/
 ```
 
-The **`ctx-monitor`** dashboard shows currently loaded skills, agents, and MCP servers with load/unload buttons, a cytoscape graph view (`/graph?slug=…`), the LLM-wiki entity browser (`/wiki/<slug>`), a filterable skills grid, a session timeline, an audit log viewer, and a live SSE event stream. Dashboard harness exposure is not yet present; harnesses are cataloged and recommended through the CLI/API surfaces.
+The **`ctx-monitor`** dashboard shows currently loaded skills, agents, and MCP servers with load/unload buttons, a cytoscape graph view (`/graph?slug=…`), the LLM-wiki entity browser (`/wiki/<slug>`), a filterable skills grid, a session timeline, an audit log viewer, and a live SSE event stream. Harnesses are visible in the dashboard wiki and graph views; harness install/lifecycle actions stay in `ctx-harness-install`.
 
 When `ctx-skill-add`, `ctx-agent-add`, `ctx-mcp-add`, or `ctx-harness-add`
 finds an existing entity, ctx prints a benefits/risks update review and skips

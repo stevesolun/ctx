@@ -530,9 +530,10 @@ def test_render_wiki_index_lists_entities(fake_claude: Path) -> None:
     # Search + type filter must be present.
     assert "id='wiki-search'" in html_out
     assert "class='wiki-type-filter'" in html_out
-    # Cards link to the per-entity wiki page.
-    assert "href='/wiki/python-patterns'" in html_out
-    assert "href='/wiki/code-reviewer'" in html_out
+    # Cards link to the typed per-entity wiki page so duplicate slugs can
+    # disambiguate skill/agent/MCP/harness pages.
+    assert "href='/wiki/python-patterns?type=skill'" in html_out
+    assert "href='/wiki/code-reviewer?type=agent'" in html_out
 
 
 def test_render_wiki_index_empty_when_no_entities(fake_claude: Path) -> None:
