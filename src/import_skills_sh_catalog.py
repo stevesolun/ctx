@@ -39,6 +39,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -55,9 +56,15 @@ LEGACY_EXTERNAL_NODE_PREFIX = "external-skill:skills-sh:"
 MAX_EXTERNAL_EDGES_PER_NODE = 2
 EXTERNAL_ENTITY_ROOT = "entities/external-skills"
 SKILLS_SH_ENTITY_ROOT = "entities/skills"
+DEFAULT_DETAIL_MAX_BYTES = 2_000_000
+DEFAULT_SKILL_BODY_MAX_CHARS = 120_000
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _SAFE_SLUG_RE = re.compile(r"[^a-z0-9]+")
+_VOID_HTML_TAGS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+    "param", "source", "track", "wbr",
+}
 _NOISY_EXTERNAL_EDGE_TAGS = {
     "skills-sh", "skill", "skills", "ai", "agent", "agents", "api", "web", "code",
 }
@@ -218,6 +225,218 @@ def _fetch_query(
     if not isinstance(skills, list):
         return query, [], "response.skills was not a list"
     return query, [s for s in skills if isinstance(s, dict)], None
+
+
+class _SkillBodyParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._capture_depth = 0
+        self._pre_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if self._capture_depth == 0:
+            if tag == "div" and self._has_prose_class(attrs):
+                self._capture_depth = 1
+            return
+        if tag in _VOID_HTML_TAGS:
+            if tag in {"br", "hr"}:
+                self._push("\n")
+            return
+        self._capture_depth += 1
+        if tag in {"h1", "h2", "h3"}:
+            self._push("\n" + {"h1": "# ", "h2": "## ", "h3": "### "}[tag])
+        elif tag in {"h4", "h5", "h6"}:
+            self._push("\n#### ")
+        elif tag in {"p", "pre", "blockquote", "ul", "ol", "div", "section", "article"}:
+            self._push("\n")
+        elif tag == "li":
+            self._push("\n- ")
+        elif tag == "br":
+            self._push("\n")
+        if tag == "pre":
+            self._pre_depth += 1
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self._capture_depth > 0 and tag.lower() == "br":
+            self._push("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if self._capture_depth == 0:
+            return
+        if tag in {
+            "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "blockquote",
+            "li", "ul", "ol", "div", "section", "article",
+        }:
+            self._push("\n")
+        if tag == "pre" and self._pre_depth > 0:
+            self._pre_depth -= 1
+        self._capture_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._capture_depth == 0:
+            return
+        text = data.strip("\r\n") if self._pre_depth else re.sub(r"\s+", " ", data)
+        if text.strip():
+            self._push(text.strip() if not self._pre_depth else text)
+
+    @staticmethod
+    def _has_prose_class(attrs: list[tuple[str, str | None]]) -> bool:
+        for name, value in attrs:
+            if name.lower() != "class" or not value:
+                continue
+            if "prose" in value.split():
+                return True
+        return False
+
+    def _push(self, value: str) -> None:
+        if (
+            self.parts
+            and value
+            and not value.startswith(("\n", " ", ".", ",", ":", ";", ")", "]"))
+            and not self.parts[-1].endswith(("\n", " ", "(", "[", "# ", "## ", "### ", "#### "))
+        ):
+            self.parts.append(" ")
+        self.parts.append(value)
+
+
+def _normalize_skill_body_text(text: str) -> str:
+    lines = [line.rstrip() for line in text.splitlines()]
+    normalized = "\n".join(lines).strip()
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized
+
+
+def _extract_skill_body_from_detail_html(html_text: str) -> str:
+    parser = _SkillBodyParser()
+    parser.feed(html_text)
+    parser.close()
+    return _normalize_skill_body_text("".join(parser.parts))
+
+
+def _is_skills_sh_detail_url(url: str) -> bool:
+    parsed = urllib.parse.urlparse(url)
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc.lower() == "skills.sh"
+        and bool(parsed.path.strip("/"))
+    )
+
+
+def _fetch_detail_html(
+    url: str,
+    timeout: int = 30,
+    max_bytes: int = DEFAULT_DETAIL_MAX_BYTES,
+) -> tuple[str | None, str | None]:
+    if not _is_skills_sh_detail_url(url):
+        return None, "refused non-skills.sh detail URL"
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            payload = response.read(max_bytes + 1)
+    except Exception as exc:  # noqa: BLE001 - store per-skill failures in catalog metadata.
+        return None, f"{type(exc).__name__}: {exc}"
+    if len(payload) > max_bytes:
+        return None, f"detail response exceeded {max_bytes} bytes"
+    return payload.decode("utf-8", errors="replace"), None
+
+
+def _refresh_body_summary(catalog: dict[str, Any]) -> dict[str, Any]:
+    raw_skills = catalog.get("skills")
+    skills = raw_skills if isinstance(raw_skills, list) else []
+    body_available_count = sum(
+        1 for item in skills
+        if isinstance(item, dict) and (item.get("body_available") or item.get("skill_body"))
+    )
+    summary = {
+        "body_available_count": body_available_count,
+        "body_hydration_attempted_count": catalog.get("body_hydration_attempted_count", 0),
+        "body_hydrated_count": catalog.get("body_hydrated_count", body_available_count),
+        "body_hydration_error_count": catalog.get("body_hydration_error_count", 0),
+        "body_hydration_errors_sample": catalog.get("body_hydration_errors_sample", []),
+    }
+    catalog.update(summary)
+    return summary
+
+
+def hydrate_catalog_bodies(
+    catalog: dict[str, Any],
+    *,
+    workers: int,
+    limit: int | None = None,
+    delay_seconds: float = 0.0,
+    timeout: int = 30,
+    max_response_bytes: int = DEFAULT_DETAIL_MAX_BYTES,
+    max_body_chars: int = DEFAULT_SKILL_BODY_MAX_CHARS,
+) -> dict[str, Any]:
+    raw_skills = catalog.get("skills")
+    skills = raw_skills if isinstance(raw_skills, list) else []
+    candidates = [
+        item for item in skills
+        if isinstance(item, dict)
+        and not item.get("skill_body")
+        and str(item.get("detail_url") or "").strip()
+    ]
+    if limit is not None:
+        candidates = candidates[: max(limit, 0)]
+
+    errors: list[dict[str, str]] = []
+    hydrated = 0
+    hydration_time = _utc_now()
+
+    def hydrate_one(item: dict[str, Any]) -> tuple[dict[str, Any], str | None, str | None]:
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
+        url = str(item.get("detail_url") or "")
+        if not _is_skills_sh_detail_url(url):
+            return item, None, "refused non-skills.sh detail URL"
+        html_text, error = _fetch_detail_html(
+            url,
+            timeout=timeout,
+            max_bytes=max_response_bytes,
+        )
+        if error:
+            return item, None, error
+        body = _extract_skill_body_from_detail_html(html_text or "")
+        if not body:
+            return item, None, "detail page did not contain a parseable Skills.sh prose body"
+        return item, body, None
+
+    if candidates:
+        with cf.ThreadPoolExecutor(max_workers=max(workers, 1)) as executor:
+            future_map = {executor.submit(hydrate_one, item): item for item in candidates}
+            for future in cf.as_completed(future_map):
+                item, body, error = future.result()
+                if body:
+                    item["body_truncated"] = len(body) > max_body_chars
+                    if item["body_truncated"]:
+                        body = body[:max_body_chars].rstrip()
+                    item["skill_body"] = body
+                    item["body_available"] = True
+                    item["body_source_url"] = str(item.get("detail_url") or "")
+                    item["body_hydrated_at"] = hydration_time
+                    item.pop("body_error", None)
+                    hydrated += 1
+                    continue
+                item["body_available"] = False
+                if error:
+                    item["body_error"] = error
+                    errors.append({
+                        "id": str(item.get("id") or ""),
+                        "detail_url": str(item.get("detail_url") or ""),
+                        "error": error,
+                    })
+
+    summary = {
+        "body_hydration_attempted_count": len(candidates),
+        "body_hydrated_count": hydrated,
+        "body_hydration_error_count": len(errors),
+        "body_hydration_errors_sample": errors[:20],
+    }
+    catalog.update(summary)
+    return _refresh_body_summary(catalog)
 
 
 def fetch_api_union(*, limit: int, workers: int, delay_seconds: float = 0.0) -> dict[str, Any]:
@@ -442,11 +661,12 @@ This directory is generated by `src/import_skills_sh_catalog.py`.
 - Existing wiki skill-id overlaps: {_fmt_count(catalog.get("overlap", {}).get("skill_id_matches_existing_wiki"))}
 - Resolved ctx slug collisions: {_fmt_count(catalog.get("ctx_slug_collisions_resolved"))}
 - Remote-cataloged skill graph nodes: {_fmt_count(catalog.get("graph_skill_nodes"))}
+- Hydrated upstream bodies: {_fmt_count(catalog.get("body_available_count"))}
 
 The catalog is stored as first-class remote-cataloged `skill` entities. These
 records participate in ctx recommendation surfaces as skills while retaining
 Skills.sh provenance, install commands, and metadata-only security status until
-their upstream SKILL.md bodies are hydrated and promoted.
+their upstream SKILL.md bodies are hydrated, reviewed, and promoted.
 """
 
 
@@ -495,7 +715,7 @@ def _quality_signals(item: dict[str, Any], duplicate_targets: list[str]) -> dict
         "source_reputation_score": reputation_score,
         "duplicate_score": duplicate_score,
         "tag_score": tag_score,
-        "body_available": bool(item.get("skill_body")),
+        "body_available": bool(item.get("body_available") or item.get("skill_body")),
         "security_review": "metadata-only",
         "promotion_state": "alias" if duplicate_targets else "remote-cataloged",
     }
@@ -524,6 +744,13 @@ def _render_external_entity_page(
     duplicate_target = duplicate_targets[0] if duplicate_targets else "null"
     tags = [str(tag) for tag in item.get("tags", []) if tag]
     skill_body = str(item.get("skill_body") or "").strip()
+    body_available = bool(quality.get("body_available") or skill_body)
+    body_source_url = str(item.get("body_source_url") or "")
+    body_status = (
+        "hydrated from Skills.sh detail page."
+        if body_available else
+        "metadata-only; canonical body remains upstream."
+    )
     body = f"""---
 title: {json.dumps(label, ensure_ascii=False)}
 type: skill
@@ -540,6 +767,8 @@ install_command: {json.dumps(str(item.get("install_command") or ""), ensure_asci
 merge_state: {merge_state}
 duplicate_of: {duplicate_target}
 quality_score: {int(quality.get("score") or 0)}
+body_available: {str(body_available).lower()}
+body_source_url: {json.dumps(body_source_url, ensure_ascii=False)}
 security_review: metadata-only
 ---
 
@@ -576,7 +805,7 @@ Remote-cataloged Skills.sh skill.
 - Source reputation score: {quality.get("source_reputation_score")}
 - Duplicate score: {quality.get("duplicate_score")}
 - Tag score: {quality.get("tag_score")}
-- Body availability: metadata-only; canonical body remains upstream.
+- Body availability: {body_status}
 - Security review: metadata-only. Fetch and inspect the body before promotion to curated `skill`.
 """
     if skill_body:
@@ -753,6 +982,7 @@ def _add_bytes(
 
 
 def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
+    _refresh_body_summary(catalog)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz") as tmp_file:
         tmp_path = Path(tmp_file.name)
     try:
@@ -802,7 +1032,9 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                     "schema_version", "source", "api", "fetched_at", "site_reported_total",
                     "observed_unique_skills", "coverage_vs_site_reported_total",
                     "query_count", "query_error_count", "ctx_slug_collisions_resolved", "overlap",
-                    "graph_skill_nodes", "graph_skill_edges",
+                    "graph_skill_nodes", "graph_skill_edges", "body_available_count",
+                    "body_hydration_attempted_count", "body_hydrated_count",
+                    "body_hydration_error_count",
                 )
             }
             summary_bytes = json.dumps(summary, ensure_ascii=False, indent=2).encode("utf-8")
@@ -870,6 +1102,13 @@ def main() -> None:
     parser.add_argument("--catalog-out", type=Path, default=DEFAULT_CATALOG_OUT)
     parser.add_argument("--wiki-tar", type=Path, default=DEFAULT_WIKI_TAR)
     parser.add_argument("--update-wiki-tar", action="store_true")
+    parser.add_argument("--hydrate-bodies", action="store_true")
+    parser.add_argument("--hydrate-limit", type=int, default=None)
+    parser.add_argument("--hydrate-workers", type=int, default=4)
+    parser.add_argument("--hydrate-delay-ms", type=int, default=0)
+    parser.add_argument("--hydrate-timeout", type=int, default=30)
+    parser.add_argument("--hydrate-max-response-bytes", type=int, default=DEFAULT_DETAIL_MAX_BYTES)
+    parser.add_argument("--hydrate-max-body-chars", type=int, default=DEFAULT_SKILL_BODY_MAX_CHARS)
     args = parser.parse_args()
 
     if args.fetch:
@@ -886,6 +1125,22 @@ def main() -> None:
         catalog = normalize_catalog(raw, existing)
     else:
         catalog = _load_catalog_input(args.from_catalog)
+    if args.hydrate_bodies:
+        summary = hydrate_catalog_bodies(
+            catalog,
+            workers=args.hydrate_workers,
+            limit=args.hydrate_limit,
+            delay_seconds=max(args.hydrate_delay_ms, 0) / 1000.0,
+            timeout=args.hydrate_timeout,
+            max_response_bytes=args.hydrate_max_response_bytes,
+            max_body_chars=args.hydrate_max_body_chars,
+        )
+        print(
+            "hydrated Skills.sh bodies: "
+            f"{summary['body_hydrated_count']:,}/"
+            f"{summary['body_hydration_attempted_count']:,} attempted "
+            f"({summary['body_hydration_error_count']:,} errors)"
+        )
     if args.update_wiki_tar:
         update_wiki_tarball(args.wiki_tar, catalog)
     write_gzip_json(args.catalog_out, catalog)
