@@ -3,8 +3,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-3340_collected-brightgreen.svg)](#)
-[![Graph](https://img.shields.io/badge/Graph-104%2C065_nodes_/_1.0M_edges-red.svg)](graph/)
+[![Tests](https://img.shields.io/badge/Tests-3341_collected-brightgreen.svg)](#)
+[![Graph](https://img.shields.io/badge/Graph-104%2C066_nodes_/_1.0M_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
 Watches what you develop, walks a graph that combines **92,815 skills, 464 agents, 10,786 MCP servers, and cataloged harnesses**, and recommends the right bundle on the fly. The skill count includes 1,969 curated ctx skills plus 90,846 remote-cataloged Skills.sh skill nodes with upstream `npx skills` install instructions, duplicate hints, and metadata-only quality/security signals. You approve what loads, installs, or gets adopted. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
@@ -39,7 +39,7 @@ Optional extras: `pip install "claude-ctx[embeddings]"` for the semantic backend
 
 ### Pre-built knowledge graph (optional)
 
-A pre-built knowledge graph of 104,065 nodes and 1,030,831 edges ships as a tarball. The same tarball includes `external-catalogs/skills-sh/catalog.json` and 90,846 remote-cataloged Skills.sh skill pages under `entities/skills/skills-sh-*.md`. Extract to get a ready-to-use `~/.claude/skill-wiki/`:
+A pre-built knowledge graph of 104,066 nodes and 1,031,011 edges ships as a tarball. The same tarball includes `external-catalogs/skills-sh/catalog.json`, 90,846 remote-cataloged Skills.sh skill pages under `entities/skills/skills-sh-*.md`, and the first cataloged harness page under `entities/harnesses/`. Extract to get a ready-to-use `~/.claude/skill-wiki/`:
 
 ```bash
 # after `git clone` — or download graph/wiki-graph.tar.gz from the GitHub release

@@ -10,9 +10,9 @@ only. Dashboard harness exposure is not yet present.
 ## What's in it
 
 Authoritative numbers from the shipped tarball. The curated-core snapshot
-is **13,219 nodes** (1,969 curated skills + agents + MCP servers); harness
-pages under `entities/harnesses/` are ingested into local rebuilds and
-recommendation output when cataloged. The tarball also carries **90,846
+is **13,220 nodes** (1,969 curated skills + 464 agents + 10,786 MCP servers
++ 1 harness). Harness pages under `entities/harnesses/` are ingested into
+local rebuilds and recommendation output when cataloged. The tarball also carries **90,846
 remote-cataloged Skills.sh `skill` nodes**, matching skill pages under
 `entities/skills/skills-sh-*.md`, and **67,519 sparse metadata edges** back
 to curated entities. These records are first-class skills by graph type,
@@ -21,17 +21,18 @@ and reviewed.
 
 | | Count |
 |---|---:|
-| Total nodes | **104,065** |
-| Curated core nodes | **13,219** (1,969 skills + 464 agents + 10,786 MCP servers) |
+| Total nodes | **104,066** |
+| Curated core nodes | **13,220** (1,969 skills + 464 agents + 10,786 MCP servers + 1 harness) |
 | Remote-cataloged Skills.sh skill nodes | **90,846** (`skill`, `status=remote-cataloged`) |
-| Total edges | **1,030,831** |
-| Curated core edges | **963,312** |
+| Total edges | **1,031,011** |
+| Curated core edges | **963,492** |
 | Skills.sh metadata edges | **67,519** |
 | Communities | **22** (Louvain over the curated core) |
-| Edge sources (overlap-deduped) | semantic 210,227 - tag 543,938 - token 300,345 |
+| Edge sources (overlap-deduped) | semantic 210,248 - tag 597,017 - token 314,945 |
 | Cross-type edges (skill <-> agent) | ~222K |
 | Cross-type edges (skill <-> MCP) | ~62K |
 | Cross-type edges (agent <-> MCP) | ~13K |
+| Harness edges | **224** (`text-to-cad` -> 126 curated skills, 44 Skills.sh skills, 40 MCP servers, 14 agents) |
 | Skills.sh catalog | **90,846** observed entries (`external-catalogs/skills-sh/catalog.json` + `entities/skills/skills-sh-*.md`) |
 
 ## Install
@@ -119,7 +120,7 @@ raw = json.loads(
 edges_key = "links" if "links" in raw else "edges"
 G = node_link_graph(raw, edges=edges_key)
 
-# 104,065 nodes, 1,030,831 edges
+# 104,066 nodes, 1,031,011 edges
 print(G.number_of_nodes(), G.number_of_edges())
 
 # Find entities related to 'fastapi-pro' by edge weight

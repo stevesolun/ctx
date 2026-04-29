@@ -2,6 +2,7 @@
 
 import json
 import sys
+import tarfile
 from pathlib import Path
 
 import networkx as nx
@@ -9,6 +10,10 @@ import networkx as nx
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ctx.core.graph import resolve_graph
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
 def _write_graph_file(tmp_path: Path, content: bytes | str) -> Path:
     p = tmp_path / "graph.json"
     if isinstance(content, str):
@@ -78,3 +83,19 @@ class TestLoadGraphIntegrity:
         G = resolve_graph.load_graph(path=p)
         assert G.number_of_nodes() == 2
         assert G.number_of_edges() == 1
+
+    def test_shipped_wiki_graph_contains_text_to_cad_harness(self) -> None:
+        tarball = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
+        with tarfile.open(tarball, "r:gz") as tf:
+            names = {member.name for member in tf.getmembers()}
+            assert "./entities/harnesses/text-to-cad.md" in names
+            graph_file = tf.extractfile("./graphify-out/graph.json")
+            assert graph_file is not None
+            graph = json.loads(graph_file.read().decode("utf-8"))
+
+        harness_node = next(
+            node for node in graph["nodes"]
+            if node["id"] == "harness:text-to-cad"
+        )
+        assert harness_node["type"] == "harness"
+        assert "cad" in harness_node["tags"]
