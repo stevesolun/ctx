@@ -10,29 +10,29 @@ only. Dashboard harness exposure is not yet present.
 ## What's in it
 
 Authoritative numbers from the shipped tarball. The curated-core snapshot
-is **13,220 nodes** (1,969 curated skills + 464 agents + 10,786 MCP servers
-+ 1 harness). Harness pages under `entities/harnesses/` are ingested into
+is **13,232 nodes** (1,969 curated skills + 464 agents + 10,786 MCP servers
++ 13 harnesses). Harness pages under `entities/harnesses/` are ingested into
 local rebuilds and recommendation output when cataloged. The tarball also carries **90,846
 remote-cataloged Skills.sh `skill` nodes**, matching skill pages under
-`entities/skills/skills-sh-*.md`, and **67,519 sparse metadata edges** back
+`entities/skills/skills-sh-*.md`, and **67,530 sparse metadata edges** back
 to curated entities. These records are first-class skills by graph type,
 but remain metadata-only until their upstream SKILL.md bodies are hydrated
 and reviewed.
 
 | | Count |
 |---|---:|
-| Total nodes | **104,066** |
-| Curated core nodes | **13,220** (1,969 skills + 464 agents + 10,786 MCP servers + 1 harness) |
+| Total nodes | **104,078** |
+| Curated core nodes | **13,232** (1,969 skills + 464 agents + 10,786 MCP servers + 13 harnesses) |
 | Remote-cataloged Skills.sh skill nodes | **90,846** (`skill`, `status=remote-cataloged`) |
-| Total edges | **1,031,011** |
-| Curated core edges | **963,492** |
-| Skills.sh metadata edges | **67,519** |
-| Communities | **22** (Louvain over the curated core) |
-| Edge sources (overlap-deduped) | semantic 210,248 - tag 597,017 - token 314,945 |
+| Total edges | **1,033,253** |
+| Curated core edges | **965,723** |
+| Skills.sh metadata edges | **67,530** |
+| Communities | **23** (Louvain over the curated core) |
+| Edge sources (overlap-deduped) | semantic 210,487 - tag 598,908 - token 315,162 |
 | Cross-type edges (skill <-> agent) | ~222K |
 | Cross-type edges (skill <-> MCP) | ~62K |
 | Cross-type edges (agent <-> MCP) | ~13K |
-| Harness edges | **224** (`text-to-cad` -> 126 curated skills, 44 Skills.sh skills, 40 MCP servers, 14 agents) |
+| Harness edges | **2,700** (2,411 curated-core edges + 289 Skills.sh metadata edges across 13 cataloged harnesses) |
 | Skills.sh catalog | **90,846** observed entries (`external-catalogs/skills-sh/catalog.json` + `entities/skills/skills-sh-*.md`) |
 
 ## Install
@@ -79,7 +79,7 @@ security, _t:architect, ...]`).
 
 After edges are built, `wiki_graphify` runs NetworkX's Louvain
 community detection (`resolution=1.2`, `seed=42` for determinism).
-The result is **22 communities** ranging from single-member isolated
+The result is **23 communities** ranging from single-member isolated
 specialists to several thousand members in broad clusters like
 `Community + Official + AI`. Each community also gets an auto-generated
 `concepts/<community>.md` wiki page summarizing its members and top
@@ -120,7 +120,7 @@ raw = json.loads(
 edges_key = "links" if "links" in raw else "edges"
 G = node_link_graph(raw, edges=edges_key)
 
-# 104,066 nodes, 1,031,011 edges
+# 104,078 nodes, 1,033,253 edges
 print(G.number_of_nodes(), G.number_of_edges())
 
 # Find entities related to 'fastapi-pro' by edge weight
@@ -188,6 +188,7 @@ if your hook config does not include those paths.
 | 2026-04-27 (this release) | **963,068** | +21 mattpocock skills, +156 designdotmd designs (+106,702 edges); patch-path bug fixed (graphify now forces full rebuild when prior graph has 0 semantic edges but current run computed semantic pairs); community detection switched from CNM to Louvain. |
 | 2026-04-29 Skills.sh remote-cataloged pass | **1,030,831** | +90,846 first-class `skill` nodes, +90,846 skill pages, and +67,519 sparse duplicate/tag metadata edges to the curated graph. Full-body semantic edges are intentionally deferred to the hydration pass. |
 | 2026-04-29 text-to-cad harness pass | **1,031,011** | +1 first-class `harness` node, +1 harness page, and +224 explainable harness edges, including 44 remote-cataloged Skills.sh edges. |
+| 2026-04-29 curated harness catalog pass | **1,033,253** | +12 first-class `harness` nodes/pages for LangGraph, CrewAI, AutoGen, Google ADK, Semantic Kernel, Mastra, Pydantic AI, Haystack, OpenAI Agents SDK, LiteLLM, Langfuse, and AgentOps; harness incident edges now total 2,700. |
 
 The full audit history lives in `CHANGELOG.md`. The current build is
 fully reproducible from the wiki content.
