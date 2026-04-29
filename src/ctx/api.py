@@ -33,7 +33,7 @@ Public functions:
     wiki_search(query, *, top_n=15)
         Keyword search wiki entity pages.
 
-    wiki_get(slug)
+    wiki_get(slug, *, entity_type=None)
         Fetch one wiki entity by slug — frontmatter + body.
 
     list_all_entities(entity_type=None)
@@ -159,14 +159,24 @@ def wiki_search(
     return payload.get("results", []) if "error" not in payload else []
 
 
-def wiki_get(slug: str) -> dict[str, Any] | None:
+def wiki_get(
+    slug: str,
+    *,
+    entity_type: str | None = None,
+) -> dict[str, Any] | None:
     """Fetch one entity page by slug. Returns None if not found.
+
+    ``entity_type`` optionally disambiguates duplicate slugs across
+    skills, agents, MCP servers, and harnesses.
 
     Result dict on hit: ``slug``, ``path``, ``frontmatter``, ``body``.
     Errors (invalid slug, traversal attempt, file missing) all map to
     ``None`` — library callers get a simple "exists or not" contract.
     """
-    payload = _call("ctx__wiki_get", {"slug": slug})
+    args: dict[str, Any] = {"slug": slug}
+    if entity_type is not None:
+        args["entity_type"] = entity_type
+    payload = _call("ctx__wiki_get", args)
     if "error" in payload:
         return None
     return payload

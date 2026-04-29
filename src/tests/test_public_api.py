@@ -44,6 +44,8 @@ def synthetic_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     agents.mkdir(parents=True)
     mcp_a = wiki / "entities" / "mcp-servers" / "f"
     mcp_a.mkdir(parents=True)
+    harnesses = wiki / "entities" / "harnesses"
+    harnesses.mkdir(parents=True)
 
     (skills / "python-patterns.md").write_text(
         "---\nname: python-patterns\ntitle: Python Patterns\n"
@@ -66,6 +68,12 @@ def synthetic_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "tags: [filesystem]\nstatus: cataloged\n---\n# body\n",
         encoding="utf-8",
     )
+    (harnesses / "fastapi-pro.md").write_text(
+        "---\nname: fastapi-pro\ntitle: FastAPI Harness\n"
+        "tags: [python, api, harness]\nstatus: cataloged\n---\n"
+        "# FastAPI Harness\nRun custom model loops for FastAPI work.\n",
+        encoding="utf-8",
+    )
 
     # Graph
     G = nx.Graph()
@@ -75,6 +83,8 @@ def synthetic_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                type="skill", tags=["python", "api", "web"])
     G.add_node("agent:code-reviewer", label="code-reviewer",
                type="agent", tags=["python", "review"])
+    G.add_node("harness:fastapi-pro", label="fastapi-pro",
+               type="harness", tags=["python", "api", "harness"])
     G.add_edge("skill:python-patterns", "skill:fastapi-pro",
                weight=0.8, shared_tags=["python"])
     G.add_edge("skill:python-patterns", "agent:code-reviewer",
@@ -175,7 +185,9 @@ class TestSignatures:
 
     def test_wiki_get_signature(self) -> None:
         sig = inspect.signature(ctx.wiki_get)
-        assert list(sig.parameters) == ["slug"]
+        assert list(sig.parameters) == ["slug", "entity_type"]
+        assert sig.parameters["entity_type"].kind == inspect.Parameter.KEYWORD_ONLY
+        assert sig.parameters["entity_type"].default is None
 
     def test_list_all_entities_signature(self) -> None:
         sig = inspect.signature(ctx.list_all_entities)
@@ -236,6 +248,23 @@ class TestWikiGet:
         assert "frontmatter" in page
         assert "body" in page
 
+    def test_entity_type_disambiguates_duplicate_slug(
+        self, synthetic_home: Path,
+    ) -> None:
+        default_page = ctx.wiki_get("fastapi-pro")
+        assert default_page is not None
+        assert default_page["entity_type"] == "skill"
+
+        harness_page = ctx.wiki_get("fastapi-pro", entity_type="harness")
+        assert harness_page is not None
+        assert harness_page["entity_type"] == "harness"
+        assert harness_page["frontmatter"]["title"] == "FastAPI Harness"
+
+    def test_invalid_entity_type_returns_none(
+        self, synthetic_home: Path,
+    ) -> None:
+        assert ctx.wiki_get("fastapi-pro", entity_type="plugin") is None
+
     def test_miss_returns_none(self, synthetic_home: Path) -> None:
         assert ctx.wiki_get("does-not-exist") is None
 
@@ -267,6 +296,10 @@ class TestListAllEntities:
     def test_mcp_filter(self, synthetic_home: Path) -> None:
         entities = ctx.list_all_entities(entity_type="mcp-server")
         assert entities == ["filesystem"]
+
+    def test_harness_filter(self, synthetic_home: Path) -> None:
+        entities = ctx.list_all_entities(entity_type="harness")
+        assert entities == ["fastapi-pro"]
 
     def test_empty_wiki_returns_empty(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

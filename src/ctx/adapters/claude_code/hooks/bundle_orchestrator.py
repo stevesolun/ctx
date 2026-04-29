@@ -4,14 +4,15 @@ bundle_orchestrator.py -- PostToolUse hook: surface a cross-type bundle recommen
 
 Replaces the older name ``skill_suggest.py`` which was a misnomer —
 this hook produces a BUNDLE that may span any combination of the
-three entity types tracked by the system:
+four recommendable entity types tracked by the system:
 
   - skills   (converted long-form pipelines OR short single-file skills)
   - agents   (Claude Code agents)
   - mcp-servers (registered MCP servers the user has or could install)
+  - harnesses (model/runtime machinery for custom LLM loops)
 
 The graph-based scorer in ``context_monitor.graph_suggest`` ranks all
-three types uniformly against the current unmatched signals; whatever
+four types uniformly against the current unmatched signals; whatever
 scores highest wins. A bundle of 5 might be 3 skills + 1 agent + 1
 MCP, or all-skills, or all-agents, or any mix. It's dynamic.
 
@@ -23,7 +24,7 @@ This module:
     ``ctx_lifecycle`` when stale entities should be unloaded)
   - caps both lists at ``cfg.recommendation_top_k`` (default 5)
   - categorises the output by entity type so the user sees a
-    structured "Skills / Agents / MCPs" recommendation rather than
+    structured "Skills / Agents / MCPs / Harnesses" recommendation rather than
     a flat list
   - emits a Claude-Code-hook JSON payload to stdout
   - marks the suggestion as shown so it isn't re-emitted on every
@@ -53,12 +54,14 @@ PENDING_UNLOAD = CLAUDE_DIR / "pending-unload.json"
 SHOWN_FLAG = CLAUDE_DIR / ".bundle-suggest-shown"
 
 # Entity-type display ordering. Skills first (most common), agents
-# next (deliberate invocation), MCPs last (external process).
-_TYPE_ORDER: tuple[str, ...] = ("skill", "agent", "mcp-server")
+# next (deliberate invocation), MCPs and harnesses last because they
+# can alter the surrounding execution environment.
+_TYPE_ORDER: tuple[str, ...] = ("skill", "agent", "mcp-server", "harness")
 _TYPE_DISPLAY: dict[str, str] = {
     "skill": "Skills",
     "agent": "Agents",
     "mcp-server": "MCPs",
+    "harness": "Harnesses",
 }
 # Install CLI hint per type — surfaced in the message so the user
 # knows how to act on each category.
@@ -66,6 +69,7 @@ _TYPE_INSTALL_CLI: dict[str, str] = {
     "skill": "ctx-skill-install <slug>",
     "agent": "ctx-agent-install <slug>",
     "mcp-server": "ctx-mcp-install <slug> --cmd '...'",
+    "harness": "ctx-harness-install <slug>",
 }
 
 
@@ -162,7 +166,7 @@ def render_bundle_message(
     Layout:
       - Leader line if any signals / bundle items exist
       - "Unmatched signals: ..." line for transparency
-      - Bundle block grouped by type (Skills / Agents / MCPs), each
+      - Bundle block grouped by type (Skills / Agents / MCPs / Harnesses), each
         with its install command hint
       - Unload block if the lifecycle flagged anything
 
@@ -183,7 +187,7 @@ def render_bundle_message(
             lines.append("")
             lines.append(
                 f"Suggested bundle (top {total} by graph score — "
-                "skills, agents, and MCPs blend):"
+                "skills, agents, MCPs, and harnesses blend):"
             )
             for etype in _TYPE_ORDER:
                 entries = bundle.get(etype, [])
@@ -201,7 +205,7 @@ def render_bundle_message(
                 lines.append(f"    install: {_TYPE_INSTALL_CLI[etype]}")
             lines.append("")
             lines.append(
-                "A bundle can be any mix of the three types — whatever "
+                "A bundle can be any mix of the four types — whatever "
                 "the graph ranks highest for your current signals wins."
             )
 
@@ -209,7 +213,7 @@ def render_bundle_message(
         if lines:
             lines.append("")
         lines.append(
-            "ctx detected entities (skills / agents / MCPs) that have "
+            "ctx detected entities (skills / agents / MCPs / harnesses) that have "
             "been loaded but never used:"
         )
         for s in unload_suggestions[:top_k]:
