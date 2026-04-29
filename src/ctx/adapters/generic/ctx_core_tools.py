@@ -119,7 +119,7 @@ class CtxCoreToolbox:
                 name=f"{_NAMESPACE}recommend_bundle",
                 description=(
                     "Recommend a top-K bundle of skills / agents / MCP "
-                    "servers / harnesses relevant to a free-text query. Returns a "
+                    "servers relevant to a free-text query. Returns a "
                     "JSON array of entries with name, type, score, and "
                     "shared tags. Use when the user asks 'what tools "
                     "should I use for X?' or mid-task to find a more "
@@ -134,9 +134,9 @@ class CtxCoreToolbox:
                         },
                         "top_k": {
                             "type": "integer",
-                            "description": "How many entries to return. Default 5.",
+                            "description": "How many entries to return. Default/max 5.",
                             "minimum": 1,
-                            "maximum": 50,
+                            "maximum": 5,
                         },
                     },
                     "required": ["query"],
@@ -264,7 +264,14 @@ class CtxCoreToolbox:
         query = str(args.get("query", "")).strip()
         if not query:
             return json.dumps({"error": "query must be non-empty", "results": []})
-        top_k = _clamp_int(args.get("top_k"), default=5, lo=1, hi=50)
+        from ctx_config import cfg  # noqa: PLC0415
+
+        top_k = _clamp_int(
+            args.get("top_k"),
+            default=cfg.recommendation_top_k,
+            lo=1,
+            hi=cfg.recommendation_top_k,
+        )
 
         tags = _query_to_tags(query)
         if not tags:
@@ -285,7 +292,14 @@ class CtxCoreToolbox:
         # Pass the original query through so the recommender can apply
         # semantic-similarity scoring (in addition to tag/slug-token).
         # Falls through silently if the embedding cache is missing.
-        raw = recommend_by_tags(graph, tags, top_n=top_k, query=query)
+        raw = recommend_by_tags(
+            graph,
+            tags,
+            top_n=top_k,
+            query=query,
+            entity_types=("skill", "agent", "mcp-server"),
+            min_normalized_score=cfg.recommendation_min_normalized_score,
+        )
         results = [
             {
                 "name": r["name"],

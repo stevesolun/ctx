@@ -85,6 +85,9 @@ def synthetic_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                type="agent", tags=["python", "review"])
     G.add_node("harness:fastapi-pro", label="fastapi-pro",
                type="harness", tags=["python", "api", "harness"])
+    for i in range(8):
+        G.add_node(f"skill:python-extra-{i}", label=f"python-extra-{i}",
+                   type="skill", tags=["python"])
     G.add_edge("skill:python-patterns", "skill:fastapi-pro",
                weight=0.8, shared_tags=["python"])
     G.add_edge("skill:python-patterns", "agent:code-reviewer",
@@ -199,7 +202,7 @@ class TestSignatures:
 
 class TestRecommendBundle:
     def test_happy_path(self, synthetic_home: Path) -> None:
-        bundle = ctx.recommend_bundle("python web api")
+        bundle = ctx.recommend_bundle("fastapi web api")
         assert isinstance(bundle, list)
         names = [row["name"] for row in bundle]
         assert "fastapi-pro" in names
@@ -212,6 +215,13 @@ class TestRecommendBundle:
     def test_top_k_passed_through(self, synthetic_home: Path) -> None:
         bundle = ctx.recommend_bundle("python", top_k=1)
         assert len(bundle) <= 1
+
+    def test_execution_bundle_excludes_harnesses_and_caps_to_five(
+        self, synthetic_home: Path,
+    ) -> None:
+        bundle = ctx.recommend_bundle("python api harness", top_k=50)
+        assert len(bundle) <= 5
+        assert {row["type"] for row in bundle} <= {"skill", "agent", "mcp-server"}
 
 
 class TestGraphQuery:

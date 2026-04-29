@@ -207,6 +207,8 @@ def recommend_by_tags(
     *,
     top_n: int = 10,
     query: str | None = None,
+    entity_types: tuple[str, ...] | set[str] | None = None,
+    min_normalized_score: float = 0.0,
     semantic_cache_dir: Path | None = None,
     semantic_weight: float = 100.0,
     external_catalog_path: Path | None = None,
@@ -233,6 +235,8 @@ def recommend_by_tags(
     signals = _normalise_signals(tags)
     if not signals or top_n < 1:
         return []
+    entity_type_filter = {str(t) for t in entity_types} if entity_types else None
+    min_score = max(0.0, min(1.0, float(min_normalized_score)))
 
     idf = _token_idf(graph)
 
@@ -259,9 +263,12 @@ def recommend_by_tags(
                     sem_score = {}
 
     signal_set = set(signals)
-    scored: list[tuple[str, float, dict[str, Any], set[str]]] = []
+    scored: list[tuple[str, float, str, dict[str, Any], set[str]]] = []
     for node_id, data in graph.nodes(data=True):
         node_data = dict(data)
+        node_type = str(node_data.get("type", "skill"))
+        if entity_type_filter is not None and node_type not in entity_type_filter:
+            continue
         label = str(node_data.get("label") or _node_name(node_id))
         node_tags = {str(tag).lower() for tag in node_data.get("tags", [])}
         matching_tags = signal_set & node_tags
@@ -292,16 +299,28 @@ def recommend_by_tags(
             continue
 
         score += math.log1p(graph.degree(node_id))
-        scored.append((label, score, node_data, matching_tags))
+        scored.append((label, score, node_id, node_data, matching_tags))
 
-    ranked = sorted(scored, key=lambda item: -item[1])[:top_n]
+    ranked = sorted(
+        scored,
+        key=lambda item: (
+            -item[1],
+            str(item[3].get("type", "skill")),
+            item[0].lower(),
+            item[2],
+        ),
+    )
     top_score = ranked[0][1] if ranked else 0.0
-    graph_results = [
-        {
+    graph_results: list[dict[str, Any]] = []
+    for label, score, _node_id, node_data, matching_tags in ranked:
+        normalized_score = round(score / top_score, 4) if top_score else 0.0
+        if normalized_score < min_score:
+            continue
+        graph_results.append({
             "name": label,
             "type": node_data.get("type", "skill"),
             "score": round(score, 1),
-            "normalized_score": round(score / top_score, 4) if top_score else 0.0,
+            "normalized_score": normalized_score,
             "matching_tags": sorted(matching_tags),
             "external": node_data.get("external", False),
             "external_catalog": node_data.get("external_catalog"),
@@ -312,11 +331,12 @@ def recommend_by_tags(
             "installs": _safe_int(node_data.get("installs")),
             "detail_url": node_data.get("detail_url"),
             "install_command": node_data.get("install_command"),
-        }
-        for label, score, node_data, matching_tags in ranked
-    ]
+        })
+        if len(graph_results) >= top_n:
+            break
     external_results: list[dict[str, Any]] = []
-    if not _graph_has_external_catalog_nodes(graph, "skills.sh"):
+    include_external_skills = entity_type_filter is None or "skill" in entity_type_filter
+    if include_external_skills and not _graph_has_external_catalog_nodes(graph, "skills.sh"):
         external_results = _recommend_external_catalog(
             graph,
             signals,
@@ -328,13 +348,22 @@ def recommend_by_tags(
         return graph_results
     merged = sorted(
         [*graph_results, *external_results],
-        key=lambda item: -float(item.get("score", 0.0)),
-    )[:top_n]
+        key=lambda item: (
+            -float(item.get("score", 0.0)),
+            str(item.get("type", "skill")),
+            str(item.get("name", "")).lower(),
+        ),
+    )
     merged_top = float(merged[0].get("score", 0.0)) if merged else 0.0
+    filtered: list[dict[str, Any]] = []
     if merged_top > 0:
         for item in merged:
             item["normalized_score"] = round(float(item.get("score", 0.0)) / merged_top, 4)
-    return merged
+            if float(item["normalized_score"]) >= min_score:
+                filtered.append(item)
+            if len(filtered) >= top_n:
+                break
+    return filtered
 
 
 def _graph_has_external_catalog_nodes(graph: Any, catalog_name: str) -> bool:

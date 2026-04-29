@@ -89,13 +89,22 @@ class Config:
         # ── Resolver ───────────────────────────────────────────────────────
         self.max_skills: int = resolver.get("max_skills", 15)
         self.recommendation_top_k: int = int(resolver.get("recommendation_top_k", 5))
+        self.recommendation_min_normalized_score: float = float(
+            resolver.get("recommendation_min_normalized_score", 0.30)
+        )
         self.intent_boost_per_signal: int = resolver.get("intent_boost_per_signal", 5)
         self.intent_boost_max: int = resolver.get("intent_boost_max", 15)
         self.staleness_penalty: int = resolver.get("staleness_penalty", -8)
         self.meta_skills: list[str] = resolver.get("meta_skills", ["skill-router", "file-reading"])
-        if self.recommendation_top_k < 1:
+        if not (1 <= self.recommendation_top_k <= 5):
             raise ValueError(
-                f"resolver.recommendation_top_k must be >= 1 (got {self.recommendation_top_k})"
+                f"resolver.recommendation_top_k must be in [1, 5] "
+                f"(got {self.recommendation_top_k})"
+            )
+        if not (0.0 <= self.recommendation_min_normalized_score <= 1.0):
+            raise ValueError(
+                "resolver.recommendation_min_normalized_score must be in [0, 1] "
+                f"(got {self.recommendation_min_normalized_score})"
             )
 
         # ── Context Monitor ────────────────────────────────────────────────
