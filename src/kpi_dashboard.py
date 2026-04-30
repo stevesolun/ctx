@@ -164,6 +164,18 @@ def _iter_quality_slugs(sidecar_dir: Path) -> list[str]:
     return out
 
 
+def _quality_sources(sidecar_dir: Path) -> dict[str, Path]:
+    out: dict[str, Path] = {
+        slug: sidecar_dir
+        for slug in _iter_quality_slugs(sidecar_dir)
+    }
+    mcp_dir = sidecar_dir / "mcp"
+    if mcp_dir.is_dir():
+        for slug in _iter_quality_slugs(mcp_dir):
+            out.setdefault(slug, mcp_dir)
+    return out
+
+
 def _iter_lifecycle_slugs(sidecar_dir: Path) -> list[str]:
     if not sidecar_dir.is_dir():
         return []
@@ -206,13 +218,17 @@ def collect_rows(
     *, sources: LifecycleSources,
 ) -> list[EntityRow]:
     """Walk both sinks and return one row per known slug (union)."""
-    quality_slugs = set(_iter_quality_slugs(sources.sidecar_dir))
+    quality_sources = _quality_sources(sources.sidecar_dir)
+    quality_slugs = set(quality_sources)
     lifecycle_slugs = set(_iter_lifecycle_slugs(sources.sidecar_dir))
     all_slugs = sorted(quality_slugs | lifecycle_slugs)
     rows: list[EntityRow] = []
     for slug in all_slugs:
         try:
-            score = load_quality(slug, sidecar_dir=sources.sidecar_dir)
+            score = load_quality(
+                slug,
+                sidecar_dir=quality_sources.get(slug, sources.sidecar_dir),
+            )
         except (json.JSONDecodeError, ValueError, OSError) as exc:
             _logger.warning("kpi_dashboard: skipping %s: %s", slug, exc)
             score = None

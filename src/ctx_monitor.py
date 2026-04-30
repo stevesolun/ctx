@@ -206,8 +206,14 @@ def _read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
 def _load_sidecar(slug: str) -> dict | None:
     if not _is_safe_slug(slug):
         return None
-    path = _sidecar_dir() / f"{slug}.json"
-    if not path.exists():
+    path = next((
+        p for p in (
+            _sidecar_dir() / f"{slug}.json",
+            _sidecar_dir() / "mcp" / f"{slug}.json",
+        )
+        if p.exists()
+    ), None)
+    if path is None:
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -215,14 +221,22 @@ def _load_sidecar(slug: str) -> dict | None:
         return None
 
 
-def _all_sidecars() -> list[dict]:
-    d = _sidecar_dir()
-    if not d.is_dir():
-        return []
-    out: list[dict] = []
-    for p in sorted(d.glob("*.json")):
-        if p.name.startswith(".") or p.name.endswith(".lifecycle.json"):
+def _sidecar_files() -> list[Path]:
+    files: list[Path] = []
+    for root in (_sidecar_dir(), _sidecar_dir() / "mcp"):
+        if not root.is_dir():
             continue
+        files.extend(
+            p for p in sorted(root.glob("*.json"))
+            if not p.name.startswith(".")
+            and not p.name.endswith(".lifecycle.json")
+        )
+    return files
+
+
+def _all_sidecars() -> list[dict]:
+    out: list[dict] = []
+    for p in _sidecar_files():
         try:
             out.append(json.loads(p.read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError):
@@ -690,7 +704,7 @@ def _render_skills() -> str:
 
     # Sidebar stats for the filter UI.
     grade_counts = {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
-    type_counts = {"skill": 0, "agent": 0}
+    type_counts = {"skill": 0, "agent": 0, "mcp-server": 0}
     for sc in sidecars:
         grade_counts[sc.get("grade", "F")] = grade_counts.get(sc.get("grade", "F"), 0) + 1
         st = sc.get("subject_type", "skill")
@@ -735,11 +749,11 @@ def _render_skills() -> str:
         f"<span><input type='checkbox' class='type-filter' value='{t}' checked> {t}</span>"
         f"<span class='muted' style='font-size:0.78rem;'>{type_counts.get(t, 0)}</span>"
         f"</label>"
-        for t in ("skill", "agent")
+        for t in ("skill", "agent", "mcp-server")
     )
 
     body = (
-        "<h1>Skills &amp; agents</h1>"
+        "<h1>Quality sidecars</h1>"
         f"<p class='muted'>{len(sidecars)} sidecars · click any card to drill in.</p>"
         "<div style='display:grid; grid-template-columns:220px 1fr; gap:1.25rem; align-items:start;'>"
         # ── Left filter sidebar ──────────────────────────────────────
@@ -1452,7 +1466,7 @@ def _render_events() -> str:
 def _render_loaded() -> str:
     """Live view of ~/.claude/skill-manifest.json with load/unload actions.
 
-    Groups manifest entries by ``entity_type`` (skill / agent / mcp-server)
+    Groups manifest entries by ``entity_type`` (skill / agent / mcp-server / harness)
     with a per-section count. Unload button posts both the slug and
     entity_type so the server routes correctly — MCPs need
     ``claude mcp remove``, skills + agents take the file-copy path.
@@ -1467,8 +1481,13 @@ def _render_loaded() -> str:
         # Missing entity_type => legacy skill entry.
         return str(entry.get("entity_type") or "skill")
 
-    # Split loaded by entity_type for the 3-section layout.
-    by_type: dict[str, list[dict]] = {"skill": [], "agent": [], "mcp-server": []}
+    # Split loaded by entity_type for the sectioned layout.
+    by_type: dict[str, list[dict]] = {
+        "skill": [],
+        "agent": [],
+        "mcp-server": [],
+        "harness": [],
+    }
     for e in load_rows:
         by_type.setdefault(_etype(e), []).append(e)
 
@@ -1476,7 +1495,7 @@ def _render_loaded() -> str:
         slug = e.get("skill", "")
         etype = _etype(e)
         link = (
-            f"<a href='/wiki/{html.escape(slug)}'>"
+            f"<a href='/wiki/{html.escape(slug)}?type={html.escape(etype)}'>"
             f"<code>{html.escape(slug)}</code></a>"
         )
         return (
@@ -1518,13 +1537,14 @@ def _render_loaded() -> str:
     )
 
     body = (
-        "<h1>Loaded entities — skills, agents &amp; MCPs</h1>"
+        "<h1>Loaded entities — skills, agents, MCPs &amp; harnesses</h1>"
         f"<div class='card'>"
         f"<strong>{len(load_rows)}</strong> currently loaded "
         f"(<span class='muted'>"
         f"{len(by_type.get('skill', []))} skills · "
         f"{len(by_type.get('agent', []))} agents · "
-        f"{len(by_type.get('mcp-server', []))} MCPs</span>) · "
+        f"{len(by_type.get('mcp-server', []))} MCPs · "
+        f"{len(by_type.get('harness', []))} harnesses</span>) · "
         f"<strong>{len(unload_rows)}</strong> known-unloaded · "
         f"<span class='muted'>source: <code>~/.claude/skill-manifest.json</code></span>"
         "</div>"
@@ -1541,6 +1561,7 @@ def _render_loaded() -> str:
         + _section("Skills", "skill")
         + _section("Agents", "agent")
         + _section("MCP servers", "mcp-server")
+        + _section("Harnesses", "harness")
         + f"<h2>Recently unloaded ({len(unload_rows)})</h2>"
         "<table><tr><th>Slug</th><th>Type</th><th>Source / reason</th><th></th></tr>"
         + unload_html + "</table>"

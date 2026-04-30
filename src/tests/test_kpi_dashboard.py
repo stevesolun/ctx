@@ -176,6 +176,23 @@ class TestCollectRows:
         rows = kd.collect_rows(sources=sources)
         assert rows[0].lifecycle_state == cl.STATE_ACTIVE
 
+    def test_mcp_quality_subdir_is_included(
+        self, sources: cl.LifecycleSources,
+    ) -> None:
+        _write_quality(
+            sources.sidecar_dir / "mcp",
+            "filesystem",
+            subject_type="mcp-server",
+            grade="A",
+            score=0.88,
+        )
+
+        rows = kd.collect_rows(sources=sources)
+
+        assert [(r.slug, r.subject_type) for r in rows] == [
+            ("filesystem", "mcp-server")
+        ]
+
     def test_corrupt_quality_sidecar_is_skipped(
         self, sources: cl.LifecycleSources,
     ) -> None:

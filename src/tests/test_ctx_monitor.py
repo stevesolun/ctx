@@ -44,6 +44,12 @@ def _write_sidecar(claude: Path, slug: str, body: dict) -> None:
     )
 
 
+def _write_mcp_sidecar(claude: Path, slug: str, body: dict) -> None:
+    mcp_dir = claude / "skill-quality" / "mcp"
+    mcp_dir.mkdir(parents=True, exist_ok=True)
+    (mcp_dir / f"{slug}.json").write_text(json.dumps(body), encoding="utf-8")
+
+
 def _post_json(port: int, path: str, body: dict, token: str | None = None) -> tuple[int, dict]:
     headers = {"Content-Type": "application/json"}
     if token is not None:
@@ -103,9 +109,14 @@ def test_grade_distribution(fake_claude: Path) -> None:
     _write_sidecar(fake_claude, "b1", {"slug": "b1", "grade": "B", "raw_score": 0.7})
     _write_sidecar(fake_claude, "b2", {"slug": "b2", "grade": "B", "raw_score": 0.6})
     _write_sidecar(fake_claude, "f", {"slug": "f", "grade": "F", "raw_score": 0.1})
+    _write_mcp_sidecar(fake_claude, "mcp-one", {
+        "slug": "mcp-one", "subject_type": "mcp-server",
+        "grade": "C", "raw_score": 0.5,
+    })
     dist = cm._grade_distribution()
     assert dist["A"] == 1
     assert dist["B"] == 2
+    assert dist["C"] == 1
     assert dist["F"] == 1
 
 
@@ -238,6 +249,18 @@ def test_perform_unload_rejects_invalid_slug() -> None:
 def test_load_sidecar_rejects_unsafe_slug(fake_claude: Path) -> None:
     _write_sidecar(fake_claude, "python-patterns", {"slug": "python-patterns"})
     assert cm._load_sidecar("../python-patterns") is None
+
+
+def test_load_sidecar_reads_mcp_quality_subdir(fake_claude: Path) -> None:
+    _write_mcp_sidecar(fake_claude, "filesystem", {
+        "slug": "filesystem",
+        "subject_type": "mcp-server",
+        "grade": "A",
+        "raw_score": 0.91,
+    })
+    sidecar = cm._load_sidecar("filesystem")
+    assert sidecar is not None
+    assert sidecar["subject_type"] == "mcp-server"
 
 
 def test_monitor_post_requires_token(

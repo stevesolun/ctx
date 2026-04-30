@@ -195,7 +195,9 @@ class TestRenderLoaded3Type:
         monkeypatch.setattr(_cm, "_read_manifest",
                             lambda: {"load": [], "unload": []})
         html = _cm._render_loaded()
-        assert "skills, agents &amp; MCPs" in html or "skills, agents & MCPs" in html
+        assert "skills, agents, MCPs &amp; harnesses" in html or (
+            "skills, agents, MCPs & harnesses" in html
+        )
 
     def test_loaded_entries_split_by_entity_type(self, monkeypatch):
         manifest = {
@@ -206,16 +208,20 @@ class TestRenderLoaded3Type:
                  "source": "ctx-agent-install"},
                 {"skill": "anthropic-python-sdk", "entity_type": "mcp-server",
                  "source": "ctx-mcp-install", "command": "npx -y @anthropic/sdk"},
+                {"skill": "langgraph", "entity_type": "harness",
+                 "source": "ctx-harness-install"},
             ],
             "unload": [],
         }
         monkeypatch.setattr(_cm, "_read_manifest", lambda: manifest)
         html = _cm._render_loaded()
-        # Three section headers render — one per type.
+        # Four section headers render — one per type.
         assert "<h3" in html
         assert "Skills " in html or "Skills</h3" in html or "Skills " in html
         assert "Agents " in html or "Agents</h3" in html
         assert "MCP servers" in html
+        assert "Harnesses" in html
+        assert "langgraph" in html
 
     def test_unload_buttons_carry_entity_type(self, monkeypatch):
         """Every unload button must carry data-etype so the /api/unload
@@ -226,6 +232,7 @@ class TestRenderLoaded3Type:
                 {"skill": "foo-skill", "entity_type": "skill"},
                 {"skill": "bar-agent", "entity_type": "agent"},
                 {"skill": "baz-mcp", "entity_type": "mcp-server"},
+                {"skill": "langgraph", "entity_type": "harness"},
             ],
             "unload": [],
         }
@@ -234,6 +241,7 @@ class TestRenderLoaded3Type:
         assert "data-etype='skill'" in html
         assert "data-etype='agent'" in html
         assert "data-etype='mcp-server'" in html
+        assert "data-etype='harness'" in html
 
     def test_legacy_manifest_entry_defaults_to_skill(self, monkeypatch):
         """Pre-install_utils manifest entries had no entity_type field.
