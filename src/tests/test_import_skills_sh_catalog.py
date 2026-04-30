@@ -349,10 +349,16 @@ def test_hydrated_skills_sh_body_is_indexed_and_rendered(
     }
     with tarfile.open(tarball, "w:gz") as tf:
         _add_text(tf, "./graphify-out/graph.json", json.dumps(graph))
+        _add_text(
+            tf,
+            "./converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md",
+            "stale body\n",
+        )
 
     update_wiki_tarball(tarball, catalog)
 
     with tarfile.open(tarball, "r:gz") as tf:
+        names = tf.getnames()
         graph_out = _read_json(tf, "./graphify-out/graph.json")
         catalog_out = _read_json(tf, "./external-catalogs/skills-sh/catalog.json")
         page_member = tf.getmember(
@@ -368,6 +374,7 @@ def test_hydrated_skills_sh_body_is_indexed_and_rendered(
         assert converted_file is not None
         converted = converted_file.read().decode("utf-8")
 
+    assert names.count("./converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md") == 1
     graph_node = graph_out["nodes"][0]
     assert graph_node["quality_signals"]["body_available"] is True
     assert catalog_out["body_hydrated_count"] == 1
@@ -378,9 +385,15 @@ def test_hydrated_skills_sh_body_is_indexed_and_rendered(
     assert graph_node["converted_path"] == (
         "converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md"
     )
+    assert "skill_body" not in catalog_out["skills"][0]
+    assert catalog_out["skills"][0]["body_char_count"] == len(skill["skill_body"])
     assert "body_available: true" in page
+    assert (
+        "converted_path: "
+        '"converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md"'
+    ) in page
     assert "Body availability: hydrated from Skills.sh detail page." in page
-    assert "## Upstream SKILL.md" in page
+    assert "## Upstream SKILL.md" not in page
     assert converted == "# Find Skills\n\nUse this skill to discover relevant skills.\n"
 
 
