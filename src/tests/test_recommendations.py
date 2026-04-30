@@ -98,6 +98,19 @@ def test_token_idf_caches_per_graph_identity() -> None:
     assert a is b, "IDF table must be cached per graph object"
 
 
+def test_token_idf_cache_isolated_between_live_graphs() -> None:
+    """Different graph objects must never share a stale IDF table."""
+    first = _build_graph([("python-a", []), ("python-b", [])])
+    second = _build_graph([("python-only", []), ("ruby-only", [])])
+
+    first_idf = _token_idf(first)
+    second_idf = _token_idf(second)
+
+    assert first_idf is not second_idf
+    assert first_idf["python"] == 0.0
+    assert second_idf["python"] > 0.0
+
+
 # ── Ranking behavior (the regression) ─────────────────────────────────
 
 

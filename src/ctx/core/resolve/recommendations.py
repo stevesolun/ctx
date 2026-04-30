@@ -6,6 +6,7 @@ import functools
 import json
 import math
 import re
+import weakref
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -38,18 +39,23 @@ def _slug_tokens(label: str) -> set[str]:
     return {tok for tok in _SLUG_TOKEN_RE.split(label.lower()) if tok}
 
 
-# Cache token IDF per graph identity. The graph object is built once
+# Cache token IDF per live graph object. The graph object is built once
 # per process by the recommender entry points; recomputing the IDF on
-# every query would be wasteful (one pass over 13K labels). Keying by
-# id() of the graph means a re-graphify produces a fresh table.
-_idf_cache: dict[int, dict[str, float]] = {}
+# every query would be wasteful (one pass over 100K+ labels). A weak-key
+# cache avoids stale hits when CPython reuses an object id after a graph
+# fixture is collected.
+_idf_cache: weakref.WeakKeyDictionary[Any, dict[str, float]] = (
+    weakref.WeakKeyDictionary()
+)
 
 
-# Cache the (vec_matrix, node_ids, model_id) tuple per graph identity.
+# Cache the (vec_matrix, node_ids, model_id) tuple per live graph object.
 # Loading the .npz + topk-state is ~50ms on a 13K-node graph; we don't
-# want to pay it on every recommend_by_tags call. Re-graphify produces
-# a fresh graph object so id() changes and the cache is reset.
-_semantic_cache: dict[int, tuple[Any, tuple[str, ...], str] | None] = {}
+# want to pay it on every recommend_by_tags call. Weak keys keep the cache
+# tied to the actual graph lifetime instead of a reusable object id.
+_semantic_cache: weakref.WeakKeyDictionary[Any, tuple[Any, tuple[str, ...], str] | None] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def _load_semantic_index(
@@ -64,22 +70,21 @@ def _load_semantic_index(
     sync — a stale cache silently degrades semantic ranking, but tag +
     token + degree ranking still work.
     """
-    graph_key = id(graph)
-    if graph_key in _semantic_cache:
-        return _semantic_cache[graph_key]
+    if graph in _semantic_cache:
+        return _semantic_cache[graph]
 
     if cache_dir is None:
         try:
             from ctx_config import cfg  # noqa: PLC0415
             cache_dir = cfg.graph_semantic_cache_dir
         except Exception:
-            _semantic_cache[graph_key] = None
+            _semantic_cache[graph] = None
             return None
 
     npz = cache_dir / "embeddings.npz"
     state = cache_dir / "topk-state.json"
     if not (npz.is_file() and state.is_file()):
-        _semantic_cache[graph_key] = None
+        _semantic_cache[graph] = None
         return None
     try:
         import numpy as np  # noqa: PLC0415
@@ -116,20 +121,20 @@ def _load_semantic_index(
             ordered_ids.append(nid)
             ordered_vecs.append(vecs[idx])
         if not ordered_ids:
-            _semantic_cache[graph_key] = None
+            _semantic_cache[graph] = None
             return None
         mat = np.asarray(ordered_vecs, dtype="float32")
         norms = np.linalg.norm(mat, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         mat = mat / norms
         result = (mat, tuple(ordered_ids), model_id)
-        _semantic_cache[graph_key] = result
+        _semantic_cache[graph] = result
         return result
     except Exception:
         # Any exception path (numpy missing, file unreadable, malformed
         # state, etc.) silently disables semantic boost. The non-semantic
         # ranking still works.
-        _semantic_cache[graph_key] = None
+        _semantic_cache[graph] = None
         return None
 
 
@@ -170,7 +175,7 @@ def _token_idf(graph: Any) -> dict[str, float]:
     tokens (``fastapi`` over ~10 nodes) get IDF around 7. The query
     ranker multiplies match scores by IDF so rare tokens dominate.
     """
-    cached = _idf_cache.get(id(graph))
+    cached = _idf_cache.get(graph)
     if cached is not None:
         return cached
     df: dict[str, int] = defaultdict(int)
@@ -186,7 +191,7 @@ def _token_idf(graph: Any) -> dict[str, float]:
     if n == 0:
         return {}
     table = {tok: math.log(n / max(d, 1)) for tok, d in df.items()}
-    _idf_cache[id(graph)] = table
+    _idf_cache[graph] = table
     return table
 
 
