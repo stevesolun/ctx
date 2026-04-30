@@ -453,3 +453,65 @@ def test_hydration_truncates_large_bodies(monkeypatch) -> None:
     assert skill["body_available"] is True
     assert skill["body_truncated"] is True
     assert len(skill["skill_body"]) == 12
+
+
+def test_hydration_checkpoint_resumes_hydrated_bodies(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    checkpoint = tmp_path / "hydrate.jsonl.gz"
+    detail_html = "<main><div class='prose'><p>Fetched body.</p></div></main>"
+    monkeypatch.setattr(
+        importer,
+        "_fetch_detail_html",
+        lambda url, timeout=30, max_bytes=2_000_000: (detail_html, None),
+    )
+    first_catalog: dict[str, Any] = {
+        "skills": [
+            {
+                "id": "vercel-labs/skills/find-skills",
+                "ctx_slug": "skills-sh-vercel-labs-skills-find-skills",
+                "detail_url": "https://skills.sh/vercel-labs/skills/find-skills",
+            }
+        ]
+    }
+
+    importer.hydrate_catalog_bodies(
+        first_catalog,
+        workers=1,
+        checkpoint_path=checkpoint,
+    )
+
+    fetched_urls: list[str] = []
+
+    def fetch_second(url: str, timeout: int = 30, max_bytes: int = 2_000_000) -> tuple[str, None]:
+        fetched_urls.append(url)
+        return "<main><div class='prose'><p>Second body.</p></div></main>", None
+
+    monkeypatch.setattr(importer, "_fetch_detail_html", fetch_second)
+    resumed_catalog: dict[str, Any] = {
+        "skills": [
+            {
+                "id": "vercel-labs/skills/find-skills",
+                "ctx_slug": "skills-sh-vercel-labs-skills-find-skills",
+                "detail_url": "https://skills.sh/vercel-labs/skills/find-skills",
+            },
+            {
+                "id": "microsoft/azure-skills/microsoft-foundry",
+                "ctx_slug": "skills-sh-microsoft-azure-skills-microsoft-foundry",
+                "detail_url": "https://skills.sh/microsoft/azure-skills/microsoft-foundry",
+            },
+        ]
+    }
+
+    summary = importer.hydrate_catalog_bodies(
+        resumed_catalog,
+        workers=1,
+        checkpoint_path=checkpoint,
+    )
+
+    assert summary["body_hydration_checkpoint_applied_count"] == 1
+    assert summary["body_hydration_attempted_count"] == 1
+    assert fetched_urls == ["https://skills.sh/microsoft/azure-skills/microsoft-foundry"]
+    assert resumed_catalog["skills"][0]["skill_body"] == "Fetched body."
+    assert resumed_catalog["skills"][1]["skill_body"] == "Second body."

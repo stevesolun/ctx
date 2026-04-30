@@ -42,7 +42,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CATALOG_OUT = REPO_ROOT / "graph" / "skills-sh-catalog.json.gz"
@@ -59,6 +59,16 @@ SKILLS_SH_ENTITY_ROOT = "entities/skills"
 CONVERTED_SKILL_ROOT = "converted"
 DEFAULT_DETAIL_MAX_BYTES = 2_000_000
 DEFAULT_SKILL_BODY_MAX_CHARS = 120_000
+_HYDRATION_CHECKPOINT_FIELDS = (
+    "id",
+    "ctx_slug",
+    "skill_body",
+    "body_available",
+    "body_source_url",
+    "body_hydrated_at",
+    "body_truncated",
+    "body_error",
+)
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _SAFE_SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -362,6 +372,9 @@ def _refresh_body_summary(catalog: dict[str, Any]) -> dict[str, Any]:
     )
     summary = {
         "body_available_count": body_available_count,
+        "body_hydration_checkpoint_applied_count": catalog.get(
+            "body_hydration_checkpoint_applied_count", 0,
+        ),
         "body_hydration_attempted_count": catalog.get("body_hydration_attempted_count", 0),
         "body_hydrated_count": catalog.get("body_hydrated_count", body_available_count),
         "body_hydration_error_count": catalog.get("body_hydration_error_count", 0),
@@ -380,9 +393,11 @@ def hydrate_catalog_bodies(
     timeout: int = 30,
     max_response_bytes: int = DEFAULT_DETAIL_MAX_BYTES,
     max_body_chars: int = DEFAULT_SKILL_BODY_MAX_CHARS,
+    checkpoint_path: Path | None = None,
 ) -> dict[str, Any]:
     raw_skills = catalog.get("skills")
     skills = raw_skills if isinstance(raw_skills, list) else []
+    checkpoint_applied = _apply_hydration_checkpoint(catalog, checkpoint_path)
     candidates = [
         item for item in skills
         if isinstance(item, dict)
@@ -415,31 +430,49 @@ def hydrate_catalog_bodies(
         return item, body, None
 
     if candidates:
-        with cf.ThreadPoolExecutor(max_workers=max(workers, 1)) as executor:
-            future_map = {executor.submit(hydrate_one, item): item for item in candidates}
-            for future in cf.as_completed(future_map):
-                item, body, error = future.result()
-                if body:
-                    item["body_truncated"] = len(body) > max_body_chars
-                    if item["body_truncated"]:
-                        body = body[:max_body_chars].rstrip()
-                    item["skill_body"] = body
-                    item["body_available"] = True
-                    item["body_source_url"] = str(item.get("detail_url") or "")
-                    item["body_hydrated_at"] = hydration_time
-                    item.pop("body_error", None)
-                    hydrated += 1
-                    continue
-                item["body_available"] = False
-                if error:
-                    item["body_error"] = error
-                    errors.append({
-                        "id": str(item.get("id") or ""),
-                        "detail_url": str(item.get("detail_url") or ""),
-                        "error": error,
-                    })
+        checkpoint_writer = (
+            _open_checkpoint_writer(checkpoint_path)
+            if checkpoint_path is not None else None
+        )
+        try:
+            with cf.ThreadPoolExecutor(max_workers=max(workers, 1)) as executor:
+                future_map = {executor.submit(hydrate_one, item): item for item in candidates}
+                for future in cf.as_completed(future_map):
+                    item, body, error = future.result()
+                    if body:
+                        item["body_truncated"] = len(body) > max_body_chars
+                        if item["body_truncated"]:
+                            body = body[:max_body_chars].rstrip()
+                        item["skill_body"] = body
+                        item["body_available"] = True
+                        item["body_source_url"] = str(item.get("detail_url") or "")
+                        item["body_hydrated_at"] = hydration_time
+                        item.pop("body_error", None)
+                        hydrated += 1
+                    else:
+                        item["body_available"] = False
+                        if error:
+                            item["body_error"] = error
+                            errors.append({
+                                "id": str(item.get("id") or ""),
+                                "detail_url": str(item.get("detail_url") or ""),
+                                "error": error,
+                            })
+                    if checkpoint_writer is not None:
+                        json.dump(
+                            _checkpoint_record(item),
+                            checkpoint_writer,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )
+                        checkpoint_writer.write("\n")
+                        checkpoint_writer.flush()
+        finally:
+            if checkpoint_writer is not None:
+                checkpoint_writer.close()
 
     summary = {
+        "body_hydration_checkpoint_applied_count": checkpoint_applied,
         "body_hydration_attempted_count": len(candidates),
         "body_hydrated_count": hydrated,
         "body_hydration_error_count": len(errors),
@@ -1141,6 +1174,58 @@ def _load_catalog_input(path: Path) -> dict[str, Any]:
     return _load_raw_input(path)
 
 
+def _open_checkpoint_reader(path: Path) -> TextIO:
+    if path.suffix == ".gz":
+        return gzip.open(path, "rt", encoding="utf-8")
+    return path.open("rt", encoding="utf-8")
+
+
+def _open_checkpoint_writer(path: Path) -> TextIO:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix == ".gz":
+        return gzip.open(path, "at", encoding="utf-8")
+    return path.open("a", encoding="utf-8")
+
+
+def _checkpoint_record(item: dict[str, Any]) -> dict[str, Any]:
+    return {field: item[field] for field in _HYDRATION_CHECKPOINT_FIELDS if field in item}
+
+
+def _apply_hydration_checkpoint(catalog: dict[str, Any], path: Path | None) -> int:
+    if path is None or not path.exists():
+        return 0
+    records: dict[str, dict[str, Any]] = {}
+    with _open_checkpoint_reader(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict) and record.get("id"):
+                records[str(record["id"])] = record
+    if not records:
+        return 0
+    raw_skills = catalog.get("skills")
+    skills = raw_skills if isinstance(raw_skills, list) else []
+    applied = 0
+    for item in skills:
+        if not isinstance(item, dict):
+            continue
+        record = records.get(str(item.get("id") or ""))
+        if not record:
+            continue
+        for field in _HYDRATION_CHECKPOINT_FIELDS:
+            if field in {"id", "ctx_slug"}:
+                continue
+            if field in record:
+                item[field] = record[field]
+        applied += 1
+    return applied
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
@@ -1160,6 +1245,12 @@ def main() -> None:
     parser.add_argument("--hydrate-timeout", type=int, default=30)
     parser.add_argument("--hydrate-max-response-bytes", type=int, default=DEFAULT_DETAIL_MAX_BYTES)
     parser.add_argument("--hydrate-max-body-chars", type=int, default=DEFAULT_SKILL_BODY_MAX_CHARS)
+    parser.add_argument(
+        "--hydrate-checkpoint",
+        type=Path,
+        default=None,
+        help="JSONL or JSONL.gz checkpoint for resumable Skills.sh body hydration",
+    )
     args = parser.parse_args()
 
     if args.fetch:
@@ -1185,6 +1276,7 @@ def main() -> None:
             timeout=args.hydrate_timeout,
             max_response_bytes=args.hydrate_max_response_bytes,
             max_body_chars=args.hydrate_max_body_chars,
+            checkpoint_path=args.hydrate_checkpoint,
         )
         print(
             "hydrated Skills.sh bodies: "
