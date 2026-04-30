@@ -56,6 +56,7 @@ LEGACY_EXTERNAL_NODE_PREFIX = "external-skill:skills-sh:"
 MAX_EXTERNAL_EDGES_PER_NODE = 2
 EXTERNAL_ENTITY_ROOT = "entities/external-skills"
 SKILLS_SH_ENTITY_ROOT = "entities/skills"
+CONVERTED_SKILL_ROOT = "converted"
 DEFAULT_DETAIL_MAX_BYTES = 2_000_000
 DEFAULT_SKILL_BODY_MAX_CHARS = 120_000
 
@@ -310,6 +311,15 @@ def _normalize_skill_body_text(text: str) -> str:
 
 
 def _extract_skill_body_from_detail_html(html_text: str) -> str:
+    marker_index = html_text.find(">SKILL.md<")
+    if marker_index >= 0:
+        body_parser = _SkillBodyParser()
+        body_parser.feed(html_text[marker_index:])
+        body_parser.close()
+        body = _normalize_skill_body_text("".join(body_parser.parts))
+        if body:
+            return body
+
     parser = _SkillBodyParser()
     parser.feed(html_text)
     parser.close()
@@ -725,6 +735,10 @@ def _skills_sh_entity_path(ctx_slug: str) -> str:
     return f"{SKILLS_SH_ENTITY_ROOT}/{ctx_slug}.md"
 
 
+def _skills_sh_converted_path(ctx_slug: str) -> str:
+    return f"{CONVERTED_SKILL_ROOT}/{ctx_slug}/SKILL.md"
+
+
 def _md_list(values: list[str]) -> str:
     if not values:
         return "[]"
@@ -900,6 +914,10 @@ def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str,
         item.pop("external_catalog", None)
         item["graph_node_id"] = external_id
         item["entity_path"] = _skills_sh_entity_path(ctx_slug)
+        item["converted_path"] = (
+            _skills_sh_converted_path(ctx_slug)
+            if quality.get("body_available") else None
+        )
         item["merge_state"] = "alias-of-curated" if duplicate_targets else "remote-cataloged"
         item["duplicate_of"] = duplicate_targets[0] if duplicate_targets else None
         item["duplicate_targets"] = duplicate_targets
@@ -923,6 +941,7 @@ def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str,
             "quality_score": item["quality_score"],
             "quality_signals": item["quality_signals"],
             "entity_path": item["entity_path"],
+            "converted_path": item["converted_path"],
         }
         existing_node = node_by_id.get(external_id)
         if existing_node is None:
@@ -1017,6 +1036,7 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                 if (
                     safe_name.startswith("external-catalogs/skills-sh/")
                     or safe_name.startswith(f"{EXTERNAL_ENTITY_ROOT}/")
+                    or safe_name.startswith(f"{CONVERTED_SKILL_ROOT}/skills-sh-/")
                     or (
                         safe_name.startswith(f"{SKILLS_SH_ENTITY_ROOT}/skills-sh-")
                         and safe_name.endswith(".md")
@@ -1087,6 +1107,14 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                     name=f"./{entity_path}",
                     payload=page.encode("utf-8"),
                 )
+                skill_body = str(item.get("skill_body") or "").strip()
+                converted_path = str(item.get("converted_path") or "")
+                if skill_body and converted_path:
+                    _add_bytes(
+                        dst,
+                        name=f"./{converted_path}",
+                        payload=(skill_body.rstrip() + "\n").encode("utf-8"),
+                    )
             for name, payload in (
                 ("external-catalogs/skills-sh/catalog.json", catalog_bytes),
                 ("external-catalogs/skills-sh/summary.json", summary_bytes),

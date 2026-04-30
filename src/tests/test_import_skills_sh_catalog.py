@@ -256,6 +256,27 @@ def test_extract_skill_body_from_skills_sh_detail_html() -> None:
     assert "<h1>" not in body
 
 
+def test_extract_skill_body_prefers_skill_md_panel() -> None:
+    html = """
+    <main>
+      <div class="prose">
+        <p>Summary card text.</p>
+      </div>
+      <div><span>SKILL.md</span></div>
+      <div class="prose">
+        <h1>Microsoft Foundry Skill</h1>
+        <p>Canonical upstream body.</p>
+      </div>
+    </main>
+    """
+
+    body = importer._extract_skill_body_from_detail_html(html)
+
+    assert "# Microsoft Foundry Skill" in body
+    assert "Canonical upstream body." in body
+    assert "Summary card text." not in body
+
+
 def test_hydrated_skills_sh_body_is_indexed_and_rendered(
     monkeypatch,
     tmp_path: Path,
@@ -339,14 +360,27 @@ def test_hydrated_skills_sh_body_is_indexed_and_rendered(
         page_file = tf.extractfile(page_member)
         assert page_file is not None
         page = page_file.read().decode("utf-8")
+        converted_member = tf.getmember(
+            "./converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md"
+        )
+        converted_file = tf.extractfile(converted_member)
+        assert converted_file is not None
+        converted = converted_file.read().decode("utf-8")
 
     graph_node = graph_out["nodes"][0]
     assert graph_node["quality_signals"]["body_available"] is True
     assert catalog_out["body_hydrated_count"] == 1
     assert catalog_out["skills"][0]["quality_signals"]["body_available"] is True
+    assert catalog_out["skills"][0]["converted_path"] == (
+        "converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md"
+    )
+    assert graph_node["converted_path"] == (
+        "converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md"
+    )
     assert "body_available: true" in page
     assert "Body availability: hydrated from Skills.sh detail page." in page
     assert "## Upstream SKILL.md" in page
+    assert converted == "# Find Skills\n\nUse this skill to discover relevant skills.\n"
 
 
 def test_hydration_rejects_non_skills_sh_detail_urls(monkeypatch) -> None:
