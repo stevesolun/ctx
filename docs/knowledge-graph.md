@@ -12,7 +12,8 @@ update, load/unload, and quality scoring remain CLI/API workflows.
 Authoritative numbers from the shipped tarball. The curated-core snapshot
 is **13,232 nodes** (1,969 curated skills + 464 agents + 10,786 MCP servers
 + 13 harnesses). Harness pages under `entities/harnesses/` are ingested into
-local rebuilds and recommendation output when cataloged. The tarball also carries **90,846
+local rebuilds and the separate harness-catalog recommendation path. The
+tarball also carries **90,846
 remote-cataloged Skills.sh `skill` nodes**, matching skill pages under
 `entities/skills/skills-sh-*.md`, and **67,530 sparse metadata edges** back
 to curated entities. These records are first-class skills by graph type,
@@ -55,25 +56,29 @@ Obsidian's native graph view if you prefer it to the web dashboard.
 
 ## How edges are built
 
-Two sources of connectivity, combined at build time by the
+Three sources of connectivity, combined at build time by the
 `ctx-wiki-graphify` console script (`ctx.core.wiki.wiki_graphify`):
 
-1. **Explicit frontmatter tags** — each entity page's YAML `tags:`
+1. **Semantic cosine** — when the embedding backend is available, entity
+   text is embedded and semantic neighbors above the configured build floor
+   contribute weighted edges.
+2. **Explicit frontmatter tags** — each entity page's YAML `tags:`
    list contributes edges between every pair of entities that share
    a tag. Popular tags capped at 500 nodes to avoid noise-floor
    "everything connects to everything" mega-buckets like `typescript`
    or `frontend`.
-2. **Slug-token pseudo-tags** — each hyphenated slug contributes its
+3. **Slug-token pseudo-tags** — each hyphenated slug contributes its
    tokens as implicit tags. `fastapi-pro` contributes `fastapi`;
    `python-patterns` contributes `python` and `patterns`. A stop-word
    filter drops generic tokens like `skill`, `agent`, `pro`, `expert`,
    `core` so they don't over-connect the graph.
 
-Edge `weight` is the count of shared tags between two nodes. Edge
-`shared_tags` is the list of the actual tags that produced the edge,
-so any single edge is explainable (e.g. `cloud-architect ↔ terraform-
-engineer` has `weight=6` with `shared_tags=[automation, azure,
-security, _t:architect, ...]`).
+Edge `weight` is the final blended strength after semantic, tag, and token
+signals are combined. Edge metadata keeps the ingredients explainable:
+`semantic_sim` for cosine similarity, `shared_tags` for explicit tags, and
+`shared_tokens` for slug-token overlap. Skills.sh records currently have
+metadata-only edges until their upstream SKILL.md bodies are hydrated and
+semantic embeddings are rebuilt.
 
 ## Communities
 
@@ -143,26 +148,40 @@ The helper `resolve_graph.load_graph()` does this for you.
 
 The graph backs two recommendation paths:
 
-- Free-text recommendation surfaces (`ctx.recommend_bundle`, MCP
-  `ctx__recommend_bundle`, generic harness tools, and Claude Code hook
-  suggestions) share `ctx.core.resolve.recommendations.recommend_by_tags`.
-  That engine ranks skills, agents, MCP servers, and harnesses by
+- Execution recommendation surfaces (`ctx.recommend_bundle`, MCP
+  `ctx__recommend_bundle`, generic harness tools, Claude Code hook
+  suggestions, and repo-scan advisory output) share
+  `ctx.core.resolve.recommendations.recommend_by_tags` for skills,
+  agents, and MCP servers. That engine ranks candidates by
   slug-token matches, tag overlap, graph degree, and semantic-cache
   signals when available. Skills.sh results are `skill` nodes with
   `source_catalog=skills.sh`, `detail_url`, `install_command`, duplicate
   hints, and metadata-only quality/security signals. If an older
   extracted wiki has the Skills.sh catalog JSON but no graph nodes for
   those records, the same recommender falls back to the catalog file.
+- Harness recommendations are a separate catalog path for custom/API/local
+  model onboarding (`ctx-init --model-mode custom ...`) and
+  `ctx-harness-install`. They use the same graph catalog filtered to
+  `harness` nodes and the higher harness match floor from `config.json`.
 - Repository scans still start from stack detections and installed-entity
   availability. `resolve_skills.resolve()` maps detected languages,
   frameworks, infrastructure, and tools through the shared stack matrix, then
   uses the graph as an advisory augmentation source for additional installed
-  skills, agents, and MCP server suggestions, plus catalog-only harness
-  recommendations where the scan includes them.
+  skills, agents, and MCP server suggestions. Harnesses are intentionally not
+  emitted from repo scans or Claude Code hook bundles.
 
-This split is intentional: free-text query surfaces need identical ranking,
-while scan resolution also has to respect local installation state and the
-manifest cap.
+This split is intentional: execution surfaces need identical ranking and a
+small top-K, while harness choice changes the model runtime itself and belongs
+in an explicit onboarding/install flow.
+
+### LLM-wiki design references
+
+ctx follows Karpathy's LLM-wiki pattern. We also reviewed
+[`nashsu/llm_wiki`](https://github.com/nashsu/llm_wiki) as a design reference
+for source traceability, persistent ingest queues, graph insights, and
+budgeted token/vector/graph retrieval. That repository is GPLv3, while ctx is
+MIT, so ctx can use those ideas as product inspiration but must not copy or
+vendor its code or assets.
 
 ## Rebuilding
 

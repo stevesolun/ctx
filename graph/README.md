@@ -2,6 +2,11 @@
 
 Pre-built knowledge graph of **104,078 nodes** and **1,033,253 edges**. The curated core is **13,232 nodes** (1,969 curated skills + 464 agents + 10,786 MCP servers + 13 cataloged harnesses) with **965,723 edges** across **23 communities** (Louvain). The Skills.sh catalog adds **90,846 first-class remote-cataloged `skill` nodes**, **90,846 skill pages under `entities/skills/skills-sh-*.md`**, and **67,530 sparse metadata edges** to curated entities. Curated-core edges are blended from three signals: semantic cosine (210,487 edges, default weight 0.70), explicit `tags:` overlap (598,908 edges, weight 0.15), and slug-token overlap (315,162 edges, weight 0.15). The current Skills.sh pass is first-class by node type, but not yet full-body semantic: Skills.sh edges still have `semantic_sim=0.0` until the hydration + full regraphify phase fetches upstream SKILL.md bodies. Rebuild the curated core with `python -m ctx.core.wiki.wiki_graphify`, add harnesses with `ctx-harness-add`, then refresh the Skills.sh catalog with `python src/import_skills_sh_catalog.py --from-api-union <raw.json> --update-wiki-tar`.
 
+Runtime recommendation is intentionally split into two paths: execution
+surfaces recommend only skills, agents, and MCP servers; custom/API/local model
+onboarding recommends harnesses from the same graph catalog with the higher
+harness match floor in `config.json`.
+
 > **2026-04-29.** Expanded the harness catalog to 13 first-class `harness` nodes/pages: LangGraph, CrewAI, AutoGen, Google ADK, Semantic Kernel, Mastra, Pydantic AI, Haystack, OpenAI Agents SDK, LiteLLM, Langfuse, AgentOps, and [`text-to-cad`](https://github.com/earthtojake/text-to-cad). Node count: 104,066 -> **104,078**. Edge count: 1,031,011 -> **1,033,253**. Harness incident edges now total 2,700: 2,411 curated-core edges plus 289 remote-cataloged Skills.sh metadata edges. It does not add full-body Skills.sh semantic edges; those require the later hydration + graphify pass.
 
 > **2026-04-29.** Added the curated `find-skills` workflow and mirrored it into `converted/find-skills/SKILL.md`, so fresh clones can install it from the shipped wiki. Curated node count: 13,218 -> **13,219**. Curated edge count: 963,068 -> **963,312**. The tarball now also carries Skills.sh catalog coverage as **90,846 remote-cataloged `skill` nodes**, matching skill pages under `entities/skills/skills-sh-*.md`, and `external-catalogs/skills-sh/catalog.json`.
@@ -85,12 +90,13 @@ G = node_link_graph(raw, edges=edges_key)
 # 104,078 nodes, 1,033,253 edges
 print(G.number_of_nodes(), G.number_of_edges())
 
-# Find skills related to "fastapi"
+# Find entities related to "fastapi"
 fastapi = "skill:fastapi-pro"
 neighbors = sorted(G.neighbors(fastapi),
                    key=lambda n: G[fastapi][n]["weight"], reverse=True)[:10]
 for n in neighbors:
-    print(f"  {G.nodes[n]['label']} (weight={G[fastapi][n]['weight']})")
+    edge = G[fastapi][n]
+    print(f"  {G.nodes[n]['label']} (weight={edge['weight']})")
 ```
 
 Or just use the dashboard:
@@ -113,7 +119,13 @@ python src/wiki_batch_entities.py --all          # skills/agents only; MCPs/harn
 python -m ctx.core.wiki.wiki_graphify            # rebuild graph + communities; --full to force semantic top-K
 ctx-dedup-check --threshold 0.85                 # pre-ship dedup gate (flag-only, NEVER drops)
 ctx-tag-backfill                                 # report-only by default; --apply to write
+python src/render_graph_viz.py                   # refresh graph/*.html and overview PNG snapshots
 ```
+
+`nashsu/llm_wiki` was reviewed as a design reference for source traceability,
+ingest queues, graph insights, and budgeted retrieval. Its GPLv3 license is
+not compatible with copying code into this MIT repo, so ctx should adopt only
+independently implemented ideas.
 
 ### Pre-ship gates
 

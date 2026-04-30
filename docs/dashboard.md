@@ -78,8 +78,9 @@ Inside the cytoscape view, node colors mean:
 - **red diamond** — MCP servers
 - **green hexagon** — harnesses
 
-Edge width encodes the `weight` attribute (count of shared tags), so
-thicker lines = stronger semantic relationships. **Tap any node** to
+Edge width encodes the blended graph `weight` attribute, combining semantic
+similarity, explicit tag overlap, and slug-token overlap where available.
+Thicker lines = stronger relationships. **Tap any node** to
 navigate to that entity's wiki page. The type checkboxes hide or show
 skills, agents, MCP servers, and harnesses without reloading the graph.
 
@@ -124,20 +125,19 @@ Home · Loaded · Skills · Wiki · Graph · KPIs · Sessions · Logs · Live
 
 ### HTML views
 
-Harness catalog entries are visible in wiki and graph routes. Harness
-installation, update, load/unload, and quality scoring remain CLI/API
-workflows.
+Harness catalog entries are visible in loaded, wiki, and graph routes. Harness
+installation, update, uninstall, and quality scoring remain CLI/API workflows.
 
 | Route | What it shows |
 |---|---|
 | `/` | Home: six stat cards (loaded, sidecars, wiki entities, graph nodes, audit events, sessions), grade distribution pills, recent sessions table, recent audit events |
-| `/loaded` | **Currently-loaded skills, agents, and MCP servers** from `~/.claude/skill-manifest.json` with per-row **unload** buttons + a text-input to load a new skill slug |
-| `/skills` | Every sidecar as a filterable **card grid**: left sidebar (search by slug, grade checkboxes, skill/agent toggle, hide-floored), card shows grade pill + raw score + links to sidecar/wiki/graph |
+| `/loaded` | **Currently-loaded skills, agents, MCP servers, and installed harness records** from `~/.claude/skill-manifest.json` plus `~/.claude/harness-installs/*.json`; skill/MCP rows expose supported live actions |
+| `/skills` | Every sidecar as a filterable **card grid**: left sidebar (search by slug, grade checkboxes, skill/agent/MCP toggle, hide-floored), card shows grade pill + raw score + links to sidecar/wiki/graph |
 | `/skill/<slug>` | Full sidecar breakdown: four-signal score (telemetry · intake · graph · routing), hard-floor reason, computed_at timestamp, per-skill audit timeline |
 | `/wiki` | **Wiki entity index** - card grid of every dashboard-supported page under `~/.claude/skill-wiki/entities/{skills,agents,mcp-servers,harnesses}/`, including sharded MCP server pages and flat harness pages. Left sidebar: text search (slug, description, tag), skill/agent/MCP/harness checkboxes. |
 | `/wiki/<slug>?type=<entity>` | Dashboard-supported wiki entity page rendered: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views. The optional `type` query disambiguates duplicate slugs such as `langgraph`. |
 | `/graph` | **Graph explorer landing page** - node/edge count header, a "Popular seed slugs" block (18 highest-degree skill/agent/MCP/harness entities as clickable chips), search box for any skill/agent/MCP/harness slug, and the cytoscape canvas. Clicking a seed chip navigates to `/graph?slug=<slug>&type=<entity>`. |
-| `/graph?slug=<slug>&type=<entity>` | **Cytoscape-rendered** 1-hop neighborhood around the target skill/agent/MCP/harness slug. Node colors: emerald=focus, indigo=skill, amber=agent, red diamond=MCP server, green hexagon=harness. Edge width maps to shared-tag count. Tap any node to navigate to that entity's typed wiki page. Type and tag filters run client-side. |
+| `/graph?slug=<slug>&type=<entity>` | **Cytoscape-rendered** 1-hop neighborhood around the target skill/agent/MCP/harness slug. Node colors: emerald=focus, indigo=skill, amber=agent, red diamond=MCP server, green hexagon=harness. Edge width maps to blended graph weight. Tap any node to navigate to that entity's typed wiki page. Type and tag filters run client-side. |
 | `/kpi` | **KPI dashboard** — total entity count with subject breakdown, grade distribution pills, two-column tables for grade counts and lifecycle tiers (active · watch · demote · archive), hard-floor reasons with counts, **By category** table (count · avg score · A/B/C/D/F mix per category), **Top demotion candidates** (active/watch entries graded D or F, sorted by consecutive-D streak desc then score asc), and the **Archived** list. Same shape as `python -m kpi_dashboard render` but HTML |
 | `/sessions` | Index of every session (audit + skill-events), first/last seen, counts of skills loaded/unloaded/agents/lifecycle transitions |
 | `/session/<id>` | Per-session audit timeline showing the load → score_updated → unload triad with timestamps |
@@ -200,7 +200,7 @@ Every card shows:
 
 - **grade** — A / B / C / D / F pill (A=green, F=red)
 - **raw score** — float in [0, 1] before the hard-floor override
-- **subject_type** — skill vs agent
+- **subject_type** — skill, agent, or mcp-server
 - **hard floor reason** — `never_loaded_stale`, `intake_fail`, etc.
   when the floor is active
 

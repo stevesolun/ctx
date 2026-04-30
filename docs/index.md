@@ -3,12 +3,15 @@ hide:
   - navigation
 ---
 
-# ctx — Skill, Agent, MCP & Harness Recommendation and Management
+# ctx — Skill, Agent, MCP & Harness Catalog
 
 Watches what you develop, walks a knowledge graph of **92,815 skills, 464
 agents, 10,786 MCP servers, and 13 cataloged harnesses**, and recommends the
-right ones on the fly — you decide what to load, install, or adopt. Powered
-by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+right execution bundle on the fly. The live execution bundle is skills,
+agents, and MCP servers only; custom/API/local model users get a separate
+harness-catalog recommendation based on model choice and task goal. You decide
+what to load, install, or adopt. Powered by a Karpathy LLM wiki with persistent
+memory that gets smarter every session.
 
 !!! tip "Install"
 
@@ -35,11 +38,14 @@ powerful, but at scale they become unmanageable:
   MCP servers, and 13 cataloged harnesses, how do you know which
   ones exist and which are relevant to your current project?
 - **Context budget** — loading every installable entity wastes tokens and
-  degrades quality. You need exactly the right skills, agents, MCP
-  servers, and harness recommendations per session.
+  degrades quality. You need exactly the right skills, agents, and MCP
+  servers per session, plus a harness recommendation only when you choose
+  a custom/API/local model path.
 - **Hidden connections** — a FastAPI skill is useful, but you also need
   the Pydantic skill, the async Python patterns skill, and the Docker
-  skill, plus possibly a matching MCP server or model harness profile.
+  skill, plus possibly a matching MCP server. If you are not using Claude
+  Code, ctx separately suggests the model harness most likely to fit your
+  goal.
   Nobody tells you that.
 - **Entity rot** — skills, agents, MCP servers, and harness records you
   added months ago and never used are cluttering your context. Stale ones
@@ -80,16 +86,19 @@ graph-based discovery:
 - Skills over 180 lines are converted to a gated 5-stage micro-skill
   pipeline so the router can load them incrementally.
 - At session start, the skill-router scans your project and
-  **recommends** the best-matching skills, agents, MCP servers, and
-  harnesses.
+  **recommends** the best-matching skills, agents, and MCP servers.
 - Mid-session, the context monitor watches every tool call, detects new
   stack signals, walks the graph, and **recommends** relevant skills,
-  agents, MCP servers, and harnesses in real time — **nothing loads or
+  agents, and MCP servers in real time — **nothing loads or
   installs without your approval**.
+- During custom/API/local model onboarding, `ctx-init` and
+  `ctx-harness-install` use the same graph catalog to recommend harnesses
+  above the configured harness match floor.
 
-The result: you always know what skills, agents, MCP servers, and harnesses are
-available for your current task. The graph reveals hidden connections. The wiki
-learns from your usage. Stale ones are flagged. New ones self-ingest.
+The result: you always know what skills, agents, and MCP servers are available
+for your current task, and which harness fits when you choose your own model.
+The graph reveals hidden connections. The wiki learns from your usage. Stale
+ones are flagged. New ones self-ingest.
 
 ## Explore the docs
 
@@ -147,7 +156,7 @@ learns from your usage. Stale ones are flagged. New ones self-ingest.
 
     Scans the active repo, detects the stack from file signatures, walks
     the stack matrix, loads exactly the skills that apply, and can
-    recommend supporting agents, MCP servers, and harnesses.
+    recommend supporting agents and MCP servers.
 
     [:octicons-arrow-right-24: Router overview](skill-router/index.md) ·
     [Stack signatures](stack-signatures.md) ·
