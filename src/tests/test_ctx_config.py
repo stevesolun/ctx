@@ -142,9 +142,9 @@ class TestRecommendationTopK:
         c = Config({"resolver": {"recommendation_top_k": 1}})
         assert c.recommendation_top_k == 1
 
-    def test_large_value_accepted(self) -> None:
-        c = Config({"resolver": {"recommendation_top_k": 999}})
-        assert c.recommendation_top_k == 999
+    def test_above_execution_bundle_cap_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"recommendation_top_k.*\[1, 5\]"):
+            Config({"resolver": {"recommendation_top_k": 999}})
 
 
 # ── Graph edge weights ───────────────────────────────────────────────────────
