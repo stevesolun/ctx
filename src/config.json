@@ -91,8 +91,8 @@
       "shared_tag_saturation": 5
     },
     "token_edges": {
-      "_comment": "Slug-token edge construction. Mirrors tag_edges but for the pseudo-tags synthesized from slug tokens. shared_token_saturation applies to how many slug tokens two pages must share before token_sim saturates to 1.0.",
-      "dense_token_threshold": 500,
+      "_comment": "Slug-token edge construction. Mirrors tag_edges but for the pseudo-tags synthesized from slugs. Keep dense_token_threshold intentionally low: after 90K+ hydrated Skills.sh bodies, broad slug words create millions of low-signal token-only edges. Semantic top-K and explicit tags are the primary graph signals; slug tokens are only a sparse fallback.",
+      "dense_token_threshold": 30,
       "shared_token_saturation": 3
     }
   },

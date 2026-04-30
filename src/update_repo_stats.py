@@ -30,8 +30,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 README = REPO_ROOT / "README.md"
 _MAX_TAR_JSON_BYTES = 512 * 1024 * 1024
+_MAX_TAR_TEXT_BYTES = 2 * 1024 * 1024
 _GRAPH_JSON_MEMBER = "graphify-out/graph.json"
 _COMMUNITIES_JSON_MEMBER = "graphify-out/communities.json"
+_GRAPH_REPORT_MEMBER = "graphify-out/graph-report.md"
 _PYTEST_COLLECT_TIMEOUT_SECONDS = 180
 
 
@@ -76,7 +78,43 @@ def _read_json_member(tf: tarfile.TarFile, expected_name: str) -> object | None:
     return json.loads(payload.decode("utf-8"))
 
 
-def _read_graph_from_tarball() -> dict[str, int | None] | None:
+def _read_text_member(tf: tarfile.TarFile, expected_name: str) -> str | None:
+    matches = [
+        member for member in tf.getmembers() if _safe_tar_name(member.name) == expected_name
+    ]
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise ValueError(f"ambiguous tar member: {expected_name}")
+    member = matches[0]
+    if not member.isfile():
+        raise ValueError(f"tar member is not a regular file: {expected_name}")
+    if member.size < 0 or member.size > _MAX_TAR_TEXT_BYTES:
+        raise ValueError(f"tar member exceeds size cap: {expected_name}")
+    f = tf.extractfile(member)
+    if f is None:
+        raise ValueError(f"tar member cannot be read: {expected_name}")
+    payload = f.read(_MAX_TAR_TEXT_BYTES + 1)
+    if len(payload) > _MAX_TAR_TEXT_BYTES:
+        raise ValueError(f"tar member exceeds read cap: {expected_name}")
+    return payload.decode("utf-8")
+
+
+def _parse_graph_report(text: str) -> dict[str, int]:
+    match = re.search(
+        r"Nodes:\s*([\d,]+)\s*\|\s*Edges:\s*([\d,]+)\s*\|\s*Communities:\s*([\d,]+)",
+        text,
+    )
+    if not match:
+        return {}
+    return {
+        "nodes": int(match.group(1).replace(",", "")),
+        "edges": int(match.group(2).replace(",", "")),
+        "communities": int(match.group(3).replace(",", "")),
+    }
+
+
+def _read_graph_from_tarball_legacy() -> dict[str, int | None] | None:
     """Read graph + counts from the shipped ``graph/wiki-graph.tar.gz``.
 
     The tarball is the canonical source of the numbers published in
@@ -133,6 +171,63 @@ def _read_graph_from_tarball() -> dict[str, int | None] | None:
         return None
     # Require at least nodes + skills to consider the tarball reading
     # authoritative; otherwise fall back to the live wiki.
+    if stats["nodes"] and stats["skills"]:
+        return stats
+    return None
+
+
+def _read_graph_from_tarball() -> dict[str, int | None] | None:
+    """Read shipped graph counts without loading graph.json when possible."""
+    tarball = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
+    if not tarball.exists():
+        return None
+    stats: dict[str, int | None] = {
+        "nodes": None, "edges": None,
+        "skills": None, "agents": None, "mcps": None, "communities": None,
+    }
+    try:
+        with tarfile.open(tarball, "r:gz") as tf:
+            s = a = m = 0
+            for member in tf.getmembers():
+                name = _safe_tar_name(member.name)
+                if name is None or not member.isfile() or not name.endswith(".md"):
+                    continue
+                if name.startswith("entities/skills/"):
+                    s += 1
+                elif name.startswith("entities/agents/"):
+                    a += 1
+                elif name.startswith("entities/mcp-servers/"):
+                    m += 1
+            stats["skills"], stats["agents"], stats["mcps"] = s, a, m
+
+            report = _read_text_member(tf, _GRAPH_REPORT_MEMBER)
+            if report is not None:
+                parsed = _parse_graph_report(report)
+                for key in ("nodes", "edges", "communities"):
+                    if key in parsed:
+                        stats[key] = parsed[key]
+
+            if stats["nodes"] is None or stats["edges"] is None:
+                body = _read_json_member(tf, _GRAPH_JSON_MEMBER)
+                if body is not None:
+                    if not isinstance(body, dict):
+                        raise ValueError("graph member must be a JSON object")
+                    stats["nodes"] = len(body.get("nodes", []))
+                    edges_key = next((k for k in ("edges", "links") if k in body), None)
+                    if edges_key:
+                        stats["edges"] = len(body[edges_key])
+
+            if stats["communities"] is None:
+                body = _read_json_member(tf, _COMMUNITIES_JSON_MEMBER)
+                if isinstance(body, dict):
+                    stats["communities"] = (
+                        body.get("total_communities")
+                        or len(body.get("communities", []))
+                    )
+                elif isinstance(body, list):
+                    stats["communities"] = len(body)
+    except (tarfile.TarError, OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return _read_graph_from_tarball_legacy()
     if stats["nodes"] and stats["skills"]:
         return stats
     return None

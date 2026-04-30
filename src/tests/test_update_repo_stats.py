@@ -111,6 +111,36 @@ def test_tarball_stats_reject_oversized_json_member(
     assert urs._read_graph_from_tarball() is None
 
 
+def test_tarball_stats_uses_report_when_graph_json_is_large(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(urs, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(urs, "_MAX_TAR_JSON_BYTES", 8)
+    _write_graph_tarball(
+        tmp_path,
+        [
+            (
+                "graphify-out/graph-report.md",
+                b"# Graph Report\n\n> Nodes: 104078 | Edges: 2881027 | Communities: 50\n",
+            ),
+            ("graphify-out/graph.json", {"nodes": [{}], "edges": []}),
+            ("entities/skills/good.md", b"# skill"),
+            ("entities/agents/good.md", b"# agent"),
+            ("entities/mcp-servers/a/good.md", b"# mcp"),
+        ],
+    )
+
+    assert urs._read_graph_from_tarball() == {
+        "nodes": 104078,
+        "edges": 2881027,
+        "skills": 1,
+        "agents": 1,
+        "mcps": 1,
+        "communities": 50,
+    }
+
+
 def test_test_badge_is_labeled_collected_not_passing() -> None:
     text = "[![Tests](https://img.shields.io/badge/Tests-12_passing-brightgreen.svg)](#)"
     stats = {
