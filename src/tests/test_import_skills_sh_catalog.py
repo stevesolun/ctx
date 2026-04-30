@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tarfile
+import zlib
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -515,3 +516,85 @@ def test_hydration_checkpoint_resumes_hydrated_bodies(
     assert fetched_urls == ["https://skills.sh/microsoft/azure-skills/microsoft-foundry"]
     assert resumed_catalog["skills"][0]["skill_body"] == "Fetched body."
     assert resumed_catalog["skills"][1]["skill_body"] == "Second body."
+
+
+def test_hydration_checkpoint_reads_incomplete_gzip_member(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "hydrate.jsonl.gz"
+    record = {
+        "id": "vercel-labs/skills/find-skills",
+        "ctx_slug": "skills-sh-vercel-labs-skills-find-skills",
+        "skill_body": "Recovered body.",
+        "body_available": True,
+    }
+    compressor = zlib.compressobj(wbits=16 + zlib.MAX_WBITS)
+    checkpoint.write_bytes(
+        compressor.compress((json.dumps(record) + "\n").encode("utf-8"))
+        + compressor.flush(zlib.Z_SYNC_FLUSH)
+    )
+    catalog: dict[str, Any] = {
+        "skills": [
+            {
+                "id": "vercel-labs/skills/find-skills",
+                "ctx_slug": "skills-sh-vercel-labs-skills-find-skills",
+                "detail_url": "https://skills.sh/vercel-labs/skills/find-skills",
+            }
+        ]
+    }
+
+    summary = importer.hydrate_catalog_bodies(
+        catalog,
+        workers=1,
+        checkpoint_path=checkpoint,
+    )
+
+    assert summary["body_hydration_checkpoint_applied_count"] == 1
+    assert summary["body_hydration_attempted_count"] == 0
+    assert catalog["skills"][0]["skill_body"] == "Recovered body."
+
+
+def test_hydration_writes_progress_and_status_file(
+    capsys,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    status_path = tmp_path / "hydrate-status.json"
+
+    def fetch(url: str, timeout: int = 30, max_bytes: int = 2_000_000) -> tuple[str | None, str | None]:
+        if url.endswith("/bad"):
+            return None, "boom"
+        return "<main><div class='prose'><p>Body.</p></div></main>", None
+
+    monkeypatch.setattr(importer, "_fetch_detail_html", fetch)
+    catalog: dict[str, Any] = {
+        "skills": [
+            {
+                "id": "one/good",
+                "ctx_slug": "skills-sh-one-good",
+                "detail_url": "https://skills.sh/one/good",
+            },
+            {
+                "id": "two/bad",
+                "ctx_slug": "skills-sh-two-bad",
+                "detail_url": "https://skills.sh/two/bad",
+            },
+        ]
+    }
+
+    summary = importer.hydrate_catalog_bodies(
+        catalog,
+        workers=2,
+        progress_every=1,
+        status_path=status_path,
+    )
+
+    output = capsys.readouterr().out
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    assert "hydrate progress:" in output
+    assert "2/2 (100.00%)" in output
+    assert summary["body_hydrated_count"] == 1
+    assert summary["body_hydration_error_count"] == 1
+    assert status["status"] == "completed"
+    assert status["total"] == 2
+    assert status["overall_completed"] == 2
+    assert status["hydrated_new"] == 1
+    assert status["errors_new"] == 1

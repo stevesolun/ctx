@@ -37,6 +37,7 @@ import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -394,6 +395,8 @@ def hydrate_catalog_bodies(
     max_response_bytes: int = DEFAULT_DETAIL_MAX_BYTES,
     max_body_chars: int = DEFAULT_SKILL_BODY_MAX_CHARS,
     checkpoint_path: Path | None = None,
+    progress_every: int = 0,
+    status_path: Path | None = None,
 ) -> dict[str, Any]:
     raw_skills = catalog.get("skills")
     skills = raw_skills if isinstance(raw_skills, list) else []
@@ -410,6 +413,30 @@ def hydrate_catalog_bodies(
     errors: list[dict[str, str]] = []
     hydrated = 0
     hydration_time = _utc_now()
+    started = time.time()
+    completed = 0
+    total = len(skills)
+
+    def emit_status(*, final: bool = False) -> None:
+        overall_done = checkpoint_applied + completed
+        elapsed = max(time.time() - started, 0.001)
+        payload = {
+            "status": "completed" if final else "running",
+            "updated_at": _utc_now(),
+            "total": total,
+            "checkpoint_applied": checkpoint_applied,
+            "attempted_new": len(candidates),
+            "completed_new": completed,
+            "hydrated_new": hydrated,
+            "errors_new": len(errors),
+            "overall_completed": overall_done,
+            "overall_remaining": max(total - overall_done, 0),
+            "percent": round((overall_done / total * 100.0) if total else 100.0, 4),
+            "rate_per_second": round(completed / elapsed, 4),
+            "elapsed_seconds": round(elapsed, 3),
+        }
+        if status_path is not None:
+            _write_json_atomic(status_path, payload)
 
     def hydrate_one(item: dict[str, Any]) -> tuple[dict[str, Any], str | None, str | None]:
         if delay_seconds > 0:
@@ -439,6 +466,7 @@ def hydrate_catalog_bodies(
                 future_map = {executor.submit(hydrate_one, item): item for item in candidates}
                 for future in cf.as_completed(future_map):
                     item, body, error = future.result()
+                    completed += 1
                     if body:
                         item["body_truncated"] = len(body) > max_body_chars
                         if item["body_truncated"]:
@@ -467,9 +495,27 @@ def hydrate_catalog_bodies(
                         )
                         checkpoint_writer.write("\n")
                         checkpoint_writer.flush()
+                    if progress_every > 0 and (
+                        completed % progress_every == 0
+                        or completed == len(candidates)
+                    ):
+                        elapsed = max(time.time() - started, 0.001)
+                        rate = completed / elapsed
+                        overall_done = checkpoint_applied + completed
+                        pct = (overall_done / total * 100.0) if total else 100.0
+                        print(
+                            "hydrate progress: "
+                            f"{overall_done:,}/{total:,} ({pct:.2f}%) "
+                            f"new={completed:,}/{len(candidates):,} "
+                            f"hydrated_new={hydrated:,} errors_new={len(errors):,} "
+                            f"rate={rate:.1f}/s",
+                            flush=True,
+                        )
+                        emit_status()
         finally:
             if checkpoint_writer is not None:
                 checkpoint_writer.close()
+    emit_status(final=True)
 
     summary = {
         "body_hydration_checkpoint_applied_count": checkpoint_applied,
@@ -1174,6 +1220,21 @@ def _load_catalog_input(path: Path) -> dict[str, Any]:
     return _load_raw_input(path)
 
 
+def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=path.parent,
+        delete=False,
+    ) as tmp:
+        tmp.write(payload)
+        tmp.write("\n")
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(path)
+
+
 def _open_checkpoint_reader(path: Path) -> TextIO:
     if path.suffix == ".gz":
         return gzip.open(path, "rt", encoding="utf-8")
@@ -1191,21 +1252,53 @@ def _checkpoint_record(item: dict[str, Any]) -> dict[str, Any]:
     return {field: item[field] for field in _HYDRATION_CHECKPOINT_FIELDS if field in item}
 
 
+def _iter_gzip_checkpoint_lines(path: Path) -> list[str]:
+    lines: list[str] = []
+    decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    pending = b""
+    with path.open("rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            data = chunk
+            while data:
+                try:
+                    pending += decoder.decompress(data)
+                except zlib.error:
+                    return lines
+                if decoder.unused_data:
+                    data = decoder.unused_data
+                    decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                    continue
+                break
+            while b"\n" in pending:
+                line, pending = pending.split(b"\n", 1)
+                lines.append(line.decode("utf-8", errors="replace"))
+    return lines
+
+
+def _iter_checkpoint_lines(path: Path) -> list[str]:
+    if path.suffix == ".gz":
+        return _iter_gzip_checkpoint_lines(path)
+    with _open_checkpoint_reader(path) as f:
+        return list(f)
+
+
 def _apply_hydration_checkpoint(catalog: dict[str, Any], path: Path | None) -> int:
     if path is None or not path.exists():
         return 0
     records: dict[str, dict[str, Any]] = {}
-    with _open_checkpoint_reader(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(record, dict) and record.get("id"):
-                records[str(record["id"])] = record
+    for line in _iter_checkpoint_lines(path):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict) and record.get("id"):
+            records[str(record["id"])] = record
     if not records:
         return 0
     raw_skills = catalog.get("skills")
@@ -1245,6 +1338,13 @@ def main() -> None:
     parser.add_argument("--hydrate-timeout", type=int, default=30)
     parser.add_argument("--hydrate-max-response-bytes", type=int, default=DEFAULT_DETAIL_MAX_BYTES)
     parser.add_argument("--hydrate-max-body-chars", type=int, default=DEFAULT_SKILL_BODY_MAX_CHARS)
+    parser.add_argument("--hydrate-progress-every", type=int, default=1000)
+    parser.add_argument(
+        "--hydrate-status",
+        type=Path,
+        default=None,
+        help="Atomically updated JSON status file for long Skills.sh hydration runs",
+    )
     parser.add_argument(
         "--hydrate-checkpoint",
         type=Path,
@@ -1277,6 +1377,8 @@ def main() -> None:
             max_response_bytes=args.hydrate_max_response_bytes,
             max_body_chars=args.hydrate_max_body_chars,
             checkpoint_path=args.hydrate_checkpoint,
+            progress_every=max(args.hydrate_progress_every, 0),
+            status_path=args.hydrate_status,
         )
         print(
             "hydrated Skills.sh bodies: "
