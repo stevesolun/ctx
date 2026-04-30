@@ -341,8 +341,42 @@ def _l2_normalize(matrix: "np.ndarray") -> "np.ndarray":
 # the tokenizer's per-word variance without losing trailing content.
 # Overlap preserves context that spans chunk boundaries (a sentence
 # cut mid-way still gets embedded coherently in one of the chunks).
+#
+# A full Skills.sh hydration can include 90K+ bodies. Some upstream
+# SKILL.md files are long enough to explode into dozens of chunks; an
+# uncapped pass produced ~787K chunks for a 104K-node graph. Keep the
+# representation bounded per entity by sampling across the whole body
+# (first/middle/last), so every entity participates in semantic top-K
+# without one verbose page dominating rebuild time.
 _CHUNK_WORDS = 150
 _CHUNK_OVERLAP_WORDS = 20
+_MAX_CHUNKS_PER_TEXT = 4
+
+
+def _sample_chunk_indices(chunk_count: int, max_chunks: int) -> list[int]:
+    """Return up to ``max_chunks`` chunk indices spread across a text."""
+    if max_chunks <= 0 or chunk_count <= max_chunks:
+        return list(range(chunk_count))
+    if max_chunks == 1:
+        return [0]
+
+    last = chunk_count - 1
+    indices: list[int] = []
+    for i in range(max_chunks):
+        idx = round(i * last / (max_chunks - 1))
+        if idx not in indices:
+            indices.append(idx)
+    # ``round`` can duplicate adjacent positions on tiny inputs. Fill
+    # deterministically from the front; only reachable with very small
+    # chunk counts and custom max values.
+    if len(indices) < max_chunks:
+        for idx in range(chunk_count):
+            if idx not in indices:
+                indices.append(idx)
+            if len(indices) == max_chunks:
+                break
+    indices.sort()
+    return indices
 
 
 def _chunk_text(text: str) -> list[str]:
@@ -361,14 +395,16 @@ def _chunk_text(text: str) -> list[str]:
     if not words:
         return [""]
     step = max(1, _CHUNK_WORDS - _CHUNK_OVERLAP_WORDS)
+
+    if len(words) <= _CHUNK_WORDS:
+        return [" ".join(words)]
+
+    chunk_count = ((len(words) - _CHUNK_WORDS + step - 1) // step) + 1
     chunks: list[str] = []
-    start = 0
-    while start < len(words):
+    for chunk_i in _sample_chunk_indices(chunk_count, _MAX_CHUNKS_PER_TEXT):
+        start = chunk_i * step
         end = min(start + _CHUNK_WORDS, len(words))
         chunks.append(" ".join(words[start:end]))
-        if end == len(words):
-            break
-        start += step
     return chunks
 
 
@@ -379,12 +415,13 @@ def _embed_missing(
 ) -> "np.ndarray":
     """Embed ``missing`` texts with chunk + mean-pool.
 
-    Each text is split into word-chunks, all chunks go through the
-    embedder in one flat pass (batched by ``batch_size``), and the
-    per-node vector is the length-weighted mean of its chunk
-    embeddings. This captures the "whole context" of long entity
-    bodies instead of silently truncating them to the first 256
-    tokens the way a naive ``encode(full_text)`` would.
+    Each text is split into bounded representative word-chunks, those
+    chunks go through the embedder in one flat pass (batched by
+    ``batch_size``), and the per-node vector is the length-weighted
+    mean of its chunk embeddings. This samples across long entity
+    bodies instead of silently truncating them to the first 256 tokens
+    the way a naive ``encode(full_text)`` would, while keeping full
+    catalog rebuilds practical.
 
     Returns an (M, dim) matrix aligned with the input order.
     """
@@ -412,6 +449,13 @@ def _embed_missing(
         batch = all_chunks[batch_start : batch_start + batch_size]
         matrix = embedder.embed(batch)  # type: ignore[attr-defined]
         chunk_embeddings.append(np.asarray(matrix, dtype="float32"))
+        batch_done = min(batch_start + batch_size, len(all_chunks))
+        if batch_done == len(all_chunks) or batch_done % (batch_size * 50) == 0:
+            print(
+                "semantic_edges: embedded chunks "
+                f"{batch_done:,}/{len(all_chunks):,}",
+                flush=True,
+            )
     if not chunk_embeddings:
         return np.zeros((0, 0), dtype="float32")
     chunks_matrix = np.vstack(chunk_embeddings)
@@ -487,6 +531,12 @@ def _topk_pairs(
                 existing = out.get(pair)
                 if existing is None or score > existing:
                     out[pair] = score
+        if end == n or (start // chunk_size + 1) % 10 == 0:
+            print(
+                "semantic_edges: top-k rows "
+                f"{end:,}/{n:,} pairs={len(out):,}",
+                flush=True,
+            )
     return out
 
 

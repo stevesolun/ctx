@@ -51,6 +51,25 @@ GRAPH_OUT = WIKI_DIR / "graphify-out"
 QUALITY_SIDECAR_DIR = Path(os.path.expanduser("~/.claude/skill-quality"))
 
 
+def configure_wiki_dir(wiki_dir: Path) -> None:
+    """Point graphify at a specific wiki root.
+
+    The shipped tarball can be rebuilt in an isolated temp directory, so
+    graphify must not be hard-wired to the operator's live
+    ``~/.claude/skill-wiki``. Keep the derived entity/output paths in sync.
+    """
+    global WIKI_DIR, SKILL_ENTITIES, AGENT_ENTITIES, MCP_ENTITIES
+    global HARNESS_ENTITIES, CONCEPTS_DIR, GRAPH_OUT
+
+    WIKI_DIR = wiki_dir.expanduser().resolve()
+    SKILL_ENTITIES = WIKI_DIR / "entities" / "skills"
+    AGENT_ENTITIES = WIKI_DIR / "entities" / "agents"
+    MCP_ENTITIES = WIKI_DIR / "entities" / "mcp-servers"
+    HARNESS_ENTITIES = WIKI_DIR / "entities" / "harnesses"
+    CONCEPTS_DIR = WIKI_DIR / "concepts"
+    GRAPH_OUT = WIKI_DIR / "graphify-out"
+
+
 def parse_frontmatter(filepath: Path) -> dict:
     """Parse YAML frontmatter from a markdown file, adding path metadata."""
     content = filepath.read_text(encoding="utf-8", errors="replace")
@@ -1104,6 +1123,12 @@ def export_graph(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build knowledge graph from wiki entities")
+    parser.add_argument(
+        "--wiki-dir",
+        type=Path,
+        default=None,
+        help="Wiki root to graphify (default: ~/.claude/skill-wiki)",
+    )
     parser.add_argument("--graph-only", action="store_true", help="Build graph and export only")
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
     # Incremental vs full: incremental reuses the prior run's per-node
@@ -1122,6 +1147,9 @@ def main() -> None:
         help="Force a full top-K recompute for every node",
     )
     args = parser.parse_args()
+
+    if args.wiki_dir is not None:
+        configure_wiki_dir(args.wiki_dir)
 
     affected: set[str] = set()
     G, entities = build_graph(

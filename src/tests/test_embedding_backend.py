@@ -147,6 +147,24 @@ def test_st_embedder_returns_normalised_matrix(
     np.testing.assert_allclose(norms, np.ones(2), atol=1e-6)
 
 
+def test_st_embedder_sets_encode_batch_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _CapturingSTModel(_FakeSTModel):
+        last_kwargs: dict[str, Any] = {}
+
+        def encode(self, texts: Sequence[str], **kwargs: Any) -> np.ndarray:
+            type(self).last_kwargs = dict(kwargs)
+            return super().encode(texts, **kwargs)
+
+    fake_module = MagicMock()
+    fake_module.SentenceTransformer = lambda model_name: _CapturingSTModel()
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
+
+    e = eb.SentenceTransformerEmbedder()
+    e.embed([f"text {i}" for i in range(200)])
+
+    assert _CapturingSTModel.last_kwargs["batch_size"] == eb._ST_ENCODE_BATCH_SIZE
+
+
 def test_st_embedder_dim_is_minus_one_before_load(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

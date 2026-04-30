@@ -255,6 +255,14 @@ class TestChunkText:
         expected_max = (n_words + step - 1) // step + 2  # generous upper bound
         assert 1 <= len(chunks) <= expected_max
 
+    def test_very_long_text_is_bounded_and_samples_tail(self) -> None:
+        text = " ".join(f"word{i}" for i in range(2_000))
+        chunks = _chunk_text(text)
+
+        assert len(chunks) == semantic_edges._MAX_CHUNKS_PER_TEXT
+        assert "word0" in chunks[0]
+        assert "word1999" in chunks[-1]
+
 
 # ===========================================================================
 # _l2_normalize

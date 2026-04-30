@@ -83,6 +83,29 @@ def test_slug_token_pseudo_tags_are_indexed() -> None:
     assert "pro" not in toks  # filtered by SLUG_STOP
 
 
+def test_configure_wiki_dir_updates_derived_paths(tmp_path) -> None:
+    """Graphify must be able to rebuild an extracted shipped wiki tarball.
+
+    Without this, a regraphify always targets the operator's live
+    ~/.claude/skill-wiki and can silently omit hydrated Skills.sh bodies
+    that exist only in graph/wiki-graph.tar.gz.
+    """
+    original = wg.WIKI_DIR
+    wiki = tmp_path / "skill-wiki"
+    try:
+        wg.configure_wiki_dir(wiki)
+
+        assert wg.WIKI_DIR == wiki.resolve()
+        assert wg.SKILL_ENTITIES == wiki.resolve() / "entities" / "skills"
+        assert wg.AGENT_ENTITIES == wiki.resolve() / "entities" / "agents"
+        assert wg.MCP_ENTITIES == wiki.resolve() / "entities" / "mcp-servers"
+        assert wg.HARNESS_ENTITIES == wiki.resolve() / "entities" / "harnesses"
+        assert wg.CONCEPTS_DIR == wiki.resolve() / "concepts"
+        assert wg.GRAPH_OUT == wiki.resolve() / "graphify-out"
+    finally:
+        wg.configure_wiki_dir(original)
+
+
 def test_build_graph_produces_edges_on_small_fixture(tmp_path, monkeypatch) -> None:
     """End-to-end: a 4-entity fixture with two shared tags must produce
     at least one edge. Catches any future refactor that breaks the
