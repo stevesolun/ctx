@@ -41,7 +41,7 @@ import numpy as np
 DEFAULT_ST_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_OLLAMA_MODEL = "nomic-embed-text"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
-_ST_ENCODE_BATCH_SIZE = 128
+_ST_ENCODE_BATCH_SIZE = 512
 
 # Output dim of nomic-embed-text at the version tested against. Kept as
 # a named constant so a future upstream dim change only needs one edit.

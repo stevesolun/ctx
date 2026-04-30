@@ -160,7 +160,7 @@ def test_st_embedder_sets_encode_batch_size(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
 
     e = eb.SentenceTransformerEmbedder()
-    e.embed([f"text {i}" for i in range(200)])
+    e.embed([f"text {i}" for i in range(600)])
 
     assert _CapturingSTModel.last_kwargs["batch_size"] == eb._ST_ENCODE_BATCH_SIZE
 

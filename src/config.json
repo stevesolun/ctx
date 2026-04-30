@@ -82,7 +82,7 @@
       "top_k": 20,
       "build_floor": 0.50,
       "min_cosine": 0.80,
-      "batch_size": 128,
+      "batch_size": 512,
       "cache_dir": "~/.claude/skill-wiki/.embedding-cache/graph"
     },
     "tag_edges": {

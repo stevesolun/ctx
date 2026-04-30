@@ -487,7 +487,7 @@ def _topk_pairs(
     node_ids: list[str],
     top_k: int,
     min_cosine: float,
-    chunk_size: int = 512,
+    chunk_size: int = 1024,
 ) -> dict[tuple[str, str], float]:
     """Return unordered-pair → max-cosine for top-K neighbors per row.
 
@@ -785,7 +785,7 @@ def _topk_pairs_subset(
     *,
     top_k: int,
     min_cosine: float,
-    chunk_size: int = 512,
+    chunk_size: int = 1024,
 ) -> dict[tuple[str, str], float]:
     """Top-K cosine but only for rows whose index is in ``subset_indices``.
 
