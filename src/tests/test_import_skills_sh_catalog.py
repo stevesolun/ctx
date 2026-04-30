@@ -397,6 +397,60 @@ def test_hydrated_skills_sh_body_is_indexed_and_rendered(
     assert converted == "# Find Skills\n\nUse this skill to discover relevant skills.\n"
 
 
+def test_hydration_falls_back_to_github_raw_skill_md(monkeypatch) -> None:
+    monkeypatch.setattr(
+        importer,
+        "_fetch_detail_html",
+        lambda url, timeout=30, max_bytes=2_000_000: (
+            "<main><span>SKILL.md</span><p>No SKILL.md available.</p></main>",
+            None,
+        ),
+    )
+    fetched_urls: list[str] = []
+
+    class FakeResponse:
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self, size: int = -1) -> bytes:
+            return b"# Brand Identity\n\nUse this skill for brand strategy.\n"
+
+    def fake_urlopen(req: object, timeout: int) -> FakeResponse:
+        url = req.full_url  # type: ignore[attr-defined]
+        fetched_urls.append(url)
+        if "/skills/brand-identity/" not in url:
+            raise OSError("not found")
+        return FakeResponse()
+
+    monkeypatch.setattr(importer.urllib.request, "urlopen", fake_urlopen)
+    catalog: dict[str, Any] = {
+        "skills": [
+            {
+                "id": "travisjneuman/.claude/brand-identity",
+                "ctx_slug": "skills-sh-travisjneuman-claude-brand-identity",
+                "source": "travisjneuman/.claude",
+                "skill_id": "brand-identity",
+                "detail_url": "https://skills.sh/travisjneuman/.claude/brand-identity",
+            }
+        ]
+    }
+
+    summary = importer.hydrate_catalog_bodies(catalog, workers=1)
+
+    skill = catalog["skills"][0]
+    assert summary["body_hydrated_count"] == 1
+    assert skill["body_available"] is True
+    assert skill["skill_body"].startswith("# Brand Identity")
+    assert skill["body_source_url"] == (
+        "https://raw.githubusercontent.com/travisjneuman/.claude/"
+        "main/skills/brand-identity/SKILL.md"
+    )
+    assert fetched_urls[-1] == skill["body_source_url"]
+
+
 def test_hydration_rejects_non_skills_sh_detail_urls(monkeypatch) -> None:
     def fail_fetch(url: str, timeout: int = 30) -> tuple[str | None, str | None]:
         raise AssertionError(f"unexpected fetch for {url}")

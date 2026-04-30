@@ -61,6 +61,7 @@ SKILLS_SH_ENTITY_ROOT = "entities/skills"
 CONVERTED_SKILL_ROOT = "converted"
 DEFAULT_DETAIL_MAX_BYTES = 2_000_000
 DEFAULT_SKILL_BODY_MAX_CHARS = 120_000
+GITHUB_RAW_HOST = "raw.githubusercontent.com"
 _HYDRATION_CHECKPOINT_FIELDS = (
     "id",
     "ctx_slug",
@@ -365,6 +366,66 @@ def _fetch_detail_html(
     return payload.decode("utf-8", errors="replace"), None
 
 
+def _github_raw_skill_urls(source: str, skill_id: str) -> list[str]:
+    if (
+        "/" not in source
+        or source.startswith(("http://", "https://"))
+        or not skill_id.strip()
+    ):
+        return []
+    owner, repo = source.split("/", 1)
+    if not owner or not repo:
+        return []
+    owner_q = urllib.parse.quote(owner, safe="")
+    repo_q = urllib.parse.quote(repo, safe=".-_")
+    skill_q = urllib.parse.quote(skill_id.strip("/"), safe="")
+    filenames = ("SKILL.md", "Skill.md", "skill.md")
+    candidate_paths = [
+        f"{base}/{filename}"
+        for filename in filenames
+        for base in (
+            skill_q,
+            f"skills/{skill_q}",
+            f".claude/skills/{skill_q}",
+            f"claude/skills/{skill_q}",
+            f"agent-skills/{skill_q}",
+        )
+    ]
+    if _slugify(repo) == _slugify(skill_id):
+        candidate_paths.extend(filenames)
+    urls: list[str] = []
+    for branch in ("main", "master"):
+        for path in candidate_paths:
+            urls.append(
+                f"https://{GITHUB_RAW_HOST}/{owner_q}/{repo_q}/{branch}/{path}",
+            )
+    return urls
+
+
+def _fetch_github_raw_skill_body(
+    item: dict[str, Any],
+    *,
+    timeout: int = 30,
+    max_bytes: int = DEFAULT_DETAIL_MAX_BYTES,
+) -> tuple[str | None, str | None, str | None]:
+    source = str(item.get("source") or "")
+    skill_id = str(item.get("skill_id") or item.get("skillId") or "")
+    raw_timeout = min(timeout, 12)
+    for url in _github_raw_skill_urls(source, skill_id):
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        try:
+            with urllib.request.urlopen(req, timeout=raw_timeout) as response:
+                payload = response.read(max_bytes + 1)
+        except Exception:
+            continue
+        if len(payload) > max_bytes:
+            return None, None, f"GitHub raw SKILL.md exceeded {max_bytes} bytes"
+        body = _normalize_skill_body_text(payload.decode("utf-8", errors="replace"))
+        if body:
+            return body, url, None
+    return None, None, "GitHub raw fallback found no SKILL.md candidates"
+
+
 def _refresh_body_summary(catalog: dict[str, Any]) -> dict[str, Any]:
     raw_skills = catalog.get("skills")
     skills = raw_skills if isinstance(raw_skills, list) else []
@@ -441,23 +502,35 @@ def hydrate_catalog_bodies(
         if status_path is not None:
             _write_json_atomic(status_path, payload)
 
-    def hydrate_one(item: dict[str, Any]) -> tuple[dict[str, Any], str | None, str | None]:
+    def hydrate_one(
+        item: dict[str, Any],
+    ) -> tuple[dict[str, Any], str | None, str | None, str | None]:
         if delay_seconds > 0:
             time.sleep(delay_seconds)
         url = str(item.get("detail_url") or "")
         if not _is_skills_sh_detail_url(url):
-            return item, None, "refused non-skills.sh detail URL"
+            return item, None, None, "refused non-skills.sh detail URL"
         html_text, error = _fetch_detail_html(
             url,
             timeout=timeout,
             max_bytes=max_response_bytes,
         )
         if error:
-            return item, None, error
+            return item, None, None, error
         body = _extract_skill_body_from_detail_html(html_text or "")
         if not body:
-            return item, None, "detail page did not contain a parseable Skills.sh prose body"
-        return item, body, None
+            raw_body, raw_url, raw_error = _fetch_github_raw_skill_body(
+                item,
+                timeout=timeout,
+                max_bytes=max_response_bytes,
+            )
+            if raw_body:
+                return item, raw_body, raw_url, None
+            error = "detail page did not contain a parseable Skills.sh prose body"
+            if raw_error:
+                error = f"{error}; {raw_error}"
+            return item, None, None, error
+        return item, body, url, None
 
     if candidates:
         checkpoint_writer = (
@@ -468,7 +541,7 @@ def hydrate_catalog_bodies(
             with cf.ThreadPoolExecutor(max_workers=max(workers, 1)) as executor:
                 future_map = {executor.submit(hydrate_one, item): item for item in candidates}
                 for future in cf.as_completed(future_map):
-                    item, body, error = future.result()
+                    item, body, body_source_url, error = future.result()
                     completed += 1
                     if body:
                         item["body_truncated"] = len(body) > max_body_chars
@@ -476,7 +549,7 @@ def hydrate_catalog_bodies(
                             body = body[:max_body_chars].rstrip()
                         item["skill_body"] = body
                         item["body_available"] = True
-                        item["body_source_url"] = str(item.get("detail_url") or "")
+                        item["body_source_url"] = body_source_url or str(item.get("detail_url") or "")
                         item["body_hydrated_at"] = hydration_time
                         item.pop("body_error", None)
                         hydrated += 1
