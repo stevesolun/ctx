@@ -400,6 +400,7 @@ def hydrate_catalog_bodies(
 ) -> dict[str, Any]:
     raw_skills = catalog.get("skills")
     skills = raw_skills if isinstance(raw_skills, list) else []
+    total = len(skills)
     checkpoint_applied = _apply_hydration_checkpoint(catalog, checkpoint_path)
     candidates = [
         item for item in skills
@@ -409,22 +410,23 @@ def hydrate_catalog_bodies(
     ]
     if limit is not None:
         candidates = candidates[: max(limit, 0)]
+    skipped_by_checkpoint = max(total - len(candidates), 0)
 
     errors: list[dict[str, str]] = []
     hydrated = 0
     hydration_time = _utc_now()
     started = time.time()
     completed = 0
-    total = len(skills)
 
     def emit_status(*, final: bool = False) -> None:
-        overall_done = checkpoint_applied + completed
+        overall_done = skipped_by_checkpoint + completed
         elapsed = max(time.time() - started, 0.001)
         payload = {
             "status": "completed" if final else "running",
             "updated_at": _utc_now(),
             "total": total,
             "checkpoint_applied": checkpoint_applied,
+            "skipped_by_checkpoint": skipped_by_checkpoint,
             "attempted_new": len(candidates),
             "completed_new": completed,
             "hydrated_new": hydrated,
@@ -501,7 +503,7 @@ def hydrate_catalog_bodies(
                     ):
                         elapsed = max(time.time() - started, 0.001)
                         rate = completed / elapsed
-                        overall_done = checkpoint_applied + completed
+                        overall_done = skipped_by_checkpoint + completed
                         pct = (overall_done / total * 100.0) if total else 100.0
                         print(
                             "hydrate progress: "
