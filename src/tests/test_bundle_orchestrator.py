@@ -37,9 +37,8 @@ class TestCategoriseBundle:
             for n, t, s in entries
         ]
 
-    def test_bundle_can_be_mixed_all_recommendable_types(self):
-        """A top-5 bundle with skill/agent/mcp-server/harness entries
-        must preserve all four types in the output."""
+    def test_bundle_excludes_harnesses_from_execution_bundle(self):
+        """Harnesses are recommended by model onboarding, not hook bundles."""
         sugs = self._sug(
             ("fastapi-pro", "skill", 90),
             ("code-reviewer", "agent", 85),
@@ -51,7 +50,7 @@ class TestCategoriseBundle:
         assert len(grouped["skill"]) == 2
         assert len(grouped["agent"]) == 1
         assert len(grouped["mcp-server"]) == 1
-        assert len(grouped["harness"]) == 1
+        assert "harness" not in grouped
 
     def test_bundle_can_be_single_type(self):
         """If the top-K entries are all skills, the bundle contains only
@@ -65,7 +64,6 @@ class TestCategoriseBundle:
         assert len(grouped["skill"]) == 3
         assert grouped["agent"] == []
         assert grouped["mcp-server"] == []
-        assert grouped["harness"] == []
 
     def test_top_k_is_total_not_per_type(self):
         """top_k=5 with 10 skills available returns 5 skills TOTAL,
@@ -103,18 +101,17 @@ class TestCategoriseBundle:
             "skill": [],
             "agent": [],
             "mcp-server": [],
-            "harness": [],
         }
 
-    def test_unknown_type_still_included(self):
+    def test_unknown_type_is_ignored(self):
         """A suggestion with an unexpected ``type`` value doesn't crash
-        the categoriser; it lands in its own bucket. Defensive — the
+        the categoriser; it is skipped. Defensive — the
         graph should never produce these, but a malformed pending file
         shouldn't break the hook."""
         sugs = [{"name": "weird", "type": "future-type", "score": 50, "matching_tags": []}]
         grouped = _bo.categorise_bundle(sugs, top_k=5)
-        assert "future-type" in grouped
-        assert grouped["future-type"][0]["name"] == "weird"
+        assert "future-type" not in grouped
+        assert sum(len(v) for v in grouped.values()) == 0
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -130,7 +127,7 @@ class TestRenderBundleMessage:
         ]
 
     def test_categorised_headers_only_for_types_with_entries(self):
-        """Skills/Agents/MCPs/Harnesses headers appear ONLY when that type has
+        """Skills/Agents/MCPs headers appear ONLY when that type has
         entries in the bundle. Empty sections are omitted so the user
         doesn't see dead headers."""
         sugs = self._sug(("a", "skill", 90), ("b", "skill", 80))
@@ -138,7 +135,6 @@ class TestRenderBundleMessage:
         assert "Skills:" in msg
         assert "Agents:" not in msg
         assert "MCPs:" not in msg
-        assert "Harnesses:" not in msg
 
     def test_install_cli_hint_per_type(self):
         """Each category header is followed by its install-CLI hint.
@@ -147,20 +143,17 @@ class TestRenderBundleMessage:
             ("a", "skill", 90),
             ("b", "agent", 80),
             ("c", "mcp-server", 70),
-            ("d", "harness", 60),
         )
         msg = _bo.render_bundle_message(sugs, [], [], top_k=5)
         assert "ctx-skill-install" in msg
         assert "ctx-agent-install" in msg
         assert "ctx-mcp-install" in msg
-        assert "ctx-harness-install" in msg
 
-    def test_harness_only_suggestion_is_rendered(self):
+    def test_harness_only_suggestion_is_ignored(self):
         sugs = self._sug(("langgraph", "harness", 88))
         msg = _bo.render_bundle_message(sugs, [], [], top_k=5)
-        assert "Harnesses:" in msg
-        assert "langgraph" in msg
-        assert "ctx-harness-install <slug>" in msg
+        assert "Suggested bundle" not in msg
+        assert "langgraph" not in msg
 
     def test_unmatched_signals_surfaced(self):
         msg = _bo.render_bundle_message([], ["fastapi", "docker"], [], top_k=5)
@@ -216,8 +209,6 @@ class TestMainEndToEnd:
                  "matching_tags": ["fastapi"]},
                 {"name": "anthropic-python-sdk", "type": "mcp-server",
                  "score": 75, "matching_tags": []},
-                {"name": "langgraph", "type": "harness", "score": 70,
-                 "matching_tags": ["agent"]},
             ],
         }
         (tmp_path / "pending-skills.json").write_text(json.dumps(pending))
@@ -229,10 +220,9 @@ class TestMainEndToEnd:
         msg = payload["hookSpecificOutput"]["additionalContext"]
         assert "fastapi-pro" in msg
         assert "anthropic-python-sdk" in msg
-        assert "langgraph" in msg
         assert "Skills:" in msg
         assert "MCPs:" in msg
-        assert "Harnesses:" in msg
+        assert "Harnesses:" not in msg
 
     def test_already_shown_suppresses_output(
         self, tmp_path, monkeypatch, capsys,

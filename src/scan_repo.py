@@ -611,22 +611,6 @@ def _print_recommendations(repo: str, profile: dict) -> None:
         print("   `ctx-mcp-fetch --source awesome-mcp --limit 100 | ctx-mcp-add --from-stdin`")
         print("   to populate the catalog, then rescan)")
 
-    # Harness section - catalog-only recommendations for the model runtime
-    # and verification machinery around the user's agent.
-    harnesses = manifest.get("harnesses", [])
-    print(f"\n-- Harnesses ({len(harnesses)}) --")
-    if harnesses:
-        for h in harnesses[:10]:
-            shared = ",".join(h.get("shared_tags", [])[:2]) or "-"
-            score = float(h.get("score", 0.0) or 0.0)
-            norm = h.get("normalized_score")
-            score_text = f"score={score:.2f}"
-            if isinstance(norm, (int, float)):
-                score_text += f"  norm={norm:.2f}"
-            print(f"  {h['name']:<40s}  {score_text}  via={shared}")
-    else:
-        print("  (no harnesses matched)")
-
     # Warnings (missing skill installs etc.)
     if manifest["warnings"]:
         print(f"\n-- Notes ({len(manifest['warnings'])}) --")
@@ -644,7 +628,7 @@ def main():
         action="store_true",
         help=(
             "After scanning, run the resolver and print recommended "
-            "skills / agents / MCP servers / harnesses to stderr. Requires an "
+            "skills / agents / MCP servers to stderr. Requires an "
             "existing ~/.claude/skill-wiki graph (run ctx-wiki-graphify "
             "first). Default: scan only, no recommendations."
         ),

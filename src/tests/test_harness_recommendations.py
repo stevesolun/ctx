@@ -58,7 +58,7 @@ def _harness_graph() -> nx.Graph:
     return graph
 
 
-def test_resolver_routes_harness_graph_hits_to_harness_bucket(
+def test_resolver_ignores_harness_graph_hits_in_scan_flow(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -87,12 +87,12 @@ def test_resolver_routes_harness_graph_hits_to_harness_bucket(
     }
     manifest = resolve_skills.resolve(_minimal_profile(), available, {})
 
-    assert [h["name"] for h in manifest["harnesses"]] == ["text-to-cad"]
+    assert manifest["harnesses"] == []
     assert [m["name"] for m in manifest["mcp_servers"]] == []
     assert "text-to-cad" not in [entry["skill"] for entry in manifest["load"]]
 
 
-def test_scan_recommendations_print_harness_bucket(
+def test_scan_recommendations_do_not_print_harness_bucket(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -121,9 +121,8 @@ def test_scan_recommendations_print_harness_bucket(
     scan_repo._print_recommendations(str(tmp_path), {"repo_path": str(tmp_path)})
     output = capsys.readouterr().out
 
-    assert "-- Harnesses (1) --" in output
-    assert "text-to-cad" in output
-    assert "norm=0.80" in output
+    assert "-- Harnesses" not in output
+    assert "text-to-cad" not in output
 
 
 def test_public_api_lists_harness_entities(

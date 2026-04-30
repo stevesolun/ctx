@@ -263,14 +263,17 @@ def resolve(
                 # underweight popular hits (on the real 13k-node
                 # graph where ``docker`` accumulates scores of ~300).
                 # Normalised [0,1] thresholds are scale-invariant.
-                # MCPs and harnesses keep a slightly lower floor because
-                # those types are historically sparser; a single strong
-                # link is still signal, not noise.
+                # MCPs keep a slightly lower floor because that type is
+                # historically sparser; a single strong link is still
+                # signal, not noise. Harnesses are recommended through
+                # the model-onboarding catalog flow, not repo scans.
                 _SKILL_NOISE_FLOOR = 0.30     # 30% of top hit's score
-                _TOOLING_NOISE_FLOOR = 0.20   # 20% (MCPs/harnesses sparser)
+                _TOOLING_NOISE_FLOOR = 0.20   # 20% (MCPs sparser)
                 for hit in graph_hits:
                     name = hit["name"]
                     hit_type = hit.get("type", "skill")
+                    if hit_type == "harness":
+                        continue
                     raw_score = _float_or_default(hit.get("score"))
                     # Use normalized_score when present (new schema);
                     # fall through to raw ``score`` for older graphs
@@ -295,20 +298,13 @@ def resolve(
                     shared_str = f" via shared tags {shared}" if shared else ""
                     reason = f"graph neighbor of {via}{shared_str}"
 
-                    # MCP servers and harnesses land in dedicated
-                    # recommendation buckets. Users don't "load" these the
-                    # way they load skills; they review the recommendation
-                    # and opt into setup through the relevant installer or
-                    # host-specific instructions.
-                    if hit_type in {"mcp-server", "harness"}:
-                        bucket = (
-                            "mcp_servers"
-                            if hit_type == "mcp-server"
-                            else "harnesses"
-                        )
-                        if any(m.get("name") == name for m in manifest[bucket]):
+                    # MCP servers land in a dedicated recommendation bucket.
+                    # Users review the recommendation and opt into setup
+                    # through the MCP installer or host-specific instructions.
+                    if hit_type == "mcp-server":
+                        if any(m.get("name") == name for m in manifest["mcp_servers"]):
                             continue  # already listed
-                        manifest[bucket].append({
+                        manifest["mcp_servers"].append({
                             "name": name,
                             "reason": reason,
                             "score": raw_score,
