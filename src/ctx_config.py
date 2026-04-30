@@ -72,6 +72,7 @@ class Config:
         router = raw.get("skill_router", {})
         intake = raw.get("intake", {})
         intake_emb = intake.get("embedding", {}) if isinstance(intake, dict) else {}
+        harness = raw.get("harness", {}) if isinstance(raw.get("harness"), dict) else {}
         bsitter = raw.get("babysitter", {})
 
         # ── Paths ──────────────────────────────────────────────────────────
@@ -105,6 +106,16 @@ class Config:
             raise ValueError(
                 "resolver.recommendation_min_normalized_score must be in [0, 1] "
                 f"(got {self.recommendation_min_normalized_score})"
+            )
+
+        # ── Harness Catalog ────────────────────────────────────────────────
+        self.harness_recommendation_min_normalized_score: float = float(
+            harness.get("recommendation_min_normalized_score", 0.85)
+        )
+        if not (0.0 <= self.harness_recommendation_min_normalized_score <= 1.0):
+            raise ValueError(
+                "harness.recommendation_min_normalized_score must be in [0, 1] "
+                f"(got {self.harness_recommendation_min_normalized_score})"
             )
 
         # ── Context Monitor ────────────────────────────────────────────────

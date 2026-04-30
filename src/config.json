@@ -36,6 +36,11 @@
     "keep_log_days": 5
   },
 
+  "harness": {
+    "_comment": "Harness catalog recommendation tuning for custom/API/local model users. Harnesses are separate from the execution bundle and are only recommended when their normalized match score is at or above this floor.",
+    "recommendation_min_normalized_score": 0.85
+  },
+
   "skill_transformer": {
     "line_threshold": 180,
     "max_stage_lines": 40,

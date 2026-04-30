@@ -216,20 +216,42 @@ def write_model_profile(
 
 
 def recommend_harnesses(goal: str, *, top_k: int = 5) -> list[dict[str, Any]]:
-    """Return harness recommendations from the shared recommendation API."""
+    """Return high-confidence harness catalog recommendations."""
     if not goal.strip():
         return []
     try:
-        from ctx.api import recommend_bundle  # noqa: PLC0415
+        from ctx.core.resolve.recommendations import (  # noqa: PLC0415
+            query_to_tags,
+            recommend_by_tags,
+        )
+        from ctx_config import cfg  # noqa: PLC0415
 
-        results = recommend_bundle(goal, top_k=top_k * 3)
+        graph = _load_recommendation_graph()
+        if graph.number_of_nodes() == 0:
+            return []
+        limit = max(1, min(int(top_k), cfg.recommendation_top_k))
+        results = recommend_by_tags(
+            graph,
+            query_to_tags(goal),
+            top_n=limit,
+            query=goal,
+            entity_types=("harness",),
+            min_normalized_score=cfg.harness_recommendation_min_normalized_score,
+        )
     except Exception as exc:  # noqa: BLE001
         print(
             f"  [warn] harness recommendation failed: {type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
         return []
-    return [row for row in results if row.get("type") == "harness"][:top_k]
+    return results[:top_k]
+
+
+def _load_recommendation_graph() -> Any:
+    """Load the ctx knowledge graph for harness onboarding."""
+    from ctx.core.graph.resolve_graph import load_graph  # noqa: PLC0415
+
+    return load_graph()
 
 
 def validate_model_connection(
@@ -406,6 +428,9 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
         if rc == 0:
             print("  [ok] model connection validated")
 
+    if mode != "custom":
+        return rc
+
     recommendation_query = " ".join(
         part for part in [goal, provider or "", args.model or "", "harness"]
         if part
@@ -414,8 +439,10 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
     if harnesses:
         print("  [ok] recommended harnesses:")
         for row in harnesses:
-            score = float(row.get("score") or 0.0)
-            print(f"       - {row.get('name')} ({score:.2f})")
+            norm = float(row.get("normalized_score") or 0.0)
+            name = row.get("name")
+            print(f"       - {name} (match {norm:.2f})")
+            print(f"         install: ctx-harness-install {name} --dry-run")
     elif goal or mode == "custom":
         print("  [info] no harness recommendations matched yet")
     return rc
