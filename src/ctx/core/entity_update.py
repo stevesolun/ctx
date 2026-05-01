@@ -19,11 +19,12 @@ class UpdateReview:
     security_findings: tuple[str, ...]
     existing_body_lines: int
     proposed_body_lines: int
+    body_changed: bool
     recommendation: str
 
     @property
     def has_changes(self) -> bool:
-        return bool(self.changed_fields or self.existing_body_lines != self.proposed_body_lines)
+        return bool(self.changed_fields or self.body_changed)
 
 
 def _as_set(raw: Any) -> set[str]:
@@ -118,14 +119,17 @@ def build_update_review(
 
     existing_lines = _line_count(existing_body)
     proposed_lines = _line_count(proposed_body)
+    body_changed = existing_body.strip() != proposed_body.strip()
     if proposed_lines > existing_lines:
         benefits.append(f"body gains {proposed_lines - existing_lines} line(s)")
     elif proposed_lines < existing_lines:
         risks.append(f"body loses {existing_lines - proposed_lines} line(s)")
+    elif body_changed:
+        benefits.append("body content changes without changing length")
 
     security_findings = _security_findings(proposed_text)
 
-    if not changed_fields and existing_lines == proposed_lines and not security_findings:
+    if not changed_fields and not body_changed and not security_findings:
         recommendation = "skip-no-change"
     elif risks or security_findings:
         recommendation = "review-before-update"
@@ -141,6 +145,7 @@ def build_update_review(
         security_findings=security_findings,
         existing_body_lines=existing_lines,
         proposed_body_lines=proposed_lines,
+        body_changed=body_changed,
         recommendation=recommendation,
     )
 

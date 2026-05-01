@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import harness_install
+import pytest
 
 
 def _write_harness_page(
@@ -75,6 +76,7 @@ def test_install_copies_local_source_and_writes_manifest(tmp_path: Path) -> None
         wiki_path=wiki,
         installs_root=tmp_path / "installs",
         manifest_dir=tmp_path / "manifests",
+        allow_local_sources=True,
     )
 
     assert result.status == "installed"
@@ -86,6 +88,48 @@ def test_install_copies_local_source_and_writes_manifest(tmp_path: Path) -> None
     assert manifest["status"] == "installed"
     assert manifest["setup_commands_run"] == []
     assert manifest["verify_commands_run"] == []
+
+
+def test_install_refuses_local_source_without_explicit_opt_in(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=str(source))
+
+    result = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=tmp_path / "manifests",
+    )
+
+    assert result.status == "install-failed"
+    assert "--allow-local-source" in result.message
+    assert not (tmp_path / "installs" / "text-to-cad").exists()
+
+
+def test_install_refuses_symlink_inside_local_source(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    try:
+        (source / "leak.txt").symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=str(source))
+
+    result = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=tmp_path / "manifests",
+        allow_local_sources=True,
+    )
+
+    assert result.status == "install-failed"
+    assert "symlink inside harness source" in result.message
 
 
 def test_setup_and_verify_commands_require_explicit_flags(
@@ -109,6 +153,7 @@ def test_setup_and_verify_commands_require_explicit_flags(
         wiki_path=wiki,
         installs_root=tmp_path / "installs-a",
         manifest_dir=tmp_path / "manifests-a",
+        allow_local_sources=True,
     )
     assert calls == []
 
@@ -119,6 +164,7 @@ def test_setup_and_verify_commands_require_explicit_flags(
         manifest_dir=tmp_path / "manifests-b",
         approve_commands=True,
         run_verify=True,
+        allow_local_sources=True,
     )
     assert calls == [
         ["python", "-m", "pip", "install", "-e", "."],
@@ -182,6 +228,7 @@ def test_uninstall_removes_target_and_manifest(tmp_path: Path) -> None:
         wiki_path=wiki,
         installs_root=tmp_path / "installs",
         manifest_dir=manifest_dir,
+        allow_local_sources=True,
     )
     assert install.target is not None
     assert install.manifest_path is not None
@@ -208,6 +255,7 @@ def test_uninstall_keep_files_only_removes_manifest(tmp_path: Path) -> None:
         wiki_path=wiki,
         installs_root=tmp_path / "installs",
         manifest_dir=manifest_dir,
+        allow_local_sources=True,
     )
     assert install.target is not None
     assert install.manifest_path is not None
@@ -236,6 +284,7 @@ def test_update_replaces_installed_target_from_catalog_source(tmp_path: Path) ->
         wiki_path=wiki,
         installs_root=installs_root,
         manifest_dir=manifest_dir,
+        allow_local_sources=True,
     )
     assert install.target is not None
     (source / "README.md").write_text("v2", encoding="utf-8")
@@ -245,6 +294,7 @@ def test_update_replaces_installed_target_from_catalog_source(tmp_path: Path) ->
         wiki_path=wiki,
         installs_root=installs_root,
         manifest_dir=manifest_dir,
+        allow_local_sources=True,
     )
 
     assert result.status == "updated"
@@ -267,6 +317,7 @@ def test_update_failure_preserves_existing_target_and_manifest(
         wiki_path=wiki,
         installs_root=installs_root,
         manifest_dir=manifest_dir,
+        allow_local_sources=True,
     )
     assert install.target is not None
     assert install.manifest_path is not None
@@ -284,6 +335,7 @@ def test_update_failure_preserves_existing_target_and_manifest(
         installs_root=installs_root,
         manifest_dir=manifest_dir,
         approve_commands=True,
+        allow_local_sources=True,
     )
 
     assert result.status == "install-failed"

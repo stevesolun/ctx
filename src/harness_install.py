@@ -200,10 +200,32 @@ def _local_source_from_repo_url(repo_url: str) -> Path | None:
     return candidate if candidate.exists() else None
 
 
-def _materialize_source(record: HarnessRecord, target: Path) -> None:
+def _reject_symlink_tree(root: Path) -> None:
+    if root.is_symlink():
+        raise ValueError(f"refusing symlinked harness source: {root}")
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            raise ValueError(f"refusing symlink inside harness source: {path}")
+
+
+def _materialize_source(
+    record: HarnessRecord,
+    target: Path,
+    *,
+    allow_local_sources: bool,
+) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     local_source = _local_source_from_repo_url(record.repo_url)
     if local_source is not None:
+        if not allow_local_sources:
+            raise ValueError(
+                "local harness repo_url requires --allow-local-source; "
+                "cataloged harnesses should normally use https:// repositories"
+            )
+        local_source = local_source.expanduser().resolve()
+        if not local_source.is_dir():
+            raise ValueError(f"local harness source is not a directory: {local_source}")
+        _reject_symlink_tree(local_source)
         shutil.copytree(local_source, target)
         return
 
@@ -276,8 +298,13 @@ def _stage_harness(
     stage_path: Path,
     approve_commands: bool,
     run_verify: bool,
+    allow_local_sources: bool,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    _materialize_source(record, stage_path)
+    _materialize_source(
+        record,
+        stage_path,
+        allow_local_sources=allow_local_sources,
+    )
     setup_runs: list[dict[str, Any]] = []
     verify_runs: list[dict[str, Any]] = []
     if approve_commands:
@@ -322,6 +349,7 @@ def _install_to_target(
     force: bool,
     approve_commands: bool,
     run_verify: bool,
+    allow_local_sources: bool,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if target_path.exists() and not force:
         raise FileExistsError("target already exists; pass --force to replace it")
@@ -334,6 +362,7 @@ def _install_to_target(
             stage_path=stage_path,
             approve_commands=approve_commands,
             run_verify=run_verify,
+            allow_local_sources=allow_local_sources,
         )
         _atomic_replace_target(stage_path, target_path)
         return setup_runs, verify_runs
@@ -392,6 +421,7 @@ def install_harness(
     force: bool = False,
     approve_commands: bool = False,
     run_verify: bool = False,
+    allow_local_sources: bool = False,
 ) -> InstallResult:
     try:
         record = resolve_harness(identifier, wiki_path=wiki_path)
@@ -427,6 +457,7 @@ def install_harness(
             force=force,
             approve_commands=approve_commands,
             run_verify=run_verify,
+            allow_local_sources=allow_local_sources,
         )
         manifest_path = _write_manifest(
             record=record,
@@ -521,6 +552,7 @@ def update_harness(
     dry_run: bool = False,
     approve_commands: bool = False,
     run_verify: bool = False,
+    allow_local_sources: bool = False,
 ) -> InstallResult:
     try:
         record = resolve_harness(identifier, wiki_path=wiki_path)
@@ -551,6 +583,7 @@ def update_harness(
         force=True,
         approve_commands=approve_commands,
         run_verify=run_verify,
+        allow_local_sources=allow_local_sources,
     )
     if result.status != "installed":
         return result
@@ -651,6 +684,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run cataloged verification commands after setup/install",
     )
+    parser.add_argument(
+        "--allow-local-source",
+        action="store_true",
+        help=(
+            "Allow file:// or local-path repo_url values. Intended for "
+            "trusted offline tests; public catalog entries should use https."
+        ),
+    )
     args = parser.parse_args(argv)
 
     wiki_path = Path(os.path.expanduser(args.wiki))
@@ -699,6 +740,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
             approve_commands=args.approve_commands,
             run_verify=args.run_verify,
+            allow_local_sources=args.allow_local_source,
         )
     else:
         result = install_harness(
@@ -711,6 +753,7 @@ def main(argv: list[str] | None = None) -> int:
             force=args.force,
             approve_commands=args.approve_commands,
             run_verify=args.run_verify,
+            allow_local_sources=args.allow_local_source,
         )
     if result.status in {
         "installed",

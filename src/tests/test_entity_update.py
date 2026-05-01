@@ -84,6 +84,21 @@ def test_review_handles_no_changes() -> None:
     assert review.recommendation == "skip-no-change"
 
 
+def test_review_detects_same_line_body_changes() -> None:
+    review = build_update_review(
+        entity_type="skill",
+        slug="same-lines",
+        existing_text=_page(body="Run pytest."),
+        proposed_text=_page(body="Run ruff."),
+    )
+
+    assert review.has_changes is True
+    assert review.body_changed is True
+    assert review.existing_body_lines == review.proposed_body_lines
+    assert review.recommendation == "apply-update"
+    assert "body content changes without changing length" in review.benefits
+
+
 def test_render_update_review_is_human_readable() -> None:
     review = build_update_review(
         entity_type="mcp-server",
