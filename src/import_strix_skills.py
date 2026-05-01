@@ -180,7 +180,7 @@ def main() -> None:
         print(f"  python src/catalog_builder.py --wiki {cfg.wiki_dir} --skills-dir {target_dir} \\")
         print(f"      --agents-dir {cfg.agents_dir}")
         print("  python src/wiki_batch_entities.py --all")
-        print("  python src/wiki_graphify.py")
+        print("  python -m ctx.core.wiki.wiki_graphify")
 
 
 if __name__ == "__main__":
