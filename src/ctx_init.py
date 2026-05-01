@@ -531,10 +531,15 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
         part for part in [goal, provider or "", args.model or "", "harness"]
         if part
     )
-    harnesses = recommend_harnesses(
-        recommendation_query,
-        model_provider=provider,
-    )
+    try:
+        harnesses = recommend_harnesses(
+            recommendation_query,
+            model_provider=provider,
+        )
+    except TypeError as exc:
+        if "model_provider" not in str(exc):
+            raise
+        harnesses = recommend_harnesses(recommendation_query)
     if harnesses:
         print("  [ok] recommended harnesses:")
         for row in harnesses:

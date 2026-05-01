@@ -1,170 +1,43 @@
 #!/usr/bin/env bash
-# pre-commit -- keep README numbers and wiki tarball in sync with reality.
+# pre-commit -- refresh cheap repo stats without leaking local wiki state.
 #
 # Enable with:   git config core.hooksPath .githooks
 # Disable with:  git config --unset core.hooksPath
 #
-# Two stages run on every commit:
-#
-#   1. Stat refresh: regenerate skill/agent/graph/test counts in README.md
-#      from authoritative sources. Re-stages README.md if it drifted.
-#
-#   2. Wiki rebuild (only when skills/ or agents/ changed in this commit):
-#      rebuild entity pages + knowledge graph, repack the wiki tarball at
-#      graph/wiki-graph.tar.gz, and re-stage it so the committed state of
-#      the repo always matches the deployed wiki.
-#
-# Behaviour on failure is *permissive*: if a tool can't resolve something
-# (wiki not deployed, pytest missing, tar unavailable), it warns and leaves
-# the affected file untouched. The commit is never blocked.
+# This hook intentionally does not rebuild graph/wiki artifacts from
+# ~/.claude/skill-wiki. That directory can contain private local entities.
+# Release graph artifacts must be created by explicit, reproducible commands
+# and staged by the user or CI.
 
 set -u
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 UPDATER="$REPO_ROOT/src/update_repo_stats.py"
-WIKI_DIR="$HOME/.claude/skill-wiki"
-TARBALL="$REPO_ROOT/graph/wiki-graph.tar.gz"
-SKILLS_SH_CATALOG="$REPO_ROOT/graph/skills-sh-catalog.json.gz"
-SKILLS_SH_IMPORTER="$REPO_ROOT/src/import_skills_sh_catalog.py"
 
 PYTHON="${PYTHON:-python3}"
 command -v "$PYTHON" >/dev/null 2>&1 || PYTHON="python"
 
+STAGED_CHANGES=$(git diff --cached --name-only)
 log() { echo "[pre-commit] $*" >&2; }
 
-# ── Stage 1: README stat refresh ──────────────────────────────────────────────
-if [[ -f "$UPDATER" ]]; then
-  if ! "$PYTHON" "$UPDATER" 2> >(sed 's/^/[pre-commit stats] /' >&2); then
-    log "stats updater failed — continuing without README refresh"
-  elif ! git diff --quiet -- README.md; then
-    git add README.md
-    log "README.md refreshed and re-staged"
+if echo "$STAGED_CHANGES" | grep -qE '^(README\.md|graph/(wiki-graph\.tar\.gz|communities\.json)|src/update_repo_stats\.py)$' ; then
+  if [[ -f "$UPDATER" ]]; then
+    STATS_CMD=("$PYTHON" "$UPDATER")
+    if command -v timeout >/dev/null 2>&1; then
+      STATS_CMD=(timeout 45s "${STATS_CMD[@]}")
+    fi
+    if ! "${STATS_CMD[@]}" 2> >(sed 's/^/[pre-commit stats] /' >&2); then
+      log "stats updater failed or timed out; continuing without README refresh"
+    elif ! git diff --quiet -- README.md; then
+      git add README.md
+      log "README.md refreshed and re-staged"
+    fi
   fi
 fi
 
-# ── Stage 2: Wiki tarball refresh ─────────────────────────────────────────────
-# Trigger conditions (any one fires a rebuild):
-#
-#   A. The commit touches repo-tracked entity sources:
-#      - skills/  agents/  (legacy locations)
-#      - any src/*mirror*.py / src/*_install.py (behavioural contract
-#        changes for how entities flow from local -> wiki -> tarball)
-#   B. WIKI DRIFT: ~/.claude/skill-wiki/ carries content newer than
-#      graph/wiki-graph.tar.gz. Covers the case where
-#      ctx-skill-mirror / ctx-agent-mirror / ctx-mcp-ingest wrote into
-#      the wiki OUTSIDE a commit and the tarball is now stale. Prior
-#      to this rule MCP ingests were invisible to the hook — MCPs
-#      don't live under repo-tracked skills/ or agents/.
-#      A manually staged graph/wiki-graph.tar.gz is treated as an already
-#      rebuilt artifact and is not replaced from local wiki state.
-STAGED_CHANGES=$(git diff --cached --name-only)
-NEEDS_WIKI_REBUILD=0
-WIKI_REBUILD_REASON=""
-TARBALL_STAGED=0
-
-if echo "$STAGED_CHANGES" | grep -qE '^graph/wiki-graph\.tar\.gz$' ; then
-  TARBALL_STAGED=1
-fi
-
-if echo "$STAGED_CHANGES" | grep -qE '^(skills|agents)/' ; then
-  NEEDS_WIKI_REBUILD=1
-  WIKI_REBUILD_REASON="skills/ or agents/ source changed"
-elif [[ $TARBALL_STAGED -eq 0 && -f "$TARBALL" && -d "$WIKI_DIR" ]]; then
-  # Cheap drift check: find the newest relevant wiki file and compare
-  # against the tarball's mtime. Bounded to the dirs we actually pack
-  # (exclude raw/, .embedding-cache/, checkpoints) so unrelated
-  # regenerable state doesn't fire a rebuild.
-  WIKI_NEWEST=$(find "$WIKI_DIR" \
-      -path "$WIKI_DIR/raw" -prune -o \
-      -path "$WIKI_DIR/.embedding-cache" -prune -o \
-      -path "$WIKI_DIR/.ingest-checkpoint" -prune -o \
-      -path "$WIKI_DIR/.enrich-checkpoint" -prune -o \
-      -type f -newer "$TARBALL" -print 2>/dev/null | head -1)
-  if [[ -n "$WIKI_NEWEST" ]]; then
-    NEEDS_WIKI_REBUILD=1
-    WIKI_REBUILD_REASON="wiki drift — ${WIKI_NEWEST#$WIKI_DIR/} newer than tarball"
-  fi
-fi
-
-if [[ $NEEDS_WIKI_REBUILD -eq 1 ]]; then
-  if [[ ! -d "$WIKI_DIR" ]]; then
-    log "$WIKI_REBUILD_REASON, but wiki not deployed at $WIKI_DIR — skipping rebuild"
-  else
-    log "$WIKI_REBUILD_REASON — rebuilding wiki + graph + tarball (skills + agents + MCPs)"
-
-    # Regenerate entity pages + graph. These two scripts already warn but
-    # don't abort on individual failures.
-    if ! "$PYTHON" "$REPO_ROOT/src/wiki_batch_entities.py" --all \
-         2> >(sed 's/^/[pre-commit wiki] /' >&2); then
-      log "entity regen failed — continuing"
-    fi
-    if ! PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON" -m ctx.core.wiki.wiki_graphify \
-         2> >(sed 's/^/[pre-commit wiki] /' >&2); then
-      log "graph rebuild failed — continuing"
-    fi
-
-    # Repack the tarball. We exclude .obsidian, .trash, and venv artifacts.
-    # Working dir = $WIKI_DIR's parent so the tarball contents are relative
-    # to skill-wiki/.
-    if command -v tar >/dev/null 2>&1; then
-      mkdir -p "$(dirname "$TARBALL")"
-      # --force-local: GNU tar on Windows/MSYS otherwise parses the
-      # colon in ``c:/path`` as a host:path remote-tar spec and fails
-      # with "Cannot connect to c: resolve failed". This flag tells
-      # tar the path is always local regardless of any colon it contains.
-      #
-      # .obsidian is intentionally included — graph/README documents
-      # that the tarball opens directly as an Obsidian vault. Dropping
-      # it silently removes a shipped feature.
-      # Exclusions beyond .trash / __pycache__:
-      #   - raw/: MCP catalog HTML dumps (pulsemcp scraper). 700MB+
-      #     of regenerable content; the ingest cache is pointless
-      #     to ship and pushed the tarball past GitHub's 100MB
-      #     single-file limit.
-      #   - .embedding-cache/: 60MB+ of sentence-transformer vectors
-      #     keyed by content hash. Auto-regenerated on the first
-      #     graphify after unpack.
-      #   - .ingest-checkpoint/ + .enrich-checkpoint/: per-user
-      #     resume state for catalog scrapes. Useless to another
-      #     user and could leak partial enrichment history.
-      #   - graphify-out/graph-delta.json + graph.pickle: the delta
-      #     is a single-run artifact; pickle was removed as an RCE
-      #     vector in 86a1688 but a stale one on disk must not ship.
-      if ( cd "$WIKI_DIR" && tar --force-local -czf "$TARBALL" \
-          --exclude='.trash' \
-          --exclude='__pycache__' \
-          --exclude='./raw' \
-          --exclude='./.embedding-cache' \
-          --exclude='./.ingest-checkpoint' \
-          --exclude='./.enrich-checkpoint' \
-          --exclude='./graphify-out/graph-delta.json' \
-          --exclude='./graphify-out/graph.pickle' \
-          . ); then
-        if [[ -f "$SKILLS_SH_CATALOG" && -f "$SKILLS_SH_IMPORTER" ]]; then
-          "$PYTHON" "$SKILLS_SH_IMPORTER" \
-            --from-catalog "$SKILLS_SH_CATALOG" \
-            --catalog-out "$SKILLS_SH_CATALOG" \
-            --wiki-tar "$TARBALL" \
-            --update-wiki-tar \
-            2> >(sed 's/^/[pre-commit skills.sh] /' >&2) \
-            || log "Skills.sh overlay refresh failed — continuing with curated tarball"
-        fi
-        git add "$TARBALL"
-        [[ -f "$SKILLS_SH_CATALOG" ]] && git add "$SKILLS_SH_CATALOG"
-        log "wiki tarball rebuilt and re-staged ($(du -h "$TARBALL" | cut -f1))"
-      else
-        log "tar repack failed — tarball left as-is"
-      fi
-    else
-      log "tar not available — skipping tarball repack"
-    fi
-
-    # Refresh README stats again (counts likely changed).
-    if [[ -f "$UPDATER" ]]; then
-      "$PYTHON" "$UPDATER" 2>/dev/null || true
-      git diff --quiet -- README.md || { git add README.md; log "README refreshed after wiki rebuild"; }
-    fi
-  fi
+if echo "$STAGED_CHANGES" | grep -qE '^(skills|agents|harnesses|imported-skills|graph/skills-sh-catalog\.json\.gz)' ; then
+  log "entity source changed; graph/wiki tarball not rebuilt by pre-commit"
+  log "run the explicit graph release command and stage graph/wiki-graph.tar.gz if needed"
 fi
 
 exit 0

@@ -1,0 +1,4 @@
+prune src/tests
+prune .a5c
+prune .claude
+global-exclude __pycache__ *.py[cod]
