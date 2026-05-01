@@ -1,5 +1,5 @@
 """
-test_package_scaffold.py -- Pin the ctx package tree scaffolded in Plan 001 R0.
+test_package_scaffold.py -- Pin the ctx package tree.
 
 Goal: a reorg phase that accidentally deletes, renames, or moves a
 subpackage breaks these tests loudly instead of silently shipping a
@@ -7,7 +7,8 @@ broken import tree. Each R-phase adds content INSIDE a subpackage; the
 existence + importability of the subpackages themselves is the
 guardrail.
 
-See docs/plans/001-model-agnostic-harness.md for the target layout.
+This guards the public package layout used by the console scripts and
+custom-harness Python imports.
 """
 
 from __future__ import annotations

@@ -2,8 +2,6 @@
 """
 skill_quality.py -- Post-install quality scorer + three-sink persistence.
 
-Phase 3 of the skill-quality plan (see ``docs/roadmap/skill-quality.md``).
-
 Flow:
 
   1. ``extract_signals_for_slug`` gathers the four signal inputs by
@@ -15,7 +13,7 @@ Flow:
      downstream consumer — Obsidian, machine-readable automations, the wiki
      UI — can see the same number.
 
-Persistence sinks (Q3 in the plan doc):
+Persistence sinks:
 
   - Sidecar JSON — ``~/.claude/skill-quality/<slug>.json`` (canonical
     machine-readable form; source of truth for the graph writer).

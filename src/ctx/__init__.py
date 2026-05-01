@@ -28,9 +28,6 @@ Package layout:
     ctx.mcp_server - the standalone MCP server (H8)
     ctx.api        - blessed public Python API for custom harnesses
     ctx.utils      - low-level primitives (safe names, atomic IO)
-
-See docs/plans/001-model-agnostic-harness.md for the roadmap + phase
-status.
 """
 
 __version__ = "0.7.0"

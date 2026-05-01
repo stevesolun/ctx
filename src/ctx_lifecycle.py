@@ -2,8 +2,6 @@
 """
 ctx_lifecycle.py -- Propose-and-confirm lifecycle CLI for the quality corpus.
 
-Phase 4 of the skill-quality plan (see ``docs/roadmap/skill-quality.md``).
-
 Four tiers, asymmetric by design:
 
     active ─C─► watch ─D×N─► demote ─Δt─► archive ─Δt + purge─► deleted

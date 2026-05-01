@@ -77,8 +77,9 @@ graph-based discovery:
   13,232-node curated core plus 90,846 remote-cataloged Skills.sh `skill`
   nodes. The graph has 53 Louvain communities and blends semantic cosine,
   tag overlap, and slug-token overlap; 89,461 hydrated Skills.sh bodies are
-  shipped as micro-skill orchestrators, with preserved originals used for
-  full-body semantic graphing.
+  shipped as micro-skill orchestrators. Preserved source bodies were used for
+  full-body semantic graphing before packaging; `SKILL.md.original` backups are
+  not shipped in the tarball.
 - **53 Louvain communities** group related entities into named
   communities (e.g., *AI + Devops + Frontend*, *Python + API*).
 - PostToolUse and Stop hooks update the wiki automatically during each
@@ -179,11 +180,11 @@ ones are flagged. New ones self-ingest.
     ---
 
     **v0.7.x** — MIT, CI-matrixed (Ubuntu + Windows × Python 3.11/3.12),
-    3,370+ tests collected. Ships console scripts including `ctx-init`,
+    3,410 tests collected. Ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus harness wiki/graph browsing),
     `ctx-dedup-check` (pre-ship near-duplicate gate), and
-    `ctx-tag-backfill` (catalog hygiene), plus the ~436 MiB pre-built
+    `ctx-tag-backfill` (catalog hygiene), plus the ~336 MiB pre-built
     wiki tarball with **104,078 nodes / 2,960,189 edges / 53 Louvain
     communities**. Hardened across the Strix audit + a 12-finding
     codex review.
