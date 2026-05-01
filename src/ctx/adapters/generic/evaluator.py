@@ -417,6 +417,7 @@ def run_with_evaluation(
             observer=observer,
             compactor=compactor,
             messages=accumulated_messages[:] or None,
+            append_task_after_messages=bool(accumulated_messages),
         )
         totals.add(loop_result.usage)
 

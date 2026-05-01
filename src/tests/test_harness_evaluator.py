@@ -552,10 +552,8 @@ class TestRunWithEvaluation:
         # Round-2 generator call sees prior conversation in messages.
         round_2_gen_call = provider.calls[2]
         messages = round_2_gen_call["messages"]
-        # Initial system + initial user(task) + prior messages
-        # (system, user, assistant) + new user(revision_task).
         roles = [m.role for m in messages]
-        assert roles.count("system") >= 1
+        assert roles == ["system", "user", "assistant", "user"]
         # The revision prompt should mention the evaluator's feedback.
         revision_user = [
             m for m in messages

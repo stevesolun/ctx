@@ -847,7 +847,12 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     )
 
     store = SessionStore.attach(args.session_id, sessions_dir=sdir)
-    observer = JsonlObserver(store, session_metadata={}, emit_session_start=False)
+    observer = JsonlObserver(
+        store,
+        session_metadata={},
+        emit_session_start=False,
+        persisted_message_count=len(state.messages),
+    )
     compactor = TokenBudgetCompactor()
 
     # Session logs are mutable local JSONL files. Recreate ctx-core

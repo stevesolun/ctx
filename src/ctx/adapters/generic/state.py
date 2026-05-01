@@ -434,17 +434,25 @@ class JsonlObserver(LoopObserver):
         *,
         session_metadata: dict[str, Any] | None = None,
         emit_session_start: bool = True,
+        persisted_message_count: int = 0,
     ) -> None:
+        if persisted_message_count < 0:
+            raise ValueError("persisted_message_count must be >= 0")
         self._store = store
         self._metadata = dict(session_metadata or {})
         self._emit_session_start = emit_session_start
+        self._persisted_message_count = persisted_message_count
         self._session_started = False
         # Track previous-iteration message count so we only persist
         # messages appended this iteration (not the full snapshot).
         self._last_message_count = 0
 
     def _emit_start_if_needed(self, messages: list[Message]) -> None:
-        if self._session_started or not self._emit_session_start:
+        if self._session_started:
+            self._session_started = True
+            return
+        if not self._emit_session_start:
+            self._last_message_count = min(self._persisted_message_count, len(messages))
             self._session_started = True
             return
         payload = dict(self._metadata)

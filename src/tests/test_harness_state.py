@@ -542,21 +542,26 @@ class TestJsonlObserverRoundTrip:
                     store2,
                     session_metadata={},
                     emit_session_start=False,  # already written in first run
+                    persisted_message_count=len(state.messages),
                 ),
+                append_task_after_messages=True,
             )
         finally:
             store2.close()
 
         # First run's conversation is visible in the resumed result.
         resumed_roles = [m.role for m in result2.messages]
-        # system + user(follow-up) + ...prior(system,user,assistant)... + assistant(final)
-        # The seeded 'messages' param appends AFTER the system+task, so:
-        #   [system, user(follow-up), system, user(initial), assistant(first-answer),
-        #    assistant(resumed-answer)]
-        assert resumed_roles.count("system") == 2
+        assert resumed_roles == ["system", "user", "assistant", "user", "assistant"]
         contents = [m.content for m in result2.messages]
-        assert "first-answer" in contents
-        assert "resumed-answer" in contents
+        assert contents == [
+            "sys",
+            "initial task",
+            "first-answer",
+            "follow-up",
+            "resumed-answer",
+        ]
+        replayed = load_session("resume1", sessions_dir=tmp_path)
+        assert [m.content for m in replayed.messages] == contents
 
     def test_metadata_includes_seed_messages(self, tmp_path: Path) -> None:
         """session_start payload captures the seed conversation."""
@@ -596,6 +601,7 @@ class TestJsonlObserverRoundTrip:
         ]
         types = [e["type"] for e in events]
         assert "session_start" not in types
+        assert types.count("message") == 2
 
     def test_stop_event_always_written(self, tmp_path: Path) -> None:
         provider = _Scripted([_stop_response("ok")])
