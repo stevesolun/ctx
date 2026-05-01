@@ -57,6 +57,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
 from ctx.utils._safe_name import is_safe_source_name
 
 
@@ -157,21 +158,35 @@ def _wiki_entity_path(slug: str, entity_type: str | None = None) -> Path | None:
     return None
 
 
-def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
-    """Split ``---\\n...\\n---\\n`` frontmatter from body. Minimal parser
-    that treats each top-level ``key: value`` as a string — no nested
-    YAML, because our wiki pages don't use it.
-    """
-    m = __import__("re").match(r"^---\n(.*?)\n---\s*\n?", text, flags=__import__("re").DOTALL)
-    if m is None:
-        return {}, text
-    meta: dict[str, str] = {}
-    for line in m.group(1).splitlines():
-        if ":" not in line:
-            continue
-        k, _, v = line.partition(":")
-        meta[k.strip()] = v.strip()
-    return meta, text[m.end():]
+def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
+    """Split frontmatter from body using the canonical wiki parser."""
+    return parse_frontmatter_and_body(text)
+
+
+def _frontmatter_text(value: Any) -> str:
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, default=str)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _frontmatter_tags(value: Any, *, limit: int = 6) -> list[str]:
+    if isinstance(value, list):
+        raw_items = value
+    else:
+        raw = _frontmatter_text(value)
+        raw_items = raw.replace("[", "").replace("]", "").split(",")
+    out: list[str] = []
+    for item in raw_items:
+        tok = str(item).strip().strip("'\"")
+        if tok:
+            out.append(tok)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _read_manifest() -> dict:
@@ -251,12 +266,12 @@ def _read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
     return out
 
 
-def _sidecar_entity_type(sidecar: dict) -> str:
+def _sidecar_entity_type(sidecar: dict, fallback: str = "skill") -> str:
     raw = str(
         sidecar.get("entity_type")
         or sidecar.get("subject_type")
         or sidecar.get("type")
-        or "skill"
+        or fallback
     )
     return {
         "skills": "skill",
@@ -271,6 +286,23 @@ def _sidecar_entity_type(sidecar: dict) -> str:
     }.get(raw, raw)
 
 
+def _sidecar_fallback_type(path: Path) -> str:
+    return "mcp-server" if path.parent.name == "mcp" else "skill"
+
+
+def _read_sidecar_file(path: Path) -> dict | None:
+    try:
+        sidecar = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(sidecar, dict):
+        return None
+    etype = _sidecar_entity_type(sidecar, _sidecar_fallback_type(path))
+    sidecar.setdefault("slug", path.stem)
+    sidecar["subject_type"] = etype
+    return sidecar
+
+
 def _load_sidecar(slug: str, entity_type: str | None = None) -> dict | None:
     if not _is_safe_slug(slug):
         return None
@@ -280,14 +312,18 @@ def _load_sidecar(slug: str, entity_type: str | None = None) -> dict | None:
     ):
         if not path.exists():
             continue
-        try:
-            sidecar = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(sidecar, dict):
+        sidecar = _read_sidecar_file(path)
+        if sidecar is None:
             continue
         if entity_type is None or _sidecar_entity_type(sidecar) == entity_type:
             return sidecar
+    if entity_type is not None:
+        for path in _sidecar_files():
+            sidecar = _read_sidecar_file(path)
+            if sidecar is None:
+                continue
+            if sidecar.get("slug") == slug and _sidecar_entity_type(sidecar) == entity_type:
+                return sidecar
     return None
 
 
@@ -307,10 +343,9 @@ def _sidecar_files() -> list[Path]:
 def _all_sidecars() -> list[dict]:
     out: list[dict] = []
     for p in _sidecar_files():
-        try:
-            out.append(json.loads(p.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError):
-            continue
+        sidecar = _read_sidecar_file(p)
+        if sidecar is not None:
+            out.append(sidecar)
     return out
 
 
@@ -512,6 +547,7 @@ def _graph_neighborhood(
 
     nodes_out: dict[str, dict] = {}
     edges_out: list[dict] = []
+    emitted_edges: set[tuple[str, str]] = set()
     frontier = [center]
     seen: set[str] = {center}
 
@@ -552,15 +588,18 @@ def _graph_neighborhood(
                 if len(nodes_out) >= limit:
                     break
                 _add_node(other, depth)
-                edges_out.append({
-                    "data": {
-                        "id": f"{nid}__{other}",
-                        "source": nid,
-                        "target": other,
-                        "weight": edata.get("weight", 1),
-                        "shared_tags": edata.get("shared_tags", [])[:4],
-                    },
-                })
+                edge_key = tuple(sorted((nid, other)))
+                if edge_key not in emitted_edges:
+                    emitted_edges.add(edge_key)
+                    edges_out.append({
+                        "data": {
+                            "id": f"{edge_key[0]}__{edge_key[1]}",
+                            "source": nid,
+                            "target": other,
+                            "weight": edata.get("weight", 1),
+                            "shared_tags": edata.get("shared_tags", [])[:4],
+                        },
+                    })
                 if other not in seen:
                     seen.add(other)
                     next_frontier.append(other)
@@ -774,16 +813,16 @@ def _render_skills() -> str:
 
     # Sidebar stats for the filter UI.
     grade_counts = {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
-    type_counts = {"skill": 0, "agent": 0, "mcp-server": 0}
+    type_counts = {entity_type: 0 for entity_type in _DASHBOARD_ENTITY_TYPES}
     for sc in sidecars:
         grade_counts[sc.get("grade", "F")] = grade_counts.get(sc.get("grade", "F"), 0) + 1
-        st = sc.get("subject_type", "skill")
+        st = _sidecar_entity_type(sc)
         type_counts[st] = type_counts.get(st, 0) + 1
 
     cards = "".join(
         f"<div class='skill-card' data-slug='{html.escape(s.get('slug', ''))}' "
         f"data-grade='{html.escape(s.get('grade', 'F'))}' "
-        f"data-type='{html.escape(s.get('subject_type', 'skill'))}' "
+        f"data-type='{html.escape(_sidecar_entity_type(s))}' "
         f"data-floor='{html.escape(s.get('hard_floor') or '')}' "
         f"style='border:1px solid #e5e7eb; border-radius:6px; padding:0.7rem 0.9rem; "
         f"display:flex; flex-direction:column; gap:0.3rem;'>"
@@ -796,9 +835,9 @@ def _render_skills() -> str:
         f"{' · ' + html.escape(s.get('hard_floor','')) if s.get('hard_floor') else ''}"
         f"</div>"
         f"<div style='display:flex; gap:0.4rem; margin-top:0.2rem;'>"
-        f"<a href='/skill/{html.escape(s.get('slug', ''))}' style='font-size:0.78rem;'>sidecar</a>"
-        f"<a href='/wiki/{html.escape(s.get('slug', ''))}' style='font-size:0.78rem;'>wiki</a>"
-        f"<a href='/graph?slug={html.escape(s.get('slug', ''))}' style='font-size:0.78rem;'>graph</a>"
+        f"<a href='/skill/{html.escape(s.get('slug', ''))}?type={html.escape(_sidecar_entity_type(s))}' style='font-size:0.78rem;'>sidecar</a>"
+        f"<a href='/wiki/{html.escape(s.get('slug', ''))}?type={html.escape(_sidecar_entity_type(s))}' style='font-size:0.78rem;'>wiki</a>"
+        f"<a href='/graph?slug={html.escape(s.get('slug', ''))}&amp;type={html.escape(_sidecar_entity_type(s))}' style='font-size:0.78rem;'>graph</a>"
         f"</div>"
         f"</div>"
         for s in sidecars
@@ -819,7 +858,7 @@ def _render_skills() -> str:
         f"<span><input type='checkbox' class='type-filter' value='{t}' checked> {t}</span>"
         f"<span class='muted' style='font-size:0.78rem;'>{type_counts.get(t, 0)}</span>"
         f"</label>"
-        for t in ("skill", "agent", "mcp-server")
+        for t in _DASHBOARD_ENTITY_TYPES
     )
 
     body = (
@@ -880,8 +919,8 @@ def _render_skills() -> str:
     return _layout("Skills", body)
 
 
-def _render_skill_detail(slug: str) -> str:
-    sidecar = _load_sidecar(slug)
+def _render_skill_detail(slug: str, entity_type: str | None = None) -> str:
+    sidecar = _load_sidecar(slug, entity_type=entity_type)
     if sidecar is None:
         return _layout(slug, f"<h1>{html.escape(slug)}</h1><p>No sidecar.</p>")
     audit = [r for r in _read_jsonl(_audit_log_path())
@@ -1172,7 +1211,7 @@ def _render_wiki_entity(slug: str, entity_type: str | None = None) -> str:
 
     fm_rows = "".join(
         f"<tr><td class='muted'>{html.escape(k)}</td>"
-        f"<td><code>{html.escape(v[:120])}</code></td></tr>"
+        f"<td><code>{html.escape(_frontmatter_text(v)[:120])}</code></td></tr>"
         for k, v in sorted(meta.items())
     )
 
@@ -1185,7 +1224,7 @@ def _render_wiki_entity(slug: str, entity_type: str | None = None) -> str:
             f"score <strong>{sidecar.get('raw_score', 0.0):.3f}</strong>"
             f"{' · floor ' + html.escape(sidecar.get('hard_floor','')) if sidecar.get('hard_floor') else ''}"
             f"<div style='margin-top:0.4rem;'>"
-            f"<a href='/skill/{html.escape(slug)}'>sidecar detail →</a> · "
+            f"<a href='/skill/{html.escape(slug)}?type={html.escape(entity_type or '')}'>sidecar detail →</a> · "
             f"<a href='/graph?slug={html.escape(slug)}{type_suffix}'>graph neighborhood →</a>"
             "</div></div>"
         )
@@ -1234,21 +1273,12 @@ def _wiki_index_entries() -> list[dict]:
             except OSError:
                 continue
             meta, _ = _parse_frontmatter(head)
-            tags_raw = meta.get("tags", "")
-            # frontmatter parser returns strings — tags come as
-            # "[a, b]" or "a, b". Normalize to a small preview list.
-            tags_preview: list[str] = []
-            for tok in tags_raw.replace("[", "").replace("]", "").split(","):
-                tok = tok.strip().strip("'\"")
-                if tok:
-                    tags_preview.append(tok)
-                if len(tags_preview) >= 6:
-                    break
+            tags_preview = _frontmatter_tags(meta.get("tags", ""))
             out.append({
                 "slug": slug,
                 "type": entity_type,
                 "tags": tags_preview,
-                "description": meta.get("description", "")[:200],
+                "description": _frontmatter_text(meta.get("description", ""))[:200],
             })
     return out
 
@@ -1617,7 +1647,8 @@ def _render_loaded() -> str:
         f"<td><code>{html.escape(e.get('skill', ''))}</code></td>"
         f"<td class='muted'>{html.escape(_etype(e))}</td>"
         f"<td class='muted'>{html.escape(str(e.get('source', '') or e.get('reason', ''))[:80])}</td>"
-        f"<td><button class='btn-load' data-slug='{html.escape(e.get('skill', ''))}'>load</button></td>"
+        f"<td><button class='btn-load' data-slug='{html.escape(e.get('skill', ''))}' "
+        f"data-etype='{html.escape(_etype(e))}'>load</button></td>"
         f"</tr>"
         for e in unload_rows
     )
@@ -1635,12 +1666,18 @@ def _render_loaded() -> str:
         f"<span class='muted'>source: <code>~/.claude/skill-manifest.json</code> "
         f"+ <code>~/.claude/harness-installs/*.json</code></span>"
         "</div>"
-        "<h2>Load a new skill</h2>"
+        "<h2>Load an entity</h2>"
         "<div class='card'>"
         "<form id='load-form'>"
-        "<input type='text' id='load-input' placeholder='skill slug (e.g. fastapi-pro)' "
+        "<input type='text' id='load-input' placeholder='slug (e.g. fastapi-pro)' "
         "style='padding:0.35rem 0.6rem; width:18rem; border:1px solid #ccc; "
         "border-radius:4px;'>"
+        "<select id='load-type' style='margin-left:0.5rem; padding:0.35rem 0.6rem; "
+        "border:1px solid #ccc; border-radius:4px;'>"
+        "<option value='skill'>skill</option>"
+        "<option value='agent'>agent</option>"
+        "<option value='mcp-server'>mcp-server</option>"
+        "</select>"
         "<button type='submit' style='margin-left:0.5rem;'>load</button>"
         "<span id='load-msg' class='muted' style='margin-left:0.75rem;'></span>"
         "</form></div>"
@@ -1666,16 +1703,17 @@ def _render_loaded() -> str:
         "  if (r.ok) location.reload(); else { b.disabled = false; alert('unload failed: ' + r.msg); }\n"
         "}));\n"
         "document.querySelectorAll('.btn-load').forEach(b => b.addEventListener('click', async () => {\n"
-        "  b.disabled = true; const slug = b.dataset.slug;\n"
-        "  const r = await post('/api/load', {slug});\n"
+        "  b.disabled = true; const slug = b.dataset.slug; const entity_type = b.dataset.etype || 'skill';\n"
+        "  const r = await post('/api/load', {slug, entity_type});\n"
         "  if (r.ok) location.reload(); else { b.disabled = false; alert('load failed: ' + r.msg); }\n"
         "}));\n"
         "document.getElementById('load-form').addEventListener('submit', async (ev) => {\n"
         "  ev.preventDefault();\n"
         "  const slug = document.getElementById('load-input').value.trim();\n"
+        "  const entity_type = document.getElementById('load-type').value;\n"
         "  if (!slug) return;\n"
         "  document.getElementById('load-msg').textContent = 'loading…';\n"
-        "  const r = await post('/api/load', {slug});\n"
+        "  const r = await post('/api/load', {slug, entity_type});\n"
         "  document.getElementById('load-msg').textContent = r.ok ? 'ok — reloading' : ('failed: ' + r.msg);\n"
         "  if (r.ok) setTimeout(() => location.reload(), 400);\n"
         "});\n"
@@ -1736,26 +1774,55 @@ def _is_safe_slug(slug: str) -> bool:
     return is_safe_source_name(slug)
 
 
-def _perform_load(slug: str) -> tuple[bool, str]:
-    """Invoke skill_loader.load_skill(slug). Returns (ok, message)."""
+def _perform_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
+    """Install/load one entity from the wiki. Returns (ok, message)."""
     if not _is_safe_slug(slug):
         return False, f"invalid slug: {slug!r}"
+    if entity_type not in _DASHBOARD_ENTITY_TYPES:
+        return False, f"unsupported entity_type: {entity_type!r}"
+    if entity_type == "harness":
+        return (
+            False,
+            "harness installs are managed by ctx-harness-install; "
+            f"run: ctx-harness-install {slug} --dry-run",
+        )
+    result: Any
     try:
-        from ctx.adapters.claude_code.skill_loader import load_skill  # local import — heavy module
+        if entity_type == "agent":
+            from ctx.adapters.claude_code.install.agent_install import install_agent
+            result = install_agent(
+                slug,
+                wiki_dir=_wiki_dir(),
+                agents_dir=_claude_dir() / "agents",
+            )
+        elif entity_type == "mcp-server":
+            from ctx.adapters.claude_code.install.mcp_install import install_mcp
+            result = install_mcp(slug, wiki_dir=_wiki_dir(), auto=True)
+        else:
+            from ctx.adapters.claude_code.install.skill_install import install_skill
+            result = install_skill(
+                slug,
+                wiki_dir=_wiki_dir(),
+                skills_dir=_claude_dir() / "skills",
+            )
     except ImportError as exc:
-        return False, f"skill_loader import failed: {exc}"
-    try:
-        load_skill(slug)
-    except Exception as exc:  # noqa: BLE001 — surface the error to the caller
+        return False, f"install import failed: {exc}"
+    except Exception as exc:  # noqa: BLE001
         return False, f"{type(exc).__name__}: {exc}"
-    # Audit entry so the dashboard timeline reflects the dashboard-driven load.
+    if result.status not in ("installed", "skipped-existing"):
+        return False, f"load failed: {result.message or result.status}"
     try:
-        from ctx_audit_log import log_skill_event
-        log_skill_event("skill.loaded", slug, actor="user",
-                        meta={"via": "ctx-monitor"})
-    except Exception:  # noqa: BLE001 — audit best-effort
+        if entity_type == "agent":
+            from ctx_audit_log import log_agent_event
+            log_agent_event("agent.loaded", slug, actor="user",
+                            meta={"via": "ctx-monitor"})
+        elif entity_type == "skill":
+            from ctx_audit_log import log_skill_event
+            log_skill_event("skill.loaded", slug, actor="user",
+                            meta={"via": "ctx-monitor"})
+    except Exception:  # noqa: BLE001
         pass
-    return True, "loaded"
+    return True, result.message or f"loaded {entity_type}:{slug}"
 
 
 def _perform_unload(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
@@ -1853,7 +1920,10 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             elif path == "/skills":
                 self._send_html(_render_skills())
             elif path.startswith("/skill/"):
-                self._send_html(_render_skill_detail(path.split("/skill/", 1)[1]))
+                self._send_html(_render_skill_detail(
+                    path.split("/skill/", 1)[1],
+                    qs.get("type"),
+                ))
             elif path == "/loaded":
                 self._send_html(_render_loaded())
             elif path == "/logs":
@@ -1880,7 +1950,7 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 })
             elif path.startswith("/api/skill/") and path.endswith(".json"):
                 slug = path[len("/api/skill/"): -len(".json")]
-                sidecar = _load_sidecar(slug)
+                sidecar = _load_sidecar(slug, entity_type=qs.get("type"))
                 if sidecar is None:
                     self._send_404(f"no sidecar for {slug}")
                 else:
@@ -1938,7 +2008,8 @@ class _MonitorHandler(BaseHTTPRequestHandler):
 
             if path == "/api/load":
                 slug = str(body.get("slug", "")).strip()
-                ok, msg = _perform_load(slug)
+                etype = str(body.get("entity_type", "skill")).strip() or "skill"
+                ok, msg = _perform_load(slug, entity_type=etype)
                 self._send_json_status(
                     200 if ok else 400, {"ok": ok, "detail": msg},
                 )

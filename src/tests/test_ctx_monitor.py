@@ -183,6 +183,22 @@ def test_render_skills_sorts_grade_then_score(fake_claude: Path) -> None:
     assert idx_top < idx_mid < idx_low
 
 
+def test_render_skills_includes_harness_filter_and_typed_links(fake_claude: Path) -> None:
+    _write_sidecar(fake_claude, "langgraph-harness", {
+        "slug": "langgraph",
+        "subject_type": "harness",
+        "grade": "A",
+        "raw_score": 0.95,
+    })
+
+    html = cm._render_skills()
+
+    assert "class='type-filter' value='harness'" in html
+    assert "/skill/langgraph?type=harness" in html
+    assert "/wiki/langgraph?type=harness" in html
+    assert "/graph?slug=langgraph&amp;type=harness" in html
+
+
 def test_read_manifest_empty_when_missing(fake_claude: Path) -> None:
     m = cm._read_manifest()
     assert m == {"load": [], "unload": [], "warnings": []}
@@ -295,7 +311,6 @@ def test_load_sidecar_rejects_unsafe_slug(fake_claude: Path) -> None:
 def test_load_sidecar_reads_mcp_quality_subdir(fake_claude: Path) -> None:
     _write_mcp_sidecar(fake_claude, "filesystem", {
         "slug": "filesystem",
-        "subject_type": "mcp-server",
         "grade": "A",
         "raw_score": 0.91,
     })
@@ -324,7 +339,9 @@ def test_load_sidecar_can_disambiguate_duplicate_slug(fake_claude: Path) -> None
     skill_sidecar = cm._load_sidecar("langgraph", entity_type="skill")
     assert skill_sidecar is not None
     assert skill_sidecar["grade"] == "D"
-    assert cm._load_sidecar("langgraph", entity_type="harness") is None
+    harness = cm._load_sidecar("langgraph", entity_type="harness")
+    assert harness is not None
+    assert harness["grade"] == "A"
 
 
 def test_monitor_post_requires_token(
@@ -344,21 +361,24 @@ def test_monitor_post_requires_token(
 def test_monitor_post_accepts_valid_token(
     fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[str] = []
+    calls: list[tuple[str, str]] = []
 
-    def fake_load(slug: str) -> tuple[bool, str]:
-        calls.append(slug)
+    def fake_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
+        calls.append((slug, entity_type))
         return True, "loaded"
 
     monkeypatch.setattr(cm, "_perform_load", fake_load)
     server, thread, port = _serve_monitor(monkeypatch)
     try:
         status, body = _post_json(
-            port, "/api/load", {"slug": "python-patterns"}, token="test-token"
+            port,
+            "/api/load",
+            {"slug": "python-patterns", "entity_type": "agent"},
+            token="test-token",
         )
         assert status == 200
         assert body == {"ok": True, "detail": "loaded"}
-        assert calls == ["python-patterns"]
+        assert calls == [("python-patterns", "agent")]
     finally:
         server.shutdown()
         server.server_close()
@@ -396,6 +416,13 @@ def test_parse_frontmatter_missing_returns_empty_meta() -> None:
     meta, body = cm._parse_frontmatter(text)
     assert meta == {}
     assert body == text
+
+
+def test_parse_frontmatter_multiline_tags() -> None:
+    text = "---\ntags:\n  - python\n  - api\n---\n# Body\n"
+    meta, body = cm._parse_frontmatter(text)
+    assert meta["tags"] == ["python", "api"]
+    assert body == "# Body"
 
 
 def test_wiki_entity_path_rejects_unsafe_slug(fake_claude: Path) -> None:

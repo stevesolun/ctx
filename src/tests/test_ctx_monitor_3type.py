@@ -257,6 +257,23 @@ class TestRenderLoaded3Type:
         assert "legacy" in html
         assert "data-etype='skill'" in html
 
+    def test_unloaded_reload_buttons_carry_entity_type(self, monkeypatch):
+        manifest = {
+            "load": [],
+            "unload": [
+                {"skill": "code-reviewer", "entity_type": "agent"},
+                {"skill": "anthropic-python-sdk", "entity_type": "mcp-server"},
+            ],
+        }
+        monkeypatch.setattr(_cm, "_read_manifest", lambda: manifest)
+        html = _cm._render_loaded()
+        assert "data-slug='code-reviewer' data-etype='agent'" in html
+        assert (
+            "data-slug='anthropic-python-sdk' data-etype='mcp-server'"
+            in html
+        )
+        assert "id='load-type'" in html
+
 
 # ────────────────────────────────────────────────────────────────────
 # _perform_unload — routes by entity_type
@@ -335,6 +352,92 @@ class TestPerformUnloadByEntityType:
         assert "invalid slug" in msg
 
 
+class TestPerformLoadByEntityType:
+    def test_skill_type_calls_skill_install(self, monkeypatch):
+        from dataclasses import dataclass
+
+        @dataclass
+        class _FakeResult:
+            slug: str
+            status: str
+            message: str = ""
+
+        calls = {}
+
+        def fake_install(slug, **kw):
+            calls["slug"] = slug
+            calls["kw"] = kw
+            return _FakeResult(slug=slug, status="installed", message="ok")
+
+        from ctx.adapters.claude_code.install import skill_install
+        monkeypatch.setattr(skill_install, "install_skill", fake_install)
+
+        ok, msg = _cm._perform_load("python-patterns", entity_type="skill")
+
+        assert ok
+        assert msg == "ok"
+        assert calls["slug"] == "python-patterns"
+        assert calls["kw"]["wiki_dir"] == _cm._wiki_dir()
+
+    def test_agent_type_calls_agent_install(self, monkeypatch):
+        from dataclasses import dataclass
+
+        @dataclass
+        class _FakeResult:
+            slug: str
+            status: str
+            message: str = ""
+
+        calls = {}
+
+        def fake_install(slug, **kw):
+            calls["slug"] = slug
+            calls["kw"] = kw
+            return _FakeResult(slug=slug, status="installed", message="ok")
+
+        from ctx.adapters.claude_code.install import agent_install
+        monkeypatch.setattr(agent_install, "install_agent", fake_install)
+
+        ok, msg = _cm._perform_load("code-reviewer", entity_type="agent")
+
+        assert ok
+        assert msg == "ok"
+        assert calls["slug"] == "code-reviewer"
+        assert calls["kw"]["agents_dir"] == _cm._claude_dir() / "agents"
+
+    def test_mcp_type_calls_mcp_install_auto(self, monkeypatch):
+        from dataclasses import dataclass
+
+        @dataclass
+        class _FakeResult:
+            slug: str
+            status: str
+            message: str = ""
+
+        calls = {}
+
+        def fake_install(slug, **kw):
+            calls["slug"] = slug
+            calls["kw"] = kw
+            return _FakeResult(slug=slug, status="installed", message="ok")
+
+        from ctx.adapters.claude_code.install import mcp_install
+        monkeypatch.setattr(mcp_install, "install_mcp", fake_install)
+
+        ok, msg = _cm._perform_load("anthropic-python-sdk",
+                                    entity_type="mcp-server")
+
+        assert ok
+        assert msg == "ok"
+        assert calls["slug"] == "anthropic-python-sdk"
+        assert calls["kw"]["auto"] is True
+
+    def test_harness_type_hands_off_to_cli(self):
+        ok, msg = _cm._perform_load("langgraph", entity_type="harness")
+        assert not ok
+        assert "ctx-harness-install langgraph --dry-run" in msg
+
+
 # ────────────────────────────────────────────────────────────────────
 # _render_graph — left-sidebar filter panel + MCP node style
 # ────────────────────────────────────────────────────────────────────
@@ -398,6 +501,20 @@ class TestRenderGraphSidebar:
 
         assert out["center"] == "harness:langgraph"
         assert any(n["data"]["type"] == "harness" for n in out["nodes"])
+
+    def test_graph_neighborhood_deduplicates_undirected_edges(self, monkeypatch):
+        graph = nx.Graph()
+        graph.add_node("skill:a", label="a", type="skill", tags=[])
+        graph.add_node("skill:b", label="b", type="skill", tags=[])
+        graph.add_node("skill:c", label="c", type="skill", tags=[])
+        graph.add_edge("skill:a", "skill:b", weight=2)
+        graph.add_edge("skill:b", "skill:c", weight=1)
+        monkeypatch.setattr(_cm, "_load_dashboard_graph", lambda: graph)
+
+        out = _cm._graph_neighborhood("a", hops=2, entity_type="skill")
+
+        edge_ids = [edge["data"]["id"] for edge in out["edges"]]
+        assert len(edge_ids) == len(set(edge_ids))
 
 
 class TestMonitorRoutesPreserveEntityType:

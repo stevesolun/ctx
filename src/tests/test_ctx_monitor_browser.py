@@ -21,7 +21,7 @@ pytestmark = pytest.mark.browser
 class MonitorHarness:
     base_url: str
     port: int
-    calls: list[str]
+    calls: list[tuple[str, str]]
     server: Any
     thread: threading.Thread
 
@@ -59,10 +59,10 @@ def _start_monitor(
     fake_load: bool,
 ) -> MonitorHarness:
     monkeypatch.setattr(cm, "_MONITOR_TOKEN", "browser-token")
-    calls: list[str] = []
+    calls: list[tuple[str, str]] = []
     if fake_load:
-        def perform_load(slug: str) -> tuple[bool, str]:
-            calls.append(slug)
+        def perform_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
+            calls.append((slug, entity_type))
             return True, "loaded"
 
         monkeypatch.setattr(cm, "_perform_load", perform_load)
@@ -122,7 +122,7 @@ def test_loaded_page_token_controls_browser_mutations(
             }
         """)
         assert with_token == {"status": 200, "body": {"ok": True, "detail": "loaded"}}
-        assert harness.calls == ["python-patterns"]
+        assert harness.calls == [("python-patterns", "skill")]
     finally:
         harness.close()
 
