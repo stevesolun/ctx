@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import networkx as nx
@@ -168,6 +169,57 @@ class TestLoadGraph:
         monkeypatch.setattr(resolve_graph, "node_link_graph", _boom)
         G = resolve_graph.load_graph(p)
         assert G.number_of_nodes() == 0
+
+    def test_runtime_semantic_floor_filters_only_weak_semantic_edges(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx_config
+
+        source = nx.Graph()
+        source.graph["semantic_build_floor"] = 0.5
+        for name in ("seed", "weak", "strong", "tagged", "legacy"):
+            source.add_node(f"skill:{name}", type="skill", label=name, tags=[])
+        source.add_edge(
+            "skill:seed",
+            "skill:weak",
+            weight=0.6,
+            semantic_sim=0.6,
+            tag_sim=0.0,
+            token_sim=0.0,
+        )
+        source.add_edge(
+            "skill:seed",
+            "skill:strong",
+            weight=0.9,
+            semantic_sim=0.9,
+            tag_sim=0.0,
+            token_sim=0.0,
+        )
+        source.add_edge(
+            "skill:seed",
+            "skill:tagged",
+            weight=0.2,
+            semantic_sim=0.2,
+            tag_sim=0.1,
+            token_sim=0.0,
+        )
+        source.add_edge("skill:seed", "skill:legacy", weight=1.0)
+        p = tmp_path / "graph.json"
+        p.write_text(json.dumps(_serialise_graph(source)), encoding="utf-8")
+        monkeypatch.setattr(
+            ctx_config,
+            "cfg",
+            SimpleNamespace(graph_semantic_min_cosine=0.8),
+        )
+
+        graph = resolve_graph.load_graph(p)
+
+        assert not graph.has_edge("skill:seed", "skill:weak")
+        assert graph.has_edge("skill:seed", "skill:strong")
+        assert graph.has_edge("skill:seed", "skill:tagged")
+        assert graph.has_edge("skill:seed", "skill:legacy")
 
 
 # ── TestResolveBySeeds ────────────────────────────────────────────────────────

@@ -11,13 +11,16 @@ must produce the same ranked bundle from:
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import networkx as nx
 import pytest
 
 import ctx.api
+import scan_repo
 from ctx.adapters.claude_code.hooks import context_monitor
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.providers import ToolCall
@@ -123,6 +126,98 @@ def test_recommendation_surfaces_share_order_type_and_normalized_score(
     for surface_results in (direct, hook, toolbox_results, public):
         assert surface_results[0]["normalized_score"] == 1.0
         assert all("normalized_score" in row for row in surface_results)
+
+
+def test_hook_uses_shared_query_min_score_and_top_k(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claude_dir = tmp_path / "claude"
+    graph_path = claude_dir / "skill-wiki" / "graphify-out" / "graph.json"
+    graph_path.parent.mkdir(parents=True)
+    graph_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(context_monitor, "CLAUDE_DIR", claude_dir)
+    import ctx_config
+    monkeypatch.setattr(
+        ctx_config,
+        "cfg",
+        SimpleNamespace(
+            recommendation_top_k=2,
+            recommendation_min_normalized_score=0.75,
+        ),
+    )
+    calls: dict[str, Any] = {}
+
+    class FakeGraph:
+        def number_of_nodes(self) -> int:
+            return 1
+
+    def fake_recommend_by_tags(graph: Any, tags: list[str], **kwargs: Any) -> list[dict]:
+        calls["tags"] = tags
+        calls.update(kwargs)
+        return [{"name": "fastapi-pro", "type": "skill"}]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "ctx.core.graph.resolve_graph",
+        type("FakeGraphModule", (), {"load_graph": staticmethod(lambda _path=None: FakeGraph())}),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "ctx.core.resolve.recommendations",
+        type("FakeRecommendModule", (), {"recommend_by_tags": staticmethod(fake_recommend_by_tags)}),
+    )
+
+    out = context_monitor.graph_suggest(["fastapi", "python"], top_k=99)
+
+    assert out == [{"name": "fastapi-pro", "type": "skill"}]
+    assert calls["tags"] == ["fastapi", "python"]
+    assert calls["top_n"] == 2
+    assert calls["query"] == "fastapi python"
+    assert calls["min_normalized_score"] == 0.75
+    assert calls["entity_types"] == ("skill", "agent", "mcp-server")
+
+
+def test_scan_repo_recommendations_use_shared_graph_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    wiki = tmp_path / "skill-wiki"
+    graph_path = wiki / "graphify-out" / "graph.json"
+    _write_golden_graph(graph_path)
+    import ctx_config
+    monkeypatch.setattr(
+        ctx_config,
+        "cfg",
+        SimpleNamespace(
+            wiki_dir=wiki,
+            recommendation_top_k=5,
+            recommendation_min_normalized_score=0.30,
+        ),
+    )
+    profile = {
+        "repo_path": str(tmp_path),
+        "project_type": "api-service",
+        "languages": [{"name": "python", "confidence": 0.9}],
+        "frameworks": [{"name": "fastapi", "confidence": 0.9}],
+        "infrastructure": [],
+        "data_stores": [],
+        "testing": [],
+        "ai_tooling": [],
+        "build_system": [],
+        "docs": [],
+    }
+
+    scan_repo._print_recommendations(str(tmp_path), profile)
+    out = capsys.readouterr().out
+
+    assert "-- Skills (1) --" in out
+    assert "-- Agents (1) --" in out
+    assert "-- MCP Servers (1) --" in out
+    assert "fastapi-python-async" in out
+    assert "fastapi-code-reviewer" in out
+    assert "fastapi-docs" in out
 
 
 def test_resolver_preserves_graph_entity_type_and_normalized_priority(

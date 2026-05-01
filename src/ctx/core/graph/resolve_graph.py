@@ -31,6 +31,43 @@ GRAPH_PATH = WIKI_DIR / "graphify-out" / "graph.json"
 # A valid node-link graph dict must have "nodes" and either "links" or "edges"
 # (networkx >= 3.0 uses "edges"; older versions used "links").
 _EDGE_KEYS = frozenset({"links", "edges"})
+_SIMILARITY_EDGE_KEYS = frozenset({"semantic_sim", "tag_sim", "token_sim"})
+
+
+def _configured_semantic_min_cosine() -> float | None:
+    try:
+        from ctx_config import cfg  # noqa: PLC0415
+        return float(cfg.graph_semantic_min_cosine)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _filter_runtime_edges(G: nx.Graph, min_cosine: float | None) -> nx.Graph:
+    """Apply the runtime semantic edge floor while preserving legacy graphs."""
+    if min_cosine is None:
+        return G
+    has_similarity_attrs = any(
+        _SIMILARITY_EDGE_KEYS & set(attrs)
+        for _, _, attrs in G.edges(data=True)
+    )
+    if not has_similarity_attrs:
+        return G
+
+    build_floor = float(G.graph.get("semantic_build_floor", 0.0) or 0.0)
+    effective_min = max(float(min_cosine), build_floor)
+    sub = nx.Graph()
+    sub.graph.update(G.graph)
+    sub.add_nodes_from(G.nodes(data=True))
+    for n1, n2, attrs in G.edges(data=True):
+        if not (_SIMILARITY_EDGE_KEYS & set(attrs)):
+            sub.add_edge(n1, n2, **attrs)
+            continue
+        sem = float(attrs.get("semantic_sim", 0.0) or 0.0)
+        tag = float(attrs.get("tag_sim", 0.0) or 0.0)
+        tok = float(attrs.get("token_sim", 0.0) or 0.0)
+        if sem >= effective_min or tag > 0.0 or tok > 0.0:
+            sub.add_edge(n1, n2, **attrs)
+    return sub
 
 
 def load_graph(path: Path | None = None) -> nx.Graph:
@@ -60,7 +97,7 @@ def load_graph(path: Path | None = None) -> nx.Graph:
         edges_key = "links" if "links" in data else "edges"
         graph = node_link_graph(data, edges=edges_key)
         graph.graph.setdefault("ctx_graph_path", str(graph_path))
-        return graph
+        return _filter_runtime_edges(graph, _configured_semantic_min_cosine())
     except json.JSONDecodeError as exc:
         logger.warning("graph.json is not valid JSON (%s); returning empty graph", exc)
     except UnicodeDecodeError as exc:

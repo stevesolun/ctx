@@ -541,16 +541,67 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
     return profile
 
 
-def _print_recommendations(repo: str, profile: dict) -> None:
-    """Run resolve() and print recommendations by entity bucket.
+def _profile_recommendation_query(profile: dict) -> str:
+    parts: list[str] = []
+    project_type = str(profile.get("project_type") or "").strip()
+    if project_type and project_type != "unknown":
+        parts.append(project_type)
+    for bucket in (
+        "languages",
+        "frameworks",
+        "infrastructure",
+        "data_stores",
+        "testing",
+        "ai_tooling",
+        "build_system",
+        "docs",
+    ):
+        for item in profile.get(bucket, []):
+            if isinstance(item, dict) and item.get("name"):
+                parts.append(str(item["name"]))
+    return " ".join(parts)
 
-    Phase 6a UX: previously only programmatic consumers (monitor, hooks)
-    saw the manifest output. Running ``ctx-scan-repo --recommend`` now
-    prints the same entity buckets to the terminal so users see tooling
-    recommendations surface from real repos without opening the dashboard.
-    """
-    # Local imports — these pull in networkx and the full resolver graph
-    # which isn't needed for plain profile scans. Keeps default scan fast.
+
+def _shared_recommendations(profile: dict) -> list[dict[str, Any]] | None:
+    """Return shared recommender rows, or None when no graph is available."""
+    from ctx.core.graph.resolve_graph import load_graph  # noqa: PLC0415
+    from ctx.core.resolve.recommendations import (  # noqa: PLC0415
+        query_to_tags,
+        recommend_by_tags,
+    )
+    from ctx_config import cfg  # noqa: PLC0415
+
+    graph_path = cfg.wiki_dir / "graphify-out" / "graph.json"
+    if not graph_path.is_file():
+        return None
+    graph = load_graph(graph_path)
+    if graph.number_of_nodes() == 0:
+        return None
+    query = _profile_recommendation_query(profile)
+    tags = query_to_tags(query)
+    if not tags:
+        return []
+    return recommend_by_tags(
+        graph,
+        tags,
+        top_n=max(1, min(int(cfg.recommendation_top_k), 5)),
+        query=query,
+        entity_types=("skill", "agent", "mcp-server"),
+        min_normalized_score=cfg.recommendation_min_normalized_score,
+    )
+
+
+def _row_reason(row: dict[str, Any]) -> str:
+    tags = row.get("matching_tags") or row.get("shared_tags") or []
+    if tags:
+        return "matched " + ", ".join(str(tag) for tag in tags[:4])
+    score = row.get("normalized_score")
+    if isinstance(score, (int, float)):
+        return f"match score {score:.2f}"
+    return "shared recommendation engine"
+
+
+def _legacy_recommendation_manifest(profile: dict) -> dict:
     from ctx.core.resolve.resolve_skills import (  # noqa: PLC0415
         discover_available_skills,
         read_wiki_overrides,
@@ -560,14 +611,52 @@ def _print_recommendations(repo: str, profile: dict) -> None:
 
     available = discover_available_skills(str(cfg.skills_dir))
     overrides = read_wiki_overrides(str(cfg.wiki_dir))
-    manifest = resolve(profile, available, overrides, max_skills=cfg.max_skills)
+    return resolve(profile, available, overrides, max_skills=cfg.max_skills)
+
+
+def _print_recommendations(repo: str, profile: dict) -> None:
+    """Run the shared recommender and print recommendations by entity bucket.
+
+    Phase 6a UX: previously only programmatic consumers (monitor, hooks)
+    saw the manifest output. Running ``ctx-scan-repo --recommend`` now
+    prints the same entity buckets to the terminal so users see tooling
+    recommendations surface from real repos without opening the dashboard.
+    """
+    # Local imports — these pull in networkx and the full resolver graph
+    shared = _shared_recommendations(profile)
+    if shared is None:
+        manifest = _legacy_recommendation_manifest(profile)
+        load_entries = manifest.get("load", [])
+        mcp_servers = manifest.get("mcp_servers", [])
+        warnings = manifest.get("warnings", [])
+    else:
+        load_entries = [
+            {
+                "skill": row["name"],
+                "entity_type": row.get("type", "skill"),
+                "reason": _row_reason(row),
+                "priority": round(float(row.get("normalized_score") or 0.0) * 20),
+            }
+            for row in shared
+            if row.get("type") in {"skill", "agent"}
+        ]
+        mcp_servers = [
+            {
+                "name": row["name"],
+                "score": row.get("score", 0.0),
+                "normalized_score": row.get("normalized_score"),
+                "shared_tags": row.get("matching_tags", []),
+            }
+            for row in shared
+            if row.get("type") == "mcp-server"
+        ]
+        warnings = []
 
     print()
     print("=" * 60)
     print("Recommended for this repo")
     print("=" * 60)
 
-    load_entries = manifest.get("load", [])
     skills = [
         e for e in load_entries
         if (e.get("entity_type") or e.get("type") or "skill") == "skill"
@@ -595,26 +684,25 @@ def _print_recommendations(repo: str, profile: dict) -> None:
         print("  (no agents matched)")
 
     # MCP servers section — Phase 5 populated this bucket
-    mcp_servers = manifest.get("mcp_servers", [])
     print(f"\n-- MCP Servers ({len(mcp_servers)}) --")
     if mcp_servers:
         for m in mcp_servers[:10]:
-            shared = ",".join(m.get("shared_tags", [])[:2]) or "-"
+            shared_tag_text = ",".join(m.get("shared_tags", [])[:2]) or "-"
             score = float(m.get("score", 0.0) or 0.0)
             norm = m.get("normalized_score")
             score_text = f"score={score:.2f}"
             if isinstance(norm, (int, float)):
                 score_text += f"  norm={norm:.2f}"
-            print(f"  {m['name']:<40s}  {score_text}  via={shared}")
+            print(f"  {m['name']:<40s}  {score_text}  via={shared_tag_text}")
     else:
         print("  (no MCP servers matched — try running")
         print("   `ctx-mcp-fetch --source awesome-mcp --limit 100 | ctx-mcp-add --from-stdin`")
         print("   to populate the catalog, then rescan)")
 
     # Warnings (missing skill installs etc.)
-    if manifest["warnings"]:
-        print(f"\n-- Notes ({len(manifest['warnings'])}) --")
-        for w in manifest["warnings"][:5]:
+    if warnings:
+        print(f"\n-- Notes ({len(warnings)}) --")
+        for w in warnings[:5]:
             print(f"  {w}")
 
 

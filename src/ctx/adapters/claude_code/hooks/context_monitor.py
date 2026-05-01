@@ -217,11 +217,23 @@ def graph_suggest(
         # minimal-env test where the full config chain isn't wired.
         try:
             from ctx_config import cfg  # noqa: PLC0415
-            top_k = int(cfg.recommendation_top_k)
+            configured_top_k = int(cfg.recommendation_top_k)
+            min_score = float(cfg.recommendation_min_normalized_score)
         except Exception:
-            top_k = 5  # matches the config default
+            configured_top_k = 5  # matches the config default
+            min_score = 0.30
+        top_k = configured_top_k
+    else:
+        try:
+            from ctx_config import cfg  # noqa: PLC0415
+            configured_top_k = int(cfg.recommendation_top_k)
+            min_score = float(cfg.recommendation_min_normalized_score)
+        except Exception:
+            configured_top_k = 5
+            min_score = 0.30
     if top_k < 1:
         top_k = 1
+    top_k = min(top_k, configured_top_k, 5)
     graph_path = CLAUDE_DIR / "skill-wiki" / "graphify-out" / "graph.json"
     if not graph_path.exists():
         return []
@@ -235,7 +247,9 @@ def graph_suggest(
             graph,
             unmatched_tags,
             top_n=top_k,
+            query=" ".join(unmatched_tags),
             entity_types=("skill", "agent", "mcp-server"),
+            min_normalized_score=min_score,
         )
     except Exception as exc:
         print(f"Warning: graph suggest error: {exc}", file=sys.stderr)
