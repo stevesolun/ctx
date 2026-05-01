@@ -77,9 +77,10 @@ graph-based discovery:
   13,232-node curated core plus 90,846 remote-cataloged Skills.sh `skill`
   nodes. The graph has 53 Louvain communities and blends semantic cosine,
   tag overlap, and slug-token overlap; 89,461 hydrated Skills.sh bodies are
-  shipped as micro-skill orchestrators. Preserved source bodies were used for
-  full-body semantic graphing before packaging; `SKILL.md.original` backups are
-  not shipped in the tarball.
+  shipped as installable `SKILL.md` files. Entries over the configured line
+  threshold are converted to gated micro-skill orchestrators. Full source
+  bodies were used for semantic graphing before packaging; `SKILL.md.original`
+  backups are not shipped in the tarball.
 - **53 Louvain communities** group related entities into named
   communities (e.g., *AI + Devops + Frontend*, *Python + API*).
 - PostToolUse and Stop hooks update the wiki automatically during each
