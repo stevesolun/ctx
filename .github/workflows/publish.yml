@@ -5,8 +5,9 @@ name: Publish to PyPI
 # no API token needed once the pending publisher is configured at
 # https://pypi.org/manage/account/publishing/.
 #
-# Also deployable on demand via workflow_dispatch (useful for
-# re-publishing to TestPyPI).
+# Also deployable on demand via workflow_dispatch. Manual PyPI publishes must
+# run from a version tag that matches pyproject.toml; branch dispatches are
+# allowed only for TestPyPI.
 
 on:
   push:
@@ -34,6 +35,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -45,15 +48,28 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install build packaging twine ruff mypy pytest
 
-      - name: Validate tag matches package version
-        if: github.event_name == 'push'
+      - name: Validate release target
         run: |
           python - <<'PY'
           import os
           import tomllib
           from packaging.version import Version
 
-          tag = os.environ["GITHUB_REF_NAME"]
+          event = os.environ["GITHUB_EVENT_NAME"]
+          target_repository = os.environ.get("INPUT_REPOSITORY", "pypi")
+          ref_type = os.environ.get("GITHUB_REF_TYPE", "")
+          ref_name = os.environ["GITHUB_REF_NAME"]
+
+          if event == "workflow_dispatch" and target_repository == "testpypi":
+              print(f"manual TestPyPI publish allowed from {ref_type}:{ref_name}")
+              raise SystemExit(0)
+
+          if ref_type != "tag":
+              raise SystemExit(
+                  "PyPI release must run from a version tag; "
+                  f"got {ref_type}:{ref_name}"
+              )
+          tag = ref_name
           if not tag.startswith("v"):
               raise SystemExit(f"release tag must start with v: {tag}")
 
@@ -68,6 +84,8 @@ jobs:
               )
           print(f"release version {package_version} matches tag {tag}")
           PY
+        env:
+          INPUT_REPOSITORY: ${{ github.event.inputs.repository || 'pypi' }}
 
       - name: Static gates
         run: |

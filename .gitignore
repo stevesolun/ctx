@@ -66,6 +66,9 @@ CLAUDE.md
 # Secrets / config overrides
 skill-system-config.json
 .env.local
+.env.development
+.env.production
+.envrc
 
 # Strix security scanner (local venv, instructions, output)
 .strix-venv/
@@ -82,6 +85,11 @@ strix_runs/
 htmlcov/
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# Local code-review graph experiments
+.code-review-graph/
 
 # MkDocs build output
 /site/

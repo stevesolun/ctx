@@ -23,6 +23,9 @@ that will be saved in shell history.
 
 ```powershell
 $env:HF_TOKEN = "<hugging-face-write-token>"
+python -m pip install --upgrade huggingface_hub
+git lfs install
+git lfs pull --include="graph/wiki-graph.tar.gz"
 @'
 from __future__ import annotations
 
@@ -46,6 +49,11 @@ files = [
     for raw in subprocess.check_output(["git", "ls-files", "-z"], cwd=root).split(b"\0")
     if raw
 ]
+graph_tar = root / "graph" / "wiki-graph.tar.gz"
+if not graph_tar.is_file() or graph_tar.stat().st_size < 100_000_000:
+    raise SystemExit(
+        "graph/wiki-graph.tar.gz is not hydrated; run git lfs pull before publishing"
+    )
 
 api.create_repo(repo_id=repo_id, repo_type=repo_type, private=False, exist_ok=True, token=token)
 staging = Path(tempfile.mkdtemp(prefix="ctx-hf-upload-"))
