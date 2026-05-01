@@ -186,6 +186,13 @@ def _parse_mcp_spec(spec: str) -> McpServerConfig:
         parts = invocation.split()
         if not parts:
             raise SystemExit(f"malformed --mcp spec: {spec!r}")
+        if name == "filesystem" and len(parts) == 1:
+            filesystem_preset = _MCP_PRESETS["filesystem"]
+            return McpServerConfig(
+                name=filesystem_preset.name,
+                command=filesystem_preset.command,
+                args=(*filesystem_preset.args[:-1], parts[0]),
+            )
         return McpServerConfig(
             name=name,
             command=parts[0],
@@ -509,6 +516,24 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     rz.add_argument(
+        "--provider",
+        help=(
+            "Provider backend for API-key auto-detection. Default: the "
+            "recorded provider from the original session, then model prefix."
+        ),
+    )
+    rz.add_argument(
+        "--api-key-env",
+        help=(
+            "Override the env var holding the provider's API key. "
+            "Default: recorded session value, then auto-detected."
+        ),
+    )
+    rz.add_argument(
+        "--base-url",
+        help="Override provider base URL. Default: recorded session value.",
+    )
+    rz.add_argument(
         "--sessions-dir", default=None,
         help="Override sessions directory.",
     )
@@ -621,9 +646,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     metadata = {
         "task": args.task,
         "model": args.model,
+        "provider": args.provider or _model_provider_prefix(args.model),
         "provider_prefix": _model_provider_prefix(args.model),
+        "api_key_env": api_key_env or "",
+        "base_url": args.base_url or "",
         "system_prompt": system_prompt,
         "temperature": args.temperature,
+        "max_tokens": args.max_tokens,
         "max_iterations": args.max_iterations,
         "budget_usd": args.budget_usd,
         "budget_tokens": args.budget_tokens,
@@ -800,8 +829,22 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         return 1
 
     system_prompt = meta.get("system_prompt") or _DEFAULT_SYSTEM_PROMPT
-    api_key_env = _resolve_api_key_env(None, model, None)
-    provider = get_provider(default_model=model, api_key_env=api_key_env)
+    provider_name = args.provider or meta.get("provider") or meta.get("provider_prefix")
+    provider_key = provider_name if isinstance(provider_name, str) else None
+    if args.api_key_env is not None:
+        api_key_env = _resolve_api_key_env(args.api_key_env, model, provider_key)
+    elif isinstance(meta.get("api_key_env"), str):
+        api_key_env = str(meta.get("api_key_env") or "") or None
+    else:
+        api_key_env = _resolve_api_key_env(None, model, provider_key)
+    base_url = args.base_url
+    if base_url is None and isinstance(meta.get("base_url"), str):
+        base_url = str(meta.get("base_url") or "") or None
+    provider = get_provider(
+        default_model=model,
+        base_url=base_url,
+        api_key_env=api_key_env,
+    )
 
     store = SessionStore.attach(args.session_id, sessions_dir=sdir)
     observer = JsonlObserver(store, session_metadata={}, emit_session_start=False)
@@ -875,6 +918,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             # so the resume doesn't blow past the original ceiling.
             max_iterations=int(meta.get("max_iterations") or 25),
             temperature=float(meta.get("temperature") or 0.7),
+            max_tokens=meta.get("max_tokens"),
             budget_usd=meta.get("budget_usd"),
             budget_tokens=meta.get("budget_tokens"),
         )

@@ -158,6 +158,13 @@ class TestParseMcpSpec:
         assert cfg.command == "myserver"
         assert cfg.args == ()
 
+    def test_filesystem_colon_path_uses_preset_command(self) -> None:
+        cfg = _parse_mcp_spec("filesystem:/tmp/project")
+        assert cfg.name == "filesystem"
+        assert cfg.command == "npx"
+        assert cfg.args[-1] == "/tmp/project"
+        assert "server-filesystem" in " ".join(cfg.args)
+
     def test_unknown_bare_rejected(self) -> None:
         with pytest.raises(SystemExit):
             _parse_mcp_spec("not-a-preset")
@@ -290,6 +297,8 @@ class TestRunCommand:
                 "--session-id", "meta-test",
                 "--no-ctx-tools",
                 "--budget-usd", "1.5",
+                "--api-key-env", "CUSTOM_OPENROUTER_KEY",
+                "--base-url", "https://openrouter.example/api",
                 "--quiet",
             ]
         )
@@ -300,6 +309,9 @@ class TestRunCommand:
         assert event["task"] == "task-content"
         assert event["model"] == "openrouter/anthropic/claude"
         assert event["provider_prefix"] == "openrouter"
+        assert event["provider"] == "openrouter"
+        assert event["api_key_env"] == "CUSTOM_OPENROUTER_KEY"
+        assert event["base_url"] == "https://openrouter.example/api"
         assert event["budget_usd"] == 1.5
 
     def test_tool_policy_metadata_recorded(
@@ -608,6 +620,44 @@ class TestResumeCommand:
             if line and json.loads(line)["type"] == "stop"
         )
         assert stop_count == 2
+
+    def test_resume_reuses_recorded_provider_settings(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("LOCAL_KEY", "secret-value")
+        main(
+            [
+                "run",
+                "--model", "openai/local-model",
+                "--task", "first",
+                "--sessions-dir", str(tmp_path),
+                "--session-id", "provider-resume",
+                "--api-key-env", "LOCAL_KEY",
+                "--base-url", "http://127.0.0.1:8000/v1",
+                "--no-ctx-tools",
+                "--quiet",
+            ]
+        )
+        capsys.readouterr()
+        fake_litellm._calls.clear()
+
+        exit_code = main(
+            [
+                "resume", "provider-resume",
+                "--task", "follow-up",
+                "--sessions-dir", str(tmp_path),
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        resume_call = fake_litellm._calls[-1]
+        assert resume_call["api_base"] == "http://127.0.0.1:8000/v1"
+        assert resume_call["api_key"] == "secret-value"
 
     def test_resume_inherits_recorded_tool_policy(
         self, fake_litellm: Any, tmp_path: Path,
