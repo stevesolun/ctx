@@ -1319,6 +1319,10 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                         and len(parts) >= 2
                         and parts[1] in replacement_slugs
                     )
+                    or (
+                        is_skills_sh_converted
+                        and safe_name.endswith("/SKILL.md.original")
+                    )
                 ):
                     continue
                 if member.isfile():

@@ -469,6 +469,69 @@ def test_update_wiki_tarball_preserves_stripped_catalog_converted_body(
     assert "body_available: true" in page
 
 
+def test_update_wiki_tarball_drops_skills_sh_original_body_files(
+    tmp_path: Path,
+) -> None:
+    tarball = tmp_path / "wiki-graph.tar.gz"
+    graph = {
+        "directed": False,
+        "multigraph": False,
+        "graph": {},
+        "nodes": [],
+        "edges": [],
+    }
+    converted_path = "./converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md"
+    with tarfile.open(tarball, "w:gz") as tf:
+        _add_text(tf, "./graphify-out/graph.json", json.dumps(graph))
+        _add_text(tf, converted_path, "# Existing hydrated body\n")
+        _add_text(
+            tf,
+            "./converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md.original",
+            "# Very long upstream original\n",
+        )
+
+    catalog: dict[str, Any] = {
+        "schema_version": 1,
+        "source": "skills.sh",
+        "api": "https://skills.sh/api/search",
+        "fetched_at": "2026-04-29T00:00:00+00:00",
+        "site_reported_total": 1,
+        "observed_unique_skills": 1,
+        "coverage_vs_site_reported_total": 1.0,
+        "query_count": 1,
+        "query_error_count": 0,
+        "overlap": {"existing_wiki_skill_pages": 0},
+        "skills": [
+            {
+                "id": "vercel-labs/skills/find-skills",
+                "ctx_slug": "skills-sh-vercel-labs-skills-find-skills",
+                "source": "vercel-labs/skills",
+                "skill_id": "find-skills",
+                "name": "find-skills",
+                "type": "skill",
+                "status": "remote-cataloged",
+                "source_catalog": "skills.sh",
+                "installs": 100,
+                "tags": ["skill"],
+                "detail_url": "https://skills.sh/vercel-labs/skills/find-skills",
+                "body_available": True,
+                "converted_path": converted_path.removeprefix("./"),
+            }
+        ],
+    }
+
+    update_wiki_tarball(tarball, catalog)
+
+    with tarfile.open(tarball, "r:gz") as tf:
+        names = set(tf.getnames())
+
+    assert converted_path in names
+    assert (
+        "./converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md.original"
+        not in names
+    )
+
+
 def test_update_wiki_tarball_downgrades_missing_stripped_body(
     tmp_path: Path,
 ) -> None:
