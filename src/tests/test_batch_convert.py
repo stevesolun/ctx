@@ -552,6 +552,7 @@ class TestConvertSkill:
         assert (out_dir / "check-gates.md").exists()
         assert (out_dir / "failure-log.md").exists()
         assert (out_dir / "original-hash.txt").exists()
+        assert skill_250.exists()
         refs = list((out_dir / "references").glob("*.md"))
         assert len(refs) >= 5
 
@@ -563,5 +564,6 @@ class TestConvertSkill:
         result = convert_skill(str(skill_250), output_dir=str(out_dir))
 
         assert result["status"] == "converted"
+        assert skill_250.exists()
         assert (out_dir / "SKILL.md").exists()
         assert (out_dir / "references" / "01-scope.md").exists()

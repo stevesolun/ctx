@@ -595,18 +595,13 @@ def test_update_wiki_tarball_micro_converts_long_skills_sh_body(
         skill_file = tf.extractfile(
             tf.getmember("./converted/skills-sh-example-skills-long-skill/SKILL.md")
         )
-        original_file = tf.extractfile(
-            tf.getmember("./converted/skills-sh-example-skills-long-skill/SKILL.md.original")
-        )
         assert skill_file is not None
-        assert original_file is not None
         skill_text = skill_file.read().decode("utf-8")
-        original_text = original_file.read().decode("utf-8")
 
     assert "./converted/skills-sh-example-skills-long-skill/references/01-scope.md" in names
     assert "./converted/skills-sh-example-skills-long-skill/check-gates.md" in names
+    assert "./converted/skills-sh-example-skills-long-skill/SKILL.md.original" not in names
     assert "When this skill triggers, execute the following gated pipeline." in skill_text
-    assert original_text == long_body.rstrip() + "\n"
 
 
 def test_hydration_falls_back_to_github_raw_skill_md(monkeypatch) -> None:

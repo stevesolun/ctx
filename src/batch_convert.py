@@ -455,12 +455,9 @@ Read `failure-log.md` before starting. Every pattern is a mandatory constraint.
 - Step 4 (Check) is the hard gate. "Mostly yes" counts as NO.
 - On Check failure: fix, re-run full checklist, append pattern to `failure-log.md`.
 """
-    # Atomic write — this is what replaces the original SKILL.md in-place.
-    # Only after this succeeds do we remove any lingering original at a
-    # different path (out-of-place conversion).
+    # Atomic write replaces the original only for in-place conversion. When
+    # output_dir is separate, the source skill remains intact.
     _atomic_write_text(output_dir / "SKILL.md", orchestrator.strip() + "\n")
-    if skill_path.resolve() != (output_dir / "SKILL.md").resolve() and skill_path.exists():
-        skill_path.unlink()
 
     # Count total pipeline files and max line count
     all_pipeline_files = list(refs_dir.glob("*.md")) + [

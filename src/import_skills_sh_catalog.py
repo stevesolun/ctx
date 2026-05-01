@@ -1265,6 +1265,8 @@ def _converted_skill_files_from_body(
             if not path.is_file():
                 continue
             rel = path.relative_to(output_dir).as_posix()
+            if rel == "SKILL.md.original":
+                continue
             files[f"{root}/{rel}"] = path.read_bytes()
         if converted_path not in files:
             return {converted_path: body.encode("utf-8")}
