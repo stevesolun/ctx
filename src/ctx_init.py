@@ -215,7 +215,12 @@ def write_model_profile(
     return target
 
 
-def recommend_harnesses(goal: str, *, top_k: int = 5) -> list[dict[str, Any]]:
+def recommend_harnesses(
+    goal: str,
+    *,
+    top_k: int = 5,
+    model_provider: str | None = None,
+) -> list[dict[str, Any]]:
     """Return high-confidence harness catalog recommendations."""
     if not goal.strip():
         return []
@@ -230,14 +235,32 @@ def recommend_harnesses(goal: str, *, top_k: int = 5) -> list[dict[str, Any]]:
         if graph.number_of_nodes() == 0:
             return []
         limit = max(1, min(int(top_k), cfg.recommendation_top_k))
+        candidate_limit = max(limit * 4, 25)
         results = recommend_by_tags(
             graph,
             query_to_tags(goal),
-            top_n=limit,
+            top_n=candidate_limit,
             query=goal,
             entity_types=("harness",),
-            min_normalized_score=cfg.harness_recommendation_min_normalized_score,
+            min_normalized_score=0.0,
         )
+        results = [
+            row for row in results
+            if _harness_supports_provider(
+                graph,
+                str(row.get("name") or ""),
+                model_provider,
+            )
+        ]
+        top_score = max((float(row.get("score") or 0.0) for row in results), default=0.0)
+        if top_score > 0:
+            for row in results:
+                row["normalized_score"] = round(float(row.get("score") or 0.0) / top_score, 4)
+            threshold = cfg.harness_recommendation_min_normalized_score
+            results = [
+                row for row in results
+                if float(row.get("normalized_score") or 0.0) >= threshold
+            ]
     except Exception as exc:  # noqa: BLE001
         print(
             f"  [warn] harness recommendation failed: {type(exc).__name__}: {exc}",
@@ -245,6 +268,79 @@ def recommend_harnesses(goal: str, *, top_k: int = 5) -> list[dict[str, Any]]:
         )
         return []
     return results[:top_k]
+
+
+def _harness_supports_provider(
+    graph: Any,
+    slug: str,
+    model_provider: str | None,
+) -> bool:
+    """Return true when a harness is compatible with the requested provider."""
+    requested = _normalise_model_provider(model_provider)
+    if not requested:
+        return True
+    providers = _harness_model_providers_from_graph(graph, slug)
+    if not providers:
+        providers = _harness_model_providers_from_wiki(slug)
+    if not providers:
+        return True
+    return requested in providers
+
+
+def _normalise_model_provider(value: str | None) -> str:
+    provider = (value or "").strip().lower()
+    if not provider:
+        return ""
+    aliases = {
+        "azure": "azure-openai",
+        "azure_openai": "azure-openai",
+        "googleai": "google",
+        "gemini": "google",
+        "local": "ollama",
+    }
+    return aliases.get(provider, provider)
+
+
+def _normalise_model_providers(raw: object) -> set[str]:
+    if raw is None:
+        return set()
+    if isinstance(raw, str):
+        values = [raw]
+    elif isinstance(raw, (list, tuple, set, frozenset)):
+        values = [str(item) for item in raw]
+    else:
+        return set()
+    return {
+        provider for value in values
+        if (provider := _normalise_model_provider(value))
+    }
+
+
+def _harness_model_providers_from_graph(graph: Any, slug: str) -> set[str]:
+    for _node_id, data in graph.nodes(data=True):
+        if str(data.get("type")) != "harness":
+            continue
+        if str(data.get("label") or "") != slug:
+            continue
+        return _normalise_model_providers(data.get("model_providers"))
+    return set()
+
+
+def _harness_model_providers_from_wiki(slug: str) -> set[str]:
+    try:
+        from ctx.core.entity_types import entity_page_path  # noqa: PLC0415
+        from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body  # noqa: PLC0415
+        from ctx_config import cfg  # noqa: PLC0415
+
+        path = entity_page_path(cfg.wiki_dir, "harness", slug)
+        if path is None or not path.is_file():
+            return set()
+        fm, _body = parse_frontmatter_and_body(
+            path.read_text(encoding="utf-8", errors="replace"),
+        )
+        return _normalise_model_providers(fm.get("model_providers"))
+    except Exception:
+        return set()
 
 
 def _load_recommendation_graph() -> Any:
@@ -435,7 +531,10 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
         part for part in [goal, provider or "", args.model or "", "harness"]
         if part
     )
-    harnesses = recommend_harnesses(recommendation_query)
+    harnesses = recommend_harnesses(
+        recommendation_query,
+        model_provider=provider,
+    )
     if harnesses:
         print("  [ok] recommended harnesses:")
         for row in harnesses:

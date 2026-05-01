@@ -201,6 +201,42 @@ class TestWritePendingSkills:
         pending = json.loads((tmp_path / "pending.json").read_text())
         assert "graph_suggestions" in pending
 
+    def test_graph_suggest_filters_to_execution_bundle_types(self, tmp_path, monkeypatch):
+        graph_path = tmp_path / "skill-wiki" / "graphify-out" / "graph.json"
+        graph_path.parent.mkdir(parents=True)
+        graph_path.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(_cm, "CLAUDE_DIR", tmp_path)
+        calls = {}
+
+        class FakeGraph:
+            def number_of_nodes(self):
+                return 1
+
+        fake_graph_module = type(
+            "FakeGraphModule",
+            (),
+            {"load_graph": staticmethod(lambda _path=None: FakeGraph())},
+        )
+
+        def fake_recommend_by_tags(graph, tags, **kwargs):
+            calls["entity_types"] = kwargs.get("entity_types")
+            return [{"name": "fastapi-pro", "type": "skill"}]
+
+        fake_recommend_module = type(
+            "FakeRecommendModule",
+            (),
+            {"recommend_by_tags": staticmethod(fake_recommend_by_tags)},
+        )
+        monkeypatch.setitem(sys.modules, "ctx.core.graph.resolve_graph", fake_graph_module)
+        monkeypatch.setitem(
+            sys.modules,
+            "ctx.core.resolve.recommendations",
+            fake_recommend_module,
+        )
+
+        assert _cm.graph_suggest(["fastapi"]) == [{"name": "fastapi-pro", "type": "skill"}]
+        assert calls["entity_types"] == ("skill", "agent", "mcp-server")
+
 
 # ---------------------------------------------------------------------------
 # load_recent_unmatched_count

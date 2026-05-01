@@ -231,7 +231,12 @@ def graph_suggest(
         graph = load_graph(graph_path)
         if graph.number_of_nodes() == 0:
             return []
-        return recommend_by_tags(graph, unmatched_tags, top_n=top_k)
+        return recommend_by_tags(
+            graph,
+            unmatched_tags,
+            top_n=top_k,
+            entity_types=("skill", "agent", "mcp-server"),
+        )
     except Exception as exc:
         print(f"Warning: graph suggest error: {exc}", file=sys.stderr)
         return []

@@ -42,12 +42,20 @@ def _harness_graph() -> nx.Graph:
         label="langgraph",
         type="harness",
         tags=["python", "openai", "agents", "graph", "checkpointing", "harness"],
+        model_providers=["openai"],
     )
     graph.add_node(
         "harness:weak-match",
         label="weak-match",
         type="harness",
         tags=["python"],
+    )
+    graph.add_node(
+        "harness:local-workbench",
+        label="local-workbench",
+        type="harness",
+        tags=["python", "agents", "graph", "checkpointing", "harness", "ollama"],
+        model_providers=["ollama"],
     )
     graph.add_node(
         "skill:python-helper",
@@ -157,6 +165,20 @@ def test_ctx_init_recommends_harnesses_from_dedicated_catalog(
     assert [row["name"] for row in results] == ["langgraph"]
     assert {row["type"] for row in results} == {"harness"}
     assert results[0]["normalized_score"] >= 0.85
+
+
+def test_ctx_init_filters_harnesses_by_model_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ctx_init, "_load_recommendation_graph", _harness_graph)
+
+    results = ctx_init.recommend_harnesses(
+        "build an ollama python agent graph with checkpointing",
+        top_k=5,
+        model_provider="ollama",
+    )
+
+    assert [row["name"] for row in results] == ["local-workbench"]
 
 
 def test_ctx_init_prints_harness_install_handoff_for_custom_model(
