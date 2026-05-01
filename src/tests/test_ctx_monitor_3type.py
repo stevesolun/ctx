@@ -224,9 +224,12 @@ class TestRenderLoaded3Type:
         assert "langgraph" in html
 
     def test_unload_buttons_carry_entity_type(self, monkeypatch):
-        """Every unload button must carry data-etype so the /api/unload
-        POST routes by entity_type. Without this, MCPs would go down the
-        skill_unload path and fail."""
+        """Unload buttons must carry data-etype for live-action entity types.
+
+        Harnesses are managed by ctx-harness-install because they own target
+        directories and setup commands, so the dashboard shows the CLI handoff
+        instead of a misleading live unload button.
+        """
         manifest = {
             "load": [
                 {"skill": "foo-skill", "entity_type": "skill"},
@@ -241,7 +244,8 @@ class TestRenderLoaded3Type:
         assert "data-etype='skill'" in html
         assert "data-etype='agent'" in html
         assert "data-etype='mcp-server'" in html
-        assert "data-etype='harness'" in html
+        assert "data-etype='harness'" not in html
+        assert "ctx-harness-install langgraph --uninstall --dry-run" in html
 
     def test_legacy_manifest_entry_defaults_to_skill(self, monkeypatch):
         """Pre-install_utils manifest entries had no entity_type field.

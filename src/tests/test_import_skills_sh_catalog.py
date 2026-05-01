@@ -397,6 +397,146 @@ def test_hydrated_skills_sh_body_is_indexed_and_rendered(
     assert converted == "# Find Skills\n\nUse this skill to discover relevant skills.\n"
 
 
+def test_update_wiki_tarball_preserves_stripped_catalog_converted_body(
+    tmp_path: Path,
+) -> None:
+    tarball = tmp_path / "wiki-graph.tar.gz"
+    graph = {
+        "directed": False,
+        "multigraph": False,
+        "graph": {},
+        "nodes": [],
+        "edges": [],
+    }
+    converted_path = "./converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md"
+    with tarfile.open(tarball, "w:gz") as tf:
+        _add_text(tf, "./graphify-out/graph.json", json.dumps(graph))
+        _add_text(tf, converted_path, "# Existing hydrated body\n")
+
+    catalog: dict[str, Any] = {
+        "schema_version": 1,
+        "source": "skills.sh",
+        "api": "https://skills.sh/api/search",
+        "fetched_at": "2026-04-29T00:00:00+00:00",
+        "site_reported_total": 1,
+        "observed_unique_skills": 1,
+        "coverage_vs_site_reported_total": 1.0,
+        "query_count": 1,
+        "query_error_count": 0,
+        "overlap": {"existing_wiki_skill_pages": 0},
+        "skills": [
+            {
+                "id": "vercel-labs/skills/find-skills",
+                "ctx_slug": "skills-sh-vercel-labs-skills-find-skills",
+                "source": "vercel-labs/skills",
+                "skill_id": "find-skills",
+                "name": "find-skills",
+                "type": "skill",
+                "status": "remote-cataloged",
+                "source_catalog": "skills.sh",
+                "installs": 100,
+                "tags": ["skill"],
+                "detail_url": "https://skills.sh/vercel-labs/skills/find-skills",
+                "install_command": (
+                    "npx skills add https://github.com/vercel-labs/skills "
+                    "--skill find-skills"
+                ),
+                "body_available": True,
+                "converted_path": converted_path.removeprefix("./"),
+            }
+        ],
+    }
+
+    update_wiki_tarball(tarball, catalog)
+
+    with tarfile.open(tarball, "r:gz") as tf:
+        names = tf.getnames()
+        converted_file = tf.extractfile(tf.getmember(converted_path))
+        assert converted_file is not None
+        converted = converted_file.read().decode("utf-8")
+        catalog_out = _read_json(tf, "./external-catalogs/skills-sh/catalog.json")
+        page_file = tf.extractfile(
+            tf.getmember("./entities/skills/skills-sh-vercel-labs-skills-find-skills.md")
+        )
+        assert page_file is not None
+        page = page_file.read().decode("utf-8")
+
+    assert names.count(converted_path) == 1
+    assert converted == "# Existing hydrated body\n"
+    assert catalog_out["body_available_count"] == 1
+    assert catalog_out["skills"][0]["body_available"] is True
+    assert "skill_body" not in catalog_out["skills"][0]
+    assert "body_available: true" in page
+
+
+def test_update_wiki_tarball_downgrades_missing_stripped_body(
+    tmp_path: Path,
+) -> None:
+    tarball = tmp_path / "wiki-graph.tar.gz"
+    graph = {
+        "directed": False,
+        "multigraph": False,
+        "graph": {},
+        "nodes": [],
+        "edges": [],
+    }
+    with tarfile.open(tarball, "w:gz") as tf:
+        _add_text(tf, "./graphify-out/graph.json", json.dumps(graph))
+
+    catalog: dict[str, Any] = {
+        "schema_version": 1,
+        "source": "skills.sh",
+        "api": "https://skills.sh/api/search",
+        "fetched_at": "2026-04-29T00:00:00+00:00",
+        "site_reported_total": 1,
+        "observed_unique_skills": 1,
+        "coverage_vs_site_reported_total": 1.0,
+        "query_count": 1,
+        "query_error_count": 0,
+        "overlap": {"existing_wiki_skill_pages": 0},
+        "skills": [
+            {
+                "id": "vercel-labs/skills/find-skills",
+                "ctx_slug": "skills-sh-vercel-labs-skills-find-skills",
+                "source": "vercel-labs/skills",
+                "skill_id": "find-skills",
+                "name": "find-skills",
+                "type": "skill",
+                "status": "remote-cataloged",
+                "source_catalog": "skills.sh",
+                "installs": 100,
+                "tags": ["skill"],
+                "detail_url": "https://skills.sh/vercel-labs/skills/find-skills",
+                "install_command": (
+                    "npx skills add https://github.com/vercel-labs/skills "
+                    "--skill find-skills"
+                ),
+                "body_available": True,
+                "converted_path": (
+                    "converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md"
+                ),
+            }
+        ],
+    }
+
+    update_wiki_tarball(tarball, catalog)
+
+    with tarfile.open(tarball, "r:gz") as tf:
+        names = tf.getnames()
+        catalog_out = _read_json(tf, "./external-catalogs/skills-sh/catalog.json")
+        page_file = tf.extractfile(
+            tf.getmember("./entities/skills/skills-sh-vercel-labs-skills-find-skills.md")
+        )
+        assert page_file is not None
+        page = page_file.read().decode("utf-8")
+
+    assert "./converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md" not in names
+    assert catalog_out["body_available_count"] == 0
+    assert catalog_out["skills"][0]["body_available"] is False
+    assert catalog_out["skills"][0]["converted_path"] is None
+    assert "body_available: false" in page
+
+
 def test_hydration_falls_back_to_github_raw_skill_md(monkeypatch) -> None:
     monkeypatch.setattr(
         importer,

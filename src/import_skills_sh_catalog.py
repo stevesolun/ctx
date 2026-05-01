@@ -1208,22 +1208,50 @@ def _add_bytes(
 
 
 def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
-    _refresh_body_summary(catalog)
+    replacement_slugs = {
+        str(item.get("ctx_slug") or "")
+        for item in catalog.get("skills", [])
+        if isinstance(item, dict)
+        and str(item.get("ctx_slug") or "")
+        and str(item.get("skill_body") or "").strip()
+    }
     with tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz") as tmp_file:
         tmp_path = Path(tmp_file.name)
     try:
         with tarfile.open(tarball, "r:gz") as src, tarfile.open(tmp_path, "w:gz") as dst:
-            for member in src.getmembers():
+            members = src.getmembers()
+            existing_converted_paths = {
+                safe_name
+                for member in members
+                if (safe_name := _safe_tar_name(member.name)) is not None
+                and member.isfile()
+                and safe_name.startswith(f"{CONVERTED_SKILL_ROOT}/skills-sh-")
+                and safe_name.endswith("/SKILL.md")
+            }
+            _reconcile_body_availability_with_tar(catalog, existing_converted_paths)
+            _refresh_body_summary(catalog)
+
+            for member in members:
                 safe_name = _safe_tar_name(member.name)
                 if safe_name is None:
                     continue
+                parts = safe_name.split("/", 2)
+                is_skills_sh_converted = (
+                    len(parts) >= 2
+                    and parts[0] == CONVERTED_SKILL_ROOT
+                    and parts[1].startswith("skills-sh-")
+                )
                 if (
                     safe_name.startswith("external-catalogs/skills-sh/")
                     or safe_name.startswith(f"{EXTERNAL_ENTITY_ROOT}/")
-                    or safe_name.startswith(f"{CONVERTED_SKILL_ROOT}/skills-sh-")
                     or (
                         safe_name.startswith(f"{SKILLS_SH_ENTITY_ROOT}/skills-sh-")
                         and safe_name.endswith(".md")
+                    )
+                    or (
+                        is_skills_sh_converted
+                        and len(parts) >= 2
+                        and parts[1] in replacement_slugs
                     )
                 ):
                     continue
@@ -1314,6 +1342,38 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
     finally:
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
+
+
+def _reconcile_body_availability_with_tar(
+    catalog: dict[str, Any],
+    existing_converted_paths: set[str],
+) -> None:
+    """Align catalog hydration metadata with bodies that will ship.
+
+    ``graph/skills-sh-catalog.json.gz`` intentionally strips full
+    ``skill_body`` text. A tarball refresh from that checked-in catalog must
+    therefore preserve already-converted bodies instead of deleting them and
+    falsely leaving ``body_available: true`` records behind.
+    """
+    raw_skills = catalog.get("skills")
+    skills = raw_skills if isinstance(raw_skills, list) else []
+    for item in skills:
+        if not isinstance(item, dict):
+            continue
+        ctx_slug = str(item.get("ctx_slug") or "")
+        if not ctx_slug:
+            continue
+        converted_path = str(item.get("converted_path") or _skills_sh_converted_path(ctx_slug))
+        has_inline_body = bool(str(item.get("skill_body") or "").strip())
+        has_existing_body = converted_path in existing_converted_paths
+        if has_inline_body or has_existing_body:
+            item["body_available"] = True
+            item["converted_path"] = converted_path
+            if has_existing_body and not has_inline_body:
+                item.pop("body_error", None)
+        else:
+            item["body_available"] = False
+            item["converted_path"] = None
 
 
 def _load_raw_input(path: Path) -> dict[str, Any]:

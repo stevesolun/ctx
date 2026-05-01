@@ -175,14 +175,62 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
 
 
 def _read_manifest() -> dict:
-    """Return the current ~/.claude/skill-manifest.json or an empty shell."""
+    """Return current loaded entities from the skill manifest plus harness installs."""
     path = _manifest_path()
+    manifest: dict[str, Any]
     if not path.exists():
-        return {"load": [], "unload": [], "warnings": []}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {"load": [], "unload": [], "warnings": []}
+        manifest = {"load": [], "unload": [], "warnings": []}
+    else:
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = {"load": [], "unload": [], "warnings": []}
+    if not isinstance(manifest, dict):
+        manifest = {"load": [], "unload": [], "warnings": []}
+    load_rows = manifest.setdefault("load", [])
+    if not isinstance(load_rows, list):
+        load_rows = []
+        manifest["load"] = load_rows
+    manifest.setdefault("unload", [])
+    manifest.setdefault("warnings", [])
+    existing = {
+        (str(row.get("entity_type") or "skill"), str(row.get("skill") or ""))
+        for row in load_rows
+        if isinstance(row, dict)
+    }
+    for row in _read_harness_install_rows():
+        key = ("harness", str(row.get("skill") or ""))
+        if key not in existing:
+            load_rows.append(row)
+            existing.add(key)
+    return manifest
+
+
+def _read_harness_install_rows() -> list[dict]:
+    """Return installed harness records as manifest-compatible load rows."""
+    root = _claude_dir() / "harness-installs"
+    if not root.is_dir():
+        return []
+    rows: list[dict] = []
+    for path in sorted(root.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict) or data.get("status") != "installed":
+            continue
+        slug = str(data.get("slug") or path.stem).strip()
+        if not slug or not _is_safe_slug(slug):
+            continue
+        rows.append({
+            "skill": slug,
+            "entity_type": "harness",
+            "source": "ctx-harness-install",
+            "command": data.get("target") or data.get("repo_url") or "",
+            "installed_at": data.get("installed_at", ""),
+            "status": data.get("status", "installed"),
+        })
+    return rows
 
 
 def _read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
@@ -203,22 +251,44 @@ def _read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
     return out
 
 
-def _load_sidecar(slug: str) -> dict | None:
+def _sidecar_entity_type(sidecar: dict) -> str:
+    raw = str(
+        sidecar.get("entity_type")
+        or sidecar.get("subject_type")
+        or sidecar.get("type")
+        or "skill"
+    )
+    return {
+        "skills": "skill",
+        "skill": "skill",
+        "agents": "agent",
+        "agent": "agent",
+        "mcp": "mcp-server",
+        "mcp-server": "mcp-server",
+        "mcp-servers": "mcp-server",
+        "harness": "harness",
+        "harnesses": "harness",
+    }.get(raw, raw)
+
+
+def _load_sidecar(slug: str, entity_type: str | None = None) -> dict | None:
     if not _is_safe_slug(slug):
         return None
-    path = next((
-        p for p in (
-            _sidecar_dir() / f"{slug}.json",
-            _sidecar_dir() / "mcp" / f"{slug}.json",
-        )
-        if p.exists()
-    ), None)
-    if path is None:
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    for path in (
+        _sidecar_dir() / f"{slug}.json",
+        _sidecar_dir() / "mcp" / f"{slug}.json",
+    ):
+        if not path.exists():
+            continue
+        try:
+            sidecar = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(sidecar, dict):
+            continue
+        if entity_type is None or _sidecar_entity_type(sidecar) == entity_type:
+            return sidecar
+    return None
 
 
 def _sidecar_files() -> list[Path]:
@@ -929,6 +999,15 @@ def _render_graph(focus: str | None = None, focus_type: str | None = None) -> st
         f"value='{html.escape(focus_slug)}' "
         "style='width:100%; margin-top:0.4rem; padding:0.35rem 0.5rem; "
         "border:1px solid #ccc; border-radius:4px;'>"
+        "<select id='focus-type' "
+        "style='width:100%; margin-top:0.4rem; padding:0.35rem 0.5rem; "
+        "border:1px solid #ccc; border-radius:4px;'>"
+        "<option value=''>auto type</option>"
+        f"<option value='skill' {'selected' if focus_type == 'skill' else ''}>skill</option>"
+        f"<option value='agent' {'selected' if focus_type == 'agent' else ''}>agent</option>"
+        f"<option value='mcp-server' {'selected' if focus_type == 'mcp-server' else ''}>mcp-server</option>"
+        f"<option value='harness' {'selected' if focus_type == 'harness' else ''}>harness</option>"
+        "</select>"
         "<button id='go' style='margin-top:0.4rem; width:100%;'>"
         "explore</button></div>"
         "<div class='card'><strong>Type</strong>"
@@ -1055,8 +1134,9 @@ def _render_graph(focus: str | None = None, focus_type: str | None = None) -> st
         "  document.getElementById('msg').textContent = g.nodes.length + ' nodes · ' + g.edges.length + ' edges';\n"
         "  applyFilters();\n"
         "}\n"
-        "document.getElementById('go').addEventListener('click', () => load(document.getElementById('focus').value.trim()));\n"
-        "document.getElementById('focus').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') load(ev.target.value.trim()); });\n"
+        "function selectedFocusType() { return document.getElementById('focus-type').value || ''; }\n"
+        "document.getElementById('go').addEventListener('click', () => load(document.getElementById('focus').value.trim(), selectedFocusType()));\n"
+        "document.getElementById('focus').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') load(ev.target.value.trim(), selectedFocusType()); });\n"
         "document.querySelectorAll('.graph-type-filter').forEach(cb => cb.addEventListener('change', applyFilters));\n"
         "document.getElementById('tag-filter').addEventListener('input', applyFilters);\n"
         "if (initial) load(initial, initialType);\n"
@@ -1083,7 +1163,7 @@ def _render_wiki_entity(slug: str, entity_type: str | None = None) -> str:
             f"<h1>{html.escape(slug)}</h1><p class='muted'>read error: {html.escape(str(exc))}</p>",
         )
     meta, md_body = _parse_frontmatter(raw)
-    sidecar = _load_sidecar(slug)
+    sidecar = _load_sidecar(slug, entity_type=entity_type)
     type_suffix = (
         f"&amp;type={html.escape(entity_type)}"
         if entity_type in _DASHBOARD_ENTITY_TYPES
@@ -1177,11 +1257,11 @@ def _render_wiki_index() -> str:
     """Card grid of every wiki entity — search + type filter + sidecar grades."""
     entries = _wiki_index_entries()
     # Join with grade pills where a sidecar exists.
-    grade_by_slug: dict[str, str] = {}
+    grade_by_key: dict[tuple[str, str], str] = {}
     for sc in _all_sidecars():
         slug = sc.get("slug")
         if slug:
-            grade_by_slug[slug] = sc.get("grade", "")
+            grade_by_key[(str(slug), _sidecar_entity_type(sc))] = sc.get("grade", "")
 
     type_counts = {entity_type: 0 for entity_type in _DASHBOARD_ENTITY_TYPES}
     for e in entries:
@@ -1198,9 +1278,9 @@ def _render_wiki_index() -> str:
         "display:flex; flex-direction:column; gap:0.25rem;'>"
         "<div style='display:flex; justify-content:space-between; align-items:center; gap:0.4rem;'>"
         f"<code style='font-size:0.84rem;'>{html.escape(e['slug'])}</code>"
-        + (f"<span class='pill grade-{html.escape(grade_by_slug[e['slug']])}'>"
-           f"{html.escape(grade_by_slug[e['slug']])}</span>"
-           if grade_by_slug.get(e['slug']) else
+        + (f"<span class='pill grade-{html.escape(grade_by_key[(e['slug'], e['type'])])}'>"
+           f"{html.escape(grade_by_key[(e['slug'], e['type'])])}</span>"
+           if grade_by_key.get((e['slug'], e['type'])) else
            f"<span class='pill'>{html.escape(e['type'])}</span>")
         + "</div>"
         f"<div class='muted' style='font-size:0.78rem; line-height:1.3;'>"
@@ -1498,13 +1578,19 @@ def _render_loaded() -> str:
             f"<a href='/wiki/{html.escape(slug)}?type={html.escape(etype)}'>"
             f"<code>{html.escape(slug)}</code></a>"
         )
+        action = (
+            f"<td class='muted'><code>ctx-harness-install {html.escape(slug)} "
+            f"--uninstall --dry-run</code></td>"
+            if etype == "harness" else
+            f"<td><button class='btn-unload' data-slug='{html.escape(slug)}' "
+            f"data-etype='{html.escape(etype)}'>unload</button></td>"
+        )
         return (
             f"<tr>"
             f"<td>{link}</td>"
             f"<td class='muted'>{html.escape(e.get('source', ''))}</td>"
             f"<td class='muted'>{html.escape(str(e.get('command', '') or e.get('priority', '—')))[:60]}</td>"
-            f"<td><button class='btn-unload' data-slug='{html.escape(slug)}' "
-            f"data-etype='{html.escape(etype)}'>unload</button></td>"
+            f"{action}"
             f"</tr>"
         )
 
@@ -1546,7 +1632,8 @@ def _render_loaded() -> str:
         f"{len(by_type.get('mcp-server', []))} MCPs · "
         f"{len(by_type.get('harness', []))} harnesses</span>) · "
         f"<strong>{len(unload_rows)}</strong> known-unloaded · "
-        f"<span class='muted'>source: <code>~/.claude/skill-manifest.json</code></span>"
+        f"<span class='muted'>source: <code>~/.claude/skill-manifest.json</code> "
+        f"+ <code>~/.claude/harness-installs/*.json</code></span>"
         "</div>"
         "<h2>Load a new skill</h2>"
         "<div class='card'>"
@@ -1683,6 +1770,12 @@ def _perform_unload(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
     """
     if not _is_safe_slug(slug):
         return False, f"invalid slug: {slug!r}"
+    if entity_type == "harness":
+        return (
+            False,
+            "harness installs are managed by ctx-harness-install; "
+            f"run: ctx-harness-install {slug} --uninstall --dry-run",
+        )
     if entity_type == "mcp-server":
         try:
             from ctx.adapters.claude_code.install.mcp_install import uninstall_mcp
@@ -1794,8 +1887,15 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                     self._send_json(sidecar)
             elif path.startswith("/api/graph/") and path.endswith(".json"):
                 slug = path[len("/api/graph/"): -len(".json")]
-                hops = max(1, min(int(qs.get("hops", 1)), 3))
-                limit = max(5, min(int(qs.get("limit", 40)), 150))
+                try:
+                    hops = max(1, min(int(qs.get("hops", 1)), 3))
+                    limit = max(5, min(int(qs.get("limit", 40)), 150))
+                except ValueError:
+                    self._send_json_status(
+                        400,
+                        {"detail": "hops and limit must be integers"},
+                    )
+                    return
                 self._send_json(_graph_neighborhood(
                     slug, hops=hops, limit=limit, entity_type=qs.get("type"),
                 ))

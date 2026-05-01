@@ -199,6 +199,32 @@ def test_read_manifest_reads_real_manifest(fake_claude: Path) -> None:
     assert [e["skill"] for e in m["unload"]] == ["b"]
 
 
+def test_read_manifest_includes_installed_harness_records(fake_claude: Path) -> None:
+    harness_dir = fake_claude / "harness-installs"
+    harness_dir.mkdir()
+    (harness_dir / "langgraph.json").write_text(
+        json.dumps({
+            "slug": "langgraph",
+            "status": "installed",
+            "repo_url": "https://github.com/langchain-ai/langgraph",
+            "target": str(fake_claude / "harnesses" / "langgraph"),
+            "installed_at": "2026-05-01T00:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    m = cm._read_manifest()
+
+    assert m["load"] == [{
+        "skill": "langgraph",
+        "entity_type": "harness",
+        "source": "ctx-harness-install",
+        "command": str(fake_claude / "harnesses" / "langgraph"),
+        "installed_at": "2026-05-01T00:00:00Z",
+        "status": "installed",
+    }]
+
+
 def test_render_loaded_shows_manifest_entries(fake_claude: Path) -> None:
     (fake_claude / "skill-manifest.json").write_text(
         json.dumps({
@@ -218,6 +244,21 @@ def test_render_loaded_shows_manifest_entries(fake_claude: Path) -> None:
     # Navigation must include new pages.
     assert "/loaded" in html
     assert "/logs" in html
+
+
+def test_render_loaded_shows_harness_install_without_unload_button(fake_claude: Path) -> None:
+    harness_dir = fake_claude / "harness-installs"
+    harness_dir.mkdir()
+    (harness_dir / "langgraph.json").write_text(
+        json.dumps({"slug": "langgraph", "status": "installed"}),
+        encoding="utf-8",
+    )
+
+    html = cm._render_loaded()
+
+    assert "langgraph" in html
+    assert "ctx-harness-install langgraph --uninstall --dry-run" in html
+    assert "data-slug='langgraph'" not in html
 
 
 def test_render_logs_filters_and_renders(fake_claude: Path) -> None:
@@ -263,6 +304,29 @@ def test_load_sidecar_reads_mcp_quality_subdir(fake_claude: Path) -> None:
     assert sidecar["subject_type"] == "mcp-server"
 
 
+def test_load_sidecar_can_disambiguate_duplicate_slug(fake_claude: Path) -> None:
+    _write_sidecar(fake_claude, "langgraph", {
+        "slug": "langgraph",
+        "subject_type": "skill",
+        "grade": "D",
+    })
+    harness_sidecar = {
+        "slug": "langgraph",
+        "subject_type": "harness",
+        "grade": "A",
+    }
+    # Dashboard sidecars are flat for non-MCP entity types; duplicate slugs
+    # are disambiguated by the subject_type inside the sidecar.
+    (fake_claude / "skill-quality" / "langgraph-harness.json").write_text(
+        json.dumps(harness_sidecar), encoding="utf-8",
+    )
+
+    skill_sidecar = cm._load_sidecar("langgraph", entity_type="skill")
+    assert skill_sidecar is not None
+    assert skill_sidecar["grade"] == "D"
+    assert cm._load_sidecar("langgraph", entity_type="harness") is None
+
+
 def test_monitor_post_requires_token(
     fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -295,6 +359,25 @@ def test_monitor_post_accepts_valid_token(
         assert status == 200
         assert body == {"ok": True, "detail": "loaded"}
         assert calls == ["python-patterns"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_graph_api_invalid_params_return_400(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/api/graph/langgraph.json?hops=abc",
+                timeout=5,
+            )
+        assert excinfo.value.code == 400
+        body = json.loads(excinfo.value.read().decode("utf-8"))
+        assert body["detail"] == "hops and limit must be integers"
     finally:
         server.shutdown()
         server.server_close()
@@ -408,6 +491,13 @@ def test_render_graph_emits_cytoscape_mount() -> None:
     assert "cytoscape" in html_out
     # Initial slug must be embedded as JSON literal so the JS picks it up.
     assert "\"python-patterns\"" in html_out
+
+
+def test_render_graph_focus_controls_preserve_type() -> None:
+    html_out = cm._render_graph("langgraph", focus_type="harness")
+    assert "id='focus-type'" in html_out
+    assert "<option value='harness' selected>harness</option>" in html_out
+    assert "load(document.getElementById('focus').value.trim(), selectedFocusType())" in html_out
 
 
 def test_graph_neighborhood_rejects_unsafe_slug() -> None:
@@ -557,6 +647,36 @@ def test_render_wiki_index_lists_entities(fake_claude: Path) -> None:
     # disambiguate skill/agent/MCP/harness pages.
     assert "href='/wiki/python-patterns?type=skill'" in html_out
     assert "href='/wiki/code-reviewer?type=agent'" in html_out
+
+
+def test_render_wiki_index_does_not_bleed_grade_across_duplicate_slugs(
+    fake_claude: Path,
+) -> None:
+    skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
+    harnesses_dir = fake_claude / "skill-wiki" / "entities" / "harnesses"
+    skills_dir.mkdir(parents=True)
+    harnesses_dir.mkdir(parents=True)
+    (skills_dir / "langgraph.md").write_text(
+        "---\nname: langgraph\ntype: skill\n---\n# body\n",
+        encoding="utf-8",
+    )
+    (harnesses_dir / "langgraph.md").write_text(
+        "---\nname: langgraph\ntype: harness\n---\n# body\n",
+        encoding="utf-8",
+    )
+    _write_sidecar(fake_claude, "langgraph", {
+        "slug": "langgraph",
+        "subject_type": "skill",
+        "grade": "D",
+        "raw_score": 0.2,
+    })
+
+    html_out = cm._render_wiki_index()
+
+    harness_start = html_out.index("href='/wiki/langgraph?type=harness'")
+    harness_card = html_out[harness_start:html_out.index("</a>", harness_start)]
+    assert "grade-D" not in harness_card
+    assert "<span class='pill'>harness</span>" in harness_card
 
 
 def test_render_wiki_index_empty_when_no_entities(fake_claude: Path) -> None:
