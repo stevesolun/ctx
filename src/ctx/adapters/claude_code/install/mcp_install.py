@@ -411,11 +411,17 @@ def install_mcp(
         status="installed",
         extra_fields={"install_cmd": effective_cmd or ""},
     )
+    manifest_extra: dict[str, str] = {}
+    if effective_cmd:
+        manifest_extra["command"] = effective_cmd
+    elif json_config:
+        manifest_extra["json_config"] = json_config
+
     record_install(
         slug,
         entity_type="mcp-server",
         source="ctx-mcp-install",
-        extra={"command": effective_cmd or json_config or ""},
+        extra=manifest_extra,
     )
 
     return InstallResult(
@@ -469,7 +475,6 @@ def uninstall_mcp(
     if entity.is_file():
         bump_entity_status(
             entity, status="cataloged",
-            extra_fields={"install_cmd": None},  # render as YAML null
         )
     record_uninstall(slug, entity_type="mcp-server", source="ctx-mcp-uninstall")
 

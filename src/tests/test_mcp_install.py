@@ -474,6 +474,9 @@ class TestInstallMcp:
         assert r.status == "installed"
         call = fake_claude["calls"][0]
         assert "add-json" in call and "gh" in call and cfg in call
+        manifest = install_utils.load_manifest()
+        assert manifest["load"][0]["json_config"] == cfg
+        assert "command" not in manifest["load"][0]
 
     def test_happy_path_writes_manifest_and_status(
         self,
@@ -558,19 +561,66 @@ class TestUninstallMcp:
         fake_claude: dict[str, Any],
         isolated_manifest: Path,
     ) -> None:
-        entity = _write_entity(wiki_dir, "gh", {"status": "installed"})
+        entity = _write_entity(
+            wiki_dir,
+            "gh",
+            {"status": "installed", "install_cmd": "npx -y pkg"},
+        )
         install_utils.record_install(
-            "gh", entity_type="mcp-server", source="ctx-mcp-install",
+            "gh",
+            entity_type="mcp-server",
+            source="ctx-mcp-install",
+            extra={"command": "npx -y pkg"},
         )
         r = mcp_install.uninstall_mcp("gh", wiki_dir=wiki_dir)
         assert r.status == "uninstalled"
-        assert "status: cataloged" in entity.read_text(encoding="utf-8")
+        text = entity.read_text(encoding="utf-8")
+        assert "status: cataloged" in text
+        assert "install_cmd: npx -y pkg" in text
         m = install_utils.load_manifest()
         assert not any(e["skill"] == "gh" for e in m["load"])
         assert any(
             e["skill"] == "gh" and e["entity_type"] == "mcp-server"
+            and e["command"] == "npx -y pkg"
             for e in m["unload"]
         )
+
+    def test_uninstall_updates_existing_unload_with_preserved_command(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+    ) -> None:
+        _write_entity(
+            wiki_dir,
+            "gh",
+            {"status": "installed", "install_cmd": "npx -y pkg"},
+        )
+        install_utils.save_manifest({
+            "load": [{
+                "skill": "gh",
+                "entity_type": "mcp-server",
+                "source": "ctx-mcp-install",
+                "command": "npx -y pkg",
+            }],
+            "unload": [{
+                "skill": "gh",
+                "entity_type": "mcp-server",
+                "source": "old-dashboard",
+            }],
+            "warnings": [],
+        })
+
+        result = mcp_install.uninstall_mcp("gh", wiki_dir=wiki_dir)
+
+        assert result.status == "uninstalled"
+        manifest = install_utils.load_manifest()
+        assert manifest["unload"] == [{
+            "skill": "gh",
+            "entity_type": "mcp-server",
+            "source": "old-dashboard",
+            "command": "npx -y pkg",
+        }]
 
     def test_cli_failure_without_force(
         self, wiki_dir: Path, fake_claude: dict[str, Any]

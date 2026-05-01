@@ -58,6 +58,8 @@ from pathlib import Path
 from typing import Any
 
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
+from ctx.utils._file_lock import file_lock
+from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 from ctx.utils._safe_name import is_safe_source_name
 
 
@@ -173,7 +175,7 @@ def _frontmatter_text(value: Any) -> str:
     return str(value)
 
 
-def _frontmatter_tags(value: Any, *, limit: int = 6) -> list[str]:
+def _frontmatter_tags(value: Any, *, limit: int | None = 6) -> list[str]:
     if isinstance(value, list):
         raw_items = value
     else:
@@ -184,9 +186,122 @@ def _frontmatter_tags(value: Any, *, limit: int = 6) -> list[str]:
         tok = str(item).strip().strip("'\"")
         if tok:
             out.append(tok)
-        if len(out) >= limit:
+        if limit is not None and len(out) >= limit:
             break
     return out
+
+
+def _save_manifest(manifest: dict) -> None:
+    _atomic_write_text(_manifest_path(), json.dumps(manifest, indent=2) + "\n")
+
+
+def _read_skill_manifest_only() -> dict:
+    """Read the mutable skill manifest without synthetic harness rows."""
+    path = _manifest_path()
+    if not path.exists():
+        return {"load": [], "unload": [], "warnings": []}
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"load": [], "unload": [], "warnings": []}
+    if not isinstance(manifest, dict):
+        return {"load": [], "unload": [], "warnings": []}
+    if not isinstance(manifest.get("load"), list):
+        manifest["load"] = []
+    if not isinstance(manifest.get("unload"), list):
+        manifest["unload"] = []
+    if not isinstance(manifest.get("warnings"), list):
+        manifest["warnings"] = []
+    return manifest
+
+
+def _remove_loaded_manifest_entry(slug: str, entity_type: str) -> list[dict]:
+    """Remove loaded rows for one entity tuple and return removed rows."""
+    path = _manifest_path()
+    with file_lock(path):
+        manifest = _read_skill_manifest_only()
+        removed: list[dict] = []
+        remaining: list[dict] = []
+        for entry in manifest.get("load", []):
+            entry_type = str(entry.get("entity_type") or "skill")
+            if entry.get("skill") == slug and entry_type == entity_type:
+                removed.append(entry)
+            else:
+                remaining.append(entry)
+        if not removed:
+            return []
+        manifest["load"] = remaining
+        unloaded = {
+            (entry.get("skill"), str(entry.get("entity_type") or "skill"))
+            for entry in manifest.get("unload", [])
+        }
+        preserved: dict[str, object] = {}
+        for field in ("command", "json_config", "priority", "reason"):
+            value = removed[0].get(field)
+            if value not in (None, ""):
+                preserved[field] = value
+        if (slug, entity_type) not in unloaded:
+            entry = {
+                "skill": slug,
+                "entity_type": entity_type,
+                "source": "ctx-monitor",
+            }
+            entry.update(preserved)
+            manifest.setdefault("unload", []).append(entry)
+        elif preserved:
+            for entry in manifest.get("unload", []):
+                if (
+                    entry.get("skill") == slug
+                    and str(entry.get("entity_type") or "skill") == entity_type
+                ):
+                    for field, value in preserved.items():
+                        entry.setdefault(field, value)
+                    break
+        _save_manifest(manifest)
+        return removed
+
+
+def _log_dashboard_entity_event(
+    entity_type: str,
+    action: str,
+    slug: str,
+) -> None:
+    """Append a dashboard-visible audit row for a load/unload action."""
+    try:
+        from ctx_audit_log import log
+        if entity_type == "skill":
+            log(
+                f"skill.{action}",
+                subject_type="skill",
+                subject=slug,
+                actor="user",
+                meta={"via": "ctx-monitor"},
+                path=_audit_log_path(),
+            )
+        elif entity_type == "agent":
+            log(
+                f"agent.{action}",
+                subject_type="agent",
+                subject=slug,
+                actor="user",
+                meta={"via": "ctx-monitor"},
+                path=_audit_log_path(),
+            )
+        elif entity_type == "mcp-server":
+            log(
+                "toolbox.triggered",
+                subject_type="toolbox",
+                subject=slug,
+                actor="user",
+                meta={
+                    "via": "ctx-monitor",
+                    "entity_type": "mcp-server",
+                    "action": action,
+                },
+                path=_audit_log_path(),
+            )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _read_manifest() -> dict:
@@ -365,6 +480,9 @@ def _summarize_sessions() -> list[dict]:
             "skills_loaded": set(),
             "skills_unloaded": set(),
             "agents_loaded": set(),
+            "agents_unloaded": set(),
+            "mcps_loaded": set(),
+            "mcps_unloaded": set(),
             "score_updates": 0,
             "lifecycle_transitions": 0,
         }
@@ -386,6 +504,17 @@ def _summarize_sessions() -> list[dict]:
             row["skills_unloaded"].add(line.get("subject", ""))
         elif event == "agent.loaded":
             row["agents_loaded"].add(line.get("subject", ""))
+        elif event == "agent.unloaded":
+            row["agents_unloaded"].add(line.get("subject", ""))
+        elif event == "toolbox.triggered":
+            raw_meta = line.get("meta")
+            meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
+            if meta.get("entity_type") == "mcp-server":
+                action = meta.get("action")
+                if action == "loaded":
+                    row["mcps_loaded"].add(line.get("subject", ""))
+                elif action == "unloaded":
+                    row["mcps_unloaded"].add(line.get("subject", ""))
         elif event.endswith(".score_updated"):
             row["score_updates"] += 1
         elif event in ("skill.archived", "skill.demoted", "skill.restored",
@@ -418,6 +547,9 @@ def _summarize_sessions() -> list[dict]:
             "skills_loaded": sorted(row["skills_loaded"]),
             "skills_unloaded": sorted(row["skills_unloaded"]),
             "agents_loaded": sorted(row["agents_loaded"]),
+            "agents_unloaded": sorted(row["agents_unloaded"]),
+            "mcps_loaded": sorted(row["mcps_loaded"]),
+            "mcps_unloaded": sorted(row["mcps_unloaded"]),
             "score_updates": row["score_updates"],
             "lifecycle_transitions": row["lifecycle_transitions"],
         })
@@ -556,6 +688,7 @@ def _graph_neighborhood(
             return
         data = G.nodes.get(nid, {})
         label = data.get("label", nid.split(":", 1)[-1])
+        tags = list(data.get("tags", []))
         default_type = (
             "mcp-server" if nid.startswith("mcp-server:")
             else "harness" if nid.startswith("harness:")
@@ -569,7 +702,8 @@ def _graph_neighborhood(
                 "label": label,
                 "type": ntype,
                 "depth": depth,
-                "tags": data.get("tags", [])[:6],
+                "tags": tags[:6],
+                "filter_tokens": [nid, label, nid.split(":", 1)[-1], *tags],
             },
         }
 
@@ -591,13 +725,19 @@ def _graph_neighborhood(
                 edge_key = tuple(sorted((nid, other)))
                 if edge_key not in emitted_edges:
                     emitted_edges.add(edge_key)
+                    shared_tags = edata.get("shared_tags", [])[:4]
+                    for node_id in (nid, other):
+                        tokens = nodes_out[node_id]["data"].setdefault(
+                            "filter_tokens", []
+                        )
+                        tokens.extend(shared_tags)
                     edges_out.append({
                         "data": {
                             "id": f"{edge_key[0]}__{edge_key[1]}",
                             "source": nid,
                             "target": other,
                             "weight": edata.get("weight", 1),
-                            "shared_tags": edata.get("shared_tags", [])[:4],
+                            "shared_tags": shared_tags,
                         },
                     })
                 if other not in seen:
@@ -1136,9 +1276,9 @@ def _render_graph(focus: str | None = None, focus_type: str | None = None) -> st
         "  cy.nodes().forEach(n => {\n"
         "    const t = n.data('type');\n"
         "    const isFocus = n.data('depth') === 0;\n"
-        "    const tags = Array.from(n.data('tags') || []).map(x => String(x).toLowerCase());\n"
+        "    const tags = Array.from(n.data('filter_tokens') || n.data('tags') || []).map(x => String(x).toLowerCase());\n"
         "    const typeOk = isFocus || allowedTypes.has(t);\n"
-        "    const tagOk = !tagQ || tags.some(tag => tag.includes(tagQ));\n"
+        "    const tagOk = isFocus || !tagQ || tags.some(tag => tag.includes(tagQ));\n"
         "    const hidden = !(typeOk && tagOk);\n"
         "    n.toggleClass('hidden-by-filter', hidden);\n"
         "    if (!hidden) {\n"
@@ -1273,11 +1413,12 @@ def _wiki_index_entries() -> list[dict]:
             except OSError:
                 continue
             meta, _ = _parse_frontmatter(head)
-            tags_preview = _frontmatter_tags(meta.get("tags", ""))
+            all_tags = _frontmatter_tags(meta.get("tags", ""), limit=None)
             out.append({
                 "slug": slug,
                 "type": entity_type,
-                "tags": tags_preview,
+                "tags": all_tags[:6],
+                "search_tags": all_tags,
                 "description": _frontmatter_text(meta.get("description", ""))[:200],
             })
     return out
@@ -1301,7 +1442,7 @@ def _render_wiki_index() -> str:
         "<a class='wiki-card' "
         f"data-slug='{html.escape(e['slug'])}' "
         f"data-type='{html.escape(e['type'])}' "
-        f"data-tags='{html.escape(' '.join(e['tags']).lower())}' "
+        f"data-tags='{html.escape(' '.join(e.get('search_tags', e['tags'])).lower())}' "
         f"href='/wiki/{html.escape(e['slug'])}?type={html.escape(e['type'])}' "
         "style='border:1px solid #e5e7eb; border-radius:6px; "
         "padding:0.6rem 0.8rem; text-decoration:none; color:inherit; "
@@ -1648,7 +1789,10 @@ def _render_loaded() -> str:
         f"<td class='muted'>{html.escape(_etype(e))}</td>"
         f"<td class='muted'>{html.escape(str(e.get('source', '') or e.get('reason', ''))[:80])}</td>"
         f"<td><button class='btn-load' data-slug='{html.escape(e.get('skill', ''))}' "
-        f"data-etype='{html.escape(_etype(e))}'>load</button></td>"
+        f"data-etype='{html.escape(_etype(e))}'"
+        f"{' data-command=' + repr(html.escape(str(e.get('command')))) if e.get('command') else ''}"
+        f"{' data-json-config=' + repr(html.escape(str(e.get('json_config')))) if e.get('json_config') else ''}"
+        f">load</button></td>"
         f"</tr>"
         for e in unload_rows
     )
@@ -1704,7 +1848,10 @@ def _render_loaded() -> str:
         "}));\n"
         "document.querySelectorAll('.btn-load').forEach(b => b.addEventListener('click', async () => {\n"
         "  b.disabled = true; const slug = b.dataset.slug; const entity_type = b.dataset.etype || 'skill';\n"
-        "  const r = await post('/api/load', {slug, entity_type});\n"
+        "  const payload = {slug, entity_type};\n"
+        "  if (b.dataset.command) payload.command = b.dataset.command;\n"
+        "  if (b.dataset.jsonConfig) payload.json_config = b.dataset.jsonConfig;\n"
+        "  const r = await post('/api/load', payload);\n"
         "  if (r.ok) location.reload(); else { b.disabled = false; alert('load failed: ' + r.msg); }\n"
         "}));\n"
         "document.getElementById('load-form').addEventListener('submit', async (ev) => {\n"
@@ -1774,7 +1921,13 @@ def _is_safe_slug(slug: str) -> bool:
     return is_safe_source_name(slug)
 
 
-def _perform_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
+def _perform_load(
+    slug: str,
+    entity_type: str = "skill",
+    *,
+    command: str | None = None,
+    json_config: str | None = None,
+) -> tuple[bool, str]:
     """Install/load one entity from the wiki. Returns (ok, message)."""
     if not _is_safe_slug(slug):
         return False, f"invalid slug: {slug!r}"
@@ -1797,7 +1950,13 @@ def _perform_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
             )
         elif entity_type == "mcp-server":
             from ctx.adapters.claude_code.install.mcp_install import install_mcp
-            result = install_mcp(slug, wiki_dir=_wiki_dir(), auto=True)
+            result = install_mcp(
+                slug,
+                wiki_dir=_wiki_dir(),
+                command=command,
+                json_config=json_config,
+                auto=True,
+            )
         else:
             from ctx.adapters.claude_code.install.skill_install import install_skill
             result = install_skill(
@@ -1811,17 +1970,7 @@ def _perform_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"
     if result.status not in ("installed", "skipped-existing"):
         return False, f"load failed: {result.message or result.status}"
-    try:
-        if entity_type == "agent":
-            from ctx_audit_log import log_agent_event
-            log_agent_event("agent.loaded", slug, actor="user",
-                            meta={"via": "ctx-monitor"})
-        elif entity_type == "skill":
-            from ctx_audit_log import log_skill_event
-            log_skill_event("skill.loaded", slug, actor="user",
-                            meta={"via": "ctx-monitor"})
-    except Exception:  # noqa: BLE001
-        pass
+    _log_dashboard_entity_event(entity_type, "loaded", slug)
     return True, result.message or f"loaded {entity_type}:{slug}"
 
 
@@ -1849,14 +1998,26 @@ def _perform_unload(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
         except ImportError as exc:
             return False, f"mcp_install import failed: {exc}"
         try:
-            result = uninstall_mcp(slug, wiki_dir=_wiki_dir(), force=True)
+            result = uninstall_mcp(slug, wiki_dir=_wiki_dir())
         except Exception as exc:  # noqa: BLE001
             return False, f"{type(exc).__name__}: {exc}"
         if result.status not in ("uninstalled",):
             return False, f"uninstall failed: {result.message or result.status}"
+        _log_dashboard_entity_event("mcp-server", "unloaded", slug)
         return True, f"unloaded mcp:{slug}"
 
-    # skill or agent — both flow through the same skill_unload module.
+    if entity_type == "agent":
+        try:
+            removed_entries = _remove_loaded_manifest_entry(slug, "agent")
+        except Exception as exc:  # noqa: BLE001
+            return False, f"{type(exc).__name__}: {exc}"
+        if not removed_entries:
+            return False, f"{slug} was not in the loaded set"
+        _log_dashboard_entity_event("agent", "unloaded", slug)
+        return True, f"unloaded {slug}"
+
+    # Skills keep using the existing skill_unload module so skill-events.jsonl
+    # remains compatible with older usage and retention analytics.
     try:
         from ctx.adapters.claude_code.install.skill_unload import unload_from_session
     except ImportError as exc:
@@ -2009,7 +2170,14 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             if path == "/api/load":
                 slug = str(body.get("slug", "")).strip()
                 etype = str(body.get("entity_type", "skill")).strip() or "skill"
-                ok, msg = _perform_load(slug, entity_type=etype)
+                command = body.get("command")
+                json_config = body.get("json_config")
+                kwargs: dict[str, str] = {}
+                if isinstance(command, str) and command:
+                    kwargs["command"] = command
+                if isinstance(json_config, str) and json_config:
+                    kwargs["json_config"] = json_config
+                ok, msg = _perform_load(slug, entity_type=etype, **kwargs)
                 self._send_json_status(
                     200 if ok else 400, {"ok": ok, "detail": msg},
                 )

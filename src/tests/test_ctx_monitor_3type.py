@@ -22,6 +22,7 @@ Scope:
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -143,6 +144,23 @@ class TestWikiIndexEntries:
         path = _cm._wiki_entity_path("langgraph", entity_type="harness")
         assert path == wiki_3type / "entities" / "harnesses" / "langgraph.md"
 
+    def test_wiki_search_indexes_tags_beyond_preview_limit(self, wiki_3type):
+        page = wiki_3type / "entities" / "skills" / "many-tags.md"
+        page.write_text(
+            "---\n"
+            "title: many-tags\n"
+            "type: skill\n"
+            "tags: [one, two, three, four, five, six, seventh]\n"
+            "---\n# many-tags\n",
+            encoding="utf-8",
+        )
+
+        entries = _cm._wiki_index_entries()
+        entry = next(e for e in entries if e["slug"] == "many-tags")
+
+        assert entry["tags"] == ["one", "two", "three", "four", "five", "six"]
+        assert "seventh" in entry["search_tags"]
+
 
 # ────────────────────────────────────────────────────────────────────
 # _render_home — entity-type card
@@ -169,6 +187,52 @@ class TestRenderHome3Type:
         assert "1 harness" in html
 
 
+class TestSessionSummaries3Type:
+    def test_agent_unload_and_mcp_actions_get_own_buckets(self, tmp_path, monkeypatch):
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        monkeypatch.setattr(_cm, "_claude_dir", lambda: claude)
+        records = [
+            {
+                "ts": "2026-05-02T10:00:00Z",
+                "event": "agent.unloaded",
+                "subject_type": "agent",
+                "subject": "code-reviewer",
+                "actor": "user",
+                "session_id": "S1",
+            },
+            {
+                "ts": "2026-05-02T10:01:00Z",
+                "event": "toolbox.triggered",
+                "subject_type": "toolbox",
+                "subject": "anthropic-python-sdk",
+                "actor": "user",
+                "session_id": "S1",
+                "meta": {"entity_type": "mcp-server", "action": "loaded"},
+            },
+            {
+                "ts": "2026-05-02T10:02:00Z",
+                "event": "toolbox.triggered",
+                "subject_type": "toolbox",
+                "subject": "anthropic-python-sdk",
+                "actor": "user",
+                "session_id": "S1",
+                "meta": {"entity_type": "mcp-server", "action": "unloaded"},
+            },
+        ]
+        (claude / "ctx-audit.jsonl").write_text(
+            "\n".join(json.dumps(record) for record in records) + "\n",
+            encoding="utf-8",
+        )
+
+        session = _cm._summarize_sessions()[0]
+
+        assert session["agents_unloaded"] == ["code-reviewer"]
+        assert session["skills_unloaded"] == []
+        assert session["mcps_loaded"] == ["anthropic-python-sdk"]
+        assert session["mcps_unloaded"] == ["anthropic-python-sdk"]
+
+
 # ────────────────────────────────────────────────────────────────────
 # _render_wiki_index — type filter includes mcp-server
 # ────────────────────────────────────────────────────────────────────
@@ -183,6 +247,18 @@ class TestRenderWikiIndex3Type:
         # Count for the mcp-server bucket should render.
         assert ">3</span>" in html  # 3 MCPs in fixture
         assert ">1</span>" in html  # 1 harness in fixture
+
+    def test_search_markup_keeps_non_preview_tags(self, wiki_3type, monkeypatch):
+        page = wiki_3type / "entities" / "skills" / "many-tags.md"
+        page.write_text(
+            "---\ntype: skill\ntags: [one, two, three, four, five, six, seventh]\n---\n# many-tags\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(_cm, "_all_sidecars", lambda: [])
+
+        html = _cm._render_wiki_index()
+
+        assert "data-tags='one two three four five six seventh'" in html
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -262,7 +338,11 @@ class TestRenderLoaded3Type:
             "load": [],
             "unload": [
                 {"skill": "code-reviewer", "entity_type": "agent"},
-                {"skill": "anthropic-python-sdk", "entity_type": "mcp-server"},
+                {
+                    "skill": "anthropic-python-sdk",
+                    "entity_type": "mcp-server",
+                    "command": "npx -y @anthropic/sdk",
+                },
             ],
         }
         monkeypatch.setattr(_cm, "_read_manifest", lambda: manifest)
@@ -272,6 +352,7 @@ class TestRenderLoaded3Type:
             "data-slug='anthropic-python-sdk' data-etype='mcp-server'"
             in html
         )
+        assert "data-command='npx -y @anthropic/sdk'" in html
         assert "id='load-type'" in html
 
 
@@ -322,9 +403,39 @@ class TestPerformUnloadByEntityType:
                                        entity_type="mcp-server")
         assert ok
         assert calls["slug"] == "anthropic-python-sdk"
-        # force=True so a drifted local state (entity status != installed)
-        # doesn't block the dashboard unload.
-        assert calls["kw"].get("force") is True
+        assert calls["kw"].get("force") in (None, False)
+
+    def test_agent_unload_logs_agent_event_and_updates_manifest(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        monkeypatch.setattr(_cm, "_claude_dir", lambda: claude)
+        (claude / "skill-manifest.json").write_text(
+            json.dumps({
+                "load": [{
+                    "skill": "code-reviewer",
+                    "entity_type": "agent",
+                    "source": "ctx-agent-install",
+                }],
+                "unload": [],
+                "warnings": [],
+            }),
+            encoding="utf-8",
+        )
+
+        ok, msg = _cm._perform_unload("code-reviewer", entity_type="agent")
+
+        assert ok, msg
+        manifest = json.loads(
+            (claude / "skill-manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["load"] == []
+        assert manifest["unload"][0]["entity_type"] == "agent"
+        audit = (claude / "ctx-audit.jsonl").read_text(encoding="utf-8")
+        assert '"event":"agent.unloaded"' in audit
 
     def test_mcp_uninstall_failure_surfaces(self, monkeypatch):
         from dataclasses import dataclass
@@ -345,6 +456,34 @@ class TestPerformUnloadByEntityType:
         ok, msg = _cm._perform_unload("bad-mcp", entity_type="mcp-server")
         assert not ok
         assert "claude mcp remove failed" in msg
+
+    def test_mcp_unload_logs_dashboard_audit(self, tmp_path, monkeypatch):
+        from dataclasses import dataclass
+
+        @dataclass
+        class _FakeResult:
+            slug: str
+            status: str
+            message: str = ""
+
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        monkeypatch.setattr(_cm, "_claude_dir", lambda: claude)
+        from ctx.adapters.claude_code.install import mcp_install
+        monkeypatch.setattr(
+            mcp_install,
+            "uninstall_mcp",
+            lambda slug, **kw: _FakeResult(slug=slug, status="uninstalled"),
+        )
+
+        ok, msg = _cm._perform_unload("anthropic-python-sdk", "mcp-server")
+
+        assert ok, msg
+        audit = json.loads((claude / "ctx-audit.jsonl").read_text(encoding="utf-8"))
+        assert audit["event"] == "toolbox.triggered"
+        assert audit["subject"] == "anthropic-python-sdk"
+        assert audit["meta"]["entity_type"] == "mcp-server"
+        assert audit["meta"]["action"] == "unloaded"
 
     def test_invalid_slug_rejected(self):
         ok, msg = _cm._perform_unload("../etc/passwd", entity_type="skill")
@@ -432,6 +571,63 @@ class TestPerformLoadByEntityType:
         assert calls["slug"] == "anthropic-python-sdk"
         assert calls["kw"]["auto"] is True
 
+    def test_mcp_type_replays_preserved_command(self, monkeypatch):
+        from dataclasses import dataclass
+
+        @dataclass
+        class _FakeResult:
+            slug: str
+            status: str
+            message: str = ""
+
+        calls = {}
+
+        def fake_install(slug, **kw):
+            calls["slug"] = slug
+            calls["kw"] = kw
+            return _FakeResult(slug=slug, status="installed", message="ok")
+
+        from ctx.adapters.claude_code.install import mcp_install
+        monkeypatch.setattr(mcp_install, "install_mcp", fake_install)
+
+        ok, msg = _cm._perform_load(
+            "anthropic-python-sdk",
+            entity_type="mcp-server",
+            command="npx -y @anthropic/sdk",
+        )
+
+        assert ok
+        assert msg == "ok"
+        assert calls["kw"]["command"] == "npx -y @anthropic/sdk"
+        assert calls["kw"]["json_config"] is None
+
+    def test_mcp_load_logs_dashboard_audit(self, tmp_path, monkeypatch):
+        from dataclasses import dataclass
+
+        @dataclass
+        class _FakeResult:
+            slug: str
+            status: str
+            message: str = ""
+
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        monkeypatch.setattr(_cm, "_claude_dir", lambda: claude)
+        from ctx.adapters.claude_code.install import mcp_install
+        monkeypatch.setattr(
+            mcp_install,
+            "install_mcp",
+            lambda slug, **kw: _FakeResult(slug=slug, status="installed"),
+        )
+
+        ok, msg = _cm._perform_load("anthropic-python-sdk", "mcp-server")
+
+        assert ok, msg
+        audit = json.loads((claude / "ctx-audit.jsonl").read_text(encoding="utf-8"))
+        assert audit["event"] == "toolbox.triggered"
+        assert audit["subject"] == "anthropic-python-sdk"
+        assert audit["meta"]["action"] == "loaded"
+
     def test_harness_type_hands_off_to_cli(self):
         ok, msg = _cm._perform_load("langgraph", entity_type="harness")
         assert not ok
@@ -461,6 +657,8 @@ class TestRenderGraphSidebar:
         monkeypatch.setattr(_cm, "_top_degree_seeds", lambda: [])
         html = _cm._render_graph()
         assert "id='tag-filter'" in html
+        assert "filter_tokens" in html
+        assert "isFocus || !tagQ" in html
 
     def test_cytoscape_styles_mcp_and_harness_nodes_distinctly(self, monkeypatch):
         """The graph view shows four types; each must be visually
@@ -515,6 +713,22 @@ class TestRenderGraphSidebar:
 
         edge_ids = [edge["data"]["id"] for edge in out["edges"]]
         assert len(edge_ids) == len(set(edge_ids))
+
+    def test_graph_neighborhood_filter_tokens_include_edge_shared_tags(
+        self,
+        monkeypatch,
+    ):
+        graph = nx.Graph()
+        graph.add_node("skill:a", label="a", type="skill", tags=[])
+        graph.add_node("skill:b", label="b", type="skill", tags=[])
+        graph.add_edge("skill:a", "skill:b", weight=1, shared_tags=["security"])
+        monkeypatch.setattr(_cm, "_load_dashboard_graph", lambda: graph)
+
+        out = _cm._graph_neighborhood("a", entity_type="skill")
+
+        by_id = {node["data"]["id"]: node["data"] for node in out["nodes"]}
+        assert "security" in by_id["skill:a"]["filter_tokens"]
+        assert "security" in by_id["skill:b"]["filter_tokens"]
 
 
 class TestMonitorRoutesPreserveEntityType:

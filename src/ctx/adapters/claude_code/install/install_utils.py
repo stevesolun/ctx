@@ -166,6 +166,16 @@ def record_uninstall(slug: str, *, entity_type: EntityType, source: str) -> None
     the same pair doesn't produce duplicates.
     """
     def mutate(manifest: dict) -> None:
+        removed_entry: dict | None = next(
+            (
+                e for e in manifest["load"]
+                if (
+                    e.get("skill") == slug
+                    and e.get("entity_type", "skill") == entity_type
+                )
+            ),
+            None,
+        )
         manifest["load"] = [
             e for e in manifest["load"]
             if not (
@@ -177,12 +187,29 @@ def record_uninstall(slug: str, *, entity_type: EntityType, source: str) -> None
             (e.get("skill"), e.get("entity_type", "skill"))
             for e in manifest["unload"]
         }
+        preserved: dict[str, object] = {}
+        if removed_entry:
+            for field in ("command", "json_config", "priority", "reason"):
+                value = removed_entry.get(field)
+                if value not in (None, ""):
+                    preserved[field] = value
         if (slug, entity_type) not in unloaded:
-            manifest["unload"].append({
+            entry: dict[str, object] = {
                 "skill": slug,
                 "entity_type": entity_type,
                 "source": source,
-            })
+            }
+            entry.update(preserved)
+            manifest["unload"].append(entry)
+        elif preserved:
+            for entry in manifest["unload"]:
+                if (
+                    entry.get("skill") == slug
+                    and entry.get("entity_type", "skill") == entity_type
+                ):
+                    for field, value in preserved.items():
+                        entry.setdefault(field, value)
+                    break
 
     _update_manifest(mutate)
 
