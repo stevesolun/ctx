@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "skill_dirs": [
+    {
+      "path": "~/.claude/skills",
+      "label": "global-skills",
+      "enabled": true
+    },
+    {
+      "path": "~/.claude/agents",
+      "label": "global-agents",
+      "enabled": true
+    }
+  ],
+  "notes": "Add more repos here. Each entry: {path, label, enabled}"
+}

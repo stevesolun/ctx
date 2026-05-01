@@ -43,7 +43,7 @@ jobs:
       - name: Install release tooling
         run: |
           python -m pip install --upgrade pip
-          python -m pip install build packaging twine
+          python -m pip install build packaging twine ruff mypy pytest
 
       - name: Validate tag matches package version
         if: github.event_name == 'push'
@@ -69,11 +69,45 @@ jobs:
           print(f"release version {package_version} matches tag {tag}")
           PY
 
+      - name: Static gates
+        run: |
+          python -m ruff check src hooks scripts
+          python -m mypy src
+
+      - name: Clean-host contract
+        run: python scripts/clean_host_contract.py --fast
+
       - name: Build distributions
         run: python -m build
 
       - name: Check distributions
         run: python -m twine check dist/*
+
+      - name: Check distribution contents
+        run: |
+          python - <<'PY'
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          wheel = next(Path("dist").glob("*.whl"))
+          sdist = next(Path("dist").glob("*.tar.gz"))
+
+          with zipfile.ZipFile(wheel) as zf:
+              wheel_names = set(zf.namelist())
+          required = {"ctx/config.json", "ctx/skill-registry.json"}
+          missing = sorted(required - wheel_names)
+          if missing:
+              raise SystemExit(f"wheel missing packaged defaults: {missing}")
+
+          with tarfile.open(sdist, "r:gz") as tf:
+              names = set(tf.getnames())
+          forbidden = ("/src/tests/", "/.claude/", "/.a5c/")
+          leaked = sorted(name for name in names if any(part in name for part in forbidden))
+          if leaked:
+              raise SystemExit("sdist contains local/test artifacts:\n" + "\n".join(leaked[:20]))
+          print(f"checked distribution contents: {wheel.name}, {sdist.name}")
+          PY
 
       - name: Smoke install wheel
         run: |
@@ -86,12 +120,15 @@ jobs:
           from importlib.metadata import entry_points, version
 
           import ctx
+          import ctx_config
 
           dist_version = version("claude-ctx")
           if ctx.__version__ != dist_version:
               raise SystemExit(
                   f"ctx.__version__={ctx.__version__!r} != metadata {dist_version!r}"
               )
+          if ctx_config.cfg.recommendation_top_k != 5:
+              raise SystemExit("packaged default config was not loaded")
           scripts = [
               ep for ep in entry_points(group="console_scripts")
               if ep.name == "ctx" or ep.name.startswith("ctx-")

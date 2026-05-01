@@ -15,6 +15,7 @@ Usage:
 import json
 import os
 import sys
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -24,15 +25,24 @@ _DEFAULT_CONFIG = _SCRIPT_DIR / "config.json"
 _USER_CONFIG = Path(os.path.expanduser("~/.claude/skill-system-config.json"))
 
 
+def _read_default_config() -> dict[str, Any]:
+    """Read repo defaults from source checkout or packaged wheel data."""
+    try:
+        if _DEFAULT_CONFIG.exists():
+            return json.loads(_DEFAULT_CONFIG.read_text(encoding="utf-8"))
+        if _DEFAULT_CONFIG != _SCRIPT_DIR / "config.json":
+            return {}
+        packaged = resources.files("ctx").joinpath("config.json")
+        if packaged.is_file():
+            return json.loads(packaged.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"Warning: failed to load default config: {exc}", file=sys.stderr)
+    return {}
+
+
 def _load_raw() -> dict[str, Any]:
     """Load and merge default + user config."""
-    raw: dict[str, Any] = {}
-
-    if _DEFAULT_CONFIG.exists():
-        try:
-            raw = json.loads(_DEFAULT_CONFIG.read_text(encoding="utf-8"))
-        except Exception as exc:
-            print(f"Warning: failed to load default config: {exc}", file=sys.stderr)
+    raw: dict[str, Any] = _read_default_config()
 
     if _USER_CONFIG.exists():
         try:

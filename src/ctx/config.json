@@ -1,0 +1,199 @@
+{
+  "_comment": "Alive Skill System configuration. Edit this file to customize paths and thresholds.",
+  "_config_path": "~/.claude/skill-system-config.json",
+
+  "paths": {
+    "claude_dir": "~/.claude",
+    "wiki_dir": "~/.claude/skill-wiki",
+    "skills_dir": "~/.claude/skills",
+    "agents_dir": "~/.claude/agents",
+    "skill_manifest": "~/.claude/skill-manifest.json",
+    "intent_log": "~/.claude/intent-log.jsonl",
+    "pending_skills": "~/.claude/pending-skills.json",
+    "skill_registry": "~/.claude/skill-registry.json",
+    "stack_profile_tmp": "/tmp/skill-stack-profile.json",
+    "catalog": "~/.claude/skill-wiki/catalog.md"
+  },
+
+  "resolver": {
+    "_comment": "Resolver + recommendation tuning. max_skills is the HARD ceiling for a single resolve call (anti-budget-blowout). recommendation_top_k is the hard cap shown to users as an execution bundle — a mixed recommendation spanning skills + agents + MCPs ordered by graph score. Harnesses use the separate harness catalog flow. Keep top_k small (default/max 5) so users aren't overwhelmed by options; recommendation_min_normalized_score drops weak graph matches instead of recommending at all cost.",
+    "max_skills": 15,
+    "recommendation_top_k": 5,
+    "recommendation_min_normalized_score": 0.30,
+    "intent_boost_per_signal": 5,
+    "intent_boost_max": 15,
+    "staleness_penalty": -8,
+    "meta_skills": ["skill-router", "file-reading"]
+  },
+
+  "context_monitor": {
+    "unmatched_signal_threshold": 3,
+    "manifest_stale_minutes": 60
+  },
+
+  "usage_tracker": {
+    "stale_threshold_sessions": 30,
+    "keep_log_days": 5
+  },
+
+  "harness": {
+    "_comment": "Harness catalog recommendation tuning for custom/API/local model users. Harnesses are separate from the execution bundle and are only recommended when their normalized match score is at or above this floor.",
+    "recommendation_min_normalized_score": 0.85
+  },
+
+  "skill_transformer": {
+    "line_threshold": 180,
+    "max_stage_lines": 40,
+    "stage_count": 5
+  },
+
+  "skill_router": {
+    "manifest_stale_minutes": 60,
+    "manifest_max_age_hours": 24
+  },
+
+  "extra_skill_dirs": [],
+
+  "intake": {
+    "enabled": true,
+    "dup_threshold": 0.93,
+    "near_dup_threshold": 0.80,
+    "min_neighbors": 0,
+    "min_neighbor_score": 0.30,
+    "min_body_chars": 120,
+    "cache_root": "~/.claude/skills/_embeddings",
+    "embedding": {
+      "backend": "sentence-transformers",
+      "model": null,
+      "base_url": null,
+      "allow_remote": false
+    }
+  },
+
+  "graph": {
+    "_comment": "Knowledge-graph edge weighting for wiki_graphify. Every edge between two entity pages (skill ↔ agent ↔ mcp-server, any combination) is computed from three signals and combined as a weighted sum. Semantic similarity uses sentence embeddings (cfg.intake.embedding.backend) to compare entity descriptions — this catches context-level affinity that tags and slug tokens miss (e.g., a 'python-linter' MCP links to a 'code-reviewer' agent even when they share no explicit tags). Tag similarity counts explicit frontmatter tag overlaps. Slug-token similarity counts shared tokens from entity slugs (e.g., 'atlassian-admin' skill ↔ 'atlassian-cloud' MCP share the 'atlassian' token). Override any key in your user config (~/.claude/skill-system-config.json) — weights must sum to 1.0.",
+    "edge_weights": {
+      "semantic":    0.70,
+      "tags":        0.15,
+      "slug_tokens": 0.15
+    },
+    "semantic": {
+      "_comment": "Semantic edge construction uses two thresholds so you can tune display strictness WITHOUT paying to rebuild the graph. build_floor is the low bar for inclusion (all pairs at or above this survive to graph.json); min_cosine is the query/display filter that consumers (resolve, visualize, recommend) apply at read time. build_floor must be <= min_cosine. Rebuilding is only required when you change top_k, build_floor, or the entity body text that drives the cached embeddings — min_cosine alone is rebuild-free.",
+      "top_k": 20,
+      "build_floor": 0.50,
+      "min_cosine": 0.80,
+      "batch_size": 512,
+      "cache_dir": "~/.claude/skill-wiki/.embedding-cache/graph"
+    },
+    "tag_edges": {
+      "_comment": "Tag edge construction. dense_tag_threshold skips over-broad tags shared by >N nodes (a tag on 1000 nodes would create 500k noise edges of weight 1). Use Infinity to disable. shared_tag_saturation is the number of overlapping tags at which tag_sim saturates to 1.0 — with saturation=5, two pages sharing 5+ tags contribute tag_sim=1.0; sharing 2 contributes 0.4.",
+      "dense_tag_threshold": 500,
+      "shared_tag_saturation": 5
+    },
+    "token_edges": {
+      "_comment": "Slug-token edge construction. Mirrors tag_edges but for the pseudo-tags synthesized from slugs. Keep dense_token_threshold intentionally low: after 90K+ hydrated Skills.sh bodies, broad slug words create millions of low-signal token-only edges. Semantic top-K and explicit tags are the primary graph signals; slug tokens are only a sparse fallback.",
+      "dense_token_threshold": 30,
+      "shared_token_saturation": 3
+    }
+  },
+
+  "mcp_quality": {
+    "_comment": "Phase 4 MCP scorer. Weights must sum to 1.0; signals are popularity, freshness, structural, graph, trust, runtime. Override per-key in your user config (~/.claude/skill-system-config.json).",
+    "weights": {
+      "popularity": 0.30,
+      "freshness":  0.20,
+      "structural": 0.15,
+      "graph":      0.15,
+      "trust":      0.10,
+      "runtime":    0.10
+    },
+    "grade_thresholds": {
+      "A": 0.80,
+      "B": 0.60,
+      "C": 0.40
+    },
+    "star_saturation": 1000,
+    "freshness_half_life_days": 90.0,
+    "graph_degree_saturation": 20,
+    "paths": {
+      "sidecar_dir": "~/.claude/skill-quality/mcp"
+    }
+  },
+
+  "babysitter": {
+    "plugin_root": "",
+    "runs_dir": ".a5c/runs",
+    "sdk_version": "latest"
+  },
+
+  "backup": {
+    "_comment": "Change-triggered snapshot config. Paths under top_files are relative to ~/.claude. Trees copy directories. memory_glob walks ~/.claude/projects/*/memory.",
+    "snapshot_dir": "~/.claude/backups",
+    "name_format": "{timestamp}",
+    "timestamp_format": "%Y%m%dT%H%M%SZ",
+    "scope": "full",
+    "max_file_bytes": 5242880,
+    "top_files": [
+      "settings.json",
+      "skill-manifest.json",
+      "pending-skills.json",
+      "CLAUDE.md",
+      "AGENTS.md",
+      "user-profile.json",
+      "skill-system-config.json",
+      "skill-registry.json"
+    ],
+    "trees": [
+      {"src": "agents", "dest": "agents"},
+      {"src": "skills", "dest": "skills"}
+    ],
+    "memory_glob": true,
+    "excludes": [],
+    "retention": {
+      "keep_latest": 50,
+      "keep_daily": 14
+    }
+  },
+
+  "quality": {
+    "_comment": "Post-install quality scorer. 'weights' applies to skills (telemetry-heavy — skills are auto-loaded and usage frequency is the strongest post-install signal). 'agent_weights' applies to agents (structure-heavy — agents are invoked deliberately and rarely, so telemetry is a weaker quality signal). Both must sum to 1.0 and contain exactly: telemetry, intake, graph, routing. Grade thresholds must satisfy 0 <= C <= B <= A <= 1. See src/skill_quality.py.",
+    "weights": {
+      "telemetry": 0.40,
+      "intake": 0.20,
+      "graph": 0.25,
+      "routing": 0.15
+    },
+    "agent_weights": {
+      "telemetry": 0.15,
+      "intake": 0.30,
+      "graph": 0.35,
+      "routing": 0.20
+    },
+    "grade_thresholds": {
+      "A": 0.80,
+      "B": 0.60,
+      "C": 0.40
+    },
+    "stale_threshold_days": 30.0,
+    "recent_window_days": 14.0,
+    "min_body_chars": 120,
+    "paths": {
+      "sidecar_dir": "~/.claude/skill-quality",
+      "router_trace": "~/.claude/router-trace.jsonl"
+    },
+    "lifecycle": {
+      "_comment": "Asymmetric lifecycle gates. Demotions happen automatically from a D-streak; archive requires the skill to sit in _demoted long enough; delete requires typed-slug confirmation. See src/ctx_lifecycle.py.",
+      "archive_threshold_days": 14.0,
+      "delete_threshold_days": 60.0,
+      "consecutive_d_to_demote": 2,
+      "demoted_subdir": "_demoted",
+      "archive_subdir": "_archive",
+      "history_max": 20
+    },
+    "dashboard": {
+      "_comment": "KPI dashboard rendering knobs. See src/kpi_dashboard.py.",
+      "default_top_n": 10,
+      "report_path": "~/.claude/skill-quality/kpi.md"
+    }
+  }
+}
