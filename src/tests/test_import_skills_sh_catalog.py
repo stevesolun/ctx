@@ -489,6 +489,7 @@ def test_update_wiki_tarball_drops_skills_sh_original_body_files(
             "./converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md.original",
             "# Very long upstream original\n",
         )
+        _add_text(tf, "./converted/curated-long/SKILL.md.original", "# Curated original\n")
 
     catalog: dict[str, Any] = {
         "schema_version": 1,
@@ -530,6 +531,7 @@ def test_update_wiki_tarball_drops_skills_sh_original_body_files(
         "./converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md.original"
         not in names
     )
+    assert "./converted/curated-long/SKILL.md.original" not in names
 
 
 def test_update_wiki_tarball_drops_special_archive_members(tmp_path: Path) -> None:
