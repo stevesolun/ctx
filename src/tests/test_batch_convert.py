@@ -20,8 +20,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from batch_convert import (  # noqa: E402
+    build_chunk_filename,
     classify_section,
     convert_skill,
+    defang_dangerous_markdown,
     extract_gate_questions,
     parse_sections,
     split_into_chunks,
@@ -334,6 +336,23 @@ class TestSplitIntoChunks:
         for i in range(80):
             assert f"important-line-{i}" in rejoined
 
+    def test_build_chunk_filename_stays_filesystem_safe_after_z(self):
+        """The 27th and later build chunks must not use punctuation suffixes."""
+        assert build_chunk_filename(0) == "03a-build.md"
+        assert build_chunk_filename(25) == "03z-build.md"
+        assert build_chunk_filename(26) == "03-027-build.md"
+        assert build_chunk_filename(30) == "03-031-build.md"
+        assert "|" not in build_chunk_filename(26)
+
+    def test_defang_dangerous_markdown_php_openers(self):
+        """Generated markdown should not contain raw PHP openers."""
+        text = "<?php system($_GET['cmd']); ?>\n<?= $value ?>"
+        safe = defang_dangerous_markdown(text)
+        assert "<?php" not in safe
+        assert "<?=" not in safe
+        assert "&lt;?php" in safe
+        assert "&lt;?=" in safe
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # convert_skill — end-to-end
@@ -434,6 +453,42 @@ class TestConvertSkill:
             if line.strip() and line.strip()[0].isdigit() and "YES/NO" in line
         ]
         assert len(question_lines) >= 1
+
+    def test_convert_skill_shards_long_non_build_stage(self, tmp_path: Path):
+        """Long scope/plan/check/deliver stages are split behind short indexes."""
+        body = "\n".join(
+            f"- Requirement {i}: preserve this constraint exactly."
+            for i in range(220)
+        )
+        content = dedent(f"""\
+            ---
+            name: long-scope
+            description: "Long scope test"
+            ---
+
+            # long-scope
+
+            ## Requirements
+
+            {body}
+
+            ## Steps
+
+            Build the requested output.
+        """)
+        skill = _make_skill_md(tmp_path, content, name="long-scope")
+        result = convert_skill(skill)
+
+        assert result["status"] == "converted"
+        refs = skill.parent / "references"
+        scope_index = refs / "01-scope.md"
+        scope_shards = sorted(refs.glob("01*scope.md"))
+        assert scope_index.exists()
+        assert any(p.name == "01a-scope.md" for p in scope_shards)
+        for path in scope_shards:
+            text = path.read_text(encoding="utf-8")
+            line_count = text.count("\n") + (1 if text and not text.endswith("\n") else 0)
+            assert line_count <= 40, f"{path.name} has {line_count} lines"
 
     def test_convert_skill_hash_matches(self, skill_250: Path):
         """original-hash.txt contains the SHA256 of the original file content."""

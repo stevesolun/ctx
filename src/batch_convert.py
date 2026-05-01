@@ -66,6 +66,19 @@ REFERENCE_INDICATORS = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+DANGEROUS_MARKDOWN_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    ("<?php", "&lt;?php"),
+    ("<?PHP", "&lt;?PHP"),
+    ("<?=", "&lt;?="),
+)
+
+
+def defang_dangerous_markdown(text: str) -> str:
+    """Defang executable-looking snippets before writing generated markdown."""
+    for needle, replacement in DANGEROUS_MARKDOWN_REPLACEMENTS:
+        text = text.replace(needle, replacement)
+    return text
+
 
 def classify_section(header: str, body: str) -> str:
     """Classify a markdown section into a pipeline stage."""
@@ -204,6 +217,39 @@ def split_into_chunks(text: str, max_lines: int) -> list[str]:
     return chunks
 
 
+def build_chunk_filename(index: int) -> str:
+    """Return a Windows-safe build-stage filename for a zero-based chunk index."""
+    if index < 0:
+        raise ValueError("chunk index must be non-negative")
+    if index < 26:
+        return f"03{chr(ord('a') + index)}-build.md"
+    return f"03-{index + 1:03d}-build.md"
+
+
+def _fixed_line_chunks(text: str, max_lines: int) -> list[str]:
+    """Split markdown into hard line-count chunks."""
+    lines = text.strip().split("\n")
+    return [
+        "\n".join(lines[i:i + max_lines]).strip()
+        for i in range(0, len(lines), max_lines)
+    ]
+
+
+def _stage_shard_path(path: Path, index: int) -> Path:
+    """Return a shard path that sorts next to its stage index file."""
+    if index < 0:
+        raise ValueError("chunk index must be non-negative")
+    stem = path.stem
+    suffix = path.suffix
+    match = re.match(r"^(\d+)(.*)$", stem)
+    if match:
+        prefix, rest = match.groups()
+        if index < 26:
+            return path.with_name(f"{prefix}{chr(ord('a') + index)}{rest}{suffix}")
+        return path.with_name(f"{prefix}-{index + 1:03d}{rest}{suffix}")
+    return path.with_name(f"{stem}-{index + 1:03d}{suffix}")
+
+
 # ── Converter ─────────────────────────────────────────────────────────────────
 
 def convert_skill(skill_path: Path, output_dir: Path | None = None) -> dict:
@@ -323,8 +369,7 @@ def convert_skill(skill_path: Path, output_dir: Path | None = None) -> dict:
         build_files.append("references/03-build.md")
     else:
         for i, chunk in enumerate(build_chunks):
-            suffix = chr(ord("a") + i)
-            fname = f"03{suffix}-build.md"
+            fname = build_chunk_filename(i)
             _write_stage(refs_dir / fname, chunk)
             build_files.append(f"references/{fname}")
 
@@ -351,14 +396,17 @@ def convert_skill(skill_path: Path, output_dir: Path | None = None) -> dict:
     ref_file_list = []
     for i, ref in enumerate(reference_parts):
         fname = f"ref-{i + 1:02d}.md"
-        (refs_dir / fname).write_text(ref, encoding="utf-8")
+        _write_stage(refs_dir / fname, ref)
         ref_file_list.append(f"references/{fname}")
 
     # check-gates.md
     gates_text = f"# Domain Gate Questions -- {skill_name}\n\nAnswer each YES or NO. Any NO = fix before proceeding.\n\n"
     for i, q in enumerate(all_gate_questions[:20], 1):  # cap at 20 gates
         gates_text += f"{i}. {q}\n"
-    (output_dir / "check-gates.md").write_text(gates_text, encoding="utf-8")
+    (output_dir / "check-gates.md").write_text(
+        defang_dangerous_markdown(gates_text),
+        encoding="utf-8",
+    )
 
     # failure-log.md
     failure_text = "# Failure Log\nOne-line patterns learned from past mistakes.\n"
@@ -446,13 +494,28 @@ def _ensure_header(text: str, default_header: str) -> str:
 
 def _write_stage(path: Path, text: str) -> None:
     """Write a stage file, splitting into sub-files if >MAX_STAGE_LINES."""
+    text = defang_dangerous_markdown(text).strip()
     lines = text.split("\n")
     if len(lines) <= MAX_STAGE_LINES:
-        path.write_text(text.strip() + "\n", encoding="utf-8")
-    else:
-        # If this is the main build file, split has already been handled
-        # For other stages, just write as-is (scope/plan/deliver rarely exceed 40)
-        path.write_text(text.strip() + "\n", encoding="utf-8")
+        path.write_text(text + "\n", encoding="utf-8")
+        return
+
+    chunks = _fixed_line_chunks(text, MAX_STAGE_LINES)
+    shard_paths = []
+    for i, chunk in enumerate(chunks):
+        shard_path = _stage_shard_path(path, i)
+        shard_path.write_text(chunk + "\n", encoding="utf-8")
+        shard_paths.append(shard_path)
+
+    index_text = (
+        f"# {path.stem}\n\n"
+        f"This generated stage was split into {len(shard_paths)} shards to keep "
+        f"each file under {MAX_STAGE_LINES} lines.\n"
+        "Read the shard files in sorted filename order.\n\n"
+        f"First shard: `{shard_paths[0].name}`\n"
+        f"Last shard: `{shard_paths[-1].name}`\n"
+    )
+    path.write_text(index_text, encoding="utf-8")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

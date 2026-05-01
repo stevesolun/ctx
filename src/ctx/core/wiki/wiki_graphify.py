@@ -132,13 +132,12 @@ def _load_full_body(meta: dict, slug: str, entity_type: str) -> str:
 
     Different entity types live in different places in the wiki:
 
-      - **skill**: the pipeline-converted ``<wiki>/converted/<slug>/SKILL.md``
-        is the canonical wiki body. We also concatenate the
-        ``references/*.md`` pipeline stages when present so a skill
-        whose logic is split across 5 stages still embeds the union
-        of all five. Falls back to the entity card body when no
-        converted dir exists (short skills <180 lines that skip the
-        pipeline).
+      - **skill**: when a micro-skill conversion preserved
+        ``SKILL.md.original``, use that full source body for semantic
+        embedding. This keeps graph quality high without crawling every
+        generated shard file. Otherwise use the converted ``SKILL.md``
+        plus ``references/*.md`` stages when present. Falls back to the
+        entity card body when no converted dir exists.
       - **agent**: ``<wiki>/converted-agents/<slug>.md`` holds the full
         Claude Code agent prompt (populated by ``ctx-agent-mirror``).
         Falls back to the entity card body when the mirror hasn't
@@ -156,13 +155,20 @@ def _load_full_body(meta: dict, slug: str, entity_type: str) -> str:
 
     rich_body = ""
     if entity_type == "skill":
-        skill_md = WIKI_DIR / "converted" / slug / "SKILL.md"
-        if skill_md.is_file():
+        converted_dir = WIKI_DIR / "converted" / slug
+        original_md = converted_dir / "SKILL.md.original"
+        skill_md = converted_dir / "SKILL.md"
+        if original_md.is_file():
+            try:
+                rich_body = original_md.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                rich_body = ""
+        if skill_md.is_file() and not rich_body:
             try:
                 rich_body = skill_md.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 rich_body = ""
-            refs_dir = WIKI_DIR / "converted" / slug / "references"
+            refs_dir = converted_dir / "references"
             if refs_dir.is_dir():
                 parts: list[str] = [rich_body] if rich_body else []
                 for ref in sorted(refs_dir.glob("*.md")):

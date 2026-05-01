@@ -106,6 +106,36 @@ def test_configure_wiki_dir_updates_derived_paths(tmp_path) -> None:
         wg.configure_wiki_dir(original)
 
 
+def test_load_full_body_prefers_original_backup_over_shards(tmp_path) -> None:
+    """Semantic graph text should use preserved originals for micro-skills."""
+    original = wg.WIKI_DIR
+    wiki = tmp_path / "skill-wiki"
+    converted = wiki / "converted" / "demo-skill"
+    (converted / "references").mkdir(parents=True)
+    (converted / "SKILL.md").write_text("short orchestrator\n", encoding="utf-8")
+    (converted / "SKILL.md.original").write_text(
+        "full original source body\n",
+        encoding="utf-8",
+    )
+    (converted / "references" / "01-scope.md").write_text(
+        "generated shard text should not be embedded\n",
+        encoding="utf-8",
+    )
+    try:
+        wg.configure_wiki_dir(wiki)
+        body = wg._load_full_body(
+            {"_content": "# Entity\nfallback", "description": "demo", "tags": ["python"]},
+            "demo-skill",
+            "skill",
+        )
+    finally:
+        wg.configure_wiki_dir(original)
+
+    assert "full original source body" in body
+    assert "short orchestrator" not in body
+    assert "generated shard text should not be embedded" not in body
+
+
 def test_build_graph_produces_edges_on_small_fixture(tmp_path, monkeypatch) -> None:
     """End-to-end: a 4-entity fixture with two shared tags must produce
     at least one edge. Catches any future refactor that breaks the

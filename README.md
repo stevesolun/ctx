@@ -3,11 +3,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-3366_collected-brightgreen.svg)](#)
-[![Graph](https://img.shields.io/badge/Graph-104%2C078_nodes_/_2.9M_edges-red.svg)](graph/)
+[![Tests](https://img.shields.io/badge/Tests-3370_collected-brightgreen.svg)](#)
+[![Graph](https://img.shields.io/badge/Graph-104%2C078_nodes_/_3.0M_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
-Watches what you develop, walks a graph that combines **92,815 skills, 464 agents, 10,786 MCP servers, and 13 cataloged harnesses**, and recommends the right execution bundle on the fly. Execution recommendations are capped to the best skills, agents, and MCP servers for the current task; custom/API/local model users get a separate harness-catalog recommendation during onboarding or `ctx-harness-install`. The skill count includes 1,969 curated ctx skills plus 90,846 Skills.sh skill nodes with upstream `npx skills` install instructions, duplicate hints, 89,461 hydrated `SKILL.md` bodies, and full-body semantic graph edges. You approve what loads, installs, or gets adopted. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
+Watches what you develop, walks a graph that combines **92,815 skills, 464 agents, 10,786 MCP servers, and 13 cataloged harnesses**, and recommends the right execution bundle on the fly. Execution recommendations are capped to the best skills, agents, and MCP servers for the current task; custom/API/local model users get a separate harness-catalog recommendation during onboarding or `ctx-harness-install`. The skill count includes 1,969 curated ctx skills plus 90,846 Skills.sh skill nodes with upstream `npx skills` install instructions, duplicate hints, 89,461 hydrated Skills.sh bodies shipped as micro-skill `SKILL.md` orchestrators, 28,611 preserved originals, and full-body semantic graph edges. You approve what loads, installs, or gets adopted. Powered by a Karpathy LLM wiki with persistent memory that gets smarter every session.
 
 > **2026-04-29 updates.**
 > - Added the curated `find-skills` workflow, backed by the canonical upstream install command `npx skills add https://github.com/vercel-labs/skills --skill find-skills`.
@@ -40,7 +40,7 @@ Optional extras: `pip install "claude-ctx[embeddings]"` for the semantic backend
 
 ### Pre-built knowledge graph (optional)
 
-A pre-built knowledge graph of 104,078 nodes and 1,033,253 edges ships as a tarball. The same tarball includes `external-catalogs/skills-sh/catalog.json`, 90,846 remote-cataloged Skills.sh skill pages under `entities/skills/skills-sh-*.md`, and 13 cataloged harness pages under `entities/harnesses/`. Extract to get a ready-to-use `~/.claude/skill-wiki/`:
+A pre-built knowledge graph of 104,078 nodes and 2,960,189 edges ships as a tarball. The same tarball includes `external-catalogs/skills-sh/catalog.json`, 90,846 remote-cataloged Skills.sh skill pages under `entities/skills/skills-sh-*.md`, 89,461 hydrated Skills.sh micro-skill orchestrators under `converted/skills-sh-*/SKILL.md`, and 13 cataloged harness pages under `entities/harnesses/`. Extract to get a ready-to-use `~/.claude/skill-wiki/`:
 
 ```bash
 # after `git clone` — or download graph/wiki-graph.tar.gz from the GitHub release
