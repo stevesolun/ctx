@@ -237,7 +237,7 @@ def _read_pending(path: Path, key: str) -> list[dict] | list[str]:
 
 
 def main() -> None:
-    if not PENDING_SKILLS.exists():
+    if not PENDING_SKILLS.exists() and not PENDING_UNLOAD.exists():
         sys.exit(0)
     if already_shown_this_session():
         sys.exit(0)

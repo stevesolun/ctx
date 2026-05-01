@@ -224,6 +224,25 @@ class TestMainEndToEnd:
         assert "MCPs:" in msg
         assert "Harnesses:" not in msg
 
+    def test_pending_unload_without_pending_skills_emits_hook_json(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        self._setup_paths(tmp_path, monkeypatch)
+        pending_unload = {
+            "suggestions": [
+                {"name": "old-skill", "reason": "unused for 30 days"},
+            ],
+        }
+        (tmp_path / "pending-unload.json").write_text(json.dumps(pending_unload))
+
+        _bo.main()
+
+        out = capsys.readouterr().out.strip()
+        payload = json.loads(out)
+        msg = payload["hookSpecificOutput"]["additionalContext"]
+        assert "old-skill" in msg
+        assert "loaded but never used" in msg
+
     def test_already_shown_suppresses_output(
         self, tmp_path, monkeypatch, capsys,
     ):

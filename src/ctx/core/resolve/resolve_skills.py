@@ -316,8 +316,13 @@ def resolve(
                         })
                         continue
 
-                    # skill / agent path.
-                    if name in needed or name not in available:
+                    # skill / agent path. Skills must be installed locally
+                    # because the resolver emits load entries; agents are
+                    # catalog/wiki entities and are installed on approval via
+                    # ctx-agent-install, so do not require SKILL.md presence.
+                    if name in needed:
+                        continue
+                    if hit_type == "skill" and name not in available:
                         continue
                     if has_normalized_score:
                         priority = 3 + min(round(rank_score * 12), 12)
@@ -372,6 +377,8 @@ def resolve(
 
     # Check availability
     for skill_name, info in list(needed.items()):
+        if info.get("entity_type", "skill") != "skill":
+            continue
         if skill_name not in available:
             manifest["suggestions"].append({
                 "skill": skill_name,
@@ -396,11 +403,16 @@ def resolve(
     for skill_name, info in sorted_needed:
         skill_meta = available.get(skill_name, {})
         entity_type = info.get("entity_type", "skill")
+        default_path = (
+            f"/mnt/agents/unknown/{skill_name}.md"
+            if entity_type == "agent"
+            else f"/mnt/skills/unknown/{skill_name}/SKILL.md"
+        )
         manifest["load"].append({
             "skill": skill_name,
             "entity_type": entity_type,
             "type": entity_type,
-            "path": skill_meta.get("path", f"/mnt/skills/unknown/{skill_name}/SKILL.md"),
+            "path": skill_meta.get("path", default_path),
             "reason": info["reason"],
             "priority": info["priority"],
         })

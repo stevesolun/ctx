@@ -429,6 +429,40 @@ class TestResolveMcpRecommendations:
         assert "fetch-mcp" in mcp_names
         assert "pytest-something" in load_names
 
+    def test_agent_graph_hit_lands_in_load_without_installed_skill(
+        self, tmp_path, monkeypatch
+    ):
+        from ctx.core.resolve import resolve_skills  # noqa: PLC0415
+        self._fake_graph(monkeypatch)
+
+        def fake_resolve_by_seeds(graph, seeds, **kwargs):
+            return [
+                {
+                    "name": "code-reviewer",
+                    "type": "agent",
+                    "score": 2.0,
+                    "normalized_score": 0.8,
+                    "shared_tags": ["review"],
+                    "via": ["django"],
+                },
+            ]
+
+        monkeypatch.setattr(
+            resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds
+        )
+
+        available = {"django": {"path": str(tmp_path / "django/SKILL.md"), "name": "django"}}
+        profile = _minimal_profile(frameworks=[_detection("django")])
+        manifest = resolve(profile, available, {})
+
+        agents = [
+            e for e in manifest["load"]
+            if e.get("entity_type") == "agent"
+        ]
+        assert [e["skill"] for e in agents] == ["code-reviewer"]
+        assert agents[0]["path"] == "/mnt/agents/unknown/code-reviewer.md"
+        assert not any("code-reviewer needed but not installed" in w for w in manifest["warnings"])
+
 
 # ---------------------------------------------------------------------------
 # read_intent_signals
