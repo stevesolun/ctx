@@ -554,3 +554,14 @@ class TestConvertSkill:
         assert (out_dir / "original-hash.txt").exists()
         refs = list((out_dir / "references").glob("*.md"))
         assert len(refs) >= 5
+
+    def test_convert_skill_accepts_string_paths(self, skill_250: Path, tmp_path: Path):
+        """wiki_orchestrator passes string paths; keep that API working."""
+        out_dir = tmp_path / "converted_output"
+        out_dir.mkdir()
+
+        result = convert_skill(str(skill_250), output_dir=str(out_dir))
+
+        assert result["status"] == "converted"
+        assert (out_dir / "SKILL.md").exists()
+        assert (out_dir / "references" / "01-scope.md").exists()

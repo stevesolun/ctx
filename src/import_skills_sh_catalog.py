@@ -464,15 +464,28 @@ def hydrate_catalog_bodies(
     skills = raw_skills if isinstance(raw_skills, list) else []
     total = len(skills)
     checkpoint_applied = _apply_hydration_checkpoint(catalog, checkpoint_path)
-    candidates = [
+    def has_available_body(item: dict[str, Any]) -> bool:
+        return bool(item.get("body_available") or item.get("skill_body"))
+
+    already_available = sum(
+        1 for item in skills
+        if isinstance(item, dict) and has_available_body(item)
+    )
+    pending = [
         item for item in skills
         if isinstance(item, dict)
-        and not item.get("skill_body")
-        and str(item.get("detail_url") or "").strip()
+        and not has_available_body(item)
     ]
+    fetchable = [
+        item for item in pending
+        if str(item.get("detail_url") or "").strip()
+    ]
+    fetchable_count = len(fetchable)
+    not_fetchable = len(pending) - fetchable_count
+    candidates = fetchable
     if limit is not None:
         candidates = candidates[: max(limit, 0)]
-    skipped_by_checkpoint = max(total - len(candidates), 0)
+    deferred_by_limit = fetchable_count - len(candidates)
 
     errors: list[dict[str, str]] = []
     hydrated = 0
@@ -481,20 +494,27 @@ def hydrate_catalog_bodies(
     completed = 0
 
     def emit_status(*, final: bool = False) -> None:
-        overall_done = skipped_by_checkpoint + completed
+        overall_done = min(total, already_available + completed)
+        remaining_unhydrated = max(total - (already_available + hydrated), 0)
         elapsed = max(time.time() - started, 0.001)
         payload = {
             "status": "completed" if final else "running",
             "updated_at": _utc_now(),
             "total": total,
             "checkpoint_applied": checkpoint_applied,
-            "skipped_by_checkpoint": skipped_by_checkpoint,
+            "skipped_by_checkpoint": checkpoint_applied,
+            "already_available": already_available,
+            "pending_unhydrated": len(pending),
+            "fetchable_unhydrated": fetchable_count,
+            "not_fetchable_unhydrated": not_fetchable,
+            "deferred_by_limit": deferred_by_limit,
             "attempted_new": len(candidates),
             "completed_new": completed,
             "hydrated_new": hydrated,
             "errors_new": len(errors),
             "overall_completed": overall_done,
             "overall_remaining": max(total - overall_done, 0),
+            "remaining_unhydrated": remaining_unhydrated,
             "percent": round((overall_done / total * 100.0) if total else 100.0, 4),
             "rate_per_second": round(completed / elapsed, 4),
             "elapsed_seconds": round(elapsed, 3),
@@ -577,7 +597,7 @@ def hydrate_catalog_bodies(
                     ):
                         elapsed = max(time.time() - started, 0.001)
                         rate = completed / elapsed
-                        overall_done = skipped_by_checkpoint + completed
+                        overall_done = min(total, already_available + completed)
                         pct = (overall_done / total * 100.0) if total else 100.0
                         print(
                             "hydrate progress: "
@@ -1202,9 +1222,53 @@ def _add_bytes(
 ) -> None:
     info = tarfile.TarInfo(name)
     info.size = len(payload)
-    info.mtime = int(time.time()) if mtime is None else mtime
+    info.mtime = 0 if mtime is None else mtime
     info.mode = mode
     dst.addfile(info, BytesIO(payload))
+
+
+def _converted_skill_files_from_body(
+    *,
+    converted_path: str,
+    skill_body: str,
+) -> dict[str, bytes]:
+    body = skill_body.rstrip() + "\n"
+    root = converted_path.removesuffix("/SKILL.md")
+    if not root.startswith(f"{CONVERTED_SKILL_ROOT}/skills-sh-"):
+        return {converted_path: body.encode("utf-8")}
+    try:
+        from ctx_config import cfg as _cfg
+        line_threshold = int(getattr(_cfg, "line_threshold", 180))
+    except Exception:
+        line_threshold = 180
+    if len(body.splitlines()) <= line_threshold:
+        return {converted_path: body.encode("utf-8")}
+
+    try:
+        import batch_convert
+    except Exception:
+        return {converted_path: body.encode("utf-8")}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        source_dir = tmp_path / "source" / Path(root).name
+        output_dir = tmp_path / "converted" / Path(root).name
+        source_dir.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        source = source_dir / "SKILL.md"
+        source.write_text(body, encoding="utf-8", newline="\n")
+        result = batch_convert.convert_skill(source, output_dir=output_dir)
+        if result.get("status") != "converted":
+            return {converted_path: body.encode("utf-8")}
+        files: dict[str, bytes] = {}
+        for path in sorted(output_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(output_dir).as_posix()
+            files[f"{root}/{rel}"] = path.read_bytes()
+        if converted_path not in files:
+            return {converted_path: body.encode("utf-8")}
+        return files
 
 
 def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
@@ -1327,11 +1391,12 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                 skill_body = str(item.get("skill_body") or "").strip()
                 converted_path = str(item.get("converted_path") or "")
                 if skill_body and converted_path:
-                    _add_bytes(
-                        dst,
-                        name=f"./{converted_path}",
-                        payload=(skill_body.rstrip() + "\n").encode("utf-8"),
+                    converted_files = _converted_skill_files_from_body(
+                        converted_path=converted_path,
+                        skill_body=skill_body,
                     )
+                    for path, payload in converted_files.items():
+                        _add_bytes(dst, name=f"./{path}", payload=payload)
             for name, payload in (
                 ("external-catalogs/skills-sh/catalog.json", catalog_bytes),
                 ("external-catalogs/skills-sh/summary.json", summary_bytes),

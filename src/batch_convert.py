@@ -252,12 +252,15 @@ def _stage_shard_path(path: Path, index: int) -> Path:
 
 # ── Converter ─────────────────────────────────────────────────────────────────
 
-def convert_skill(skill_path: Path, output_dir: Path | None = None) -> dict:
+def convert_skill(skill_path: Path | str, output_dir: Path | str | None = None) -> dict:
     """Convert a single skill file into a micro-skill pipeline.
 
     If output_dir is None, converts in-place (same directory as the skill).
     Returns stats dict.
     """
+    skill_path = Path(skill_path)
+    if output_dir is not None:
+        output_dir = Path(output_dir)
     content = skill_path.read_text(encoding="utf-8", errors="replace")
     lines = content.split("\n")
     line_count = len(lines)

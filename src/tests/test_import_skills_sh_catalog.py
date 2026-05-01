@@ -537,6 +537,78 @@ def test_update_wiki_tarball_downgrades_missing_stripped_body(
     assert "body_available: false" in page
 
 
+def test_update_wiki_tarball_micro_converts_long_skills_sh_body(
+    tmp_path: Path,
+) -> None:
+    tarball = tmp_path / "wiki-graph.tar.gz"
+    graph = {
+        "directed": False,
+        "multigraph": False,
+        "graph": {},
+        "nodes": [],
+        "edges": [],
+    }
+    with tarfile.open(tarball, "w:gz") as tf:
+        _add_text(tf, "./graphify-out/graph.json", json.dumps(graph))
+
+    long_body = "---\nname: long-skill\ndescription: Long skill\n---\n\n"
+    long_body += "# Long Skill\n\n" + "\n".join(f"- ensure item {i}" for i in range(190))
+    catalog: dict[str, Any] = {
+        "schema_version": 1,
+        "source": "skills.sh",
+        "api": "https://skills.sh/api/search",
+        "fetched_at": "2026-04-29T00:00:00+00:00",
+        "site_reported_total": 1,
+        "observed_unique_skills": 1,
+        "coverage_vs_site_reported_total": 1.0,
+        "query_count": 1,
+        "query_error_count": 0,
+        "overlap": {"existing_wiki_skill_pages": 0},
+        "skills": [
+            {
+                "id": "example/skills/long-skill",
+                "ctx_slug": "skills-sh-example-skills-long-skill",
+                "source": "example/skills",
+                "skill_id": "long-skill",
+                "name": "long-skill",
+                "type": "skill",
+                "status": "remote-cataloged",
+                "source_catalog": "skills.sh",
+                "installs": 100,
+                "tags": ["skill"],
+                "detail_url": "https://skills.sh/example/skills/long-skill",
+                "install_command": (
+                    "npx skills add https://github.com/example/skills "
+                    "--skill long-skill"
+                ),
+                "body_available": True,
+                "converted_path": "converted/skills-sh-example-skills-long-skill/SKILL.md",
+                "skill_body": long_body,
+            }
+        ],
+    }
+
+    update_wiki_tarball(tarball, catalog)
+
+    with tarfile.open(tarball, "r:gz") as tf:
+        names = set(tf.getnames())
+        skill_file = tf.extractfile(
+            tf.getmember("./converted/skills-sh-example-skills-long-skill/SKILL.md")
+        )
+        original_file = tf.extractfile(
+            tf.getmember("./converted/skills-sh-example-skills-long-skill/SKILL.md.original")
+        )
+        assert skill_file is not None
+        assert original_file is not None
+        skill_text = skill_file.read().decode("utf-8")
+        original_text = original_file.read().decode("utf-8")
+
+    assert "./converted/skills-sh-example-skills-long-skill/references/01-scope.md" in names
+    assert "./converted/skills-sh-example-skills-long-skill/check-gates.md" in names
+    assert "When this skill triggers, execute the following gated pipeline." in skill_text
+    assert original_text == long_body.rstrip() + "\n"
+
+
 def test_hydration_falls_back_to_github_raw_skill_md(monkeypatch) -> None:
     monkeypatch.setattr(
         importer,
@@ -805,3 +877,58 @@ def test_hydration_writes_progress_and_status_file(
     assert status["overall_completed"] == 2
     assert status["hydrated_new"] == 1
     assert status["errors_new"] == 1
+
+
+def test_hydration_status_does_not_count_limit_deferred_entries(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    status_path = tmp_path / "hydrate-status.json"
+    monkeypatch.setattr(
+        importer,
+        "_fetch_detail_html",
+        lambda url, timeout=30, max_bytes=2_000_000: (
+            "<main><div class='prose'><p>Body.</p></div></main>",
+            None,
+        ),
+    )
+    catalog: dict[str, Any] = {
+        "skills": [
+            {
+                "id": "one/done",
+                "ctx_slug": "skills-sh-one-done",
+                "body_available": True,
+                "converted_path": "converted/skills-sh-one-done/SKILL.md",
+                "detail_url": "https://skills.sh/one/done",
+            },
+            {
+                "id": "two/todo",
+                "ctx_slug": "skills-sh-two-todo",
+                "detail_url": "https://skills.sh/two/todo",
+            },
+            {
+                "id": "three/todo",
+                "ctx_slug": "skills-sh-three-todo",
+                "detail_url": "https://skills.sh/three/todo",
+            },
+            {
+                "id": "four/todo",
+                "ctx_slug": "skills-sh-four-todo",
+                "detail_url": "https://skills.sh/four/todo",
+            },
+        ]
+    }
+
+    importer.hydrate_catalog_bodies(
+        catalog,
+        workers=1,
+        limit=1,
+        status_path=status_path,
+    )
+
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    assert status["overall_completed"] == 2
+    assert status["overall_remaining"] == 2
+    assert status["remaining_unhydrated"] == 2
+    assert status["deferred_by_limit"] == 2
+    assert status["percent"] == 50.0
