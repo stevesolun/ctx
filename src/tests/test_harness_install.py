@@ -90,6 +90,25 @@ def test_install_copies_local_source_and_writes_manifest(tmp_path: Path) -> None
     assert manifest["verify_commands_run"] == []
 
 
+def test_install_accepts_file_uri_local_source_with_opt_in(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "README.md").write_text("harness", encoding="utf-8")
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=source.as_uri())
+
+    result = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=tmp_path / "manifests",
+        allow_local_sources=True,
+    )
+
+    assert result.status == "installed"
+    assert (tmp_path / "installs" / "text-to-cad" / "README.md").exists()
+
+
 def test_install_refuses_local_source_without_explicit_opt_in(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
@@ -190,6 +209,26 @@ def test_target_must_stay_inside_installs_root(tmp_path: Path) -> None:
     assert not (tmp_path / "outside").exists()
 
 
+def test_target_cannot_be_installs_root(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=str(source))
+    installs_root = tmp_path / "installs"
+
+    result = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=installs_root,
+        manifest_dir=tmp_path / "manifests",
+        target=installs_root,
+        allow_local_sources=True,
+    )
+
+    assert result.status == "invalid-target"
+    assert not installs_root.exists()
+
+
 def test_repo_url_identifier_resolves_matching_page(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
@@ -269,6 +308,29 @@ def test_uninstall_keep_files_only_removes_manifest(tmp_path: Path) -> None:
     assert result.status == "uninstalled"
     assert install.target.exists()
     assert not install.manifest_path.exists()
+
+
+def test_uninstall_refuses_manifest_target_at_installs_root(tmp_path: Path) -> None:
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    installs_root = tmp_path / "installs"
+    installs_root.mkdir()
+    sibling = installs_root / "other"
+    sibling.mkdir()
+    (manifest_dir / "text-to-cad.json").write_text(
+        json.dumps({"slug": "text-to-cad", "target": str(installs_root)}),
+        encoding="utf-8",
+    )
+
+    result = harness_install.uninstall_harness(
+        "text-to-cad",
+        manifest_dir=manifest_dir,
+        installs_root=installs_root,
+    )
+
+    assert result.status == "invalid-target"
+    assert installs_root.exists()
+    assert sibling.exists()
 
 
 def test_update_replaces_installed_target_from_catalog_source(tmp_path: Path) -> None:
@@ -355,6 +417,29 @@ def test_update_requires_existing_manifest(tmp_path: Path) -> None:
     )
 
     assert result.status == "not-installed"
+
+
+def test_update_dry_run_validates_manifest_target(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki)
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    installs_root = tmp_path / "installs"
+    installs_root.mkdir()
+    (manifest_dir / "text-to-cad.json").write_text(
+        json.dumps({"slug": "text-to-cad", "target": str(installs_root)}),
+        encoding="utf-8",
+    )
+
+    result = harness_install.update_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=installs_root,
+        manifest_dir=manifest_dir,
+        dry_run=True,
+    )
+
+    assert result.status == "invalid-target"
 
 
 def test_cataloged_commands_use_sanitized_env_and_redact_output(

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from ctx.core.entity_types import entity_page_path
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body, validate_skill_name
@@ -152,6 +153,10 @@ def _is_within(path: Path, root: Path) -> bool:
         return False
 
 
+def _is_strictly_within(path: Path, root: Path) -> bool:
+    return path != root and _is_within(path, root)
+
+
 def _resolve_target(
     *,
     slug: str,
@@ -160,7 +165,7 @@ def _resolve_target(
 ) -> Path:
     root = installs_root.expanduser().resolve()
     chosen = (target.expanduser() if target is not None else root / slug).resolve()
-    if not _is_within(chosen, root):
+    if not _is_strictly_within(chosen, root):
         raise ValueError(f"target must stay under installs root {root}")
     return chosen
 
@@ -195,7 +200,10 @@ def render_plan(record: HarnessRecord, *, target: Path) -> str:
 def _local_source_from_repo_url(repo_url: str) -> Path | None:
     parsed = urlparse(repo_url)
     if parsed.scheme == "file":
-        return Path(unquote(parsed.path))
+        file_path = parsed.path
+        if parsed.netloc and parsed.netloc not in {"", "localhost"}:
+            file_path = f"//{parsed.netloc}{file_path}"
+        return Path(url2pathname(unquote(file_path)))
     candidate = Path(repo_url).expanduser()
     return candidate if candidate.exists() else None
 
@@ -508,7 +516,7 @@ def uninstall_harness(
     target = Path(str(manifest.get("target") or "")).expanduser().resolve()
     if installs_root is not None:
         root = installs_root.expanduser().resolve()
-        if target and not _is_within(target, root):
+        if target and not _is_strictly_within(target, root):
             return InstallResult(
                 slug,
                 "invalid-target",
@@ -567,8 +575,16 @@ def update_harness(
             "invalid-target",
             message="install manifest does not include target",
         )
+    try:
+        target_path = _resolve_target(
+            slug=record.slug,
+            installs_root=installs_root,
+            target=target,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return InstallResult(record.slug, "invalid-target", message=str(exc))
+
     if dry_run:
-        target_path = target.resolve()
         print("Update harness:")
         print(render_plan(record, target=target_path))
         print("Action: replace installed target from cataloged source")
