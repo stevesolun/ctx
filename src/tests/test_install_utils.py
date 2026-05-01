@@ -111,6 +111,26 @@ def isolated_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # ── load_manifest ────────────────────────────────────────────────────────────
 
 
+class TestSafeCopyFile:
+    def test_rejects_symlinked_source_ancestor(self, tmp_path: Path) -> None:
+        real_source_root = tmp_path / "real-wiki"
+        real_source = real_source_root / "nested" / "SKILL.md"
+        real_source.parent.mkdir(parents=True)
+        real_source.write_text("# Skill\n", encoding="utf-8")
+        linked_root = tmp_path / "linked-wiki"
+        try:
+            linked_root.symlink_to(real_source_root, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+
+        with pytest.raises(ValueError, match="symlinked source"):
+            install_utils.safe_copy_file(
+                linked_root / "nested" / "SKILL.md",
+                tmp_path / "installed" / "SKILL.md",
+                dest_root=tmp_path / "installed",
+            )
+
+
 class TestLoadManifest:
     def test_missing_file_returns_empty_shell(self, isolated_manifest: Path) -> None:
         assert not isolated_manifest.exists()

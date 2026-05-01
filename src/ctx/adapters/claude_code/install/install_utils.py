@@ -47,9 +47,13 @@ MANIFEST_PATH = Path(os.path.expanduser("~/.claude/skill-manifest.json"))
 _FRONTMATTER_HEAD_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 
 
+def _has_symlink_in_path(path: Path) -> bool:
+    return any(candidate.is_symlink() for candidate in (path, *path.parents))
+
+
 def safe_copy_file(source: Path, dest: Path, *, dest_root: Path) -> None:
     """Copy one file while refusing symlink write-through paths."""
-    if source.is_symlink() or source.parent.is_symlink():
+    if _has_symlink_in_path(source):
         raise ValueError(f"refusing to copy symlinked source: {source}")
     if not source.is_file():
         raise FileNotFoundError(f"copy source missing: {source}")
