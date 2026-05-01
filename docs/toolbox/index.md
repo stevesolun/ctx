@@ -53,7 +53,7 @@ toolboxes:
 Run it manually:
 
 ```bash
-ctx-toolbox run review
+ctx-toolbox run --event pre-commit
 ```
 
 Or let the `pre-commit` hook fire it automatically — see

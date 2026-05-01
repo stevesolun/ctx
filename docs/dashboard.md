@@ -110,7 +110,7 @@ render`. It aggregates the quality + lifecycle sidecars under
 
 If the quality sidecar directory is empty (no scoring has happened
 yet), the page shows a helpful empty-state pointing at
-`ctx-skill-quality score --all`.
+`ctx-skill-quality recompute --all`.
 
 ## Routes
 

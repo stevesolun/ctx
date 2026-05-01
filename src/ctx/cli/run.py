@@ -468,7 +468,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=2,
         help=(
-            "Max Generator→Evaluator rounds (1 = one generation "
+            "Max Generator->Evaluator rounds (1 = one generation "
             "then a final grade, no revision; 2 = one revision; "
             "etc.). Default 2."
         ),

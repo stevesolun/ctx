@@ -248,7 +248,7 @@ you're on the MCP path, library path, or `ctx run` CLI.
 To inspect lifecycle state for a specific skill:
 
 ```bash
-ctx-skill-quality --slug fastapi-pro
+ctx-skill-quality explain fastapi-pro
 ```
 
 Or from Python:
