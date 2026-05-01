@@ -104,6 +104,38 @@ def _pick_source(
     return None, None
 
 
+def _line_count(path: Path) -> int:
+    return len(path.read_text(encoding="utf-8", errors="replace").splitlines())
+
+
+def _ensure_micro_converted(
+    converted: Path,
+    source: Path,
+    variant: str,
+) -> tuple[Path | None, str | None, str]:
+    """Return a source safe to install, converting long raw bodies first."""
+    if source.is_symlink():
+        return None, None, f"unsafe symlinked wiki source at {source}"
+    lines = _line_count(source)
+    if lines <= cfg.line_threshold:
+        return source, variant, ""
+    try:
+        from batch_convert import convert_skill
+
+        result = convert_skill(source, output_dir=converted)
+    except Exception as exc:  # noqa: BLE001 - install should return a structured failure.
+        return None, None, f"micro-skill conversion failed: {exc}"
+    if result.get("status") != "converted":
+        return None, None, (
+            "micro-skill conversion did not complete: "
+            f"{result.get('reason') or result.get('status')}"
+        )
+    transformed = converted / "SKILL.md"
+    if not transformed.is_file():
+        return None, None, "micro-skill conversion produced no SKILL.md"
+    return transformed, "transformed", ""
+
+
 # ── Copy logic ───────────────────────────────────────────────────────────────
 
 
@@ -178,6 +210,7 @@ def install_skill(
             source_variant=None, references_copied=0,
             message="wiki has no SKILL.md or SKILL.md.original",
         )
+    assert variant is not None
 
     dest_dir = skills_dir / slug
     dest = dest_dir / "SKILL.md"
@@ -202,10 +235,28 @@ def install_skill(
         refs_dir = converted / "references"
         if refs_dir.is_dir():
             refs_count = sum(1 for _ in refs_dir.glob("*.md"))
+        message = "dry-run: no files written"
+        try:
+            if _line_count(source) > cfg.line_threshold:
+                message = "dry-run: would micro-convert before install"
+        except OSError:
+            pass
         return InstallResult(
             slug=slug, status="installed", installed_path=str(dest),
             source_variant=variant, references_copied=refs_count,
-            message="dry-run: no files written",
+            message=message,
+        )
+
+    source, variant, conversion_error = _ensure_micro_converted(
+        converted,
+        source,
+        variant,
+    )
+    if source is None:
+        return InstallResult(
+            slug=slug, status="failed", installed_path=None,
+            source_variant=variant, references_copied=0,
+            message=conversion_error,
         )
 
     try:

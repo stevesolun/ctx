@@ -125,3 +125,31 @@ def test_is_in_skill_dir_rejects_traversal_to_outside(tmp_path: Path) -> None:
     traversal = str(skill_dir / ".." / ".." / "evil" / "SKILL.md")
     # After resolve() this should not be inside skill_dir
     assert sad.is_in_skill_dir(traversal, [str(skill_dir)]) is False
+
+
+def test_long_skill_is_micro_converted_from_hook_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    wiki = tmp_path / "wiki"
+    source_dir = tmp_path / "skills" / "long-skill"
+    source_dir.mkdir(parents=True)
+    source = source_dir / "SKILL.md"
+    source.write_text(
+        "---\nname: long-skill\ndescription: Long skill\n---\n\n"
+        + "\n".join(f"- ensure item {i}" for i in range(190)),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sad, "WIKI_DIR", wiki)
+    monkeypatch.setattr(sad, "LINE_THRESHOLD", 180)
+
+    converted, detail = sad.maybe_convert_to_micro_skill(source, "long-skill", 195)
+
+    assert converted is True
+    assert detail == str(wiki / "converted" / "long-skill")
+    assert source.exists()
+    converted_skill = wiki / "converted" / "long-skill" / "SKILL.md"
+    assert "When this skill triggers, execute the following gated pipeline." in (
+        converted_skill.read_text(encoding="utf-8")
+    )
+    assert (wiki / "converted" / "long-skill" / "references" / "01-scope.md").is_file()

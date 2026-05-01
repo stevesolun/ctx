@@ -8,8 +8,8 @@ registers the new skill in the wiki catalog and index automatically.
 Called by PostToolUse hook:
     python skill_add_detector.py --tool <name> --input <json>
 
-If >180 lines: prints a prompt asking the user if they want to convert.
-(The message appears in Claude's console output — Claude will see it and can relay to user.)
+If the file is longer than the configured line threshold, the hook converts it
+to a micro-skill pipeline under the wiki's converted/ directory immediately.
 
 Two-tier slug validation model
 -------------------------------
@@ -136,13 +136,34 @@ def register_skill_in_catalog(file_path: str, skill_name: str, lines: int) -> No
     # catalog rows mention "react-pro" or paths containing "react".
     if f"| {skill_name} |" in content:
         return
-    over_flag = "⚠" if lines > 180 else ""
+    over_flag = "⚠" if lines > LINE_THRESHOLD else ""
     safe_path = _escape_md_cell(file_path)
     entry = f"| {skill_name} | skill | {lines} | {over_flag} | `{safe_path}` |"
     # Insert before the last line
     lines_list = content.splitlines()
     lines_list.append(entry)
     CATALOG_PATH.write_text("\n".join(lines_list) + "\n", encoding="utf-8")
+
+
+def maybe_convert_to_micro_skill(
+    skill_path: Path,
+    skill_name: str,
+    line_count: int,
+) -> tuple[bool, str]:
+    """Convert long hook-detected skills to the micro-skill pipeline."""
+    if line_count <= LINE_THRESHOLD:
+        return False, "below-threshold"
+    try:
+        from batch_convert import convert_skill
+
+        output_dir = WIKI_DIR / "converted" / skill_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        result = convert_skill(skill_path, output_dir=output_dir)
+    except Exception as exc:  # noqa: BLE001 - hook output should report failure, not crash Claude.
+        return False, f"conversion failed: {exc}"
+    if result.get("status") == "converted":
+        return True, str(output_dir)
+    return False, f"conversion skipped: {result.get('reason') or result.get('status')}"
 
 
 def _parse_stdin_payload() -> tuple[str, dict]:
@@ -222,12 +243,16 @@ def main() -> None:
     # Register in catalog
     register_skill_in_catalog(file_path, skill_name, lines)
 
-    # If over 180 lines, emit a notice (Claude will see this in hook output)
     if lines > LINE_THRESHOLD:
+        converted, detail = maybe_convert_to_micro_skill(
+            resolved_path,
+            skill_name,
+            lines,
+        )
+        status = "converted" if converted else "conversion not completed"
         print(
-            f"\n[skill-system] New skill '{skill_name}' has {lines} lines (>{180}).\n"
-            f"  Consider converting to micro-skills pipeline (>={LINE_THRESHOLD} lines):\n"
-            f"  python {Path(__file__).parent}/batch_convert.py --file \"{file_path}\"\n"
+            f"\n[skill-system] New skill '{skill_name}' has {lines} lines "
+            f"(>{LINE_THRESHOLD}); micro-skill gate {status}: {detail}\n"
         )
 
 

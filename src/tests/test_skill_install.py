@@ -333,6 +333,37 @@ class TestInstallSkill:
         content = (skills_dir / "s" / "SKILL.md").read_text(encoding="utf-8")
         assert "original body" in content
 
+    def test_long_raw_source_is_micro_converted_before_install(
+        self,
+        wiki_dir: Path,
+        skills_dir: Path,
+        isolated_manifest: Path,
+    ) -> None:
+        converted = wiki_dir / "converted" / "long-skill"
+        converted.mkdir(parents=True)
+        body = "---\nname: long-skill\ndescription: Long skill\n---\n\n"
+        body += "\n".join(f"- ensure item {i}" for i in range(190))
+        (converted / "SKILL.md").write_text(body, encoding="utf-8")
+        (wiki_dir / "entities" / "skills" / "long-skill.md").write_text(
+            "---\nname: long-skill\nstatus: cataloged\n---\nbody\n",
+            encoding="utf-8",
+        )
+
+        r = skill_install.install_skill(
+            "long-skill",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+        )
+
+        assert r.status == "installed"
+        assert r.source_variant == "transformed"
+        assert r.references_copied >= 5
+        installed = (skills_dir / "long-skill" / "SKILL.md").read_text(
+            encoding="utf-8",
+        )
+        assert "When this skill triggers, execute the following gated pipeline." in installed
+        assert (skills_dir / "long-skill" / "references" / "01-scope.md").is_file()
+
 
 # ── _split_slugs ─────────────────────────────────────────────────────────────
 
