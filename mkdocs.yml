@@ -18,13 +18,9 @@ site_dir: site
 strict: true
 
 # SKILL.md lives in docs/ for historical reasons but doesn't belong
-# in the rendered nav — the skill-router section summarizes it.
-# Roadmap pages are retained on disk but hidden from nav until they
-# reflect the post-v0.5.0 direction.
+# in the rendered nav; the skill-router section summarizes it.
 not_in_nav: |
   SKILL.md
-  roadmap/skill-quality.md
-  roadmap/toolbox.md
 
 theme:
   name: material
