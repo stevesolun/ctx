@@ -244,7 +244,7 @@ def _remove_loaded_manifest_entry(slug: str, entity_type: str) -> list[dict]:
             entry = {
                 "skill": slug,
                 "entity_type": entity_type,
-                "source": "ctx-monitor",
+                "source": removed[0].get("source") or "ctx-monitor",
             }
             entry.update(preserved)
             manifest.setdefault("unload", []).append(entry)

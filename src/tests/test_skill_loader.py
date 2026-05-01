@@ -131,6 +131,7 @@ def test_dashboard_agent_unload_preserves_same_slug_skill(
         }),
         encoding="utf-8",
     )
+    monkeypatch.setattr(cm, "_claude_dir", lambda: claude_dir)
     monkeypatch.setattr(skill_unload, "CLAUDE_DIR", claude_dir)
     monkeypatch.setattr(skill_unload, "MANIFEST_PATH", manifest_path)
     monkeypatch.setitem(sys.modules, "ctx_audit_log", _AuditLog)
