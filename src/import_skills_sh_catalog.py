@@ -1346,7 +1346,7 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                         )
                         continue
                     dst.addfile(member, f)
-                else:
+                elif member.isdir():
                     dst.addfile(member)
 
             stored_catalog = _catalog_for_storage(catalog)

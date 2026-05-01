@@ -132,6 +132,24 @@ def test_isolated_env_does_not_inherit_caller_pythonpath(
     assert with_extra["PYTHONPATH"] == str(paths.fake_modules)
 
 
+def test_isolated_env_does_not_inherit_caller_secrets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = make_paths(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp-test")
+    monkeypatch.setenv("CTX_WIKI_DIR", str(tmp_path / "real-wiki"))
+    monkeypatch.setenv("CLAUDE_HOME", str(tmp_path / "real-claude"))
+
+    env = isolated_env(paths)
+
+    assert "OPENAI_API_KEY" not in env
+    assert "GITHUB_TOKEN" not in env
+    assert "CTX_WIKI_DIR" not in env
+    assert "CLAUDE_HOME" not in env
+
+
 def test_assert_inside_rejects_escape(tmp_path: Path) -> None:
     assert_inside(tmp_path / "child", tmp_path)
     with pytest.raises(AssertionError):

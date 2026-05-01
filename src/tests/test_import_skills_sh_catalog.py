@@ -532,6 +532,47 @@ def test_update_wiki_tarball_drops_skills_sh_original_body_files(
     )
 
 
+def test_update_wiki_tarball_drops_special_archive_members(tmp_path: Path) -> None:
+    tarball = tmp_path / "wiki-graph.tar.gz"
+    graph = {
+        "directed": False,
+        "multigraph": False,
+        "graph": {},
+        "nodes": [],
+        "edges": [],
+    }
+    with tarfile.open(tarball, "w:gz") as tf:
+        _add_text(tf, "./graphify-out/graph.json", json.dumps(graph))
+        _add_text(tf, "./entities/skills/keep.md", "# Keep\n")
+        link = tarfile.TarInfo("./entities/skills/unsafe-link.md")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "/etc/passwd"
+        tf.addfile(link)
+
+    catalog: dict[str, Any] = {
+        "schema_version": 1,
+        "source": "skills.sh",
+        "api": "https://skills.sh/api/search",
+        "fetched_at": "2026-04-29T00:00:00+00:00",
+        "site_reported_total": 0,
+        "observed_unique_skills": 0,
+        "coverage_vs_site_reported_total": 0.0,
+        "query_count": 0,
+        "query_error_count": 0,
+        "overlap": {"existing_wiki_skill_pages": 0},
+        "skills": [],
+    }
+
+    update_wiki_tarball(tarball, catalog)
+
+    with tarfile.open(tarball, "r:gz") as tf:
+        members = {member.name: member for member in tf.getmembers()}
+
+    assert "./entities/skills/keep.md" in members
+    assert "./entities/skills/unsafe-link.md" not in members
+    assert all(member.isfile() or member.isdir() for member in members.values())
+
+
 def test_update_wiki_tarball_downgrades_missing_stripped_body(
     tmp_path: Path,
 ) -> None:

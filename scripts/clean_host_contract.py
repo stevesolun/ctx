@@ -55,6 +55,11 @@ _LIVE_CLAUDE_PLATFORM_ENV = {
     "TEMP",
     "TMP",
 }
+_CLEAN_HOST_PLATFORM_ENV = _LIVE_CLAUDE_PLATFORM_ENV | {
+    "LANG",
+    "LC_ALL",
+    "TZ",
+}
 _EXPECTED_LIVE_CLAUDE_EVENTS = ("PostToolUse", "Stop")
 
 
@@ -161,7 +166,11 @@ def assert_inside(path: Path, root: Path) -> None:
 
 
 def isolated_env(paths: ContractPaths, *, extra_pythonpath: Path | None = None) -> dict[str, str]:
-    env = os.environ.copy()
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key in _CLEAN_HOST_PLATFORM_ENV
+    }
     env.update({
         "HOME": str(paths.home),
         "USERPROFILE": str(paths.home),
@@ -172,10 +181,6 @@ def isolated_env(paths: ContractPaths, *, extra_pythonpath: Path | None = None) 
         "PIP_CACHE_DIR": str(paths.pip_cache),
         "PYTHONUTF8": "1",
     })
-    env.pop("CTX_WIKI_DIR", None)
-    env.pop("CTX_GRAPH_PATH", None)
-    env.pop("CLAUDE_HOME", None)
-    env.pop("PYTHONPATH", None)
     if extra_pythonpath is not None:
         env["PYTHONPATH"] = str(extra_pythonpath)
     return env
