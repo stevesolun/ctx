@@ -251,6 +251,46 @@ def test_update_replaces_installed_target_from_catalog_source(tmp_path: Path) ->
     assert (install.target / "README.md").read_text(encoding="utf-8") == "v2"
 
 
+def test_update_failure_preserves_existing_target_and_manifest(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "README.md").write_text("v1", encoding="utf-8")
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=str(source))
+    manifest_dir = tmp_path / "manifests"
+    installs_root = tmp_path / "installs"
+    install = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=installs_root,
+        manifest_dir=manifest_dir,
+    )
+    assert install.target is not None
+    assert install.manifest_path is not None
+    before_manifest = install.manifest_path.read_text(encoding="utf-8")
+    (source / "README.md").write_text("v2", encoding="utf-8")
+
+    def fake_run(cmd: list[str], **_kwargs: Any) -> _FakeRun:
+        return _FakeRun(returncode=1, stderr="setup failed")
+
+    monkeypatch.setattr(harness_install.subprocess, "run", fake_run)
+
+    result = harness_install.update_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=installs_root,
+        manifest_dir=manifest_dir,
+        approve_commands=True,
+    )
+
+    assert result.status == "install-failed"
+    assert (install.target / "README.md").read_text(encoding="utf-8") == "v1"
+    assert install.manifest_path.read_text(encoding="utf-8") == before_manifest
+
+
 def test_update_requires_existing_manifest(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     _write_harness_page(wiki)
@@ -263,3 +303,56 @@ def test_update_requires_existing_manifest(tmp_path: Path) -> None:
     )
 
     assert result.status == "not-installed"
+
+
+def test_cataloged_commands_use_sanitized_env_and_redact_output(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-value")
+    captured_env: dict[str, str] = {}
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> _FakeRun:
+        captured_env.update(kwargs["env"])
+        return _FakeRun(stdout="token sk-secret-value")
+
+    monkeypatch.setattr(harness_install.subprocess, "run", fake_run)
+
+    run = harness_install._run_command("python --version", cwd=tmp_path)
+
+    assert "OPENAI_API_KEY" not in captured_env
+    assert run["stdout"] == f"token {harness_install._REDACTION}"
+
+
+def test_recommend_mode_prints_install_handoff(
+    monkeypatch: Any,
+    capsys: Any,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_recommend(**kwargs: Any) -> list[dict[str, object]]:
+        calls.append(kwargs)
+        return [{
+            "name": "text-to-cad",
+            "normalized_score": 0.91,
+            "reason": "cad tag match",
+        }]
+
+    monkeypatch.setattr(harness_install, "recommend_harnesses_for_cli", fake_recommend)
+
+    rc = harness_install.main([
+        "--recommend",
+        "--goal",
+        "generate CAD from text",
+        "--model-provider",
+        "openai",
+        "--model",
+        "openai/gpt-5.5",
+    ])
+
+    assert rc == 0
+    assert calls[0]["model_provider"] == "openai"
+    assert calls[0]["model"] == "openai/gpt-5.5"
+    output = capsys.readouterr().out
+    assert "Recommended harnesses" in output
+    assert "ctx-harness-install text-to-cad --dry-run" in output

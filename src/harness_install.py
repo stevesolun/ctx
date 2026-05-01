@@ -26,6 +26,25 @@ from ctx.core.entity_types import entity_page_path
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body, validate_skill_name
 from ctx_config import cfg
 
+_COMMAND_ENV_ALLOWLIST = {
+    "CI",
+    "COMSPEC",
+    "HOME",
+    "LANG",
+    "PATH",
+    "PATHEXT",
+    "PYTHONPATH",
+    "SYSTEMDRIVE",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "VIRTUAL_ENV",
+    "WINDIR",
+}
+_SECRET_NAME_MARKERS = ("API", "KEY", "SECRET", "TOKEN", "PASSWORD", "CREDENTIAL")
+_REDACTION = "[redacted]"
+
 
 @dataclass(frozen=True)
 class HarnessRecord:
@@ -190,6 +209,7 @@ def _materialize_source(record: HarnessRecord, target: Path) -> None:
 
     proc = subprocess.run(
         ["git", "clone", "--depth", "1", record.repo_url, str(target)],
+        env=_command_env(),
         capture_output=True,
         text=True,
         check=False,
@@ -208,6 +228,7 @@ def _run_command(command: str, *, cwd: Path) -> dict[str, Any]:
     proc = subprocess.run(
         tokens,
         cwd=str(cwd),
+        env=_command_env(),
         capture_output=True,
         text=True,
         check=False,
@@ -216,10 +237,110 @@ def _run_command(command: str, *, cwd: Path) -> dict[str, Any]:
     return {
         "command": command,
         "returncode": proc.returncode,
-        "stdout": proc.stdout[-4000:],
-        "stderr": proc.stderr[-4000:],
+        "stdout": _redact_output(proc.stdout)[-4000:],
+        "stderr": _redact_output(proc.stderr)[-4000:],
         "duration_seconds": round(time.time() - started, 3),
     }
+
+
+def _command_env() -> dict[str, str]:
+    """Return a minimal environment for cataloged harness commands."""
+    env: dict[str, str] = {}
+    for key, value in os.environ.items():
+        upper = key.upper()
+        if upper in _COMMAND_ENV_ALLOWLIST:
+            env[key] = value
+    return env
+
+
+def _redact_output(text: str) -> str:
+    redacted = text or ""
+    for key, value in os.environ.items():
+        if not value or len(value) < 8:
+            continue
+        if any(marker in key.upper() for marker in _SECRET_NAME_MARKERS):
+            redacted = redacted.replace(value, _REDACTION)
+    return redacted
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path)
+    elif path.exists():
+        path.unlink()
+
+
+def _stage_harness(
+    *,
+    record: HarnessRecord,
+    stage_path: Path,
+    approve_commands: bool,
+    run_verify: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    _materialize_source(record, stage_path)
+    setup_runs: list[dict[str, Any]] = []
+    verify_runs: list[dict[str, Any]] = []
+    if approve_commands:
+        for command in record.setup_commands:
+            run = _run_command(command, cwd=stage_path)
+            setup_runs.append(run)
+            if run["returncode"] != 0:
+                raise RuntimeError(f"setup command failed: {command}")
+    if run_verify:
+        for command in record.verify_commands:
+            run = _run_command(command, cwd=stage_path)
+            verify_runs.append(run)
+            if run["returncode"] != 0:
+                raise RuntimeError(f"verify command failed: {command}")
+    return setup_runs, verify_runs
+
+
+def _atomic_replace_target(stage_path: Path, target_path: Path) -> None:
+    backup_path: Path | None = None
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    if target_path.exists():
+        backup_path = target_path.with_name(
+            f".{target_path.name}.backup-{os.getpid()}-{time.time_ns()}"
+        )
+        target_path.rename(backup_path)
+    try:
+        stage_path.rename(target_path)
+    except Exception:
+        if backup_path is not None and backup_path.exists() and not target_path.exists():
+            backup_path.rename(target_path)
+        raise
+    finally:
+        if backup_path is not None and backup_path.exists():
+            _remove_path(backup_path)
+
+
+def _install_to_target(
+    *,
+    record: HarnessRecord,
+    target_path: Path,
+    installs_root: Path,
+    force: bool,
+    approve_commands: bool,
+    run_verify: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if target_path.exists() and not force:
+        raise FileExistsError("target already exists; pass --force to replace it")
+    root = installs_root.expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    stage_path = root / f".{record.slug}.tmp-{os.getpid()}-{time.time_ns()}"
+    try:
+        setup_runs, verify_runs = _stage_harness(
+            record=record,
+            stage_path=stage_path,
+            approve_commands=approve_commands,
+            run_verify=run_verify,
+        )
+        _atomic_replace_target(stage_path, target_path)
+        return setup_runs, verify_runs
+    except Exception:
+        if stage_path.exists():
+            _remove_path(stage_path)
+        raise
 
 
 def _write_manifest(
@@ -298,38 +419,28 @@ def install_harness(
     if dry_run:
         return InstallResult(record.slug, "dry-run", target=target_path)
 
-    if target_path.exists():
-        if not force:
-            return InstallResult(
-                record.slug,
-                "skipped-existing",
-                target=target_path,
-                message="target already exists; pass --force to replace it",
-            )
-        shutil.rmtree(target_path)
-
     try:
-        _materialize_source(record, target_path)
-        setup_runs: list[dict[str, Any]] = []
-        verify_runs: list[dict[str, Any]] = []
-        if approve_commands:
-            for command in record.setup_commands:
-                run = _run_command(command, cwd=target_path)
-                setup_runs.append(run)
-                if run["returncode"] != 0:
-                    raise RuntimeError(f"setup command failed: {command}")
-        if run_verify:
-            for command in record.verify_commands:
-                run = _run_command(command, cwd=target_path)
-                verify_runs.append(run)
-                if run["returncode"] != 0:
-                    raise RuntimeError(f"verify command failed: {command}")
+        setup_runs, verify_runs = _install_to_target(
+            record=record,
+            target_path=target_path,
+            installs_root=installs_root,
+            force=force,
+            approve_commands=approve_commands,
+            run_verify=run_verify,
+        )
         manifest_path = _write_manifest(
             record=record,
             target=target_path,
             manifest_dir=manifest_dir,
             setup_runs=setup_runs,
             verify_runs=verify_runs,
+        )
+    except FileExistsError as exc:
+        return InstallResult(
+            record.slug,
+            "skipped-existing",
+            target=target_path,
+            message=str(exc),
         )
     except Exception as exc:  # noqa: BLE001
         return InstallResult(
@@ -452,11 +563,46 @@ def update_harness(
     )
 
 
+def recommend_harnesses_for_cli(
+    *,
+    goal: str,
+    model_provider: str | None,
+    model: str | None,
+    top_k: int,
+) -> list[dict[str, Any]]:
+    from ctx_init import recommend_harnesses  # noqa: PLC0415
+
+    query = " ".join(
+        part for part in [goal, model_provider or "", model or "", "harness"] if part
+    )
+    return recommend_harnesses(
+        query,
+        top_k=top_k,
+        model_provider=model_provider,
+        model=model,
+    )
+
+
+def print_recommendations(results: list[dict[str, Any]]) -> None:
+    if not results:
+        print("No harness recommendations matched.")
+        return
+    print("Recommended harnesses:")
+    for row in results:
+        slug = str(row.get("name") or "")
+        score = float(row.get("normalized_score") or 0.0)
+        reason = str(row.get("reason") or "").strip()
+        print(f"- {slug} (match {score:.2f})")
+        if reason:
+            print(f"  reason: {reason}")
+        print(f"  install: ctx-harness-install {slug} --dry-run")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Install a cataloged harness into ~/.claude/harnesses"
     )
-    parser.add_argument("identifier", help="Harness slug or repository URL")
+    parser.add_argument("identifier", nargs="?", help="Harness slug or repository URL")
     parser.add_argument("--wiki", default=str(cfg.wiki_dir), help="Wiki path")
     parser.add_argument(
         "--installs-root",
@@ -470,6 +616,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--target", help="Install target under --installs-root")
     parser.add_argument("--dry-run", action="store_true", help="Print plan only")
+    parser.add_argument(
+        "--recommend",
+        action="store_true",
+        help="Recommend harnesses from --goal/--model instead of installing one",
+    )
+    parser.add_argument("--goal", help="What you want to build or automate")
+    parser.add_argument("--model-provider", help="Model provider prefix, e.g. openai or ollama")
+    parser.add_argument("--model", help="Model slug, e.g. openrouter/openai/gpt-5.5")
+    parser.add_argument("--top-k", type=int, default=5, help="Maximum recommendations to print")
     parser.add_argument("--force", action="store_true", help="Replace target if it exists")
     parser.add_argument(
         "--update",
@@ -503,12 +658,30 @@ def main(argv: list[str] | None = None) -> int:
     manifest_dir = Path(os.path.expanduser(args.manifest_dir))
     target = Path(os.path.expanduser(args.target)) if args.target else None
 
+    if args.recommend and (args.update or args.uninstall):
+        print("Error: --recommend cannot be combined with --update/--uninstall", file=sys.stderr)
+        return 2
     if args.update and args.uninstall:
         print("Error: choose only one of --update or --uninstall", file=sys.stderr)
         return 2
     if args.keep_files and not args.uninstall:
         print("Error: --keep-files requires --uninstall", file=sys.stderr)
         return 2
+    if args.recommend:
+        goal = args.goal or args.identifier or ""
+        if not goal.strip():
+            print("Error: --recommend requires --goal or a free-text query", file=sys.stderr)
+            return 2
+        results = recommend_harnesses_for_cli(
+            goal=goal,
+            model_provider=args.model_provider,
+            model=args.model,
+            top_k=max(1, min(int(args.top_k), 5)),
+        )
+        print_recommendations(results)
+        return 0
+    if not args.identifier:
+        parser.error("identifier is required unless --recommend is used")
     if args.uninstall:
         result = uninstall_harness(
             args.identifier,

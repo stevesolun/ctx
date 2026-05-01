@@ -220,6 +220,7 @@ def recommend_harnesses(
     *,
     top_k: int = 5,
     model_provider: str | None = None,
+    model: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return high-confidence harness catalog recommendations."""
     if not goal.strip():
@@ -250,13 +251,14 @@ def recommend_harnesses(
                 graph,
                 str(row.get("name") or ""),
                 model_provider,
+                model=model,
             )
         ]
-        top_score = max((float(row.get("score") or 0.0) for row in results), default=0.0)
-        if top_score > 0:
-            for row in results:
-                row["normalized_score"] = round(float(row.get("score") or 0.0) / top_score, 4)
-            threshold = cfg.harness_recommendation_min_normalized_score
+        threshold = cfg.harness_recommendation_min_normalized_score
+        for row in results:
+            score = float(row.get("score") or 0.0)
+            row.setdefault("normalized_score", round(min(max(score, 0.0), 1.0), 4))
+        if results:
             results = [
                 row for row in results
                 if float(row.get("normalized_score") or 0.0) >= threshold
@@ -267,16 +269,18 @@ def recommend_harnesses(
             file=sys.stderr,
         )
         return []
-    return results[:top_k]
+    return results[:limit]
 
 
 def _harness_supports_provider(
     graph: Any,
     slug: str,
     model_provider: str | None,
+    *,
+    model: str | None = None,
 ) -> bool:
     """Return true when a harness is compatible with the requested provider."""
-    requested = _normalise_model_provider(model_provider)
+    requested = _provider_match_candidates(model_provider, model)
     if not requested:
         return True
     providers = _harness_model_providers_from_graph(graph, slug)
@@ -284,7 +288,29 @@ def _harness_supports_provider(
         providers = _harness_model_providers_from_wiki(slug)
     if not providers:
         return True
-    return requested in providers
+    if providers.intersection({"model-agnostic", "any", "all", "litellm"}):
+        return True
+    return bool(requested & providers)
+
+
+def _provider_match_candidates(
+    model_provider: str | None,
+    model: str | None,
+) -> set[str]:
+    providers = {
+        candidate for candidate in (
+            _normalise_model_provider(model_provider),
+            _normalise_model_provider(_model_provider_prefix(model or "")),
+        ) if candidate
+    }
+    parts = [part for part in (model or "").split("/") if part]
+    if parts and _normalise_model_provider(parts[0]) in {"openrouter", "litellm"}:
+        providers.update(
+            _normalise_model_provider(part)
+            for part in parts[1:2]
+            if _normalise_model_provider(part)
+        )
+    return providers
 
 
 def _normalise_model_provider(value: str | None) -> str:
@@ -297,6 +323,8 @@ def _normalise_model_provider(value: str | None) -> str:
         "googleai": "google",
         "gemini": "google",
         "local": "ollama",
+        "model_agnostic": "model-agnostic",
+        "model agnostic": "model-agnostic",
     }
     return aliases.get(provider, provider)
 
@@ -531,15 +559,11 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
         part for part in [goal, provider or "", args.model or "", "harness"]
         if part
     )
-    try:
-        harnesses = recommend_harnesses(
-            recommendation_query,
-            model_provider=provider,
-        )
-    except TypeError as exc:
-        if "model_provider" not in str(exc):
-            raise
-        harnesses = recommend_harnesses(recommendation_query)
+    harnesses = recommend_harnesses(
+        recommendation_query,
+        model_provider=provider,
+        model=args.model,
+    )
     if harnesses:
         print("  [ok] recommended harnesses:")
         for row in harnesses:

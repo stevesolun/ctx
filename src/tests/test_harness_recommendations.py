@@ -54,7 +54,7 @@ def _harness_graph() -> nx.Graph:
         "harness:local-workbench",
         label="local-workbench",
         type="harness",
-        tags=["python", "agents", "graph", "checkpointing", "harness", "ollama"],
+        tags=["python", "agent", "agents", "graph", "checkpointing", "harness", "ollama"],
         model_providers=["ollama"],
     )
     graph.add_node(
@@ -179,6 +179,33 @@ def test_ctx_init_filters_harnesses_by_model_provider(
     )
 
     assert [row["name"] for row in results] == ["local-workbench"]
+
+
+def test_ctx_init_treats_model_agnostic_and_openrouter_underlying_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ctx_init, "_load_recommendation_graph", _harness_graph)
+    graph = _harness_graph()
+    graph.add_node(
+        "harness:universal-agent",
+        label="universal-agent",
+        type="harness",
+        tags=["python", "agents", "harness"],
+        model_providers=["model-agnostic"],
+    )
+
+    assert ctx_init._harness_supports_provider(
+        graph,
+        "universal-agent",
+        "openrouter",
+        model="openrouter/anthropic/claude-sonnet",
+    )
+    assert ctx_init._harness_supports_provider(
+        graph,
+        "langgraph",
+        "openrouter",
+        model="openrouter/openai/gpt-5.5",
+    )
 
 
 def test_ctx_init_prints_harness_install_handoff_for_custom_model(

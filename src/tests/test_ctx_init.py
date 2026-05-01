@@ -93,7 +93,11 @@ def test_main_auto_wizard_in_terminal_configures_custom_model(
 ) -> None:
     monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
     monkeypatch.setattr(ci, "_stdio_is_interactive", lambda: True)
-    monkeypatch.setattr(ci, "recommend_harnesses", lambda goal, top_k=5: [])
+    monkeypatch.setattr(
+        ci,
+        "recommend_harnesses",
+        lambda goal, top_k=5, model_provider=None, model=None: [],
+    )
 
     answers = iter([
         "y",                  # hooks
@@ -137,7 +141,11 @@ def test_wizard_flag_prompts_without_tty(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
     monkeypatch.setattr(ci, "_stdio_is_interactive", lambda: False)
     monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
-    monkeypatch.setattr(ci, "recommend_harnesses", lambda goal, top_k=5: [])
+    monkeypatch.setattr(
+        ci,
+        "recommend_harnesses",
+        lambda goal, top_k=5, model_provider=None, model=None: [],
+    )
 
     answers = iter([
         "n",                  # hooks
@@ -239,12 +247,27 @@ def test_main_custom_model_writes_profile_and_recommends_harness(
 ) -> None:
     monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
     monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
+
+    recommendation_calls: list[dict[str, object]] = []
+
+    def fake_recommend(
+        goal: str,
+        top_k: int = 5,
+        model_provider: str | None = None,
+        model: str | None = None,
+    ) -> list[dict[str, object]]:
+        recommendation_calls.append({
+            "goal": goal,
+            "top_k": top_k,
+            "model_provider": model_provider,
+            "model": model,
+        })
+        return [{"name": "text-to-cad", "type": "harness", "score": 0.8}]
+
     monkeypatch.setattr(
         ci,
         "recommend_harnesses",
-        lambda goal, top_k=5: [
-            {"name": "text-to-cad", "type": "harness", "score": 0.8}
-        ],
+        fake_recommend,
     )
 
     rc = ci.main([
@@ -259,6 +282,8 @@ def test_main_custom_model_writes_profile_and_recommends_harness(
     assert profile["provider"] == "openai"
     assert profile["model"] == "openai/gpt-5.5"
     assert profile["api_key_env"] == "OPENAI_API_KEY"
+    assert recommendation_calls[0]["model_provider"] == "openai"
+    assert recommendation_calls[0]["model"] == "openai/gpt-5.5"
     assert "text-to-cad" in capsys.readouterr().out
 
 
@@ -275,7 +300,11 @@ def test_validate_model_flag_invokes_connection_check(
 ) -> None:
     monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
     monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
-    monkeypatch.setattr(ci, "recommend_harnesses", lambda goal, top_k=5: [])
+    monkeypatch.setattr(
+        ci,
+        "recommend_harnesses",
+        lambda goal, top_k=5, model_provider=None, model=None: [],
+    )
     calls: list[dict] = []
 
     def fake_validate(**kwargs):
