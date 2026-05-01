@@ -1,6 +1,6 @@
 # Knowledge Graph
 
-Pre-built knowledge graph of **104,078 nodes** and **2,960,189 edges** across **53 communities** (Louvain). The curated core remains **13,232 nodes** (1,969 curated skills + 464 agents + 10,786 MCP servers + 13 cataloged harnesses). The Skills.sh catalog contributes **90,846 first-class `skill` nodes**, **90,846 skill entity pages under `entities/skills/skills-sh-*.md`**, and **89,461 hydrated Skills.sh micro-skill orchestrators** under `converted/skills-sh-*/SKILL.md`; **28,611** long hydrated bodies keep their preserved source in `SKILL.md.original`. Edges are blended from three signals: semantic cosine (**1,707,435** edges, default weight 0.70), explicit `tags:` overlap (**920,667** candidate pairs, weight 0.15), and sparse slug-token overlap (**442,549** candidate pairs, weight 0.15). Skills.sh is full-body semantic: **1,525,295** Skills.sh-incident edges have non-zero `semantic_sim`, including **1,437,138** Skills.sh-to-Skills.sh semantic edges. Rebuild with `python -m ctx.core.wiki.wiki_graphify`, add harnesses with `ctx-harness-add`, then refresh the Skills.sh catalog with `python src/import_skills_sh_catalog.py --from-api-union <raw.json> --update-wiki-tar`.
+Pre-built knowledge graph of **104,078 nodes** and **2,960,189 edges** across **53 communities** (Louvain). The curated core remains **13,232 nodes** (1,969 curated skills + 464 agents + 10,786 MCP servers + 13 cataloged harnesses). The Skills.sh catalog contributes **90,846 first-class `skill` nodes**, **90,846 skill entity pages under `entities/skills/skills-sh-*.md`**, and **89,461 hydrated Skills.sh micro-skill orchestrators** under `converted/skills-sh-*/SKILL.md`. Edges are blended from three signals: semantic cosine (**1,707,435** edges, default weight 0.70), explicit `tags:` overlap (**920,667** candidate pairs, weight 0.15), and sparse slug-token overlap (**442,549** candidate pairs, weight 0.15). Skills.sh is full-body semantic: **1,525,295** Skills.sh-incident edges have non-zero `semantic_sim`, including **1,437,138** Skills.sh-to-Skills.sh semantic edges. Rebuild with `python -m ctx.core.wiki.wiki_graphify`, add harnesses with `ctx-harness-add`, then refresh the Skills.sh catalog with `python src/import_skills_sh_catalog.py --from-api-union <raw.json> --update-wiki-tar`.
 
 Runtime recommendation is intentionally split into two paths: execution
 surfaces recommend only skills, agents, and MCP servers; custom/API/local model
@@ -9,7 +9,7 @@ harness match floor in `config.json`.
 
 > **2026-04-30.** Completed the Skills.sh full-body semantic regraph. That build had **2,881,027** edges, including **1,626,632** semantic edges. Skills.sh nodes had **1,451,838** non-zero semantic incident edges. The slug-token dense threshold was tightened from 500 to 30 because hydrated Skills.sh slugs created 13M+ low-signal token-only pairs and made export fail; semantic top-K and explicit tags are now the primary large-scale signals.
 
-> **2026-05-01.** Converted the hydrated Skills.sh corpus to micro-skill form. All **89,461** hydrated Skills.sh `SKILL.md` files are now under the 180-line loader threshold; **28,611** long bodies were split into gated pipeline stages and keep `SKILL.md.original` for full-body semantic graphing. Generated stage/reference markdown is bounded to 40 lines and raw PHP openers are defanged in generated markdown. The graph was rebuilt from the preserved originals and now has **2,960,189** edges, including **1,707,435** semantic edges.
+> **2026-05-01.** Converted the hydrated Skills.sh corpus to micro-skill form. All **89,461** hydrated Skills.sh `SKILL.md` files are now under the 180-line loader threshold; **28,611** long bodies were split into gated pipeline stages for loading. The full-body semantic graph was rebuilt from preserved source material before packaging, but `SKILL.md.original` backups are not shipped in `wiki-graph.tar.gz`. Generated stage/reference markdown is bounded to 40 lines and raw PHP openers are defanged in generated markdown. The graph now has **2,960,189** edges, including **1,707,435** semantic edges.
 
 > **2026-04-29.** Expanded the harness catalog to 13 first-class `harness` nodes/pages: LangGraph, CrewAI, AutoGen, Google ADK, Semantic Kernel, Mastra, Pydantic AI, Haystack, OpenAI Agents SDK, LiteLLM, Langfuse, AgentOps, and [`text-to-cad`](https://github.com/earthtojake/text-to-cad). Node count: 104,066 -> **104,078**. Edge count: 1,031,011 -> **1,033,253**. Harness incident edges now total 2,700: 2,411 curated-core edges plus 289 remote-cataloged Skills.sh metadata edges.
 
@@ -32,9 +32,9 @@ harness match floor in `config.json`.
 
 | File | Size | Contents |
 |------|------|----------|
-| `wiki-graph.tar.gz` | ~436 MiB | **Full wiki** - entity cards, 91,234 converted skill bodies, 430 mirrored agent bodies, 104K-node / 2.96M-edge knowledge graph, concept pages, catalog, 13 cataloged harnesses, and first-class hydrated Skills.sh micro-skill pages |
+| `wiki-graph.tar.gz` | ~336 MiB | **Full wiki** - entity cards, 91,234 converted skill bodies, 430 mirrored agent bodies, 104K-node / 2.96M-edge knowledge graph, concept pages, catalog, 13 cataloged harnesses, and first-class hydrated Skills.sh micro-skill pages |
 | `skills-sh-catalog.json.gz` | ~11.3 MiB | Compressed Skills.sh catalog (90,846 observed entries, install commands, detail URLs, inferred tags, overlap metadata) |
-| `communities.json` | ~6.7 MiB | 50 detected communities (Louvain) with labels + member lists |
+| `communities.json` | ~6.6 MiB | 53 detected communities (Louvain) with labels + member lists |
 | `viz-overview.html` / `.png` | — | Plotly-rendered overview of the full graph |
 | `viz-python.html` | — | Python-skills sub-view |
 | `viz-security.html` / `.png` | — | Security-skills sub-view |
@@ -48,7 +48,7 @@ harness match floor in `config.json`.
 - `entities/mcp-servers/<shard>/` — **10,786** MCP entity pages (sharded by first-char to keep dirs scannable)
 - `entities/harnesses/` - **13** harness entity pages
 - `concepts/` - community concept pages generated from the current Louvain labels
-- `converted/` - **91,234** skill bodies ready for `ctx-skill-install`, including **89,461** hydrated Skills.sh micro-skill orchestrators, **28,611** preserved Skills.sh originals in `SKILL.md.original`, and `converted/find-skills/SKILL.md`
+- `converted/` - **91,234** skill bodies ready for `ctx-skill-install`, including **89,461** hydrated Skills.sh micro-skill orchestrators and `converted/find-skills/SKILL.md`; no `SKILL.md.original` backups are shipped
 - `converted-agents/` — **430** agent bodies ready for `ctx-agent-install`
 - `graphify-out/graph.json` - full knowledge graph (104,078 nodes, 2,960,189 edges), including the curated core, cataloged harnesses, and full-body semantic Skills.sh skill nodes
 - `graphify-out/communities.json` - community detection results (53 communities, Louvain)
@@ -58,7 +58,7 @@ harness match floor in `config.json`.
 - `SCHEMA.md`, `index.md`, `log.md` — wiki infrastructure
 - `.obsidian/` — Obsidian vault config, so the extracted tree opens as a graph directly in Obsidian
 
-Excluded to keep the tarball reviewable (all regenerable on first local run): `raw/` (pulsemcp HTML cache, ~700MB), `.embedding-cache/` (sentence-transformer vectors + top-K state, hundreds of MB), `.ingest-checkpoint/`, `.enrich-checkpoint/`, `graphify-out/graph-delta.json`.
+Excluded to keep the tarball reviewable (all regenerable on first local run): `raw/` (pulsemcp HTML cache, ~700MB), `.embedding-cache/` (sentence-transformer vectors + top-K state, hundreds of MB), `.ingest-checkpoint/`, `.enrich-checkpoint/`, `graphify-out/graph-delta.json`, and micro-skill `SKILL.md.original` backups.
 
 ## Usage
 
