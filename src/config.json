@@ -121,7 +121,7 @@
   },
 
   "babysitter": {
-    "plugin_root": "C:/Users/solun/.claude/plugins/cache/a5c-ai/babysitter/4.0.149",
+    "plugin_root": "",
     "runs_dir": ".a5c/runs",
     "sdk_version": "latest"
   },

@@ -2,12 +2,12 @@
   "version": "1.0",
   "skill_dirs": [
     {
-      "path": "C:\\Users\\solun/.claude/skills",
+      "path": "~/.claude/skills",
       "label": "global-skills",
       "enabled": true
     },
     {
-      "path": "C:\\Users\\solun/.claude/agents",
+      "path": "~/.claude/agents",
       "label": "global-agents",
       "enabled": true
     }
