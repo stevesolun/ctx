@@ -13,23 +13,22 @@ Authoritative numbers from the shipped tarball. The curated-core snapshot
 is **13,232 nodes** (1,969 curated skills + 464 agents + 10,786 MCP servers
 + 13 harnesses). Harness pages under `entities/harnesses/` are ingested into
 local rebuilds and the separate harness-catalog recommendation path. The
-tarball also carries **90,846
-remote-cataloged Skills.sh `skill` nodes**, matching skill pages under
-`entities/skills/skills-sh-*.md`, and **67,530 sparse metadata edges** back
-to curated entities. These records are first-class skills by graph type,
-but remain metadata-only until their upstream SKILL.md bodies are hydrated
-and reviewed.
+tarball also carries **90,846 remote-cataloged Skills.sh `skill` nodes**,
+matching skill pages under `entities/skills/skills-sh-*.md`. **89,461**
+hydrated Skills.sh bodies are shipped as micro-skill orchestrators under
+`converted/skills-sh-*/SKILL.md`; **28,611** long originals are preserved as
+`SKILL.md.original` and used for full-body semantic graphing.
 
 | | Count |
 |---|---:|
 | Total nodes | **104,078** |
 | Curated core nodes | **13,232** (1,969 skills + 464 agents + 10,786 MCP servers + 13 harnesses) |
 | Remote-cataloged Skills.sh skill nodes | **90,846** (`skill`, `status=remote-cataloged`) |
-| Total edges | **1,033,253** |
-| Curated core edges | **965,723** |
-| Skills.sh metadata edges | **67,530** |
-| Communities | **23** (Louvain over the curated core) |
-| Edge sources (overlap-deduped) | semantic 210,487 - tag 598,908 - token 315,162 |
+| Total edges | **2,960,189** |
+| Skills.sh incident edges | **2,665,345** |
+| Skills.sh semantic incident edges | **1,525,295** |
+| Communities | **53** (Louvain) |
+| Edge sources (overlap-deduped) | semantic 1,707,435 - tag 920,667 - token 442,549 |
 | Cross-type edges (skill <-> agent) | ~222K |
 | Cross-type edges (skill <-> MCP) | ~62K |
 | Cross-type edges (agent <-> MCP) | ~13K |
@@ -76,15 +75,16 @@ Three sources of connectivity, combined at build time by the
 Edge `weight` is the final blended strength after semantic, tag, and token
 signals are combined. Edge metadata keeps the ingredients explainable:
 `semantic_sim` for cosine similarity, `shared_tags` for explicit tags, and
-`shared_tokens` for slug-token overlap. Skills.sh records currently have
-metadata-only edges until their upstream SKILL.md bodies are hydrated and
-semantic embeddings are rebuilt.
+`shared_tokens` for slug-token overlap. Hydrated Skills.sh records use their
+preserved `SKILL.md.original` bodies for semantic graphing, so the graph
+keeps full-body similarity even though the installable `SKILL.md` files are
+short micro-skill orchestrators.
 
 ## Communities
 
 After edges are built, `wiki_graphify` runs NetworkX's Louvain
 community detection (`resolution=1.2`, `seed=42` for determinism).
-The result is **23 communities** ranging from single-member isolated
+The result is **53 communities** ranging from single-member isolated
 specialists to several thousand members in broad clusters like
 `Community + Official + AI`. Each community also gets an auto-generated
 `concepts/<community>.md` wiki page summarizing its members and top
@@ -125,7 +125,7 @@ raw = json.loads(
 edges_key = "links" if "links" in raw else "edges"
 G = node_link_graph(raw, edges=edges_key)
 
-# 104,078 nodes, 1,033,253 edges
+# 104,078 nodes, 2,960,189 edges
 print(G.number_of_nodes(), G.number_of_edges())
 
 # Find entities related to 'fastapi-pro' by edge weight
@@ -156,7 +156,8 @@ The graph backs two recommendation paths:
   slug-token matches, tag overlap, graph degree, and semantic-cache
   signals when available. Skills.sh results are `skill` nodes with
   `source_catalog=skills.sh`, `detail_url`, `install_command`, duplicate
-  hints, and metadata-only quality/security signals. If an older
+  hints, micro-skill orchestrators when hydrated, and quality/security
+  metadata. If an older
   extracted wiki has the Skills.sh catalog JSON but no graph nodes for
   those records, the same recommender falls back to the catalog file.
 - Harness recommendations are a separate catalog path for custom/API/local
@@ -208,6 +209,8 @@ if your hook config does not include those paths.
 | 2026-04-29 Skills.sh remote-cataloged pass | **1,030,831** | +90,846 first-class `skill` nodes, +90,846 skill pages, and +67,519 sparse duplicate/tag metadata edges to the curated graph. Full-body semantic edges are intentionally deferred to the hydration pass. |
 | 2026-04-29 text-to-cad harness pass | **1,031,011** | +1 first-class `harness` node, +1 harness page, and +224 explainable harness edges, including 44 remote-cataloged Skills.sh edges. |
 | 2026-04-29 curated harness catalog pass | **1,033,253** | +12 first-class `harness` nodes/pages for LangGraph, CrewAI, AutoGen, Google ADK, Semantic Kernel, Mastra, Pydantic AI, Haystack, OpenAI Agents SDK, LiteLLM, Langfuse, and AgentOps; harness incident edges now total 2,700. |
+| 2026-04-30 Skills.sh semantic hydration pass | **2,881,027** | +full-body semantic edges for hydrated Skills.sh records; semantic top-K became the dominant large-scale signal. |
+| 2026-05-01 Skills.sh micro-skill pass | **2,960,189** | Converted all 89,461 hydrated Skills.sh `SKILL.md` files to <=180-line orchestrators, preserved 28,611 originals for semantic graphing, bounded generated stage/reference files to 40 lines, and rebuilt the graph. |
 
 The full audit history lives in `CHANGELOG.md`. The current build is
 fully reproducible from the wiki content.

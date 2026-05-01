@@ -73,18 +73,18 @@ graph-based discovery:
   inventory, including 90,846 remote-cataloged Skills.sh skill pages
   and 13 cataloged harness pages under `entities/harnesses/`.
   Each page tracks tags, status, provenance, and usage where it applies.
-- A **knowledge graph** (104,078 nodes, 1,033,253 edges) built from a
+- A **knowledge graph** (104,078 nodes, 2,960,189 edges) built from a
   13,232-node curated core plus 90,846 remote-cataloged Skills.sh `skill`
-  nodes. The curated core has 23 Louvain communities and blends semantic
-  cosine + tag overlap + slug-token overlap; the current Skills.sh pass
-  adds sparse metadata edges and keeps metadata-only security status until
-  full SKILL.md body hydration runs.
-- **23 Louvain communities** group related entities into named
+  nodes. The graph has 53 Louvain communities and blends semantic cosine,
+  tag overlap, and slug-token overlap; 89,461 hydrated Skills.sh bodies are
+  shipped as micro-skill orchestrators, with preserved originals used for
+  full-body semantic graphing.
+- **53 Louvain communities** group related entities into named
   communities (e.g., *AI + Devops + Frontend*, *Python + API*).
 - PostToolUse and Stop hooks update the wiki automatically during each
   Claude Code session.
-- Skills over 180 lines are converted to a gated 5-stage micro-skill
-  pipeline so the router can load them incrementally.
+- Hydrated skills over 180 lines are converted to gated micro-skill
+  pipelines so the router can load them incrementally.
 - At session start, the skill-router scans your project and
   **recommends** the best-matching skills, agents, and MCP servers.
 - Mid-session, the context monitor watches every tool call, detects new
@@ -109,9 +109,8 @@ ones are flagged. New ones self-ingest.
     ---
 
     104,078 shipped graph nodes: 13,232 curated skill/agent/MCP/harness
-    nodes plus 90,846 remote-cataloged Skills.sh skill nodes. The graph has 1,033,253
-    weighted edges; Louvain communities are generated for the curated
-    core.
+    nodes plus 90,846 remote-cataloged Skills.sh skill nodes. The graph has
+    2,960,189 weighted edges and 53 Louvain communities.
     Ships pre-built in `graph/wiki-graph.tar.gz` and powers the
     graph-aware recommendations + the pre-ship `ctx-dedup-check` gate.
 
@@ -180,13 +179,13 @@ ones are flagged. New ones self-ingest.
     ---
 
     **v0.7.x** — MIT, CI-matrixed (Ubuntu + Windows × Python 3.11/3.12),
-    3,333+ tests passing. Ships console scripts including `ctx-init`,
+    3,370+ tests collected. Ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus harness wiki/graph browsing),
     `ctx-dedup-check` (pre-ship near-duplicate gate), and
-    `ctx-tag-backfill` (catalog hygiene), plus the ~43 MiB pre-built
-    wiki tarball with **104,078 nodes / 1,033,253 edges / 23 curated-core
-    Louvain communities**. Hardened across the Strix audit + a 12-finding
+    `ctx-tag-backfill` (catalog hygiene), plus the ~436 MiB pre-built
+    wiki tarball with **104,078 nodes / 2,960,189 edges / 53 Louvain
+    communities**. Hardened across the Strix audit + a 12-finding
     codex review.
 
     [:octicons-arrow-right-24: CHANGELOG](https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md) ·
