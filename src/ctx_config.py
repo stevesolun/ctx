@@ -137,7 +137,19 @@ class Config:
         self.keep_log_days: int = tracker.get("keep_log_days", 5)
 
         # ── Skill Transformer ──────────────────────────────────────────────
-        self.line_threshold: int = transformer.get("line_threshold", 180)
+        raw_line_threshold = transformer.get("line_threshold", 180)
+        try:
+            self.line_threshold = int(raw_line_threshold)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "skill_transformer.line_threshold must be an integer >= 1 "
+                f"(got {raw_line_threshold!r})"
+            ) from None
+        if self.line_threshold < 1:
+            raise ValueError(
+                "skill_transformer.line_threshold must be an integer >= 1 "
+                f"(got {self.line_threshold})"
+            )
         self.max_stage_lines: int = transformer.get("max_stage_lines", 40)
         self.stage_count: int = transformer.get("stage_count", 5)
 

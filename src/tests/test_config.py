@@ -77,6 +77,15 @@ class TestConfigLoadsDefaults:
         cfg = Config(_minimal_raw())
         assert cfg.line_threshold == 180
 
+    def test_line_threshold_accepts_user_value(self) -> None:
+        cfg = Config(_minimal_raw({"skill_transformer": {"line_threshold": 240}}))
+        assert cfg.line_threshold == 240
+
+    @pytest.mark.parametrize("value", [0, -1, "not-an-int"])
+    def test_line_threshold_rejects_invalid_values(self, value: object) -> None:
+        with pytest.raises(ValueError, match="skill_transformer.line_threshold"):
+            Config(_minimal_raw({"skill_transformer": {"line_threshold": value}}))
+
     def test_max_stage_lines_default(self) -> None:
         cfg = Config(_minimal_raw())
         assert cfg.max_stage_lines == 40
@@ -170,7 +179,7 @@ class TestConfigReload:
         monkeypatch.setattr(ctx_config, "_USER_CONFIG", tmp_path / "nonexistent.json")
 
         ctx_config.reload()
-        # line_threshold should fall back to the hard-coded default 180
+        # line_threshold should fall back to the packaged default 180
         assert ctx_config.cfg.line_threshold == 180
 
 

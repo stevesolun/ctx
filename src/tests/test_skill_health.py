@@ -555,6 +555,28 @@ def test_cli_scan_outputs_json(isolated_cli: dict,
     assert data["entities"][0]["name"] == "ok"
 
 
+def test_cli_scan_uses_configured_default_line_threshold(
+    isolated_cli: dict,
+    capsys: pytest.CaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sh, "DEFAULT_LINE_THRESHOLD", 8)
+    _write_skill(
+        isolated_cli["skills"],
+        "longer",
+        "\n".join(["body line"] * 6),
+        fm_name="longer",
+        fm_description="good",
+    )
+
+    rc = sh.main(["scan"])
+
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    issues = data["entities"][0]["issues"]
+    assert [issue["code"] for issue in issues] == ["over-threshold"]
+
+
 def test_cli_dashboard_prints_human_summary(isolated_cli: dict,
                                             capsys: pytest.CaptureFixture
                                             ) -> None:

@@ -18,7 +18,7 @@ For each skill (`~/.claude/skills/<name>/SKILL.md`) and each agent
 | `frontmatter-missing-name` | error | Frontmatter has no `name:` field |
 | `frontmatter-missing-description` | warning | Missing `description:` (router relevance suffers) |
 | `empty-body` | error | Fewer than `min_body_lines` non-blank lines |
-| `over-threshold` | warning | Line count exceeds `line_threshold` (default 180) |
+| `over-threshold` | warning | Line count exceeds `skill_transformer.line_threshold`; the packaged default is 180 and users can override it in `~/.claude/skill-system-config.json` |
 
 ## Drift detection
 
