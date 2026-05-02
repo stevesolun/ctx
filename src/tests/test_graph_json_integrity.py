@@ -6,6 +6,7 @@ import tarfile
 from pathlib import Path
 
 import networkx as nx
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -27,6 +28,16 @@ CURATED_HARNESS_SLUGS = {
     "semantic-kernel",
     "text-to-cad",
 }
+GIT_LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
+
+
+def _require_hydrated_tarball(tarball: Path) -> None:
+    if not tarball.exists():
+        pytest.skip(f"{tarball} is not present")
+    with tarball.open("rb") as handle:
+        prefix = handle.read(len(GIT_LFS_POINTER_PREFIX))
+    if prefix == GIT_LFS_POINTER_PREFIX:
+        pytest.skip(f"{tarball} is a Git LFS pointer in this checkout")
 
 
 def _write_graph_file(tmp_path: Path, content: bytes | str) -> Path:
@@ -101,6 +112,7 @@ class TestLoadGraphIntegrity:
 
     def test_shipped_wiki_graph_contains_curated_harness_catalog(self) -> None:
         tarball = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
+        _require_hydrated_tarball(tarball)
         with tarfile.open(tarball, "r:gz") as tf:
             names = {member.name for member in tf.getmembers()}
             expected_pages = {
@@ -124,6 +136,7 @@ class TestLoadGraphIntegrity:
 
     def test_shipped_wiki_graph_omits_original_backups(self) -> None:
         tarball = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
+        _require_hydrated_tarball(tarball)
         with tarfile.open(tarball, "r:gz") as tf:
             original_members = [
                 member.name for member in tf.getmembers()
