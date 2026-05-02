@@ -21,6 +21,7 @@ _SRC = Path(__file__).resolve().parent.parent
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+from ctx.adapters.claude_code import inject_hooks  # noqa: E402
 from ctx.adapters.claude_code.inject_hooks import make_hooks, merge_hooks, write_settings_atomic  # noqa: E402
 
 
@@ -225,6 +226,22 @@ class TestCtxDirQuoting:
                 assert f" {ctx_dir}/" not in cmd, (
                     f"Unquoted $ path found in: {cmd!r}"
                 )
+
+    def test_windows_python_path_with_spaces_uses_windows_quoting(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            inject_hooks.sys,
+            "executable",
+            r"C:\Program Files\Python311\python.exe",
+        )
+        monkeypatch.setattr(inject_hooks.os, "name", "nt")
+
+        cmd = inject_hooks._module_cmd("usage_tracker", "--sync")
+
+        assert cmd == r'"C:\Program Files\Python311\python.exe" -m usage_tracker --sync'
+        assert "'" not in cmd
 
 
 class TestPackagedHookCommands:

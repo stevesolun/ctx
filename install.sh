@@ -27,5 +27,10 @@ if ! command -v "$PYTHON" >/dev/null 2>&1; then
   PYTHON="python"
 fi
 
-export PYTHONPATH="$CTX_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+PYTHONPATH_SEP="$("$PYTHON" - <<'PY'
+import os
+print(os.pathsep)
+PY
+)"
+export PYTHONPATH="$CTX_DIR/src${PYTHONPATH:+$PYTHONPATH_SEP$PYTHONPATH}"
 exec "$PYTHON" -m ctx_init "$@"

@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import shlex
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -33,7 +34,8 @@ def load_settings(path: Path) -> dict:
 def make_hooks(ctx_dir: str) -> dict:
     """Return the hooks config block for this installation."""
     _ = ctx_dir  # Kept for CLI/API compatibility; commands now use modules.
-    # shlex.quote() ensures paths with spaces, $, or quotes don't break the shell command.
+    # Commands are quoted for the host OS so Python paths with spaces do not
+    # break the hook shell/command runner.
     # Tool input is delivered by Claude Code on stdin as JSON; --from-stdin reads it
     # from there instead of interpolating $CLAUDE_TOOL_INPUT into argv (which would
     # allow shell injection via malicious tool-input blobs).
@@ -114,6 +116,8 @@ def make_hooks(ctx_dir: str) -> dict:
 def _module_cmd(module: str, *args: str) -> str:
     """Return a hook command that targets an installed Python module."""
     parts = [sys.executable, "-m", module, *args]
+    if os.name == "nt":
+        return subprocess.list2cmdline(parts)
     return " ".join(shlex.quote(part) for part in parts)
 
 

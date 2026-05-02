@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.11", "3.12"]
 
     steps:
@@ -119,8 +119,15 @@ jobs:
         run: pytest -q --no-cov -m browser src/tests/test_ctx_monitor_browser.py
 
   package-smoke:
-    name: "Wheel package smoke"
-    runs-on: ubuntu-latest
+    name: "Wheel package smoke (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -144,7 +151,11 @@ jobs:
       - name: Install wheel in clean venv
         run: |
           python -m venv .venv-smoke
-          . .venv-smoke/bin/activate
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            . .venv-smoke/Scripts/activate
+          else
+            . .venv-smoke/bin/activate
+          fi
           python -m pip install --upgrade pip
           python -m pip install dist/*.whl
           python -m pip check
