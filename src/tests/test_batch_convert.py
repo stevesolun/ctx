@@ -389,6 +389,20 @@ class TestConvertSkill:
         refs_dir = skill_100.parent / "references"
         assert not refs_dir.exists()
 
+    def test_convert_skill_skips_exact_threshold_with_trailing_newline(self, tmp_path: Path):
+        content = "\n".join(f"Line {i}" for i in range(180)) + "\n"
+        skill = _make_skill_md(tmp_path, content, name="exact-threshold")
+
+        result = convert_skill(skill, line_threshold=180)
+
+        assert result["status"] == "skipped"
+        assert not (skill.parent / "SKILL.md.original").exists()
+
+    def test_convert_skill_respects_explicit_line_threshold(self, skill_100: Path):
+        result = convert_skill(skill_100, line_threshold=50)
+
+        assert result["status"] == "converted"
+
     # ── happy-path pipeline creation ──────────────────────────────────────────
 
     def test_convert_skill_creates_pipeline(self, skill_250: Path, tmp_path: Path):
@@ -514,7 +528,7 @@ class TestConvertSkill:
     def test_convert_skill_original_lines_accurate(self, skill_250: Path):
         """Returned original_lines matches the actual line count of the source."""
         content = skill_250.read_text(encoding="utf-8")
-        actual_line_count = len(content.split("\n"))
+        actual_line_count = len(content.splitlines())
         result = convert_skill(skill_250)
         assert result["original_lines"] == actual_line_count
 

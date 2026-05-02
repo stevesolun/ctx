@@ -138,13 +138,15 @@ class Config:
 
         # ── Skill Transformer ──────────────────────────────────────────────
         raw_line_threshold = transformer.get("line_threshold", 180)
-        try:
-            self.line_threshold = int(raw_line_threshold)
-        except (TypeError, ValueError):
+        if (
+            isinstance(raw_line_threshold, bool)
+            or not isinstance(raw_line_threshold, int)
+        ):
             raise ValueError(
                 "skill_transformer.line_threshold must be an integer >= 1 "
                 f"(got {raw_line_threshold!r})"
-            ) from None
+            )
+        self.line_threshold = raw_line_threshold
         if self.line_threshold < 1:
             raise ValueError(
                 "skill_transformer.line_threshold must be an integer >= 1 "

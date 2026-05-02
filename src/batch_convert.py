@@ -35,6 +35,10 @@ MAX_STAGE_LINES = cfg.max_stage_lines
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+def _line_count(content: str) -> int:
+    return len(content.splitlines())
+
+
 # ── Section classification ────────────────────────────────────────────────────
 
 SCOPE_KEYWORDS = re.compile(
@@ -252,7 +256,11 @@ def _stage_shard_path(path: Path, index: int) -> Path:
 
 # ── Converter ─────────────────────────────────────────────────────────────────
 
-def convert_skill(skill_path: Path | str, output_dir: Path | str | None = None) -> dict:
+def convert_skill(
+    skill_path: Path | str,
+    output_dir: Path | str | None = None,
+    line_threshold: int | None = None,
+) -> dict:
     """Convert a single skill file into a micro-skill pipeline.
 
     If output_dir is None, converts in-place (same directory as the skill).
@@ -262,11 +270,11 @@ def convert_skill(skill_path: Path | str, output_dir: Path | str | None = None) 
     if output_dir is not None:
         output_dir = Path(output_dir)
     content = skill_path.read_text(encoding="utf-8", errors="replace")
-    lines = content.split("\n")
-    line_count = len(lines)
+    line_count = _line_count(content)
+    threshold = cfg.line_threshold if line_threshold is None else line_threshold
 
-    if line_count <= cfg.line_threshold:
-        return {"status": "skipped", "reason": f"{line_count} lines <= {MIN_LINES}"}
+    if line_count <= threshold:
+        return {"status": "skipped", "reason": f"{line_count} lines <= {threshold}"}
 
     # Compute source hash
     source_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -560,7 +568,7 @@ def main():
             if (skill_md.parent / "SKILL.md.original").exists():
                 continue
             try:
-                line_count = len(skill_md.read_text(encoding="utf-8", errors="replace").split("\n"))
+                line_count = _line_count(skill_md.read_text(encoding="utf-8", errors="replace"))
                 if line_count > min_lines_val:
                     skill_files.append((skill_md, line_count))
             except Exception as exc:
@@ -581,7 +589,7 @@ def main():
     skipped = 0
     for i, (sf, lc) in enumerate(skill_files):
         try:
-            result = convert_skill(sf)
+            result = convert_skill(sf, line_threshold=min_lines_val)
             if result["status"] == "converted":
                 converted += 1
                 if (i + 1) % 50 == 0:

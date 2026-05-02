@@ -81,7 +81,7 @@ class TestConfigLoadsDefaults:
         cfg = Config(_minimal_raw({"skill_transformer": {"line_threshold": 240}}))
         assert cfg.line_threshold == 240
 
-    @pytest.mark.parametrize("value", [0, -1, "not-an-int"])
+    @pytest.mark.parametrize("value", [0, -1, "not-an-int", "240", True, False, 1.5])
     def test_line_threshold_rejects_invalid_values(self, value: object) -> None:
         with pytest.raises(ValueError, match="skill_transformer.line_threshold"):
             Config(_minimal_raw({"skill_transformer": {"line_threshold": value}}))
