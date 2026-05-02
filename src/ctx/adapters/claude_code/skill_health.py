@@ -39,6 +39,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from ctx_config import cfg
 from ctx.utils._file_lock import file_lock
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write
 
@@ -51,11 +52,7 @@ AGENTS_DIR = Path(os.path.expanduser("~/.claude/agents"))
 MANIFEST_PATH = Path(os.path.expanduser("~/.claude/skill-manifest.json"))
 PENDING_PATH = Path(os.path.expanduser("~/.claude/pending-skills.json"))
 
-try:
-    from ctx_config import cfg
-    DEFAULT_LINE_THRESHOLD = cfg.line_threshold
-except Exception:  # noqa: BLE001 - keep the health CLI usable if config is broken.
-    DEFAULT_LINE_THRESHOLD = 180
+DEFAULT_LINE_THRESHOLD = cfg.line_threshold
 DEFAULT_MIN_BODY_LINES = 5
 ERROR_SEVERITIES = frozenset({"error"})
 _SEVERITY_RANK = {"ok": 0, "warning": 1, "error": 2}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tarfile
 import zlib
 from io import BytesIO
@@ -713,6 +714,31 @@ def test_update_wiki_tarball_micro_converts_long_skills_sh_body(
     assert "./converted/skills-sh-example-skills-long-skill/check-gates.md" in names
     assert "./converted/skills-sh-example-skills-long-skill/SKILL.md.original" not in names
     assert "When this skill triggers, execute the following gated pipeline." in skill_text
+
+
+def test_converted_skill_files_uses_validated_config(monkeypatch) -> None:
+    class FakeCfg:
+        line_threshold = 10
+
+    class FakeBatchConvert:
+        @staticmethod
+        def convert_skill(source: Path, output_dir: Path) -> dict[str, str]:
+            (output_dir / "SKILL.md").write_bytes(b"# Converted\n")
+            (output_dir / "SKILL.md.original").write_text(
+                source.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            return {"status": "converted"}
+
+    monkeypatch.setattr("ctx_config.cfg", FakeCfg())
+    monkeypatch.setitem(sys.modules, "batch_convert", FakeBatchConvert)
+
+    files = importer._converted_skill_files_from_body(
+        converted_path="converted/skills-sh-example-long/SKILL.md",
+        skill_body="\n".join(f"line {i}" for i in range(11)),
+    )
+
+    assert files == {"converted/skills-sh-example-long/SKILL.md": b"# Converted\n"}
 
 
 def test_hydration_falls_back_to_github_raw_skill_md(monkeypatch) -> None:

@@ -1236,11 +1236,8 @@ def _converted_skill_files_from_body(
     root = converted_path.removesuffix("/SKILL.md")
     if not root.startswith(f"{CONVERTED_SKILL_ROOT}/skills-sh-"):
         return {converted_path: body.encode("utf-8")}
-    try:
-        from ctx_config import cfg as _cfg
-        line_threshold = int(getattr(_cfg, "line_threshold", 180))
-    except Exception:
-        line_threshold = 180
+    from ctx_config import cfg as _cfg
+    line_threshold = _cfg.line_threshold
     if len(body.splitlines()) <= line_threshold:
         return {converted_path: body.encode("utf-8")}
 
