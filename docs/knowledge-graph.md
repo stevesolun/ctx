@@ -10,7 +10,7 @@ update, load/unload, and quality scoring remain CLI/API workflows.
 ## What's in it
 
 Authoritative numbers from the shipped tarball. The curated-core snapshot
-is **13,232 nodes** (1,969 curated skills + 464 agents + 10,786 MCP servers
+is **13,233 nodes** (1,969 curated skills + 464 agents + 10,787 MCP servers
 + 13 harnesses). Harness pages under `entities/harnesses/` are ingested into
 local rebuilds and the separate harness-catalog recommendation path. The
 tarball also carries **90,846 remote-cataloged Skills.sh `skill` nodes**,
@@ -23,14 +23,14 @@ are used during graph rebuilds for semantic similarity, but
 
 | | Count |
 |---|---:|
-| Total nodes | **104,078** |
-| Curated core nodes | **13,232** (1,969 skills + 464 agents + 10,786 MCP servers + 13 harnesses) |
+| Total nodes | **104,079** |
+| Curated core nodes | **13,233** (1,969 skills + 464 agents + 10,787 MCP servers + 13 harnesses) |
 | Remote-cataloged Skills.sh skill nodes | **90,846** (`skill`, `status=remote-cataloged`) |
-| Total edges | **2,960,189** |
+| Total edges | **2,960,215** |
 | Skills.sh incident edges | **2,665,345** |
 | Skills.sh semantic incident edges | **1,525,295** |
 | Communities | **53** (Louvain) |
-| Edge sources (overlap-deduped) | semantic 1,707,435 - tag 920,667 - token 442,549 |
+| Edge sources (overlap-deduped) | semantic 1,707,435 - tag 920,686 - token 442,556 |
 | Cross-type edges (skill <-> agent) | ~222K |
 | Cross-type edges (skill <-> MCP) | ~62K |
 | Cross-type edges (agent <-> MCP) | ~13K |
@@ -128,7 +128,7 @@ raw = json.loads(
 edges_key = "links" if "links" in raw else "edges"
 G = node_link_graph(raw, edges=edges_key)
 
-# 104,078 nodes, 2,960,189 edges
+# 104,079 nodes, 2,960,215 edges
 print(G.number_of_nodes(), G.number_of_edges())
 
 # Find entities related to 'fastapi-pro' by edge weight
@@ -213,6 +213,7 @@ if your hook config does not include those paths.
 | 2026-04-29 curated harness catalog pass | **1,033,253** | +12 first-class `harness` nodes/pages for LangGraph, CrewAI, AutoGen, Google ADK, Semantic Kernel, Mastra, Pydantic AI, Haystack, OpenAI Agents SDK, LiteLLM, Langfuse, and AgentOps; harness incident edges now total 2,700. |
 | 2026-04-30 Skills.sh semantic hydration pass | **2,881,027** | +full-body semantic edges for hydrated Skills.sh records; semantic top-K became the dominant large-scale signal. |
 | 2026-05-01 Skills.sh micro-skill pass | **2,960,189** | Enforced the <=180-line loader threshold across 89,461 hydrated Skills.sh `SKILL.md` files, converted 28,611 long bodies into gated micro-skill orchestrators, used full originals for semantic graphing, excluded `.original` backups from the shipped tarball, bounded generated stage/reference files to 40 lines, and rebuilt the graph. |
+| 2026-05-02 GitNexus MCP pass | **2,960,215** | Added GitNexus as a cataloged MCP server entity with 26 cross-type edges to its Skills.sh skill pages and related architecture/refactoring agents; semantic edge count unchanged. |
 
 The full audit history lives in `CHANGELOG.md`. The current build is
 fully reproducible from the wiki content.
