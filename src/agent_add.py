@@ -33,6 +33,7 @@ from intake_pipeline import IntakeRejected, check_intake, record_embedding
 from wiki_batch_entities import generate_agent_page
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
 from ctx.core.wiki.wiki_utils import validate_skill_name
+from ctx.utils._fs_utils import reject_symlink_path, safe_atomic_write_text
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -53,11 +54,10 @@ def install_agent(source: Path, agents_dir: Path, name: str) -> Path:
 
 def write_entity_page(wiki_path: Path, name: str, content: str) -> bool:
     """Write agent entity page. Returns True if newly created."""
-    entities_dir = wiki_path / "entities" / "agents"
-    entities_dir.mkdir(parents=True, exist_ok=True)
-    page = entities_dir / f"{name}.md"
+    page = wiki_path / "entities" / "agents" / f"{name}.md"
+    reject_symlink_path(page)
     is_new = not page.exists()
-    page.write_text(content, encoding="utf-8")
+    safe_atomic_write_text(page, content, encoding="utf-8")
     return is_new
 
 

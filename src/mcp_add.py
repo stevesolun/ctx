@@ -39,6 +39,7 @@ from mcp_entity import McpRecord
 from wiki_batch_entities import generate_mcp_page
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
 from ctx.core.wiki.wiki_utils import validate_skill_name
+from ctx.utils._fs_utils import reject_symlink_path, safe_atomic_write_text
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -290,6 +291,7 @@ def add_mcp(
     if canonical_match is not None and canonical_match != target_path:
         target_path = canonical_match
 
+    reject_symlink_path(target_path)
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     is_new_page: bool
@@ -357,7 +359,7 @@ def add_mcp(
     if not dry_run:
         # Phase 2 of branching: render and write. Any YAML serialization
         # failure now is a real error, not a dry-run side-effect.
-        target_path.write_text(final_text, encoding="utf-8")
+        safe_atomic_write_text(target_path, final_text, encoding="utf-8")
 
         # Phase 6b: keep the canonical sidecar index hot. Upsert on
         # every successful write so the first cross-source dedup after

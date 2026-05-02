@@ -27,6 +27,7 @@ from intake_pipeline import IntakeRejected, check_intake, record_embedding
 from ctx.adapters.claude_code.install.install_utils import safe_copy_file
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
 from ctx.core.wiki.wiki_utils import validate_skill_name
+from ctx.utils._fs_utils import reject_symlink_path, safe_atomic_write_text
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -163,8 +164,9 @@ def build_entity_page(
 def write_entity_page(wiki_path: Path, name: str, content: str) -> bool:
     """Write entity page. Returns True if newly created."""
     page = wiki_path / "entities" / "skills" / f"{name}.md"
+    reject_symlink_path(page)
     is_new = not page.exists()
-    page.write_text(content, encoding="utf-8")
+    safe_atomic_write_text(page, content, encoding="utf-8")
     return is_new
 
 
@@ -193,6 +195,7 @@ def find_related_skills(wiki_path: Path, name: str, tags: list[str]) -> list[str
 def _add_backlink(wiki_path: Path, target_name: str, source_name: str) -> None:
     """Add a [[wikilink]] from target page back to source if not already present."""
     page = wiki_path / "entities" / "skills" / f"{target_name}.md"
+    reject_symlink_path(page)
     if not page.exists():
         return
     content = page.read_text(encoding="utf-8", errors="replace")
@@ -208,7 +211,7 @@ def _add_backlink(wiki_path: Path, target_name: str, source_name: str) -> None:
         )
     else:
         content = content.rstrip() + f"\n\n- {link}\n"
-    page.write_text(content, encoding="utf-8")
+    safe_atomic_write_text(page, content, encoding="utf-8")
 
 
 def wire_backlinks(wiki_path: Path, name: str, related: list[str]) -> None:

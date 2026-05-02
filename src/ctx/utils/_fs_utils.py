@@ -23,7 +23,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-__all__ = ["atomic_write_text", "atomic_write_bytes", "atomic_write_json"]
+__all__ = [
+    "atomic_write_text",
+    "atomic_write_bytes",
+    "atomic_write_json",
+    "reject_symlink_path",
+    "safe_atomic_write_text",
+]
 
 
 # Permission mask for newly written files. 0o600 = owner read/write only.
@@ -90,6 +96,32 @@ def atomic_write_json(path: Path, obj: Any, indent: int | None = 2) -> None:
     Creates parent directories if missing.
     """
     atomic_write_text(path, json.dumps(obj, indent=indent) + "\n", encoding="utf-8")
+
+
+def reject_symlink_path(path: Path) -> None:
+    """Raise if *path* or any existing ancestor is a symlink."""
+    path = Path(path)
+    if path.is_absolute():
+        current = Path(path.anchor)
+        parts = path.parts[1:]
+    else:
+        current = Path(".")
+        parts = path.parts
+
+    for part in parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError(f"refusing to use symlinked path: {current}")
+        if not current.exists():
+            return
+
+
+def safe_atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
+    """Atomically write text without following pre-existing symlink paths."""
+    reject_symlink_path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    reject_symlink_path(path)
+    atomic_write_text(path, text, encoding=encoding)
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
