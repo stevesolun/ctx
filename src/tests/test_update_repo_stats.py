@@ -47,6 +47,7 @@ def test_tarball_stats_only_trust_safe_regular_members(
             ("./entities/skills/good.md", b"# skill"),
             ("entities/agents/good.md", b"# agent"),
             ("entities/mcp-servers/a/good.md", b"# mcp"),
+            ("entities/harnesses/good.md", b"# harness"),
             ("shadow/entities/skills/ignored.md", b"# ignored"),
             ("entities/skills/../ignored.md", b"# ignored"),
         ],
@@ -58,6 +59,7 @@ def test_tarball_stats_only_trust_safe_regular_members(
         "skills": 1,
         "agents": 1,
         "mcps": 1,
+        "harnesses": 1,
         "communities": 4,
     }
 
@@ -128,6 +130,7 @@ def test_tarball_stats_uses_report_when_graph_json_is_large(
             ("entities/skills/good.md", b"# skill"),
             ("entities/agents/good.md", b"# agent"),
             ("entities/mcp-servers/a/good.md", b"# mcp"),
+            ("entities/harnesses/good.md", b"# harness"),
         ],
     )
 
@@ -137,6 +140,7 @@ def test_tarball_stats_uses_report_when_graph_json_is_large(
         "skills": 1,
         "agents": 1,
         "mcps": 1,
+        "harnesses": 1,
         "communities": 50,
     }
 
@@ -149,6 +153,7 @@ def test_test_badge_is_labeled_collected_not_passing() -> None:
         "skills": None,
         "agents": None,
         "mcps": None,
+        "harnesses": None,
         "communities": None,
     }
     patched = text
@@ -157,6 +162,27 @@ def test_test_badge_is_labeled_collected_not_passing() -> None:
 
     assert "Tests-34_collected" in patched
     assert "_passing" not in patched
+
+
+def test_harness_aware_readme_prose_is_updated() -> None:
+    text = (
+        "walks a **1,000 skills, 20 agents, 30 MCP servers, "
+        "and 4 cataloged harnesses** graph"
+    )
+    stats = {
+        "nodes": None,
+        "edges": None,
+        "skills": 92815,
+        "agents": 464,
+        "mcps": 10787,
+        "harnesses": 13,
+        "communities": None,
+    }
+    patched = text
+    for pattern, replacement in urs.build_replacements(stats, tests=None, converted=None):
+        patched = pattern.sub(replacement, patched)
+
+    assert "**92,815 skills, 464 agents, 10,787 MCP servers, and 13 cataloged harnesses**" in patched
 
 
 def test_read_test_count_prefers_project_python(

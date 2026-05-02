@@ -128,14 +128,15 @@ def _read_graph_from_tarball_legacy() -> dict[str, int | None] | None:
         return None
     stats: dict[str, int | None] = {
         "nodes": None, "edges": None,
-        "skills": None, "agents": None, "mcps": None, "communities": None,
+        "skills": None, "agents": None, "mcps": None, "harnesses": None,
+        "communities": None,
     }
     try:
         with tarfile.open(tarball, "r:gz") as tf:
             # Count entity pages directly from the archive index.
             # MCP entities are sharded by first char (entities/mcp-servers/<shard>/)
             # so we match the whole subtree, not just one level.
-            s = a = m = 0
+            s = a = m = h = 0
             for member in tf.getmembers():
                 name = _safe_tar_name(member.name)
                 if name is None or not member.isfile() or not name.endswith(".md"):
@@ -146,7 +147,9 @@ def _read_graph_from_tarball_legacy() -> dict[str, int | None] | None:
                     a += 1
                 elif name.startswith("entities/mcp-servers/"):
                     m += 1
-            stats["skills"], stats["agents"], stats["mcps"] = s, a, m
+                elif name.startswith("entities/harnesses/"):
+                    h += 1
+            stats["skills"], stats["agents"], stats["mcps"], stats["harnesses"] = s, a, m, h
             # Graph + communities are smaller files — extract to read.
             for path in (_GRAPH_JSON_MEMBER, _COMMUNITIES_JSON_MEMBER):
                 body = _read_json_member(tf, path)
@@ -183,11 +186,12 @@ def _read_graph_from_tarball() -> dict[str, int | None] | None:
         return None
     stats: dict[str, int | None] = {
         "nodes": None, "edges": None,
-        "skills": None, "agents": None, "mcps": None, "communities": None,
+        "skills": None, "agents": None, "mcps": None, "harnesses": None,
+        "communities": None,
     }
     try:
         with tarfile.open(tarball, "r:gz") as tf:
-            s = a = m = 0
+            s = a = m = h = 0
             for member in tf.getmembers():
                 name = _safe_tar_name(member.name)
                 if name is None or not member.isfile() or not name.endswith(".md"):
@@ -198,7 +202,9 @@ def _read_graph_from_tarball() -> dict[str, int | None] | None:
                     a += 1
                 elif name.startswith("entities/mcp-servers/"):
                     m += 1
-            stats["skills"], stats["agents"], stats["mcps"] = s, a, m
+                elif name.startswith("entities/harnesses/"):
+                    h += 1
+            stats["skills"], stats["agents"], stats["mcps"], stats["harnesses"] = s, a, m, h
 
             report = _read_text_member(tf, _GRAPH_REPORT_MEMBER)
             if report is not None:
@@ -261,6 +267,7 @@ def read_graph_stats() -> dict:
         "skills": None,
         "agents": None,
         "mcps": None,
+        "harnesses": None,
         "communities": None,
     }
 
@@ -277,6 +284,7 @@ def read_graph_stats() -> dict:
         stats["skills"] = type_counts.get("skill")
         stats["agents"] = type_counts.get("agent")
         stats["mcps"] = type_counts.get("mcp-server")
+        stats["harnesses"] = type_counts.get("harness")
 
     if communities_repo.exists():
         c = json.loads(communities_repo.read_text(encoding="utf-8"))
@@ -401,6 +409,20 @@ def build_replacements(stats: dict, tests: int | None, converted: int | None) ->
     if stats["skills"]:
         s = stats["skills"]
         reps.append((re.compile(r"badge/Skills-[0-9%,]+-"), f"badge/Skills-{s:,}-".replace(",", "%2C")))
+        # 4-type pattern: "92,815 skills, 464 agents, 10,787 MCP servers,
+        # and 13 cataloged harnesses". Keep this before the 3-type fallback
+        # so the README's harness-aware lead sentence stays machine-owned.
+        if stats["agents"] and stats["mcps"] and stats["harnesses"]:
+            reps.append((
+                re.compile(
+                    r"\*\*[\d,]+\s+skills,\s+[\d,]+\s+agents,\s+"
+                    r"[\d,]+\s+MCP\s+servers,\s+and\s+[\d,]+\s+"
+                    r"cataloged\s+harnesses\*\*"
+                ),
+                f"**{s:,} skills, {stats['agents']:,} agents, "
+                f"{stats['mcps']:,} MCP servers, and "
+                f"{stats['harnesses']:,} cataloged harnesses**",
+            ))
         # 3-type pattern: "1,789 skills, 464 agents, and 10,786 MCP servers"
         # Order matters — this regex is more specific than the 2-type one
         # below, so match it first. Handles the MCP-aware tagline that
