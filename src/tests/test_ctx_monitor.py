@@ -67,9 +67,13 @@ def _post_json(port: int, path: str, body: dict, token: str | None = None) -> tu
         return exc.code, json.loads(exc.read().decode("utf-8"))
 
 
-def _serve_monitor(monkeypatch: pytest.MonkeyPatch, token: str = "test-token"):
+def _serve_monitor(
+    monkeypatch: pytest.MonkeyPatch,
+    token: str = "test-token",
+    host: str = "127.0.0.1",
+):
     monkeypatch.setattr(cm, "_MONITOR_TOKEN", token)
-    server = cm._make_monitor_server("127.0.0.1", 0)
+    server = cm._make_monitor_server(host, 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, thread, server.server_port
@@ -383,6 +387,55 @@ def test_monitor_post_accepts_valid_token(
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_monitor_non_loopback_bind_is_read_only(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
+        calls.append(slug)
+        return True, f"loaded {entity_type}"
+
+    (fake_claude / "skill-manifest.json").write_text(
+        json.dumps({"load": [], "unload": [], "warnings": []}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cm, "_perform_load", fake_load)
+    server, thread, port = _serve_monitor(
+        monkeypatch,
+        token="browser-token",
+        host="0.0.0.0",
+    )
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/loaded", timeout=5) as response:
+            loaded_html = response.read().decode("utf-8")
+        assert "browser-token" not in loaded_html
+        assert "Read-only mode" in loaded_html
+
+        status, body = _post_json(
+            port,
+            "/api/load",
+            {"slug": "python-patterns"},
+            token="browser-token",
+        )
+        assert status == 403
+        assert "disabled" in body["detail"]
+        assert calls == []
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_host_allows_mutations_only_for_loopback() -> None:
+    assert cm._host_allows_mutations("127.0.0.1")
+    assert cm._host_allows_mutations("::1")
+    assert cm._host_allows_mutations("localhost")
+    assert not cm._host_allows_mutations("0.0.0.0")
+    assert not cm._host_allows_mutations("::")
+    assert not cm._host_allows_mutations("example.com")
 
 
 def test_graph_api_invalid_params_return_400(

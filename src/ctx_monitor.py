@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import ipaddress
 import json
 import os
 import secrets
@@ -64,11 +65,22 @@ from ctx.utils._safe_name import is_safe_source_name
 
 
 _MONITOR_TOKEN = ""
+_MONITOR_MUTATIONS_ENABLED = True
 _GRAPH_CACHE_KEY: tuple[Path, float, int, int] | None = None
 _GRAPH_CACHE_VALUE: Any | None = None
 
 
 # ─── Data sources ────────────────────────────────────────────────────────────
+
+
+def _host_allows_mutations(host: str) -> bool:
+    normalized = (host or "").strip().strip("[]").rstrip(".").lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 def _claude_dir() -> Path:
@@ -1714,7 +1726,7 @@ def _render_events() -> str:
     )
 
 
-def _render_loaded() -> str:
+def _render_loaded(mutations_enabled: bool | None = None) -> str:
     """Live view of ~/.claude/skill-manifest.json with load/unload actions.
 
     Groups manifest entries by ``entity_type`` (skill / agent / mcp-server / harness)
@@ -1724,6 +1736,8 @@ def _render_loaded() -> str:
     Legacy entries without entity_type default to ``skill`` (what the
     pre-install_utils manifest implicitly assumed).
     """
+    if mutations_enabled is None:
+        mutations_enabled = _MONITOR_MUTATIONS_ENABLED
     manifest = _read_manifest()
     load_rows = manifest.get("load", [])
     unload_rows = manifest.get("unload", [])
@@ -1742,6 +1756,18 @@ def _render_loaded() -> str:
     for e in load_rows:
         by_type.setdefault(_etype(e), []).append(e)
 
+    disabled_attr = "" if mutations_enabled else " disabled"
+    mutation_token = _MONITOR_TOKEN if mutations_enabled else ""
+    mutation_notice = (
+        ""
+        if mutations_enabled
+        else (
+            "<div class='card'><strong>Read-only mode.</strong> "
+            "Load/unload actions are disabled because ctx-monitor is not "
+            "bound to a loopback address.</div>"
+        )
+    )
+
     def _row(e: dict) -> str:
         slug = e.get("skill", "")
         etype = _etype(e)
@@ -1754,7 +1780,7 @@ def _render_loaded() -> str:
             f"--uninstall --dry-run</code></td>"
             if etype == "harness" else
             f"<td><button class='btn-unload' data-slug='{html.escape(slug)}' "
-            f"data-etype='{html.escape(etype)}'>unload</button></td>"
+            f"data-etype='{html.escape(etype)}'{disabled_attr}>unload</button></td>"
         )
         return (
             f"<tr>"
@@ -1792,7 +1818,7 @@ def _render_loaded() -> str:
         f"data-etype='{html.escape(_etype(e))}'"
         f"{' data-command=' + repr(html.escape(str(e.get('command')))) if e.get('command') else ''}"
         f"{' data-json-config=' + repr(html.escape(str(e.get('json_config')))) if e.get('json_config') else ''}"
-        f">load</button></td>"
+        f"{disabled_attr}>load</button></td>"
         f"</tr>"
         for e in unload_rows
     )
@@ -1810,6 +1836,7 @@ def _render_loaded() -> str:
         f"<span class='muted'>source: <code>~/.claude/skill-manifest.json</code> "
         f"+ <code>~/.claude/harness-installs/*.json</code></span>"
         "</div>"
+        f"{mutation_notice}"
         "<h2>Load an entity</h2>"
         "<div class='card'>"
         "<form id='load-form'>"
@@ -1822,7 +1849,7 @@ def _render_loaded() -> str:
         "<option value='agent'>agent</option>"
         "<option value='mcp-server'>mcp-server</option>"
         "</select>"
-        "<button type='submit' style='margin-left:0.5rem;'>load</button>"
+        f"<button type='submit' style='margin-left:0.5rem;'{disabled_attr}>load</button>"
         "<span id='load-msg' class='muted' style='margin-left:0.75rem;'></span>"
         "</form></div>"
         f"<h2>Currently loaded ({len(load_rows)})</h2>"
@@ -1834,8 +1861,10 @@ def _render_loaded() -> str:
         "<table><tr><th>Slug</th><th>Type</th><th>Source / reason</th><th></th></tr>"
         + unload_html + "</table>"
         "<script>\n"
-        f"const CTX_MONITOR_TOKEN = {json.dumps(_MONITOR_TOKEN)};\n"
+        f"const CTX_MONITOR_MUTATIONS_ENABLED = {json.dumps(mutations_enabled)};\n"
+        f"const CTX_MONITOR_TOKEN = {json.dumps(mutation_token)};\n"
         "async function post(url, body) {\n"
+        "  if (!CTX_MONITOR_MUTATIONS_ENABLED) return {ok:false, msg:'mutations disabled on non-loopback bind'};\n"
         "  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json', 'X-CTX-Monitor-Token':CTX_MONITOR_TOKEN}, body: JSON.stringify(body || {})});\n"
         "  const ok = r.status >= 200 && r.status < 300;\n"
         "  let msg = ''; try { msg = (await r.json()).detail || r.statusText; } catch(_) { msg = r.statusText; }\n"
@@ -2059,9 +2088,18 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         # when the mutation token below is also present.
         return True
 
+    def _mutations_enabled(self) -> bool:
+        return bool(
+            getattr(self.server, "_ctx_mutations_enabled", _MONITOR_MUTATIONS_ENABLED),
+        )
+
     def _mutation_authorized(self) -> bool:
         token = self.headers.get("X-CTX-Monitor-Token") or ""
-        return bool(_MONITOR_TOKEN) and secrets.compare_digest(token, _MONITOR_TOKEN)
+        return (
+            self._mutations_enabled()
+            and bool(_MONITOR_TOKEN)
+            and secrets.compare_digest(token, _MONITOR_TOKEN)
+        )
 
     def do_GET(self) -> None:  # noqa: N802 — stdlib signature
         # Parse once so we can reuse the query string for /graph?slug=…
@@ -2086,7 +2124,7 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                     qs.get("type"),
                 ))
             elif path == "/loaded":
-                self._send_html(_render_loaded())
+                self._send_html(_render_loaded(self._mutations_enabled()))
             elif path == "/logs":
                 self._send_html(_render_logs())
             elif path == "/graph":
@@ -2147,6 +2185,11 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(length) if length else b""
+            if not self._mutations_enabled():
+                self._send_json_status(
+                    403, {"detail": "monitor mutations disabled on non-loopback bind"},
+                )
+                return
             if not self._same_origin():
                 self._send_json_status(
                     403, {"detail": "cross-origin POST denied"},
@@ -2305,16 +2348,29 @@ class _MonitorServer(ThreadingHTTPServer):
 
 
 def _make_monitor_server(host: str, port: int) -> _MonitorServer:
-    return _MonitorServer((host, port), _MonitorHandler)
+    global _MONITOR_MUTATIONS_ENABLED
+    _MONITOR_MUTATIONS_ENABLED = _host_allows_mutations(host)
+    server = _MonitorServer((host, port), _MonitorHandler)
+    server._ctx_mutations_enabled = _MONITOR_MUTATIONS_ENABLED
+    return server
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
     """Run the monitor. Blocks until Ctrl+C."""
     global _MONITOR_TOKEN
-    _MONITOR_TOKEN = secrets.token_urlsafe(32)
     server = _make_monitor_server(host, port)
+    _MONITOR_TOKEN = (
+        secrets.token_urlsafe(32)
+        if bool(getattr(server, "_ctx_mutations_enabled", False))
+        else ""
+    )
     url = f"http://{host}:{port}/"
     print(f"ctx-monitor serving at {url}  (Ctrl+C to stop)", flush=True)
+    if not bool(getattr(server, "_ctx_mutations_enabled", False)):
+        print(
+            "ctx-monitor: non-loopback bind; load/unload mutations disabled",
+            flush=True,
+        )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
