@@ -7,6 +7,32 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - No unreleased changes yet.
 
+## [0.7.1] - 2026-05-02
+
+### Fixed
+
+- Ensured the shipped `graph/wiki-graph.tar.gz` omits all `.original`
+  micro-skill backup files, not just newly generated `SKILL.md.original`
+  files.
+- Made the micro-skill line threshold strict, configurable through
+  `skill_transformer.line_threshold`, and honored by both scan and
+  single-file conversion modes.
+- Made `ctx-monitor --host 0.0.0.0` read-only: non-loopback binds no
+  longer expose the dashboard mutation token or accept load/unload POSTs.
+- Hardened skill, agent, and MCP entity-page writes against pre-existing
+  symlinked targets or parent directories.
+- Fixed generated Claude Code hook commands on Windows Python paths with
+  spaces.
+
+### Changed
+
+- Added macOS to the main CI matrix and expanded wheel smoke tests across
+  Linux, Windows, and macOS.
+- Added a native `install.ps1` wrapper and made `install.sh` use the host
+  Python path separator.
+- `v0.7.0` remains untouched because it is already published; the safe
+  release tag for this patch line is `v0.7.1`.
+
 ## [0.7.0] - 2026-04-28
 
 This release is the hardening and model-agnostic harness release. It
