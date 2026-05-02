@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
+import pytest
 
 import harness_add
 
@@ -141,6 +142,23 @@ def test_existing_harness_update_existing_applies_reviewed_change(
     assert result["sources"] == ["external-review", "manual"]
     assert fm["sources"] == ["external-review", "manual"]
     assert fm["verify_commands"] == ["pytest", "python smoke.py"]
+
+
+def test_add_harness_refuses_symlinked_entity_page(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    target_dir = wiki / "entities" / "harnesses"
+    target_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside\n", encoding="utf-8")
+    try:
+        (target_dir / "text-to-cad.md").symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+
+    with pytest.raises(ValueError, match="symlink"):
+        harness_add.add_harness(record=_record(), wiki_path=wiki)
+
+    assert outside.read_text(encoding="utf-8") == "outside\n"
 
 
 def test_cli_from_json_adds_harness(

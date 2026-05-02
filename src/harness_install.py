@@ -25,6 +25,7 @@ from urllib.request import url2pathname
 
 from ctx.core.entity_types import entity_page_path
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body, validate_skill_name
+from ctx.utils._fs_utils import atomic_write_json, reject_symlink_path
 from ctx_config import cfg
 
 _COMMAND_ENV_ALLOWLIST = {
@@ -388,8 +389,10 @@ def _write_manifest(
     setup_runs: list[dict[str, Any]],
     verify_runs: list[dict[str, Any]],
 ) -> Path:
-    manifest_dir.mkdir(parents=True, exist_ok=True)
     path = manifest_dir / f"{record.slug}.json"
+    reject_symlink_path(path)
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    reject_symlink_path(path)
     payload = {
         "slug": record.slug,
         "status": "installed",
@@ -399,7 +402,7 @@ def _write_manifest(
         "setup_commands_run": setup_runs,
         "verify_commands_run": verify_runs,
     }
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    atomic_write_json(path, payload, indent=2)
     return path
 
 

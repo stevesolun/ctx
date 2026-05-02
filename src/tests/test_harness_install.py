@@ -90,6 +90,53 @@ def test_install_copies_local_source_and_writes_manifest(tmp_path: Path) -> None
     assert manifest["verify_commands_run"] == []
 
 
+def test_write_manifest_uses_atomic_json_writer(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    calls: list[tuple[Path, dict[str, Any], int | None]] = []
+
+    def fake_atomic_write_json(
+        path: Path,
+        obj: Any,
+        indent: int | None = 2,
+    ) -> None:
+        assert isinstance(obj, dict)
+        calls.append((path, obj, indent))
+        path.write_text(json.dumps(obj, indent=indent) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        harness_install,
+        "atomic_write_json",
+        fake_atomic_write_json,
+        raising=False,
+    )
+    record = harness_install.HarnessRecord(
+        slug="text-to-cad",
+        path=tmp_path / "page.md",
+        title="Text to CAD",
+        repo_url="https://github.com/earthtojake/text-to-cad",
+        docs_url=None,
+        tags=("cad",),
+        runtimes=("python",),
+        model_providers=("openai",),
+        capabilities=("Generate CAD",),
+        setup_commands=(),
+        verify_commands=(),
+    )
+
+    path = harness_install._write_manifest(
+        record=record,
+        target=tmp_path / "installs" / "text-to-cad",
+        manifest_dir=tmp_path / "manifests",
+        setup_runs=[],
+        verify_runs=[],
+    )
+
+    assert path == tmp_path / "manifests" / "text-to-cad.json"
+    assert calls == [(path, json.loads(path.read_text(encoding="utf-8")), 2)]
+
+
 def test_install_accepts_file_uri_local_source_with_opt_in(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()

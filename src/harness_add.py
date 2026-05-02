@@ -24,6 +24,7 @@ import yaml  # type: ignore[import-untyped]
 
 from ctx.core.entity_update import build_update_review, render_update_review
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
+from ctx.utils._fs_utils import safe_atomic_write_text
 from ctx_config import cfg
 from mcp_entity import canonicalize_github_url, normalize_slug
 
@@ -302,8 +303,7 @@ def add_harness(
 
     if not dry_run:
         ensure_wiki(str(wiki_path))
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(proposed_text, encoding="utf-8")
+        safe_atomic_write_text(target_path, proposed_text, encoding="utf-8")
         if is_new_page:
             update_index(str(wiki_path), [record.slug], subject_type="harnesses")
         append_log(

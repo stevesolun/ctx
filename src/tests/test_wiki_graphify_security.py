@@ -265,3 +265,70 @@ def test_export_graph_does_not_write_pickle(graphify_out: Path) -> None:
     assert not (graphify_out / "graph.pickle").exists(), (
         "export_graph wrote graph.pickle — re-introducing the RCE vector"
     )
+
+
+def test_export_graph_uses_atomic_writer_for_artifacts(
+    graphify_out: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Graphify artifacts are large enough that direct writes can truncate state."""
+    from ctx.core.wiki import wiki_graphify
+
+    calls: list[str] = []
+
+    def fake_atomic(path: Path, text: str, encoding: str = "utf-8") -> None:
+        calls.append(path.name)
+        path.write_text(text, encoding=encoding)
+
+    monkeypatch.setattr(
+        wiki_graphify,
+        "safe_atomic_write_text",
+        fake_atomic,
+        raising=False,
+    )
+
+    wiki_graphify.export_graph(_make_sample_graph(), communities={})
+
+    assert set(calls) == {
+        "graph.json",
+        "graph-delta.json",
+        "communities.json",
+        "graph-report.md",
+    }
+
+
+def test_inject_community_links_refreshes_generated_block(
+    tmp_path: Path,
+) -> None:
+    """Regraphify must replace stale graph-generated links, not append forever."""
+    from ctx.core.wiki import wiki_graphify
+
+    wiki_graphify.configure_wiki_dir(tmp_path / "wiki")
+    page = tmp_path / "wiki" / "entities" / "skills" / "a.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "\n".join([
+            "# a",
+            "",
+            "## Related Skills",
+            "<!-- ctx-graph-related:start -->",
+            "- [[entities/skills/old]]",
+            "<!-- ctx-graph-related:end -->",
+            "- [[entities/skills/manual]]",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+
+    G = nx.Graph()
+    G.add_node("skill:a", label="a", type="skill", tags=["python"])
+    G.add_node("skill:b", label="b", type="skill", tags=["python"])
+    G.add_edge("skill:a", "skill:b", weight=1.0)
+
+    updated = wiki_graphify.inject_community_links(G, {0: ["skill:a", "skill:b"]})
+
+    content = page.read_text(encoding="utf-8")
+    assert updated == 1
+    assert "[[entities/skills/b]]" in content
+    assert "[[entities/skills/manual]]" in content
+    assert "[[entities/skills/old]]" not in content

@@ -15,6 +15,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,8 +33,15 @@ from ctx.core.entity_types import (
     mcp_shard,
 )
 from ctx.core.wiki.wiki_utils import parse_frontmatter as _parse_fm
+from ctx.utils._fs_utils import safe_atomic_write_text
 
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+GRAPH_RELATED_START = "<!-- ctx-graph-related:start -->"
+GRAPH_RELATED_END = "<!-- ctx-graph-related:end -->"
+GRAPH_RELATED_BLOCK_RE = re.compile(
+    rf"\n?{re.escape(GRAPH_RELATED_START)}\n.*?{re.escape(GRAPH_RELATED_END)}\n?",
+    re.DOTALL,
+)
 
 WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki"))
 SKILL_ENTITIES = WIKI_DIR / "entities" / "skills"
@@ -977,11 +985,20 @@ tags: [{', '.join(t for t, _ in sorted(defaultdict(int, {t: c for m in members f
         if dry_run:
             print(f"  [DRY RUN] Would create: concepts/{filename}")
         else:
-            (CONCEPTS_DIR / filename).write_text(page, encoding="utf-8")
+            safe_atomic_write_text(CONCEPTS_DIR / filename, page, encoding="utf-8")
         created.append(filename)
 
     print(f"Concept pages: {len(created)} created")
     return created
+
+
+def _remove_graph_related_block(content: str) -> tuple[str, bool]:
+    stripped, count = GRAPH_RELATED_BLOCK_RE.subn("\n", content)
+    return re.sub(r"\n{3,}", "\n\n", stripped), bool(count)
+
+
+def _render_graph_related_block(new_links: list[str]) -> str:
+    return "\n".join([GRAPH_RELATED_START, *new_links, GRAPH_RELATED_END])
 
 
 def inject_community_links(
@@ -989,7 +1006,7 @@ def inject_community_links(
     communities: dict[int, list[str]],
     dry_run: bool = False,
 ) -> int:
-    """Inject community membership and top-N neighbor wikilinks into entity frontmatter."""
+    """Refresh graph-generated top-N neighbor wikilinks on entity pages."""
     updated = 0
 
     # Build node->community mapping
@@ -1006,7 +1023,8 @@ def inject_community_links(
         if page_path is None or not page_path.exists():
             continue
 
-        content = page_path.read_text(encoding="utf-8", errors="replace")
+        original_content = page_path.read_text(encoding="utf-8", errors="replace")
+        content, had_generated_block = _remove_graph_related_block(original_content)
 
         # Find top neighbors by edge weight
         neighbors = sorted(
@@ -1024,23 +1042,27 @@ def inject_community_links(
                 continue
             new_links.append(f"- {link}")
 
-        if not new_links:
+        if not new_links and not had_generated_block:
             continue
 
-        # Inject under the type-appropriate ## Related section header.
+        # Refresh only ctx's generated block. Manual links in the same
+        # section stay untouched and prevent duplicates.
         section_header = _related_section_header(entity_type)
-        if section_header in content:
-            insert_text = "\n".join(new_links)
+        insert_text = _render_graph_related_block(new_links) if new_links else ""
+        if new_links and section_header in content:
             content = content.replace(
                 section_header + "\n",
                 section_header + "\n" + insert_text + "\n",
                 1,
             )
-        else:
-            content = content.rstrip() + f"\n\n{section_header}\n" + "\n".join(new_links) + "\n"
+        elif new_links:
+            content = content.rstrip() + f"\n\n{section_header}\n" + insert_text + "\n"
+
+        if content == original_content:
+            continue
 
         if not dry_run:
-            page_path.write_text(content, encoding="utf-8")
+            safe_atomic_write_text(page_path, content, encoding="utf-8")
         updated += 1
 
     print(f"Entity pages updated with graph-based wikilinks: {updated}")
@@ -1067,7 +1089,8 @@ def export_graph(
     # networkx version that wrote it — default changed from "links" in
     # <3.0 to "edges" in >=3.0, which silently broke every consumer.
     graph_data = nx.node_link_data(G, edges="edges")
-    (GRAPH_OUT / "graph.json").write_text(
+    safe_atomic_write_text(
+        GRAPH_OUT / "graph.json",
         json.dumps(graph_data, indent=2, default=str),
         encoding="utf-8",
     )
@@ -1084,7 +1107,8 @@ def export_graph(
     # the graph from scratch) so downstream consumers can always
     # stat a single file to detect changes.
     delta = _build_delta(G, delta_nodes or set())
-    (GRAPH_OUT / "graph-delta.json").write_text(
+    safe_atomic_write_text(
+        GRAPH_OUT / "graph-delta.json",
         json.dumps(delta, indent=2, default=str),
         encoding="utf-8",
     )
@@ -1094,7 +1118,8 @@ def export_graph(
     for cid, members in communities.items():
         labels[cid] = label_community(G, members)
 
-    (GRAPH_OUT / "communities.json").write_text(
+    safe_atomic_write_text(
+        GRAPH_OUT / "communities.json",
         json.dumps({
             "communities": {str(cid): {"label": labels[cid], "members": members}
                            for cid, members in communities.items()},
@@ -1123,7 +1148,11 @@ def export_graph(
     for cid, members in sorted(communities.items(), key=lambda x: -len(x[1])):
         report_lines.append(f"- **{labels[cid]}** — {len(members)} members")
 
-    (GRAPH_OUT / "graph-report.md").write_text("\n".join(report_lines), encoding="utf-8")
+    safe_atomic_write_text(
+        GRAPH_OUT / "graph-report.md",
+        "\n".join(report_lines),
+        encoding="utf-8",
+    )
     print(f"Graph exported to {GRAPH_OUT}/")
 
 
