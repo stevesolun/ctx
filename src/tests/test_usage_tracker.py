@@ -14,7 +14,6 @@ Covers:
 
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -32,7 +31,7 @@ from usage_tracker import (
     update_skill_page,
 )
 
-TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+TEST_TODAY = "2030-01-02"
 
 
 # ---------------------------------------------------------------------------
@@ -70,10 +69,11 @@ class TestReadTodaySignals:
     def test_happy_path(self, tmp_path, monkeypatch):
         log = tmp_path / "intent.jsonl"
         _write_intent_log(log, [
-            {"date": TODAY, "signals": ["react", "docker"]},
-            {"date": TODAY, "signals": ["react"]},
+            {"date": TEST_TODAY, "signals": ["react", "docker"]},
+            {"date": TEST_TODAY, "signals": ["react"]},
         ])
         monkeypatch.setattr(_ut, "INTENT_LOG", log)
+        monkeypatch.setattr(_ut, "_today", lambda: TEST_TODAY)
         result = read_today_signals()
         assert result["react"] == 2
         assert result["docker"] == 1
@@ -91,8 +91,11 @@ class TestReadTodaySignals:
 
     def test_skips_malformed_lines(self, tmp_path, monkeypatch):
         log = tmp_path / "intent.jsonl"
-        log.write_text(f'bad-json\n{json.dumps({"date": TODAY, "signals": ["fastapi"]})}\n')
+        log.write_text(
+            f'bad-json\n{json.dumps({"date": TEST_TODAY, "signals": ["fastapi"]})}\n',
+        )
         monkeypatch.setattr(_ut, "INTENT_LOG", log)
+        monkeypatch.setattr(_ut, "_today", lambda: TEST_TODAY)
         result = read_today_signals()
         assert result.get("fastapi") == 1
 
@@ -243,9 +246,10 @@ class TestUpdateSkillPage:
         entities.mkdir(parents=True)
         _make_entity_page(entities, "react")
         monkeypatch.setattr(_ut, "ENTITIES_DIR", entities)
+        monkeypatch.setattr(_ut, "_today", lambda: TEST_TODAY)
         update_skill_page("react", used=True)
         content = (entities / "react.md").read_text()
-        assert f"last_used: {TODAY}" in content
+        assert f"last_used: {TEST_TODAY}" in content
 
     def test_used_false_increments_session_count(self, tmp_path, monkeypatch):
         entities = tmp_path / "entities" / "skills"
@@ -354,7 +358,7 @@ class TestTruncateIntentLog:
 
     def test_malformed_lines_skipped(self, tmp_path, monkeypatch):
         log = tmp_path / "intent.jsonl"
-        log.write_text(f'not-json\n{json.dumps({"date": TODAY, "signals": []})}\n')
+        log.write_text(f'not-json\n{json.dumps({"date": TEST_TODAY, "signals": []})}\n')
         monkeypatch.setattr(_ut, "INTENT_LOG", log)
         monkeypatch.setattr(_ut, "KEEP_DAYS", 5)
         truncate_intent_log()
