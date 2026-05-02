@@ -13,6 +13,7 @@ build/
 *.egg
 .eggs/
 .venv/
+.venv-smoke/
 venv/
 env/
 .env

@@ -186,6 +186,8 @@ def test_fake_claude_cli_executes_post_tool_and_stop_hooks(tmp_path: Path) -> No
     assert "PostToolUse" in body
     assert "Stop" in body
     assert "subprocess.run" in body
+    assert "shell=True" in body
+    assert "shlex.split(command)" not in body
 
 
 def test_fake_claude_hook_output_requires_all_generated_hooks() -> None:

@@ -289,7 +289,6 @@ def write_fake_claude_cli(fake_modules: Path) -> Path:
         "import json\n"
         "import os\n"
         "import re\n"
-        "import shlex\n"
         "import subprocess\n"
         "import sys\n"
         "from pathlib import Path\n\n"
@@ -337,15 +336,15 @@ def write_fake_claude_cli(fake_modules: Path) -> Path:
         "    for event in ('PostToolUse', 'Stop'):\n"
         "        payload = json.dumps(PAYLOADS[event])\n"
         "        for command in _commands(settings, event):\n"
-        "            argv = shlex.split(command)\n"
         "            result = subprocess.run(\n"
-        "                argv,\n"
+        "                command,\n"
         "                cwd=cwd,\n"
         "                env=os.environ.copy(),\n"
         "                input=payload,\n"
         "                text=True,\n"
         "                capture_output=True,\n"
         "                check=False,\n"
+        "                shell=True,\n"
         "            )\n"
         "            records.append({\n"
         "                'event': event,\n"
@@ -438,7 +437,10 @@ def _assert_fake_claude_hook_output(stdout: str) -> None:
 
 
 def _quote_command(parts: Sequence[str | Path]) -> str:
-    return " ".join(shlex.quote(str(part)) for part in parts)
+    values = [str(part) for part in parts]
+    if os.name == "nt":
+        return subprocess.list2cmdline(values)
+    return " ".join(shlex.quote(part) for part in values)
 
 
 def write_live_claude_sentinel_script(path: Path) -> None:
