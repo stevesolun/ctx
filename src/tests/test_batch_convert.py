@@ -25,6 +25,7 @@ from batch_convert import (  # noqa: E402
     convert_skill,
     defang_dangerous_markdown,
     extract_gate_questions,
+    main as batch_convert_main,
     parse_sections,
     split_into_chunks,
 )
@@ -581,3 +582,18 @@ class TestConvertSkill:
         assert skill_250.exists()
         assert (out_dir / "SKILL.md").exists()
         assert (out_dir / "references" / "01-scope.md").exists()
+
+
+def test_main_file_mode_respects_min_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    skill = _make_skill_md(tmp_path, _fake_skill_content(100), name="cli-threshold")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["batch_convert.py", "--file", str(skill), "--min-lines", "50"],
+    )
+
+    batch_convert_main()
+
+    output = capsys.readouterr().out
+    assert '"status": "converted"' in output
+    assert (skill.parent / "SKILL.md.original").exists()

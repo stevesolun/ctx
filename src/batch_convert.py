@@ -544,7 +544,7 @@ def main():
         if not path.exists():
             print(f"File not found: {path}", file=sys.stderr)
             sys.exit(1)
-        result = convert_skill(path)
+        result = convert_skill(path, line_threshold=min_lines_val)
         print(json.dumps(result, indent=2))
         return
 
