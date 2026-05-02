@@ -166,7 +166,7 @@ jobs:
           PY
 
       - name: Upload dist artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -180,7 +180,7 @@ jobs:
       url: https://pypi.org/project/claude-ctx/
     steps:
       - name: Download dist artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist/
