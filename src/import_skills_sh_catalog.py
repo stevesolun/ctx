@@ -1265,7 +1265,7 @@ def _converted_skill_files_from_body(
             if not path.is_file():
                 continue
             rel = path.relative_to(output_dir).as_posix()
-            if rel == "SKILL.md.original":
+            if rel.endswith(".original"):
                 continue
             files[f"{root}/{rel}"] = path.read_bytes()
         if converted_path not in files:
@@ -1319,7 +1319,7 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                         and len(parts) >= 2
                         and parts[1] in replacement_slugs
                     )
-                    or safe_name.endswith("/SKILL.md.original")
+                    or safe_name.endswith(".original")
                 ):
                     continue
                 if member.isfile():

@@ -490,6 +490,8 @@ def test_update_wiki_tarball_drops_skills_sh_original_body_files(
             "# Very long upstream original\n",
         )
         _add_text(tf, "./converted/curated-long/SKILL.md.original", "# Curated original\n")
+        _add_text(tf, "./converted/curated-long/README.md.original", "# Raw README\n")
+        _add_text(tf, "./entities/skills/curated-long.md.original", "# Raw entity\n")
 
     catalog: dict[str, Any] = {
         "schema_version": 1,
@@ -532,6 +534,9 @@ def test_update_wiki_tarball_drops_skills_sh_original_body_files(
         not in names
     )
     assert "./converted/curated-long/SKILL.md.original" not in names
+    assert "./converted/curated-long/README.md.original" not in names
+    assert "./entities/skills/curated-long.md.original" not in names
+    assert not any(name.endswith(".original") for name in names)
 
 
 def test_update_wiki_tarball_drops_special_archive_members(tmp_path: Path) -> None:

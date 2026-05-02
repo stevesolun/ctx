@@ -121,3 +121,12 @@ class TestLoadGraphIntegrity:
             f"harness:{slug}" for slug in CURATED_HARNESS_SLUGS
         }
         assert "cad" in harness_nodes["harness:text-to-cad"]["tags"]
+
+    def test_shipped_wiki_graph_omits_original_backups(self) -> None:
+        tarball = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
+        with tarfile.open(tarball, "r:gz") as tf:
+            original_members = [
+                member.name for member in tf.getmembers()
+                if member.name.endswith(".original")
+            ]
+        assert original_members == []

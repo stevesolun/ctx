@@ -155,7 +155,9 @@ default; pass `--apply` to write. The generated markdown and JSON reports
 are ignored by git. Backfills are additive: the gate never removes or
 rewrites existing tags.
 
-Then re-archive. The pre-commit hook does this automatically when the wiki drifts beyond the tarball; the manual command below mirrors its exclusions:
+Then re-archive. The pre-commit hook only reminds you when the tracked graph
+artifacts may be stale; graph archives are refreshed by explicit commands so
+the exclusion policy is visible and repeatable:
 
 ```bash
 cd ~/.claude/skill-wiki
@@ -168,7 +170,7 @@ tar --force-local -czf /path/to/ctx/graph/wiki-graph.tar.gz \
     --exclude='./.enrich-checkpoint' \
     --exclude='./graphify-out/graph-delta.json' \
     --exclude='./graphify-out/graph.pickle' \
-    --exclude='*/SKILL.md.original' \
+    --exclude='*.original' \
     .
 ```
 
