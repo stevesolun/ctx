@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from scripts.ci_classifier import classify_paths, main
 from scripts.ci_required import failed_required_jobs
@@ -59,7 +60,7 @@ def test_main_writes_github_outputs(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_ci_required_allows_pr_policy_skip_on_push_only() -> None:
-    needs = {
+    needs: dict[str, dict[str, Any]] = {
         "static": {"result": "success"},
         "no-test-no-merge": {"result": "skipped"},
     }
@@ -71,9 +72,32 @@ def test_ci_required_allows_pr_policy_skip_on_push_only() -> None:
 
 
 def test_ci_required_rejects_failed_dependency() -> None:
-    needs = {
+    needs: dict[str, dict[str, Any]] = {
         "static": {"result": "success"},
         "test": {"result": "failure"},
     }
 
     assert failed_required_jobs(needs, event_name="push") == {"test": "failure"}
+
+
+def test_ci_required_allows_browser_skip_for_unrelated_pr_only() -> None:
+    needs: dict[str, dict[str, Any]] = {
+        "classify": {"result": "success", "outputs": {"browser_changed": "false"}},
+        "browser-security": {"result": "skipped"},
+    }
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {}
+    assert failed_required_jobs(needs, event_name="push") == {
+        "browser-security": "skipped",
+    }
+
+
+def test_ci_required_rejects_browser_skip_when_classifier_requests_it() -> None:
+    needs: dict[str, dict[str, Any]] = {
+        "classify": {"result": "success", "outputs": {"browser_changed": "true"}},
+        "browser-security": {"result": "skipped"},
+    }
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "browser-security": "skipped",
+    }

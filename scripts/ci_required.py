@@ -7,6 +7,18 @@ import os
 from typing import Any
 
 
+def _job_output(
+    needs: dict[str, dict[str, Any]],
+    job_name: str,
+    output_name: str,
+) -> str | None:
+    outputs = needs.get(job_name, {}).get("outputs", {})
+    if not isinstance(outputs, dict):
+        return None
+    output = outputs.get(output_name)
+    return output if isinstance(output, str) else None
+
+
 def failed_required_jobs(
     needs: dict[str, dict[str, Any]],
     *,
@@ -21,6 +33,13 @@ def failed_required_jobs(
             event_name != "pull_request"
             and name == "no-test-no-merge"
             and result == "skipped"
+        ):
+            continue
+        if (
+            event_name == "pull_request"
+            and name == "browser-security"
+            and result == "skipped"
+            and _job_output(needs, "classify", "browser_changed") == "false"
         ):
             continue
         failures[name] = result

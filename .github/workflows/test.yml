@@ -169,6 +169,8 @@ jobs:
 
   browser-security:
     name: "Browser monitor security"
+    needs: classify
+    if: ${{ github.event_name == 'push' || needs.classify.outputs.browser_changed == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -183,11 +185,30 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      - name: Install browser test dependencies
+      - name: Install browser Python dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install ".[dev,browser]"
-          python -m playwright install --with-deps chromium
+
+      - name: Detect Playwright version
+        id: playwright
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          from importlib.metadata import version
+
+          print(f"version={version('playwright')}")
+          PY
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      - name: Install browser runtime
+        run: |
+          python -m playwright install-deps chromium
+          python -m playwright install chromium
 
       - name: Run browser security tests
         run: pytest -q --no-cov -m browser src/tests/test_ctx_monitor_browser.py
