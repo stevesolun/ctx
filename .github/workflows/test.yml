@@ -192,8 +192,51 @@ jobs:
       - name: Run browser security tests
         run: pytest -q --no-cov -m browser src/tests/test_ctx_monitor_browser.py
 
+  package-build:
+    name: "Build wheel package"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Build and inspect wheel
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
+          python - <<'PY'
+          from pathlib import Path
+
+          wheels = sorted(Path("dist").glob("*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"expected exactly one wheel, found {len(wheels)}")
+          wheel = wheels[0]
+          if not wheel.name.endswith("-py3-none-any.whl"):
+              message = f"expected a universal pure-Python wheel, got {wheel.name}"
+              raise SystemExit(message)
+          print(f"built package-smoke wheel: {wheel.name}")
+          PY
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-smoke-wheel
+          path: dist/*.whl
+          retention-days: 7
+
   package-smoke:
     name: "Wheel package smoke (${{ matrix.os }})"
+    needs: package-build
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -215,12 +258,11 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      - name: Build and inspect wheel
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install build twine
-          python -m build
-          python -m twine check dist/*
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: package-smoke-wheel
+          path: dist
 
       - name: Install wheel in clean venv
         run: |
@@ -350,6 +392,7 @@ jobs:
       - e2e-canary
       - browser-security
       - package-smoke
+      - package-build
       - clean-host-contract
       - no-test-no-merge
     if: ${{ always() }}
