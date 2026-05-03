@@ -14,6 +14,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  classify:
+    name: "Change classifier"
+    runs-on: ubuntu-latest
+    outputs:
+      browser_changed: ${{ steps.classify.outputs.browser_changed }}
+      ci_changed: ${{ steps.classify.outputs.ci_changed }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+      graph_changed: ${{ steps.classify.outputs.graph_changed }}
+      package_changed: ${{ steps.classify.outputs.package_changed }}
+      source_changed: ${{ steps.classify.outputs.source_changed }}
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          lfs: false
+
+      - name: Classify changed paths
+        id: classify
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          BASE="$BEFORE_SHA"
+          if [[ "$EVENT_NAME" == "pull_request" && -n "$PR_BASE_SHA" ]]; then
+            BASE="$PR_BASE_SHA"
+          fi
+          if [[ -z "$BASE" || "$BASE" =~ ^0+$ ]]; then
+            BASE="$(git rev-list --max-parents=0 "$HEAD_SHA")"
+          fi
+          if git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            git diff --name-only "$BASE" "$HEAD_SHA" > changed-files.txt
+          elif git cat-file -e "$HEAD_SHA^" 2>/dev/null; then
+            git diff --name-only "$HEAD_SHA^" "$HEAD_SHA" > changed-files.txt
+          else
+            git diff-tree --no-commit-id --name-only -r "$HEAD_SHA" > changed-files.txt
+          fi
+
+          python scripts/ci_classifier.py changed-files.txt
+
   static:
     name: "Static quality gates"
     runs-on: ubuntu-latest
@@ -295,3 +339,23 @@ jobs:
           echo ""
           echo "Test files:"
           echo "$TEST"
+
+  ci-required:
+    name: "CI required"
+    runs-on: ubuntu-latest
+    needs:
+      - classify
+      - static
+      - test
+      - e2e-canary
+      - browser-security
+      - package-smoke
+      - clean-host-contract
+      - no-test-no-merge
+    if: ${{ always() }}
+    steps:
+      - name: Check required job results
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: python scripts/ci_required.py
