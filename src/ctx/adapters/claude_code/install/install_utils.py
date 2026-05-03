@@ -297,8 +297,9 @@ def _render_scalar(value: object) -> str:
         # The full set mirrors the YAML 1.1 reserved-indicator table:
         # flow indicators (,[]{}), block/map indicators (:?-), anchor/
         # alias (&*), tag (!), pipe/fold (|>), comment (#), directive (%),
-        # reserved (@`), and both quote marks.
-        yaml_structural = set(",[]{}:?#&*!|>%@`=\"'\\")
+        # reserved (@`), both quote marks, and ``<`` so bare ``<<`` is
+        # never resolved as YAML's merge tag.
+        yaml_structural = set(",[]{}:?#&*!|>%@`=\"'\\<")
         needs_quote = (
             any(ch in safe for ch in yaml_structural)
             or (safe and (safe[0] == "-" or safe[0].isspace() or safe[-1].isspace()))

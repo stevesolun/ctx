@@ -318,9 +318,10 @@ def _render_scalar(value: Any) -> str:
         # Conservative: quote on the full YAML 1.1 reserved-indicator set,
         # leading block indicators, or leading/trailing whitespace. The
         # unquoted path is reserved for simple alphanumeric-style values
-        # that YAML's plain-scalar scanner parses unambiguously. Mirrors
-        # install_utils._render_scalar — the two must stay aligned.
-        yaml_structural = set(",[]{}:?#&*!|>%@`=\"'\\")
+        # that YAML's plain-scalar scanner parses unambiguously. ``<`` is
+        # included so bare ``<<`` is never resolved as YAML's merge tag.
+        # Mirrors install_utils._render_scalar — the two must stay aligned.
+        yaml_structural = set(",[]{}:?#&*!|>%@`=\"'\\<")
         needs_quote = (
             any(ch in sanitised for ch in yaml_structural)
             or (

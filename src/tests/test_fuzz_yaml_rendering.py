@@ -32,7 +32,7 @@ from mcp_enrich import _render_scalar as mcp_render_scalar
 # ── Strategies ───────────────────────────────────────────────────────────────
 
 
-_yaml_specials = ":#&*!|>%@`"
+_yaml_specials = ":#&*!|>%@`<"
 _leading_specials = "-?[{"
 _surrogate_categories: list[Literal["Cs"]] = ["Cs"]
 
@@ -125,7 +125,7 @@ class TestInstallUtilsRenderScalar:
             # Cc: C0/C1 control chars (Python counts some as whitespace, e.g.
             #      \x1f is treated as whitespace by str.isspace()).
             blacklist_categories=("Cs", "Zs", "Cc"),
-            blacklist_characters=",[]{}:?#&*!|>%@`=\"'\\-",
+            blacklist_characters=",[]{}:?#&*!|>%@`=\"'\\-<",
         ),
         min_size=1, max_size=40,
     ))
@@ -217,6 +217,7 @@ class TestDeterministicInjectionCases:
         "{inline: map, injection: here}",
         "| block scalar",
         "> folded block",
+        "<<",
         # Strix vuln-0001: Unicode line separators that Python's
         # str.splitlines() treats as line boundaries - they must
         # be neutralized just like \\r and \\n.
