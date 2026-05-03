@@ -80,6 +80,16 @@ def test_ci_required_rejects_failed_dependency() -> None:
     assert failed_required_jobs(needs, event_name="push") == {"test": "failure"}
 
 
+def test_ci_required_allows_full_matrix_skip_on_pr_only() -> None:
+    needs: dict[str, dict[str, Any]] = {
+        "unit-linux": {"result": "success"},
+        "test": {"result": "skipped"},
+    }
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {}
+    assert failed_required_jobs(needs, event_name="push") == {"test": "skipped"}
+
+
 def test_ci_required_allows_browser_skip_for_unrelated_pr_only() -> None:
     needs: dict[str, dict[str, Any]] = {
         "classify": {"result": "success", "outputs": {"browser_changed": "false"}},

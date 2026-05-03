@@ -42,6 +42,8 @@ def failed_required_jobs(
             and _job_output(needs, "classify", "browser_changed") == "false"
         ):
             continue
+        if event_name == "pull_request" and name == "test" and result == "skipped":
+            continue
         failures[name] = result
     return failures
 

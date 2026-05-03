@@ -82,14 +82,57 @@ jobs:
       - name: Run static quality gates
         run: python -m ruff check src hooks scripts && python -m mypy src && python -m pip check
 
+  unit-linux:
+    name: "unit-linux"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+
+      - name: Run tests with coverage gate
+        # Bump this number as the coverage sprint ships - never lower it.
+        run: pytest -q -m "not browser" --cov=src --cov-report=term-missing --cov-fail-under=40
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: .coverage
+          include-hidden-files: true
+          retention-days: 7
+
   test:
     name: pytest (${{ matrix.os }} / py${{ matrix.python-version }})
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.11", "3.12"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.12"
 
     steps:
       - name: Checkout
@@ -109,28 +152,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[dev]"
 
-      - name: Run tests with coverage gate
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' }}
-        # --cov-fail-under=40 is the FLOOR, not the goal. QA-expert
-        # flagged zero coverage on install CLIs, install_utils,
-        # semantic_edges, and others; the immediate ask is that a PR
-        # which DROPS coverage below the current baseline fails CI.
-        # Bump this number as the coverage sprint ships — never
-        # lower it.
-        run: pytest -q -m "not browser" --cov=src --cov-report=term-missing --cov-fail-under=40
-
       - name: Run tests without coverage
-        if: ${{ matrix.os != 'ubuntu-latest' || matrix.python-version != '3.11' }}
         run: pytest -q -m "not browser" --no-cov
-
-      - name: Upload coverage artifact
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage
-          path: .coverage
-          include-hidden-files: true
-          retention-days: 7
 
   e2e-canary:
     name: "A-Z alive-loop E2E canary"
@@ -409,6 +432,7 @@ jobs:
     needs:
       - classify
       - static
+      - unit-linux
       - test
       - e2e-canary
       - browser-security
