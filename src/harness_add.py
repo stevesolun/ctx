@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 import yaml  # type: ignore[import-untyped]
 
 from ctx.core.entity_update import build_update_review, render_update_review
+from ctx.core.wiki.wiki_queue import enqueue_entity_upsert
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
 from ctx.utils._fs_utils import safe_atomic_write_text
 from ctx_config import cfg
@@ -269,6 +270,7 @@ def add_harness(
             "skipped": True,
             "path": str(target_path),
             "sources": list(record.sources),
+            "queued_job_id": None,
         }
 
     existing_fm: dict[str, Any] = {}
@@ -299,11 +301,22 @@ def add_harness(
             "update_review": render_update_review(review),
             "path": str(target_path),
             "sources": list(merged_sources),
+            "queued_job_id": None,
         }
 
+    queue_job = None
     if not dry_run:
         ensure_wiki(str(wiki_path))
         safe_atomic_write_text(target_path, proposed_text, encoding="utf-8")
+        queue_job = enqueue_entity_upsert(
+            wiki_path=wiki_path,
+            entity_type="harness",
+            slug=record.slug,
+            entity_path=target_path,
+            content=proposed_text,
+            action="created" if is_new_page else "updated",
+            source="harness_add",
+        )
         if is_new_page:
             update_index(str(wiki_path), [record.slug], subject_type="harnesses")
         append_log(
@@ -324,6 +337,7 @@ def add_harness(
         "update_required": False,
         "path": str(target_path),
         "sources": list(merged_sources),
+        "queued_job_id": queue_job.id if queue_job is not None else None,
     }
 
 

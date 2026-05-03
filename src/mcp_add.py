@@ -38,6 +38,7 @@ import mcp_canonical_index
 from mcp_entity import McpRecord
 from wiki_batch_entities import generate_mcp_page
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
+from ctx.core.wiki.wiki_queue import enqueue_entity_upsert
 from ctx.core.wiki.wiki_utils import validate_skill_name
 from ctx.utils._fs_utils import reject_symlink_path, safe_atomic_write_text
 
@@ -354,12 +355,23 @@ def add_mcp(
             "skipped": True,
             "update_required": True,
             "update_review": render_update_review(review),
+            "queued_job_id": None,
         }
 
+    queue_job = None
     if not dry_run:
         # Phase 2 of branching: render and write. Any YAML serialization
         # failure now is a real error, not a dry-run side-effect.
         safe_atomic_write_text(target_path, final_text, encoding="utf-8")
+        queue_job = enqueue_entity_upsert(
+            wiki_path=wiki_path,
+            entity_type="mcp-server",
+            slug=record.slug,
+            entity_path=target_path,
+            content=final_text,
+            action="created" if is_new_page else "updated",
+            source="mcp_add",
+        )
 
         # Phase 6b: keep the canonical sidecar index hot. Upsert on
         # every successful write so the first cross-source dedup after
@@ -428,6 +440,7 @@ def add_mcp(
         "path": str(target_path),
         "skipped": False,
         "update_required": False,
+        "queued_job_id": queue_job.id if queue_job is not None else None,
     }
 
 
