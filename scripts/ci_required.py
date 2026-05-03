@@ -6,6 +6,16 @@ import json
 import os
 from typing import Any
 
+CHEAP_PR_SKIPPABLE_JOBS = {
+    "clean-host-contract",
+    "e2e-canary",
+    "no-test-no-merge",
+    "package-build",
+    "package-smoke",
+    "static",
+    "unit-linux",
+}
+
 
 def _job_output(
     needs: dict[str, dict[str, Any]],
@@ -25,14 +35,39 @@ def failed_required_jobs(
     event_name: str,
 ) -> dict[str, str | None]:
     failures: dict[str, str | None] = {}
+    docs_only_pr = (
+        event_name == "pull_request"
+        and _job_output(needs, "classify", "docs_only") == "true"
+    )
+    graph_only_pr = (
+        event_name == "pull_request"
+        and _job_output(needs, "classify", "graph_only") == "true"
+    )
+    cheap_pr = docs_only_pr or graph_only_pr
     for name, details in sorted(needs.items()):
         result = details.get("result")
         if result == "success":
             continue
         if (
             event_name != "pull_request"
-            and name == "no-test-no-merge"
+            and name in {"docs-check", "graph-check", "no-test-no-merge"}
             and result == "skipped"
+        ):
+            continue
+        if cheap_pr and name in CHEAP_PR_SKIPPABLE_JOBS and result == "skipped":
+            continue
+        if (
+            event_name == "pull_request"
+            and name == "docs-check"
+            and result == "skipped"
+            and not docs_only_pr
+        ):
+            continue
+        if (
+            event_name == "pull_request"
+            and name == "graph-check"
+            and result == "skipped"
+            and not graph_only_pr
         ):
             continue
         if (

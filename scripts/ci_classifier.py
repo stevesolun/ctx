@@ -13,6 +13,7 @@ OUTPUT_NAMES = (
     "ci_changed",
     "docs_only",
     "graph_changed",
+    "graph_only",
     "package_changed",
     "source_changed",
 )
@@ -22,6 +23,8 @@ DOCS_PATTERNS = (
     "docs/**",
     "graph/README.md",
     "LICENSE",
+    "mkdocs.yml",
+    "requirements-docs.txt",
 )
 BROWSER_PATTERNS = (
     ".github/workflows/test.yml",
@@ -54,12 +57,14 @@ def _matches(path: str, patterns: Iterable[str]) -> bool:
 def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
     files = [path.strip().replace("\\", "/") for path in paths if path.strip()]
     ci_changed = any(_matches(path, (".github/workflows/**",)) for path in files)
+    graph_only = bool(files) and all(_matches(path, ("graph/**",)) for path in files)
     return {
         "browser_changed": ci_changed
         or any(_matches(path, BROWSER_PATTERNS) for path in files),
         "ci_changed": ci_changed,
         "docs_only": bool(files) and all(_matches(path, DOCS_PATTERNS) for path in files),
         "graph_changed": any(_matches(path, ("graph/**",)) for path in files),
+        "graph_only": graph_only,
         "package_changed": ci_changed
         or any(_matches(path, PACKAGE_PATTERNS) for path in files),
         "source_changed": ci_changed

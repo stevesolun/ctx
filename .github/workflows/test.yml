@@ -22,6 +22,7 @@ jobs:
       ci_changed: ${{ steps.classify.outputs.ci_changed }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
       graph_changed: ${{ steps.classify.outputs.graph_changed }}
+      graph_only: ${{ steps.classify.outputs.graph_only }}
       package_changed: ${{ steps.classify.outputs.package_changed }}
       source_changed: ${{ steps.classify.outputs.source_changed }}
     steps:
@@ -60,6 +61,8 @@ jobs:
 
   static:
     name: "Static quality gates"
+    needs: classify
+    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -84,6 +87,8 @@ jobs:
 
   unit-linux:
     name: "unit-linux"
+    needs: classify
+    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -157,6 +162,8 @@ jobs:
 
   e2e-canary:
     name: "A-Z alive-loop E2E canary"
+    needs: classify
+    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -189,6 +196,74 @@ jobs:
           pytest -q --no-cov \
             src/tests/test_alive_loop_e2e.py \
             src/tests/test_fuzz_yaml_rendering.py
+
+  docs-check:
+    name: "Docs strict build"
+    needs: classify
+    if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
+
+      - name: Build docs strictly
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-docs.txt
+          python -m mkdocs build --strict
+
+  graph-check:
+    name: "Graph artifact check"
+    needs: classify
+    if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.graph_only == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout graph artifacts
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Validate shipped graph artifacts
+        run: |
+          python - <<'PY'
+          import gzip
+          import json
+          import tarfile
+          from pathlib import Path
+
+          required = [
+              Path("graph/wiki-graph.tar.gz"),
+              Path("graph/skills-sh-catalog.json.gz"),
+              Path("graph/communities.json"),
+          ]
+          for path in required:
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit(f"missing or empty graph artifact: {path}")
+
+          with gzip.open("graph/skills-sh-catalog.json.gz", "rt", encoding="utf-8") as fh:
+              json.load(fh)
+          json.loads(Path("graph/communities.json").read_text(encoding="utf-8"))
+
+          with tarfile.open("graph/wiki-graph.tar.gz", "r:gz") as tar:
+              names = tar.getnames()
+          if not any(name.endswith("/index.md") or name == "./index.md" for name in names):
+              raise SystemExit("wiki graph archive is missing index.md")
+          originals = [name for name in names if name.endswith("SKILL.md.original")]
+          if originals:
+              raise SystemExit(
+                  f"wiki graph archive contains {len(originals)} raw SKILL.md.original files"
+              )
+          print(f"validated graph archive with {len(names)} entries")
+          PY
 
   browser-security:
     name: "Browser monitor security"
@@ -238,6 +313,8 @@ jobs:
 
   package-build:
     name: "Build wheel package"
+    needs: classify
+    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -280,7 +357,10 @@ jobs:
 
   package-smoke:
     name: "Wheel package smoke (${{ matrix.os }})"
-    needs: package-build
+    needs:
+      - classify
+      - package-build
+    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true') }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -351,6 +431,8 @@ jobs:
 
   clean-host-contract:
     name: "Clean host contract"
+    needs: classify
+    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -374,8 +456,9 @@ jobs:
 
   no-test-no-merge:
     name: "Every src/*.py change must touch a src/tests/*.py"
+    needs: classify
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true' }}
     steps:
       - name: Checkout with full history
         uses: actions/checkout@v5
@@ -435,6 +518,8 @@ jobs:
       - unit-linux
       - test
       - e2e-canary
+      - docs-check
+      - graph-check
       - browser-security
       - package-smoke
       - package-build

@@ -15,9 +15,35 @@ def test_docs_only_classification() -> None:
         "ci_changed": False,
         "docs_only": True,
         "graph_changed": True,
+        "graph_only": False,
         "package_changed": False,
         "source_changed": False,
     }
+
+
+def test_docs_tooling_changes_are_docs_only() -> None:
+    flags = classify_paths(["mkdocs.yml", "requirements-docs.txt"])
+
+    assert flags["docs_only"] is True
+    assert flags["graph_only"] is False
+    assert flags["source_changed"] is False
+
+
+def test_graph_artifacts_are_graph_only_not_docs_only() -> None:
+    flags = classify_paths(["graph/wiki-graph.tar.gz", "graph/communities.json"])
+
+    assert flags["docs_only"] is False
+    assert flags["graph_changed"] is True
+    assert flags["graph_only"] is True
+    assert flags["source_changed"] is False
+
+
+def test_mixed_graph_and_source_change_is_not_graph_only() -> None:
+    flags = classify_paths(["graph/wiki-graph.tar.gz", "src/ctx/adapters/generic/loop.py"])
+
+    assert flags["graph_changed"] is True
+    assert flags["graph_only"] is False
+    assert flags["source_changed"] is True
 
 
 def test_source_change_marks_source_and_package() -> None:
@@ -88,6 +114,76 @@ def test_ci_required_allows_full_matrix_skip_on_pr_only() -> None:
 
     assert failed_required_jobs(needs, event_name="pull_request") == {}
     assert failed_required_jobs(needs, event_name="push") == {"test": "skipped"}
+
+
+def test_ci_required_allows_heavy_jobs_to_skip_on_docs_only_pr() -> None:
+    needs: dict[str, dict[str, Any]] = {
+        "classify": {
+            "result": "success",
+            "outputs": {"browser_changed": "false", "docs_only": "true"},
+        },
+        "docs-check": {"result": "success"},
+        "graph-check": {"result": "skipped"},
+        "static": {"result": "skipped"},
+        "unit-linux": {"result": "skipped"},
+        "e2e-canary": {"result": "skipped"},
+        "package-build": {"result": "skipped"},
+        "package-smoke": {"result": "skipped"},
+        "clean-host-contract": {"result": "skipped"},
+        "no-test-no-merge": {"result": "skipped"},
+        "browser-security": {"result": "skipped"},
+        "test": {"result": "skipped"},
+    }
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {}
+
+
+def test_ci_required_rejects_missing_docs_check_on_docs_only_pr() -> None:
+    needs: dict[str, dict[str, Any]] = {
+        "classify": {"result": "success", "outputs": {"docs_only": "true"}},
+        "docs-check": {"result": "skipped"},
+    }
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "docs-check": "skipped",
+    }
+
+
+def test_ci_required_allows_heavy_jobs_to_skip_on_graph_only_pr() -> None:
+    needs: dict[str, dict[str, Any]] = {
+        "classify": {
+            "result": "success",
+            "outputs": {
+                "browser_changed": "false",
+                "docs_only": "false",
+                "graph_only": "true",
+            },
+        },
+        "docs-check": {"result": "skipped"},
+        "graph-check": {"result": "success"},
+        "static": {"result": "skipped"},
+        "unit-linux": {"result": "skipped"},
+        "e2e-canary": {"result": "skipped"},
+        "package-build": {"result": "skipped"},
+        "package-smoke": {"result": "skipped"},
+        "clean-host-contract": {"result": "skipped"},
+        "no-test-no-merge": {"result": "skipped"},
+        "browser-security": {"result": "skipped"},
+        "test": {"result": "skipped"},
+    }
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {}
+
+
+def test_ci_required_rejects_missing_graph_check_on_graph_only_pr() -> None:
+    needs: dict[str, dict[str, Any]] = {
+        "classify": {"result": "success", "outputs": {"graph_only": "true"}},
+        "graph-check": {"result": "skipped"},
+    }
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "graph-check": "skipped",
+    }
 
 
 def test_ci_required_allows_browser_skip_for_unrelated_pr_only() -> None:
