@@ -25,6 +25,7 @@ from ctx.core.entity_update import build_update_review, render_update_review
 from ctx_config import cfg
 from intake_pipeline import IntakeRejected, check_intake, record_embedding
 from ctx.adapters.claude_code.install.install_utils import safe_copy_file
+from ctx.core.wiki.wiki_queue import enqueue_entity_upsert
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
 from ctx.core.wiki.wiki_utils import validate_skill_name
 from ctx.utils._fs_utils import reject_symlink_path, safe_atomic_write_text
@@ -366,6 +367,15 @@ def add_skill(
     if converted and pipeline_path:
         log_details.append(f"Pipeline: {pipeline_path}")
     append_log(str(wiki_path), "add-skill", name, log_details)
+    queue_job = enqueue_entity_upsert(
+        wiki_path,
+        entity_type="skill",
+        slug=name,
+        entity_path=wiki_path / "entities" / "skills" / f"{name}.md",
+        content=page_content,
+        action="created" if is_new else "updated",
+        source="skill_add",
+    )
 
     # Append to the unified audit log so post-hoc investigations can
     # reconstruct every add/convert/install event without mining
@@ -400,6 +410,7 @@ def add_skill(
         "is_new_page": is_new,
         "skipped": False,
         "update_required": False,
+        "queued_job_id": queue_job.id,
     }
 
 

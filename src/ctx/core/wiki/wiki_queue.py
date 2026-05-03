@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from hashlib import sha256
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -20,6 +21,10 @@ STATUS_PENDING = "pending"
 STATUS_RUNNING = "running"
 STATUS_SUCCEEDED = "succeeded"
 STATUS_FAILED = "failed"
+
+ENTITY_UPSERT_JOB = "entity-upsert"
+QUEUE_DIRNAME = ".ctx"
+QUEUE_DB_NAME = "wiki-queue.sqlite3"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS wiki_queue_jobs (
@@ -69,6 +74,52 @@ def init_queue(db_path: Path) -> None:
     """Create the queue database and enable SQLite WAL mode."""
     with _connect(db_path) as conn:
         conn.executescript(_SCHEMA)
+
+
+def queue_db_path(wiki_path: Path) -> Path:
+    """Return the durable maintenance queue path for a wiki root."""
+    return Path(wiki_path) / QUEUE_DIRNAME / QUEUE_DB_NAME
+
+
+def enqueue_entity_upsert(
+    wiki_path: Path,
+    *,
+    entity_type: str,
+    slug: str,
+    entity_path: Path,
+    content: str,
+    action: str,
+    source: str,
+    now: float | None = None,
+) -> QueueJob:
+    """Queue a wiki entity upsert for graph/wiki artifact refresh.
+
+    The idempotency key includes the content hash. Re-adding unchanged
+    content collapses to one job, while a real update creates a new queue item
+    for the future worker to process.
+    """
+    entity_type = _validate_value("entity_type", entity_type)
+    slug = _validate_value("slug", slug)
+    action = _validate_value("action", action)
+    source = _validate_value("source", source)
+    content_hash = sha256(content.encode("utf-8")).hexdigest()
+    rel_entity_path = _relative_to_wiki(wiki_path, entity_path)
+    payload = {
+        "entity_type": entity_type,
+        "slug": slug,
+        "entity_path": rel_entity_path,
+        "action": action,
+        "source": source,
+        "content_hash": content_hash,
+    }
+    return enqueue(
+        queue_db_path(wiki_path),
+        kind=ENTITY_UPSERT_JOB,
+        payload=payload,
+        idempotency_key=f"{ENTITY_UPSERT_JOB}:{entity_type}:{slug}:{content_hash}",
+        content_hash=content_hash,
+        now=now,
+    )
 
 
 def enqueue(
@@ -390,6 +441,19 @@ def _dump_payload(payload: dict[str, Any]) -> str:
     if not isinstance(payload, dict):
         raise TypeError(f"payload must be a dict, got {type(payload).__name__}")
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _relative_to_wiki(wiki_path: Path, entity_path: Path) -> str:
+    try:
+        return Path(entity_path).relative_to(Path(wiki_path)).as_posix()
+    except ValueError:
+        return str(entity_path)
+
+
+def _validate_value(name: str, value: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    return value.strip()
 
 
 def _validate_kind(kind: str) -> None:

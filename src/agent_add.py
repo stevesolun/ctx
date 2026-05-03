@@ -31,6 +31,7 @@ from ctx_config import cfg
 from ctx.adapters.claude_code.install.install_utils import safe_copy_file
 from intake_pipeline import IntakeRejected, check_intake, record_embedding
 from wiki_batch_entities import generate_agent_page
+from ctx.core.wiki.wiki_queue import enqueue_entity_upsert
 from ctx.core.wiki.wiki_sync import append_log, ensure_wiki, update_index
 from ctx.core.wiki.wiki_utils import validate_skill_name
 from ctx.utils._fs_utils import reject_symlink_path, safe_atomic_write_text
@@ -155,6 +156,15 @@ def add_agent(
             "Warnings: " + "; ".join(f"{w.code}:{w.message}" for w in warnings)
         )
     append_log(str(wiki_path), "add-agent", name, log_details)
+    queue_job = enqueue_entity_upsert(
+        wiki_path,
+        entity_type="agent",
+        slug=name,
+        entity_path=wiki_path / "entities" / "agents" / f"{name}.md",
+        content=page_content,
+        action="created" if is_new else "updated",
+        source="agent_add",
+    )
 
     return {
         "name": name,
@@ -162,6 +172,7 @@ def add_agent(
         "is_new_page": is_new,
         "skipped": False,
         "update_required": False,
+        "queued_job_id": queue_job.id,
     }
 
 
