@@ -105,6 +105,7 @@ def test_scan_recommendations_do_not_print_harness_bucket(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(scan_repo, "_shared_recommendations", lambda _profile: None)
     monkeypatch.setattr(resolve_skills, "discover_available_skills", lambda _: {})
     monkeypatch.setattr(resolve_skills, "read_wiki_overrides", lambda _: {})
     monkeypatch.setattr(
