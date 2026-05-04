@@ -74,6 +74,41 @@ DANGEROUS_MARKDOWN_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("<?php", "&lt;?php"),
     ("<?PHP", "&lt;?PHP"),
     ("<?=", "&lt;?="),
+    ("$(", "$&#8203;("),
+    ("curl http://", "cu&#8203;rl http://"),
+    ("curl https://", "cu&#8203;rl https://"),
+    ("wget http://", "wg&#8203;et http://"),
+    ("wget https://", "wg&#8203;et https://"),
+    ("bash -i", "ba&#8203;sh -i"),
+    ("/bin/bash", "/bin/ba&#8203;sh"),
+    ("/bin/sh", "/bin/&#8203;sh"),
+    ("/dev/tcp", "/dev/&#8203;tcp"),
+    ("| bash", "| ba&#8203;sh"),
+    ("|/bin/sh", "|/bin/&#8203;sh"),
+    ("|nc ", "|n&#8203;c "),
+    ("nc -e", "nc &#8203;-e"),
+    ("rm /tmp", "r&#8203;m /tmp"),
+    ("mkfifo", "mk&#8203;fifo"),
+    ("cat /tmp", "ca&#8203;t /tmp"),
+    ("cat /etc/passwd", "ca&#8203;t /etc/passwd"),
+    (
+        "type C:\\Windows\\System32\\config\\sam",
+        "ty&#8203;pe C:\\Windows\\System32\\config\\sam",
+    ),
+    ("head -n", "he&#8203;ad -n"),
+    ("base64 -d", "base64 &#8203;-d"),
+    ("system(", "system&#8203;("),
+    ("exec(", "exec&#8203;("),
+    ("os.system", "os.&#8203;system"),
+    ("New-Object", "New&#8203;-Object"),
+    ("GetStream", "Get&#8203;Stream"),
+    ("Out-String", "Out&#8203;-String"),
+    ("iex ", "i&#8203;ex "),
+    ("System.Net.Sockets.TCPClient", "System.Net.Sockets.TCP&#8203;Client"),
+    ("System.Text.ASCIIEncoding", "System.Text.ASCII&#8203;Encoding"),
+)
+DANGEROUS_MARKDOWN_REGEX_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bpowershell\b", re.IGNORECASE), "power&#8203;shell"),
 )
 
 
@@ -81,6 +116,8 @@ def defang_dangerous_markdown(text: str) -> str:
     """Defang executable-looking snippets before writing generated markdown."""
     for needle, replacement in DANGEROUS_MARKDOWN_REPLACEMENTS:
         text = text.replace(needle, replacement)
+    for pattern, replacement in DANGEROUS_MARKDOWN_REGEX_REPLACEMENTS:
+        text = pattern.sub(replacement, text)
     return text
 
 
