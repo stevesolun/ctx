@@ -9,7 +9,7 @@ Routes:
 
     /                           Home — summary stats + session list + links
     /loaded                     Live manifest view + load/unload actions
-    /sessions                   List of sessions (from audit + events jsonl)
+    /sessions                   List of sessions (skills/agents/MCP activity)
     /session/<id>               Skills + agents seen in that session
     /skills                     Sidecar card grid with grade + score filters
     /skill/<slug>               Sidecar breakdown + timeline of audit events
@@ -33,7 +33,8 @@ Design notes:
 - No Flask / Starlette / FastAPI dependency. stdlib only — keeps
   ``pip install claude-ctx`` lean. Request handling is threaded so one
   open SSE client cannot monopolize the local dashboard.
-- Reads append-only files; never mutates them.
+- GET views read append-only files. POST mutation endpoints require
+  loopback access, a per-process token, and same-origin headers.
 - SSE endpoint tails ``~/.claude/ctx-audit.jsonl`` and pushes each new
   line as a server-sent event. Clients auto-reconnect.
 - Security: binds to 127.0.0.1 by default. ``--host`` override requires
@@ -1058,6 +1059,9 @@ def _render_sessions_index() -> str:
             f"<td>{len(s['skills_loaded'])}</td>"
             f"<td>{len(s['skills_unloaded'])}</td>"
             f"<td>{len(s['agents_loaded'])}</td>"
+            f"<td>{len(s['agents_unloaded'])}</td>"
+            f"<td>{len(s['mcps_loaded'])}</td>"
+            f"<td>{len(s['mcps_unloaded'])}</td>"
             f"<td>{s['lifecycle_transitions']}</td>"
             f"</tr>"
         )
@@ -1066,7 +1070,9 @@ def _render_sessions_index() -> str:
         f"<p class='muted'>{len(sessions)} unique sessions observed.</p>"
         "<table>"
         "<tr><th>Session</th><th>First seen</th><th>Last seen</th>"
-        "<th>Skills↑</th><th>Skills↓</th><th>Agents↑</th><th>Lifecycle</th></tr>"
+        "<th>Skills↑</th><th>Skills↓</th>"
+        "<th>Agents↑</th><th>Agents↓</th>"
+        "<th>MCPs↑</th><th>MCPs↓</th><th>Lifecycle</th></tr>"
         + "".join(rows)
         + "</table>"
     )
@@ -1438,6 +1444,9 @@ def _render_graph(focus: str | None = None, focus_type: str | None = None) -> st
         "        'font-weight': 'bold',\n"
         "      }},\n"
         "      { selector: 'node.hidden-by-filter', style: {\n"
+        "        'display': 'none',\n"
+        "      }},\n"
+        "      { selector: 'edge.hidden-by-filter', style: {\n"
         "        'display': 'none',\n"
         "      }},\n"
         "      { selector: 'edge', style: {\n"

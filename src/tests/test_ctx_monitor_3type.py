@@ -232,6 +232,27 @@ class TestSessionSummaries3Type:
         assert session["mcps_loaded"] == ["anthropic-python-sdk"]
         assert session["mcps_unloaded"] == ["anthropic-python-sdk"]
 
+    def test_sessions_index_renders_agent_and_mcp_columns(self, monkeypatch):
+        monkeypatch.setattr(_cm, "_summarize_sessions", lambda: [{
+            "session_id": "S1",
+            "first_seen": "2026-05-02T10:00:00Z",
+            "last_seen": "2026-05-02T10:02:00Z",
+            "skills_loaded": [],
+            "skills_unloaded": [],
+            "agents_loaded": [],
+            "agents_unloaded": ["code-reviewer"],
+            "mcps_loaded": ["anthropic-python-sdk"],
+            "mcps_unloaded": ["anthropic-python-sdk"],
+            "lifecycle_transitions": 0,
+        }])
+
+        html = _cm._render_sessions_index()
+
+        assert "Agents↓" in html
+        assert "MCPs↑" in html
+        assert "MCPs↓" in html
+        assert "<td>1</td><td>1</td><td>1</td>" in html
+
 
 # ────────────────────────────────────────────────────────────────────
 # _render_wiki_index — type filter includes mcp-server
@@ -676,6 +697,15 @@ class TestRenderGraphSidebar:
         # loosen this — just require SOME style block exists.
         assert "shape" in html.split('node[type = "mcp-server"]')[1][:300]
         assert "shape" in html.split('node[type = "harness"]')[1][:300]
+
+    def test_cytoscape_hides_edges_connected_to_filtered_nodes(self, monkeypatch):
+        monkeypatch.setattr(_cm, "_graph_stats",
+                            lambda: {"nodes": 0, "edges": 0, "available": False})
+        monkeypatch.setattr(_cm, "_top_degree_seeds", lambda: [])
+        html = _cm._render_graph()
+
+        assert "edge.hidden-by-filter" in html
+        assert "e.toggleClass('hidden-by-filter', srcHidden || tgtHidden)" in html
 
     def test_tap_handler_strips_mcp_server_prefix(self, monkeypatch):
         """Clicking an MCP node must route to /wiki/<slug> — the

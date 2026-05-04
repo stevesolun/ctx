@@ -141,6 +141,8 @@ Home · Loaded · Skills · Wiki · Graph · Status · KPIs · Sessions · Logs 
 
 Harness catalog entries are visible in loaded, wiki, and graph routes. Harness
 installation, update, uninstall, and quality scoring remain CLI/API workflows.
+Dashboard POST actions are available only from loopback clients and require the
+per-process monitor token injected into the rendered page.
 
 | Route | What it shows |
 |---|---|
@@ -154,7 +156,7 @@ installation, update, uninstall, and quality scoring remain CLI/API workflows.
 | `/graph?slug=<slug>&type=<entity>` | **Cytoscape-rendered** 1-hop neighborhood around the target skill/agent/MCP/harness slug. Node colors: emerald=focus, indigo=skill, amber=agent, red diamond=MCP server, green hexagon=harness. Edge width maps to blended graph weight. Tap any node to navigate to that entity's typed wiki page. Type and tag filters run client-side. |
 | `/status` | Durable queue and artifact status: job counts by state, recent queue jobs, graph/wiki artifact sizes, and crash-safe promotion metadata. |
 | `/kpi` | **KPI dashboard** — total entity count with subject breakdown, grade distribution pills, two-column tables for grade counts and lifecycle tiers (active · watch · demote · archive), hard-floor reasons with counts, **By category** table (count · avg score · A/B/C/D/F mix per category), **Top demotion candidates** (active/watch entries graded D or F, sorted by consecutive-D streak desc then score asc), and the **Archived** list. Same shape as `python -m kpi_dashboard render` but HTML |
-| `/sessions` | Index of every session (audit + skill-events), first/last seen, counts of skills loaded/unloaded/agents/lifecycle transitions |
+| `/sessions` | Index of every session (audit + skill-events), first/last seen, counts of skills loaded/unloaded, agents loaded/unloaded, MCPs loaded/unloaded, and lifecycle transitions |
 | `/session/<id>` | Per-session audit timeline showing the load → score_updated → unload triad with timestamps |
 | `/logs` | Last 500 audit events in a filterable table (client-side filter on event name, subject, session id) |
 | `/events` | Live SSE stream of new audit events |
@@ -173,7 +175,7 @@ installation, update, uninstall, and quality scoring remain CLI/API workflows.
 
 ### Mutation endpoints
 
-Both POST endpoints enforce same-origin (browser tab open on another
+Dashboard GET views are read-only. Both POST endpoints enforce same-origin (browser tab open on another
 origin can't forge a request), require the per-process
 `X-CTX-Monitor-Token` injected into the dashboard page, and reject any
 slug failing the shared safe-name validator. That validator blocks path
