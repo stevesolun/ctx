@@ -205,3 +205,5 @@ ones are flagged. New ones self-ingest.
   knowledge-graph edges. No black-box prompts.
 - **Token discipline.** Every council run honors `max_tokens` /
   `max_seconds` budgets.
+
+<!-- CI required ruleset canary. -->
