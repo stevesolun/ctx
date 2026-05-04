@@ -771,6 +771,11 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
             print(f"         install: ctx-harness-install {name} --dry-run")
     elif goal or mode == "custom":
         print("  [info] no harness recommendations matched yet")
+        print(
+            "       build plan: ctx-harness-install --recommend "
+            f"--goal {json.dumps(goal or args.model or 'custom model work')} "
+            f"--model {json.dumps(args.model or '')} --plan-on-no-fit"
+        )
     return rc
 
 

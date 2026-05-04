@@ -25,7 +25,7 @@ from urllib.request import url2pathname
 
 from ctx.core.entity_types import entity_page_path
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body, validate_skill_name
-from ctx.utils._fs_utils import atomic_write_json, reject_symlink_path
+from ctx.utils._fs_utils import atomic_write_json, atomic_write_text, reject_symlink_path
 from ctx_config import cfg
 
 _COMMAND_ENV_ALLOWLIST = {
@@ -635,6 +635,91 @@ def recommend_harnesses_for_cli(
     )
 
 
+def render_no_fit_harness_plan(
+    *,
+    goal: str,
+    model_provider: str | None,
+    model: str | None,
+) -> str:
+    """Render a build handoff when no catalog harness fits the user's setup."""
+    provider = model_provider or "unknown provider"
+    model_name = model or "unspecified model"
+    goal_text = goal.strip() or "unspecified development goal"
+    return "\n".join([
+        "# Custom Harness PRD",
+        "",
+        "ctx did not find a catalog harness above the configured fit score.",
+        "Use this handoff to build an attachable harness for your local/API model.",
+        "",
+        "## Inputs",
+        "",
+        f"- Goal: {goal_text}",
+        f"- Model provider: {provider}",
+        f"- Model: {model_name}",
+        "- Target operating systems: Windows, macOS, and Linux unless narrowed by the user",
+        "",
+        "## Required Interview Before Building",
+        "",
+        "- Confirm the exact model, API base URL or local runtime, context window, and tool-call support.",
+        "- Confirm the user's goal, repository type, stack, expected autonomy, and time horizon.",
+        "- Confirm filesystem, shell, browser, network, secret, and package-manager access.",
+        "- Confirm verification commands: tests, lint, type check, build, smoke, and dashboard/browser checks.",
+        "- Confirm approval policy for destructive commands, network calls, dependency installs, and secret use.",
+        "",
+        "## Harness Architecture",
+        "",
+        "- Instructions: short root instructions plus deeper task, quality, safety, and verification docs.",
+        "- State: durable session file, active task summary, loaded ctx entities, and handoff/progress log.",
+        "- Scope: explicit allow/deny tool registry, cwd boundaries, environment allowlist, and secret redaction.",
+        "- Verification: every completion requires runnable evidence captured in the session log.",
+        "- Lifecycle: start session, observe dev events, request ctx recommendations, mark use, propose unload, end session.",
+        "",
+        "## ctx Attachment Contract",
+        "",
+        "- MCP mode: start `ctx-mcp-server` and expose ctx tools to the host.",
+        "- Python mode: call `ctx.recommend_bundle`, `ctx.wiki_get`, `ctx.wiki_search`, and `ctx.graph_query`.",
+        "- CLI mode: use `ctx run --model <model> --task <task>` when the user wants ctx to own the loop.",
+        "- Each dev window sends the current goal, stack, touched files, errors, and verification state to ctx.",
+        "- ctx returns at most five skills/agents/MCPs. The harness asks before loading or unloading anything.",
+        "",
+        "## Acceptance Tests",
+        "",
+        "- Fresh install on Windows, macOS, and Linux can start the harness without secrets printed in logs.",
+        "- A sample task triggers no more than five ctx skill/agent/MCP recommendations.",
+        "- A selected recommendation is recorded as used with evidence.",
+        "- An unused loaded entity produces an unload proposal and respects a user skip.",
+        "- A failing verification command prevents the harness from reporting completion.",
+        "",
+        "## Prompt For A Strong LLM",
+        "",
+        "Build the harness described above. Keep ctx integration attachable through MCP or Python. "
+        "Do not hard-code secrets. Implement cross-platform startup and verification commands. "
+        "Produce a minimal working harness first, then add durable state and unload lifecycle.",
+        "",
+        "Design reference: https://github.com/walkinglabs/learn-harness-engineering",
+    ]) + "\n"
+
+
+def write_no_fit_harness_plan(
+    path: Path,
+    *,
+    goal: str,
+    model_provider: str | None,
+    model: str | None,
+) -> Path:
+    target = path.expanduser()
+    reject_symlink_path(target)
+    atomic_write_text(
+        target,
+        render_no_fit_harness_plan(
+            goal=goal,
+            model_provider=model_provider,
+            model=model,
+        ),
+    )
+    return target
+
+
 def print_recommendations(results: list[dict[str, Any]]) -> None:
     if not results:
         print("No harness recommendations matched.")
@@ -642,9 +727,9 @@ def print_recommendations(results: list[dict[str, Any]]) -> None:
     print("Recommended harnesses:")
     for row in results:
         slug = str(row.get("name") or "")
-        score = float(row.get("normalized_score") or 0.0)
-        reason = str(row.get("reason") or "").strip()
-        print(f"- {slug} (match {score:.2f})")
+        score = float(row.get("fit_score") or row.get("normalized_score") or 0.0)
+        reason = str(row.get("fit_reason") or row.get("reason") or "").strip()
+        print(f"- {slug} (fit {score:.2f})")
         if reason:
             print(f"  reason: {reason}")
         print(f"  install: ctx-harness-install {slug} --dry-run")
@@ -677,6 +762,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model-provider", help="Model provider prefix, e.g. openai or ollama")
     parser.add_argument("--model", help="Model slug, e.g. openrouter/openai/gpt-5.5")
     parser.add_argument("--top-k", type=int, default=5, help="Maximum recommendations to print")
+    parser.add_argument(
+        "--plan-on-no-fit",
+        action="store_true",
+        help="When --recommend finds no harness, print a custom harness PRD",
+    )
+    parser.add_argument(
+        "--plan-output",
+        help="Write the no-fit custom harness PRD to this markdown file",
+    )
     parser.add_argument("--force", action="store_true", help="Replace target if it exists")
     parser.add_argument(
         "--update",
@@ -739,6 +833,24 @@ def main(argv: list[str] | None = None) -> int:
             top_k=max(1, min(int(args.top_k), 5)),
         )
         print_recommendations(results)
+        if not results and args.plan_on_no_fit:
+            if args.plan_output:
+                path = write_no_fit_harness_plan(
+                    Path(os.path.expanduser(args.plan_output)),
+                    goal=goal,
+                    model_provider=args.model_provider,
+                    model=args.model,
+                )
+                print(f"Custom harness plan: {path}")
+            else:
+                print()
+                print(render_no_fit_harness_plan(
+                    goal=goal,
+                    model_provider=args.model_provider,
+                    model=args.model,
+                ), end="")
+        elif not results:
+            print("Use --plan-on-no-fit to generate a custom harness PRD.")
         return 0
     if not args.identifier:
         parser.error("identifier is required unless --recommend is used")

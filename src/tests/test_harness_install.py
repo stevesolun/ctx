@@ -540,3 +540,56 @@ def test_recommend_mode_prints_install_handoff(
     output = capsys.readouterr().out
     assert "Recommended harnesses" in output
     assert "ctx-harness-install text-to-cad --dry-run" in output
+
+
+def test_recommend_no_fit_prints_custom_harness_plan(
+    monkeypatch: Any,
+    capsys: Any,
+) -> None:
+    monkeypatch.setattr(harness_install, "recommend_harnesses_for_cli", lambda **_: [])
+
+    rc = harness_install.main([
+        "--recommend",
+        "--goal",
+        "build a private CAD workflow with a local model",
+        "--model-provider",
+        "ollama",
+        "--model",
+        "ollama/llama3.1",
+        "--plan-on-no-fit",
+    ])
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "No harness recommendations matched." in output
+    assert "# Custom Harness PRD" in output
+    assert "ctx-mcp-server" in output
+    assert "ctx.recommend_bundle" in output
+    assert "Windows, macOS, and Linux" in output
+
+
+def test_recommend_no_fit_writes_custom_harness_plan(
+    tmp_path: Path,
+    monkeypatch: Any,
+    capsys: Any,
+) -> None:
+    monkeypatch.setattr(harness_install, "recommend_harnesses_for_cli", lambda **_: [])
+    target = tmp_path / "custom-harness.md"
+
+    rc = harness_install.main([
+        "--recommend",
+        "--goal",
+        "repair a legacy Python service",
+        "--model",
+        "openrouter/openai/gpt-5.5",
+        "--plan-on-no-fit",
+        "--plan-output",
+        str(target),
+    ])
+
+    assert rc == 0
+    assert f"Custom harness plan: {target}" in capsys.readouterr().out
+    text = target.read_text(encoding="utf-8")
+    assert "repair a legacy Python service" in text
+    assert "openrouter/openai/gpt-5.5" in text
+    assert "Build the harness described above" in text

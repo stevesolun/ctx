@@ -287,6 +287,28 @@ def test_main_custom_model_writes_profile_and_recommends_harness(
     assert "text-to-cad" in capsys.readouterr().out
 
 
+def test_main_custom_model_no_fit_points_to_harness_plan(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
+    monkeypatch.setattr(ci, "recommend_harnesses", lambda *args, **kwargs: [])
+
+    rc = ci.main([
+        "--model-mode", "custom",
+        "--model", "ollama/llama3.1",
+        "--goal", "private local CAD workflow",
+    ])
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "no harness recommendations matched yet" in output
+    assert "ctx-harness-install --recommend" in output
+    assert "--plan-on-no-fit" in output
+
+
 def test_main_custom_model_requires_model(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
     monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
