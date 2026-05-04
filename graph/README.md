@@ -1,6 +1,6 @@
 # Knowledge Graph
 
-Pre-built knowledge graph of **104,079 nodes** and **2,960,215 edges** across **53 communities** (Louvain). The curated core is **13,233 nodes** (1,969 curated skills + 464 agents + 10,787 MCP servers + 13 cataloged harnesses). The Skills.sh catalog contributes **90,846 first-class `skill` nodes**, **90,846 skill entity pages under `entities/skills/skills-sh-*.md`**, and **89,463 hydrated installable Skills.sh `SKILL.md` files** under `converted/skills-sh-*/`, with the **28,611** long entries converted to gated micro-skill orchestrators. Edges are blended from three signals: semantic cosine (**1,707,435** edges, default weight 0.70), explicit `tags:` overlap (**920,686** candidate pairs, weight 0.15), and sparse slug-token overlap (**442,556** candidate pairs, weight 0.15). Skills.sh is full-body semantic: **1,525,295** Skills.sh-incident edges have non-zero `semantic_sim`, including **1,437,138** Skills.sh-to-Skills.sh semantic edges. Rebuild with `python -m ctx.core.wiki.wiki_graphify`, add harnesses with `ctx-harness-add`, then refresh the Skills.sh catalog with `python src/import_skills_sh_catalog.py --from-api-union <raw.json> --update-wiki-tar`.
+Pre-built knowledge graph of **102,696 nodes** and **2,900,834 edges** across **52 communities** (Louvain). The curated core is **13,233 nodes** (1,969 curated skills + 464 agents + 10,787 MCP servers + 13 cataloged harnesses). The Skills.sh catalog contributes **89,463 first-class body-backed `skill` nodes**, **89,463 skill entity pages under `entities/skills/skills-sh-*.md`**, and **89,463 hydrated installable Skills.sh `SKILL.md` files** under `converted/skills-sh-*/`, with the **28,611** long entries converted to gated micro-skill orchestrators. Edges are blended from three signals: semantic cosine (**1,682,825** edges, default weight 0.70), explicit `tags:` overlap (**891,684** candidate pairs, weight 0.15), and sparse slug-token overlap (**433,074** candidate pairs, weight 0.15). Skills.sh is full-body semantic: **1,500,685** Skills.sh-incident edges have non-zero `semantic_sim`, including **1,412,547** Skills.sh-to-Skills.sh semantic edges. Rebuild with `python -m ctx.core.wiki.wiki_graphify`, add harnesses with `ctx-harness-add`, then refresh the Skills.sh catalog with `python src/import_skills_sh_catalog.py --from-api-union <raw.json> --drop-body-unavailable --update-wiki-tar`.
 
 Runtime recommendation is intentionally split into two paths: execution
 surfaces recommend only skills, agents, and MCP servers; custom/API/local model
@@ -14,6 +14,8 @@ harness match floor in `config.json`.
 > **2026-05-02.** Added [GitNexus](https://github.com/abhigyanpatwari/GitNexus) as a first-class cataloged MCP server entity, linked to its Skills.sh GitNexus skill pages and related architecture/refactoring agents. Node count: 104,078 -> **104,079**. Edge count: 2,960,189 -> **2,960,215**. The GitNexus node has 26 incident cross-type edges and an MCP quality score of 0.8997 (grade A). Its PolyForm Noncommercial license is recorded in frontmatter, so install decisions remain explicit.
 
 > **2026-05-04.** Refreshed the v0.7.3 artifact after recovering one Skills.sh command-injection-testing body. Hydrated Skills.sh installable bodies increased from 89,462 to **89,463** and total converted skill bodies increased from 91,235 to **91,236**. Graph topology stayed at **104,079 nodes** and **2,960,215 edges**; generated micro-skill markdown now defangs high-risk command-injection payloads before packaging.
+
+> **2026-05-04.** Pruned **1,383** Skills.sh records that had no packaged `SKILL.md` body and no parseable Skills.sh prose body. The shipped catalog now contains **89,463** Skills.sh entries, and every Skills.sh catalog entry has a matching entity page plus converted `SKILL.md` body. Node count: 104,079 -> **102,696**. Edge count: 2,960,215 -> **2,900,834**. Communities: 53 -> **52**.
 
 > **2026-04-29.** Expanded the harness catalog to 13 first-class `harness` nodes/pages: LangGraph, CrewAI, AutoGen, Google ADK, Semantic Kernel, Mastra, Pydantic AI, Haystack, OpenAI Agents SDK, LiteLLM, Langfuse, AgentOps, and [`text-to-cad`](https://github.com/earthtojake/text-to-cad). Node count: 104,066 -> **104,078**. Edge count: 1,031,011 -> **1,033,253**. Harness incident edges now total 2,700: 2,411 curated-core edges plus 289 remote-cataloged Skills.sh metadata edges.
 
@@ -36,9 +38,9 @@ harness match floor in `config.json`.
 
 | File | Size | Contents |
 |------|------|----------|
-| `wiki-graph.tar.gz` | ~336 MiB | **Full wiki** - entity cards, 91,236 converted skill bodies, 430 mirrored agent bodies, 104K-node / 3.0M-edge knowledge graph, concept pages, catalog, 13 cataloged harnesses, and first-class hydrated Skills.sh installable pages |
-| `skills-sh-catalog.json.gz` | ~11.3 MiB | Compressed Skills.sh catalog (90,846 observed entries, install commands, detail URLs, inferred tags, overlap metadata) |
-| `communities.json` | ~6.6 MiB | 53 detected communities (Louvain) with labels + member lists |
+| `wiki-graph.tar.gz` | ~334 MiB | **Full wiki** - entity cards, 89,463 Skills.sh converted skill bodies, 430 mirrored agent bodies, 102.7K-node / 2.9M-edge knowledge graph, concept pages, catalog, 13 cataloged harnesses, and first-class hydrated Skills.sh installable pages |
+| `skills-sh-catalog.json.gz` | ~11.1 MiB | Compressed Skills.sh catalog (89,463 observed body-backed entries, install commands, detail URLs, inferred tags, overlap metadata) |
+| `communities.json` | ~6.6 MiB | 52 detected communities (Louvain) with labels + member lists |
 | `viz-overview.html` / `.png` | — | Plotly-rendered overview of the full graph |
 | `viz-python.html` | — | Python-skills sub-view |
 | `viz-security.html` / `.png` | — | Security-skills sub-view |
@@ -47,16 +49,16 @@ harness match floor in `config.json`.
 
 ### What's inside `wiki-graph.tar.gz`
 
-- `entities/skills/` - **92,815** skill entity pages: 1,969 curated ctx skills plus 90,846 remote-cataloged Skills.sh pages under the `skills-sh-` prefix
+- `entities/skills/` - **91,432** skill entity pages: 1,969 curated ctx skills plus 89,463 body-backed Skills.sh pages under the `skills-sh-` prefix
 - `entities/agents/` — **464** agent entity pages
 - `entities/mcp-servers/<shard>/` — **10,787** MCP entity pages (sharded by first-char to keep dirs scannable)
 - `entities/harnesses/` - **13** harness entity pages
 - `concepts/` - community concept pages generated from the current Louvain labels
-- `converted/` - **91,236** skill bodies ready for `ctx-skill-install`, including **89,463** hydrated Skills.sh `SKILL.md` files. Long entries over the configured loader threshold are gated micro-skill orchestrators; no `SKILL.md.original` backups are shipped
+- `converted/` - **89,463** hydrated Skills.sh `SKILL.md` files plus curated skill bodies ready for `ctx-skill-install`. Long entries over the configured loader threshold are gated micro-skill orchestrators; no `SKILL.md.original` backups are shipped
 - `converted-agents/` — **430** agent bodies ready for `ctx-agent-install`
-- `graphify-out/graph.json` - full knowledge graph (104,079 nodes, 2,960,215 edges), including the curated core, cataloged harnesses, and full-body semantic Skills.sh skill nodes
-- `graphify-out/communities.json` - community detection results (53 communities, Louvain)
-- `external-catalogs/skills-sh/catalog.json` — Skills.sh catalog (90,846 observed entries; site reported 90,991 during the clean refresh), including graph node IDs, entity paths, install commands, duplicate hints, and quality signals
+- `graphify-out/graph.json` - full knowledge graph (102,696 nodes, 2,900,834 edges), including the curated core, cataloged harnesses, and full-body semantic Skills.sh skill nodes
+- `graphify-out/communities.json` - community detection results (52 communities, Louvain)
+- `external-catalogs/skills-sh/catalog.json` — Skills.sh catalog (89,463 observed body-backed entries; site reported 90,991 during the clean refresh), including graph node IDs, entity paths, install commands, duplicate hints, and quality signals
 - `external-catalogs/skills-sh/summary.json` and `README.md` — fetch/coverage/overlap metadata for the catalog
 - `catalog.md` — bulk listing of skills / agents / MCPs
 - `SCHEMA.md`, `index.md`, `log.md` — wiki infrastructure
@@ -95,7 +97,7 @@ raw = json.loads(Path("~/.claude/skill-wiki/graphify-out/graph.json").expanduser
 edges_key = "links" if "links" in raw else "edges"
 G = node_link_graph(raw, edges=edges_key)
 
-# 104,079 nodes, 2,960,215 edges
+# 102,696 nodes, 2,900,834 edges
 print(G.number_of_nodes(), G.number_of_edges())
 
 # Find entities related to "fastapi"

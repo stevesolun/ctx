@@ -116,7 +116,7 @@ def validate_graph_artifacts(
     deep: bool = False,
     min_nodes: int = 100_000,
     min_edges: int = 2_000_000,
-    min_skills_sh_nodes: int = 90_000,
+    min_skills_sh_nodes: int = 89_000,
     min_semantic_edges: int = 1_000_000,
     expected_harnesses: set[str] | None = None,
     line_threshold: int = 180,
@@ -132,6 +132,16 @@ def validate_graph_artifacts(
     catalog = _load_gzip_json(catalog_path)
     _load_json(communities_path)
     skills = _catalog_skills(catalog)
+    body_unavailable = [
+        str(item.get("ctx_slug") or item.get("id") or "")
+        for item in skills
+        if item.get("body_available") is False
+    ]
+    if body_unavailable:
+        raise GraphArtifactError(
+            "Skills.sh catalog contains body-unavailable records: "
+            f"{body_unavailable[:5]}",
+        )
     available_converted_paths = {
         str(item.get("converted_path") or "")
         for item in skills
@@ -247,7 +257,7 @@ def main() -> None:
     parser.add_argument("--deep", action="store_true")
     parser.add_argument("--min-nodes", type=int, default=100_000)
     parser.add_argument("--min-edges", type=int, default=2_000_000)
-    parser.add_argument("--min-skills-sh-nodes", type=int, default=90_000)
+    parser.add_argument("--min-skills-sh-nodes", type=int, default=89_000)
     parser.add_argument("--min-semantic-edges", type=int, default=1_000_000)
     parser.add_argument("--line-threshold", type=int, default=180)
     parser.add_argument("--max-stage-lines", type=int, default=40)
