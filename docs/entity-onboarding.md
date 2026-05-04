@@ -31,8 +31,10 @@ the update is treated like a release step.
    `--update-existing` until those findings are acceptable.
 3. Run the security/cyber check below.
 4. Rebuild the curated wiki graph with `ctx-wiki-graphify`.
-5. Repack `graph/wiki-graph.tar.gz` with the exclusions in
-   `graph/README.md`; never commit local review reports or raw caches.
+5. Repack `graph/wiki-graph.tar.gz` through the artifact promotion path:
+   write a staged tarball, validate it, atomically promote it, and keep the
+   generated `*.promotion.json` metadata with the previous/current hashes.
+   Never commit local review reports or raw caches.
 6. Refresh the Skills.sh catalog overlay when shipping catalog coverage.
    This adds remote-cataloged first-class `skill` nodes under the
    `skills-sh-` prefix, skill pages under `entities/skills/`, install

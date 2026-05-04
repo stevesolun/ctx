@@ -46,6 +46,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, TextIO
 
+from ctx.core.wiki.artifact_promotion import promote_staged_artifact
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CATALOG_OUT = REPO_ROOT / "graph" / "skills-sh-catalog.json.gz"
 DEFAULT_WIKI_TAR = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
@@ -1675,10 +1677,53 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                         communities_for_report,
                     ).encode("utf-8"),
                 )
-        tmp_path.replace(tarball)
+        promote_staged_artifact(
+            tmp_path,
+            tarball,
+            validate=_validate_wiki_tarball_candidate,
+        )
     finally:
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
+
+
+def _validate_wiki_tarball_candidate(candidate: Path) -> None:
+    required = {
+        "graphify-out/graph.json",
+        "external-catalogs/skills-sh/catalog.json",
+    }
+    seen: set[str] = set()
+    with tarfile.open(candidate, "r:gz") as tf:
+        for member in tf.getmembers():
+            safe_name = _safe_tar_name(member.name)
+            if safe_name is None:
+                raise ValueError(f"unsafe tar member in candidate: {member.name!r}")
+            if safe_name.endswith(".original"):
+                raise ValueError(f"raw backup member leaked into candidate: {safe_name}")
+            seen.add(safe_name)
+            if safe_name == "graphify-out/graph.json":
+                graph = _read_tar_json(tf, member, "graph.json")
+                if not isinstance(graph.get("nodes"), list) or not isinstance(
+                    graph.get("edges"), list
+                ):
+                    raise ValueError("candidate graph.json must contain nodes and edges")
+            elif safe_name == "external-catalogs/skills-sh/catalog.json":
+                catalog = _read_tar_json(tf, member, "Skills.sh catalog")
+                if not isinstance(catalog.get("skills"), list):
+                    raise ValueError("candidate Skills.sh catalog must contain skills")
+    missing = sorted(required - seen)
+    if missing:
+        raise ValueError(f"candidate wiki tarball is missing required members: {missing}")
+
+
+def _read_tar_json(tf: tarfile.TarFile, member: tarfile.TarInfo, label: str) -> dict[str, Any]:
+    f = tf.extractfile(member)
+    if f is None:
+        raise ValueError(f"candidate {label} member is not readable")
+    data = json.loads(f.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"candidate {label} must be a JSON object")
+    return data
 
 
 def _reconcile_body_availability_with_tar(
