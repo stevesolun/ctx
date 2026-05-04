@@ -86,8 +86,20 @@ def test_install_copies_local_source_and_writes_manifest(tmp_path: Path) -> None
     )
     assert manifest["slug"] == "text-to-cad"
     assert manifest["status"] == "installed"
+    assert {Path(path).as_posix() for path in manifest["attach_files"]} == {
+        ".ctx/attach/README.md",
+        ".ctx/attach/ctx-run.txt",
+        ".ctx/attach/mcp.json",
+        ".ctx/attach/python.py",
+    }
     assert manifest["setup_commands_run"] == []
     assert manifest["verify_commands_run"] == []
+    attach_dir = tmp_path / "installs" / "text-to-cad" / ".ctx" / "attach"
+    assert json.loads((attach_dir / "mcp.json").read_text(encoding="utf-8")) == {
+        "mcpServers": {"ctx-wiki": {"command": "ctx-mcp-server", "args": []}}
+    }
+    assert "recommend_bundle" in (attach_dir / "python.py").read_text(encoding="utf-8")
+    assert "ctx run --model" in (attach_dir / "ctx-run.txt").read_text(encoding="utf-8")
 
 
 def test_write_manifest_uses_atomic_json_writer(
@@ -121,6 +133,7 @@ def test_write_manifest_uses_atomic_json_writer(
         runtimes=("python",),
         model_providers=("openai",),
         capabilities=("Generate CAD",),
+        attach_modes=("mcp", "python-library", "ctx-run"),
         setup_commands=(),
         verify_commands=(),
     )
@@ -131,10 +144,48 @@ def test_write_manifest_uses_atomic_json_writer(
         manifest_dir=tmp_path / "manifests",
         setup_runs=[],
         verify_runs=[],
+        attach_files=[],
     )
 
     assert path == tmp_path / "manifests" / "text-to-cad.json"
     assert calls == [(path, json.loads(path.read_text(encoding="utf-8")), 2)]
+
+
+def test_install_respects_catalog_attach_modes(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=str(source), attach_modes=["mcp"])
+
+    result = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=tmp_path / "manifests",
+        allow_local_sources=True,
+    )
+
+    assert result.status == "installed"
+    attach_dir = tmp_path / "installs" / "text-to-cad" / ".ctx" / "attach"
+    assert (attach_dir / "README.md").exists()
+    assert (attach_dir / "mcp.json").exists()
+    assert not (attach_dir / "python.py").exists()
+    assert not (attach_dir / "ctx-run.txt").exists()
+
+
+def test_dry_run_does_not_write_attach_files(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki)
+    result = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=tmp_path / "manifests",
+        dry_run=True,
+    )
+
+    assert result.status == "dry-run"
+    assert not (tmp_path / "installs" / "text-to-cad" / ".ctx").exists()
 
 
 def test_install_accepts_file_uri_local_source_with_opt_in(tmp_path: Path) -> None:

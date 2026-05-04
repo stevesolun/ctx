@@ -59,6 +59,7 @@ class HarnessRecord:
     runtimes: tuple[str, ...]
     model_providers: tuple[str, ...]
     capabilities: tuple[str, ...]
+    attach_modes: tuple[str, ...]
     setup_commands: tuple[str, ...]
     verify_commands: tuple[str, ...]
 
@@ -98,9 +99,31 @@ def _load_page(path: Path, slug: str) -> HarnessRecord:
         runtimes=_as_tuple(fm.get("runtimes")),
         model_providers=_as_tuple(fm.get("model_providers")),
         capabilities=_as_tuple(fm.get("capabilities")),
+        attach_modes=_normalize_attach_modes(fm.get("attach_modes")),
         setup_commands=_as_tuple(fm.get("setup_commands")),
         verify_commands=_as_tuple(fm.get("verify_commands")),
     )
+
+
+def _normalize_attach_modes(raw: object) -> tuple[str, ...]:
+    aliases = {
+        "mcp": "mcp",
+        "mcp-server": "mcp",
+        "python": "python-library",
+        "python-library": "python-library",
+        "library": "python-library",
+        "ctx": "ctx-run",
+        "ctx-run": "ctx-run",
+        "cli": "ctx-run",
+        "manual": "manual",
+    }
+    values = _as_tuple(raw) or ("mcp", "python-library", "ctx-run")
+    modes: list[str] = []
+    for value in values:
+        mode = aliases.get(value.strip().lower())
+        if mode and mode not in modes:
+            modes.append(mode)
+    return tuple(modes) or ("manual",)
 
 
 def _repo_key(raw: str) -> str:
@@ -186,6 +209,10 @@ def render_plan(record: HarnessRecord, *, target: Path) -> str:
         lines.append(f"Runtimes: {', '.join(record.runtimes)}")
     if record.model_providers:
         lines.append(f"Model providers: {', '.join(record.model_providers)}")
+    if record.capabilities:
+        lines.append(f"Capabilities: {', '.join(record.capabilities)}")
+    if record.attach_modes:
+        lines.append(f"Attach modes: {', '.join(record.attach_modes)}")
     if record.setup_commands:
         lines.append("Setup commands:")
         lines.extend(f"  - {cmd}" for cmd in record.setup_commands)
@@ -388,6 +415,7 @@ def _write_manifest(
     manifest_dir: Path,
     setup_runs: list[dict[str, Any]],
     verify_runs: list[dict[str, Any]],
+    attach_files: list[Path] | None = None,
 ) -> Path:
     path = manifest_dir / f"{record.slug}.json"
     reject_symlink_path(path)
@@ -399,6 +427,9 @@ def _write_manifest(
         "repo_url": record.repo_url,
         "target": str(target),
         "installed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "attach_files": [
+            str(path.relative_to(target)) for path in (attach_files or [])
+        ],
         "setup_commands_run": setup_runs,
         "verify_commands_run": verify_runs,
     }
@@ -470,12 +501,14 @@ def install_harness(
             run_verify=run_verify,
             allow_local_sources=allow_local_sources,
         )
+        attach_files = _write_attach_files(record, target=target_path)
         manifest_path = _write_manifest(
             record=record,
             target=target_path,
             manifest_dir=manifest_dir,
             setup_runs=setup_runs,
             verify_runs=verify_runs,
+            attach_files=attach_files,
         )
     except FileExistsError as exc:
         return InstallResult(
@@ -497,6 +530,89 @@ def install_harness(
         "installed",
         target=target_path,
         manifest_path=manifest_path,
+    )
+
+
+def _write_attach_files(record: HarnessRecord, *, target: Path) -> list[Path]:
+    attach_dir = target / ".ctx" / "attach"
+    attach_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+
+    readme = attach_dir / "README.md"
+    reject_symlink_path(readme)
+    atomic_write_text(readme, _render_attach_readme(record))
+    written.append(readme)
+
+    if "mcp" in record.attach_modes:
+        path = attach_dir / "mcp.json"
+        reject_symlink_path(path)
+        atomic_write_text(path, _render_mcp_attach_config())
+        written.append(path)
+    if "python-library" in record.attach_modes:
+        path = attach_dir / "python.py"
+        reject_symlink_path(path)
+        atomic_write_text(path, _render_python_attach_snippet())
+        written.append(path)
+    if "ctx-run" in record.attach_modes:
+        path = attach_dir / "ctx-run.txt"
+        reject_symlink_path(path)
+        atomic_write_text(path, _render_ctx_run_attach_template(record))
+        written.append(path)
+    return written
+
+
+def _render_attach_readme(record: HarnessRecord) -> str:
+    modes = ", ".join(record.attach_modes)
+    return f"""# ctx Attachment for {record.title}
+
+This harness was installed by `ctx-harness-install`.
+
+Supported attach modes: {modes}
+
+Use the files in this directory to connect the harness to ctx:
+
+- `mcp.json`: start `ctx-mcp-server` from any MCP-speaking host.
+- `python.py`: call ctx recommendation/wiki APIs from a Python loop.
+- `ctx-run.txt`: run the built-in ctx generic harness with your model.
+
+The attachment files do not run setup commands and do not contain secrets.
+"""
+
+
+def _render_mcp_attach_config() -> str:
+    return json.dumps(
+        {
+            "mcpServers": {
+                "ctx-wiki": {
+                    "command": "ctx-mcp-server",
+                    "args": [],
+                }
+            }
+        },
+        indent=2,
+    ) + "\n"
+
+
+def _render_python_attach_snippet() -> str:
+    return """from ctx import graph_query, recommend_bundle, wiki_get, wiki_search
+
+
+def recommend_for_turn(goal: str) -> list[dict]:
+    return recommend_bundle(goal, top_k=5)
+
+
+def load_entity(slug: str) -> dict | None:
+    return wiki_get(slug)
+
+"""
+
+
+def _render_ctx_run_attach_template(record: HarnessRecord) -> str:
+    task = record.capabilities[0] if record.capabilities else f"use {record.title}"
+    return (
+        "ctx run --model <provider/model> "
+        f"--task {json.dumps(task)} "
+        "--mcp ctx-wiki:ctx-mcp-server\n"
     )
 
 
