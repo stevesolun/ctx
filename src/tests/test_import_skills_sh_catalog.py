@@ -8,6 +8,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 import import_skills_sh_catalog as importer
 from import_skills_sh_catalog import (
     ExistingWikiIndex,
@@ -634,6 +636,52 @@ def test_update_wiki_tarball_preserves_stripped_catalog_converted_body(
     assert catalog_out["skills"][0]["body_available"] is True
     assert "skill_body" not in catalog_out["skills"][0]
     assert "body_available: true" in page
+
+
+def test_update_wiki_tarball_validation_failure_preserves_original_tarball(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    tarball = tmp_path / "wiki-graph.tar.gz"
+    graph = {
+        "directed": False,
+        "multigraph": False,
+        "graph": {},
+        "nodes": [],
+        "edges": [],
+    }
+    with tarfile.open(tarball, "w:gz") as tf:
+        _add_text(tf, "./graphify-out/graph.json", json.dumps(graph))
+        _add_text(tf, "./entities/skills/existing.md", "# existing\n")
+    original = tarball.read_bytes()
+    catalog: dict[str, Any] = {
+        "schema_version": 1,
+        "source": "skills.sh",
+        "api": "https://skills.sh/api/search",
+        "fetched_at": "2026-04-29T00:00:00+00:00",
+        "site_reported_total": 0,
+        "observed_unique_skills": 0,
+        "coverage_vs_site_reported_total": 0.0,
+        "query_count": 1,
+        "query_error_count": 0,
+        "overlap": {"existing_wiki_skill_pages": 0},
+        "skills": [],
+    }
+
+    def fail_validation(_candidate: Path) -> None:
+        raise ValueError("candidate invalid")
+
+    monkeypatch.setattr(importer, "_validate_wiki_tarball_candidate", fail_validation)
+
+    with pytest.raises(ValueError, match="candidate invalid"):
+        update_wiki_tarball(tarball, catalog)
+
+    assert tarball.read_bytes() == original
+    assert not tarball.with_name("wiki-graph.tar.gz.promotion.json").exists()
+    with tarfile.open(tarball, "r:gz") as tf:
+        assert "./entities/skills/existing.md" in tf.getnames()
+        with pytest.raises(KeyError):
+            tf.getmember("./external-catalogs/skills-sh/catalog.json")
 
 
 def test_update_wiki_tarball_drops_skills_sh_original_body_files(
