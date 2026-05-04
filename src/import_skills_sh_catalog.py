@@ -451,6 +451,68 @@ def _refresh_body_summary(catalog: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
+def _catalog_skills(catalog: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_skills = catalog.get("skills")
+    return [item for item in raw_skills if isinstance(item, dict)] if isinstance(raw_skills, list) else []
+
+
+def _has_packaged_or_inline_body(item: dict[str, Any]) -> bool:
+    return bool(
+        item.get("body_available")
+        or str(item.get("skill_body") or "").strip()
+        or str(item.get("converted_path") or "").strip()
+    )
+
+
+def drop_body_unavailable_skills(catalog: dict[str, Any]) -> dict[str, int]:
+    """Remove Skills.sh records that cannot ship as installable skill bodies."""
+    skills = _catalog_skills(catalog)
+    kept = [item for item in skills if _has_packaged_or_inline_body(item)]
+    original_count = int(
+        catalog.get("observed_unique_skills_before_body_prune")
+        or catalog.get("observed_unique_skills")
+        or len(skills)
+    )
+    pruned_count = max(original_count - len(kept), 0)
+
+    catalog["skills"] = kept
+    catalog["observed_unique_skills_before_body_prune"] = original_count
+    catalog["observed_unique_skills"] = len(kept)
+    catalog["body_unavailable_pruned_count"] = pruned_count
+    catalog["body_unavailable_pruned_at"] = _utc_now() if pruned_count else catalog.get(
+        "body_unavailable_pruned_at",
+    )
+    site_total = catalog.get("site_reported_total")
+    catalog["coverage_vs_site_reported_total"] = (
+        round(len(kept) / site_total, 6) if isinstance(site_total, int) and site_total else None
+    )
+    overlap = catalog.setdefault("overlap", {})
+    if isinstance(overlap, dict):
+        overlap["skill_id_matches_existing_wiki"] = sum(
+            1 for item in kept
+            if isinstance(item.get("overlap"), dict)
+            and item["overlap"].get("skill_id_in_existing_wiki")
+        )
+        overlap["ctx_slug_matches_existing_wiki"] = sum(
+            1 for item in kept
+            if isinstance(item.get("overlap"), dict)
+            and item["overlap"].get("ctx_slug_in_existing_wiki")
+        )
+    catalog["ctx_slug_collisions_resolved"] = sum(
+        1 for item in kept
+        if isinstance(item.get("overlap"), dict)
+        and item["overlap"].get("ctx_slug_collision_resolved")
+    )
+    catalog["body_hydration_error_count"] = 0
+    catalog["body_hydration_errors_sample"] = []
+    notes = catalog.setdefault("notes", [])
+    note = "Body-unavailable Skills.sh records are pruned from shipped graph/wiki artifacts."
+    if isinstance(notes, list) and note not in notes:
+        notes.append(note)
+    _refresh_body_summary(catalog)
+    return {"kept": len(kept), "pruned": pruned_count, "original": original_count}
+
+
 def hydrate_catalog_bodies(
     catalog: dict[str, Any],
     *,
@@ -1035,6 +1097,102 @@ Remote-cataloged Skills.sh skill.
     return body
 
 
+def _skills_sh_node_ids(catalog: dict[str, Any]) -> set[str]:
+    return {
+        SKILLS_SH_NODE_PREFIX + str(item.get("ctx_slug") or "")
+        for item in _catalog_skills(catalog)
+        if str(item.get("ctx_slug") or "")
+    }
+
+
+def _is_skills_sh_graph_node(node: dict[str, Any]) -> bool:
+    node_id = str(node.get("id") or "")
+    return node_id.startswith(SKILLS_SH_NODE_PREFIX + "skills-sh-") or (
+        node.get("source_catalog") == "skills.sh"
+        and node.get("type") == "skill"
+    )
+
+
+def _filter_skills_sh_communities(
+    communities: dict[str, Any],
+    valid_node_ids: set[str],
+) -> dict[str, Any]:
+    raw_communities = communities.get("communities")
+    if not isinstance(raw_communities, dict):
+        return communities
+    filtered: dict[str, Any] = {}
+    for community_id, raw_community in raw_communities.items():
+        if not isinstance(raw_community, dict):
+            continue
+        raw_members = raw_community.get("members")
+        if not isinstance(raw_members, list):
+            filtered[str(community_id)] = raw_community
+            continue
+        members = [
+            str(member) for member in raw_members
+            if not (
+                str(member).startswith(SKILLS_SH_NODE_PREFIX + "skills-sh-")
+                and str(member) not in valid_node_ids
+            )
+        ]
+        if not members:
+            continue
+        community = dict(raw_community)
+        community["members"] = members
+        filtered[str(community_id)] = community
+    out = dict(communities)
+    out["communities"] = filtered
+    out["total_communities"] = len(filtered)
+    out["generated"] = _utc_now()
+    return out
+
+
+def _render_graph_report(graph: dict[str, Any], communities: dict[str, Any] | None) -> str:
+    nodes = graph.get("nodes")
+    edges = graph.get("edges") if "edges" in graph else graph.get("links")
+    if not isinstance(nodes, list):
+        nodes = []
+    if not isinstance(edges, list):
+        edges = []
+    degree: dict[str, int] = {}
+    node_by_id = {
+        str(node.get("id") or ""): node
+        for node in nodes
+        if isinstance(node, dict) and str(node.get("id") or "")
+    }
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if source:
+            degree[source] = degree.get(source, 0) + 1
+        if target:
+            degree[target] = degree.get(target, 0) + 1
+    top_nodes = sorted(degree.items(), key=lambda item: (-item[1], item[0]))[:20]
+    community_count = 0
+    if isinstance(communities, dict):
+        raw_communities = communities.get("communities")
+        if isinstance(raw_communities, dict):
+            community_count = len(raw_communities)
+    lines = [
+        "# Graph Report",
+        "",
+        f"> Generated: {_utc_now()}",
+        f"> Nodes: {len(nodes):,} | Edges: {len(edges):,} | Communities: {community_count:,}",
+        "",
+        "## Most Connected Nodes",
+        "",
+    ]
+    for node_id, count in top_nodes:
+        node = node_by_id.get(node_id, {})
+        label = node.get("label") or node_id
+        node_type = node.get("type") or "unknown"
+        lines.append(f"- **{label}** ({count:,} connections) - {node_type}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
     nodes = graph.get("nodes")
     edges = graph.get("edges") if "edges" in graph else graph.get("links")
@@ -1044,6 +1202,7 @@ def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str,
     skills = catalog.get("skills")
     if not isinstance(skills, list):
         return graph
+    valid_skills_sh_ids = _skills_sh_node_ids(catalog)
 
     legacy_skills_sh_ids = {
         str(node.get("id"))
@@ -1060,6 +1219,23 @@ def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str,
             edge for edge in edges
             if str(edge.get("source")) not in legacy_skills_sh_ids
             and str(edge.get("target")) not in legacy_skills_sh_ids
+        ]
+    stale_skills_sh_ids = {
+        str(node.get("id") or "")
+        for node in nodes
+        if isinstance(node, dict)
+        and _is_skills_sh_graph_node(node)
+        and str(node.get("id") or "") not in valid_skills_sh_ids
+    }
+    if stale_skills_sh_ids:
+        nodes = [
+            node for node in nodes
+            if str(node.get("id") or "") not in stale_skills_sh_ids
+        ]
+        edges = [
+            edge for edge in edges
+            if str(edge.get("source") or "") not in stale_skills_sh_ids
+            and str(edge.get("target") or "") not in stale_skills_sh_ids
         ]
     edges = [edge for edge in edges if edge.get("source_catalog") != "skills.sh"]
     node_by_id = {
@@ -1344,6 +1520,7 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
     try:
         with tarfile.open(tarball, "r:gz") as src, tarfile.open(tmp_path, "w:gz") as dst:
             members = src.getmembers()
+            valid_skills_sh_ids = _skills_sh_node_ids(catalog)
             existing_converted_paths = {
                 safe_name
                 for member in members
@@ -1355,6 +1532,8 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
             _reconcile_body_availability_with_tar(catalog, existing_converted_paths)
             staged_converted_files = _stage_inline_skill_bodies_for_packaging(catalog)
             replacement_slugs = set(staged_converted_files)
+            graph_for_report: dict[str, Any] | None = None
+            communities_for_report: dict[str, Any] | None = None
 
             for member in members:
                 safe_name = _safe_tar_name(member.name)
@@ -1381,6 +1560,8 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                     or safe_name.endswith(".original")
                 ):
                     continue
+                if safe_name == "graphify-out/graph-report.md":
+                    continue
                 if member.isfile():
                     f = src.extractfile(member)
                     if f is None:
@@ -1388,10 +1569,32 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                     if safe_name == "graphify-out/graph.json":
                         graph = json.loads(f.read().decode("utf-8"))
                         graph = _augment_graph_with_external_nodes(graph, catalog)
+                        graph_for_report = graph
                         payload = json.dumps(
                             graph,
                             ensure_ascii=False,
                             separators=(",", ":"),
+                        ).encode("utf-8")
+                        _add_bytes(
+                            dst,
+                            name=member.name,
+                            payload=payload,
+                            mode=member.mode,
+                            mtime=int(member.mtime),
+                        )
+                        continue
+                    if safe_name == "graphify-out/communities.json":
+                        communities = json.loads(f.read().decode("utf-8"))
+                        if isinstance(communities, dict):
+                            communities = _filter_skills_sh_communities(
+                                communities,
+                                valid_skills_sh_ids,
+                            )
+                            communities_for_report = communities
+                        payload = json.dumps(
+                            communities,
+                            ensure_ascii=False,
+                            indent=2,
                         ).encode("utf-8")
                         _add_bytes(
                             dst,
@@ -1463,6 +1666,15 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                 ("external-catalogs/skills-sh/README.md", readme_bytes),
             ):
                 _add_bytes(dst, name=f"./{name}", payload=payload)
+            if graph_for_report is not None:
+                _add_bytes(
+                    dst,
+                    name="./graphify-out/graph-report.md",
+                    payload=_render_graph_report(
+                        graph_for_report,
+                        communities_for_report,
+                    ).encode("utf-8"),
+                )
         tmp_path.replace(tarball)
     finally:
         if tmp_path.exists():
@@ -1626,6 +1838,11 @@ def main() -> None:
     parser.add_argument("--catalog-out", type=Path, default=DEFAULT_CATALOG_OUT)
     parser.add_argument("--wiki-tar", type=Path, default=DEFAULT_WIKI_TAR)
     parser.add_argument("--update-wiki-tar", action="store_true")
+    parser.add_argument(
+        "--drop-body-unavailable",
+        action="store_true",
+        help="Delete Skills.sh records that have no packaged SKILL.md/prose body",
+    )
     parser.add_argument("--hydrate-bodies", action="store_true")
     parser.add_argument("--hydrate-limit", type=int, default=None)
     parser.add_argument("--hydrate-workers", type=int, default=4)
@@ -1680,6 +1897,13 @@ def main() -> None:
             f"{summary['body_hydrated_count']:,}/"
             f"{summary['body_hydration_attempted_count']:,} attempted "
             f"({summary['body_hydration_error_count']:,} errors)"
+        )
+    if args.drop_body_unavailable:
+        summary = drop_body_unavailable_skills(catalog)
+        print(
+            "dropped body-unavailable Skills.sh records: "
+            f"{summary['pruned']:,} pruned; {summary['kept']:,} kept "
+            f"(original={summary['original']:,})"
         )
     if args.update_wiki_tar:
         update_wiki_tarball(args.wiki_tar, catalog)
