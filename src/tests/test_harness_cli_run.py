@@ -33,6 +33,7 @@ from ctx.cli.run import (
     _model_provider_prefix,
     _parse_mcp_spec,
     _resolve_api_key_env,
+    _split_mcp_invocation,
     main,
 )
 from ctx.adapters.generic.providers import ToolCall
@@ -151,6 +152,18 @@ class TestParseMcpSpec:
         assert cfg.name == "fs"
         assert cfg.command == "npx"
         assert cfg.args == ("-y", "pkg", "/tmp")
+
+    def test_explicit_form_preserves_quoted_args(self) -> None:
+        cfg = _parse_mcp_spec(r'fs:npx -y pkg "C:\My Project"')
+        assert cfg.name == "fs"
+        assert cfg.command == "npx"
+        assert cfg.args == ("-y", "pkg", r"C:\My Project")
+
+    def test_windows_style_split_preserves_backslashes(self) -> None:
+        assert _split_mcp_invocation(r'cmd "C:\My Project"') == [
+            "cmd",
+            r"C:\My Project",
+        ]
 
     def test_explicit_single_command(self) -> None:
         cfg = _parse_mcp_spec("raw:myserver")
@@ -452,6 +465,41 @@ class TestRunCommand:
         first_call = fake_litellm._calls[0]
         assert first_call["messages"][0]["content"] == "stdin-prompt"
 
+    def test_runtime_lifecycle_events_recorded(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        lifecycle_dir = tmp_path / "runtime"
+        monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_dir))
+        exit_code = main(
+            [
+                "run",
+                "--model", "ollama/x",
+                "--task", "hi",
+                "--sessions-dir", str(tmp_path / "sessions"),
+                "--session-id", "lifecycle-run",
+                "--quiet",
+            ]
+        )
+        assert exit_code == 0
+        capsys.readouterr()
+
+        events = [
+            json.loads(line)
+            for line in (lifecycle_dir / "events.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+        ]
+        assert [event["action"] for event in events] == [
+            "dev_event",
+            "session_end",
+        ]
+        assert events[0]["session_id"] == "lifecycle-run"
+        assert events[0]["payload"]["task"] == "hi"
+
 
 # ── Subcommand: sessions ──────────────────────────────────────────────────
 
@@ -620,6 +668,53 @@ class TestResumeCommand:
             if line and json.loads(line)["type"] == "stop"
         )
         assert stop_count == 2
+
+    def test_resume_records_runtime_lifecycle_events(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        lifecycle_dir = tmp_path / "runtime"
+        monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_dir))
+        sessions_dir = tmp_path / "sessions"
+        main(
+            [
+                "run",
+                "--model", "ollama/x",
+                "--task", "first",
+                "--sessions-dir", str(sessions_dir),
+                "--session-id", "lifecycle-resume",
+                "--quiet",
+            ]
+        )
+        capsys.readouterr()
+
+        exit_code = main(
+            [
+                "resume", "lifecycle-resume",
+                "--task", "follow-up",
+                "--sessions-dir", str(sessions_dir),
+                "--quiet",
+            ]
+        )
+        assert exit_code == 0
+
+        events = [
+            json.loads(line)
+            for line in (lifecycle_dir / "events.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+        ]
+        assert [event["action"] for event in events] == [
+            "dev_event",
+            "session_end",
+            "dev_event",
+            "session_end",
+        ]
+        assert events[2]["event_type"] == "resume_task"
+        assert events[2]["payload"]["task"] == "follow-up"
 
     def test_resume_reuses_recorded_provider_settings(
         self,
