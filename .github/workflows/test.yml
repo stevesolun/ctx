@@ -234,36 +234,15 @@ jobs:
 
       - name: Validate shipped graph artifacts
         run: |
-          python - <<'PY'
-          import gzip
-          import json
-          import tarfile
-          from pathlib import Path
-
-          required = [
-              Path("graph/wiki-graph.tar.gz"),
-              Path("graph/skills-sh-catalog.json.gz"),
-              Path("graph/communities.json"),
-          ]
-          for path in required:
-              if not path.is_file() or path.stat().st_size == 0:
-                  raise SystemExit(f"missing or empty graph artifact: {path}")
-
-          with gzip.open("graph/skills-sh-catalog.json.gz", "rt", encoding="utf-8") as fh:
-              json.load(fh)
-          json.loads(Path("graph/communities.json").read_text(encoding="utf-8"))
-
-          with tarfile.open("graph/wiki-graph.tar.gz", "r:gz") as tar:
-              names = tar.getnames()
-          if not any(name.endswith("/index.md") or name == "./index.md" for name in names):
-              raise SystemExit("wiki graph archive is missing index.md")
-          originals = [name for name in names if name.endswith("SKILL.md.original")]
-          if originals:
-              raise SystemExit(
-                  f"wiki graph archive contains {len(originals)} raw SKILL.md.original files"
-              )
-          print(f"validated graph archive with {len(names)} entries")
-          PY
+          python src/validate_graph_artifacts.py \
+            --graph-dir graph \
+            --deep \
+            --min-nodes 100000 \
+            --min-edges 2000000 \
+            --min-skills-sh-nodes 90000 \
+            --min-semantic-edges 1000000 \
+            --line-threshold 180 \
+            --max-stage-lines 40
 
   browser-security:
     name: "Browser monitor security"

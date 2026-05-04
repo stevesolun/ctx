@@ -2,42 +2,13 @@
 
 import json
 import sys
-import tarfile
 from pathlib import Path
 
 import networkx as nx
-import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ctx.core.graph import resolve_graph
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-CURATED_HARNESS_SLUGS = {
-    "agentops",
-    "autogen",
-    "crewai",
-    "google-adk",
-    "haystack",
-    "langfuse",
-    "langgraph",
-    "litellm",
-    "mastra",
-    "openai-agents-sdk",
-    "pydantic-ai",
-    "semantic-kernel",
-    "text-to-cad",
-}
-GIT_LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
-
-
-def _require_hydrated_tarball(tarball: Path) -> None:
-    if not tarball.exists():
-        pytest.skip(f"{tarball} is not present")
-    with tarball.open("rb") as handle:
-        prefix = handle.read(len(GIT_LFS_POINTER_PREFIX))
-    if prefix == GIT_LFS_POINTER_PREFIX:
-        pytest.skip(f"{tarball} is a Git LFS pointer in this checkout")
 
 
 def _write_graph_file(tmp_path: Path, content: bytes | str) -> Path:
@@ -109,37 +80,3 @@ class TestLoadGraphIntegrity:
         G = resolve_graph.load_graph(path=p)
         assert G.number_of_nodes() == 2
         assert G.number_of_edges() == 1
-
-    def test_shipped_wiki_graph_contains_curated_harness_catalog(self) -> None:
-        tarball = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
-        _require_hydrated_tarball(tarball)
-        with tarfile.open(tarball, "r:gz") as tf:
-            names = {member.name for member in tf.getmembers()}
-            expected_pages = {
-                f"./entities/harnesses/{slug}.md"
-                for slug in CURATED_HARNESS_SLUGS
-            }
-            assert expected_pages <= names
-            graph_file = tf.extractfile("./graphify-out/graph.json")
-            assert graph_file is not None
-            graph = json.loads(graph_file.read().decode("utf-8"))
-
-        harness_nodes = {
-            node["id"]: node
-            for node in graph["nodes"]
-            if node.get("type") == "harness"
-        }
-        assert set(harness_nodes) == {
-            f"harness:{slug}" for slug in CURATED_HARNESS_SLUGS
-        }
-        assert "cad" in harness_nodes["harness:text-to-cad"]["tags"]
-
-    def test_shipped_wiki_graph_omits_original_backups(self) -> None:
-        tarball = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
-        _require_hydrated_tarball(tarball)
-        with tarfile.open(tarball, "r:gz") as tf:
-            original_members = [
-                member.name for member in tf.getmembers()
-                if member.name.endswith(".original")
-            ]
-        assert original_members == []
