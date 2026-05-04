@@ -239,7 +239,7 @@ jobs:
             --deep \
             --min-nodes 100000 \
             --min-edges 2000000 \
-            --min-skills-sh-nodes 90000 \
+            --min-skills-sh-nodes 89000 \
             --min-semantic-edges 1000000 \
             --line-threshold 180 \
             --max-stage-lines 40

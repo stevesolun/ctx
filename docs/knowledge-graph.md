@@ -13,7 +13,7 @@ Authoritative numbers from the shipped tarball. The curated-core snapshot
 is **13,233 nodes** (1,969 curated skills + 464 agents + 10,787 MCP servers
 + 13 harnesses). Harness pages under `entities/harnesses/` are ingested into
 local rebuilds and the separate harness-catalog recommendation path. The
-tarball also carries **90,846 remote-cataloged Skills.sh `skill` nodes**,
+tarball also carries **89,463 body-backed Skills.sh `skill` nodes**,
 matching skill pages under `entities/skills/skills-sh-*.md`. **89,463**
 hydrated Skills.sh bodies are shipped as installable `SKILL.md` files under
 `converted/skills-sh-*/`; the **28,611** entries over the configured line
@@ -23,19 +23,19 @@ are used during graph rebuilds for semantic similarity, but
 
 | | Count |
 |---|---:|
-| Total nodes | **104,079** |
+| Total nodes | **102,696** |
 | Curated core nodes | **13,233** (1,969 skills + 464 agents + 10,787 MCP servers + 13 harnesses) |
-| Remote-cataloged Skills.sh skill nodes | **90,846** (`skill`, `status=remote-cataloged`) |
-| Total edges | **2,960,215** |
-| Skills.sh incident edges | **2,665,345** |
-| Skills.sh semantic incident edges | **1,525,295** |
-| Communities | **53** (Louvain) |
-| Edge sources (overlap-deduped) | semantic 1,707,435 - tag 920,686 - token 442,556 |
-| Cross-type edges (skill <-> agent) | ~222K |
-| Cross-type edges (skill <-> MCP) | ~62K |
-| Cross-type edges (agent <-> MCP) | ~13K |
-| Harness edges | **2,700** (2,411 curated-core edges + 289 Skills.sh metadata edges across 13 cataloged harnesses) |
-| Skills.sh catalog | **90,846** observed entries (`external-catalogs/skills-sh/catalog.json` + `entities/skills/skills-sh-*.md`) |
+| Remote-cataloged Skills.sh skill nodes | **89,463** (`skill`, `status=remote-cataloged`, body-backed) |
+| Total edges | **2,900,834** |
+| Skills.sh incident edges | **2,605,971** |
+| Skills.sh semantic incident edges | **1,500,685** |
+| Communities | **52** (Louvain) |
+| Edge sources (overlap-deduped) | semantic 1,682,825 - tag 891,684 - token 433,074 |
+| Cross-type edges (skill <-> agent) | ~65K |
+| Cross-type edges (skill <-> MCP) | ~41K |
+| Cross-type edges (agent <-> MCP) | ~223 |
+| Harness edges | **3,289** |
+| Skills.sh catalog | **89,463** observed body-backed entries (`external-catalogs/skills-sh/catalog.json` + `entities/skills/skills-sh-*.md`) |
 
 ## Install
 
@@ -87,7 +87,7 @@ tarball members.
 
 After edges are built, `wiki_graphify` runs NetworkX's Louvain
 community detection (`resolution=1.2`, `seed=42` for determinism).
-The result is **53 communities** ranging from single-member isolated
+The result is **52 communities** ranging from single-member isolated
 specialists to several thousand members in broad clusters like
 `Community + Official + AI`. Each community also gets an auto-generated
 `concepts/<community>.md` wiki page summarizing its members and top
@@ -128,7 +128,7 @@ raw = json.loads(
 edges_key = "links" if "links" in raw else "edges"
 G = node_link_graph(raw, edges=edges_key)
 
-# 104,079 nodes, 2,960,215 edges
+# 102,696 nodes, 2,900,834 edges
 print(G.number_of_nodes(), G.number_of_edges())
 
 # Find entities related to 'fastapi-pro' by edge weight
@@ -215,6 +215,7 @@ if your hook config does not include those paths.
 | 2026-05-01 Skills.sh micro-skill pass | **2,960,189** | Enforced the <=180-line loader threshold across 89,461 hydrated Skills.sh `SKILL.md` files, converted 28,611 long bodies into gated micro-skill orchestrators, used full originals for semantic graphing, excluded `.original` backups from the shipped tarball, bounded generated stage/reference files to 40 lines, and rebuilt the graph. |
 | 2026-05-02 GitNexus MCP pass | **2,960,215** | Added GitNexus as a cataloged MCP server entity with 26 cross-type edges to its Skills.sh skill pages and related architecture/refactoring agents; semantic edge count unchanged. |
 | 2026-05-04 v0.7.3 artifact refresh | **2,960,215** | Hydrated one recoverable Skills.sh command-injection-testing body, raising hydrated Skills.sh `SKILL.md` files to 89,463; generated micro-skill markdown now defangs high-risk command-injection payloads before packaging. Graph topology unchanged. |
+| 2026-05-04 body-backed Skills.sh prune | **2,900,834** | Removed 1,383 Skills.sh records that had no packaged `SKILL.md` body and no parseable Skills.sh prose body. Remaining Skills.sh catalog entries, graph nodes, entity pages, and converted `SKILL.md` bodies are all **89,463**. |
 
 The full audit history lives in `CHANGELOG.md`. The current build is
 fully reproducible from the wiki content.

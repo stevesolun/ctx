@@ -3,17 +3,20 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-3498_collected-brightgreen.svg)](#)
-[![Graph](https://img.shields.io/badge/Graph-104%2C079_nodes_/_3.0M_edges-red.svg)](graph/)
+[![Tests](https://img.shields.io/badge/Tests-3501_collected-brightgreen.svg)](#)
+[![Graph](https://img.shields.io/badge/Graph-102%2C696_nodes_/_2.9M_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 
-Watches what you develop, walks a **104,079-node** graph across **92,815 skills, 464 agents, 10,787 MCP servers, and 13 cataloged harnesses**, then recommends the highest-value skills, agents, and MCP servers for the current task. Custom/API/local model users get separate harness recommendations during `ctx-init` or `ctx-harness-install`. The shipped wiki includes 90,846 Skills.sh entries, 89,463 hydrated installable `SKILL.md` bodies, install commands, duplicate hints, and semantic graph edges. You approve what loads, installs, or gets adopted.
+Watches what you develop, walks a **102,696-node** graph across **91,432 skills, 464 agents, 10,787 MCP servers, and 13 cataloged harnesses**, then recommends the highest-value skills, agents, and MCP servers for the current task. Custom/API/local model users get separate harness recommendations during `ctx-init` or `ctx-harness-install`. The shipped wiki includes 89,463 Skills.sh entries, 89,463 hydrated installable `SKILL.md` bodies, install commands, duplicate hints, and semantic graph edges. You approve what loads, installs, or gets adopted.
 
 > **2026-04-29 updates.**
 > - Added the curated `find-skills` workflow, backed by the canonical upstream install command `npx skills add https://github.com/vercel-labs/skills --skill find-skills`.
 > - Shipped 90,846 Skills.sh entries as first-class remote-cataloged `skill` nodes inside `graph/wiki-graph.tar.gz` and as `graph/skills-sh-catalog.json.gz`.
 > - Added 13 cataloged harnesses, including LangGraph, CrewAI, AutoGen, Google ADK, Semantic Kernel, Mastra, Pydantic AI, Haystack, OpenAI Agents SDK, LiteLLM, Langfuse, AgentOps, and text-to-cad.
 > - Added security/cyber review warnings to entity update reviews and documented the graph/wiki update procedure.
+
+> **2026-05-04 cleanup.**
+> - Pruned 1,383 Skills.sh records with no packaged `SKILL.md` body and no parseable Skills.sh prose body. The shipped catalog now contains only the 89,463 body-backed Skills.sh entries.
 
 > **2026-04-27 updates.**
 > - Imported [mattpocock/skills](https://github.com/mattpocock/skills) — 21 opinionated skills (TDD, domain-model, ubiquitous-language, github-triage, caveman compression mode, write-a-skill, plus 15 more) deployed under the `mattpocock-` prefix. See [`imported-skills/mattpocock/ATTRIBUTION.md`](imported-skills/mattpocock/ATTRIBUTION.md).
@@ -22,7 +25,7 @@ Watches what you develop, walks a **104,079-node** graph across **92,815 skills,
 
 ## Why it exists
 
-- **Discovery** — with 92K+ skill nodes, 460+ agents, 10K+ MCP servers, and 13 cataloged harnesses, you can't possibly know which exist or which apply to your current work.
+- **Discovery** — with 91K+ skill nodes, 460+ agents, 10K+ MCP servers, and 13 cataloged harnesses, you can't possibly know which exist or which apply to your current work.
 - **Context budget** — loading everything wastes tokens and degrades quality. You need the right 10–15 per session.
 - **Skill rot** — skills you installed months ago and never used are cluttering context. Stale ones should be flagged automatically.
 
@@ -40,7 +43,7 @@ Optional extras: `pip install "claude-ctx[embeddings]"` for the semantic backend
 
 ### Pre-built knowledge graph (optional)
 
-A pre-built knowledge graph of 104,079 nodes and 2,960,215 edges ships as a tarball. The same tarball includes `external-catalogs/skills-sh/catalog.json`, 90,846 remote-cataloged Skills.sh skill pages under `entities/skills/skills-sh-*.md`, 89,463 hydrated installable Skills.sh `SKILL.md` files under `converted/skills-sh-*/`, and 13 cataloged harness pages under `entities/harnesses/`. Extract to get a ready-to-use `~/.claude/skill-wiki/`:
+A pre-built knowledge graph of 102,696 nodes and 2.9M edges ships as a tarball. The same tarball includes `external-catalogs/skills-sh/catalog.json`, 89,463 body-backed Skills.sh skill pages under `entities/skills/skills-sh-*.md`, 89,463 hydrated installable Skills.sh `SKILL.md` files under `converted/skills-sh-*/`, and 13 cataloged harness pages under `entities/harnesses/`. Extract to get a ready-to-use `~/.claude/skill-wiki/`:
 
 ```bash
 # after `git clone` — or download graph/wiki-graph.tar.gz from the GitHub release

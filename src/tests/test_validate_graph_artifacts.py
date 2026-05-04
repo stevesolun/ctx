@@ -119,8 +119,22 @@ def test_validate_graph_artifacts_rejects_missing_converted_catalog_path(
         validate_graph_artifacts(tmp_path)
 
 
-def test_validate_graph_artifacts_rejects_original_backup_members(tmp_path: Path) -> None:
+def test_validate_graph_artifacts_rejects_body_unavailable_catalog_records(
+    tmp_path: Path,
+) -> None:
     _write_catalog(tmp_path, converted_path=None)
+    (tmp_path / "communities.json").write_text("{}", encoding="utf-8")
+    _write_archive(tmp_path, include_converted=False)
+
+    with pytest.raises(GraphArtifactError, match="body-unavailable records"):
+        validate_graph_artifacts(tmp_path)
+
+
+def test_validate_graph_artifacts_rejects_original_backup_members(tmp_path: Path) -> None:
+    _write_catalog(
+        tmp_path,
+        converted_path="converted/skills-sh-example-skill/SKILL.md",
+    )
     (tmp_path / "communities.json").write_text("{}", encoding="utf-8")
     _write_archive(tmp_path, include_original=True)
 

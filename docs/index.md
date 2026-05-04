@@ -5,7 +5,7 @@ hide:
 
 # ctx — Skill, Agent, MCP & Harness Catalog
 
-Watches what you develop, walks a knowledge graph of **92,815 skills, 464
+Watches what you develop, walks a knowledge graph of **91,432 skills, 464
 agents, 10,787 MCP servers, and 13 cataloged harnesses**, and recommends the
 right execution bundle on the fly. The live execution bundle is skills,
 agents, and MCP servers only; custom/API/local model users get a separate
@@ -34,7 +34,7 @@ memory that gets smarter every session.
 Claude Code skills, agents, MCP servers, and model harness profiles are
 powerful, but at scale they become unmanageable:
 
-- **Discovery problem** — with 92K+ skills, 460+ agents, 10,000+
+- **Discovery problem** — with 91K+ skills, 460+ agents, 10,000+
   MCP servers, and 13 cataloged harnesses, how do you know which
   ones exist and which are relevant to your current project?
 - **Context budget** — loading every installable entity wastes tokens and
@@ -69,19 +69,19 @@ graph-based discovery:
 
 - A Karpathy 3-layer wiki at `~/.claude/skill-wiki/` is the single source
   of truth.
-- **104,079 entity pages/nodes** for the shipped skill/agent/MCP/harness
-  inventory, including 90,846 remote-cataloged Skills.sh skill pages
+- **102,696 entity pages/nodes** for the shipped skill/agent/MCP/harness
+  inventory, including 89,463 body-backed Skills.sh skill pages
   and 13 cataloged harness pages under `entities/harnesses/`.
   Each page tracks tags, status, provenance, and usage where it applies.
-- A **knowledge graph** (104,079 nodes, 2,960,215 edges) built from a
-  13,233-node curated core plus 90,846 remote-cataloged Skills.sh `skill`
-  nodes. The graph has 53 Louvain communities and blends semantic cosine,
+- A **knowledge graph** (102,696 nodes, 2,900,834 edges) built from a
+  13,233-node curated core plus 89,463 body-backed Skills.sh `skill`
+  nodes. The graph has 52 Louvain communities and blends semantic cosine,
   tag overlap, and slug-token overlap; 89,463 hydrated Skills.sh bodies are
   shipped as installable `SKILL.md` files. Entries over the configured line
   threshold are converted to gated micro-skill orchestrators. Full source
   bodies were used for semantic graphing before packaging; `SKILL.md.original`
   backups are not shipped in the tarball.
-- **53 Louvain communities** group related entities into named
+- **52 Louvain communities** group related entities into named
   communities (e.g., *AI + Devops + Frontend*, *Python + API*).
 - PostToolUse and Stop hooks update the wiki automatically during each
   Claude Code session.
@@ -110,9 +110,9 @@ ones are flagged. New ones self-ingest.
 
     ---
 
-    104,079 shipped graph nodes: 13,233 curated skill/agent/MCP/harness
-    nodes plus 90,846 remote-cataloged Skills.sh skill nodes. The graph has
-    2,960,215 weighted edges and 53 Louvain communities.
+    102,696 shipped graph nodes: 13,233 curated skill/agent/MCP/harness
+    nodes plus 89,463 body-backed Skills.sh skill nodes. The graph has
+    2,900,834 weighted edges and 52 Louvain communities.
     Ships pre-built in `graph/wiki-graph.tar.gz` and powers the
     graph-aware recommendations + the pre-ship `ctx-dedup-check` gate.
 
@@ -181,12 +181,12 @@ ones are flagged. New ones self-ingest.
     ---
 
     **v0.7.x** — MIT, CI-matrixed (Ubuntu + Windows × Python 3.11/3.12),
-    3,498 tests collected. Ships console scripts including `ctx-init`,
+    3,501 tests collected. Ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus harness wiki/graph browsing),
     `ctx-dedup-check` (pre-ship near-duplicate gate), and
     `ctx-tag-backfill` (catalog hygiene), plus the ~336 MiB pre-built
-    wiki tarball with **104,079 nodes / 2,960,215 edges / 53 Louvain
+    wiki tarball with **102,696 nodes / 2,900,834 edges / 52 Louvain
     communities**. Hardened across the Strix audit + a 12-finding
     codex review.
 

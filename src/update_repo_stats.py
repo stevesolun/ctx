@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import re
 import subprocess
@@ -114,6 +115,25 @@ def _parse_graph_report(text: str) -> dict[str, int]:
     }
 
 
+def _read_skills_sh_catalog_stats() -> dict[str, int]:
+    catalog_path = REPO_ROOT / "graph" / "skills-sh-catalog.json.gz"
+    if not catalog_path.exists():
+        return {}
+    try:
+        with gzip.open(catalog_path, "rt", encoding="utf-8") as f:
+            catalog = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    raw_skills = catalog.get("skills") if isinstance(catalog, dict) else None
+    if not isinstance(raw_skills, list):
+        return {}
+    skills = [item for item in raw_skills if isinstance(item, dict)]
+    return {
+        "skills_sh_entries": len(skills),
+        "skills_sh_bodies": sum(1 for item in skills if item.get("body_available")),
+    }
+
+
 def _read_graph_from_tarball_legacy() -> dict[str, int | None] | None:
     """Read graph + counts from the shipped ``graph/wiki-graph.tar.gz``.
 
@@ -175,6 +195,7 @@ def _read_graph_from_tarball_legacy() -> dict[str, int | None] | None:
     # Require at least nodes + skills to consider the tarball reading
     # authoritative; otherwise fall back to the live wiki.
     if stats["nodes"] and stats["skills"]:
+        stats.update(_read_skills_sh_catalog_stats())
         return stats
     return None
 
@@ -235,6 +256,7 @@ def _read_graph_from_tarball() -> dict[str, int | None] | None:
     except (tarfile.TarError, OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
         return _read_graph_from_tarball_legacy()
     if stats["nodes"] and stats["skills"]:
+        stats.update(_read_skills_sh_catalog_stats())
         return stats
     return None
 
@@ -293,6 +315,7 @@ def read_graph_stats() -> dict:
         elif isinstance(c, list):
             stats["communities"] = len(c)
 
+    stats.update(_read_skills_sh_catalog_stats())
     return stats
 
 
@@ -464,11 +487,15 @@ def build_replacements(stats: dict, tests: int | None, converted: int | None) ->
         # where the comma is URL-encoded as %2C and slash is %2F / literal.
         reps.append((re.compile(r"badge/Graph-[\w.%,/_-]+_edges-"),
                      f"badge/Graph-{n:,}_nodes_/_{e_fmt}_edges-".replace(",", "%2C")))
+        reps.append((
+            re.compile(r"\*\*[\d,]+-node\*\*\s+graph"),
+            f"**{n:,}-node** graph",
+        ))
         # "A pre-built knowledge graph of 2,211 nodes and 642K edges"
         # style phrasing. Caught a stale v0.6.0 README sentence that
         # the older regex only matched on "nodes, edges, communities".
         reps.append((
-            re.compile(r"([\d,]+)\s+nodes\s+and\s+[\w.]+\s+edges"),
+            re.compile(r"([\d,]+)\s+nodes\s+and\s+[\d,.]+[KM]?\s+edges"),
             f"{n:,} nodes and {e_fmt} edges",
         ))
         # Graph.json inline Python example: "# 2,211 nodes, 642,468 edges"
@@ -492,6 +519,31 @@ def build_replacements(stats: dict, tests: int | None, converted: int | None) ->
                 re.compile(r"\*\*[\d,]+\s+entity pages\*\*\s*\([\d,]+\s+skills\s*\+\s*[\d,]+\s+agents\)"),
                 f"**{n:,} entity pages** ({stats['skills']:,} skills + {stats['agents']:,} agents)",
             ))
+
+    if stats.get("skills_sh_entries") and stats.get("skills_sh_bodies"):
+        entries = int(stats["skills_sh_entries"])
+        bodies = int(stats["skills_sh_bodies"])
+        reps.append((
+            re.compile(
+                r"The shipped wiki includes [\d,]+ Skills\.sh entries, "
+                r"[\d,]+ hydrated installable `SKILL\.md` bodies"
+            ),
+            "The shipped wiki includes "
+            f"{entries:,} Skills.sh entries, {bodies:,} hydrated installable "
+            "`SKILL.md` bodies",
+        ))
+        reps.append((
+            re.compile(
+                r"includes `external-catalogs/skills-sh/catalog\.json`, "
+                r"[\d,]+ (?:remote-cataloged|body-backed) Skills\.sh skill pages under "
+                r"`entities/skills/skills-sh-\*\.md`, "
+                r"[\d,]+ hydrated installable Skills\.sh `SKILL\.md` files"
+            ),
+            "includes `external-catalogs/skills-sh/catalog.json`, "
+            f"{entries:,} body-backed Skills.sh skill pages under "
+            "`entities/skills/skills-sh-*.md`, "
+            f"{bodies:,} hydrated installable Skills.sh `SKILL.md` files",
+        ))
 
     if tests is not None:
         reps.append((

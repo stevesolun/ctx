@@ -9,7 +9,12 @@ from pathlib import Path
 from typing import Any
 
 import import_skills_sh_catalog as importer
-from import_skills_sh_catalog import ExistingWikiIndex, normalize_catalog, update_wiki_tarball
+from import_skills_sh_catalog import (
+    ExistingWikiIndex,
+    drop_body_unavailable_skills,
+    normalize_catalog,
+    update_wiki_tarball,
+)
 
 
 def _add_text(tf: tarfile.TarFile, name: str, text: str) -> None:
@@ -229,6 +234,167 @@ def test_update_wiki_tarball_preserves_existing_skills_sh_semantic_edges(
     assert len(edges) == 1
     assert edges[0]["semantic_sim"] == 0.91
     assert edges[0].get("source_catalog") != "skills.sh"
+
+
+def test_drop_body_unavailable_skills_removes_metadata_only_records() -> None:
+    catalog: dict[str, Any] = {
+        "site_reported_total": 3,
+        "observed_unique_skills": 3,
+        "body_hydration_error_count": 1,
+        "body_hydration_errors_sample": [{"id": "missing"}],
+        "skills": [
+            {
+                "id": "owner/repo/good",
+                "ctx_slug": "skills-sh-owner-repo-good",
+                "body_available": True,
+                "converted_path": "converted/skills-sh-owner-repo-good/SKILL.md",
+                "overlap": {"skill_id_in_existing_wiki": True},
+            },
+            {
+                "id": "owner/repo/inline",
+                "ctx_slug": "skills-sh-owner-repo-inline",
+                "skill_body": "# Inline\n",
+                "overlap": {"ctx_slug_collision_resolved": True},
+            },
+            {
+                "id": "owner/repo/missing",
+                "ctx_slug": "skills-sh-owner-repo-missing",
+                "body_available": False,
+                "body_error": "detail page did not contain a parseable body",
+            },
+        ],
+    }
+
+    summary = drop_body_unavailable_skills(catalog)
+
+    assert summary == {"kept": 2, "pruned": 1, "original": 3}
+    assert catalog["observed_unique_skills"] == 2
+    assert catalog["observed_unique_skills_before_body_prune"] == 3
+    assert catalog["body_unavailable_pruned_count"] == 1
+    assert catalog["body_hydration_error_count"] == 0
+    assert catalog["body_hydration_errors_sample"] == []
+    assert [item["id"] for item in catalog["skills"]] == [
+        "owner/repo/good",
+        "owner/repo/inline",
+    ]
+
+
+def test_update_wiki_tarball_removes_pruned_skills_sh_nodes_pages_and_communities(
+    tmp_path: Path,
+) -> None:
+    tarball = tmp_path / "wiki-graph.tar.gz"
+    graph = {
+        "directed": False,
+        "multigraph": False,
+        "graph": {},
+        "nodes": [
+            {
+                "id": "skill:skills-sh-owner-repo-good",
+                "label": "skills-sh-owner-repo-good",
+                "type": "skill",
+                "source_catalog": "skills.sh",
+            },
+            {
+                "id": "skill:skills-sh-owner-repo-missing",
+                "label": "skills-sh-owner-repo-missing",
+                "type": "skill",
+                "source_catalog": "skills.sh",
+            },
+            {"id": "skill:curated", "label": "curated", "type": "skill"},
+        ],
+        "edges": [
+            {
+                "source": "skill:curated",
+                "target": "skill:skills-sh-owner-repo-good",
+                "semantic_sim": 0.91,
+            },
+            {
+                "source": "skill:curated",
+                "target": "skill:skills-sh-owner-repo-missing",
+                "semantic_sim": 0.91,
+            },
+        ],
+    }
+    communities = {
+        "communities": {
+            "0": {
+                "label": "mixed",
+                "members": [
+                    "skill:curated",
+                    "skill:skills-sh-owner-repo-good",
+                    "skill:skills-sh-owner-repo-missing",
+                ],
+            },
+        },
+        "total_communities": 1,
+    }
+    with tarfile.open(tarball, "w:gz") as tf:
+        _add_text(tf, "./graphify-out/graph.json", json.dumps(graph))
+        _add_text(tf, "./graphify-out/communities.json", json.dumps(communities))
+        _add_text(tf, "./graphify-out/graph-report.md", "# stale\n")
+        _add_text(tf, "./entities/skills/skills-sh-owner-repo-good.md", "# Good\n")
+        _add_text(tf, "./entities/skills/skills-sh-owner-repo-missing.md", "# Missing\n")
+        _add_text(tf, "./converted/skills-sh-owner-repo-good/SKILL.md", "# Good\n")
+
+    catalog: dict[str, Any] = {
+        "schema_version": 1,
+        "source": "skills.sh",
+        "api": "https://skills.sh/api/search",
+        "observed_unique_skills": 2,
+        "skills": [
+            {
+                "id": "owner/repo/good",
+                "ctx_slug": "skills-sh-owner-repo-good",
+                "source": "owner/repo",
+                "skill_id": "good",
+                "name": "good",
+                "body_available": True,
+                "converted_path": "converted/skills-sh-owner-repo-good/SKILL.md",
+                "tags": ["docs"],
+                "detail_url": "https://skills.sh/owner/repo/good",
+                "install_command": "npx skills add https://github.com/owner/repo --skill good",
+            },
+            {
+                "id": "owner/repo/missing",
+                "ctx_slug": "skills-sh-owner-repo-missing",
+                "source": "owner/repo",
+                "skill_id": "missing",
+                "name": "missing",
+                "body_available": False,
+                "body_error": "missing",
+            },
+        ],
+    }
+    drop_body_unavailable_skills(catalog)
+
+    update_wiki_tarball(tarball, catalog)
+
+    with tarfile.open(tarball, "r:gz") as tf:
+        names = {member.name for member in tf.getmembers()}
+        graph_out = _read_json(tf, "./graphify-out/graph.json")
+        communities_out = _read_json(tf, "./graphify-out/communities.json")
+        report_file = tf.extractfile("./graphify-out/graph-report.md")
+        assert report_file is not None
+        report = report_file.read().decode("utf-8")
+
+    assert "./entities/skills/skills-sh-owner-repo-good.md" in names
+    assert "./entities/skills/skills-sh-owner-repo-missing.md" not in names
+    assert {node["id"] for node in graph_out["nodes"]} == {
+        "skill:curated",
+        "skill:skills-sh-owner-repo-good",
+    }
+    assert graph_out["edges"] == [
+        {
+            "source": "skill:curated",
+            "target": "skill:skills-sh-owner-repo-good",
+            "semantic_sim": 0.91,
+        },
+    ]
+    assert communities_out["communities"]["0"]["members"] == [
+        "skill:curated",
+        "skill:skills-sh-owner-repo-good",
+    ]
+    assert "skills-sh-owner-repo-missing" not in report
 
 
 def test_extract_skill_body_from_skills_sh_detail_html() -> None:
