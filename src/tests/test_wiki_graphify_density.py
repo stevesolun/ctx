@@ -18,6 +18,7 @@ decision visible in review.
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 SRC_DIR = Path(__file__).resolve().parents[1]
@@ -25,6 +26,66 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from ctx.core.wiki import wiki_graphify as wg  # noqa: E402
+
+
+def _write_entity(
+    path: Path,
+    *,
+    slug: str,
+    etype: str = "skill",
+    tags: list[str] | None = None,
+    source_url: str | None = None,
+    body: str = "body",
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["---", f"title: {slug}", f"type: {etype}", "tags:"]
+    for tag in tags or []:
+        lines.append(f"  - {tag}")
+    if source_url:
+        lines.append(f"source_url: {source_url}")
+    lines.extend(["---", f"# {slug}", body])
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_quality_sidecar(
+    sidecar_dir: Path,
+    *,
+    slug: str,
+    subject_type: str,
+    score: float,
+    telemetry: float,
+) -> None:
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    (sidecar_dir / f"{slug}.json").write_text(
+        json.dumps({
+            "slug": slug,
+            "subject_type": subject_type,
+            "score": score,
+            "grade": "A",
+            "signals": {"telemetry": {"score": telemetry}},
+        }),
+        encoding="utf-8",
+    )
+
+
+def _isolate_graphify(
+    tmp_path: Path,
+    monkeypatch,
+) -> tuple[Path, Path]:
+    import ctx_config
+
+    wiki = tmp_path / "wiki"
+    sidecars = tmp_path / "quality"
+    monkeypatch.setattr(wg, "WIKI_DIR", wiki)
+    monkeypatch.setattr(wg, "SKILL_ENTITIES", wiki / "entities" / "skills")
+    monkeypatch.setattr(wg, "AGENT_ENTITIES", wiki / "entities" / "agents")
+    monkeypatch.setattr(wg, "MCP_ENTITIES", wiki / "entities" / "mcp-servers")
+    monkeypatch.setattr(wg, "HARNESS_ENTITIES", wiki / "entities" / "harnesses")
+    monkeypatch.setattr(wg, "GRAPH_OUT", wiki / "graphify-out")
+    monkeypatch.setattr(wg, "QUALITY_SIDECAR_DIR", sidecars)
+    monkeypatch.setattr(wg, "load_prior_graph", lambda: None)
+    monkeypatch.setattr(ctx_config.cfg, "graph_edge_weight_semantic", 0.0)
+    return wiki, sidecars
 
 
 def test_dense_tag_threshold_is_at_least_500() -> None:
@@ -192,6 +253,113 @@ def test_build_graph_produces_edges_on_small_fixture(tmp_path, monkeypatch) -> N
         "no skill<->agent edges produced — recommendation walk will "
         "never surface agents from a skill seed"
     )
+
+
+def test_source_overlap_creates_explainable_edge_without_tags(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    wiki, _ = _isolate_graphify(tmp_path, monkeypatch)
+    shared_source = "https://github.com/acme/toolkit"
+    _write_entity(
+        wiki / "entities" / "skills" / "alpha-source.md",
+        slug="alpha-source",
+        tags=["alpha"],
+        source_url=shared_source,
+    )
+    _write_entity(
+        wiki / "entities" / "agents" / "beta-target.md",
+        slug="beta-target",
+        etype="agent",
+        tags=["beta"],
+        source_url=shared_source,
+    )
+
+    graph, _ = wg.build_graph(incremental=False)
+
+    assert graph.has_edge("skill:alpha-source", "agent:beta-target")
+    edge = graph["skill:alpha-source"]["agent:beta-target"]
+    assert edge["source_overlap"] == 1.0
+    assert "source-overlap" in edge["edge_reasons"]
+    assert edge["score_components"]["source_overlap"] > 0
+
+
+def test_direct_links_quality_usage_type_and_adamic_are_explainable(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    wiki, sidecars = _isolate_graphify(tmp_path, monkeypatch)
+    _write_entity(
+        wiki / "entities" / "skills" / "alpha-skill.md",
+        slug="alpha-skill",
+        tags=["python", "shared-a"],
+        body="Uses [[entities/agents/beta-agent]] for review.",
+    )
+    _write_entity(
+        wiki / "entities" / "agents" / "beta-agent.md",
+        slug="beta-agent",
+        etype="agent",
+        tags=["python", "shared-b"],
+    )
+    _write_entity(
+        wiki / "entities" / "skills" / "bridge-skill.md",
+        slug="bridge-skill",
+        tags=["shared-a", "shared-b"],
+    )
+    _write_quality_sidecar(
+        sidecars, slug="alpha-skill", subject_type="skill", score=0.90, telemetry=0.80,
+    )
+    _write_quality_sidecar(
+        sidecars, slug="beta-agent", subject_type="agent", score=0.70, telemetry=0.60,
+    )
+
+    graph, _ = wg.build_graph(incremental=False)
+
+    edge = graph["skill:alpha-skill"]["agent:beta-agent"]
+    assert edge["direct_link"] == 1.0
+    assert edge["type_affinity"] > 0
+    assert edge["quality_score"] > 0
+    assert edge["usage_score"] > 0
+    assert edge["adamic_adar"] > 0
+    assert {"direct-link", "type-affinity", "quality", "usage", "adamic-adar"} <= set(
+        edge["edge_reasons"],
+    )
+    for key in (
+        "direct_link",
+        "type_affinity",
+        "quality",
+        "usage",
+        "adamic_adar",
+    ):
+        assert key in edge["score_components"]
+
+
+def test_quality_usage_and_type_affinity_do_not_create_edges_without_base_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    wiki, sidecars = _isolate_graphify(tmp_path, monkeypatch)
+    _write_entity(
+        wiki / "entities" / "skills" / "alphaonly.md",
+        slug="alphaonly",
+        tags=["alpha"],
+    )
+    _write_entity(
+        wiki / "entities" / "agents" / "betatwo.md",
+        slug="betatwo",
+        etype="agent",
+        tags=["beta"],
+    )
+    _write_quality_sidecar(
+        sidecars, slug="alphaonly", subject_type="skill", score=1.0, telemetry=1.0,
+    )
+    _write_quality_sidecar(
+        sidecars, slug="betatwo", subject_type="agent", score=1.0, telemetry=1.0,
+    )
+
+    graph, _ = wg.build_graph(incremental=False)
+
+    assert not graph.has_edge("skill:alphaonly", "agent:betatwo")
 
 
 def test_patch_path_force_full_when_prior_lacks_semantic(tmp_path, monkeypatch) -> None:

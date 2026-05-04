@@ -71,7 +71,7 @@
   },
 
   "graph": {
-    "_comment": "Knowledge-graph edge weighting for wiki_graphify. Every edge between two entity pages (skill ↔ agent ↔ mcp-server, any combination) is computed from three signals and combined as a weighted sum. Semantic similarity uses sentence embeddings (cfg.intake.embedding.backend) to compare entity descriptions — this catches context-level affinity that tags and slug tokens miss (e.g., a 'python-linter' MCP links to a 'code-reviewer' agent even when they share no explicit tags). Tag similarity counts explicit frontmatter tag overlaps. Slug-token similarity counts shared tokens from entity slugs (e.g., 'atlassian-admin' skill ↔ 'atlassian-cloud' MCP share the 'atlassian' token). Override any key in your user config (~/.claude/skill-system-config.json) — weights must sum to 1.0.",
+    "_comment": "Knowledge-graph edge weighting for wiki_graphify. Base edges between entity pages (skill ↔ agent ↔ mcp-server ↔ harness, any combination) come from semantic similarity, explicit tags, slug tokens, source overlap, or direct wikilinks. Semantic/tag/token weights must sum to 1.0. Edge boosts then add explainable rank signals (direct links, source overlap, Adamic-Adar, type affinity, usage, quality) without creating edges by themselves. Override any key in your user config (~/.claude/skill-system-config.json).",
     "edge_weights": {
       "semantic":    0.70,
       "tags":        0.15,
@@ -94,6 +94,19 @@
       "_comment": "Slug-token edge construction. Mirrors tag_edges but for the pseudo-tags synthesized from slugs. Keep dense_token_threshold intentionally low: after 90K+ hydrated Skills.sh bodies, broad slug words create millions of low-signal token-only edges. Semantic top-K and explicit tags are the primary graph signals; slug tokens are only a sparse fallback.",
       "dense_token_threshold": 30,
       "shared_token_saturation": 3
+    },
+    "source_edges": {
+      "_comment": "Source-overlap edge construction. Pages with the same repo/source/homepage/detail/package URL can connect even when their tags differ. Buckets above dense_source_threshold are skipped so broad catalog URLs cannot create noise edges.",
+      "dense_source_threshold": 50
+    },
+    "edge_boosts": {
+      "_comment": "Additive edge boosts. These never create edges alone; they only strengthen pairs already justified by semantic, tags, slug tokens, source overlap, or direct wikilinks. Set a value to 0 to disable that signal.",
+      "direct_link": 0.10,
+      "source_overlap": 0.05,
+      "adamic_adar": 0.04,
+      "type_affinity": 0.03,
+      "usage": 0.02,
+      "quality": 0.02
     }
   },
 
