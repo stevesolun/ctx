@@ -32,6 +32,8 @@ from ctx.core.resolve.resolve_skills import resolve
 def _write_golden_graph(graph_path: Path) -> nx.Graph:
     graph_path.parent.mkdir(parents=True, exist_ok=True)
     graph = nx.Graph()
+    graph.graph["external_catalog_nodes"] = {"skills.sh": 1}
+    graph.graph["source_catalog_nodes"] = {"skills.sh": 1}
     graph.add_node(
         "skill:fastapi-python-async",
         label="fastapi-python-async",
@@ -86,6 +88,12 @@ def test_recommendation_surfaces_share_order_type_and_normalized_score(
     claude_dir = tmp_path / "claude"
     graph_path = claude_dir / "skill-wiki" / "graphify-out" / "graph.json"
     _write_golden_graph(graph_path)
+    import ctx_config
+    monkeypatch.setattr(
+        ctx_config.cfg,
+        "graph_semantic_cache_dir",
+        tmp_path / "semantic-cache",
+    )
 
     query = "fastapi python async review code docs"
     tags = query_to_tags(query)
