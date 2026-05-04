@@ -50,6 +50,11 @@ the update is treated like a release step.
 8. Verify the changed entity can be recommended through
    `ctx-scan-repo --repo . --recommend` or `ctx__recommend_bundle`.
 
+The durable wiki worker drains `entity-upsert`, `graph-export`,
+`catalog-refresh`, `tar-refresh`, and `artifact-promotion` jobs. Use
+`ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1` for a controlled
+single-job drain, or omit `--limit` to drain the ready queue.
+
 ## Security and Cyber Check
 
 Run this before applying `--update-existing`, before installing a harness with

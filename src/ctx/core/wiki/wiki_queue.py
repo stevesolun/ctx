@@ -23,6 +23,17 @@ STATUS_SUCCEEDED = "succeeded"
 STATUS_FAILED = "failed"
 
 ENTITY_UPSERT_JOB = "entity-upsert"
+GRAPH_EXPORT_JOB = "graph-export"
+CATALOG_REFRESH_JOB = "catalog-refresh"
+TAR_REFRESH_JOB = "tar-refresh"
+ARTIFACT_PROMOTION_JOB = "artifact-promotion"
+MAINTENANCE_JOB_KINDS = (
+    GRAPH_EXPORT_JOB,
+    CATALOG_REFRESH_JOB,
+    TAR_REFRESH_JOB,
+    ARTIFACT_PROMOTION_JOB,
+)
+WORKER_JOB_KINDS = (ENTITY_UPSERT_JOB, *MAINTENANCE_JOB_KINDS)
 QUEUE_DIRNAME = ".ctx"
 QUEUE_DB_NAME = "wiki-queue.sqlite3"
 
@@ -118,6 +129,37 @@ def enqueue_entity_upsert(
         payload=payload,
         idempotency_key=f"{ENTITY_UPSERT_JOB}:{entity_type}:{slug}:{content_hash}",
         content_hash=content_hash,
+        now=now,
+    )
+
+
+def enqueue_maintenance_job(
+    wiki_path: Path,
+    *,
+    kind: str,
+    payload: dict[str, Any],
+    source: str,
+    max_attempts: int = 3,
+    available_at: float | None = None,
+    now: float | None = None,
+) -> QueueJob:
+    """Queue graph/wiki maintenance work for the durable worker."""
+    _validate_maintenance_kind(kind)
+    source = _validate_value("source", source)
+    if not isinstance(payload, dict):
+        raise TypeError(f"payload must be a dict, got {type(payload).__name__}")
+    job_payload = dict(payload)
+    job_payload["source"] = source
+    payload_json = _dump_payload(job_payload)
+    content_hash = sha256(payload_json.encode("utf-8")).hexdigest()
+    return enqueue(
+        queue_db_path(wiki_path),
+        kind=kind,
+        payload=job_payload,
+        idempotency_key=f"{kind}:{source}:{content_hash}",
+        content_hash=content_hash,
+        max_attempts=max_attempts,
+        available_at=available_at,
         now=now,
     )
 
@@ -459,6 +501,12 @@ def _validate_value(name: str, value: str) -> str:
 def _validate_kind(kind: str) -> None:
     if not isinstance(kind, str) or not kind.strip():
         raise ValueError("kind must be a non-empty string")
+
+
+def _validate_maintenance_kind(kind: str) -> None:
+    _validate_kind(kind)
+    if kind not in MAINTENANCE_JOB_KINDS:
+        raise ValueError(f"unsupported maintenance job kind: {kind}")
 
 
 def _now(now: float | None) -> float:

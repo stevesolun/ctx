@@ -112,6 +112,105 @@ def test_process_next_rejects_entity_path_escape(tmp_path: Path) -> None:
     assert "escapes wiki root" in str(current.last_error)
 
 
+def test_process_next_graph_export_job_uses_maintenance_handler(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    wiki = tmp_path / "wiki"
+    queued = wiki_queue.enqueue_maintenance_job(
+        wiki,
+        kind=wiki_queue.GRAPH_EXPORT_JOB,
+        payload={"graph_only": True},
+        source="test",
+        now=10.0,
+    )
+    calls: list[tuple[Path, dict[str, Any]]] = []
+
+    def handle_graph_export(path: Path, payload: dict[str, Any]) -> str:
+        calls.append((path, payload))
+        return "graph exported"
+
+    monkeypatch.setitem(
+        wiki_queue_worker.MAINTENANCE_HANDLERS,
+        wiki_queue.GRAPH_EXPORT_JOB,
+        handle_graph_export,
+    )
+
+    result = wiki_queue_worker.process_next(wiki, worker_id="worker-a", now=20.0)
+
+    assert result is not None
+    assert result.job_id == queued.id
+    assert result.kind == wiki_queue.GRAPH_EXPORT_JOB
+    assert result.status == wiki_queue.STATUS_SUCCEEDED
+    assert result.message == "graph exported"
+    assert calls == [(wiki, {"graph_only": True, "source": "test"})]
+
+
+def test_process_next_maintenance_job_retries_handler_failure(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    wiki = tmp_path / "wiki"
+    queued = wiki_queue.enqueue_maintenance_job(
+        wiki,
+        kind=wiki_queue.TAR_REFRESH_JOB,
+        payload={"catalog": "graph/skills-sh-catalog.json.gz"},
+        source="test",
+        now=10.0,
+    )
+
+    def fail_refresh(_path: Path, _payload: dict[str, Any]) -> str:
+        raise RuntimeError("tar refresh failed")
+
+    monkeypatch.setitem(
+        wiki_queue_worker.MAINTENANCE_HANDLERS,
+        wiki_queue.TAR_REFRESH_JOB,
+        fail_refresh,
+    )
+
+    result = wiki_queue_worker.process_next(wiki, worker_id="worker-a", now=20.0)
+
+    assert result is not None
+    assert result.job_id == queued.id
+    assert result.kind == wiki_queue.TAR_REFRESH_JOB
+    assert result.status == wiki_queue.STATUS_PENDING
+    current = wiki_queue.get_job(wiki_queue.queue_db_path(wiki), queued.id)
+    assert current.status == wiki_queue.STATUS_PENDING
+    assert "tar refresh failed" in str(current.last_error)
+
+
+def test_tar_refresh_handler_uses_from_catalog_for_catalog_payload(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], **_kwargs: Any) -> object:
+        calls.append(args)
+        return object()
+
+    monkeypatch.setattr(wiki_queue_worker.subprocess, "run", fake_run)
+
+    message = wiki_queue_worker._handle_tar_refresh(
+        tmp_path / "wiki",
+        {
+            "catalog": "graph/skills-sh-catalog.json.gz",
+            "wiki_tar": "graph/wiki-graph.tar.gz",
+            "drop_body_unavailable": True,
+            "source": "test",
+        },
+    )
+
+    assert message == "tar refresh completed"
+    assert len(calls) == 1
+    args = calls[0]
+    assert "--from-catalog" in args
+    assert "--from-api-union" not in args
+    assert args[args.index("--from-catalog") + 1] == "graph/skills-sh-catalog.json.gz"
+    assert "--update-wiki-tar" in args
+    assert "--drop-body-unavailable" in args
+
+
 def test_drain_queue_honors_limit(tmp_path: Path, monkeypatch: Any) -> None:
     wiki = tmp_path / "wiki"
     first = _write_entity(wiki, "entities/mcp-servers/a/alpha.md", "# alpha\n")
