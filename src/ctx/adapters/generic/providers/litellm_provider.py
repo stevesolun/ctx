@@ -225,25 +225,29 @@ def _parse_tool_call(tc_raw: dict[str, Any]) -> ToolCall:
     """Parse one OpenAI-shaped tool call (from LiteLLM's normalised output).
 
     The ``arguments`` field is a JSON *string* per the OpenAI schema.
-    Malformed JSON is tolerated as an empty dict — the loop will
-    downstream-validate the arguments against the tool's declared
-    parameters anyway.
+    Malformed JSON is preserved as ``parse_error`` so the loop can
+    refuse execution. Treating a truncated argument payload as ``{}``
+    can turn a partial provider response into a real tool invocation.
     """
     func = tc_raw.get("function") or {}
     args_raw = func.get("arguments") or "{}"
+    parse_error = ""
     if isinstance(args_raw, str):
         try:
             arguments = json.loads(args_raw) if args_raw else {}
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
             arguments = {}
+            parse_error = f"invalid JSON arguments: {exc.msg}"
     elif isinstance(args_raw, dict):
         arguments = args_raw
     else:
         arguments = {}
+        parse_error = f"arguments must be JSON object/string, got {type(args_raw).__name__}"
     return ToolCall(
         id=tc_raw.get("id") or "",
         name=func.get("name") or "",
         arguments=arguments,
+        parse_error=parse_error,
     )
 
 
