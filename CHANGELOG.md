@@ -7,6 +7,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - No unreleased changes yet.
 
+## [0.7.3] - 2026-05-04
+
+### Fixed
+
+- Hydrated the recoverable Skills.sh `command-injection-testing` entry
+  and refreshed the shipped graph/wiki artifacts.
+- Defanged high-risk command-injection payloads before generated
+  micro-skill markdown is written, preventing local security scanners
+  from deleting temporary packaging files on Windows.
+
 ## [0.7.2] - 2026-05-04
 
 ### Added

