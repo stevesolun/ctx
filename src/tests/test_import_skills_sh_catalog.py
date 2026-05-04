@@ -720,12 +720,22 @@ def test_converted_skill_files_uses_validated_config(monkeypatch) -> None:
     class FakeCfg:
         line_threshold = 10
 
+    calls: list[dict[str, Any]] = []
+
     class FakeBatchConvert:
         @staticmethod
-        def convert_skill(source: Path, output_dir: Path) -> dict[str, str]:
+        def convert_skill(
+            source: Path,
+            output_dir: Path,
+            **kwargs: Any,
+        ) -> dict[str, str]:
+            calls.append({"source": source, **kwargs})
+            assert not source.exists()
+            assert kwargs["source_content"].startswith("line 0")
+            assert kwargs["preserve_original"] is False
             (output_dir / "SKILL.md").write_bytes(b"# Converted\n")
             (output_dir / "SKILL.md.original").write_text(
-                source.read_text(encoding="utf-8"),
+                kwargs["source_content"],
                 encoding="utf-8",
             )
             return {"status": "converted"}
@@ -739,6 +749,116 @@ def test_converted_skill_files_uses_validated_config(monkeypatch) -> None:
     )
 
     assert files == {"converted/skills-sh-example-long/SKILL.md": b"# Converted\n"}
+    assert calls[0]["skill_name"] == "skills-sh-example-long"
+
+
+def test_read_bytes_with_retry_handles_transient_windows_lock(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "generated.md"
+    path.write_bytes(b"# Generated\n")
+    real_read_bytes = Path.read_bytes
+    calls = 0
+
+    def flaky_read_bytes(self: Path) -> bytes:
+        nonlocal calls
+        if self == path and calls < 2:
+            calls += 1
+            raise PermissionError("locked by scanner")
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", flaky_read_bytes)
+    monkeypatch.setattr(importer.time, "sleep", lambda _seconds: None)
+
+    assert importer._read_bytes_with_retry(path, attempts=3, delay_seconds=0) == b"# Generated\n"
+    assert calls == 2
+
+
+def test_update_wiki_tarball_downgrades_body_when_micro_packaging_is_blocked(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class FakeCfg:
+        line_threshold = 10
+
+    class FakeBatchConvert:
+        @staticmethod
+        def convert_skill(
+            _source: Path,
+            output_dir: Path,
+            **_kwargs: Any,
+        ) -> dict[str, str]:
+            (output_dir / "references").mkdir(parents=True, exist_ok=True)
+            (output_dir / "SKILL.md").write_bytes(b"# Converted\n")
+            (output_dir / "references" / "blocked.md").write_bytes(b"# Blocked\n")
+            return {"status": "converted"}
+
+    def blocked_read(path: Path) -> bytes:
+        if path.name == "blocked.md":
+            raise FileNotFoundError(path)
+        return path.read_bytes()
+
+    monkeypatch.setattr("ctx_config.cfg", FakeCfg())
+    monkeypatch.setitem(sys.modules, "batch_convert", FakeBatchConvert)
+    monkeypatch.setattr(importer, "_read_bytes_with_retry", blocked_read)
+
+    tarball = tmp_path / "wiki-graph.tar.gz"
+    graph = {
+        "directed": False,
+        "multigraph": False,
+        "graph": {},
+        "nodes": [],
+        "edges": [],
+    }
+    with tarfile.open(tarball, "w:gz") as tf:
+        _add_text(tf, "./graphify-out/graph.json", json.dumps(graph))
+
+    catalog: dict[str, Any] = {
+        "schema_version": 1,
+        "source": "skills.sh",
+        "api": "https://skills.sh/api/search",
+        "fetched_at": "2026-04-29T00:00:00+00:00",
+        "site_reported_total": 1,
+        "observed_unique_skills": 1,
+        "coverage_vs_site_reported_total": 1.0,
+        "query_count": 1,
+        "query_error_count": 0,
+        "overlap": {"existing_wiki_skill_pages": 0},
+        "skills": [
+            {
+                "id": "example/skills/blocked",
+                "ctx_slug": "skills-sh-example-skills-blocked",
+                "source": "example/skills",
+                "skill_id": "blocked",
+                "name": "blocked",
+                "type": "skill",
+                "status": "remote-cataloged",
+                "source_catalog": "skills.sh",
+                "installs": 1,
+                "tags": ["skill"],
+                "detail_url": "https://skills.sh/example/skills/blocked",
+                "install_command": "npx skills add example/skills --skill blocked",
+                "body_available": True,
+                "converted_path": "converted/skills-sh-example-skills-blocked/SKILL.md",
+                "skill_body": "\n".join(f"line {i}" for i in range(20)),
+            }
+        ],
+    }
+
+    update_wiki_tarball(tarball, catalog)
+
+    with tarfile.open(tarball, "r:gz") as tf:
+        names = set(tf.getnames())
+        stored = _read_json(tf, "./external-catalogs/skills-sh/catalog.json")
+        graph_out = _read_json(tf, "./graphify-out/graph.json")
+
+    assert "./converted/skills-sh-example-skills-blocked/SKILL.md" not in names
+    assert stored["body_available_count"] == 0
+    assert stored["skills"][0]["body_available"] is False
+    assert stored["skills"][0]["converted_path"] is None
+    assert "local micro-skill packaging failed" in stored["skills"][0]["body_error"]
+    assert graph_out["nodes"][0]["converted_path"] is None
 
 
 def test_hydration_falls_back_to_github_raw_skill_md(monkeypatch) -> None:

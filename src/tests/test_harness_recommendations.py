@@ -105,6 +105,7 @@ def test_scan_recommendations_do_not_print_harness_bucket(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(scan_repo, "_shared_recommendations", lambda _profile: None)
     monkeypatch.setattr(resolve_skills, "discover_available_skills", lambda _: {})
     monkeypatch.setattr(resolve_skills, "read_wiki_overrides", lambda _: {})
     monkeypatch.setattr(
@@ -179,6 +180,21 @@ def test_ctx_init_filters_harnesses_by_model_provider(
     )
 
     assert [row["name"] for row in results] == ["local-workbench"]
+
+
+def test_ctx_init_does_not_recommend_installed_harnesses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ctx_init, "_load_recommendation_graph", _harness_graph)
+    monkeypatch.setattr(ctx_init, "_installed_harness_slugs", lambda _path: {"langgraph"})
+
+    results = ctx_init.recommend_harnesses(
+        "build an openai python agent graph with checkpointing",
+        top_k=5,
+        model_provider="openai",
+    )
+
+    assert [row["name"] for row in results] == []
 
 
 def test_ctx_init_treats_model_agnostic_and_openrouter_underlying_provider(

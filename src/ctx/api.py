@@ -25,7 +25,7 @@ Three delivery paths, in increasing order of coupling to ctx:
 Public functions:
 
     recommend_bundle(query, *, top_k=5)
-        Free-text → ranked skill/agent/MCP/harness list.
+        Free-text → ranked skill/agent/MCP execution bundle.
 
     graph_query(seeds, *, max_hops=2, top_n=10)
         Walk the knowledge graph from seed entity names.

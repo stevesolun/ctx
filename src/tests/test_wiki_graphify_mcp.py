@@ -114,18 +114,27 @@ def _make_entity_md(path: Path, slug: str, etype: str, tags: list[str]) -> None:
 class TestBuildGraphIncludesMcp:
     @pytest.fixture()
     def tmp_wiki(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        import ctx_config
+
         skills_dir = tmp_path / "entities" / "skills"
         agents_dir = tmp_path / "entities" / "agents"
         mcp_dir = tmp_path / "entities" / "mcp-servers"
+        harness_dir = tmp_path / "entities" / "harnesses"
         skills_dir.mkdir(parents=True)
         agents_dir.mkdir(parents=True)
         mcp_dir.mkdir(parents=True)
 
-        # Repoint the module globals at our tmp wiki for the duration
-        # of the test. build_graph reads them directly.
+        # Repoint every graphify path at the tiny fixture. Leaving WIKI_DIR,
+        # GRAPH_OUT, HARNESS_ENTITIES, or QUALITY_SIDECAR_DIR on the live
+        # ~/.claude tree makes these tests parse or score the real catalog.
+        monkeypatch.setattr(wg, "WIKI_DIR", tmp_path)
         monkeypatch.setattr(wg, "SKILL_ENTITIES", skills_dir)
         monkeypatch.setattr(wg, "AGENT_ENTITIES", agents_dir)
         monkeypatch.setattr(wg, "MCP_ENTITIES", mcp_dir)
+        monkeypatch.setattr(wg, "HARNESS_ENTITIES", harness_dir)
+        monkeypatch.setattr(wg, "GRAPH_OUT", tmp_path / "graphify-out")
+        monkeypatch.setattr(wg, "QUALITY_SIDECAR_DIR", tmp_path / "skill-quality")
+        monkeypatch.setattr(ctx_config.cfg, "graph_edge_weight_semantic", 0.0)
 
         return tmp_path
 
@@ -134,7 +143,7 @@ class TestBuildGraphIncludesMcp:
             tmp_wiki / "entities" / "mcp-servers" / "g" / "github.md",
             slug="github", etype="mcp-server", tags=["git", "github"],
         )
-        graph, entities = wg.build_graph()
+        graph, entities = wg.build_graph(incremental=False)
         assert "mcp-server:github" in graph.nodes
         assert graph.nodes["mcp-server:github"]["type"] == "mcp-server"
         assert "git" in graph.nodes["mcp-server:github"]["tags"]
@@ -144,7 +153,7 @@ class TestBuildGraphIncludesMcp:
             tmp_wiki / "entities" / "mcp-servers" / "0-9" / "007-mcp.md",
             slug="007-mcp", etype="mcp-server", tags=["security"],
         )
-        graph, _ = wg.build_graph()
+        graph, _ = wg.build_graph(incremental=False)
         assert "mcp-server:007-mcp" in graph.nodes
 
     def test_mcp_and_skill_share_edges_via_tags(self, tmp_wiki: Path) -> None:
@@ -157,7 +166,7 @@ class TestBuildGraphIncludesMcp:
             tmp_wiki / "entities" / "mcp-servers" / "g" / "github.md",
             slug="github", etype="mcp-server", tags=["github"],
         )
-        graph, _ = wg.build_graph()
+        graph, _ = wg.build_graph(incremental=False)
         assert graph.has_edge("skill:github-ops", "mcp-server:github")
 
     def test_existing_skill_agent_layouts_still_work(self, tmp_wiki: Path) -> None:
@@ -171,7 +180,7 @@ class TestBuildGraphIncludesMcp:
             tmp_wiki / "entities" / "agents" / "planner.md",
             slug="planner", etype="agent", tags=["planning"],
         )
-        graph, _ = wg.build_graph()
+        graph, _ = wg.build_graph(incremental=False)
         assert "skill:react" in graph.nodes
         assert "agent:planner" in graph.nodes
         # No MCP entities written — confirm no MCP nodes appear.
@@ -181,17 +190,26 @@ class TestBuildGraphIncludesMcp:
     def test_missing_mcp_dir_is_skipped_silently(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        import ctx_config
+
         # Wikis that predate MCP support won't have entities/mcp-servers/
         # — build_graph must not raise.
         skills_dir = tmp_path / "entities" / "skills"
         skills_dir.mkdir(parents=True)
+        monkeypatch.setattr(wg, "WIKI_DIR", tmp_path)
         monkeypatch.setattr(wg, "SKILL_ENTITIES", skills_dir)
         monkeypatch.setattr(wg, "AGENT_ENTITIES", tmp_path / "entities" / "agents")
         monkeypatch.setattr(wg, "MCP_ENTITIES", tmp_path / "entities" / "mcp-servers")
+        monkeypatch.setattr(
+            wg, "HARNESS_ENTITIES", tmp_path / "entities" / "harnesses",
+        )
+        monkeypatch.setattr(wg, "GRAPH_OUT", tmp_path / "graphify-out")
+        monkeypatch.setattr(wg, "QUALITY_SIDECAR_DIR", tmp_path / "skill-quality")
+        monkeypatch.setattr(ctx_config.cfg, "graph_edge_weight_semantic", 0.0)
 
         _make_entity_md(
             skills_dir / "lonely.md",
             slug="lonely", etype="skill", tags=["solo"],
         )
-        graph, _ = wg.build_graph()
+        graph, _ = wg.build_graph(incremental=False)
         assert "skill:lonely" in graph.nodes

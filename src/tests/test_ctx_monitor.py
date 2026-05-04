@@ -565,7 +565,12 @@ def test_render_wiki_entity_missing_slug(fake_claude: Path) -> None:
     assert "No wiki page" in out
 
 
-def test_render_graph_emits_cytoscape_mount() -> None:
+def test_render_graph_emits_cytoscape_mount(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        cm,
+        "_graph_stats",
+        lambda: {"nodes": 0, "edges": 0, "available": False},
+    )
     html_out = cm._render_graph("python-patterns")
     assert "id='cy'" in html_out
     assert "cytoscape" in html_out
@@ -573,7 +578,12 @@ def test_render_graph_emits_cytoscape_mount() -> None:
     assert "\"python-patterns\"" in html_out
 
 
-def test_render_graph_focus_controls_preserve_type() -> None:
+def test_render_graph_focus_controls_preserve_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        cm,
+        "_graph_stats",
+        lambda: {"nodes": 0, "edges": 0, "available": False},
+    )
     html_out = cm._render_graph("langgraph", focus_type="harness")
     assert "id='focus-type'" in html_out
     assert "<option value='harness' selected>harness</option>" in html_out

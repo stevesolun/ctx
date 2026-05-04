@@ -138,6 +138,8 @@ def _write_graph_json(wiki_dir: Path, nodes: list[dict], edges: list[dict]) -> P
     """Build a graph.json that context_monitor.graph_suggest can walk."""
     G = nx.Graph()
     G.graph["semantic_build_floor"] = 0.5
+    G.graph["external_catalog_nodes"] = {"skills.sh": 1}
+    G.graph["source_catalog_nodes"] = {"skills.sh": 1}
     for n in nodes:
         G.add_node(n["id"], **{k: v for k, v in n.items() if k != "id"})
     for e in edges:
@@ -243,6 +245,13 @@ def e2e_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path
 
     from ctx.adapters.claude_code.install import install_utils as _iu
     monkeypatch.setattr(_iu, "MANIFEST_PATH", manifest)
+
+    import ctx_config
+    monkeypatch.setattr(
+        ctx_config.cfg,
+        "graph_semantic_cache_dir",
+        tmp_path / "semantic-cache",
+    )
 
     return {
         "claude": claude_dir,

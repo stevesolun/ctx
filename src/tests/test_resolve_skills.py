@@ -58,6 +58,15 @@ def _detection(name: str, confidence: float = 0.9) -> dict:
     return {"name": name, "confidence": confidence, "evidence": ["file.py"]}
 
 
+def _resolve_without_graph(
+    profile: dict,
+    available: dict,
+    overrides: dict,
+    **kwargs,
+) -> dict:
+    return resolve(profile, available, overrides, enable_graph=False, **kwargs)
+
+
 # ---------------------------------------------------------------------------
 # discover_available_skills
 # ---------------------------------------------------------------------------
@@ -158,17 +167,34 @@ class TestReadWikiOverrides:
 # ---------------------------------------------------------------------------
 
 class TestResolve:
+    def test_graph_can_be_disabled_for_deterministic_unit_resolution(
+        self, tmp_path, monkeypatch
+    ):
+        from ctx.core.resolve import resolve_skills  # noqa: PLC0415
+
+        def fail_if_loaded():
+            raise AssertionError("unit resolver tests must not load the live graph")
+
+        monkeypatch.setattr(resolve_skills, "_load_graph", fail_if_loaded)
+        available = {"react": {"path": str(tmp_path / "react/SKILL.md"), "name": "react"}}
+        profile = _minimal_profile(frameworks=[_detection("react")])
+
+        manifest = _resolve_without_graph(profile, available, {})
+
+        assert "react" in [e["skill"] for e in manifest["load"]]
+        assert not any("graph walk skipped" in w for w in manifest["warnings"])
+
     def test_basic_load_known_skill(self, tmp_path):
         available = {"react": {"path": str(tmp_path / "react/SKILL.md"), "name": "react"}}
         profile = _minimal_profile(frameworks=[_detection("react")])
-        manifest = resolve(profile, available, {})
+        manifest = _resolve_without_graph(profile, available, {})
         loaded_names = [e["skill"] for e in manifest["load"]]
         assert "react" in loaded_names
 
     def test_skill_not_available_goes_to_suggestions(self, tmp_path):
         available = {}  # react not installed
         profile = _minimal_profile(frameworks=[_detection("react")])
-        manifest = resolve(profile, available, {})
+        manifest = _resolve_without_graph(profile, available, {})
         suggestion_skills = [s["skill"] for s in manifest["suggestions"]]
         assert "react" in suggestion_skills
         # The unavailable react skill must NOT be in load. Graph-matched
@@ -186,7 +212,7 @@ class TestResolve:
         available = {"docker": {"path": str(tmp_path / "docker/SKILL.md"), "name": "docker"}}
         overrides = {"docker": {"always_load": True, "never_load": False, "use_count": 0, "last_used": "", "status": "installed"}}
         profile = _minimal_profile()  # no detection for docker
-        manifest = resolve(profile, available, overrides)
+        manifest = _resolve_without_graph(profile, available, overrides)
         loaded_names = [e["skill"] for e in manifest["load"]]
         assert "docker" in loaded_names
 
@@ -194,7 +220,7 @@ class TestResolve:
         available = {"react": {"path": str(tmp_path / "react/SKILL.md"), "name": "react"}}
         overrides = {"react": {"always_load": False, "never_load": True, "use_count": 0, "last_used": "", "status": "installed"}}
         profile = _minimal_profile(frameworks=[_detection("react")])
-        manifest = resolve(profile, available, overrides)
+        manifest = _resolve_without_graph(profile, available, overrides)
         loaded_names = [e["skill"] for e in manifest["load"]]
         assert "react" not in loaded_names
 
@@ -207,7 +233,7 @@ class TestResolve:
             _detection("fastapi", confidence=0.95),
             _detection("flask", confidence=0.6),
         ])
-        manifest = resolve(profile, available, {})
+        manifest = _resolve_without_graph(profile, available, {})
         loaded_names = [e["skill"] for e in manifest["load"]]
         # fastapi has higher base priority (8) and higher confidence boost
         assert "fastapi" in loaded_names
@@ -220,7 +246,7 @@ class TestResolve:
                            "pytest", "jest", "langchain", "nextjs", "vue"]
         available = {n: {"path": str(tmp_path / n / "SKILL.md"), "name": n} for n in skills_with_map}
         profile = _minimal_profile(frameworks=[_detection(n, 0.9) for n in skills_with_map])
-        manifest = resolve(profile, available, {}, max_skills=3)
+        manifest = _resolve_without_graph(profile, available, {}, max_skills=3)
         # At most 3 skill-mapped items (plus meta skills if available)
         non_meta = [e for e in manifest["load"] if e["skill"] not in ("skill-router", "file-reading")]
         assert len(non_meta) <= 3
@@ -229,7 +255,7 @@ class TestResolve:
     def test_meta_skills_added_if_available(self, tmp_path):
         available = {"skill-router": {"path": str(tmp_path / "skill-router/SKILL.md"), "name": "skill-router"}}
         profile = _minimal_profile()
-        manifest = resolve(profile, available, {})
+        manifest = _resolve_without_graph(profile, available, {})
         loaded_names = [e["skill"] for e in manifest["load"]]
         assert "skill-router" in loaded_names
 
@@ -239,12 +265,12 @@ class TestResolve:
             "docker": {"path": str(tmp_path / "docker/SKILL.md"), "name": "docker"},
         }
         profile = _minimal_profile(frameworks=[_detection("react")])
-        manifest = resolve(profile, available, {})
+        manifest = _resolve_without_graph(profile, available, {})
         unload_names = [e["skill"] for e in manifest["unload"]]
         assert "docker" in unload_names
 
     def test_empty_profile_no_crash(self):
-        manifest = resolve(_minimal_profile(), {}, {})
+        manifest = _resolve_without_graph(_minimal_profile(), {}, {})
         assert manifest["load"] == []
         assert "generated_at" in manifest
 
@@ -252,7 +278,7 @@ class TestResolve:
         """Skills with confidence >=0.9 should get priority +10."""
         available = {"react": {"path": str(tmp_path / "react/SKILL.md"), "name": "react"}}
         profile = _minimal_profile(frameworks=[_detection("react", confidence=0.95)])
-        manifest = resolve(profile, available, {})
+        manifest = _resolve_without_graph(profile, available, {})
         entry = next(e for e in manifest["load"] if e["skill"] == "react")
         # PRIORITY_BASE["react"] = 7, +10 for confidence, +0 no use_count
         assert entry["priority"] >= 17
@@ -462,6 +488,58 @@ class TestResolveMcpRecommendations:
         assert [e["skill"] for e in agents] == ["code-reviewer"]
         assert agents[0]["path"] == "/mnt/agents/unknown/code-reviewer.md"
         assert not any("code-reviewer needed but not installed" in w for w in manifest["warnings"])
+
+    def test_real_graph_walk_routes_cross_type_hits(
+        self, tmp_path, monkeypatch
+    ):
+        import networkx as nx
+        from ctx.core.resolve import resolve_skills  # noqa: PLC0415
+
+        G = nx.Graph()
+        G.add_node("skill:react", label="react", type="skill")
+        G.add_node("skill:pytest-something", label="pytest-something", type="skill")
+        G.add_node("agent:code-reviewer", label="code-reviewer", type="agent")
+        G.add_node("mcp-server:github-mcp-server", label="github-mcp-server", type="mcp-server")
+        G.add_edge(
+            "skill:react",
+            "skill:pytest-something",
+            weight=0.85,
+            shared_tags=["test"],
+        )
+        G.add_edge(
+            "skill:react",
+            "agent:code-reviewer",
+            weight=0.90,
+            shared_tags=["review"],
+        )
+        G.add_edge(
+            "skill:react",
+            "mcp-server:github-mcp-server",
+            weight=0.95,
+            shared_tags=["github"],
+        )
+        monkeypatch.setattr(resolve_skills, "_load_graph", lambda: G)
+        monkeypatch.setattr(resolve_skills, "_GRAPH_AVAILABLE", True)
+
+        available = {
+            "react": {"path": str(tmp_path / "react/SKILL.md"), "name": "react"},
+            "pytest-something": {
+                "path": str(tmp_path / "pytest-something/SKILL.md"),
+                "name": "pytest-something",
+            },
+        }
+        profile = _minimal_profile(frameworks=[_detection("react")])
+
+        manifest = resolve(profile, available, {})
+
+        load_by_name = {entry["skill"]: entry for entry in manifest["load"]}
+        assert load_by_name["pytest-something"]["entity_type"] == "skill"
+        assert load_by_name["code-reviewer"]["entity_type"] == "agent"
+        assert load_by_name["code-reviewer"]["path"] == "/mnt/agents/unknown/code-reviewer.md"
+        assert [entry["name"] for entry in manifest["mcp_servers"]] == [
+            "github-mcp-server",
+        ]
+        assert manifest["mcp_servers"][0]["shared_tags"] == ["github"]
 
 
 # ---------------------------------------------------------------------------

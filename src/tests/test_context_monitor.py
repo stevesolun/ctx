@@ -178,6 +178,7 @@ class TestCountRecentUnmatched:
 class TestWritePendingSkills:
     def test_writes_pending_skills_file(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_cm, "PENDING_SKILLS", tmp_path / "pending.json")
+        monkeypatch.setattr(_cm, "graph_suggest", lambda unmatched: [])
         write_pending_skills(["react", "docker"])
         pending = json.loads((tmp_path / "pending.json").read_text())
         assert pending["unmatched_signals"] == ["react", "docker"]
@@ -185,21 +186,28 @@ class TestWritePendingSkills:
 
     def test_suggestion_mentions_signals(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_cm, "PENDING_SKILLS", tmp_path / "pending.json")
+        monkeypatch.setattr(_cm, "graph_suggest", lambda unmatched: [])
         write_pending_skills(["fastapi"])
         pending = json.loads((tmp_path / "pending.json").read_text())
         assert "fastapi" in pending["suggestion"]
 
     def test_empty_unmatched(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_cm, "PENDING_SKILLS", tmp_path / "pending.json")
+        monkeypatch.setattr(_cm, "graph_suggest", lambda unmatched: [])
         write_pending_skills([])
         pending = json.loads((tmp_path / "pending.json").read_text())
         assert pending["unmatched_signals"] == []
 
     def test_graph_suggestions_list_present(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_cm, "PENDING_SKILLS", tmp_path / "pending.json")
+        monkeypatch.setattr(
+            _cm,
+            "graph_suggest",
+            lambda unmatched: [{"name": "fastapi-pro", "type": "skill"}],
+        )
         write_pending_skills(["unknown-signal"])
         pending = json.loads((tmp_path / "pending.json").read_text())
-        assert "graph_suggestions" in pending
+        assert pending["graph_suggestions"] == [{"name": "fastapi-pro", "type": "skill"}]
 
     def test_graph_suggest_filters_to_execution_bundle_types(self, tmp_path, monkeypatch):
         graph_path = tmp_path / "skill-wiki" / "graphify-out" / "graph.json"

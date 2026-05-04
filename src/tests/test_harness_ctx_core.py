@@ -35,6 +35,8 @@ from ctx.adapters.generic.providers import ToolCall, ToolDefinition
 def _build_synthetic_graph(tmp_path: Path) -> Path:
     """Write a minimal but valid graph.json under graphify-out/."""
     G = nx.Graph()
+    G.graph["external_catalog_nodes"] = {"skills.sh": 1}
+    G.graph["source_catalog_nodes"] = {"skills.sh": 1}
     G.add_node("skill:python-patterns", label="python-patterns", type="skill",
                tags=["python", "patterns"])
     G.add_node("skill:fastapi-pro", label="fastapi-pro", type="skill",
@@ -123,8 +125,15 @@ def _build_synthetic_wiki(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def toolbox(tmp_path: Path) -> CtxCoreToolbox:
+def toolbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CtxCoreToolbox:
     """Toolbox pointed at a synthetic wiki + graph."""
+    import ctx_config
+
+    monkeypatch.setattr(
+        ctx_config.cfg,
+        "graph_semantic_cache_dir",
+        tmp_path / "semantic-cache",
+    )
     graph_path = _build_synthetic_graph(tmp_path)
     wiki_dir = _build_synthetic_wiki(tmp_path)
     return CtxCoreToolbox(wiki_dir=wiki_dir, graph_path=graph_path)

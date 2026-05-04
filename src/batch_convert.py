@@ -260,16 +260,27 @@ def convert_skill(
     skill_path: Path | str,
     output_dir: Path | str | None = None,
     line_threshold: int | None = None,
+    *,
+    source_content: str | None = None,
+    skill_name: str | None = None,
+    preserve_original: bool = True,
 ) -> dict:
     """Convert a single skill file into a micro-skill pipeline.
 
     If output_dir is None, converts in-place (same directory as the skill).
+    Callers that already have trusted in-memory content can pass
+    source_content and preserve_original=False to avoid writing raw upstream
+    bodies as temporary SKILL.md files.
     Returns stats dict.
     """
     skill_path = Path(skill_path)
     if output_dir is not None:
         output_dir = Path(output_dir)
-    content = skill_path.read_text(encoding="utf-8", errors="replace")
+    content = (
+        source_content
+        if source_content is not None
+        else skill_path.read_text(encoding="utf-8", errors="replace")
+    )
     line_count = _line_count(content)
     threshold = cfg.line_threshold if line_threshold is None else line_threshold
 
@@ -280,7 +291,7 @@ def convert_skill(
     source_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     # Determine skill name and output dir
-    skill_name = skill_path.parent.name
+    skill_name = skill_name or skill_path.parent.name
     if output_dir is None:
         output_dir = skill_path.parent
 
@@ -353,9 +364,13 @@ def convert_skill(
     # has been written atomically below — this guarantees the skill directory
     # always contains a valid SKILL.md, even if the process is killed mid-
     # conversion (data-loss protection).
-    original_path = output_dir / "SKILL.md.original"
-    if not original_path.exists():
-        shutil.copy2(skill_path, original_path)
+    if preserve_original:
+        original_path = output_dir / "SKILL.md.original"
+        if not original_path.exists():
+            if source_content is None:
+                shutil.copy2(skill_path, original_path)
+            else:
+                original_path.write_text(source_content, encoding="utf-8")
 
     # 01-scope.md
     scope_text = "\n\n".join(scope_parts)
@@ -477,7 +492,10 @@ Read `failure-log.md` before starting. Every pattern is a mandatory constraint.
     total_files = len(all_pipeline_files)
     for f in all_pipeline_files:
         if f.exists():
-            lc = len(f.read_text(encoding="utf-8", errors="replace").split("\n"))
+            try:
+                lc = len(f.read_text(encoding="utf-8", errors="replace").split("\n"))
+            except OSError:
+                continue
             if lc > max_lines:
                 max_lines = lc
 

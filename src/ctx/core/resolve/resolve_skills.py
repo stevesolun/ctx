@@ -156,6 +156,7 @@ def resolve(
     overrides: dict,
     max_skills: int = 15,
     intent_signals: dict[str, int] | None = None,
+    enable_graph: bool = True,
 ) -> dict:
     """Resolve stack profile to skill manifest."""
     manifest = {
@@ -239,7 +240,7 @@ def resolve(
     #
     # Quiet on empty graph: resolve_by_seeds() returns [] if the graph
     # hasn't been built yet, so this is safe on a fresh install.
-    if _GRAPH_AVAILABLE and needed:
+    if enable_graph and _GRAPH_AVAILABLE and needed:
         try:
             G = _load_graph()
             if G.number_of_nodes() > 0:

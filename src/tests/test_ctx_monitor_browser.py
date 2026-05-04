@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
+import networkx as nx
 import pytest
 
 import ctx_monitor as cm
@@ -78,6 +79,55 @@ def _start_monitor(
         server=server,
         thread=thread,
     )
+
+
+def _write_wiki_entity(root: Path, entity_type: str, slug: str, body: str) -> None:
+    sub = {
+        "skill": "skills",
+        "agent": "agents",
+        "mcp-server": "mcp-servers/g",
+        "harness": "harnesses",
+    }[entity_type]
+    path = root / "skill-wiki" / "entities" / sub / f"{slug}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+
+
+def test_graph_page_falls_back_when_cytoscape_cdn_is_blocked(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    page: Any,
+) -> None:
+    G = nx.Graph()
+    G.add_node("skill:python-patterns", label="python-patterns", type="skill", tags=["python"])
+    G.add_node("agent:code-reviewer", label="code-reviewer", type="agent", tags=["review"])
+    G.add_node("mcp-server:github-mcp-server", label="github-mcp-server", type="mcp-server", tags=["github"])
+    G.add_node("harness:langgraph", label="langgraph", type="harness", tags=["agent"])
+    G.add_edge("skill:python-patterns", "agent:code-reviewer", weight=0.9, shared_tags=["review"])
+    G.add_edge("skill:python-patterns", "mcp-server:github-mcp-server", weight=0.8, shared_tags=["github"])
+    G.add_edge("skill:python-patterns", "harness:langgraph", weight=0.7, shared_tags=["agent"])
+    monkeypatch.setattr(cm, "_load_dashboard_graph", lambda: G)
+    _write_wiki_entity(fake_claude, "skill", "python-patterns", "# python-patterns\n")
+    _write_wiki_entity(fake_claude, "agent", "code-reviewer", "# code-reviewer\n")
+
+    page.route("https://unpkg.com/**", lambda route: route.abort())
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        page.goto(f"{harness.base_url}/graph?slug=python-patterns&type=skill")
+        page.wait_for_selector("[data-testid='graph-fallback']", timeout=5000)
+        assert "4 nodes" in page.locator("#msg").inner_text()
+        assert page.locator("[data-testid='graph-fallback-node']").count() == 4
+
+        page.fill("#tag-filter", "review")
+        page.wait_for_function(
+            "() => document.getElementById('graph-match-count').textContent === '2 visible'",
+            timeout=5000,
+        )
+        page.locator("[data-testid='graph-fallback-node'][data-slug='code-reviewer']").click()
+        page.wait_for_url("**/wiki/code-reviewer?type=agent", timeout=5000)
+        assert "code-reviewer" in page.locator("h1").inner_text()
+    finally:
+        harness.close()
 
 
 def test_loaded_page_token_controls_browser_mutations(

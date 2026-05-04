@@ -1,0 +1,128 @@
+from __future__ import annotations
+
+import gzip
+import json
+import tarfile
+from io import BytesIO
+from pathlib import Path
+
+import pytest
+
+from validate_graph_artifacts import GraphArtifactError, validate_graph_artifacts
+
+
+def _add_text(tf: tarfile.TarFile, name: str, text: str) -> None:
+    payload = text.encode("utf-8")
+    info = tarfile.TarInfo(name)
+    info.size = len(payload)
+    info.mode = 0o644
+    tf.addfile(info, BytesIO(payload))
+
+
+def _write_catalog(graph_dir: Path, *, converted_path: str | None = None) -> None:
+    skill = {
+        "ctx_slug": "skills-sh-example-skill",
+        "graph_node_id": "skill:skills-sh-example-skill",
+        "entity_path": "entities/skills/skills-sh-example-skill.md",
+        "body_available": converted_path is not None,
+        "converted_path": converted_path,
+    }
+    catalog = {
+        "observed_unique_skills": 1,
+        "body_available_count": 1 if converted_path else 0,
+        "skills": [skill],
+    }
+    with gzip.open(graph_dir / "skills-sh-catalog.json.gz", "wt", encoding="utf-8") as f:
+        json.dump(catalog, f)
+
+
+def _write_archive(
+    graph_dir: Path,
+    *,
+    include_converted: bool = True,
+    include_original: bool = False,
+) -> None:
+    graph = {
+        "nodes": [
+            {
+                "id": "skill:skills-sh-example-skill",
+                "type": "skill",
+                "source_catalog": "skills.sh",
+            },
+            {"id": "harness:langgraph", "type": "harness"},
+        ],
+        "edges": [
+            {
+                "source": "skill:skills-sh-example-skill",
+                "target": "harness:langgraph",
+                "semantic_sim": 0.91,
+            },
+        ],
+    }
+    with tarfile.open(graph_dir / "wiki-graph.tar.gz", "w:gz") as tf:
+        _add_text(tf, "./index.md", "# Wiki\n")
+        _add_text(tf, "./graphify-out/graph.json", json.dumps(graph, separators=(",", ":")))
+        _add_text(tf, "./graphify-out/communities.json", json.dumps({"total_communities": 1}))
+        _add_text(tf, "./external-catalogs/skills-sh/catalog.json", "{}")
+        _add_text(tf, "./entities/skills/skills-sh-example-skill.md", "# Example\n")
+        _add_text(tf, "./entities/harnesses/langgraph.md", "# LangGraph\n")
+        if include_converted:
+            _add_text(tf, "./converted/skills-sh-example-skill/SKILL.md", "# Example\n")
+            _add_text(tf, "./converted/skills-sh-example-skill/references/01-scope.md", "# Scope\n")
+        if include_original:
+            _add_text(tf, "./converted/skills-sh-example-skill/SKILL.md.original", "# Raw\n")
+
+
+def test_validate_graph_artifacts_checks_catalog_paths_and_deep_graph_stats(
+    tmp_path: Path,
+) -> None:
+    _write_catalog(
+        tmp_path,
+        converted_path="converted/skills-sh-example-skill/SKILL.md",
+    )
+    (tmp_path / "communities.json").write_text(
+        json.dumps({"total_communities": 1}),
+        encoding="utf-8",
+    )
+    _write_archive(tmp_path)
+
+    stats = validate_graph_artifacts(
+        tmp_path,
+        deep=True,
+        min_nodes=2,
+        min_edges=1,
+        min_skills_sh_nodes=1,
+        min_semantic_edges=1,
+        expected_harnesses={"langgraph"},
+        line_threshold=180,
+        max_stage_lines=40,
+    )
+
+    assert stats.graph_nodes == 2
+    assert stats.graph_edges == 1
+    assert stats.skills_sh_catalog_entries == 1
+    assert stats.skills_sh_converted == 1
+    assert stats.harness_pages == 1
+
+
+def test_validate_graph_artifacts_rejects_missing_converted_catalog_path(
+    tmp_path: Path,
+) -> None:
+    _write_catalog(
+        tmp_path,
+        converted_path="converted/skills-sh-example-skill/SKILL.md",
+    )
+    (tmp_path / "communities.json").write_text("{}", encoding="utf-8")
+    _write_archive(tmp_path, include_converted=False)
+
+    with pytest.raises(GraphArtifactError, match="missing converted Skills.sh body"):
+        validate_graph_artifacts(tmp_path)
+
+
+def test_validate_graph_artifacts_rejects_original_backup_members(tmp_path: Path) -> None:
+    _write_catalog(tmp_path, converted_path=None)
+    (tmp_path / "communities.json").write_text("{}", encoding="utf-8")
+    _write_archive(tmp_path, include_original=True)
+
+    with pytest.raises(GraphArtifactError, match="raw backup"):
+        validate_graph_artifacts(tmp_path)

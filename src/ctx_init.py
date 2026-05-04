@@ -254,6 +254,12 @@ def recommend_harnesses(
                 model=model,
             )
         ]
+        installed = _installed_harness_slugs(cfg.claude_dir / "harness-installs")
+        if installed:
+            results = [
+                row for row in results
+                if str(row.get("name") or "") not in installed
+            ]
         threshold = cfg.harness_recommendation_min_normalized_score
         for row in results:
             score = float(row.get("score") or 0.0)
@@ -270,6 +276,24 @@ def recommend_harnesses(
         )
         return []
     return results[:limit]
+
+
+def _installed_harness_slugs(manifest_dir: Path) -> set[str]:
+    """Return harness slugs with an active install manifest."""
+    if not manifest_dir.exists():
+        return set()
+    slugs: set[str] = set()
+    for path in manifest_dir.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - corrupt manifests should not break onboarding.
+            continue
+        if str(data.get("status") or "installed") != "installed":
+            continue
+        slug = str(data.get("slug") or path.stem).strip()
+        if slug:
+            slugs.add(slug)
+    return slugs
 
 
 def _harness_supports_provider(
