@@ -122,10 +122,21 @@ class Config:
         self.harness_recommendation_min_normalized_score: float = float(
             harness.get("recommendation_min_normalized_score", 0.85)
         )
+        self.harness_recommendation_min_fit_score: float = float(
+            harness.get(
+                "recommendation_min_fit_score",
+                self.harness_recommendation_min_normalized_score,
+            )
+        )
         if not (0.0 <= self.harness_recommendation_min_normalized_score <= 1.0):
             raise ValueError(
                 "harness.recommendation_min_normalized_score must be in [0, 1] "
                 f"(got {self.harness_recommendation_min_normalized_score})"
+            )
+        if not (0.0 <= self.harness_recommendation_min_fit_score <= 1.0):
+            raise ValueError(
+                "harness.recommendation_min_fit_score must be in [0, 1] "
+                f"(got {self.harness_recommendation_min_fit_score})"
             )
 
         # ── Context Monitor ────────────────────────────────────────────────

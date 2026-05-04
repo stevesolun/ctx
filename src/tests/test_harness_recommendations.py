@@ -166,6 +166,14 @@ def test_ctx_init_recommends_harnesses_from_dedicated_catalog(
     assert [row["name"] for row in results] == ["langgraph"]
     assert {row["type"] for row in results} == {"harness"}
     assert results[0]["normalized_score"] >= 0.85
+    assert results[0]["fit_score"] >= 0.85
+    assert results[0]["fit_signals"] == [
+        "agent",
+        "checkpointing",
+        "graph",
+        "openai",
+        "python",
+    ]
 
 
 def test_ctx_init_filters_harnesses_by_model_provider(
@@ -180,6 +188,20 @@ def test_ctx_init_filters_harnesses_by_model_provider(
     )
 
     assert [row["name"] for row in results] == ["local-workbench"]
+
+
+def test_ctx_init_rejects_weak_single_signal_harness_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ctx_init, "_load_recommendation_graph", _harness_graph)
+
+    results = ctx_init.recommend_harnesses(
+        "python",
+        top_k=5,
+        model_provider="openai",
+    )
+
+    assert results == []
 
 
 def test_ctx_init_does_not_recommend_installed_harnesses(
