@@ -46,6 +46,41 @@ def test_enqueue_is_idempotent_by_key(tmp_path: Path) -> None:
     assert wiki_queue.list_jobs(db_path) == [first]
 
 
+def test_enqueue_maintenance_job_is_idempotent_by_payload(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+
+    first = wiki_queue.enqueue_maintenance_job(
+        wiki,
+        kind=wiki_queue.GRAPH_EXPORT_JOB,
+        payload={"graph_only": True, "incremental": True},
+        source="test",
+        now=10.0,
+    )
+    second = wiki_queue.enqueue_maintenance_job(
+        wiki,
+        kind=wiki_queue.GRAPH_EXPORT_JOB,
+        payload={"incremental": True, "graph_only": True},
+        source="test",
+        now=11.0,
+    )
+
+    assert second.id == first.id
+    assert second.kind == wiki_queue.GRAPH_EXPORT_JOB
+    assert second.payload["source"] == "test"
+    assert second.payload["graph_only"] is True
+    assert wiki_queue.list_jobs(wiki_queue.queue_db_path(wiki)) == [first]
+
+
+def test_enqueue_maintenance_job_rejects_unknown_kind(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unsupported maintenance job kind"):
+        wiki_queue.enqueue_maintenance_job(
+            tmp_path / "wiki",
+            kind="unknown-maintenance",
+            payload={},
+            source="test",
+        )
+
+
 def test_lease_next_claims_oldest_available_job(tmp_path: Path) -> None:
     db_path = tmp_path / "wiki-queue.sqlite3"
     first = wiki_queue.enqueue(db_path, kind="graph-export", payload={"n": 1}, now=10.0)

@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import os
 import socket
+import subprocess
 import sys
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from ctx.core.wiki.artifact_promotion import promote_staged_artifact
 from ctx.core.wiki import wiki_queue
 from ctx.core.wiki.wiki_sync import update_index
 from ctx.utils._fs_utils import reject_symlink_path
@@ -22,6 +24,7 @@ _ENTITY_SUBJECT_TYPES = {
     "mcp-server": "mcp-servers",
     "harness": "harnesses",
 }
+MaintenanceHandler = Callable[[Path, dict[str, Any]], str]
 
 
 @dataclass(frozen=True)
@@ -46,7 +49,7 @@ def process_next(
         db_path,
         worker_id=worker_id,
         lease_seconds=lease_seconds,
-        kinds=(wiki_queue.ENTITY_UPSERT_JOB,),
+        kinds=wiki_queue.WORKER_JOB_KINDS,
         now=now,
     )
     if job is None:
@@ -107,9 +110,12 @@ def drain_queue(
 
 
 def _process_job(wiki_path: Path, job: wiki_queue.QueueJob) -> str:
-    if job.kind != wiki_queue.ENTITY_UPSERT_JOB:
+    if job.kind == wiki_queue.ENTITY_UPSERT_JOB:
+        return _process_entity_upsert(wiki_path, job.payload)
+    handler = MAINTENANCE_HANDLERS.get(job.kind)
+    if handler is None:
         raise ValueError(f"unsupported wiki queue job kind: {job.kind}")
-    return _process_entity_upsert(wiki_path, job.payload)
+    return handler(wiki_path, job.payload)
 
 
 def _process_entity_upsert(wiki_path: Path, payload: dict[str, Any]) -> str:
@@ -150,6 +156,108 @@ def _required_string(payload: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"entity-upsert payload requires non-empty {key}")
     return value.strip()
+
+
+def _handle_graph_export(wiki_path: Path, payload: dict[str, Any]) -> str:
+    args = [
+        sys.executable,
+        "-m",
+        "ctx.core.wiki.wiki_graphify",
+        "--wiki-dir",
+        str(wiki_path),
+    ]
+    args.append("--full" if payload.get("incremental") is False else "--incremental")
+    if payload.get("graph_only", True):
+        args.append("--graph-only")
+    if payload.get("dry_run"):
+        args.append("--dry-run")
+    _run_checked(args, label="graph export")
+    return "graph export completed"
+
+
+def _handle_catalog_refresh(_wiki_path: Path, payload: dict[str, Any]) -> str:
+    args = _catalog_refresh_args(payload, update_wiki_tar=False)
+    _run_checked(args, label="catalog refresh")
+    return "catalog refresh completed"
+
+
+def _handle_tar_refresh(_wiki_path: Path, payload: dict[str, Any]) -> str:
+    args = _catalog_refresh_args(payload, update_wiki_tar=True)
+    _run_checked(args, label="tar refresh")
+    return "tar refresh completed"
+
+
+def _handle_artifact_promotion(_wiki_path: Path, payload: dict[str, Any]) -> str:
+    staged = Path(_required_payload_string(payload, "staged_path"))
+    target = Path(_required_payload_string(payload, "target_path"))
+    validator = payload.get("validator")
+    validate = None
+    if validator == "wiki-tar":
+        from import_skills_sh_catalog import _validate_wiki_tarball_candidate  # noqa: PLC0415
+        validate = _validate_wiki_tarball_candidate
+    elif validator not in (None, "", "none"):
+        raise ValueError(f"unsupported artifact validator: {validator}")
+    result = promote_staged_artifact(staged, target, validate=validate)
+    return f"promoted artifact to {result.target}"
+
+
+def _catalog_refresh_args(payload: dict[str, Any], *, update_wiki_tar: bool) -> list[str]:
+    args = [sys.executable, "-m", "import_skills_sh_catalog"]
+    if payload.get("fetch"):
+        args.append("--fetch")
+    else:
+        from_catalog = payload.get("from_catalog") or payload.get("catalog")
+        from_api_union = payload.get("from_api_union")
+        source_flag = "--from-catalog" if from_catalog else "--from-api-union"
+        source_value = from_catalog or from_api_union
+        if not isinstance(source_value, str) or not source_value.strip():
+            raise ValueError(
+                "catalog maintenance payload requires fetch=true, from_catalog, "
+                "from_api_union, or catalog"
+            )
+        args.extend([source_flag, source_value.strip()])
+    if catalog_out := _optional_payload_string(payload, "catalog_out"):
+        args.extend(["--catalog-out", catalog_out])
+    if wiki_tar := _optional_payload_string(payload, "wiki_tar"):
+        args.extend(["--wiki-tar", wiki_tar])
+    if payload.get("drop_body_unavailable"):
+        args.append("--drop-body-unavailable")
+    if update_wiki_tar:
+        args.append("--update-wiki-tar")
+    return args
+
+
+def _run_checked(args: list[str], *, label: str) -> None:
+    try:
+        subprocess.run(args, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"{label} failed with exit {exc.returncode}{suffix}") from exc
+
+
+def _required_payload_string(payload: dict[str, Any], key: str) -> str:
+    value = _optional_payload_string(payload, key)
+    if value is None:
+        raise ValueError(f"maintenance payload requires non-empty {key}")
+    return value
+
+
+def _optional_payload_string(payload: dict[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"maintenance payload {key} must be a non-empty string")
+    return value.strip()
+
+
+MAINTENANCE_HANDLERS: dict[str, MaintenanceHandler] = {
+    wiki_queue.GRAPH_EXPORT_JOB: _handle_graph_export,
+    wiki_queue.CATALOG_REFRESH_JOB: _handle_catalog_refresh,
+    wiki_queue.TAR_REFRESH_JOB: _handle_tar_refresh,
+    wiki_queue.ARTIFACT_PROMOTION_JOB: _handle_artifact_promotion,
+}
 
 
 def _default_worker_id() -> str:
