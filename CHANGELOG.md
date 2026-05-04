@@ -7,6 +7,35 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - No unreleased changes yet.
 
+## [0.7.2] - 2026-05-04
+
+### Added
+
+- Added a persistent wiki ingest queue and worker so skill, agent, MCP,
+  and harness wiki updates can be queued and replayed durably.
+- Added a non-required pytest-xdist experiment workflow for measuring
+  safe parallel test execution without changing the required CI gate.
+
+### Changed
+
+- Split PR CI from main CI: PRs now use a canonical Ubuntu coverage lane,
+  while main keeps the broader OS/Python matrix.
+- Added docs-only and graph-only PR fast paths guarded by the stable
+  `CI required` aggregate check.
+- Reused one built wheel across package-smoke OS jobs and cached
+  Playwright browser setup for monitor security tests.
+- Enabled active GitHub main protection that requires only the stable
+  `CI required` check.
+- Kept Hugging Face repo-card metadata out of the GitHub README while
+  preserving valid metadata during Hugging Face sync.
+
+### Fixed
+
+- Made graph export, generated graph wikilinks, harness catalog writes,
+  and harness install manifests safer against crash/truncation cases.
+- Hardened the README harness stats updater so harness-aware counts stay
+  aligned.
+
 ## [0.7.1] - 2026-05-02
 
 ### Fixed
