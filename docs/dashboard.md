@@ -20,11 +20,9 @@ requests. Cytoscape.js is loaded from a CDN on the `/graph` route only.
 ## Usage
 
 Every page in the dashboard has the same top nav, so getting around
-is `Home → jump anywhere`. The three feature tabs new in v0.6.4 are
-how you explore the dashboard-supported ctx corpus without ever touching
-the CLI. The dashboard indexes skills, agents, MCP servers, and harness
-pages in wiki/graph views. Harness install, update, load/unload, and
-quality scoring remain CLI/API workflows.
+is `Home -> jump anywhere`. The dashboard indexes skills, agents, MCP
+servers, and harness pages in wiki/graph views. Harness install, update,
+load/unload, and quality scoring remain CLI/API workflows.
 
 ### Check queue and artifact state - `/status`
 
