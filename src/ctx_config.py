@@ -214,10 +214,10 @@ class Config:
         self.babysitter_sdk_version: str = bsitter.get("sdk_version", "latest")
 
         # ── Graph Edge Weights ──────────────────────────────────────────────
-        # wiki_graphify builds edges from three signals (semantic / tag /
-        # slug-token). Weights blend their per-edge contributions into a
-        # single final weight. Must sum to 1.0; validated lazily on first
-        # access so a bad user config surfaces with a clear error.
+        # wiki_graphify builds base edges from semantic/tag/slug-token
+        # weights plus source/direct evidence, then applies additive
+        # explainability boosts. The semantic/tag/token weights must sum
+        # to 1.0 so the primary blend remains comparable across configs.
         graph = raw.get("graph", {}) if isinstance(raw.get("graph"), dict) else {}
         ew = graph.get("edge_weights", {}) if isinstance(graph.get("edge_weights"), dict) else {}
         self.graph_edge_weight_semantic: float = float(ew.get("semantic", 0.70))
@@ -264,6 +264,17 @@ class Config:
         self.graph_dense_token_threshold: int = int(toe.get("dense_token_threshold", 500))
         self.graph_shared_token_saturation: int = int(toe.get("shared_token_saturation", 3))
 
+        se = graph.get("source_edges", {}) if isinstance(graph.get("source_edges"), dict) else {}
+        self.graph_dense_source_threshold: int = int(se.get("dense_source_threshold", 50))
+
+        boosts = graph.get("edge_boosts", {}) if isinstance(graph.get("edge_boosts"), dict) else {}
+        self.graph_edge_boost_direct_link: float = float(boosts.get("direct_link", 0.10))
+        self.graph_edge_boost_source_overlap: float = float(boosts.get("source_overlap", 0.05))
+        self.graph_edge_boost_adamic_adar: float = float(boosts.get("adamic_adar", 0.04))
+        self.graph_edge_boost_type_affinity: float = float(boosts.get("type_affinity", 0.03))
+        self.graph_edge_boost_usage: float = float(boosts.get("usage", 0.02))
+        self.graph_edge_boost_quality: float = float(boosts.get("quality", 0.02))
+
         # Validate the blend weights sum to 1.0 (±1e-6 tolerance). A
         # misconfigured user config is better caught here than 10 min
         # into a regraphify pass when scores come out wrong.
@@ -287,6 +298,23 @@ class Config:
             if val < 0.0:
                 raise ValueError(
                     f"graph.edge_weights.{name} must be >= 0 (got {val})"
+                )
+        if self.graph_dense_source_threshold < 1:
+            raise ValueError(
+                "graph.source_edges.dense_source_threshold must be >= 1 "
+                f"(got {self.graph_dense_source_threshold})"
+            )
+        for name, val in (
+            ("direct_link", self.graph_edge_boost_direct_link),
+            ("source_overlap", self.graph_edge_boost_source_overlap),
+            ("adamic_adar", self.graph_edge_boost_adamic_adar),
+            ("type_affinity", self.graph_edge_boost_type_affinity),
+            ("usage", self.graph_edge_boost_usage),
+            ("quality", self.graph_edge_boost_quality),
+        ):
+            if val < 0.0:
+                raise ValueError(
+                    f"graph.edge_boosts.{name} must be >= 0 (got {val})"
                 )
 
     def get(self, key: str, default: Any = None) -> Any:

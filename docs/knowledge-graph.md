@@ -57,8 +57,9 @@ Obsidian's native graph view if you prefer it to the web dashboard.
 
 ## How edges are built
 
-Three sources of connectivity, combined at build time by the
-`ctx-wiki-graphify` console script (`ctx.core.wiki.wiki_graphify`):
+Edges are built and explained by the `ctx-wiki-graphify` console script
+(`ctx.core.wiki.wiki_graphify`). A pair must first have at least one base
+signal:
 
 1. **Semantic cosine** — when the embedding backend is available, entity
    text is embedded and semantic neighbors above the configured build floor
@@ -73,11 +74,23 @@ Three sources of connectivity, combined at build time by the
    `python-patterns` contributes `python` and `patterns`. A stop-word
    filter drops generic tokens like `skill`, `agent`, `pro`, `expert`,
    `core` so they don't over-connect the graph.
+4. **Source overlap** — pages with the same high-specificity source URL,
+   repository URL, homepage, detail URL, or package URL can connect even
+   when their tags differ. Dense source buckets are skipped.
+5. **Direct wikilinks** — explicit entity links such as
+   `[[entities/agents/code-reviewer]]` create a direct graph edge.
 
-Edge `weight` is the final blended strength after semantic, tag, and token
-signals are combined. Edge metadata keeps the ingredients explainable:
-`semantic_sim` for cosine similarity, `shared_tags` for explicit tags, and
-`shared_tokens` for slug-token overlap. Hydrated Skills.sh records use their
+Edge `weight` is the final blended strength. Semantic, tag, and token
+weights form the base blend from `config.json`; source overlap and direct
+links add configured boosts. Existing edges can also receive explainable
+ranking boosts from Adamic-Adar shared-neighbor structure, type affinity,
+usage telemetry, and quality scores. Those boost-only signals do not create
+edges by themselves.
+
+Edge metadata keeps the ingredients explainable: `semantic_sim`,
+`shared_tags`, `shared_tokens`, `shared_sources`, `direct_link`,
+`adamic_adar`, `type_affinity`, `usage_score`, `quality_score`,
+`edge_reasons`, and `score_components`. Hydrated Skills.sh records use their
 full source bodies during graph rebuilds, so long converted entries keep
 full-body similarity even though the shipped installable `SKILL.md` files are
 short gated loaders. The raw `SKILL.md.original` backups are build inputs, not

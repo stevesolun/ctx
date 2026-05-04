@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import json
+import math
 import os
 import re
 from collections import defaultdict
@@ -42,6 +43,7 @@ GRAPH_RELATED_BLOCK_RE = re.compile(
     rf"\n?{re.escape(GRAPH_RELATED_START)}\n.*?{re.escape(GRAPH_RELATED_END)}\n?",
     re.DOTALL,
 )
+ENTITY_WIKILINK_RE = re.compile(r"\[\[entities/(?P<section>[^/\]#|]+)/(?P<target>[^\]#|]+)")
 
 WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki"))
 SKILL_ENTITIES = WIKI_DIR / "entities" / "skills"
@@ -224,6 +226,139 @@ def _slug_tokens(slug: str) -> list[str]:
     ]
 
 
+def _pair(n1: str, n2: str) -> tuple[str, str]:
+    return (n1, n2) if n1 <= n2 else (n2, n1)
+
+
+def _source_keys(meta: dict) -> list[str]:
+    """High-specificity source keys that can justify an edge."""
+    keys: list[str] = []
+    for field in (
+        "repo_url",
+        "repository",
+        "source_url",
+        "homepage",
+        "detail_url",
+        "package_url",
+    ):
+        raw = meta.get(field)
+        if not isinstance(raw, str):
+            continue
+        value = raw.strip().lower().rstrip("/")
+        if value:
+            keys.append(f"{field}:{value}")
+    return sorted(set(keys))
+
+
+def _direct_link_targets(content: str) -> set[str]:
+    """Return graph node IDs referenced by entity wikilinks in markdown."""
+    out: set[str] = set()
+    section_to_type = {
+        "skills": "skill",
+        "agents": "agent",
+        "mcp-servers": "mcp-server",
+        "harnesses": "harness",
+    }
+    for match in ENTITY_WIKILINK_RE.finditer(content):
+        entity_type = section_to_type.get(match.group("section"))
+        if entity_type is None:
+            continue
+        slug = Path(match.group("target")).stem
+        if slug:
+            out.add(f"{entity_type}:{slug}")
+    return out
+
+
+def _type_affinity_score(left: str, right: str) -> float:
+    if left == right:
+        return 0.35
+    pair = frozenset((left, right))
+    if pair == frozenset(("skill", "agent")):
+        return 1.0
+    if pair == frozenset(("skill", "mcp-server")):
+        return 0.9
+    if pair == frozenset(("skill", "harness")):
+        return 0.75
+    if pair == frozenset(("agent", "mcp-server")):
+        return 0.65
+    if pair == frozenset(("agent", "harness")):
+        return 0.7
+    if pair == frozenset(("mcp-server", "harness")):
+        return 0.6
+    return 0.4
+
+
+def _mean_present(*values: float | None) -> float:
+    present = [v for v in values if v is not None]
+    return sum(present) / len(present) if present else 0.0
+
+
+def _quality_usage_signals(sidecar_dir: Path) -> dict[str, dict[str, float | None]]:
+    signals: dict[str, dict[str, float | None]] = {}
+    if not sidecar_dir.is_dir():
+        return signals
+    roots: list[Path] = [sidecar_dir]
+    mcp_subdir = sidecar_dir / "mcp"
+    if mcp_subdir.is_dir():
+        roots.append(mcp_subdir)
+    for root in roots:
+        for path in root.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            slug = data.get("slug")
+            if not slug:
+                continue
+            subject_type = data.get("subject_type", "skill")
+            if root == mcp_subdir and subject_type == "skill":
+                subject_type = "mcp-server"
+            node_id = f"{subject_type}:{slug}"
+            quality = _float_or_none(data.get("score"))
+            usage = _float_or_none(data.get("usage_score"))
+            raw_signals = data.get("signals")
+            if usage is None and isinstance(raw_signals, dict):
+                telemetry = raw_signals.get("telemetry")
+                popularity = raw_signals.get("popularity")
+                if isinstance(telemetry, dict):
+                    usage = _float_or_none(telemetry.get("score"))
+                elif isinstance(popularity, dict):
+                    usage = _float_or_none(popularity.get("score"))
+            signals[node_id] = {"quality": quality, "usage": usage}
+    return signals
+
+
+def _float_or_none(value: object) -> float | None:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _adamic_adar_scores(
+    nodes: list[str],
+    pairs: set[tuple[str, str]],
+) -> dict[tuple[str, str], float]:
+    base = nx.Graph()
+    base.add_nodes_from(nodes)
+    base.add_edges_from(pairs)
+    pair_lookup = set(pairs)
+    scores: dict[tuple[str, str], float] = defaultdict(float)
+    max_common_degree = 200
+    for common in base.nodes:
+        neighbors = sorted(base.neighbors(common))
+        degree = len(neighbors)
+        if degree < 2 or degree > max_common_degree:
+            continue
+        contribution = 1.0 / math.log(degree)
+        for i, n1 in enumerate(neighbors):
+            for n2 in neighbors[i + 1:]:
+                pair = _pair(n1, n2)
+                if pair in pair_lookup:
+                    scores[pair] += contribution
+    return {pair: min(score, 1.0) for pair, score in scores.items()}
+
+
 def _pairs_from_index(
     index: dict[str, list[str]],
     *,
@@ -263,8 +398,8 @@ def build_graph(
 
     Nodes = entity pages (skills + agents + mcp-servers).
 
-    Edges come from three independent signals whose per-edge
-    contributions are blended into a single ``final_weight``:
+    Edges come from independent signals whose per-edge contributions
+    are blended into a single ``final_weight``:
 
       - **Semantic similarity** (default blend 0.70) — cosine between
         sentence-embedding vectors of each entity's name+description+
@@ -276,16 +411,23 @@ def build_graph(
         non-stopword tokens from the slug (``atlassian-admin`` ↔
         ``atlassian-cloud`` share the ``atlassian`` token).
 
+      - **Source overlap** - shared repo/source/homepage/detail URLs.
+      - **Direct wikilinks** - explicit links to another entity page.
+
+    Existing base edges can receive explainable boosts from direct links,
+    source overlap, Adamic-Adar shared-neighbor structure, type affinity,
+    usage telemetry, and quality scores. Boost-only evidence never creates
+    an edge; it only strengthens an edge justified by a base signal.
+
     Weights and thresholds are configurable via ``cfg.graph.*`` in
     config.json (see the ``graph`` section comments for the full
     rationale). Setting ``semantic=0.0`` reverts to the pre-7.1
     tag+token-only behaviour.
 
-    Each edge carries: ``semantic_sim``, ``tag_sim``, ``token_sim``,
-    ``final_weight``, ``weight`` (alias of final_weight for backward
-    compat with Obsidian graph view + downstream consumers that still
-    read ``weight``), and ``shared_tags`` / ``shared_tokens`` lists
-    for explainability.
+    Each edge carries the raw signal values, ``final_weight``, ``weight``
+    (alias of final_weight for backward compat with Obsidian graph view +
+    downstream consumers that still read ``weight``), concrete shared-key
+    lists, ``edge_reasons``, and weighted ``score_components``.
     """
     from ctx_config import cfg as _cfg  # noqa: PLC0415 — local to avoid
     # a config read at module-import time (tests patch cfg).
@@ -327,6 +469,8 @@ def build_graph(
     # ── Phase 2: tag + slug-token indices (cheap) ────────────────────
     tag_index: dict[str, list[str]] = defaultdict(list)
     token_index: dict[str, list[str]] = defaultdict(list)
+    source_index: dict[str, list[str]] = defaultdict(list)
+    direct_pairs: set[tuple[str, str]] = set()
     for nid, data in G.nodes(data=True):
         for tag in data.get("tags", []):
             if tag and tag != "uncategorized":
@@ -334,6 +478,12 @@ def build_graph(
         slug = data.get("label", nid.split(":", 1)[-1])
         for token in _slug_tokens(slug):
             token_index[token].append(nid)
+        meta = entities.get(nid, {})
+        for source_key in _source_keys(meta):
+            source_index[source_key].append(nid)
+        for target in _direct_link_targets(str(meta.get("_content", ""))):
+            if target in G and target != nid:
+                direct_pairs.add(_pair(nid, target))
 
     tag_counts, tag_shared = _pairs_from_index(
         tag_index,
@@ -344,6 +494,11 @@ def build_graph(
         token_index,
         dense_threshold=_cfg.graph_dense_token_threshold,
         saturation=_cfg.graph_shared_token_saturation,
+    )
+    source_counts, source_shared = _pairs_from_index(
+        source_index,
+        dense_threshold=_cfg.graph_dense_source_threshold,
+        saturation=1,
     )
 
     # ── Phase 3: semantic edges (expensive) ──────────────────────────
@@ -372,10 +527,22 @@ def build_graph(
     w_sem = _cfg.graph_edge_weight_semantic
     w_tag = _cfg.graph_edge_weight_tags
     w_tok = _cfg.graph_edge_weight_tokens
+    w_direct = _cfg.graph_edge_boost_direct_link
+    w_source = _cfg.graph_edge_boost_source_overlap
+    w_adamic = _cfg.graph_edge_boost_adamic_adar
+    w_type = _cfg.graph_edge_boost_type_affinity
+    w_usage = _cfg.graph_edge_boost_usage
+    w_quality = _cfg.graph_edge_boost_quality
 
     all_pairs: set[tuple[str, str]] = (
-        set(sem_pairs) | set(tag_counts) | set(token_counts)
+        set(sem_pairs)
+        | set(tag_counts)
+        | set(token_counts)
+        | set(source_counts)
+        | direct_pairs
     )
+    quality_usage = _quality_usage_signals(QUALITY_SIDECAR_DIR)
+    adamic_scores = _adamic_adar_scores(list(G.nodes), all_pairs)
 
     # Materialise the target edge set as ``{pair: attr_dict}`` — both
     # the full-build and patch paths consume this same dict, which
@@ -383,22 +550,81 @@ def build_graph(
     # a pure data op.
     target_edges: dict[tuple[str, str], dict] = {}
     for pair in all_pairs:
+        n1, n2 = pair
         sem = sem_pairs.get(pair, 0.0)
         tag = min(tag_counts.get(pair, 0) / tag_sat, 1.0)
         tok = min(token_counts.get(pair, 0) / tok_sat, 1.0)
-        final = w_sem * sem + w_tag * tag + w_tok * tok
+        direct = 1.0 if pair in direct_pairs else 0.0
+        source = min(source_counts.get(pair, 0), 1.0)
+        type_affinity = _type_affinity_score(
+            str(G.nodes[n1].get("type", "")),
+            str(G.nodes[n2].get("type", "")),
+        )
+        quality = _mean_present(
+            quality_usage.get(n1, {}).get("quality"),
+            quality_usage.get(n2, {}).get("quality"),
+        )
+        usage = _mean_present(
+            quality_usage.get(n1, {}).get("usage"),
+            quality_usage.get(n2, {}).get("usage"),
+        )
+        adamic = adamic_scores.get(pair, 0.0)
+        components = {
+            "semantic": w_sem * sem,
+            "tags": w_tag * tag,
+            "slug_tokens": w_tok * tok,
+            "direct_link": w_direct * direct,
+            "source_overlap": w_source * source,
+            "adamic_adar": w_adamic * adamic,
+            "type_affinity": w_type * type_affinity,
+            "usage": w_usage * usage,
+            "quality": w_quality * quality,
+        }
+        final = min(sum(components.values()), 1.0)
         if final <= 0.0:
             # Useless edge — only happens when every signal dropped to
             # zero or landed below its floor. Skip materialisation.
             continue
+        reasons: list[str] = []
+        if sem > 0.0:
+            reasons.append("semantic")
+        if tag > 0.0:
+            reasons.append("tags")
+        if tok > 0.0:
+            reasons.append("slug-tokens")
+        if direct > 0.0:
+            reasons.append("direct-link")
+        if source > 0.0:
+            reasons.append("source-overlap")
+        if adamic > 0.0:
+            reasons.append("adamic-adar")
+        if type_affinity > 0.0:
+            reasons.append("type-affinity")
+        if usage > 0.0:
+            reasons.append("usage")
+        if quality > 0.0:
+            reasons.append("quality")
         target_edges[pair] = {
             "semantic_sim": round(sem, 4),
             "tag_sim": round(tag, 4),
             "token_sim": round(tok, 4),
+            "direct_link": round(direct, 4),
+            "source_overlap": round(source, 4),
+            "adamic_adar": round(adamic, 4),
+            "type_affinity": round(type_affinity, 4),
+            "usage_score": round(usage, 4),
+            "quality_score": round(quality, 4),
             "final_weight": round(final, 4),
             "weight": round(final, 4),
             "shared_tags": tag_shared.get(pair, []),
             "shared_tokens": token_shared.get(pair, []),
+            "shared_sources": source_shared.get(pair, []),
+            "edge_reasons": reasons,
+            "score_components": {
+                key: round(value, 4)
+                for key, value in components.items()
+                if value > 0.0
+            },
         }
 
     # Decide: full build or patch an existing graph? Patching requires
@@ -487,8 +713,11 @@ def build_graph(
     print(f"Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
     print(
         f"Edge sources: semantic={len(sem_pairs)}, tag_pairs={len(tag_counts)}, "
-        f"token_pairs={len(token_counts)} "
-        f"(blend: sem={w_sem}, tag={w_tag}, tok={w_tok})"
+        f"token_pairs={len(token_counts)}, source_pairs={len(source_counts)}, "
+        f"direct_pairs={len(direct_pairs)} "
+        f"(blend: sem={w_sem}, tag={w_tag}, tok={w_tok}; "
+        f"boosts: direct={w_direct}, source={w_source}, "
+        f"adamic={w_adamic}, type={w_type}, usage={w_usage}, quality={w_quality})"
     )
     print(f"Tag index: {len(tag_index)} unique tags; token index: {len(token_index)} tokens")
     return G, entities
