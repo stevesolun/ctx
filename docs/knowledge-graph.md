@@ -14,7 +14,7 @@ is **13,233 nodes** (1,969 curated skills + 464 agents + 10,787 MCP servers
 + 13 harnesses). Harness pages under `entities/harnesses/` are ingested into
 local rebuilds and the separate harness-catalog recommendation path. The
 tarball also carries **90,846 remote-cataloged Skills.sh `skill` nodes**,
-matching skill pages under `entities/skills/skills-sh-*.md`. **89,461**
+matching skill pages under `entities/skills/skills-sh-*.md`. **89,463**
 hydrated Skills.sh bodies are shipped as installable `SKILL.md` files under
 `converted/skills-sh-*/`; the **28,611** entries over the configured line
 limit were converted to gated micro-skill orchestrators. Full original bodies
@@ -214,6 +214,7 @@ if your hook config does not include those paths.
 | 2026-04-30 Skills.sh semantic hydration pass | **2,881,027** | +full-body semantic edges for hydrated Skills.sh records; semantic top-K became the dominant large-scale signal. |
 | 2026-05-01 Skills.sh micro-skill pass | **2,960,189** | Enforced the <=180-line loader threshold across 89,461 hydrated Skills.sh `SKILL.md` files, converted 28,611 long bodies into gated micro-skill orchestrators, used full originals for semantic graphing, excluded `.original` backups from the shipped tarball, bounded generated stage/reference files to 40 lines, and rebuilt the graph. |
 | 2026-05-02 GitNexus MCP pass | **2,960,215** | Added GitNexus as a cataloged MCP server entity with 26 cross-type edges to its Skills.sh skill pages and related architecture/refactoring agents; semantic edge count unchanged. |
+| 2026-05-04 v0.7.3 artifact refresh | **2,960,215** | Hydrated one recoverable Skills.sh command-injection-testing body, raising hydrated Skills.sh `SKILL.md` files to 89,463; generated micro-skill markdown now defangs high-risk command-injection payloads before packaging. Graph topology unchanged. |
 
 The full audit history lives in `CHANGELOG.md`. The current build is
 fully reproducible from the wiki content.

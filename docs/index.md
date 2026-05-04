@@ -76,7 +76,7 @@ graph-based discovery:
 - A **knowledge graph** (104,079 nodes, 2,960,215 edges) built from a
   13,233-node curated core plus 90,846 remote-cataloged Skills.sh `skill`
   nodes. The graph has 53 Louvain communities and blends semantic cosine,
-  tag overlap, and slug-token overlap; 89,461 hydrated Skills.sh bodies are
+  tag overlap, and slug-token overlap; 89,463 hydrated Skills.sh bodies are
   shipped as installable `SKILL.md` files. Entries over the configured line
   threshold are converted to gated micro-skill orchestrators. Full source
   bodies were used for semantic graphing before packaging; `SKILL.md.original`
@@ -181,7 +181,7 @@ ones are flagged. New ones self-ingest.
     ---
 
     **v0.7.x** — MIT, CI-matrixed (Ubuntu + Windows × Python 3.11/3.12),
-    3,410 tests collected. Ships console scripts including `ctx-init`,
+    3,498 tests collected. Ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus harness wiki/graph browsing),
     `ctx-dedup-check` (pre-ship near-duplicate gate), and
