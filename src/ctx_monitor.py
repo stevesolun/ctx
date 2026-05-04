@@ -52,6 +52,7 @@ import html
 import ipaddress
 import json
 import os
+import re
 import secrets
 import sys
 import threading
@@ -72,6 +73,8 @@ _MONITOR_TOKEN = ""
 _MONITOR_MUTATIONS_ENABLED = True
 _GRAPH_CACHE_KEY: tuple[Path, float, int, int] | None = None
 _GRAPH_CACHE_VALUE: Any | None = None
+_WIKI_INDEX_LIMIT_PER_TYPE = 500
+_GRAPH_REPORT_RE = re.compile(r"Nodes:\s*([\d,]+)\s*\|\s*Edges:\s*([\d,]+)")
 
 
 # ─── Data sources ────────────────────────────────────────────────────────────
@@ -920,6 +923,19 @@ def _graph_neighborhood(
 
 def _graph_stats() -> dict:
     """Top-line graph stats for the home page."""
+    report = _wiki_dir() / "graphify-out" / "graph-report.md"
+    try:
+        match = _GRAPH_REPORT_RE.search(
+            report.read_text(encoding="utf-8", errors="replace"),
+        )
+        if match:
+            return {
+                "nodes": int(match.group(1).replace(",", "")),
+                "edges": int(match.group(2).replace(",", "")),
+                "available": True,
+            }
+    except OSError:
+        pass
     try:
         G = _load_dashboard_graph()
     except Exception:  # noqa: BLE001
@@ -1608,11 +1624,14 @@ def _render_wiki_entity(slug: str, entity_type: str | None = None) -> str:
     return _layout(slug, body)
 
 
-def _wiki_index_entries() -> list[dict]:
+def _wiki_index_entries(
+    limit_per_type: int | None = _WIKI_INDEX_LIMIT_PER_TYPE,
+) -> list[dict]:
     """List every wiki entity page under ~/.claude/skill-wiki/entities/.
 
-    Returns a slug-sorted list of ``{slug, type, tags, description, path}``.
-    Reads only the YAML frontmatter (cheap) — never parses full bodies.
+    Returns ``{slug, type, tags, description}`` rows. The full Skills.sh
+    corpus is too large to render as one HTML page, so the dashboard samples
+    a bounded number of pages per entity type.
     """
     base = _wiki_dir() / "entities"
     if not base.is_dir():
@@ -1625,8 +1644,11 @@ def _wiki_index_entries() -> list[dict]:
         d = base / sub
         if not d.is_dir():
             continue
-        paths = sorted(d.rglob("*.md") if recursive else d.glob("*.md"))
+        paths = d.rglob("*.md") if recursive else d.glob("*.md")
+        seen_for_type = 0
         for path in paths:
+            if limit_per_type is not None and seen_for_type >= limit_per_type:
+                break
             slug = path.stem
             if not _is_safe_slug(slug):
                 continue
@@ -1644,12 +1666,15 @@ def _wiki_index_entries() -> list[dict]:
                 "search_tags": all_tags,
                 "description": _frontmatter_text(meta.get("description", ""))[:200],
             })
+            seen_for_type += 1
     return out
 
 
 def _render_wiki_index() -> str:
     """Card grid of every wiki entity — search + type filter + sidecar grades."""
     entries = _wiki_index_entries()
+    wstats = _wiki_stats()
+    total_available = int(wstats.get("total") or len(entries))
     # Join with grade pills where a sidecar exists.
     grade_by_key: dict[tuple[str, str], str] = {}
     for sc in _all_sidecars():
@@ -1657,9 +1682,12 @@ def _render_wiki_index() -> str:
         if slug:
             grade_by_key[(str(slug), _sidecar_entity_type(sc))] = sc.get("grade", "")
 
-    type_counts = {entity_type: 0 for entity_type in _DASHBOARD_ENTITY_TYPES}
-    for e in entries:
-        type_counts[e["type"]] = type_counts.get(e["type"], 0) + 1
+    type_counts = {
+        "skill": int(wstats.get("skills") or 0),
+        "agent": int(wstats.get("agents") or 0),
+        "mcp-server": int(wstats.get("mcps") or 0),
+        "harness": int(wstats.get("harnesses") or 0),
+    }
 
     cards = "".join(
         "<a class='wiki-card' "
@@ -1697,9 +1725,10 @@ def _render_wiki_index() -> str:
 
     body = (
         "<h1>Wiki</h1>"
-        f"<p class='muted'>{len(entries)} entity pages under "
+        f"<p class='muted'>{len(entries):,} shown of {total_available:,} entity pages under "
         f"<code>~/.claude/skill-wiki/entities/</code> · "
-        "search by slug / description / tag, or click a card to read the page.</p>"
+        "search by slug / description / tag within the visible sample, "
+        "or click a card to read the page.</p>"
         "<div style='display:grid; grid-template-columns:220px 1fr; gap:1.25rem; align-items:start;'>"
         # Left sidebar
         "<aside style='position:sticky; top:1rem;'>"

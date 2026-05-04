@@ -115,6 +115,32 @@ class TestWikiStats:
         assert "mcps" in s  # key present even at zero
 
 
+class TestGraphStats:
+    def test_graph_stats_reads_report_without_loading_full_graph(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        wiki = tmp_path / "skill-wiki"
+        (wiki / "graphify-out").mkdir(parents=True)
+        (wiki / "graphify-out" / "graph-report.md").write_text(
+            "> Nodes: 102,696 | Edges: 2,900,834 | Communities: 52\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(_cm, "_wiki_dir", lambda: wiki)
+        monkeypatch.setattr(
+            _cm,
+            "_load_dashboard_graph",
+            lambda: (_ for _ in ()).throw(AssertionError("loaded graph.json")),
+        )
+
+        assert _cm._graph_stats() == {
+            "nodes": 102696,
+            "edges": 2900834,
+            "available": True,
+        }
+
+
 # ────────────────────────────────────────────────────────────────────
 # _wiki_index_entries
 # ────────────────────────────────────────────────────────────────────
@@ -160,6 +186,19 @@ class TestWikiIndexEntries:
 
         assert entry["tags"] == ["one", "two", "three", "four", "five", "six"]
         assert "seventh" in entry["search_tags"]
+
+    def test_index_entries_can_sample_per_entity_type(self, wiki_3type):
+        entries = _cm._wiki_index_entries(limit_per_type=1)
+        counts: dict[str, int] = {}
+        for entry in entries:
+            counts[entry["type"]] = counts.get(entry["type"], 0) + 1
+
+        assert counts == {
+            "skill": 1,
+            "agent": 1,
+            "mcp-server": 1,
+            "harness": 1,
+        }
 
 
 # ────────────────────────────────────────────────────────────────────
