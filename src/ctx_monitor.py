@@ -17,11 +17,13 @@ Routes:
     /wiki/<slug>?type=<entity>  One wiki entity page (frontmatter + body)
     /graph                      Cytoscape graph explorer + popular seeds
     /graph?slug=<slug>&type=... Focus cytoscape on a specific entity
+    /status                     Durable queue + graph/wiki artifact state
     /kpi                        Grade / lifecycle / category KPIs
     /logs                       Filterable tail of ctx-audit.jsonl
     /events                     Live SSE stream of new audit-log lines
     /api/sessions.json          JSON index for scripting
     /api/manifest.json          Raw ~/.claude/skill-manifest.json
+    /api/status.json            Queue counts + artifact promotion metadata
     /api/skill/<slug>.json      Sidecar passthrough
     /api/graph/<slug>.json      Cytoscape-shaped neighborhood; accepts type
     /api/kpi.json               DashboardSummary passthrough
@@ -58,6 +60,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from ctx.core.wiki import wiki_queue
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
 from ctx.utils._file_lock import file_lock
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
@@ -375,6 +378,151 @@ def _read_harness_install_rows() -> list[dict]:
     return rows
 
 
+def _queue_job_summary(job: wiki_queue.QueueJob) -> dict[str, Any]:
+    return {
+        "id": job.id,
+        "kind": job.kind,
+        "status": job.status,
+        "attempts": job.attempts,
+        "max_attempts": job.max_attempts,
+        "worker_id": job.worker_id,
+        "leased_until": job.leased_until,
+        "available_at": job.available_at,
+        "last_error": job.last_error,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+        "source": job.payload.get("source"),
+        "payload_keys": sorted(str(key) for key in job.payload),
+    }
+
+
+def _queue_status() -> dict[str, Any]:
+    """Return durable wiki/graph queue state without creating the DB."""
+    db_path = wiki_queue.queue_db_path(_wiki_dir())
+    counts = {
+        wiki_queue.STATUS_PENDING: 0,
+        wiki_queue.STATUS_RUNNING: 0,
+        wiki_queue.STATUS_SUCCEEDED: 0,
+        wiki_queue.STATUS_FAILED: 0,
+    }
+    if not db_path.exists():
+        return {
+            "available": False,
+            "db_path": str(db_path),
+            "total": 0,
+            "counts": counts,
+            "recent_jobs": [],
+        }
+    try:
+        jobs = wiki_queue.list_jobs(db_path)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "available": False,
+            "db_path": str(db_path),
+            "total": 0,
+            "counts": counts,
+            "recent_jobs": [],
+            "error": str(exc),
+        }
+    for job in jobs:
+        counts[job.status] = counts.get(job.status, 0) + 1
+    recent = sorted(jobs, key=lambda job: job.id, reverse=True)[:20]
+    return {
+        "available": True,
+        "db_path": str(db_path),
+        "total": len(jobs),
+        "counts": counts,
+        "recent_jobs": [_queue_job_summary(job) for job in recent],
+    }
+
+
+def _file_status(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"path": str(path), "exists": False, "size": 0, "mtime": None}
+    try:
+        stat = path.stat()
+    except OSError as exc:
+        return {
+            "path": str(path),
+            "exists": False,
+            "size": 0,
+            "mtime": None,
+            "error": str(exc),
+        }
+    return {
+        "path": str(path),
+        "exists": path.is_file(),
+        "size": stat.st_size,
+        "mtime": stat.st_mtime,
+    }
+
+
+def _promotion_status(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    previous = _dict_or_empty(data.get("previous"))
+    candidate = _dict_or_empty(data.get("candidate"))
+    current = _dict_or_empty(data.get("current"))
+    return {
+        "path": str(path),
+        "status": data.get("status"),
+        "target": data.get("target"),
+        "started_at": data.get("started_at"),
+        "promoted_at": data.get("promoted_at"),
+        "previous_sha256": previous.get("sha256"),
+        "previous_size": previous.get("size"),
+        "candidate_sha256": candidate.get("sha256"),
+        "candidate_size": candidate.get("size"),
+        "current_sha256": current.get("sha256"),
+        "current_size": current.get("size"),
+    }
+
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _artifact_status() -> dict[str, Any]:
+    """Return shipped graph/wiki artifact file state and promotion metadata."""
+    wiki = _wiki_dir()
+    graph_dir = wiki / "graphify-out"
+    promotion_paths = sorted(
+        {
+            *graph_dir.glob("*.promotion.json"),
+            *wiki.glob("*.promotion.json"),
+            *(_claude_dir() / "graph").glob("*.promotion.json"),
+        },
+        key=lambda path: str(path),
+    )
+    promotions = [
+        promotion
+        for promotion in (_promotion_status(path) for path in promotion_paths)
+        if promotion is not None
+    ]
+    return {
+        "graph_json": _file_status(graph_dir / "graph.json"),
+        "graph_delta_json": _file_status(graph_dir / "graph-delta.json"),
+        "communities_json": _file_status(graph_dir / "communities.json"),
+        "wiki_graph_tar": _file_status(_claude_dir() / "graph" / "wiki-graph.tar.gz"),
+        "skills_sh_catalog": _file_status(
+            _claude_dir() / "graph" / "skills-sh-catalog.json.gz",
+        ),
+        "promotion_count": len(promotions),
+        "promotions": promotions,
+    }
+
+
+def _status_payload() -> dict[str, Any]:
+    return {
+        "queue": _queue_status(),
+        "artifacts": _artifact_status(),
+    }
+
+
 def _read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
     if not path.exists():
         return []
@@ -641,6 +789,7 @@ def _layout(title: str, body: str) -> str:
         "<a href='/skills'>Skills</a>"
         "<a href='/wiki'>Wiki</a>"
         "<a href='/graph'>Graph</a>"
+        "<a href='/status'>Status</a>"
         "<a href='/kpi'>KPIs</a>"
         "<a href='/sessions'>Sessions</a>"
         "<a href='/logs'>Logs</a>"
@@ -1759,6 +1908,93 @@ def _render_kpi() -> str:
     return _layout("KPIs", body)
 
 
+def _render_status() -> str:
+    """Render queue and graph/wiki artifact state for operator checks."""
+    status = _status_payload()
+    queue = status["queue"]
+    artifacts = status["artifacts"]
+    counts = queue.get("counts", {})
+    count_pills = " ".join(
+        f"<span class='pill'>{html.escape(name)}: {int(counts.get(name, 0))}</span>"
+        for name in (
+            wiki_queue.STATUS_PENDING,
+            wiki_queue.STATUS_RUNNING,
+            wiki_queue.STATUS_SUCCEEDED,
+            wiki_queue.STATUS_FAILED,
+        )
+    )
+
+    job_rows = "".join(
+        "<tr>"
+        f"<td>{job.get('id')}</td>"
+        f"<td><code>{html.escape(str(job.get('kind') or ''))}</code></td>"
+        f"<td><span class='pill'>{html.escape(str(job.get('status') or ''))}</span></td>"
+        f"<td>{job.get('attempts')}/{job.get('max_attempts')}</td>"
+        f"<td class='muted'>{html.escape(str(job.get('source') or ''))}</td>"
+        f"<td class='muted'>{html.escape(str(job.get('worker_id') or ''))}</td>"
+        f"<td class='muted'>{html.escape(str(job.get('last_error') or ''))[:120]}</td>"
+        "</tr>"
+        for job in queue.get("recent_jobs", [])
+    ) or "<tr><td colspan='7' class='muted'>No queue jobs recorded.</td></tr>"
+
+    artifact_keys = (
+        ("graph_json", "graph.json"),
+        ("graph_delta_json", "graph-delta.json"),
+        ("communities_json", "communities.json"),
+        ("wiki_graph_tar", "wiki-graph.tar.gz"),
+        ("skills_sh_catalog", "skills-sh-catalog.json.gz"),
+    )
+    artifact_rows = "".join(
+        "<tr>"
+        f"<td><code>{label}</code></td>"
+        f"<td>{'yes' if artifacts[key].get('exists') else 'no'}</td>"
+        f"<td>{int(artifacts[key].get('size') or 0):,}</td>"
+        f"<td class='muted'>{html.escape(str(artifacts[key].get('path') or ''))}</td>"
+        "</tr>"
+        for key, label in artifact_keys
+    )
+
+    promotion_rows = "".join(
+        "<tr>"
+        f"<td><span class='pill'>{html.escape(str(row.get('status') or ''))}</span></td>"
+        f"<td class='muted'>{html.escape(str(row.get('promoted_at') or row.get('started_at') or ''))}</td>"
+        f"<td class='muted'><code>{html.escape(str(row.get('current_sha256') or row.get('candidate_sha256') or ''))[:16]}</code></td>"
+        f"<td class='muted'>{html.escape(str(row.get('target') or ''))}</td>"
+        "</tr>"
+        for row in artifacts.get("promotions", [])
+    ) or "<tr><td colspan='4' class='muted'>No promotion metadata recorded.</td></tr>"
+
+    availability = (
+        "available"
+        if queue.get("available")
+        else f"not initialized ({html.escape(str(queue.get('db_path') or ''))})"
+    )
+    body = (
+        "<h1>Status</h1>"
+        "<div class='card'>"
+        "<strong>Queue state</strong>"
+        f"<p class='muted'>Durable worker DB: {availability}. "
+        f"Total jobs: {int(queue.get('total') or 0)}. "
+        "<a href='/api/status.json'>JSON</a></p>"
+        f"<div>{count_pills}</div>"
+        "</div>"
+        "<div class='card'><strong>Recent queue jobs</strong>"
+        "<table><tr><th>ID</th><th>Kind</th><th>Status</th><th>Attempts</th>"
+        "<th>Source</th><th>Worker</th><th>Last error</th></tr>"
+        + job_rows
+        + "</table></div>"
+        "<div class='card'><strong>Artifact versions</strong>"
+        "<table><tr><th>Artifact</th><th>Exists</th><th>Bytes</th><th>Path</th></tr>"
+        + artifact_rows
+        + "</table></div>"
+        f"<div class='card'><strong>Artifact promotions ({artifacts.get('promotion_count', 0)})</strong>"
+        "<table><tr><th>Status</th><th>Time</th><th>Hash</th><th>Target</th></tr>"
+        + promotion_rows
+        + "</table></div>"
+    )
+    return _layout("Status", body)
+
+
 def _render_events() -> str:
     """SSE endpoint page. The server emits events at /api/events.stream."""
     return _layout(
@@ -2182,6 +2418,8 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 self._send_html(_render_logs())
             elif path == "/graph":
                 self._send_html(_render_graph(qs.get("slug"), qs.get("type")))
+            elif path == "/status":
+                self._send_html(_render_status())
             elif path == "/wiki":
                 self._send_html(_render_wiki_index())
             elif path.startswith("/wiki/"):
@@ -2195,6 +2433,8 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 self._send_json(_summarize_sessions())
             elif path == "/api/manifest.json":
                 self._send_json(_read_manifest())
+            elif path == "/api/status.json":
+                self._send_json(_status_payload())
             elif path == "/api/kpi.json":
                 summary = _kpi_summary()
                 self._send_json(summary.to_dict() if summary is not None else {
