@@ -49,10 +49,21 @@ def test_subpackage_importable(qualified_name: str) -> None:
 
 
 def test_ctx_has_version() -> None:
-    """The top-level package exposes a __version__ string."""
+    """The top-level package exposes the same version pyproject ships."""
+    try:
+        import tomllib  # py 3.11+
+    except ImportError:
+        import tomli as tomllib  # type: ignore[no-redef]
+
     import ctx
+
+    root = Path(__file__).resolve().parent.parent.parent
+    with open(root / "pyproject.toml", "rb") as fh:
+        data = tomllib.load(fh)
+
     assert isinstance(ctx.__version__, str)
     assert ctx.__version__  # non-empty
+    assert ctx.__version__ == data["project"]["version"]
 
 
 def test_every_subpackage_has_docstring() -> None:
