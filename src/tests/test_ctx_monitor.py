@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 import ctx_monitor as cm
+from ctx.core.wiki import wiki_queue
 
 
 @pytest.fixture
@@ -243,6 +244,97 @@ def test_read_manifest_includes_installed_harness_records(fake_claude: Path) -> 
         "installed_at": "2026-05-01T00:00:00Z",
         "status": "installed",
     }]
+
+
+def test_queue_status_summarizes_worker_jobs(fake_claude: Path) -> None:
+    wiki = fake_claude / "skill-wiki"
+    db_path = wiki_queue.queue_db_path(wiki)
+    first = wiki_queue.enqueue_maintenance_job(
+        wiki,
+        kind=wiki_queue.GRAPH_EXPORT_JOB,
+        payload={"graph_only": True},
+        source="test",
+        now=10.0,
+    )
+    second = wiki_queue.enqueue_maintenance_job(
+        wiki,
+        kind=wiki_queue.TAR_REFRESH_JOB,
+        payload={"catalog": "graph/skills-sh-catalog.json.gz"},
+        source="test",
+        now=11.0,
+    )
+    leased = wiki_queue.lease_next(db_path, worker_id="worker-a", now=12.0)
+    assert leased is not None
+    wiki_queue.mark_failed(db_path, leased.id, error="boom", retry=False, now=13.0)
+
+    status = cm._queue_status()
+
+    assert status["available"] is True
+    assert status["counts"] == {
+        wiki_queue.STATUS_PENDING: 1,
+        wiki_queue.STATUS_RUNNING: 0,
+        wiki_queue.STATUS_SUCCEEDED: 0,
+        wiki_queue.STATUS_FAILED: 1,
+    }
+    assert status["total"] == 2
+    assert [job["id"] for job in status["recent_jobs"]] == [second.id, first.id]
+    assert status["recent_jobs"][0]["kind"] == wiki_queue.TAR_REFRESH_JOB
+
+
+def test_artifact_status_reads_promotion_metadata(fake_claude: Path) -> None:
+    graph_dir = fake_claude / "skill-wiki" / "graphify-out"
+    graph_dir.mkdir(parents=True)
+    graph = graph_dir / "graph.json"
+    graph.write_text('{"nodes":[],"edges":[]}', encoding="utf-8")
+    (graph_dir / "graph.json.promotion.json").write_text(
+        json.dumps({
+            "status": "promoted",
+            "target": str(graph),
+            "previous": {"sha256": "old", "size": 10},
+            "current": {"sha256": "new", "size": 22},
+            "promoted_at": "2026-05-04T00:00:00+00:00",
+        }),
+        encoding="utf-8",
+    )
+
+    status = cm._artifact_status()
+
+    assert status["graph_json"]["exists"] is True
+    assert status["graph_json"]["size"] == graph.stat().st_size
+    assert status["promotion_count"] == 1
+    assert status["promotions"][0]["status"] == "promoted"
+    assert status["promotions"][0]["current_sha256"] == "new"
+
+
+def test_status_page_and_api_show_queue_and_artifacts(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wiki = fake_claude / "skill-wiki"
+    wiki_queue.enqueue_maintenance_job(
+        wiki,
+        kind=wiki_queue.GRAPH_EXPORT_JOB,
+        payload={"graph_only": True},
+        source="test",
+        now=10.0,
+    )
+    html_out = cm._render_status()
+    assert "Queue state" in html_out
+    assert "Artifact versions" in html_out
+    assert wiki_queue.GRAPH_EXPORT_JOB in html_out
+
+    server, _thread, port = _serve_monitor(monkeypatch)
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/status.json",
+            timeout=5,
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        assert payload["queue"]["total"] == 1
+        assert payload["artifacts"]["graph_json"]["path"].endswith("graph.json")
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_render_loaded_shows_manifest_entries(fake_claude: Path) -> None:

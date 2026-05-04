@@ -3,8 +3,8 @@
 Local HTTP dashboard for ctx's currently supported live observables:
 loaded skills, agents, and MCP servers; session timelines; the
 knowledge graph; the LLM-wiki browser; quality grades + scores;
-filterable audit logs; a live event stream; and cataloged harness
-wiki/graph browsing.
+durable queue state; graph/wiki artifact versions; filterable audit
+logs; a live event stream; and cataloged harness wiki/graph browsing.
 
 ```bash
 ctx-monitor serve              # http://127.0.0.1:8765
@@ -25,6 +25,20 @@ how you explore the dashboard-supported ctx corpus without ever touching
 the CLI. The dashboard indexes skills, agents, MCP servers, and harness
 pages in wiki/graph views. Harness install, update, load/unload, and
 quality scoring remain CLI/API workflows.
+
+### Check queue and artifact state - `/status`
+
+The status tab shows the durable wiki/graph maintenance queue and the
+generated graph/wiki artifacts that ctx can ship or consume. It reports:
+
+- queue DB availability and job counts by state (`pending`, `running`,
+  `succeeded`, `failed`)
+- the 20 most recent queue jobs with kind, attempts, source, worker, and
+  last error
+- artifact presence and byte size for `graph.json`, `graph-delta.json`,
+  `communities.json`, `wiki-graph.tar.gz`, and `skills-sh-catalog.json.gz`
+- artifact promotion metadata, including the latest promoted hash when
+  the crash-safe promotion path has recorded it
 
 ### Browse the LLM wiki — `/wiki`
 
@@ -116,11 +130,11 @@ yet), the page shows a helpful empty-state pointing at
 
 ### Top navigation
 
-Every page shows the same nav bar. The nine tabs cover the
+Every page shows the same nav bar. The ten tabs cover the
 dashboard-supported observable surface of ctx:
 
 ```
-Home · Loaded · Skills · Wiki · Graph · KPIs · Sessions · Logs · Live
+Home · Loaded · Skills · Wiki · Graph · Status · KPIs · Sessions · Logs · Live
 ```
 
 ### HTML views
@@ -138,6 +152,7 @@ installation, update, uninstall, and quality scoring remain CLI/API workflows.
 | `/wiki/<slug>?type=<entity>` | Dashboard-supported wiki entity page rendered: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views. The optional `type` query disambiguates duplicate slugs such as `langgraph`. |
 | `/graph` | **Graph explorer landing page** - node/edge count header, a "Popular seed slugs" block (18 highest-degree skill/agent/MCP/harness entities as clickable chips), search box for any skill/agent/MCP/harness slug, and the cytoscape canvas. Clicking a seed chip navigates to `/graph?slug=<slug>&type=<entity>`. |
 | `/graph?slug=<slug>&type=<entity>` | **Cytoscape-rendered** 1-hop neighborhood around the target skill/agent/MCP/harness slug. Node colors: emerald=focus, indigo=skill, amber=agent, red diamond=MCP server, green hexagon=harness. Edge width maps to blended graph weight. Tap any node to navigate to that entity's typed wiki page. Type and tag filters run client-side. |
+| `/status` | Durable queue and artifact status: job counts by state, recent queue jobs, graph/wiki artifact sizes, and crash-safe promotion metadata. |
 | `/kpi` | **KPI dashboard** — total entity count with subject breakdown, grade distribution pills, two-column tables for grade counts and lifecycle tiers (active · watch · demote · archive), hard-floor reasons with counts, **By category** table (count · avg score · A/B/C/D/F mix per category), **Top demotion candidates** (active/watch entries graded D or F, sorted by consecutive-D streak desc then score asc), and the **Archived** list. Same shape as `python -m kpi_dashboard render` but HTML |
 | `/sessions` | Index of every session (audit + skill-events), first/last seen, counts of skills loaded/unloaded/agents/lifecycle transitions |
 | `/session/<id>` | Per-session audit timeline showing the load → score_updated → unload triad with timestamps |
@@ -150,6 +165,7 @@ installation, update, uninstall, and quality scoring remain CLI/API workflows.
 |---|---|
 | `GET /api/sessions.json` | All sessions with aggregated counts |
 | `GET /api/manifest.json` | Raw `skill-manifest.json` passthrough |
+| `GET /api/status.json` | `{queue, artifacts}` payload: durable queue counts/recent jobs plus graph/wiki artifact file status and promotion metadata |
 | `GET /api/skill/<slug>.json` | Raw sidecar for one slug |
 | `GET /api/graph/<slug>.json?type=<entity>&hops=1&limit=40` | Dashboard-shaped skill/agent/MCP/harness `{nodes, edges, center}`; `type` is optional but recommended for duplicate slugs, `hops` is [1, 3], `limit` is [5, 150]. |
 | `GET /api/kpi.json` | `DashboardSummary` passthrough — `{total, by_subject, grade_counts, lifecycle_counts, category_breakdown, hard_floor_counts, low_quality_candidates, archived, generated_at}`. Returns `{total: 0, detail: "no sidecars yet"}` when the quality directory is empty |
