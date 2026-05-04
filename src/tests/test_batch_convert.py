@@ -444,6 +444,30 @@ class TestConvertSkill:
         preserved = original_path.read_text(encoding="utf-8")
         assert preserved == original_content
 
+    def test_convert_skill_can_convert_in_memory_without_original_backup(
+        self,
+        tmp_path: Path,
+    ):
+        """Artifact packaging can convert hydrated bodies without raw backups."""
+        content = _fake_skill_content(250)
+        output_dir = tmp_path / "converted"
+
+        result = convert_skill(
+            tmp_path / "virtual" / "SKILL.md",
+            output_dir=output_dir,
+            source_content=content,
+            skill_name="remote-security-skill",
+            preserve_original=False,
+        )
+
+        assert result["status"] == "converted"
+        assert (output_dir / "SKILL.md").exists()
+        assert (output_dir / "references" / "01-scope.md").exists()
+        assert not (output_dir / "SKILL.md.original").exists()
+        assert (output_dir / "original-hash.txt").read_text(encoding="utf-8").strip() == (
+            hashlib.sha256(content.encode("utf-8")).hexdigest()
+        )
+
     def test_convert_skill_orchestrator_under_30_lines(self, skill_250: Path):
         """The generated SKILL.md orchestrator file must be under 30 lines."""
         convert_skill(skill_250)

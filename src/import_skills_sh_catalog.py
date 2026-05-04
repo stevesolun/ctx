@@ -102,6 +102,10 @@ _TAG_ALIASES = {
 }
 
 
+class ConvertedSkillPackagingError(RuntimeError):
+    """Raised when a hydrated Skills.sh body cannot be packaged safely."""
+
+
 @dataclass(frozen=True)
 class ExistingWikiIndex:
     skill_slugs: set[str]
@@ -1243,20 +1247,25 @@ def _converted_skill_files_from_body(
 
     try:
         import batch_convert
-    except Exception:
-        return {converted_path: body.encode("utf-8")}
+    except Exception as exc:
+        raise ConvertedSkillPackagingError(f"micro-skill converter unavailable: {exc}") from exc
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         tmp_path = Path(tmp)
-        source_dir = tmp_path / "source" / Path(root).name
         output_dir = tmp_path / "converted" / Path(root).name
-        source_dir.mkdir(parents=True, exist_ok=True)
         output_dir.mkdir(parents=True, exist_ok=True)
-        source = source_dir / "SKILL.md"
-        source.write_text(body, encoding="utf-8", newline="\n")
-        result = batch_convert.convert_skill(source, output_dir=output_dir)
+        virtual_source = tmp_path / "source" / Path(root).name / "SKILL.md"
+        result = batch_convert.convert_skill(
+            virtual_source,
+            output_dir=output_dir,
+            source_content=body,
+            skill_name=Path(root).name,
+            preserve_original=False,
+        )
         if result.get("status") != "converted":
-            return {converted_path: body.encode("utf-8")}
+            raise ConvertedSkillPackagingError(
+                f"micro-skill converter returned {result.get('status')!r}",
+            )
         files: dict[str, bytes] = {}
         for path in sorted(output_dir.rglob("*")):
             if not path.is_file():
@@ -1264,20 +1273,72 @@ def _converted_skill_files_from_body(
             rel = path.relative_to(output_dir).as_posix()
             if rel.endswith(".original"):
                 continue
-            files[f"{root}/{rel}"] = path.read_bytes()
+            try:
+                files[f"{root}/{rel}"] = _read_bytes_with_retry(path)
+            except OSError as exc:
+                raise ConvertedSkillPackagingError(
+                    f"generated file {rel!r} could not be read: {exc}",
+                ) from exc
         if converted_path not in files:
-            return {converted_path: body.encode("utf-8")}
+            raise ConvertedSkillPackagingError("micro-skill converter did not emit SKILL.md")
         return files
 
 
+def _read_bytes_with_retry(
+    path: Path,
+    *,
+    attempts: int = 50,
+    delay_seconds: float = 0.2,
+) -> bytes:
+    """Read a generated file despite transient Windows scanner locks."""
+    last_error: OSError | None = None
+    for attempt in range(max(attempts, 1)):
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            last_error = exc
+            if attempt + 1 >= max(attempts, 1):
+                break
+            time.sleep(max(delay_seconds, 0.0))
+    assert last_error is not None
+    raise last_error
+
+
+def _stage_inline_skill_bodies_for_packaging(
+    catalog: dict[str, Any],
+) -> dict[str, dict[str, bytes]]:
+    """Precompute converted files and downgrade bodies that cannot ship safely."""
+    raw_skills = catalog.get("skills")
+    skills = raw_skills if isinstance(raw_skills, list) else []
+    staged: dict[str, dict[str, bytes]] = {}
+    for item in skills:
+        if not isinstance(item, dict):
+            continue
+        ctx_slug = str(item.get("ctx_slug") or "")
+        skill_body = str(item.get("skill_body") or "").strip()
+        converted_path = str(item.get("converted_path") or "")
+        if not ctx_slug or not skill_body or not converted_path:
+            continue
+        try:
+            staged[ctx_slug] = _converted_skill_files_from_body(
+                converted_path=converted_path,
+                skill_body=skill_body,
+            )
+        except ConvertedSkillPackagingError as exc:
+            item["body_available"] = False
+            item["converted_path"] = None
+            item["body_error"] = f"local micro-skill packaging failed: {exc}"
+            item.pop("skill_body", None)
+            item.pop("body_char_count", None)
+            item.pop("body_sha256", None)
+            quality = item.get("quality_signals")
+            if isinstance(quality, dict):
+                quality["body_available"] = False
+    _refresh_body_summary(catalog)
+    return staged
+
+
 def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
-    replacement_slugs = {
-        str(item.get("ctx_slug") or "")
-        for item in catalog.get("skills", [])
-        if isinstance(item, dict)
-        and str(item.get("ctx_slug") or "")
-        and str(item.get("skill_body") or "").strip()
-    }
     with tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz") as tmp_file:
         tmp_path = Path(tmp_file.name)
     try:
@@ -1292,7 +1353,8 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                 and safe_name.endswith("/SKILL.md")
             }
             _reconcile_body_availability_with_tar(catalog, existing_converted_paths)
-            _refresh_body_summary(catalog)
+            staged_converted_files = _stage_inline_skill_bodies_for_packaging(catalog)
+            replacement_slugs = set(staged_converted_files)
 
             for member in members:
                 safe_name = _safe_tar_name(member.name)
@@ -1391,10 +1453,8 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                 skill_body = str(item.get("skill_body") or "").strip()
                 converted_path = str(item.get("converted_path") or "")
                 if skill_body and converted_path:
-                    converted_files = _converted_skill_files_from_body(
-                        converted_path=converted_path,
-                        skill_body=skill_body,
-                    )
+                    ctx_slug = str(item.get("ctx_slug") or "")
+                    converted_files = staged_converted_files.get(ctx_slug, {})
                     for path, payload in converted_files.items():
                         _add_bytes(dst, name=f"./{path}", payload=payload)
             for name, payload in (
