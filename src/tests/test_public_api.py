@@ -367,4 +367,5 @@ class TestCtxCoreToolboxRexport:
             "ctx__mark_entity_used",
             "ctx__unload_entity",
             "ctx__session_end",
+            "ctx__session_state",
         }

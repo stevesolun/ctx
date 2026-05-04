@@ -62,6 +62,7 @@ _EXPECTED_TOOL_NAMES = {
     "ctx__mark_entity_used",
     "ctx__unload_entity",
     "ctx__session_end",
+    "ctx__session_state",
 }
 
 
@@ -318,6 +319,19 @@ class TestToolsCall:
         assert payload["ok"] is True
         event = json.loads((tmp_path / "runtime" / "events.jsonl").read_text())
         assert event["action"] == "load_requested"
+
+        frames = _drive(
+            _encode_request(
+                2,
+                "tools/call",
+                {
+                    "name": "ctx__session_state",
+                    "arguments": {"session_id": "s-1"},
+                },
+            )
+        )
+        state_payload = json.loads(frames[0]["result"]["content"][0]["text"])
+        assert state_payload["unload_candidates"][0]["slug"] == "python-patterns"
 
 
 # ── Handler unit tests (direct, no I/O loop) ────────────────────────────────

@@ -161,6 +161,7 @@ class TestToolDefinitions:
             "ctx__mark_entity_used",
             "ctx__unload_entity",
             "ctx__session_end",
+            "ctx__session_state",
         }
 
     def test_all_are_tool_definitions(self, toolbox: CtxCoreToolbox) -> None:
@@ -274,6 +275,44 @@ class TestRuntimeLifecycle:
 
         assert result["ok"] is False
         assert "entity_type" in result["error"]
+
+    def test_session_state_surfaces_unused_loads_as_unload_candidates(
+        self,
+        toolbox: CtxCoreToolbox,
+    ) -> None:
+        for name, arguments in [
+            ("ctx__load_entity", {
+                "session_id": "s-2",
+                "entity_type": "skill",
+                "slug": "fastapi-pro",
+            }),
+            ("ctx__load_entity", {
+                "session_id": "s-2",
+                "entity_type": "agent",
+                "slug": "code-reviewer",
+            }),
+            ("ctx__mark_entity_used", {
+                "session_id": "s-2",
+                "entity_type": "agent",
+                "slug": "code-reviewer",
+                "evidence": "reviewed diff",
+            }),
+        ]:
+            toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments))
+
+        result = json.loads(
+            toolbox.dispatch(ToolCall(
+                id="c1",
+                name="ctx__session_state",
+                arguments={"session_id": "s-2"},
+            ))
+        )
+
+        assert result["ok"] is True
+        assert [entry["slug"] for entry in result["used"]] == ["code-reviewer"]
+        assert [entry["slug"] for entry in result["unload_candidates"]] == [
+            "fastapi-pro",
+        ]
 
 
 # ── recommend_bundle ───────────────────────────────────────────────────────

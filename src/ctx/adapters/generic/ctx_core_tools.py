@@ -260,6 +260,8 @@ class CtxCoreToolbox:
             return self._dispatch_lifecycle(args, "unload_entity")
         if local_name == "session_end":
             return self._dispatch_lifecycle(args, "session_end")
+        if local_name == "session_state":
+            return self._dispatch_lifecycle(args, "session_state")
 
         raise ValueError(f"unknown ctx-core tool {local_name!r}")
 
@@ -468,6 +470,13 @@ class CtxCoreToolbox:
                     status=str(args.get("status") or "") or None,
                     summary=str(args.get("summary") or "") or None,
                 )
+            elif name == "session_state":
+                result = self._lifecycle.session_state(
+                    session_id=str(args.get("session_id") or ""),
+                    min_unused_seconds=_float_arg(
+                        args.get("min_unused_seconds"),
+                    ),
+                )
             else:
                 raise ValueError(f"unknown lifecycle tool {name}")
         except ValueError as exc:
@@ -655,11 +664,40 @@ def _lifecycle_tool_definitions() -> list[ToolDefinition]:
                 "required": ["session_id"],
             },
         ),
+        ToolDefinition(
+            name=f"{_NAMESPACE}session_state",
+            description=(
+                "Read the current lifecycle state for a session, including "
+                "loaded entities, used entities, and unload candidates that "
+                "were loaded but have no usage evidence."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "session_id": session,
+                    "min_unused_seconds": {
+                        "type": "number",
+                        "description": (
+                            "Minimum age before an unused loaded entity is "
+                            "returned as an unload candidate. Default 0."
+                        ),
+                    },
+                },
+                "required": ["session_id"],
+            },
+        ),
     ]
 
 
 def _dict_arg(raw: Any) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
+
+
+def _float_arg(raw: Any) -> float:
+    try:
+        return float(raw) if raw is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _excerpt(body: str, max_chars: int) -> str:
