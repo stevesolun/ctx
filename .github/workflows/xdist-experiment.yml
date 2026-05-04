@@ -1,0 +1,90 @@
+name: Xdist experiment
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/xdist-experiment.yml"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: xdist-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  xdist:
+    name: xdist (${{ matrix.os }} / py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.12"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install experiment dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]" pytest-xdist
+
+      - name: Run xdist experiment
+        run: |
+          set +e
+          start="$(python - <<'PY'
+          import time
+          print(time.monotonic())
+          PY
+          )"
+          python -m pytest -q -m "not browser" --no-cov \
+            -n 2 \
+            --dist=loadfile \
+            --max-worker-restart=0 \
+            --durations=25
+          status="$?"
+          end="$(python - <<'PY'
+          import time
+          print(time.monotonic())
+          PY
+          )"
+          elapsed="$(python - "$start" "$end" <<'PY'
+          import sys
+          start = float(sys.argv[1])
+          end = float(sys.argv[2])
+          print(f"{end - start:.1f}")
+          PY
+          )"
+
+          {
+            echo "## pytest-xdist experiment"
+            echo ""
+            echo "- OS: $RUNNER_OS"
+            echo "- Python: ${{ matrix.python-version }}"
+            echo "- Command: \`python -m pytest -q -m \"not browser\" --no-cov -n 2 --dist=loadfile --max-worker-restart=0 --durations=25\`"
+            echo "- Exit code: $status"
+            echo "- Elapsed seconds: $elapsed"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::xdist experiment failed on $RUNNER_OS with exit code $status"
+          fi
+          exit 0
