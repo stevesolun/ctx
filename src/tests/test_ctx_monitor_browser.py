@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +47,8 @@ def page() -> Iterator[Any]:
         try:
             browser = playwright.chromium.launch(headless=True)
         except Exception as exc:  # noqa: BLE001
+            if os.environ.get("CI"):
+                pytest.fail(f"Playwright Chromium is not available in CI: {exc}")
             pytest.skip(f"Playwright Chromium is not available: {exc}")
         try:
             page = browser.new_page()
@@ -185,7 +188,7 @@ def test_cross_origin_browser_post_cannot_mutate(
     harness = _start_monitor(monkeypatch, fake_load=True)
     try:
         page.goto("data:text/html,<html><body>cross-origin</body></html>")
-        page.evaluate(
+        result = page.evaluate(
             """
             async (url) => {
               try {
@@ -202,6 +205,7 @@ def test_cross_origin_browser_post_cannot_mutate(
             """,
             f"{harness.base_url}/api/load",
         )
+        assert result is False
         assert harness.calls == []
     finally:
         harness.close()
