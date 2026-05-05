@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import shlex
 import sys
@@ -92,6 +93,26 @@ def _resolve_api_key_env(
 
 
 # ── MCP spec parsing ───────────────────────────────────────────────────────
+
+
+def _positive_int(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return value
+
+
+def _positive_float(raw: str) -> float:
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError("must be a finite number > 0")
+    return value
 
 
 def _normalise_tool_patterns(patterns: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
@@ -442,19 +463,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Sampling temperature (default 0.7).",
     )
     r.add_argument(
-        "--max-iterations", type=int, default=25,
+        "--max-iterations", type=_positive_int, default=25,
         help="Hard cap on agent loop iterations (default 25).",
     )
     r.add_argument(
-        "--max-tokens", type=int, default=None,
+        "--max-tokens", type=_positive_int, default=None,
         help="Max tokens per provider call (default: provider default).",
     )
     r.add_argument(
-        "--budget-usd", type=float, default=None,
+        "--budget-usd", type=_positive_float, default=None,
         help="Stop when cumulative cost exceeds this many USD.",
     )
     r.add_argument(
-        "--budget-tokens", type=int, default=None,
+        "--budget-tokens", type=_positive_int, default=None,
         help="Stop when input+output tokens exceed this total.",
     )
     r.add_argument(
@@ -515,7 +536,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     r.add_argument(
         "--evaluator-rounds",
-        type=int,
+        type=_positive_int,
         default=2,
         help=(
             "Max Generator->Evaluator rounds (1 = one generation "
@@ -697,6 +718,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "use --overwrite-session to replace it or ctx resume to continue it.",
             file=sys.stderr,
         )
+        return 1
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
     metadata = {
         "task": args.task,
@@ -891,9 +915,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
 # ── Command: resume ────────────────────────────────────────────────────────
 
 
+def _load_session_for_cli(session_id: str, sessions_dir: Path) -> Any | None:
+    try:
+        return load_session(session_id, sessions_dir=sessions_dir)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return None
+
+
 def _cmd_resume(args: argparse.Namespace) -> int:
     sdir = Path(args.sessions_dir) if args.sessions_dir else default_sessions_dir()
-    state = load_session(args.session_id, sessions_dir=sdir)
+    state = _load_session_for_cli(args.session_id, sdir)
+    if state is None:
+        return 1
 
     meta = state.metadata
     model = args.model or meta.get("model")
@@ -1055,7 +1089,9 @@ def _cmd_sessions(args: argparse.Namespace) -> int:
         return 0
 
     # Detail view: load + summarise.
-    state = load_session(args.session_id, sessions_dir=sdir)
+    state = _load_session_for_cli(args.session_id, sdir)
+    if state is None:
+        return 1
     summary = {
         "session_id": state.session_id,
         "path": str(state.path),

@@ -408,6 +408,43 @@ class TestRunCommand:
         with pytest.raises(SystemExit):
             main(["run", "--model", "ollama/x"])
 
+    @pytest.mark.parametrize(
+        ("flag", "value"),
+        [
+            ("--max-iterations", "0"),
+            ("--max-tokens", "0"),
+            ("--budget-tokens", "0"),
+            ("--budget-usd", "0"),
+            ("--evaluator-rounds", "0"),
+        ],
+    )
+    def test_positive_numeric_flags_reject_zero(
+        self, flag: str, value: str,
+    ) -> None:
+        with pytest.raises(SystemExit):
+            main(["run", "--model", "ollama/x", "--task", "hi", flag, value])
+
+    def test_invalid_session_id_returns_error(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        exit_code = main(
+            [
+                "run",
+                "--model", "ollama/x",
+                "--task", "hi",
+                "--sessions-dir", str(tmp_path),
+                "--session-id", "../bad",
+                "--no-ctx-tools",
+                "--quiet",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "invalid session_id" in captured.err
+
     def test_no_ctx_tools_skips_extra_tools(
         self, fake_litellm: Any, tmp_path: Path,
     ) -> None:
@@ -505,6 +542,18 @@ class TestRunCommand:
 
 
 class TestSessionsCommand:
+    def test_detail_missing_session_returns_error(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        exit_code = main(
+            ["sessions", "not-there", "--sessions-dir", str(tmp_path)]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "session log not found" in captured.err
+
     def test_list_empty(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str],
     ) -> None:
@@ -609,7 +658,6 @@ class TestSessionsCommand:
 
 
 # ── Subcommand: resume ────────────────────────────────────────────────────
-
 
 class TestResumeCommand:
     @staticmethod
@@ -866,10 +914,14 @@ class TestResumeCommand:
         assert exit_code == 1
 
     def test_resume_missing_session(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
-        with pytest.raises(FileNotFoundError):
-            main(
-                ["resume", "not-there", "--task", "go",
-                 "--sessions-dir", str(tmp_path)]
-            )
+        exit_code = main(
+            ["resume", "not-there", "--task", "go",
+             "--sessions-dir", str(tmp_path)]
+        )
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "session log not found" in captured.err
