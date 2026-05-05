@@ -87,6 +87,20 @@ class TestExpand:
 
 
 class TestDefaults:
+    def test_packaged_default_config_matches_source_default(self) -> None:
+        """The wheel-shipped ctx/config.json must not drift from src/config.json."""
+        root = Path(__file__).resolve().parent.parent.parent
+        source_default = json.loads(
+            (root / "src" / "config.json").read_text(encoding="utf-8")
+        )
+        packaged_default = json.loads(
+            (root / "src" / "ctx" / "config.json").read_text(encoding="utf-8")
+        )
+
+        assert packaged_default == source_default
+        assert packaged_default["paths"]["stack_profile_tmp"].startswith("~")
+        assert "recommendation_min_fit_score" in packaged_default["harness"]
+
     def test_all_defaults_materialise(self) -> None:
         c = Config({})
         assert c.max_skills == 15
