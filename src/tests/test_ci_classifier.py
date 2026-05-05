@@ -28,6 +28,7 @@ def test_docs_only_classification() -> None:
         "graph_changed": True,
         "graph_only": False,
         "package_changed": False,
+        "similarity_changed": False,
         "source_changed": False,
     }
 
@@ -46,6 +47,7 @@ def test_graph_artifacts_are_graph_only_not_docs_only() -> None:
     assert flags["docs_only"] is False
     assert flags["graph_changed"] is True
     assert flags["graph_only"] is True
+    assert flags["similarity_changed"] is False
     assert flags["source_changed"] is False
 
 
@@ -71,6 +73,7 @@ def test_workflow_change_fails_open_for_future_gates() -> None:
     assert flags["ci_changed"] is True
     assert flags["browser_changed"] is True
     assert flags["package_changed"] is True
+    assert flags["similarity_changed"] is True
     assert flags["source_changed"] is True
     assert flags["docs_only"] is False
 
@@ -160,6 +163,13 @@ def test_browser_security_paths_are_classified() -> None:
     flags = classify_paths(["src/tests/test_ctx_monitor_browser.py"])
 
     assert flags["browser_changed"] is True
+    assert flags["source_changed"] is True
+
+
+def test_similarity_paths_are_classified() -> None:
+    flags = classify_paths(["src/ctx/core/graph/semantic_edges.py"])
+
+    assert flags["similarity_changed"] is True
     assert flags["source_changed"] is True
 
 
@@ -313,6 +323,22 @@ def test_ci_required_rejects_missing_similarity_gate_on_source_pr() -> None:
     assert failed_required_jobs(needs, event_name="pull_request") == {
         "similarity-integration": "skipped",
     }
+
+
+def test_ci_required_allows_similarity_skip_for_unrelated_source_pr() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {
+                "docs_only": "false",
+                "graph_only": "false",
+                "similarity_changed": "false",
+            },
+        },
+        **{"similarity-integration": {"result": "skipped"}},
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {}
 
 
 def test_ci_required_rejects_contract_compat_skip_on_source_pr() -> None:

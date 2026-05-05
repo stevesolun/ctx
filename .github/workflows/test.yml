@@ -27,6 +27,7 @@ jobs:
       graph_changed: ${{ steps.classify.outputs.graph_changed }}
       graph_only: ${{ steps.classify.outputs.graph_only }}
       package_changed: ${{ steps.classify.outputs.package_changed }}
+      similarity_changed: ${{ steps.classify.outputs.similarity_changed }}
       source_changed: ${{ steps.classify.outputs.source_changed }}
     steps:
       - name: Checkout with full history
@@ -126,7 +127,7 @@ jobs:
   similarity-integration:
     name: "Similarity precision/recall"
     needs: classify
-    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true') }}
+    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true' && needs.classify.outputs.similarity_changed == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
