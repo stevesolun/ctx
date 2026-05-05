@@ -36,6 +36,16 @@ def test_hf_metadata_replaces_existing_leading_frontmatter() -> None:
     assert rendered.endswith("# ctx\n")
 
 
+def test_hf_publish_docs_use_hardened_sync_script_without_inline_token() -> None:
+    docs = (Path(__file__).resolve().parents[2] / "docs" / "huggingface-publish.md")
+    text = docs.read_text(encoding="utf-8")
+
+    assert "scripts/sync_huggingface.py" in text
+    assert '$env:HF_TOKEN = "<' not in text
+    assert "api.upload_folder" not in text
+    assert "Read-Host \"HF write token\"" in text
+
+
 def test_hf_export_copies_hydrated_tracked_artifacts(
     tmp_path: Path, monkeypatch
 ) -> None:
