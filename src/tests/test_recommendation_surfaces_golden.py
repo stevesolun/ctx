@@ -184,6 +184,64 @@ def test_hook_uses_shared_query_min_score_and_top_k(
     assert calls["query"] == "fastapi python"
     assert calls["min_normalized_score"] == 0.75
     assert calls["entity_types"] == ("skill", "agent", "mcp-server")
+    assert calls["use_semantic_query"] is True
+
+
+def test_generic_toolbox_enables_semantic_query_scoring(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph_path = tmp_path / "skill-wiki" / "graphify-out" / "graph.json"
+    _write_golden_graph(graph_path)
+    calls: dict[str, Any] = {}
+
+    def fake_recommend_by_tags(
+        graph: Any,
+        tags: list[str],
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        calls["tags"] = tags
+        calls.update(kwargs)
+        return [
+            {
+                "name": "fastapi-python-async",
+                "type": "skill",
+                "score": 1.0,
+                "normalized_score": 1.0,
+            }
+        ]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "ctx.core.resolve.recommendations",
+        type(
+            "FakeRecommendModule",
+            (),
+            {
+                "query_to_tags": staticmethod(lambda query: query.split()),
+                "recommend_by_tags": staticmethod(fake_recommend_by_tags),
+            },
+        ),
+    )
+    toolbox = CtxCoreToolbox(
+        wiki_dir=tmp_path / "skill-wiki",
+        graph_path=graph_path,
+    )
+
+    payload = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="semantic",
+                name="ctx__recommend_bundle",
+                arguments={"query": "fastapi python", "top_k": 3},
+            )
+        )
+    )
+
+    assert payload["results"][0]["name"] == "fastapi-python-async"
+    assert calls["query"] == "fastapi python"
+    assert calls["entity_types"] == ("skill", "agent", "mcp-server")
+    assert calls["use_semantic_query"] is True
 
 
 def test_scan_repo_recommendations_use_shared_graph_bundle(
