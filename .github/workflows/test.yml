@@ -267,6 +267,17 @@ jobs:
             --min-edges 2000000 \
             --min-skills-sh-nodes 89000 \
             --min-semantic-edges 1000000 \
+            --expected-nodes 102696 \
+            --expected-edges 2900834 \
+            --expected-semantic-edges 1682825 \
+            --expected-harness-nodes 13 \
+            --expected-skills-sh-nodes 89463 \
+            --expected-skills-sh-catalog-entries 89463 \
+            --expected-skills-sh-converted 89463 \
+            --expected-skill-pages 91432 \
+            --expected-agent-pages 464 \
+            --expected-mcp-pages 10787 \
+            --expected-harness-pages 13 \
             --line-threshold 180 \
             --max-stage-lines 40
 

@@ -227,3 +227,22 @@ def test_scan_graph_json_handles_pretty_printed_graph() -> None:
     payload = json.dumps(graph, indent=2).encode("utf-8")
 
     assert _scan_graph_json(BytesIO(payload)) == (2, 2, 1, 1, 1)
+
+
+def test_graph_only_workflow_uses_exact_release_counts() -> None:
+    workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
+
+    for flag in (
+        "--expected-nodes 102696",
+        "--expected-edges 2900834",
+        "--expected-semantic-edges 1682825",
+        "--expected-harness-nodes 13",
+        "--expected-skills-sh-nodes 89463",
+        "--expected-skills-sh-catalog-entries 89463",
+        "--expected-skills-sh-converted 89463",
+        "--expected-skill-pages 91432",
+        "--expected-agent-pages 464",
+        "--expected-mcp-pages 10787",
+        "--expected-harness-pages 13",
+    ):
+        assert flag in workflow
