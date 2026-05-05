@@ -7,6 +7,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - No unreleased changes yet.
 
+## [0.7.4] - 2026-05-05
+
+### Fixed
+
+- Kept semantic query ranking opt-in so default recommendations do not
+  download embedding models or call Hugging Face during ordinary CLI use.
+- Made scan profile defaults OS-portable and dashboard artifact status
+  report the shipped graph/wiki archives truthfully.
+- Hardened package-smoke and xdist CI against Windows CRLF command lists,
+  nondeterministic test collection, macOS system temp symlinks, and
+  Windows xdist benchmark variance.
+- Moved the no-test merge policy into a tested Python helper and added a
+  narrow exemption for release metadata-only version bumps.
+- Pinned the wheel console-script surface and clean-host environment
+  isolation so packaged installs stay aligned with `pyproject.toml`.
+
 ## [0.7.3] - 2026-05-04
 
 ### Fixed

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.ci_classifier import classify_paths, main
+from scripts.ci_no_test_policy import evaluate_policy, is_release_metadata_only
 from scripts.ci_required import REQUIRED_JOBS, failed_required_jobs
 
 
@@ -77,10 +78,30 @@ def test_workflow_change_fails_open_for_future_gates() -> None:
 def test_no_test_policy_covers_ci_package_contract_files() -> None:
     workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
 
-    assert "'scripts/ci_*.py'" in workflow
-    assert "'scripts/clean_host_contract.py'" in workflow
-    assert "'pyproject.toml'" in workflow
-    assert "'src/**/*.py'" in workflow
+    assert "scripts/ci_no_test_policy.py" in workflow
+
+
+def test_no_test_policy_exempts_release_metadata_only_changes() -> None:
+    files = ["CHANGELOG.md", "pyproject.toml", "src/ctx/__init__.py"]
+    diffs = {
+        "CHANGELOG.md": "+## [0.7.4] - 2026-05-05\n",
+        "pyproject.toml": '-version = "0.7.3"\n+version = "0.7.4"\n',
+        "src/ctx/__init__.py": '-__version__ = "0.7.3"\n+__version__ = "0.7.4"\n',
+    }
+
+    assert is_release_metadata_only(files, diffs)
+    result = evaluate_policy(files, (), diffs)
+    assert result.passed is True
+    assert result.message == "Policy exempted for release metadata-only changes."
+
+
+def test_no_test_policy_rejects_pyproject_dependency_change_without_tests() -> None:
+    files = ["pyproject.toml"]
+    diffs = {"pyproject.toml": '+    "new-dependency>=1",\n'}
+
+    assert not is_release_metadata_only(files, diffs)
+    result = evaluate_policy(files, (), diffs)
+    assert result.passed is False
 
 
 def test_ci_required_expected_jobs_match_workflow_needs() -> None:
