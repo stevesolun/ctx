@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -42,6 +43,11 @@ __all__ = [
 # sidecars, pulsemcp cache JSONs, and backup manifests all land
 # owner-only on multi-user machines.
 _FILE_MODE_PRIVATE: int = 0o600
+_DARWIN_SYSTEM_SYMLINKS: dict[Path, Path] = {
+    Path("/etc"): Path("/private/etc"),
+    Path("/tmp"): Path("/private/tmp"),
+    Path("/var"): Path("/private/var"),
+}
 
 
 def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
@@ -110,7 +116,7 @@ def reject_symlink_path(path: Path) -> None:
 
     for part in parts:
         current = current / part
-        if current.is_symlink():
+        if current.is_symlink() and not _is_allowed_system_symlink_ancestor(current):
             raise ValueError(f"refusing to use symlinked path: {current}")
         if not current.exists():
             return
@@ -122,6 +128,19 @@ def safe_atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> No
     path.parent.mkdir(parents=True, exist_ok=True)
     reject_symlink_path(path)
     atomic_write_text(path, text, encoding=encoding)
+
+
+def _is_allowed_system_symlink_ancestor(path: Path) -> bool:
+    """Return true for macOS system symlink prefixes such as /var."""
+    if sys.platform != "darwin":
+        return False
+    expected = _DARWIN_SYSTEM_SYMLINKS.get(path)
+    if expected is None:
+        return False
+    try:
+        return path.resolve(strict=True) == expected
+    except OSError:
+        return False
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
