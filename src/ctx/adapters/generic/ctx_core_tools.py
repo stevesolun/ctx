@@ -310,6 +310,7 @@ class CtxCoreToolbox:
             query=query,
             entity_types=("skill", "agent", "mcp-server"),
             min_normalized_score=cfg.recommendation_min_normalized_score,
+            use_semantic_query=True,
         )
         results = [
             {

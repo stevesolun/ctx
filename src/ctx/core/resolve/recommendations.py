@@ -158,15 +158,29 @@ def _embed_query(query: str, model_id: str) -> Any | None:
     if not model_id:
         return None
     try:
-        from embedding_backend import get_embedder  # noqa: PLC0415
         # ``model_id`` is encoded as ``<backend>:<model_name>``.
         if ":" in model_id:
             backend, _, model_name = model_id.partition(":")
         else:
             backend, model_name = "sentence-transformers", model_id
-        embedder = get_embedder(backend, model=model_name)
         import numpy as np  # noqa: PLC0415
-        v = embedder.embed([query])[0]
+        if backend in {"sentence-transformers", "st", "sbert"}:
+            from sentence_transformers import (  # type: ignore[import-not-found]  # noqa: PLC0415
+                SentenceTransformer,
+            )
+
+            model = SentenceTransformer(model_name, local_files_only=True)
+            v = model.encode(
+                [query],
+                convert_to_numpy=True,
+                normalize_embeddings=False,
+                show_progress_bar=False,
+            )[0]
+        else:
+            from embedding_backend import get_embedder  # noqa: PLC0415
+
+            embedder = get_embedder(backend, model=model_name)
+            v = embedder.embed([query])[0]
         v = np.asarray(v, dtype="float32")
         n = float(np.linalg.norm(v))
         if n == 0:

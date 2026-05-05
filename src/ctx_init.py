@@ -314,6 +314,7 @@ def recommend_harnesses(
             query=goal,
             entity_types=("harness",),
             min_normalized_score=0.0,
+            use_semantic_query=True,
         )
         results = [
             row for row in results

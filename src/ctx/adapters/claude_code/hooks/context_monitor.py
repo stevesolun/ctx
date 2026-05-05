@@ -250,6 +250,7 @@ def graph_suggest(
             query=" ".join(unmatched_tags),
             entity_types=("skill", "agent", "mcp-server"),
             min_normalized_score=min_score,
+            use_semantic_query=True,
         )
     except Exception as exc:
         print(f"Warning: graph suggest error: {exc}", file=sys.stderr)
