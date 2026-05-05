@@ -11,6 +11,7 @@ exercised with adversarial inputs.
 from __future__ import annotations
 
 import json
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -100,6 +101,25 @@ class TestDefaults:
         assert packaged_default == source_default
         assert packaged_default["paths"]["stack_profile_tmp"].startswith("~")
         assert "recommendation_min_fit_score" in packaged_default["harness"]
+
+        runtime_default = json.loads(
+            resources.files("ctx").joinpath("config.json").read_text(encoding="utf-8")
+        )
+        runtime_config = Config(runtime_default)
+        assert runtime_default == source_default
+        assert str(runtime_config.stack_profile_tmp).endswith(
+            ".claude\\skill-stack-profile.json"
+        ) or str(runtime_config.stack_profile_tmp).endswith(
+            ".claude/skill-stack-profile.json"
+        )
+        assert runtime_config.harness_recommendation_min_fit_score == 0.85
+        assert runtime_config.graph_dense_source_threshold == 50
+        assert runtime_config.graph_edge_boost_direct_link == 0.10
+        assert runtime_config.graph_edge_boost_source_overlap == 0.05
+        assert runtime_config.graph_edge_boost_adamic_adar == 0.04
+        assert runtime_config.graph_edge_boost_type_affinity == 0.03
+        assert runtime_config.graph_edge_boost_usage == 0.02
+        assert runtime_config.graph_edge_boost_quality == 0.02
 
     def test_all_defaults_materialise(self) -> None:
         c = Config({})

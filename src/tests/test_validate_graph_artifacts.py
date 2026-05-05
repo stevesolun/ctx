@@ -7,6 +7,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+import yaml
 
 from validate_graph_artifacts import (
     GraphArtifactError,
@@ -230,19 +231,52 @@ def test_scan_graph_json_handles_pretty_printed_graph() -> None:
 
 
 def test_graph_only_workflow_uses_exact_release_counts() -> None:
-    workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
+    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(
+        encoding="utf-8"
+    ))
+    steps = workflow["jobs"]["graph-check"]["steps"]
+    validate_step = next(
+        step for step in steps if step.get("name") == "Validate shipped graph artifacts"
+    )
+    command = " ".join(
+        line.rstrip("\\").strip()
+        for line in validate_step["run"].splitlines()
+        if line.strip()
+    )
+    argv = command.split()
 
-    for flag in (
-        "--expected-nodes 102696",
-        "--expected-edges 2900834",
-        "--expected-semantic-edges 1682825",
-        "--expected-harness-nodes 13",
-        "--expected-skills-sh-nodes 89463",
-        "--expected-skills-sh-catalog-entries 89463",
-        "--expected-skills-sh-converted 89463",
-        "--expected-skill-pages 91432",
-        "--expected-agent-pages 464",
-        "--expected-mcp-pages 10787",
-        "--expected-harness-pages 13",
-    ):
-        assert flag in workflow
+    script_index = argv.index("src/validate_graph_artifacts.py")
+    args = argv[script_index + 1:]
+    parsed: dict[str, str | bool] = {}
+    i = 0
+    while i < len(args):
+        flag = args[i]
+        if i + 1 >= len(args) or args[i + 1].startswith("--"):
+            parsed[flag] = True
+            i += 1
+        else:
+            parsed[flag] = args[i + 1]
+            i += 2
+
+    assert argv[:script_index + 1] == ["python", "src/validate_graph_artifacts.py"]
+    assert parsed == {
+        "--graph-dir": "graph",
+        "--deep": True,
+        "--min-nodes": "100000",
+        "--min-edges": "2000000",
+        "--min-skills-sh-nodes": "89000",
+        "--min-semantic-edges": "1000000",
+        "--expected-nodes": "102696",
+        "--expected-edges": "2900834",
+        "--expected-semantic-edges": "1682825",
+        "--expected-harness-nodes": "13",
+        "--expected-skills-sh-nodes": "89463",
+        "--expected-skills-sh-catalog-entries": "89463",
+        "--expected-skills-sh-converted": "89463",
+        "--expected-skill-pages": "91432",
+        "--expected-agent-pages": "464",
+        "--expected-mcp-pages": "10787",
+        "--expected-harness-pages": "13",
+        "--line-threshold": "180",
+        "--max-stage-lines": "40",
+    }

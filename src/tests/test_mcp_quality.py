@@ -596,32 +596,39 @@ class TestDefaultSidecarDirHonorsPathHome:
 
     def test_configured_path_expands_via_path_home(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
+        import ctx_config
+
         fake_home = tmp_path / "fake-home"
+        monkeypatch.setattr(
+            ctx_config,
+            "cfg",
+            ctx_config.Config(
+                {
+                    "mcp_quality": {
+                        "paths": {
+                            "sidecar_dir": "~/.claude/skill-quality/mcp",
+                        },
+                    },
+                }
+            ),
+        )
         monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
         # default_sidecar_dir should now point under fake_home, not
         # the real user's home dir.
         result = mq.default_sidecar_dir()
-        assert str(result).startswith(str(fake_home)), (
-            f"default_sidecar_dir ignored Path.home() monkeypatch: "
-            f"{result} not under {fake_home}"
-        )
+        assert result == fake_home / ".claude" / "skill-quality" / "mcp"
 
     def test_unconfigured_path_falls_back_to_path_home(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """When config has no mcp_quality.paths.sidecar_dir, the
         fallback path is Path.home()/.claude/skill-quality/mcp —
         honors the monkeypatch via the fallback branch."""
         import ctx_config
-        # Strip the configured sidecar_dir so the fallback fires.
-        raw = ctx_config._load_raw()
-        if "mcp_quality" in raw and isinstance(raw["mcp_quality"], dict):
-            raw["mcp_quality"].pop("paths", None)
-        monkeypatch.setattr(ctx_config, "cfg", ctx_config.Config(raw))
 
         fake_home = tmp_path / "fallback-home"
+        monkeypatch.setattr(ctx_config, "cfg", ctx_config.Config({"mcp_quality": {}}))
         monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
         result = mq.default_sidecar_dir()
-        assert str(result).startswith(str(fake_home))
-        assert ".claude" in str(result)
+        assert result == fake_home / ".claude" / "skill-quality" / "mcp"
