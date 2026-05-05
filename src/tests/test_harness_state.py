@@ -41,6 +41,13 @@ from ctx.adapters.generic.state import (
 # ── Scripted provider for the round-trip tests ─────────────────────────────
 
 
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+
+
 class _Scripted(ModelProvider):
     name = "scripted"
 
@@ -207,6 +214,22 @@ class TestSessionStore:
         store.close()
         assert path.read_text(encoding="utf-8") == ""
 
+    def test_create_overwrite_rejects_symlinked_session_log(
+        self, tmp_path: Path,
+    ) -> None:
+        outside = tmp_path / "outside.jsonl"
+        outside.write_text("sentinel\n", encoding="utf-8")
+        _symlink_or_skip(tmp_path / "s1.jsonl", outside)
+
+        with pytest.raises(ValueError, match="symlink"):
+            SessionStore.create(
+                session_id="s1",
+                sessions_dir=tmp_path,
+                overwrite=True,
+            )
+
+        assert outside.read_text(encoding="utf-8") == "sentinel\n"
+
     def test_context_manager(self, tmp_path: Path) -> None:
         with SessionStore.create(session_id="s1", sessions_dir=tmp_path) as store:
             store.write_event("x", {})
@@ -227,6 +250,14 @@ class TestSessionStore:
     def test_attach_requires_existing_file(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             SessionStore.attach("nope", sessions_dir=tmp_path)
+
+    def test_attach_rejects_symlinked_session_log(self, tmp_path: Path) -> None:
+        outside = tmp_path / "outside.jsonl"
+        outside.write_text("sentinel\n", encoding="utf-8")
+        _symlink_or_skip(tmp_path / "s1.jsonl", outside)
+
+        with pytest.raises(ValueError, match="symlink"):
+            SessionStore.attach("s1", sessions_dir=tmp_path)
 
     def test_attach_appends_to_existing_file(self, tmp_path: Path) -> None:
         # Create + write one event.
@@ -332,6 +363,17 @@ class TestLoadSession:
     def test_file_not_found(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             load_session("nope", sessions_dir=tmp_path)
+
+    def test_rejects_symlinked_session_log(self, tmp_path: Path) -> None:
+        outside = tmp_path / "outside.jsonl"
+        outside.write_text(
+            json.dumps({"type": "session_start", "session_id": "s"}) + "\n",
+            encoding="utf-8",
+        )
+        _symlink_or_skip(tmp_path / "s.jsonl", outside)
+
+        with pytest.raises(ValueError, match="symlink"):
+            load_session("s", sessions_dir=tmp_path)
 
     def test_replay_simple_session(self, tmp_path: Path) -> None:
         with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
@@ -445,6 +487,14 @@ class TestListSessions:
         (tmp_path / "not_a_session.txt").write_text("", encoding="utf-8")
         (tmp_path / "subdir").mkdir()
         assert list_sessions(sessions_dir=tmp_path) == ["alpha", "beta"]
+
+    def test_symlinked_jsonl_files_are_skipped(self, tmp_path: Path) -> None:
+        (tmp_path / "alpha.jsonl").write_text("", encoding="utf-8")
+        outside = tmp_path / "outside.jsonl"
+        outside.write_text("", encoding="utf-8")
+        _symlink_or_skip(tmp_path / "linked.jsonl", outside)
+
+        assert list_sessions(sessions_dir=tmp_path) == ["alpha", "outside"]
 
     def test_sorted_alphabetically(self, tmp_path: Path) -> None:
         for name in ("zzz", "aaa", "mmm"):
