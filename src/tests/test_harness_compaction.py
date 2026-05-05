@@ -211,6 +211,23 @@ class TestCompactLayout:
         notice = out[1]
         assert "[summary was empty]" in notice.content
 
+    def test_keep_tail_zero_keeps_no_tail_and_compacts_middle(self) -> None:
+        c = TokenBudgetCompactor(
+            max_chars=10**9, max_messages=10, keep_head=1, keep_tail=0, min_middle=1,
+        )
+        msgs = [Message(role="user", content=f"m{i}") for i in range(5)]
+        p = self._provider_with_summary("ZERO_TAIL_SUMMARY")
+
+        out = c.compact(msgs, p)
+
+        assert len(out) == 2
+        assert out[0].content == "m0"
+        assert out[1].content.startswith("[Compacted 4 prior messages.]")
+        assert "ZERO_TAIL_SUMMARY" in out[1].content
+        rendered_middle = p.calls[0][1].content
+        assert "m1" in rendered_middle
+        assert "m4" in rendered_middle
+
 
 class TestCompactOnProviderError:
     def test_summary_call_failure_returns_stub(self) -> None:

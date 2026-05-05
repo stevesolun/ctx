@@ -137,7 +137,16 @@ def read_loaded_skills() -> list[str]:
     try:
         with open(MANIFEST_PATH, encoding="utf-8") as f:
             manifest = json.load(f)
-        return [entry["skill"] for entry in manifest.get("load", [])]
+        loaded: list[str] = []
+        for entry in manifest.get("load", []):
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("entity_type", "skill") != "skill":
+                continue
+            skill = entry.get("skill")
+            if isinstance(skill, str) and skill:
+                loaded.append(skill)
+        return loaded
     except Exception as exc:
         print(f"Warning: failed to read loaded skills: {exc}", file=sys.stderr)
         return []
@@ -248,13 +257,15 @@ def update_skill_page(
         content = page_path.read_text(encoding="utf-8")
         meta = _read_frontmatter(content)
 
-        # Bump session_count
+        session_count = int(str(meta.get("session_count", "0")))
+        use_count = int(str(meta.get("use_count", "0")))
+
         if session_count_bump:
-            session_count = int(str(meta.get("session_count", "0"))) + 1
+            session_count += 1
             content = _set_frontmatter_field(content, "session_count", str(session_count))
 
         if used:
-            use_count = int(str(meta.get("use_count", "0"))) + 1
+            use_count += 1
             content = _set_frontmatter_field(content, "use_count", str(use_count))
             today = _today()
             content = _set_frontmatter_field(content, "last_used", today)
@@ -264,8 +275,6 @@ def update_skill_page(
         else:
             # Check if stale threshold reached — don't mark stale directly,
             # write to pending-unload.json so the user can approve
-            session_count = int(str(meta.get("session_count", "0")))
-            use_count = int(str(meta.get("use_count", "0")))
             if session_count >= STALE_THRESHOLD and use_count == 0:
                 queued = _queue_unload_suggestion(skill_name, session_count, use_count)
 
