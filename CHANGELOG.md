@@ -7,6 +7,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - No unreleased changes yet.
 
+## [0.7.6] - 2026-05-05
+
+### Fixed
+
+- Refreshed Skills.sh shipped catalog hydration counters so the catalog
+  summary matches the 89,463 packaged SKILL.md bodies in the graph/wiki
+  archive.
+- Ignored local artifact-promotion sidecars so crash-recovery metadata
+  with machine-local paths cannot be accidentally committed or published.
+
 ## [0.7.5] - 2026-05-05
 
 ### Fixed
