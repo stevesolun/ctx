@@ -219,6 +219,7 @@ def recommend_by_tags(
     min_normalized_score: float = 0.0,
     semantic_cache_dir: Path | None = None,
     semantic_weight: float = 100.0,
+    use_semantic_query: bool = False,
     external_catalog_path: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Rank graph entities by name match, tag overlap, and graph degree.
@@ -254,7 +255,7 @@ def recommend_by_tags(
     # each node by cosine. Falls through silently to tag+token-only
     # ranking when the cache is missing or the embedder isn't installed.
     sem_score: dict[str, float] = {}
-    if query:
+    if query and use_semantic_query:
         sem_index = _load_semantic_index(graph, semantic_cache_dir)
         if sem_index is not None:
             mat, ordered_ids, model_id = sem_index
