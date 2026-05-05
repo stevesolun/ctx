@@ -83,3 +83,40 @@ def test_promote_staged_artifact_replace_failure_preserves_target_and_last_good(
     assert staged.exists()
     assert metadata["status"] == "staged"
     assert metadata["previous"]["sha256"] != metadata["candidate"]["sha256"]
+
+
+def test_promote_staged_artifact_recovers_after_post_replace_crash(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "artifact.txt"
+    staged = tmp_path / "candidate.txt"
+    metadata_path = target.with_name("artifact.txt.promotion.json")
+    target.write_bytes(b"new\n")
+    candidate = artifact_promotion._snapshot(target)
+    previous = {
+        "path": str(target),
+        "exists": True,
+        "size": 4,
+        "sha256": "old-sha",
+        "mtime_ns": 1,
+    }
+    metadata_path.write_text(
+        json.dumps({
+            "schema_version": 1,
+            "status": "staged",
+            "target": str(target),
+            "started_at": "2026-05-04T00:00:00+00:00",
+            "previous": previous,
+            "candidate": candidate,
+        }),
+        encoding="utf-8",
+    )
+
+    result = artifact_promotion.promote_staged_artifact(staged, target)
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert result.current["sha256"] == candidate["sha256"]
+    assert metadata["status"] == "promoted"
+    assert metadata["previous"] == previous
+    assert metadata["candidate"]["sha256"] == candidate["sha256"]
+    assert metadata["current"]["sha256"] == candidate["sha256"]
