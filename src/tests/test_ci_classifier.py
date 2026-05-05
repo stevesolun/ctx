@@ -81,6 +81,33 @@ def test_no_test_policy_covers_ci_package_contract_files() -> None:
     assert "scripts/ci_no_test_policy.py" in workflow
 
 
+def test_ci_workflows_default_to_read_only_token_permissions() -> None:
+    for workflow_path in (
+        Path(".github/workflows/test.yml"),
+        Path(".github/workflows/clean-host-contract.yml"),
+    ):
+        workflow = workflow_path.read_text(encoding="utf-8")
+
+        assert "\npermissions:\n  contents: read\n" in workflow
+
+
+def test_publish_oidc_permission_is_limited_to_publish_job() -> None:
+    workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
+    header = workflow.split("\njobs:\n", maxsplit=1)[0]
+    publish_job = workflow.split("\n  publish:\n", maxsplit=1)[1]
+
+    assert "id-token: write" not in header
+    assert "id-token: write" in publish_job
+
+
+def test_publish_workflow_rejects_existing_pypi_versions() -> None:
+    workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
+
+    assert "Reject already published PyPI version" in workflow
+    assert "https://pypi.org/pypi/{name}/{package_version}/json" in workflow
+    assert "already exists on PyPI" in workflow
+
+
 def test_no_test_policy_exempts_release_metadata_only_changes() -> None:
     files = ["CHANGELOG.md", "pyproject.toml", "src/ctx/__init__.py"]
     diffs = {
