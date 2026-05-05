@@ -273,6 +273,10 @@ def test_drop_body_unavailable_skills_removes_metadata_only_records() -> None:
     assert catalog["observed_unique_skills"] == 2
     assert catalog["observed_unique_skills_before_body_prune"] == 3
     assert catalog["body_unavailable_pruned_count"] == 1
+    assert catalog["body_available_count"] == 2
+    assert catalog["body_packaged_count"] == 2
+    assert catalog["body_hydrated_total_count"] == 2
+    assert catalog["body_hydrated_count"] == 2
     assert catalog["body_hydration_error_count"] == 0
     assert catalog["body_hydration_errors_sample"] == []
     assert [item["id"] for item in catalog["skills"]] == [
@@ -633,6 +637,9 @@ def test_update_wiki_tarball_preserves_stripped_catalog_converted_body(
     assert names.count(converted_path) == 1
     assert converted == "# Existing hydrated body\n"
     assert catalog_out["body_available_count"] == 1
+    assert catalog_out["body_packaged_count"] == 1
+    assert catalog_out["body_hydrated_total_count"] == 1
+    assert catalog_out["body_hydrated_count"] == 1
     assert catalog_out["skills"][0]["body_available"] is True
     assert "skill_body" not in catalog_out["skills"][0]
     assert "body_available: true" in page

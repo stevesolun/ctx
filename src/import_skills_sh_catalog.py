@@ -439,13 +439,19 @@ def _refresh_body_summary(catalog: dict[str, Any]) -> dict[str, Any]:
         1 for item in skills
         if isinstance(item, dict) and (item.get("body_available") or item.get("skill_body"))
     )
+    attempted_count = catalog.get("body_hydration_attempted_count", 0)
+    hydrated_count = catalog.get("body_hydrated_count", body_available_count)
+    if not attempted_count:
+        hydrated_count = body_available_count
     summary = {
         "body_available_count": body_available_count,
+        "body_packaged_count": body_available_count,
+        "body_hydrated_total_count": body_available_count,
         "body_hydration_checkpoint_applied_count": catalog.get(
             "body_hydration_checkpoint_applied_count", 0,
         ),
-        "body_hydration_attempted_count": catalog.get("body_hydration_attempted_count", 0),
-        "body_hydrated_count": catalog.get("body_hydrated_count", body_available_count),
+        "body_hydration_attempted_count": attempted_count,
+        "body_hydrated_count": hydrated_count,
         "body_hydration_error_count": catalog.get("body_hydration_error_count", 0),
         "body_hydration_errors_sample": catalog.get("body_hydration_errors_sample", []),
     }
