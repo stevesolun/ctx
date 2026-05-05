@@ -9,6 +9,9 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+permissions:
+  contents: read
+
 concurrency:
   group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -24,6 +27,7 @@ jobs:
       graph_changed: ${{ steps.classify.outputs.graph_changed }}
       graph_only: ${{ steps.classify.outputs.graph_only }}
       package_changed: ${{ steps.classify.outputs.package_changed }}
+      similarity_changed: ${{ steps.classify.outputs.similarity_changed }}
       source_changed: ${{ steps.classify.outputs.source_changed }}
     steps:
       - name: Checkout with full history
@@ -123,7 +127,7 @@ jobs:
   similarity-integration:
     name: "Similarity precision/recall"
     needs: classify
-    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true') }}
+    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true' && needs.classify.outputs.similarity_changed == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -185,6 +189,37 @@ jobs:
 
       - name: Run tests without coverage
         run: pytest -q -m "not browser" --no-cov
+
+  contract-compat:
+    name: "Contract compatibility (${{ matrix.os }})"
+    needs: classify
+    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true') }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+
+      - name: Run cross-OS contract tests
+        run: python -m pytest -q --no-cov src/tests/test_clean_host_contract.py src/tests/test_package_scaffold.py
 
   e2e-canary:
     name: "A-Z alive-loop E2E canary"
@@ -267,6 +302,17 @@ jobs:
             --min-edges 2000000 \
             --min-skills-sh-nodes 89000 \
             --min-semantic-edges 1000000 \
+            --expected-nodes 102696 \
+            --expected-edges 2900834 \
+            --expected-semantic-edges 1682825 \
+            --expected-harness-nodes 13 \
+            --expected-skills-sh-nodes 89463 \
+            --expected-skills-sh-catalog-entries 89463 \
+            --expected-skills-sh-converted 89463 \
+            --expected-skill-pages 91432 \
+            --expected-agent-pages 464 \
+            --expected-mcp-pages 10787 \
+            --expected-harness-pages 13 \
             --line-threshold 180 \
             --max-stage-lines 40
 
@@ -523,6 +569,7 @@ jobs:
       - unit-linux
       - similarity-integration
       - test
+      - contract-compat
       - e2e-canary
       - docs-check
       - graph-check

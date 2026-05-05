@@ -8,6 +8,7 @@ from typing import Any
 
 CHEAP_PR_SKIPPABLE_JOBS = {
     "clean-host-contract",
+    "contract-compat",
     "e2e-canary",
     "no-test-no-merge",
     "package-build",
@@ -20,6 +21,7 @@ REQUIRED_JOBS = {
     "browser-security",
     "classify",
     "clean-host-contract",
+    "contract-compat",
     "docs-check",
     "e2e-canary",
     "graph-check",
@@ -93,6 +95,13 @@ def failed_required_jobs(
             and name == "browser-security"
             and result == "skipped"
             and _job_output(needs, "classify", "browser_changed") == "false"
+        ):
+            continue
+        if (
+            event_name == "pull_request"
+            and name == "similarity-integration"
+            and result == "skipped"
+            and _job_output(needs, "classify", "similarity_changed") == "false"
         ):
             continue
         if event_name == "pull_request" and name == "test" and result == "skipped":

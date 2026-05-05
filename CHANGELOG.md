@@ -7,6 +7,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - No unreleased changes yet.
 
+## [0.7.5] - 2026-05-05
+
+### Fixed
+
+- Hardened Hugging Face sync so published snapshots use hydrated graph
+  artifacts instead of Git LFS pointers and refuse unsafe graph artifact
+  states before upload.
+- Added PyPI version reuse preflight and tighter workflow token
+  permissions so release jobs fail early and only the publish job gets
+  Trusted Publishing OIDC.
+- Made the similarity precision/recall CI job path-aware while keeping it
+  required for recommendation, graph scoring, embedding, and workflow
+  changes.
+- Updated Hugging Face publish instructions to use the tested sync script
+  and avoid inline token assignment in shell history.
+
 ## [0.7.4] - 2026-05-05
 
 ### Fixed

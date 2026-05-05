@@ -7,7 +7,6 @@ import argparse
 import os
 import shutil
 import subprocess
-import tarfile
 import tempfile
 from pathlib import Path
 
@@ -31,6 +30,12 @@ tags:
 
 """
 
+LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
+HYDRATED_ARTIFACT_MIN_BYTES = {
+    Path("graph/wiki-graph.tar.gz"): 100_000_000,
+    Path("graph/skills-sh-catalog.json.gz"): 1_000_000,
+}
+
 
 def with_hf_repo_card_metadata(readme_text: str) -> str:
     """Return README text with Hugging Face repo-card metadata prepended."""
@@ -50,34 +55,61 @@ def _git(repo: Path, *args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=repo, text=True).strip()
 
 
-def _export_git_tree(repo: Path, commit: str, export_dir: Path) -> None:
-    tar_path = export_dir.parent / "ctx.tar"
-    subprocess.run(
-        ["git", "archive", "--format=tar", "-o", str(tar_path), commit],
-        cwd=repo,
-        check=True,
-    )
-    _extract_regular_members(tar_path, export_dir)
+def _git_bytes(repo: Path, *args: str) -> bytes:
+    return subprocess.check_output(["git", *args], cwd=repo)
 
 
-def _extract_regular_members(tar_path: Path, export_dir: Path) -> None:
+def _iter_tracked_files(repo: Path) -> list[Path]:
+    output = _git_bytes(repo, "ls-files", "-z")
+    files: list[Path] = []
+    for raw in output.split(b"\0"):
+        if not raw:
+            continue
+        rel = Path(raw.decode("utf-8"))
+        if rel.is_absolute() or ".." in rel.parts:
+            raise ValueError(f"unsafe git path: {rel}")
+        files.append(rel)
+    return files
+
+
+def _assert_hydrated_artifacts(repo: Path) -> None:
+    for rel, min_bytes in HYDRATED_ARTIFACT_MIN_BYTES.items():
+        artifact = repo / rel
+        if not artifact.is_file():
+            raise FileNotFoundError(
+                f"{rel.as_posix()} is required before Hugging Face sync"
+            )
+        size = artifact.stat().st_size
+        if size < min_bytes:
+            raise RuntimeError(
+                f"{rel.as_posix()} is {size:,} bytes; expected at least "
+                f"{min_bytes:,}. Run git lfs pull before publishing."
+            )
+        with artifact.open("rb") as fh:
+            prefix = fh.read(len(LFS_POINTER_PREFIX))
+        if prefix == LFS_POINTER_PREFIX:
+            raise RuntimeError(
+                f"{rel.as_posix()} is a Git LFS pointer, not the hydrated artifact"
+            )
+
+
+def _export_tracked_tree(repo: Path, export_dir: Path) -> None:
+    _assert_hydrated_artifacts(repo)
+    repo_root = repo.resolve()
     export_root = export_dir.resolve()
-    with tarfile.open(tar_path) as archive:
-        for member in archive.getmembers():
-            target = (export_root / member.name).resolve()
-            if target != export_root and not target.is_relative_to(export_root):
-                raise ValueError(f"unsafe tar member path: {member.name}")
-            if member.isdir():
-                target.mkdir(parents=True, exist_ok=True)
-                continue
-            if not member.isfile():
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            source = archive.extractfile(member)
-            if source is None:
-                continue
-            with source, target.open("wb") as dest:
-                shutil.copyfileobj(source, dest)
+    for rel in _iter_tracked_files(repo):
+        source = (repo_root / rel).resolve()
+        if source != repo_root and not source.is_relative_to(repo_root):
+            raise ValueError(f"unsafe source path: {rel}")
+        if source.is_symlink():
+            raise ValueError(f"refusing to follow symlink during HF sync: {rel}")
+        if not source.is_file():
+            continue
+        target = (export_root / rel).resolve()
+        if target != export_root and not target.is_relative_to(export_root):
+            raise ValueError(f"unsafe export path: {rel}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
 
 
 def _patch_export_readme(export_dir: Path) -> None:
@@ -104,7 +136,7 @@ def sync_to_huggingface(
     export_dir = workspace / "export"
     try:
         export_dir.mkdir()
-        _export_git_tree(repo, head, export_dir)
+        _export_tracked_tree(repo, export_dir)
         _patch_export_readme(export_dir)
         api = HfApi(token=token)
         api.create_repo(repo_id, repo_type=repo_type, exist_ok=True)

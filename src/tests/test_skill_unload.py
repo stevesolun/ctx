@@ -14,6 +14,7 @@ Covers:
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
 
 import pytest
@@ -106,3 +107,30 @@ def test_atomic_write_preserves_original_on_caller_crash(fake_home, monkeypatch)
 
     # Original must survive.
     assert page.read_text(encoding="utf-8") == original
+
+
+def test_permanent_suppression_updates_graph_node(fake_home):
+    unload, home = fake_home
+    graph_dir = home / ".claude" / "skill-wiki" / "graphify-out"
+    graph_dir.mkdir(parents=True)
+    graph_path = graph_dir / "graph.json"
+    graph_path.write_text(
+        json.dumps({
+            "directed": False,
+            "multigraph": False,
+            "graph": {},
+            "nodes": [
+                {"id": "skill:real-skill", "label": "real-skill", "type": "skill"},
+            ],
+            "edges": [],
+        }),
+        encoding="utf-8",
+    )
+
+    assert unload.set_never_load(["real-skill"]) == ["real-skill"]
+    payload = json.loads(graph_path.read_text(encoding="utf-8"))
+    assert payload["nodes"][0]["never_load"] is True
+
+    assert unload.restore_load(["real-skill"]) == ["real-skill"]
+    payload = json.loads(graph_path.read_text(encoding="utf-8"))
+    assert payload["nodes"][0]["never_load"] is False

@@ -31,6 +31,47 @@ SKILL_ENTITIES = WIKI_DIR / "entities" / "skills"
 AGENT_ENTITIES = WIKI_DIR / "entities" / "agents"
 
 
+def _graph_node_id_for_page(name: str, page: Path) -> str | None:
+    try:
+        resolved = page.resolve()
+        if resolved.parent == SKILL_ENTITIES.resolve():
+            return f"skill:{name}"
+        if resolved.parent == AGENT_ENTITIES.resolve():
+            return f"agent:{name}"
+    except OSError:
+        return None
+    return None
+
+
+def _sync_graph_never_load(name: str, page: Path, value: bool) -> bool:
+    """Best-effort mirror of never_load into graph.json for immediate filtering."""
+    node_id = _graph_node_id_for_page(name, page)
+    if node_id is None:
+        return False
+    graph_json = WIKI_DIR / "graphify-out" / "graph.json"
+    if not graph_json.is_file():
+        return False
+    try:
+        payload = json.loads(graph_json.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    nodes = payload.get("nodes") if isinstance(payload, dict) else None
+    if not isinstance(nodes, list):
+        return False
+    changed = False
+    for node in nodes:
+        if not isinstance(node, dict) or node.get("id") != node_id:
+            continue
+        if bool(node.get("never_load")) != value:
+            node["never_load"] = value
+            changed = True
+        break
+    if not changed:
+        return False
+    _atomic_write_text(graph_json, json.dumps(payload, indent=2))
+    return True
+
+
 
 def _sanitize_yaml_value(value: str) -> str:
     """Strip newlines/CRs so a value can't inject extra YAML keys."""
@@ -179,7 +220,12 @@ def set_never_load(names: list[str]) -> list[str]:
     updated: list[str] = []
     for name in names:
         page = find_entity_page(name)
-        if page and set_frontmatter_field(page, "never_load", "true"):
+        if page:
+            changed = set_frontmatter_field(page, "never_load", "true")
+            graph_changed = _sync_graph_never_load(name, page, True)
+        else:
+            changed = graph_changed = False
+        if page and (changed or graph_changed):
             updated.append(name)
             print(f"  {name}: never_load set to true")
         elif page:
@@ -194,7 +240,12 @@ def restore_load(names: list[str]) -> list[str]:
     restored: list[str] = []
     for name in names:
         page = find_entity_page(name)
-        if page and set_frontmatter_field(page, "never_load", "false"):
+        if page:
+            changed = set_frontmatter_field(page, "never_load", "false")
+            graph_changed = _sync_graph_never_load(name, page, False)
+        else:
+            changed = graph_changed = False
+        if page and (changed or graph_changed):
             restored.append(name)
             print(f"  {name}: never_load removed, skill can be recommended again")
         elif page:

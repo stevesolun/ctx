@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -385,7 +386,7 @@ repo_url: https://github.com/earthtojake/text-to-cad
     )
 
     results = ci.recommend_harnesses(
-        "text to cad openscad openai gpt-5 harness",
+        "turn text prompts into CAD openscad openai gpt-5 harness",
         model_provider="openai",
         model="openai/gpt-5.5",
     )
@@ -396,6 +397,62 @@ repo_url: https://github.com/earthtojake/text-to-cad
     assert "openai" in results[0]["fit_signals"]
     assert "gpt-5" in results[0]["fit_signals"]
     assert "openscad" in results[0]["fit_signals"]
+
+
+def test_recommend_harnesses_enables_semantic_query_scoring(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    graph = nx.Graph()
+    graph.add_node("harness:langgraph", label="langgraph", type="harness")
+    monkeypatch.setattr(ci, "_load_recommendation_graph", lambda: graph)
+    monkeypatch.setattr(ci, "_harness_supports_provider", lambda *args, **kwargs: True)
+    monkeypatch.setattr(ci, "_installed_harness_slugs", lambda _path: set())
+    monkeypatch.setattr(
+        ci,
+        "_annotate_harness_fit",
+        lambda *_args, **_kwargs: {"fit_score": 0.99, "fit_signals": ["agent"]},
+    )
+    import ctx_config
+
+    monkeypatch.setattr(
+        ctx_config,
+        "cfg",
+        SimpleNamespace(
+            claude_dir=tmp_path / ".claude",
+            recommendation_top_k=5,
+            harness_recommendation_min_fit_score=0.85,
+        ),
+    )
+    calls: dict[str, object] = {}
+
+    def fake_recommend_by_tags(*_args, **kwargs):
+        calls.update(kwargs)
+        return [{"name": "langgraph", "type": "harness", "score": 1.0}]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "ctx.core.resolve.recommendations",
+        type(
+            "FakeRecommendModule",
+            (),
+            {
+                "query_to_tags": staticmethod(lambda _query: ["agent"]),
+                "recommend_by_tags": staticmethod(fake_recommend_by_tags),
+            },
+        ),
+    )
+
+    results = ci.recommend_harnesses(
+        "build an agent workflow",
+        model_provider="openai",
+        model="openai/gpt-5.5",
+    )
+
+    assert results[0]["name"] == "langgraph"
+    assert calls["query"] == "build an agent workflow"
+    assert calls["entity_types"] == ("harness",)
+    assert calls["use_semantic_query"] is True
 
 
 def test_main_custom_model_requires_model(tmp_path: Path, monkeypatch) -> None:

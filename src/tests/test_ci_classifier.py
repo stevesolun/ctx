@@ -28,6 +28,7 @@ def test_docs_only_classification() -> None:
         "graph_changed": True,
         "graph_only": False,
         "package_changed": False,
+        "similarity_changed": False,
         "source_changed": False,
     }
 
@@ -46,6 +47,7 @@ def test_graph_artifacts_are_graph_only_not_docs_only() -> None:
     assert flags["docs_only"] is False
     assert flags["graph_changed"] is True
     assert flags["graph_only"] is True
+    assert flags["similarity_changed"] is False
     assert flags["source_changed"] is False
 
 
@@ -71,6 +73,7 @@ def test_workflow_change_fails_open_for_future_gates() -> None:
     assert flags["ci_changed"] is True
     assert flags["browser_changed"] is True
     assert flags["package_changed"] is True
+    assert flags["similarity_changed"] is True
     assert flags["source_changed"] is True
     assert flags["docs_only"] is False
 
@@ -79,6 +82,33 @@ def test_no_test_policy_covers_ci_package_contract_files() -> None:
     workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
 
     assert "scripts/ci_no_test_policy.py" in workflow
+
+
+def test_ci_workflows_default_to_read_only_token_permissions() -> None:
+    for workflow_path in (
+        Path(".github/workflows/test.yml"),
+        Path(".github/workflows/clean-host-contract.yml"),
+    ):
+        workflow = workflow_path.read_text(encoding="utf-8")
+
+        assert "\npermissions:\n  contents: read\n" in workflow
+
+
+def test_publish_oidc_permission_is_limited_to_publish_job() -> None:
+    workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
+    header = workflow.split("\njobs:\n", maxsplit=1)[0]
+    publish_job = workflow.split("\n  publish:\n", maxsplit=1)[1]
+
+    assert "id-token: write" not in header
+    assert "id-token: write" in publish_job
+
+
+def test_publish_workflow_rejects_existing_pypi_versions() -> None:
+    workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
+
+    assert "Reject already published PyPI version" in workflow
+    assert "https://pypi.org/pypi/{name}/{package_version}/json" in workflow
+    assert "already exists on PyPI" in workflow
 
 
 def test_no_test_policy_exempts_release_metadata_only_changes() -> None:
@@ -136,6 +166,13 @@ def test_browser_security_paths_are_classified() -> None:
     assert flags["source_changed"] is True
 
 
+def test_similarity_paths_are_classified() -> None:
+    flags = classify_paths(["src/ctx/core/graph/semantic_edges.py"])
+
+    assert flags["similarity_changed"] is True
+    assert flags["source_changed"] is True
+
+
 def test_main_writes_github_outputs(tmp_path: Path, monkeypatch) -> None:
     changed = tmp_path / "changed-files.txt"
     output = tmp_path / "github-output.txt"
@@ -175,6 +212,7 @@ def test_ci_required_rejects_missing_required_dependencies() -> None:
 
     assert failures["package-smoke"] == "missing"
     assert failures["clean-host-contract"] == "missing"
+    assert failures["contract-compat"] == "missing"
     assert failures["test"] == "missing"
 
 
@@ -195,6 +233,7 @@ def test_ci_required_allows_heavy_jobs_to_skip_on_docs_only_pr() -> None:
             "graph-check": {"result": "skipped"},
             "static": {"result": "skipped"},
             "unit-linux": {"result": "skipped"},
+            "contract-compat": {"result": "skipped"},
             "e2e-canary": {"result": "skipped"},
             "package-build": {"result": "skipped"},
             "package-smoke": {"result": "skipped"},
@@ -234,6 +273,7 @@ def test_ci_required_allows_heavy_jobs_to_skip_on_graph_only_pr() -> None:
             "docs-check": {"result": "skipped"},
             "static": {"result": "skipped"},
             "unit-linux": {"result": "skipped"},
+            "contract-compat": {"result": "skipped"},
             "e2e-canary": {"result": "skipped"},
             "package-build": {"result": "skipped"},
             "package-smoke": {"result": "skipped"},
@@ -282,6 +322,36 @@ def test_ci_required_rejects_missing_similarity_gate_on_source_pr() -> None:
 
     assert failed_required_jobs(needs, event_name="pull_request") == {
         "similarity-integration": "skipped",
+    }
+
+
+def test_ci_required_allows_similarity_skip_for_unrelated_source_pr() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {
+                "docs_only": "false",
+                "graph_only": "false",
+                "similarity_changed": "false",
+            },
+        },
+        **{"similarity-integration": {"result": "skipped"}},
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {}
+
+
+def test_ci_required_rejects_contract_compat_skip_on_source_pr() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {"docs_only": "false", "graph_only": "false"},
+        },
+        **{"contract-compat": {"result": "skipped"}},
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "contract-compat": "skipped",
     }
 
 

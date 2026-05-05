@@ -58,17 +58,17 @@ fi
 ### Step 2: Scan the Active Repo
 
 ```bash
-python /path/to/scripts/scan_repo.py --repo "$REPO_PATH" --output /tmp/stack-profile.json
+python -m scan_repo --repo "$REPO_PATH" --output .ctx/stack-profile.json
 ```
 
 ### Step 3: Resolve and Load
 
 ```bash
-python /path/to/scripts/resolve_skills.py \
-  --profile /tmp/stack-profile.json \
+python -m ctx.core.resolve.resolve_skills \
+  --profile .ctx/stack-profile.json \
   --wiki "$WIKI" \
-  --available-skills /mnt/skills/ \
-  --output /tmp/skill-manifest.json
+  --available-skills "$HOME/.claude/skills" \
+  --output .ctx/skill-manifest.json
 ```
 
 ### Step 4: Apply the Manifest

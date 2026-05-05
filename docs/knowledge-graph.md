@@ -4,8 +4,11 @@ A pre-built weighted graph of skills, agents, MCP servers, and cataloged
 harnesses in the ctx ecosystem, shipped as `graph/wiki-graph.tar.gz`.
 The on-disk JSON and `resolve_graph` Python API are harness-aware, including
 plain-slug graph walks from `harness:<slug>` nodes. `ctx-monitor`
-exposes skill/agent/MCP/harness wiki and graph views; harness install,
-update, load/unload, and quality scoring remain CLI/API workflows.
+exposes skill/agent/MCP/harness wiki and graph views. Harness installation,
+update, and uninstall are handled by `ctx-harness-install`; dashboard
+load/unload POSTs deliberately reject harnesses and return the dry-run CLI
+command to use instead. Quality scoring is exposed for sidecar-backed skills,
+agents, and MCP servers.
 
 ## What's in it
 
@@ -16,10 +19,11 @@ local rebuilds and the separate harness-catalog recommendation path. The
 tarball also carries **89,463 body-backed Skills.sh `skill` nodes**,
 matching skill pages under `entities/skills/skills-sh-*.md`. **89,463**
 hydrated Skills.sh bodies are shipped as installable `SKILL.md` files under
-`converted/skills-sh-*/`; the **28,611** entries over the configured line
+`converted/skills-sh-*/`; the **28,612** entries over the configured line
 limit were converted to gated micro-skill orchestrators. Full original bodies
 are used during graph rebuilds for semantic similarity, but
-`SKILL.md.original` backups are omitted from the shipped tarball.
+`SKILL.md.original` backups and transient `.lock` files are omitted from the
+shipped tarball.
 
 | | Count |
 |---|---:|
@@ -230,6 +234,7 @@ for skill, agent, MCP server, or harness catalog releases.
 | 2026-05-02 GitNexus MCP pass | **2,960,215** | Added GitNexus as a cataloged MCP server entity with 26 cross-type edges to its Skills.sh skill pages and related architecture/refactoring agents; semantic edge count unchanged. |
 | 2026-05-04 v0.7.3 artifact refresh | **2,960,215** | Hydrated one recoverable Skills.sh command-injection-testing body, raising hydrated Skills.sh `SKILL.md` files to 89,463; generated micro-skill markdown now defangs high-risk command-injection payloads before packaging. Graph topology unchanged. |
 | 2026-05-04 body-backed Skills.sh prune | **2,900,834** | Removed 1,383 Skills.sh records that had no packaged `SKILL.md` body and no parseable Skills.sh prose body. Remaining Skills.sh catalog entries, graph nodes, entity pages, and converted `SKILL.md` bodies are all **89,463**. |
+| 2026-05-05 artifact hygiene refresh | **2,900,834** | Repacked `graph/wiki-graph.tar.gz` to remove transient `.lock` files from the shipped LLM-wiki. Topology unchanged; current tar members: **598,133**. |
 
 The full audit history lives in `CHANGELOG.md`. The current build is
 fully reproducible from the wiki content.

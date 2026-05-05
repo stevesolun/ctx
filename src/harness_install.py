@@ -527,6 +527,7 @@ def install_harness(
     if dry_run:
         return InstallResult(record.slug, "dry-run", target=target_path)
 
+    target_preexisting = target_path.exists()
     try:
         setup_runs, verify_runs = _install_to_target(
             record=record,
@@ -554,6 +555,11 @@ def install_harness(
             message=str(exc),
         )
     except Exception as exc:  # noqa: BLE001
+        if not target_preexisting and target_path.exists():
+            try:
+                _remove_path(target_path)
+            except Exception:  # noqa: BLE001
+                pass
         return InstallResult(
             record.slug,
             "install-failed",
@@ -689,6 +695,9 @@ def uninstall_harness(
         return InstallResult(slug, "dry-run", target=target, manifest_path=manifest_path)
 
     try:
+        if not keep_files:
+            manifest["status"] = "uninstalling"
+            atomic_write_json(manifest_path, manifest, indent=2)
         if not keep_files and target.exists():
             if target.is_dir():
                 shutil.rmtree(target)

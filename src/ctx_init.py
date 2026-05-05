@@ -199,7 +199,9 @@ _HARNESS_TOKEN_RE = re.compile(r"[a-z0-9]+")
 _HARNESS_GOAL_NOISE = frozenset({
     "build",
     "create",
+    "into",
     "make",
+    "turn",
     "write",
     "need",
     "want",
@@ -312,6 +314,7 @@ def recommend_harnesses(
             query=goal,
             entity_types=("harness",),
             min_normalized_score=0.0,
+            use_semantic_query=True,
         )
         results = [
             row for row in results

@@ -225,6 +225,35 @@ def test_install_refuses_local_source_without_explicit_opt_in(tmp_path: Path) ->
     assert not (tmp_path / "installs" / "text-to-cad").exists()
 
 
+def test_install_failure_after_target_replace_rolls_back_new_target(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "README.md").write_text("harness", encoding="utf-8")
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=str(source))
+
+    def fail_attach(*_args: Any, **_kwargs: Any) -> list[Path]:
+        raise OSError("attach write failed")
+
+    monkeypatch.setattr(harness_install, "_write_attach_files", fail_attach)
+
+    result = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=tmp_path / "manifests",
+        allow_local_sources=True,
+    )
+
+    assert result.status == "install-failed"
+    assert "attach write failed" in result.message
+    assert not (tmp_path / "installs" / "text-to-cad").exists()
+    assert not (tmp_path / "manifests" / "text-to-cad.json").exists()
+
+
 def test_install_refuses_symlink_inside_local_source(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
@@ -378,6 +407,46 @@ def test_uninstall_removes_target_and_manifest(tmp_path: Path) -> None:
     assert result.status == "uninstalled"
     assert not install.target.exists()
     assert not install.manifest_path.exists()
+
+
+def test_uninstall_marks_manifest_uninstalling_before_deleting_files(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "README.md").write_text("v1", encoding="utf-8")
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=str(source))
+    manifest_dir = tmp_path / "manifests"
+    install = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=manifest_dir,
+        allow_local_sources=True,
+    )
+    assert install.target is not None
+    assert install.manifest_path is not None
+
+    original_unlink = Path.unlink
+
+    def fail_manifest_unlink(path: Path, *args: Any, **kwargs: Any) -> None:
+        if path == install.manifest_path:
+            raise OSError("crash after deleting files")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_manifest_unlink)
+
+    result = harness_install.uninstall_harness(
+        "text-to-cad",
+        manifest_dir=manifest_dir,
+    )
+
+    assert result.status == "uninstall-failed"
+    assert not install.target.exists()
+    manifest = json.loads(install.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["status"] == "uninstalling"
 
 
 def test_uninstall_keep_files_only_removes_manifest(tmp_path: Path) -> None:

@@ -17,8 +17,8 @@ decision visible in review.
 
 from __future__ import annotations
 
-import sys
 import json
+import sys
 from pathlib import Path
 
 SRC_DIR = Path(__file__).resolve().parents[1]
@@ -42,6 +42,94 @@ def test_metadata_affected_nodes_detects_tag_changes() -> None:
     )
 
     assert affected == {"skill:alpha"}
+
+
+def test_metadata_affected_nodes_detects_edge_signal_changes() -> None:
+    prior = wg.nx.Graph()
+    prior.add_node(
+        "skill:alpha",
+        label="alpha",
+        type="skill",
+        tags=["python"],
+        source_keys=["repo:https://example.com/old"],
+        direct_targets=["skill:old"],
+        quality_signal=0.7,
+        usage_signal=0.2,
+        never_load=False,
+    )
+    prior.add_node(
+        "skill:beta",
+        label="beta",
+        type="skill",
+        tags=["python"],
+        source_keys=[],
+        direct_targets=[],
+        quality_signal=None,
+        usage_signal=None,
+    )
+
+    affected = wg._metadata_affected_nodes(
+        prior_graph=prior,
+        current_node_info={
+            "skill:alpha": {
+                "label": "alpha",
+                "type": "skill",
+                "tags": ["python"],
+                "source_keys": ["repo:https://example.com/new"],
+                "direct_targets": ["skill:new"],
+                "quality_signal": 0.9,
+                "usage_signal": 0.4,
+                "never_load": True,
+            },
+            "skill:beta": {
+                "label": "beta",
+                "type": "skill",
+                "tags": ["python"],
+                "source_keys": [],
+                "direct_targets": [],
+                "quality_signal": None,
+                "usage_signal": None,
+                "never_load": False,
+            },
+        },
+    )
+
+    assert affected == {"skill:alpha"}
+
+
+def test_build_graph_carries_never_load_flag(tmp_path, monkeypatch) -> None:
+    import ctx_config
+
+    wiki = tmp_path / "wiki"
+    skills_dir = wiki / "entities" / "skills"
+    monkeypatch.setattr(wg, "WIKI_DIR", wiki)
+    monkeypatch.setattr(wg, "SKILL_ENTITIES", skills_dir)
+    monkeypatch.setattr(wg, "AGENT_ENTITIES", wiki / "entities" / "agents")
+    monkeypatch.setattr(wg, "MCP_ENTITIES", wiki / "entities" / "mcp-servers")
+    monkeypatch.setattr(wg, "HARNESS_ENTITIES", wiki / "entities" / "harnesses")
+    monkeypatch.setattr(wg, "GRAPH_OUT", wiki / "graphify-out")
+    monkeypatch.setattr(wg, "QUALITY_SIDECAR_DIR", tmp_path / "quality")
+    monkeypatch.setattr(wg, "load_prior_graph", lambda: None)
+    monkeypatch.setattr(ctx_config.cfg, "graph_edge_weight_semantic", 0.0)
+    blocked = skills_dir / "blocked.md"
+    blocked.parent.mkdir(parents=True, exist_ok=True)
+    blocked.write_text(
+        "\n".join([
+            "---",
+            "title: blocked",
+            "type: skill",
+            "never_load: true",
+            "tags:",
+            "  - python",
+            "---",
+            "# blocked",
+        ]),
+        encoding="utf-8",
+    )
+
+    graph, _entities = wg.build_graph(incremental=False)
+
+    assert graph.nodes["skill:blocked"]["never_load"] is True
 
 
 def _write_entity(

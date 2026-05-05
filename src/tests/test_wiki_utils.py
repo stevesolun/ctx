@@ -153,6 +153,27 @@ Body"""
         result = parse_frontmatter(text)
         assert result["tags"] == ["python", "testing", "automation"]
 
+    def test_multiline_yaml_list_continuations_are_joined(self) -> None:
+        """Wrapped YAML list items stay attached to the previous item."""
+        text = """---
+capabilities:
+  - Build text-to-CAD workflows that call a local or API model,
+    constrain file access, and verify generated CAD outputs.
+  - Route ctx recommendations into a custom harness loop.
+model_providers:
+  - openai
+  - ollama
+---
+
+Body"""
+        result = parse_frontmatter(text)
+        assert result["capabilities"] == [
+            "Build text-to-CAD workflows that call a local or API model, "
+            "constrain file access, and verify generated CAD outputs.",
+            "Route ctx recommendations into a custom harness loop.",
+        ]
+        assert result["model_providers"] == ["openai", "ollama"]
+
 
 # ===========================================================================
 # Tests for parse_frontmatter_and_body()

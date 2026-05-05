@@ -15,6 +15,7 @@ OUTPUT_NAMES = (
     "graph_changed",
     "graph_only",
     "package_changed",
+    "similarity_changed",
     "source_changed",
 )
 
@@ -48,6 +49,18 @@ SOURCE_PATTERNS = (
     "scripts/**",
     "src/**",
 )
+SIMILARITY_PATTERNS = (
+    ".github/workflows/test.yml",
+    "pyproject.toml",
+    "src/config.json",
+    "src/ctx/adapters/claude_code/hooks/context_monitor.py",
+    "src/ctx/adapters/generic/ctx_core_tools.py",
+    "src/ctx/core/graph/**",
+    "src/ctx/core/resolve/**",
+    "src/ctx/core/wiki/wiki_graphify.py",
+    "src/ctx/embedding_backend.py",
+    "src/tests/test_similarity_precision_recall.py",
+)
 
 
 def _matches(path: str, patterns: Iterable[str]) -> bool:
@@ -67,6 +80,8 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
         "graph_only": graph_only,
         "package_changed": ci_changed
         or any(_matches(path, PACKAGE_PATTERNS) for path in files),
+        "similarity_changed": ci_changed
+        or any(_matches(path, SIMILARITY_PATTERNS) for path in files),
         "source_changed": ci_changed
         or any(_matches(path, SOURCE_PATTERNS) for path in files),
     }

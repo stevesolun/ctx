@@ -11,7 +11,7 @@
     "intent_log": "~/.claude/intent-log.jsonl",
     "pending_skills": "~/.claude/pending-skills.json",
     "skill_registry": "~/.claude/skill-registry.json",
-    "stack_profile_tmp": "/tmp/skill-stack-profile.json",
+    "stack_profile_tmp": "~/.claude/skill-stack-profile.json",
     "catalog": "~/.claude/skill-wiki/catalog.md"
   },
 
@@ -37,8 +37,9 @@
   },
 
   "harness": {
-    "_comment": "Harness catalog recommendation tuning for custom/API/local model users. Harnesses are separate from the execution bundle and are only recommended when their normalized match score is at or above this floor.",
-    "recommendation_min_normalized_score": 0.85
+    "_comment": "Harness catalog recommendation tuning for custom/API/local model users. Harnesses are separate from the execution bundle and are only recommended when their absolute fit score is at or above recommendation_min_fit_score. The normalized floor is kept for older user configs and display compatibility.",
+    "recommendation_min_normalized_score": 0.85,
+    "recommendation_min_fit_score": 0.85
   },
 
   "skill_transformer": {
@@ -71,7 +72,7 @@
   },
 
   "graph": {
-    "_comment": "Knowledge-graph edge weighting for wiki_graphify. Every edge between two entity pages (skill ↔ agent ↔ mcp-server, any combination) is computed from three signals and combined as a weighted sum. Semantic similarity uses sentence embeddings (cfg.intake.embedding.backend) to compare entity descriptions — this catches context-level affinity that tags and slug tokens miss (e.g., a 'python-linter' MCP links to a 'code-reviewer' agent even when they share no explicit tags). Tag similarity counts explicit frontmatter tag overlaps. Slug-token similarity counts shared tokens from entity slugs (e.g., 'atlassian-admin' skill ↔ 'atlassian-cloud' MCP share the 'atlassian' token). Override any key in your user config (~/.claude/skill-system-config.json) — weights must sum to 1.0.",
+    "_comment": "Knowledge-graph edge weighting for wiki_graphify. Base edges between entity pages (skill ↔ agent ↔ mcp-server ↔ harness, any combination) come from semantic similarity, explicit tags, slug tokens, source overlap, or direct wikilinks. Semantic/tag/token weights must sum to 1.0. Edge boosts then add explainable rank signals (direct links, source overlap, Adamic-Adar, type affinity, usage, quality) without creating edges by themselves. Override any key in your user config (~/.claude/skill-system-config.json).",
     "edge_weights": {
       "semantic":    0.70,
       "tags":        0.15,
@@ -94,6 +95,19 @@
       "_comment": "Slug-token edge construction. Mirrors tag_edges but for the pseudo-tags synthesized from slugs. Keep dense_token_threshold intentionally low: after 90K+ hydrated Skills.sh bodies, broad slug words create millions of low-signal token-only edges. Semantic top-K and explicit tags are the primary graph signals; slug tokens are only a sparse fallback.",
       "dense_token_threshold": 30,
       "shared_token_saturation": 3
+    },
+    "source_edges": {
+      "_comment": "Source-overlap edge construction. Pages with the same repo/source/homepage/detail/package URL can connect even when their tags differ. Buckets above dense_source_threshold are skipped so broad catalog URLs cannot create noise edges.",
+      "dense_source_threshold": 50
+    },
+    "edge_boosts": {
+      "_comment": "Additive edge boosts. These never create edges alone; they only strengthen pairs already justified by semantic, tags, slug tokens, source overlap, or direct wikilinks. Set a value to 0 to disable that signal.",
+      "direct_link": 0.10,
+      "source_overlap": 0.05,
+      "adamic_adar": 0.04,
+      "type_affinity": 0.03,
+      "usage": 0.02,
+      "quality": 0.02
     }
   },
 

@@ -206,6 +206,18 @@ def test_top_n_limit_is_respected() -> None:
     assert len(out) == 2
 
 
+def test_never_load_nodes_are_not_recommended() -> None:
+    G = _build_graph([
+        ("python-active", ["python"]),
+        ("python-stale", ["python"]),
+    ])
+    G.nodes["skill:python-stale"]["never_load"] = True
+
+    out = recommend_by_tags(G, ["python"], top_n=5)
+
+    assert [row["name"] for row in out] == ["python-active"]
+
+
 # ── query_to_tags ─────────────────────────────────────────────────────
 
 
@@ -300,6 +312,47 @@ def test_semantic_off_by_default_even_with_query(monkeypatch) -> None:
 
     assert called["load"] == 0, "semantic index must not load by default"
     assert called["embed"] == 0, "query must not be embedded by default"
+
+
+def test_embed_query_uses_sentence_transformers_local_files_only(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import numpy as np
+    from ctx.core.resolve import recommendations as rec
+
+    captured: dict[str, object] = {}
+
+    class FakeSentenceTransformer:
+        def __init__(self, model_name: str, **kwargs: object) -> None:
+            captured["model_name"] = model_name
+            captured["kwargs"] = kwargs
+
+        def encode(self, texts: list[str], **kwargs: object) -> np.ndarray:
+            captured["texts"] = texts
+            captured["encode_kwargs"] = kwargs
+            return np.asarray([[3.0, 4.0]], dtype="float32")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "sentence_transformers",
+        SimpleNamespace(SentenceTransformer=FakeSentenceTransformer),
+    )
+
+    out = rec._embed_query(
+        "fastapi async docs",
+        "sentence-transformers:local-test-model",
+    )
+
+    assert out is not None
+    assert captured["model_name"] == "local-test-model"
+    assert captured["kwargs"] == {"local_files_only": True}
+    assert captured["texts"] == ["fastapi async docs"]
+    assert captured["encode_kwargs"] == {
+        "convert_to_numpy": True,
+        "normalize_embeddings": False,
+        "show_progress_bar": False,
+    }
+    np.testing.assert_allclose(out, np.asarray([0.6, 0.8], dtype="float32"))
 
 
 def test_semantic_index_failure_falls_through(monkeypatch) -> None:

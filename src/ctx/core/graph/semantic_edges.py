@@ -555,6 +555,7 @@ def compute_semantic_edges(
     backend: str = "sentence-transformers",
     model: str | None = None,
     incremental: bool = True,
+    persist_cache: bool = True,
     affected_out: set[str] | None = None,
 ) -> dict[tuple[str, str], float]:
     """Build the semantic-similarity edge map.
@@ -580,6 +581,9 @@ def compute_semantic_edges(
             to a full rebuild when the state file is missing or its
             schema/model/top_k/build_floor don't match the current
             run — see ``TopKState.is_compatible``.
+        persist_cache: When False, read existing cache/state but skip
+            embedding and top-K state writes. ``ctx-wiki-graphify
+            --dry-run`` uses this so previews do not mutate disk.
         affected_out: Optional set populated with node IDs whose
             incident semantic edges were recomputed. Callers that patch
             an existing graph must use this before the new top-K state
@@ -699,7 +703,8 @@ def compute_semantic_edges(
             for (row_i, _nid, text), vec in zip(missing, new_vecs, strict=True):
                 row_vecs[row_i] = vec
                 cache[_content_hash(text)] = vec
-            _save_cache(cache_dir, model_id, cache)
+            if persist_cache:
+                _save_cache(cache_dir, model_id, cache)
 
     if dim <= 0:
         _logger.warning("semantic_edges: no embeddings produced (empty input?)")
@@ -773,12 +778,13 @@ def compute_semantic_edges(
             for i, nid in enumerate(node_ids)
         },
     )
-    try:
-        _save_topk_state(cache_dir, new_state)
-    except OSError as exc:
-        # State is an optimisation — a failure to persist doesn't
-        # invalidate the edges we just produced.
-        _logger.warning("semantic_edges: topk-state save failed (%s)", exc)
+    if persist_cache:
+        try:
+            _save_topk_state(cache_dir, new_state)
+        except OSError as exc:
+            # State is an optimisation — a failure to persist doesn't
+            # invalidate the edges we just produced.
+            _logger.warning("semantic_edges: topk-state save failed (%s)", exc)
 
     if affected_out is not None:
         affected_out.update(need_recompute)

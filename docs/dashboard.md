@@ -21,8 +21,10 @@ requests. Cytoscape.js is loaded from a CDN on the `/graph` route only.
 
 Every page in the dashboard has the same top nav, so getting around
 is `Home -> jump anywhere`. The dashboard indexes skills, agents, MCP
-servers, and harness pages in wiki/graph views. Harness install, update,
-load/unload, and quality scoring remain CLI/API workflows.
+servers, and harness pages in wiki/graph views. Harness installation,
+update, and uninstall run through `ctx-harness-install`; dashboard
+load/unload POSTs reject harnesses with the exact dry-run command to use.
+Quality scoring is shown for sidecar-backed skills, agents, and MCP servers.
 
 ### Check queue and artifact state - `/status`
 
@@ -143,8 +145,9 @@ Home · Loaded · Skills · Wiki · Graph · Status · KPIs · Sessions · Logs 
 
 Harness catalog entries are visible in wiki and graph routes. `/loaded` shows
 installed harness records from `~/.claude/harness-installs/*.json`, not the
-full catalog. Harness installation, update, uninstall, and quality scoring
-remain CLI/API workflows.
+full catalog. Harness installation, update, and uninstall remain
+`ctx-harness-install` workflows, while harness scoring is not exposed in the
+dashboard yet.
 Dashboard POST actions are available only from loopback clients and require the
 per-process monitor token injected into the rendered page.
 

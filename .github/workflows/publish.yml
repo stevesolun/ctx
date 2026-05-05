@@ -28,13 +28,14 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
-  id-token: write   # required for Trusted Publishing
   contents: read
 
 jobs:
   build:
     name: Build sdist + wheel
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -86,6 +87,40 @@ jobs:
                   f"tag {tag!r} does not match pyproject version {package_version!r}"
               )
           print(f"release version {package_version} matches tag {tag}")
+          PY
+        env:
+          INPUT_REPOSITORY: ${{ github.event.inputs.repository || 'pypi' }}
+
+      - name: Reject already published PyPI version
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          import urllib.error
+          import urllib.request
+
+          target_repository = os.environ.get("INPUT_REPOSITORY", "pypi")
+          if target_repository != "pypi":
+              print(f"skipping PyPI reuse check for {target_repository}")
+              raise SystemExit(0)
+
+          with open("pyproject.toml", "rb") as fh:
+              project = tomllib.load(fh)["project"]
+
+          name = project["name"]
+          package_version = project["version"]
+          url = f"https://pypi.org/pypi/{name}/{package_version}/json"
+          try:
+              with urllib.request.urlopen(url, timeout=15):
+                  raise SystemExit(
+                      f"{name} {package_version} already exists on PyPI; "
+                      "bump the version before publishing"
+                  )
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  print(f"{name} {package_version} is not present on PyPI")
+                  raise SystemExit(0)
+              raise
           PY
         env:
           INPUT_REPOSITORY: ${{ github.event.inputs.repository || 'pypi' }}
@@ -175,6 +210,9 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for Trusted Publishing
     environment:
       name: pypi
       url: https://pypi.org/project/claude-ctx/
