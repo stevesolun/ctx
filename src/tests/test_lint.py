@@ -187,3 +187,41 @@ class TestLintTagHygiene:
         assert all(f.severity == "warn" for f in findings)
         messages = " ".join(f.message for f in findings)
         assert "notarealtag" in messages
+
+
+class TestLintFixIndex:
+    """fix_index must preserve the first-class entity sections."""
+
+    def test_fix_index_routes_multi_entity_pages_to_correct_sections(self, tmp_path: Path) -> None:
+        wiki = make_wiki(tmp_path)
+        (wiki / "index.md").write_text(
+            "\n".join([
+                "# Index",
+                "",
+                "## Skills",
+                "",
+                "## Agents",
+                "",
+                "## MCP Servers",
+                "",
+                "## Harnesses",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+
+        added = wl.fix_index(
+            wiki,
+            [
+                "entities/agents/reviewer",
+                "entities/mcp-servers/g/github",
+                "entities/harnesses/openhands",
+            ],
+        )
+
+        text = (wiki / "index.md").read_text(encoding="utf-8")
+        assert added == 3
+        assert text.index("- [[entities/agents/reviewer]]") > text.index("## Agents")
+        assert text.index("- [[entities/mcp-servers/g/github]]") > text.index("## MCP Servers")
+        assert text.index("- [[entities/harnesses/openhands]]") > text.index("## Harnesses")
+        assert text.index("- [[entities/agents/reviewer]]") < text.index("## MCP Servers")

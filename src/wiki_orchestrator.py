@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from ctx_config import cfg
+from ctx.core.entity_types import SUBJECT_TYPE_FOR_ENTITY_TYPE
 from ctx.core.wiki.wiki_utils import parse_frontmatter as _parse_frontmatter
 
 from skill_add_detector import validate_user_supplied_slug as _validate_skill_name
@@ -86,6 +87,14 @@ def _try_import(name: str, report: HealthReport) -> Any | None:
     Registers in sys.modules before exec so @dataclass decorators that inspect
     cls.__module__ resolve correctly.
     """
+    if name == "wiki_lint":
+        class _PackageWikiLint:
+            @staticmethod
+            def run_lint(wiki_dir: Path) -> list[str]:
+                return _run_package_lint(Path(wiki_dir))
+
+        return _PackageWikiLint
+
     path = SCRIPT_DIR / f"{name}.py"
     if not path.exists():
         report.skipped_modules.append(name)
@@ -119,8 +128,13 @@ def _count_log_entries(log_path: Path) -> int:
 
 
 def _entity_pages(wiki_dir: Path) -> list[Path]:
-    d = wiki_dir / "entities" / "skills"
-    return sorted(d.glob("*.md")) if d.exists() else []
+    pages: list[Path] = []
+    entities = wiki_dir / "entities"
+    for subject_type in sorted(set(SUBJECT_TYPE_FOR_ENTITY_TYPE.values())):
+        subject_dir = entities / subject_type
+        if subject_dir.exists():
+            pages.extend(p for p in subject_dir.rglob("*.md") if p.is_file())
+    return sorted(pages, key=lambda p: p.relative_to(wiki_dir).as_posix())
 
 
 def _all_wikilinks(wiki_dir: Path) -> set[str]:
@@ -172,6 +186,16 @@ def _is_stale(fm: dict[str, str]) -> bool:
         return (datetime.now(timezone.utc) - dt).days > STALE_DAYS
     except ValueError:
         return False
+
+
+def _run_package_lint(wiki_dir: Path) -> list[str]:
+    from ctx.core.wiki import wiki_lint
+
+    result = wiki_lint.run_audit(wiki_dir)
+    return [
+        f"{finding.severity} {finding.check} {finding.page}: {finding.message}"
+        for finding in result.findings
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -279,14 +303,12 @@ def run_check(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: A
             r.orphan_pages.append(page.stem)
             r.deduct(1, f"Orphan page (no inbound wikilinks): {page.stem}")
 
-    # Delegate to wiki_lint if present
-    lint = _try_import("wiki_lint", r)
-    if lint and hasattr(lint, "run_lint"):
-        try:
-            for issue in lint.run_lint(wiki_dir) or []:
-                r.warnings.append(f"  [lint] {issue}")
-        except Exception as exc:
-            r.warnings.append(f"  [lint] wiki_lint.run_lint raised: {exc}")
+    # Delegate to the package linter for wiki-wide checks outside entity pages.
+    try:
+        for issue in _run_package_lint(wiki_dir):
+            r.warnings.append(f"  [lint] {issue}")
+    except Exception as exc:
+        r.warnings.append(f"  [lint] wiki_lint.run_audit raised: {exc}")
 
     return r
 
