@@ -121,6 +121,84 @@ def _patch_export_readme(export_dir: Path) -> None:
     )
 
 
+def _iter_export_file_names(export_dir: Path) -> set[str]:
+    names: set[str] = set()
+    for path in export_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(export_dir).as_posix()
+        if rel == ".cache" or rel.startswith(".cache/"):
+            continue
+        names.add(rel)
+    return names
+
+
+def _repo_url(*, repo_id: str, repo_type: str) -> str:
+    prefix = {"dataset": "datasets", "space": "spaces"}.get(repo_type)
+    repo_path = f"{prefix}/{repo_id}" if prefix else repo_id
+    return f"https://huggingface.co/{repo_path}"
+
+
+def _repo_commit_url(*, repo_id: str, repo_type: str, sha: str) -> str:
+    return f"{_repo_url(repo_id=repo_id, repo_type=repo_type)}/commit/{sha}"
+
+
+def _remote_has_no_stale_paths(
+    *,
+    api: object,
+    export_dir: Path,
+    repo_id: str,
+    repo_type: str,
+) -> bool:
+    try:
+        remote_files = set(api.list_repo_files(repo_id=repo_id, repo_type=repo_type))
+    except Exception:
+        return False
+    return remote_files <= _iter_export_file_names(export_dir)
+
+
+def _upload_export(
+    *,
+    api: object,
+    export_dir: Path,
+    repo_id: str,
+    repo_type: str,
+    head: str,
+    prefer_large_upload: bool,
+) -> str:
+    if (
+        prefer_large_upload
+        and hasattr(api, "upload_large_folder")
+        and _remote_has_no_stale_paths(
+            api=api,
+            export_dir=export_dir,
+            repo_id=repo_id,
+            repo_type=repo_type,
+        )
+    ):
+        api.upload_large_folder(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            folder_path=str(export_dir),
+            print_report=True,
+        )
+        info = api.repo_info(repo_id=repo_id, repo_type=repo_type)
+        sha = getattr(info, "sha", None)
+        if sha:
+            return _repo_commit_url(repo_id=repo_id, repo_type=repo_type, sha=str(sha))
+        return _repo_url(repo_id=repo_id, repo_type=repo_type)
+
+    info = api.upload_folder(
+        repo_id=repo_id,
+        repo_type=repo_type,
+        folder_path=str(export_dir),
+        commit_message=f"Sync ctx {head[:7]}",
+        commit_description=f"GitHub commit: {head}",
+        delete_patterns="*",
+    )
+    return str(getattr(info, "commit_url", info))
+
+
 def sync_to_huggingface(
     *,
     repo: Path,
@@ -140,15 +218,14 @@ def sync_to_huggingface(
         _patch_export_readme(export_dir)
         api = HfApi(token=token)
         api.create_repo(repo_id, repo_type=repo_type, exist_ok=True)
-        info = api.upload_folder(
+        return _upload_export(
+            api=api,
             repo_id=repo_id,
             repo_type=repo_type,
-            folder_path=str(export_dir),
-            commit_message=f"Sync ctx {head[:7]}",
-            commit_description=f"GitHub commit: {head}",
-            delete_patterns="*",
+            export_dir=export_dir,
+            head=head,
+            prefer_large_upload=True,
         )
-        return str(getattr(info, "commit_url", info))
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
 
