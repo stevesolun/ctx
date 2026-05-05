@@ -460,7 +460,7 @@ jobs:
         run: python scripts/clean_host_contract.py --fast
 
   no-test-no-merge:
-    name: "Every src/*.py change must touch a src/tests/*.py"
+    name: "Contract changes must touch tests"
     needs: classify
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true' }}
@@ -472,7 +472,7 @@ jobs:
           lfs: false
 
       - name: Enforce test-coverage-per-PR policy
-        # Policy: any source change under src/ that isn't itself a test
+        # Policy: any product or CI/package contract change
         # must be accompanied by at least one test file change in the
         # same PR. Exemptions:
         #   - Pure docs / comment changes (matched by a trivial heuristic)
@@ -484,12 +484,12 @@ jobs:
           BASE="${{ github.event.pull_request.base.sha }}"
           HEAD="${{ github.event.pull_request.head.sha }}"
           LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
-          CHANGED=$(git diff --name-only "$BASE" "$HEAD" -- 'src/**/*.py' 'src/**/*.json' || true)
-          SRC=$(echo "$CHANGED" | grep -E '^src/.*\.py$' | grep -v '^src/tests/' || true)
-          TEST=$(echo "$CHANGED" | grep -E '^src/tests/.*\.py$' || true)
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD" -- 'src/**/*.py' 'src/**/*.json' 'scripts/ci_*.py' 'scripts/clean_host_contract.py' 'pyproject.toml' '.github/workflows/test.yml' || true)
+          CONTRACT=$(echo "$CHANGED" | grep -E '^(src/.*\.py|scripts/ci_.*\.py|scripts/clean_host_contract\.py|pyproject\.toml|\.github/workflows/test\.yml)$' | grep -v '^src/tests/' || true)
+          TEST=$(echo "$CHANGED" | grep -E '^(src/tests/.*\.py|src/tests/.*\.json)$' || true)
 
-          if [ -z "$SRC" ]; then
-            echo "No src/*.py changes — policy not applicable."
+          if [ -z "$CONTRACT" ]; then
+            echo "No product or CI/package contract changes — policy not applicable."
             exit 0
           fi
           if [ -z "$TEST" ]; then
@@ -497,19 +497,19 @@ jobs:
               echo "Policy exempted by no-tests-needed label."
               exit 0
             fi
-            echo "::error::Policy violation — src/*.py changed but no src/tests/*.py touched in this PR."
-            echo "Source files changed without accompanying test:"
-            echo "$SRC"
+            echo "::error::Policy violation — contract files changed but no src/tests/ file was touched in this PR."
+            echo "Contract files changed without accompanying test:"
+            echo "$CONTRACT"
             echo ""
             echo "Fix: add or update tests in src/tests/ that cover the change."
             echo "If the change is genuinely untestable (e.g. a release-version"
             echo "bump), label the PR 'no-tests-needed' and leave a comment."
             exit 1
           fi
-          echo "Policy satisfied — src changes accompanied by test changes."
+          echo "Policy satisfied — contract changes accompanied by test changes."
           echo ""
-          echo "Source files:"
-          echo "$SRC"
+          echo "Contract files:"
+          echo "$CONTRACT"
           echo ""
           echo "Test files:"
           echo "$TEST"
