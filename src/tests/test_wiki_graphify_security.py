@@ -255,15 +255,16 @@ def test_load_prior_graph_returns_none_on_wrong_schema(graphify_out: Path) -> No
 
 
 def test_export_graph_does_not_write_pickle(graphify_out: Path) -> None:
-    """export_graph must stop writing graph.pickle — no future RCE primitive."""
+    """export_graph must remove stale graph.pickle files."""
     from ctx.core.wiki import wiki_graphify
 
+    (graphify_out / "graph.pickle").write_bytes(b"stale")
     G = _make_sample_graph()
     wiki_graphify.export_graph(G, communities={})
 
     assert (graphify_out / "graph.json").is_file()
     assert not (graphify_out / "graph.pickle").exists(), (
-        "export_graph wrote graph.pickle — re-introducing the RCE vector"
+        "export_graph left graph.pickle behind, preserving the old RCE artifact"
     )
 
 

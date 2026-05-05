@@ -630,7 +630,7 @@ def build_graph(
         }
 
     # Decide: full build or patch an existing graph? Patching requires
-    # a compatible pickle on disk AND an incremental run. Anything
+    # a compatible graph.json on disk AND an incremental run. Anything
     # else falls through to a clean rebuild.
     prior_graph = load_prior_graph() if incremental else None
 
@@ -758,7 +758,8 @@ def load_prior_graph() -> nx.Graph | None:
     primitive — a poisoned pickle executes during deserialisation,
     before any type check. Security-auditor finding C-1. The pickle
     path is now permanently removed; a stale ``graph.pickle`` on disk
-    is ignored. Do not reintroduce it — use JSON or a checksummed
+    is ignored by reads and deleted by the next export. Do not
+    reintroduce it — use JSON or a checksummed
     binary format (msgpack) if the JSON parse cost ever matters.
     """
     path = GRAPH_OUT / "graph.json"
@@ -934,6 +935,19 @@ def _build_delta(G: nx.Graph, delta_nodes: set[str]) -> dict:
         "nodes": nodes_out,
         "edges": deduped_edges,
     }
+
+
+def _remove_stale_pickle_artifact() -> None:
+    """Delete the removed graph.pickle sidecar if an older run left it behind."""
+    path = GRAPH_OUT / "graph.pickle"
+    if not path.exists() and not path.is_symlink():
+        return
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise RuntimeError(
+            f"stale graph pickle artifact could not be removed: {path}",
+        ) from exc
 
 
 def filter_graph_by_min_cosine(G: nx.Graph, min_cosine: float) -> nx.Graph:
@@ -1271,7 +1285,7 @@ def export_graph(
     *,
     delta_nodes: set[str] | None = None,
 ) -> None:
-    """Export graph as JSON (+ pickle for patch-incremental reruns).
+    """Export graph as JSON and remove obsolete binary sidecars.
 
     ``delta_nodes``, when provided, is the set of node IDs that the
     incremental path touched — we also write a ``graph-delta.json``
@@ -1279,6 +1293,7 @@ def export_graph(
     consumers can ingest just the change rather than re-read 130MB.
     """
     GRAPH_OUT.mkdir(parents=True, exist_ok=True)
+    _remove_stale_pickle_artifact()
 
     # Export graph as node-link JSON. Pin the edges key so readers
     # (resolve_graph, wiki_visualize) can rely on it regardless of the
