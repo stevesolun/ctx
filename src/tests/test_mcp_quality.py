@@ -431,7 +431,8 @@ class TestLoadGraphIndex:
         index = mq.load_graph_index(wiki_dir)
         assert "mcp-server:github" in index
         node = index["mcp-server:github"]
-        assert node["degree"] >= 1
+        assert node["degree"] == 1
+        assert node["cross_type_degree"] == 1
 
     def test_multiple_cross_type_edges_counted_correctly(
         self, tmp_path: Path
@@ -537,7 +538,9 @@ class TestCLI:
         out = capsys.readouterr().out
         parsed = json.loads(out)
         assert parsed["slug"] == "github"
-        assert "grade" in parsed
+        assert parsed["grade"] in ("A", "B", "C", "D", "F")
+        assert isinstance(parsed["score"], float)
+        assert set(parsed["signals"]) == set(_SIGNAL_NAMES)
 
     def test_list_prints_slug_grade_lines(
         self,
@@ -561,15 +564,19 @@ class TestCLI:
                            "--wiki-dir", str(wiki_dir)]
         )
         mq.main()
-        out = capsys.readouterr().out
-        assert len(out.strip()) > 0
+        captured = capsys.readouterr()
+        out = captured.out
+        assert captured.err == "1 MCP entries\n"
         # Each line must contain a tab separating slug and grade.
         first_line = out.strip().splitlines()[0]
         assert "\t" in first_line
         # Format: <slug>\t<grade>\tscore=N.NN
         parts = first_line.split("\t")
+        assert len(parts) == 3
         assert parts[0] == "github"
         assert parts[1] in ("A", "B", "C", "D", "F")
+        assert parts[2].startswith("score=")
+        assert 0.0 <= float(parts[2].removeprefix("score=")) <= 1.0
 
 
 # ─────────────────────────────────────────────────────────────────────
