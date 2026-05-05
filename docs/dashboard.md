@@ -1,7 +1,7 @@
 # Dashboard (`ctx-monitor`)
 
 Local HTTP dashboard for ctx's currently supported live observables:
-loaded skills, agents, and MCP servers; session timelines; the
+loaded skills, agents, MCP servers, and installed harness records; session timelines; the
 knowledge graph; the LLM-wiki browser; quality grades + scores;
 durable queue state; graph/wiki artifact versions; filterable audit
 logs; a live event stream; and cataloged harness wiki/graph browsing.
@@ -33,8 +33,11 @@ generated graph/wiki artifacts that ctx can ship or consume. It reports:
   `succeeded`, `failed`)
 - the 20 most recent queue jobs with kind, attempts, source, worker, and
   last error
-- artifact presence and byte size for `graph.json`, `graph-delta.json`,
-  `communities.json`, `wiki-graph.tar.gz`, and `skills-sh-catalog.json.gz`
+- artifact presence and byte size for generated
+  `~/.claude/skill-wiki/graphify-out/{graph.json,graph-delta.json,communities.json}`
+  plus `wiki-graph.tar.gz` and `skills-sh-catalog.json.gz` from
+  `~/.claude/graph/` when installed there, falling back to the repo `graph/`
+  directory during source checkouts
 - artifact promotion metadata, including the latest promoted hash when
   the crash-safe promotion path has recorded it
 
@@ -138,15 +141,17 @@ Home · Loaded · Skills · Wiki · Graph · Status · KPIs · Sessions · Logs 
 
 ### HTML views
 
-Harness catalog entries are visible in loaded, wiki, and graph routes. Harness
-installation, update, uninstall, and quality scoring remain CLI/API workflows.
+Harness catalog entries are visible in wiki and graph routes. `/loaded` shows
+installed harness records from `~/.claude/harness-installs/*.json`, not the
+full catalog. Harness installation, update, uninstall, and quality scoring
+remain CLI/API workflows.
 Dashboard POST actions are available only from loopback clients and require the
 per-process monitor token injected into the rendered page.
 
 | Route | What it shows |
 |---|---|
 | `/` | Home: six stat cards (loaded, sidecars, wiki entities, graph nodes, audit events, sessions), grade distribution pills, recent sessions table, recent audit events |
-| `/loaded` | **Currently-loaded skills, agents, MCP servers, and installed harness records** from `~/.claude/skill-manifest.json` plus `~/.claude/harness-installs/*.json`; skill/MCP rows expose supported live actions |
+| `/loaded` | **Currently-loaded skills, agents, MCP servers, and installed harness records** from `~/.claude/skill-manifest.json` plus `~/.claude/harness-installs/*.json`; skill/agent/MCP rows expose supported live actions |
 | `/skills` | Every sidecar as a filterable **card grid**: left sidebar (search by slug, grade checkboxes, skill/agent/MCP toggle, hide-floored), card shows grade pill + raw score + links to sidecar/wiki/graph |
 | `/skill/<slug>` | Full sidecar breakdown: four-signal score (telemetry · intake · graph · routing), hard-floor reason, computed_at timestamp, per-skill audit timeline |
 | `/wiki` | **Wiki entity index** - bounded card-grid sample of up to 500 pages per dashboard-supported entity type under `~/.claude/skill-wiki/entities/{skills,agents,mcp-servers,harnesses}/`, including sharded MCP server pages and flat harness pages. Left sidebar: text search over the visible sample (slug, description, tag), skill/agent/MCP/harness checkboxes. |
@@ -184,13 +189,20 @@ load/unload mutation endpoint yet.
 
 | Route | Body | Calls |
 |---|---|---|
-| `POST /api/load` | `{"slug": "..."}` | `skill_loader.load_skill(slug)` |
+| `POST /api/load` | `{"slug": "...", "entity_type": "skill"}` | `skill_install.install_skill(slug)` |
+| `POST /api/load` | `{"slug": "...", "entity_type": "agent"}` | `agent_install.install_agent(slug)` |
+| `POST /api/load` | `{"slug": "...", "entity_type": "mcp-server"}` | `mcp_install.install_mcp(slug, command?, json_config?, auto=True)` |
 | `POST /api/unload` | `{"slug": "...", "entity_type": "skill"}` | `skill_unload.unload_from_session([slug])` |
-| `POST /api/unload` | `{"slug": "...", "entity_type": "mcp-server"}` | `mcp_install.uninstall_mcp(slug, force=True)` |
+| `POST /api/unload` | `{"slug": "...", "entity_type": "agent"}` | remove the agent row from `skill-manifest.json` and append an unload row |
+| `POST /api/unload` | `{"slug": "...", "entity_type": "mcp-server"}` | `mcp_install.uninstall_mcp(slug, wiki_dir=...)` |
 
-Both emit a matching `skill.loaded` / `skill.unloaded` audit row
-with `actor=user, meta.via="ctx-monitor"` so the dashboard-driven
-action is visible in the session timeline.
+Harness load/unload POSTs are rejected with the exact
+`ctx-harness-install ... --dry-run` command to run instead. Skill rows emit
+`skill.loaded` / `skill.unloaded`, agent rows emit `agent.loaded` /
+`agent.unloaded`, and MCP rows emit `toolbox.triggered` with
+`meta.entity_type="mcp-server"` and `meta.action` set to `loaded` or
+`unloaded`. All dashboard-driven rows use `actor=user` and
+`meta.via="ctx-monitor"` so they appear in the session timeline.
 
 ## KPIs, measures, scores
 

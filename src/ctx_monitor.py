@@ -462,6 +462,17 @@ def _file_status(path: Path) -> dict[str, Any]:
     }
 
 
+def _repo_graph_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "graph"
+
+
+def _first_existing_file_status(*paths: Path) -> dict[str, Any]:
+    for path in paths:
+        if path.exists():
+            return _file_status(path)
+    return _file_status(paths[0])
+
+
 def _promotion_status(path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -495,11 +506,13 @@ def _artifact_status() -> dict[str, Any]:
     """Return shipped graph/wiki artifact file state and promotion metadata."""
     wiki = _wiki_dir()
     graph_dir = wiki / "graphify-out"
+    claude_graph_dir = _claude_dir() / "graph"
+    repo_graph_dir = _repo_graph_dir()
     promotion_paths = sorted(
         {
             *graph_dir.glob("*.promotion.json"),
             *wiki.glob("*.promotion.json"),
-            *(_claude_dir() / "graph").glob("*.promotion.json"),
+            *claude_graph_dir.glob("*.promotion.json"),
         },
         key=lambda path: str(path),
     )
@@ -512,9 +525,13 @@ def _artifact_status() -> dict[str, Any]:
         "graph_json": _file_status(graph_dir / "graph.json"),
         "graph_delta_json": _file_status(graph_dir / "graph-delta.json"),
         "communities_json": _file_status(graph_dir / "communities.json"),
-        "wiki_graph_tar": _file_status(_claude_dir() / "graph" / "wiki-graph.tar.gz"),
-        "skills_sh_catalog": _file_status(
-            _claude_dir() / "graph" / "skills-sh-catalog.json.gz",
+        "wiki_graph_tar": _first_existing_file_status(
+            claude_graph_dir / "wiki-graph.tar.gz",
+            repo_graph_dir / "wiki-graph.tar.gz",
+        ),
+        "skills_sh_catalog": _first_existing_file_status(
+            claude_graph_dir / "skills-sh-catalog.json.gz",
+            repo_graph_dir / "skills-sh-catalog.json.gz",
         ),
         "promotion_count": len(promotions),
         "promotions": promotions,

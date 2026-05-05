@@ -329,11 +329,20 @@ def test_queue_status_summarizes_worker_jobs(fake_claude: Path) -> None:
     assert status["recent_jobs"][0]["kind"] == wiki_queue.TAR_REFRESH_JOB
 
 
-def test_artifact_status_reads_promotion_metadata(fake_claude: Path) -> None:
+def test_artifact_status_reads_promotion_metadata(
+    fake_claude: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     graph_dir = fake_claude / "skill-wiki" / "graphify-out"
     graph_dir.mkdir(parents=True)
     graph = graph_dir / "graph.json"
     graph.write_text('{"nodes":[],"edges":[]}', encoding="utf-8")
+    repo_graph = tmp_path / "repo-graph"
+    repo_graph.mkdir()
+    (repo_graph / "wiki-graph.tar.gz").write_bytes(b"tar")
+    (repo_graph / "skills-sh-catalog.json.gz").write_bytes(b"catalog")
+    monkeypatch.setattr(cm, "_repo_graph_dir", lambda: repo_graph)
     (graph_dir / "graph.json.promotion.json").write_text(
         json.dumps({
             "status": "promoted",
@@ -349,6 +358,10 @@ def test_artifact_status_reads_promotion_metadata(fake_claude: Path) -> None:
 
     assert status["graph_json"]["exists"] is True
     assert status["graph_json"]["size"] == graph.stat().st_size
+    assert status["wiki_graph_tar"]["path"] == str(repo_graph / "wiki-graph.tar.gz")
+    assert status["skills_sh_catalog"]["path"] == str(
+        repo_graph / "skills-sh-catalog.json.gz",
+    )
     assert status["promotion_count"] == 1
     assert status["promotions"][0]["status"] == "promoted"
     assert status["promotions"][0]["current_sha256"] == "new"
