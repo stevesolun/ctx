@@ -296,7 +296,48 @@ def test_export_graph_uses_atomic_writer_for_artifacts(
         "graph-delta.json",
         "communities.json",
         "graph-report.md",
+        "graph-export-manifest.json",
     }
+    assert calls[-1] == "graph-export-manifest.json"
+
+
+def test_load_prior_graph_rejects_post_graph_replace_crash(
+    graphify_out: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new graph.json without a matching manifest is an incomplete export."""
+    from ctx.core.wiki import wiki_graphify
+
+    old_graph = _make_sample_graph()
+    wiki_graphify.export_graph(old_graph, communities={})
+    old_manifest = json.loads(
+        (graphify_out / "graph-export-manifest.json").read_text(encoding="utf-8")
+    )
+
+    new_graph = _make_sample_graph()
+    new_graph.add_node("skill:new", label="new", type="skill", tags=["python"])
+
+    real_atomic = wiki_graphify.safe_atomic_write_text
+
+    def crash_after_graph(path: Path, text: str, encoding: str = "utf-8") -> None:
+        real_atomic(path, text, encoding=encoding)
+        if path.name == "graph.json":
+            raise RuntimeError("simulated crash after graph replacement")
+
+    monkeypatch.setattr(
+        wiki_graphify,
+        "safe_atomic_write_text",
+        crash_after_graph,
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        wiki_graphify.export_graph(new_graph, communities={})
+
+    assert json.loads(
+        (graphify_out / "graph-export-manifest.json").read_text(encoding="utf-8")
+    ) == old_manifest
+    assert wiki_graphify.load_prior_graph() is None
 
 
 def test_inject_community_links_refreshes_generated_block(

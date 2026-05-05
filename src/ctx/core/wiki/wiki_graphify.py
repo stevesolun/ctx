@@ -56,6 +56,7 @@ MCP_ENTITIES = WIKI_DIR / "entities" / "mcp-servers"
 HARNESS_ENTITIES = WIKI_DIR / "entities" / "harnesses"
 CONCEPTS_DIR = WIKI_DIR / "concepts"
 GRAPH_OUT = WIKI_DIR / "graphify-out"
+GRAPH_EXPORT_MANIFEST = "graph-export-manifest.json"
 # Source of truth for per-node quality: sidecars produced by
 # ``src/skill_quality.py``. Graph nodes get ``quality_score`` and
 # ``quality_grade`` attached when a matching sidecar exists.
@@ -858,6 +859,65 @@ def load_prior_graph() -> nx.Graph | None:
         return None
     if "edges" not in data and "links" not in data:
         return None
+    graph_export_id: str | None = None
+    graph_meta = data.get("graph")
+    if isinstance(graph_meta, dict):
+        raw_graph_export_id = graph_meta.get("export_id")
+        if isinstance(raw_graph_export_id, str):
+            graph_export_id = raw_graph_export_id
+    manifest_path = GRAPH_OUT / GRAPH_EXPORT_MANIFEST
+    if manifest_path.is_file():
+        try:
+            manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(
+                f"wiki_graphify: graph export manifest unreadable ({exc}); "
+                "full rebuild",
+                flush=True,
+            )
+            return None
+        if not isinstance(manifest_data, dict):
+            print(
+                "wiki_graphify: graph export manifest has wrong schema; full rebuild",
+                flush=True,
+            )
+            return None
+        manifest_export_id = manifest_data.get("export_id")
+        if graph_export_id != manifest_export_id:
+            print(
+                "wiki_graphify: graph.json export id does not match manifest; "
+                "full rebuild",
+                flush=True,
+            )
+            return None
+        artifacts = manifest_data.get("artifacts")
+        if not isinstance(artifacts, dict):
+            print(
+                "wiki_graphify: graph export manifest missing artifacts; full rebuild",
+                flush=True,
+            )
+            return None
+        for key in ("delta", "communities", "report"):
+            artifact_name = artifacts.get(key)
+            if not isinstance(artifact_name, str):
+                print(
+                    f"wiki_graphify: graph export manifest missing {key}; full rebuild",
+                    flush=True,
+                )
+                return None
+            if not (GRAPH_OUT / artifact_name).is_file():
+                print(
+                    f"wiki_graphify: graph export artifact {artifact_name} missing; "
+                    "full rebuild",
+                    flush=True,
+                )
+                return None
+    elif graph_export_id:
+        print(
+            "wiki_graphify: graph.json has an export id but no manifest; full rebuild",
+            flush=True,
+        )
+        return None
     try:
         # ``edges="edges"`` matches what export_graph writes. networkx
         # auto-falls-back to the legacy ``links`` key internally when
@@ -873,6 +933,11 @@ def load_prior_graph() -> nx.Graph | None:
     if not isinstance(graph, nx.Graph):
         return None
     return graph
+
+
+def _new_graph_export_id() -> str:
+    """Return a per-export ID used to detect mixed graph artifacts."""
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
 
 
 def patch_graph(
@@ -1433,7 +1498,13 @@ def export_graph(
     # (resolve_graph, wiki_visualize) can rely on it regardless of the
     # networkx version that wrote it — default changed from "links" in
     # <3.0 to "edges" in >=3.0, which silently broke every consumer.
+    export_id = _new_graph_export_id()
     graph_data = nx.node_link_data(G, edges="edges")
+    graph_meta = graph_data.setdefault("graph", {})
+    if isinstance(graph_meta, dict):
+        graph_meta["export_id"] = export_id
+    else:
+        graph_data["graph"] = {"export_id": export_id}
     safe_atomic_write_text(
         GRAPH_OUT / "graph.json",
         json.dumps(graph_data, indent=2, default=str),
@@ -1452,6 +1523,7 @@ def export_graph(
     # the graph from scratch) so downstream consumers can always
     # stat a single file to detect changes.
     delta = _build_delta(G, delta_nodes or set())
+    delta["export_id"] = export_id
     safe_atomic_write_text(
         GRAPH_OUT / "graph-delta.json",
         json.dumps(delta, indent=2, default=str),
@@ -1466,6 +1538,7 @@ def export_graph(
     safe_atomic_write_text(
         GRAPH_OUT / "communities.json",
         json.dumps({
+            "export_id": export_id,
             "communities": {str(cid): {"label": labels[cid], "members": members}
                            for cid, members in communities.items()},
             "total_communities": len(communities),
@@ -1480,6 +1553,7 @@ def export_graph(
         "# Graph Report",
         "",
         f"> Generated: {TODAY}",
+        f"> Export ID: {export_id}",
         f"> Nodes: {G.number_of_nodes()} | Edges: {G.number_of_edges()} | Communities: {len(communities)}",
         "",
         "## God Nodes (Most Connected)",
@@ -1496,6 +1570,26 @@ def export_graph(
     safe_atomic_write_text(
         GRAPH_OUT / "graph-report.md",
         "\n".join(report_lines),
+        encoding="utf-8",
+    )
+    safe_atomic_write_text(
+        GRAPH_OUT / GRAPH_EXPORT_MANIFEST,
+        json.dumps({
+            "version": 1,
+            "export_id": export_id,
+            "generated": TODAY,
+            "artifacts": {
+                "graph": "graph.json",
+                "delta": "graph-delta.json",
+                "communities": "communities.json",
+                "report": "graph-report.md",
+            },
+            "counts": {
+                "nodes": G.number_of_nodes(),
+                "edges": G.number_of_edges(),
+                "communities": len(communities),
+            },
+        }, indent=2),
         encoding="utf-8",
     )
     print(f"Graph exported to {GRAPH_OUT}/")

@@ -144,6 +144,32 @@ class TestLoadGraph:
         assert G.number_of_nodes() == 3
         assert G.number_of_edges() == 3
 
+    def test_export_manifest_mismatch_returns_empty_graph(self, tmp_path: Path) -> None:
+        source = _build_simple_graph()
+        data = _serialise_graph(source)
+        data.setdefault("graph", {})["export_id"] = "new-export"
+        p = tmp_path / "graph.json"
+        p.write_text(json.dumps(data), encoding="utf-8")
+        for name in ("graph-delta.json", "communities.json", "graph-report.md"):
+            (tmp_path / name).write_text("{}", encoding="utf-8")
+        (tmp_path / "graph-export-manifest.json").write_text(
+            json.dumps({
+                "version": 1,
+                "export_id": "old-export",
+                "artifacts": {
+                    "graph": "graph.json",
+                    "delta": "graph-delta.json",
+                    "communities": "communities.json",
+                    "report": "graph-report.md",
+                },
+            }),
+            encoding="utf-8",
+        )
+
+        G = resolve_graph.load_graph(p)
+
+        assert G.number_of_nodes() == 0
+
     def test_default_path_used_when_arg_is_none(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Passing path=None falls back to GRAPH_PATH."""
         source = _build_simple_graph()
