@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from validate_graph_artifacts import GraphArtifactError, validate_graph_artifacts
+from validate_graph_artifacts import (
+    GraphArtifactError,
+    _safe_tar_name,
+    _scan_graph_json,
+    validate_graph_artifacts,
+)
 
 
 def _add_text(tf: tarfile.TarFile, name: str, text: str) -> None:
@@ -140,3 +145,54 @@ def test_validate_graph_artifacts_rejects_original_backup_members(tmp_path: Path
 
     with pytest.raises(GraphArtifactError, match="raw backup"):
         validate_graph_artifacts(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "raw_name",
+    [
+        "../graphify-out/graph.json",
+        "./../graphify-out/graph.json",
+        "entities/../graphify-out/graph.json",
+        "/graphify-out/graph.json",
+        r"C:\tmp\graph.json",
+        "entities//skills/example.md",
+    ],
+)
+def test_safe_tar_name_rejects_unsafe_members(raw_name: str) -> None:
+    with pytest.raises(GraphArtifactError, match="unsafe archive member path"):
+        _safe_tar_name(raw_name)
+
+
+def test_safe_tar_name_strips_only_exact_current_dir_prefix() -> None:
+    assert _safe_tar_name("./graphify-out/graph.json") == "graphify-out/graph.json"
+
+
+def test_scan_graph_json_handles_pretty_printed_graph() -> None:
+    graph = {
+        "nodes": [
+            {
+                "id": "skill:skills-sh-example-skill",
+                "type": "skill",
+                "source_catalog": "skills.sh",
+            },
+            {
+                "id": "harness:text-to-cad",
+                "type": "harness",
+            },
+        ],
+        "edges": [
+            {
+                "source": "skill:skills-sh-example-skill",
+                "target": "harness:text-to-cad",
+                "semantic_sim": 0.0,
+            },
+            {
+                "source": "skill:skills-sh-example-skill",
+                "target": "harness:text-to-cad",
+                "semantic_sim": 0.82,
+            },
+        ],
+    }
+    payload = json.dumps(graph, indent=2).encode("utf-8")
+
+    assert _scan_graph_json(BytesIO(payload)) == (2, 2, 1, 1, 1)

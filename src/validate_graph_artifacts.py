@@ -28,7 +28,14 @@ DEFAULT_HARNESSES = {
     "semantic-kernel",
     "text-to-cad",
 }
-_NONZERO_SEMANTIC_RE = re.compile(rb'"semantic_sim":(?!0(?:\.0+)?[,}])')
+_NODE_ID_RE = re.compile(rb'"id"\s*:')
+_EDGE_TARGET_RE = re.compile(rb'"target"\s*:')
+_SOURCE_SKILLS_SH_RE = re.compile(rb'"source_catalog"\s*:\s*"skills\.sh"')
+_HARNESS_TYPE_RE = re.compile(rb'"type"\s*:\s*"harness"')
+_SEMANTIC_SIM_RE = re.compile(
+    rb'"semantic_sim"\s*:\s*(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)',
+)
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
 
 class GraphArtifactError(RuntimeError):
@@ -73,9 +80,18 @@ def _require_real_file(path: Path) -> None:
 
 
 def _safe_tar_name(raw_name: str) -> str:
-    name = raw_name.replace("\\", "/").lstrip("./")
-    parts = [part for part in name.split("/") if part]
-    if not parts or raw_name.startswith(("/", "\\")) or ".." in parts:
+    name = raw_name.replace("\\", "/")
+    if (
+        not name
+        or name.startswith("/")
+        or _WINDOWS_DRIVE_RE.match(name)
+        or "\x00" in name
+    ):
+        raise GraphArtifactError(f"unsafe archive member path: {raw_name}")
+    while name.startswith("./"):
+        name = name[2:]
+    parts = name.split("/")
+    if not parts or any(part in ("", ".", "..") for part in parts):
         raise GraphArtifactError(f"unsafe archive member path: {raw_name}")
     return "/".join(parts)
 
@@ -90,19 +106,33 @@ def _scan_graph_json(stream: IO[bytes]) -> tuple[int, int, int, int, int]:
     while chunk := stream.read(1024 * 1024):
         old_tail = tail
         data = tail + chunk
-        nodes += data.count(b'"id":') - old_tail.count(b'"id":')
-        edges += data.count(b'"target":') - old_tail.count(b'"target":')
+        nodes += len(_NODE_ID_RE.findall(data)) - len(_NODE_ID_RE.findall(old_tail))
+        edges += len(_EDGE_TARGET_RE.findall(data)) - len(_EDGE_TARGET_RE.findall(old_tail))
         semantic_edges += (
-            len(_NONZERO_SEMANTIC_RE.findall(data))
-            - len(_NONZERO_SEMANTIC_RE.findall(old_tail))
+            _count_nonzero_semantic_matches(data)
+            - _count_nonzero_semantic_matches(old_tail)
         )
         skills_sh_nodes += (
-            data.count(b'"source_catalog":"skills.sh"')
-            - old_tail.count(b'"source_catalog":"skills.sh"')
+            len(_SOURCE_SKILLS_SH_RE.findall(data))
+            - len(_SOURCE_SKILLS_SH_RE.findall(old_tail))
         )
-        harness_nodes += data.count(b'"type":"harness"') - old_tail.count(b'"type":"harness"')
-        tail = data[-128:]
+        harness_nodes += (
+            len(_HARNESS_TYPE_RE.findall(data))
+            - len(_HARNESS_TYPE_RE.findall(old_tail))
+        )
+        tail = data[-512:]
     return nodes, edges, semantic_edges, skills_sh_nodes, harness_nodes
+
+
+def _count_nonzero_semantic_matches(data: bytes) -> int:
+    count = 0
+    for match in _SEMANTIC_SIM_RE.finditer(data):
+        try:
+            if float(match.group(1)) != 0.0:
+                count += 1
+        except ValueError:
+            continue
+    return count
 
 
 def _catalog_skills(catalog: dict[str, Any]) -> list[dict[str, Any]]:
