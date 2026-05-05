@@ -283,10 +283,10 @@ def test_setup_and_verify_commands_require_explicit_flags(
         run_verify=True,
         allow_local_sources=True,
     )
-    assert calls == [
-        ["python", "-m", "pip", "install", "-e", "."],
-        ["python", "-m", "pytest"],
-    ]
+    assert Path(calls[0][0]).name.lower().startswith("python")
+    assert calls[0][1:] == ["-m", "pip", "install", "-e", "."]
+    assert Path(calls[1][0]).name.lower().startswith("python")
+    assert calls[1][1:] == ["-m", "pytest"]
 
 
 def test_target_must_stay_inside_installs_root(tmp_path: Path) -> None:
@@ -557,6 +557,47 @@ def test_cataloged_commands_use_sanitized_env_and_redact_output(
 
     assert "OPENAI_API_KEY" not in captured_env
     assert run["stdout"] == f"token {harness_install._REDACTION}"
+
+
+def test_run_command_resolves_bare_executable(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    resolved = str(tmp_path / "npx.cmd")
+    captured_cmd: list[str] = []
+
+    def fake_which(command: str, *, path: str | None = None) -> str | None:
+        return resolved if command == "npx" else None
+
+    def fake_run(cmd: list[str], **_kwargs: Any) -> _FakeRun:
+        captured_cmd.extend(cmd)
+        return _FakeRun(stdout="9.0.0")
+
+    monkeypatch.setattr(harness_install.shutil, "which", fake_which)
+    monkeypatch.setattr(harness_install.subprocess, "run", fake_run)
+
+    run = harness_install._run_command("npx --version", cwd=tmp_path)
+
+    assert run["returncode"] == 0
+    assert captured_cmd[0] == resolved
+
+
+def test_split_command_preserves_windows_backslashes(monkeypatch: Any) -> None:
+    monkeypatch.setattr(harness_install.os, "name", "nt")
+
+    parts = harness_install._split_command(r'python "C:\Users\me\script.py"')
+
+    assert parts == ["python", r"C:\Users\me\script.py"]
+
+
+def test_failed_run_message_includes_redacted_output() -> None:
+    message = harness_install._failed_run_message(
+        "setup",
+        "npm install",
+        {"stderr": "token leaked", "stdout": ""},
+    )
+
+    assert message == "setup command failed: npm install: token leaked"
 
 
 def test_recommend_mode_prints_install_handoff(

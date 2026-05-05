@@ -279,19 +279,30 @@ def _materialize_source(
 
 
 def _run_command(command: str, *, cwd: Path) -> dict[str, Any]:
-    tokens = shlex.split(command)
+    tokens = _split_command(command)
     if not tokens:
         raise ValueError("empty harness command")
+    env = _command_env()
+    tokens[0] = _resolve_command_executable(tokens[0], env)
     started = time.time()
-    proc = subprocess.run(
-        tokens,
-        cwd=str(cwd),
-        env=_command_env(),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=600,
-    )
+    try:
+        proc = subprocess.run(
+            tokens,
+            cwd=str(cwd),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=600,
+        )
+    except OSError as exc:
+        return {
+            "command": command,
+            "returncode": 127,
+            "stdout": "",
+            "stderr": _redact_output(str(exc))[-4000:],
+            "duration_seconds": round(time.time() - started, 3),
+        }
     return {
         "command": command,
         "returncode": proc.returncode,
@@ -299,6 +310,31 @@ def _run_command(command: str, *, cwd: Path) -> dict[str, Any]:
         "stderr": _redact_output(proc.stderr)[-4000:],
         "duration_seconds": round(time.time() - started, 3),
     }
+
+
+def _split_command(command: str) -> list[str]:
+    parts = shlex.split(command, posix=os.name != "nt")
+    if os.name == "nt":
+        parts = [_strip_surrounding_quotes(part) for part in parts]
+    return parts
+
+
+def _strip_surrounding_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _resolve_command_executable(command: str, env: dict[str, str]) -> str:
+    if os.path.isabs(command) or any(sep in command for sep in ("/", "\\")):
+        return command
+    return shutil.which(command, path=env.get("PATH")) or command
+
+
+def _failed_run_message(kind: str, command: str, run: dict[str, Any]) -> str:
+    tail = str(run.get("stderr") or run.get("stdout") or "").strip()
+    suffix = f": {tail[-1000:]}" if tail else ""
+    return f"{kind} command failed: {command}{suffix}"
 
 
 def _command_env() -> dict[str, str]:
@@ -348,13 +384,13 @@ def _stage_harness(
             run = _run_command(command, cwd=stage_path)
             setup_runs.append(run)
             if run["returncode"] != 0:
-                raise RuntimeError(f"setup command failed: {command}")
+                raise RuntimeError(_failed_run_message("setup", command, run))
     if run_verify:
         for command in record.verify_commands:
             run = _run_command(command, cwd=stage_path)
             verify_runs.append(run)
             if run["returncode"] != 0:
-                raise RuntimeError(f"verify command failed: {command}")
+                raise RuntimeError(_failed_run_message("verify", command, run))
     return setup_runs, verify_runs
 
 

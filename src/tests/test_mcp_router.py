@@ -22,6 +22,7 @@ from ctx.adapters.generic.tools import (
     McpRouter,
     McpServerConfig,
     McpServerError,
+    mcp_router,
     running_router,
 )
 
@@ -81,6 +82,21 @@ class TestClientLifecycle:
     def test_stop_before_start_is_noop(self) -> None:
         client = McpClient(_make_config())
         client.stop()  # must not raise
+
+    def test_bare_command_resolved_through_path(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        resolved = tmp_path / ("npx.cmd" if sys.platform == "win32" else "npx")
+        resolved.write_text("", encoding="utf-8")
+        monkeypatch.setattr(
+            mcp_router.shutil,
+            "which",
+            lambda command, path=None: str(resolved) if command == "npx" else None,
+        )
+
+        assert mcp_router._resolve_executable("npx", {"PATH": str(tmp_path)}) == str(resolved)
 
     def test_idempotent_stop(self) -> None:
         client = McpClient(_make_config())
@@ -268,6 +284,10 @@ class TestRouter:
         # Atomic rollback — the first (already-started) server must be
         # reaped so we don't leak child processes.
         assert router.server_names == []
+
+    def test_server_name_cannot_contain_router_separator(self) -> None:
+        with pytest.raises(ValueError, match="may not contain"):
+            McpServerConfig(name="foo__bar", command=sys.executable)
 
     def test_stopped_router_rejects_calls(self) -> None:
         router = McpRouter([_make_config("fake")])

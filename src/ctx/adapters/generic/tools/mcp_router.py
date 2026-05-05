@@ -39,6 +39,8 @@ import json
 import logging
 import os
 import queue
+import re
+import shutil
 import subprocess
 import threading
 import time
@@ -71,6 +73,7 @@ _SAFE_PARENT_ENV_PREFIXES = ("LC_",)
 # model as "github__list_repos". Uses a double underscore to avoid
 # colliding with legitimate snake_case identifiers.
 TOOL_SEPARATOR = "__"
+_SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
 def _default_child_env() -> dict[str, str]:
@@ -83,6 +86,29 @@ def _default_child_env() -> dict[str, str]:
         ):
             child_env[key] = value
     return child_env
+
+
+def _validate_server_name(name: str) -> None:
+    if TOOL_SEPARATOR in name or _SERVER_NAME_RE.fullmatch(name) is None:
+        raise ValueError(
+            "MCP server names must match [A-Za-z0-9][A-Za-z0-9_-]* "
+            f"and may not contain {TOOL_SEPARATOR!r}: {name!r}"
+        )
+
+
+def _resolve_executable(command: str, env: dict[str, str]) -> str:
+    """Resolve bare commands through PATH/PATHEXT before spawning.
+
+    Windows does not let ``subprocess.Popen(["npx", ...])`` find
+    ``npx.cmd`` reliably in all environments. ``shutil.which`` applies
+    PATHEXT and gives us the actual executable path while leaving
+    explicit paths untouched.
+    """
+    if not command.strip():
+        raise ValueError("MCP command is empty")
+    if os.path.isabs(command) or any(sep in command for sep in ("/", "\\")):
+        return command
+    return shutil.which(command, path=env.get("PATH")) or command
 
 
 # ── Config ─────────────────────────────────────────────────────────────────
@@ -110,6 +136,9 @@ class McpServerConfig:
     startup_timeout: float = 10.0
     request_timeout: float = 30.0
     inherit_env: bool = False
+
+    def __post_init__(self) -> None:
+        _validate_server_name(self.name)
 
 
 class McpServerError(RuntimeError):
@@ -152,14 +181,21 @@ class McpClient:
         env = os.environ.copy() if self._config.inherit_env else _default_child_env()
         env.update(self._config.env)
 
-        self._proc = subprocess.Popen(
-            [self._config.command, *self._config.args],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=env,
-            bufsize=0,  # unbuffered; we flush each write ourselves
-        )
+        command = _resolve_executable(self._config.command, env)
+        try:
+            self._proc = subprocess.Popen(
+                [command, *self._config.args],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                bufsize=0,  # unbuffered; we flush each write ourselves
+            )
+        except OSError as exc:
+            raise McpServerError(
+                f"{self._config.name}: failed to start MCP command "
+                f"{self._config.command!r}: {exc}"
+            ) from exc
         assert self._proc.stdin and self._proc.stdout and self._proc.stderr
 
         # Drain stderr in the background so a verbose server can't fill
