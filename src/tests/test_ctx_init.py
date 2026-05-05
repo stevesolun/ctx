@@ -385,7 +385,7 @@ repo_url: https://github.com/earthtojake/text-to-cad
     )
 
     results = ci.recommend_harnesses(
-        "text to cad openscad openai gpt-5 harness",
+        "turn text prompts into CAD openscad openai gpt-5 harness",
         model_provider="openai",
         model="openai/gpt-5.5",
     )

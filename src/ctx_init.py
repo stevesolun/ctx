@@ -199,7 +199,9 @@ _HARNESS_TOKEN_RE = re.compile(r"[a-z0-9]+")
 _HARNESS_GOAL_NOISE = frozenset({
     "build",
     "create",
+    "into",
     "make",
+    "turn",
     "write",
     "need",
     "want",

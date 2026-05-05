@@ -206,6 +206,18 @@ def test_top_n_limit_is_respected() -> None:
     assert len(out) == 2
 
 
+def test_never_load_nodes_are_not_recommended() -> None:
+    G = _build_graph([
+        ("python-active", ["python"]),
+        ("python-stale", ["python"]),
+    ])
+    G.nodes["skill:python-stale"]["never_load"] = True
+
+    out = recommend_by_tags(G, ["python"], top_n=5)
+
+    assert [row["name"] for row in out] == ["python-active"]
+
+
 # ── query_to_tags ─────────────────────────────────────────────────────
 
 

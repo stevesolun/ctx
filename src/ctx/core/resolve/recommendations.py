@@ -39,6 +39,16 @@ def _slug_tokens(label: str) -> set[str]:
     return {tok for tok in _SLUG_TOKEN_RE.split(label.lower()) if tok}
 
 
+def _truthy_flag(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
+
+
 # Cache token IDF per live graph object. The graph object is built once
 # per process by the recommender entry points; recomputing the IDF on
 # every query would be wasteful (one pass over 100K+ labels). A weak-key
@@ -275,6 +285,8 @@ def recommend_by_tags(
     scored: list[tuple[str, float, str, dict[str, Any], set[str]]] = []
     for node_id, data in graph.nodes(data=True):
         node_data = dict(data)
+        if _truthy_flag(node_data.get("never_load")):
+            continue
         node_type = str(node_data.get("type", "skill"))
         if entity_type_filter is not None and node_type not in entity_type_filter:
             continue
@@ -335,6 +347,7 @@ def recommend_by_tags(
             "external_catalog": node_data.get("external_catalog"),
             "source_catalog": node_data.get("source_catalog"),
             "status": node_data.get("status"),
+            "never_load": _truthy_flag(node_data.get("never_load")),
             "source": node_data.get("source"),
             "skill_id": node_data.get("skill_id"),
             "installs": _safe_int(node_data.get("installs")),
