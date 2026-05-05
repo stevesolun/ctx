@@ -1,8 +1,8 @@
 # Skill lifecycle & KPI dashboard — install & operations
 
-One page on running the Phase 4 lifecycle CLI, the category backfill,
-and the KPI dashboard. Prerequisite: Phase 3 scorer is installed and
-has written at least one sidecar. See
+One page on running the lifecycle CLI, the category backfill, and the KPI
+dashboard. Prerequisite: the quality scorer is installed and has written at
+least one sidecar. See
 [skill-quality-install.md](./skill-quality-install.md).
 
 ## What it does

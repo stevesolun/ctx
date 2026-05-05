@@ -1,8 +1,7 @@
 # Skill quality — install & operations
 
-One page on running the Phase 3 quality scorer: install the Stop hook,
-seed the sidecars, and verify the data flows into the wiki and the
-knowledge graph.
+One page on running the quality scorer: install the Stop hook, seed the
+sidecars, and verify the data flows into the wiki and the knowledge graph.
 
 ## What it does
 

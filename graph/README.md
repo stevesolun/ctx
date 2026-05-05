@@ -12,7 +12,7 @@ Current snapshot:
 - **10,787 MCP server pages**
 - **13 harness pages**
 - **89,463 hydrated Skills.sh `SKILL.md` bodies**
-- **28,611 long Skills.sh bodies converted through the micro-skill gate**
+- **28,612 long Skills.sh bodies converted through the micro-skill gate**
 
 The runtime recommendation paths use this graph in two ways:
 
@@ -47,9 +47,10 @@ The runtime recommendation paths use this graph in two ways:
 - `SCHEMA.md`, `index.md`, `log.md`, `catalog.md` - wiki contract and indexes
 - `.obsidian/` - vault metadata for local graph browsing
 
-`SKILL.md.original` backups are not shipped. Local micro-skill conversion may
-keep `.original` files for traceability, but the packaged tarball excludes them
-so users do not ingest raw long bodies after conversion.
+`SKILL.md.original` backups and transient `.lock` files are not shipped. Local
+micro-skill conversion may keep `.original` files for traceability, but the
+packaged tarball excludes them so users do not ingest raw long bodies after
+conversion.
 
 ## Extract
 
@@ -94,15 +95,17 @@ Manual sanity checks:
 tar -tzf graph/wiki-graph.tar.gz | grep 'graphify-out/graph.json'
 tar -tzf graph/wiki-graph.tar.gz | grep 'external-catalogs/skills-sh/catalog.json'
 tar -tzf graph/wiki-graph.tar.gz | grep 'SKILL.md.original' && exit 1 || true
+tar -tzf graph/wiki-graph.tar.gz | grep '\.lock$' && exit 1 || true
 ```
 
-Windows PowerShell equivalent for the `.original` exclusion:
+Windows PowerShell equivalent for the exclusion checks:
 
 ```powershell
 tar -tzf graph/wiki-graph.tar.gz | Select-String 'SKILL.md.original'
+tar -tzf graph/wiki-graph.tar.gz | Select-String '\.lock$'
 ```
 
-The PowerShell command should print nothing.
+The PowerShell commands should print nothing.
 
 ## Rebuild
 
@@ -128,6 +131,7 @@ tar --force-local -czf /path/to/ctx/graph/wiki-graph.tar.gz \
     --exclude='./graphify-out/graph-delta.json' \
     --exclude='./graphify-out/graph.pickle' \
     --exclude='*.original' \
+    --exclude='*.lock' \
     .
 ```
 
