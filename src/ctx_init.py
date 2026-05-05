@@ -424,13 +424,21 @@ def _harness_candidate_terms(graph: Any, row: dict[str, Any]) -> set[str]:
     for key in ("label", "description", "summary", "source"):
         terms.update(_harness_tokens(str(node_data.get(key) or "")))
     for key in ("tags", "capabilities", "model_providers", "runtimes"):
-        raw = node_data.get(key)
-        if isinstance(raw, str):
-            terms.update(_harness_tokens(raw))
-        elif isinstance(raw, (list, tuple, set, frozenset)):
-            for item in raw:
-                terms.update(_harness_tokens(str(item)))
+        _add_harness_terms(terms, node_data.get(key))
+    wiki_fm = _harness_frontmatter_from_wiki(slug)
+    for key in ("title", "description", "summary", "repo_url", "docs_url"):
+        terms.update(_harness_tokens(str(wiki_fm.get(key) or "")))
+    for key in ("tags", "capabilities", "model_providers", "runtimes"):
+        _add_harness_terms(terms, wiki_fm.get(key))
     return terms
+
+
+def _add_harness_terms(terms: set[str], raw: object) -> None:
+    if isinstance(raw, str):
+        terms.update(_harness_tokens(raw))
+    elif isinstance(raw, (list, tuple, set, frozenset)):
+        for item in raw:
+            terms.update(_harness_tokens(str(item)))
 
 
 def _harness_node_data(graph: Any, slug: str) -> dict[str, Any]:
@@ -449,6 +457,7 @@ def _harness_node_data(graph: Any, slug: str) -> dict[str, Any]:
 
 def _harness_signal_matches(signal: str, terms: set[str]) -> bool:
     candidates = set(_HARNESS_SIGNAL_ALIASES.get(signal, {signal}))
+    candidates.update(_harness_tokens(signal))
     if signal.endswith("ies"):
         candidates.add(signal[:-3] + "y")
     elif signal.endswith("s") and len(signal) > 3:
@@ -574,6 +583,12 @@ def _harness_model_providers_from_graph(graph: Any, slug: str) -> set[str]:
 
 
 def _harness_model_providers_from_wiki(slug: str) -> set[str]:
+    return _normalise_model_providers(
+        _harness_frontmatter_from_wiki(slug).get("model_providers")
+    )
+
+
+def _harness_frontmatter_from_wiki(slug: str) -> dict[str, Any]:
     try:
         from ctx.core.entity_types import entity_page_path  # noqa: PLC0415
         from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body  # noqa: PLC0415
@@ -581,13 +596,13 @@ def _harness_model_providers_from_wiki(slug: str) -> set[str]:
 
         path = entity_page_path(cfg.wiki_dir, "harness", slug)
         if path is None or not path.is_file():
-            return set()
+            return {}
         fm, _body = parse_frontmatter_and_body(
             path.read_text(encoding="utf-8", errors="replace"),
         )
-        return _normalise_model_providers(fm.get("model_providers"))
+        return fm
     except Exception:
-        return set()
+        return {}
 
 
 def _load_recommendation_graph() -> Any:

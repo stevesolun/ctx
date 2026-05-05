@@ -5,7 +5,9 @@ from __future__ import annotations
 import builtins
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
+import networkx as nx
 import ctx_init as ci
 
 
@@ -333,6 +335,67 @@ def test_main_custom_model_no_fit_points_to_harness_plan(
     assert "no harness recommendations matched yet" in output
     assert "ctx-harness-install --recommend" in output
     assert "--plan-on-no-fit" in output
+
+
+def test_recommend_harnesses_uses_wiki_frontmatter_for_fit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    wiki = tmp_path / "wiki"
+    page = wiki / "entities" / "harnesses" / "text-to-cad.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        """---
+title: Text to CAD
+type: harness
+tags:
+  - cad
+runtimes:
+  - python
+model_providers:
+  - openai
+capabilities:
+  - Generate CAD artifacts from natural language prompts
+    with OpenSCAD and mesh validation
+repo_url: https://github.com/earthtojake/text-to-cad
+---
+# Text to CAD
+""",
+        encoding="utf-8",
+    )
+    graph = nx.Graph()
+    graph.add_node(
+        "harness:text-to-cad",
+        label="text-to-cad",
+        type="harness",
+        tags=["cad"],
+    )
+    monkeypatch.setattr(ci, "_load_recommendation_graph", lambda: graph)
+    import ctx_config
+
+    monkeypatch.setattr(
+        ctx_config,
+        "cfg",
+        SimpleNamespace(
+            wiki_dir=wiki,
+            claude_dir=tmp_path / ".claude",
+            recommendation_top_k=5,
+            harness_recommendation_min_fit_score=0.85,
+        ),
+    )
+
+    results = ci.recommend_harnesses(
+        "text to cad openscad openai gpt-5 harness",
+        model_provider="openai",
+        model="openai/gpt-5.5",
+    )
+
+    assert results
+    assert results[0]["name"] == "text-to-cad"
+    assert results[0]["fit_score"] >= 0.85
+    assert "openai" in results[0]["fit_signals"]
+    assert "gpt-5" in results[0]["fit_signals"]
+    assert "openscad" in results[0]["fit_signals"]
 
 
 def test_main_custom_model_requires_model(tmp_path: Path, monkeypatch) -> None:

@@ -255,7 +255,7 @@ def compute_quality(
         )
 
     raw = sum(cfg.weights[name] * signals[name].score for name in _MCP_WEIGHT_KEYS)
-    score = max(0.0, min(1.0, raw))
+    score = round(max(0.0, min(1.0, raw)), 10)
     grade = _grade_from_score(score, cfg.grade_thresholds)
 
     return McpQualityScore(
