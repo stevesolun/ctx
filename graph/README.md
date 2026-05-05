@@ -71,6 +71,22 @@ python src/validate_graph_artifacts.py --deep
 python src/update_repo_stats.py --check
 ```
 
+For release-count validation, pin the exact snapshot numbers:
+
+```bash
+python src/validate_graph_artifacts.py --deep \
+  --expected-nodes 102696 \
+  --expected-edges 2900834 \
+  --expected-semantic-edges 1682825 \
+  --expected-skills-sh-nodes 89463 \
+  --expected-skills-sh-catalog-entries 89463 \
+  --expected-skills-sh-converted 89463 \
+  --expected-skill-pages 91432 \
+  --expected-agent-pages 464 \
+  --expected-mcp-pages 10787 \
+  --expected-harness-pages 13
+```
+
 Manual sanity checks:
 
 ```bash

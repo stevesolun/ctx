@@ -151,6 +151,16 @@ def validate_graph_artifacts(
     expected_harnesses: set[str] | None = None,
     line_threshold: int = 180,
     max_stage_lines: int = 40,
+    expected_nodes: int | None = None,
+    expected_edges: int | None = None,
+    expected_semantic_edges: int | None = None,
+    expected_skills_sh_nodes: int | None = None,
+    expected_skills_sh_catalog_entries: int | None = None,
+    expected_skills_sh_converted: int | None = None,
+    expected_skill_pages: int | None = None,
+    expected_agent_pages: int | None = None,
+    expected_mcp_pages: int | None = None,
+    expected_harness_pages: int | None = None,
 ) -> GraphArtifactStats:
     graph_dir = Path(graph_dir)
     tarball = graph_dir / "wiki-graph.tar.gz"
@@ -266,7 +276,7 @@ def validate_graph_artifacts(
                 f"semantic edge count {graph_semantic_edges} below floor {min_semantic_edges}",
             )
 
-    return GraphArtifactStats(
+    stats = GraphArtifactStats(
         tar_members=len(names),
         graph_nodes=graph_nodes,
         graph_edges=graph_edges,
@@ -279,6 +289,37 @@ def validate_graph_artifacts(
         mcp_pages=mcp_pages,
         harness_pages=harness_pages,
     )
+    if not deep and any(
+        value is not None
+        for value in (
+            expected_nodes,
+            expected_edges,
+            expected_semantic_edges,
+            expected_skills_sh_nodes,
+        )
+    ):
+        raise GraphArtifactError("deep=True is required for exact graph node/edge counts")
+    expected_counts = {
+        "graph_nodes": expected_nodes,
+        "graph_edges": expected_edges,
+        "graph_semantic_edges": expected_semantic_edges,
+        "skills_sh_nodes": expected_skills_sh_nodes,
+        "skills_sh_catalog_entries": expected_skills_sh_catalog_entries,
+        "skills_sh_converted": expected_skills_sh_converted,
+        "skill_pages": expected_skill_pages,
+        "agent_pages": expected_agent_pages,
+        "mcp_pages": expected_mcp_pages,
+        "harness_pages": expected_harness_pages,
+    }
+    for field_name, expected in expected_counts.items():
+        if expected is None:
+            continue
+        actual = getattr(stats, field_name)
+        if actual != expected:
+            raise GraphArtifactError(
+                f"{field_name} exact count mismatch: expected {expected}, got {actual}",
+            )
+    return stats
 
 
 def main() -> None:
@@ -291,7 +332,25 @@ def main() -> None:
     parser.add_argument("--min-semantic-edges", type=int, default=1_000_000)
     parser.add_argument("--line-threshold", type=int, default=180)
     parser.add_argument("--max-stage-lines", type=int, default=40)
+    parser.add_argument("--expected-nodes", type=int)
+    parser.add_argument("--expected-edges", type=int)
+    parser.add_argument("--expected-semantic-edges", type=int)
+    parser.add_argument("--expected-skills-sh-nodes", type=int)
+    parser.add_argument("--expected-skills-sh-catalog-entries", type=int)
+    parser.add_argument("--expected-skills-sh-converted", type=int)
+    parser.add_argument("--expected-skill-pages", type=int)
+    parser.add_argument("--expected-agent-pages", type=int)
+    parser.add_argument("--expected-mcp-pages", type=int)
+    parser.add_argument("--expected-harness-pages", type=int)
     args = parser.parse_args()
+    deep_expected = (
+        args.expected_nodes,
+        args.expected_edges,
+        args.expected_semantic_edges,
+        args.expected_skills_sh_nodes,
+    )
+    if not args.deep and any(value is not None for value in deep_expected):
+        parser.error("--deep is required for exact graph node/edge count checks")
     stats = validate_graph_artifacts(
         args.graph_dir,
         deep=args.deep,
@@ -301,6 +360,16 @@ def main() -> None:
         min_semantic_edges=args.min_semantic_edges,
         line_threshold=args.line_threshold,
         max_stage_lines=args.max_stage_lines,
+        expected_nodes=args.expected_nodes,
+        expected_edges=args.expected_edges,
+        expected_semantic_edges=args.expected_semantic_edges,
+        expected_skills_sh_nodes=args.expected_skills_sh_nodes,
+        expected_skills_sh_catalog_entries=args.expected_skills_sh_catalog_entries,
+        expected_skills_sh_converted=args.expected_skills_sh_converted,
+        expected_skill_pages=args.expected_skill_pages,
+        expected_agent_pages=args.expected_agent_pages,
+        expected_mcp_pages=args.expected_mcp_pages,
+        expected_harness_pages=args.expected_harness_pages,
     )
     print(json.dumps(stats.__dict__, indent=2, sort_keys=True))
 

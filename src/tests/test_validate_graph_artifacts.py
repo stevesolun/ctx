@@ -101,6 +101,16 @@ def test_validate_graph_artifacts_checks_catalog_paths_and_deep_graph_stats(
         expected_harnesses={"langgraph"},
         line_threshold=180,
         max_stage_lines=40,
+        expected_nodes=2,
+        expected_edges=1,
+        expected_semantic_edges=1,
+        expected_skills_sh_nodes=1,
+        expected_skills_sh_catalog_entries=1,
+        expected_skills_sh_converted=1,
+        expected_skill_pages=1,
+        expected_agent_pages=0,
+        expected_mcp_pages=0,
+        expected_harness_pages=1,
     )
 
     assert stats.graph_nodes == 2
@@ -108,6 +118,25 @@ def test_validate_graph_artifacts_checks_catalog_paths_and_deep_graph_stats(
     assert stats.skills_sh_catalog_entries == 1
     assert stats.skills_sh_converted == 1
     assert stats.harness_pages == 1
+
+    with pytest.raises(GraphArtifactError, match="graph_edges exact count mismatch"):
+        validate_graph_artifacts(
+            tmp_path,
+            deep=True,
+            min_nodes=2,
+            min_edges=1,
+            min_skills_sh_nodes=1,
+            min_semantic_edges=1,
+            expected_harnesses={"langgraph"},
+            expected_edges=2,
+        )
+
+    with pytest.raises(GraphArtifactError, match="deep=True is required"):
+        validate_graph_artifacts(
+            tmp_path,
+            expected_harnesses={"langgraph"},
+            expected_nodes=2,
+        )
 
 
 def test_validate_graph_artifacts_rejects_missing_converted_catalog_path(

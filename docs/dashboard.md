@@ -40,8 +40,8 @@ generated graph/wiki artifacts that ctx can ship or consume. It reports:
 
 ### Browse the LLM wiki — `/wiki`
 
-The wiki tab is a filterable card grid of **every dashboard-supported
-entity page** under
+The wiki tab is a filterable card grid over a bounded dashboard sample:
+up to 500 pages per dashboard-supported entity type under
 `~/.claude/skill-wiki/entities/{skills,agents,mcp-servers,harnesses}/`.
 MCP server pages use the sharded layout
 `entities/mcp-servers/<first-char-or-0-9>/<slug>.md`; the dashboard
@@ -54,8 +54,9 @@ the flat `entities/harnesses/<slug>.md` layout. Each card shows:
 - the frontmatter `description`
 - up to 6 tags
 
-The **left sidebar** has a text search that matches across slug,
-description, and tags, plus skill/agent/MCP/harness type checkboxes. Pair them to
+The **left sidebar** has a text search over the visible sample that
+matches slug, description, and tags, plus skill/agent/MCP/harness type
+checkboxes. Pair them to
 answer questions like "show me all grade-B agents related to
 testing" — check `agent`, type `testing` in the search box.
 
@@ -148,7 +149,7 @@ per-process monitor token injected into the rendered page.
 | `/loaded` | **Currently-loaded skills, agents, MCP servers, and installed harness records** from `~/.claude/skill-manifest.json` plus `~/.claude/harness-installs/*.json`; skill/MCP rows expose supported live actions |
 | `/skills` | Every sidecar as a filterable **card grid**: left sidebar (search by slug, grade checkboxes, skill/agent/MCP toggle, hide-floored), card shows grade pill + raw score + links to sidecar/wiki/graph |
 | `/skill/<slug>` | Full sidecar breakdown: four-signal score (telemetry · intake · graph · routing), hard-floor reason, computed_at timestamp, per-skill audit timeline |
-| `/wiki` | **Wiki entity index** - card grid of every dashboard-supported page under `~/.claude/skill-wiki/entities/{skills,agents,mcp-servers,harnesses}/`, including sharded MCP server pages and flat harness pages. Left sidebar: text search (slug, description, tag), skill/agent/MCP/harness checkboxes. |
+| `/wiki` | **Wiki entity index** - bounded card-grid sample of up to 500 pages per dashboard-supported entity type under `~/.claude/skill-wiki/entities/{skills,agents,mcp-servers,harnesses}/`, including sharded MCP server pages and flat harness pages. Left sidebar: text search over the visible sample (slug, description, tag), skill/agent/MCP/harness checkboxes. |
 | `/wiki/<slug>?type=<entity>` | Dashboard-supported wiki entity page rendered: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views. The optional `type` query disambiguates duplicate slugs such as `langgraph`. |
 | `/graph` | **Graph explorer landing page** - node/edge count header, a "Popular seed slugs" block (18 highest-degree skill/agent/MCP/harness entities as clickable chips), search box for any skill/agent/MCP/harness slug, and the cytoscape canvas. Clicking a seed chip navigates to `/graph?slug=<slug>&type=<entity>`. |
 | `/graph?slug=<slug>&type=<entity>` | **Cytoscape-rendered** 1-hop neighborhood around the target skill/agent/MCP/harness slug. Node colors: emerald=focus, indigo=skill, amber=agent, red diamond=MCP server, green hexagon=harness. Edge width maps to blended graph weight. Tap any node to navigate to that entity's typed wiki page. Type and tag filters run client-side. |

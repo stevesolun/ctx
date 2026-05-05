@@ -207,11 +207,12 @@ After you add a skill, agent, MCP server, or harness entity page:
 ctx-wiki-graphify          # rebuild entity graph + communities
 ```
 
-The pre-commit hook (`.githooks/pre-commit`) re-runs this
-automatically when `skills/` or `agents/` are staged, and repacks
-the tarball on disk so `README.md` numbers never drift. Run
-`ctx-wiki-graphify` directly for MCP server or harness catalog changes
-if your hook config does not include those paths.
+The pre-commit hook (`.githooks/pre-commit`) does **not** rebuild or
+repack graph artifacts from `~/.claude/skill-wiki/`; that local wiki can
+contain private entities. It refreshes cheap README stats when relevant
+checked-in files are staged and warns when entity sources changed. Run
+`ctx-wiki-graphify`, validate, repack, and stage the artifacts explicitly
+for skill, agent, MCP server, or harness catalog releases.
 
 ## Edge-count history
 
