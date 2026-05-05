@@ -12,6 +12,7 @@ CHEAP_PR_SKIPPABLE_JOBS = {
     "no-test-no-merge",
     "package-build",
     "package-smoke",
+    "similarity-integration",
     "static",
     "unit-linux",
 }

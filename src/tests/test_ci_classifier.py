@@ -129,6 +129,7 @@ def test_ci_required_allows_heavy_jobs_to_skip_on_docs_only_pr() -> None:
         "e2e-canary": {"result": "skipped"},
         "package-build": {"result": "skipped"},
         "package-smoke": {"result": "skipped"},
+        "similarity-integration": {"result": "skipped"},
         "clean-host-contract": {"result": "skipped"},
         "no-test-no-merge": {"result": "skipped"},
         "browser-security": {"result": "skipped"},
@@ -166,6 +167,7 @@ def test_ci_required_allows_heavy_jobs_to_skip_on_graph_only_pr() -> None:
         "e2e-canary": {"result": "skipped"},
         "package-build": {"result": "skipped"},
         "package-smoke": {"result": "skipped"},
+        "similarity-integration": {"result": "skipped"},
         "clean-host-contract": {"result": "skipped"},
         "no-test-no-merge": {"result": "skipped"},
         "browser-security": {"result": "skipped"},
@@ -195,6 +197,20 @@ def test_ci_required_allows_browser_skip_for_unrelated_pr_only() -> None:
     assert failed_required_jobs(needs, event_name="pull_request") == {}
     assert failed_required_jobs(needs, event_name="push") == {
         "browser-security": "skipped",
+    }
+
+
+def test_ci_required_rejects_missing_similarity_gate_on_source_pr() -> None:
+    needs: dict[str, dict[str, Any]] = {
+        "classify": {
+            "result": "success",
+            "outputs": {"docs_only": "false", "graph_only": "false"},
+        },
+        "similarity-integration": {"result": "skipped"},
+    }
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "similarity-integration": "skipped",
     }
 
 
