@@ -11,7 +11,7 @@
     "intent_log": "~/.claude/intent-log.jsonl",
     "pending_skills": "~/.claude/pending-skills.json",
     "skill_registry": "~/.claude/skill-registry.json",
-    "stack_profile_tmp": "/tmp/skill-stack-profile.json",
+    "stack_profile_tmp": "~/.claude/skill-stack-profile.json",
     "catalog": "~/.claude/skill-wiki/catalog.md"
   },
 

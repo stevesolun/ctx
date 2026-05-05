@@ -15,6 +15,7 @@ Usage:
 import json
 import os
 import sys
+import tempfile
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -69,6 +70,10 @@ def _expand(value: str) -> str:
     return os.path.expandvars(os.path.expanduser(value))
 
 
+def _default_stack_profile_tmp() -> Path:
+    return Path(tempfile.gettempdir()) / "skill-stack-profile.json"
+
+
 class Config:
     """Typed access to configuration values."""
 
@@ -94,7 +99,12 @@ class Config:
         self.intent_log = Path(_expand(paths.get("intent_log", "~/.claude/intent-log.jsonl")))
         self.pending_skills = Path(_expand(paths.get("pending_skills", "~/.claude/pending-skills.json")))
         self.skill_registry = Path(_expand(paths.get("skill_registry", "~/.claude/skill-registry.json")))
-        self.stack_profile_tmp = Path(_expand(paths.get("stack_profile_tmp", "/tmp/skill-stack-profile.json")))
+        stack_profile_tmp = paths.get("stack_profile_tmp")
+        self.stack_profile_tmp = (
+            Path(_expand(stack_profile_tmp))
+            if stack_profile_tmp
+            else _default_stack_profile_tmp()
+        )
         self.catalog = Path(_expand(paths.get("catalog", "~/.claude/skill-wiki/catalog.md")))
 
         # ── Resolver ───────────────────────────────────────────────────────

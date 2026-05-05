@@ -60,7 +60,19 @@ def _make_signals(
 class TestScanDirectoryCollectsFiles:
     """test_scan_directory_collects_files -- walks a repo and records files + extensions."""
 
-    def test_collects_python_and_js_files(self, tmp_path: Path) -> None:
+    def test_collects_python_and_js_files(self, tmp_path: Path, monkeypatch) -> None:
+        configured = tmp_path / "stack-profile.json"
+        monkeypatch.setattr(
+            sr,
+            "_CTX_CFG",
+            SimpleNamespace(stack_profile_tmp=configured),
+        )
+        assert sr._default_output_path() == configured
+
+        monkeypatch.setattr(sr, "_CTX_CFG", None)
+        monkeypatch.setattr(sr.tempfile, "gettempdir", lambda: str(tmp_path))
+        assert sr._default_output_path() == tmp_path / "skill-stack-profile.json"
+
         repo = tmp_path / "repo"
         _write(repo / "main.py", "print('hi')")
         _write(repo / "app.js", "console.log('hi')")
