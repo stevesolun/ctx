@@ -333,6 +333,7 @@ def recommend_harnesses(
             # Avoid loading local embedding models on the latency-sensitive CLI path.
             use_semantic_query=False,
         )
+        results = _add_unranked_harness_candidates(graph, results)
         results = [
             row for row in results
             if _harness_supports_provider(
@@ -370,6 +371,35 @@ def recommend_harnesses(
         )
         return []
     return results[:limit]
+
+
+def _add_unranked_harness_candidates(
+    graph: Any,
+    results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Add catalog harnesses that tag ranking missed, then let fit scoring decide."""
+    expanded = list(results)
+    seen = {str(row.get("name") or "") for row in expanded}
+    try:
+        nodes = graph.nodes(data=True)
+    except Exception:
+        return expanded
+    for node_id, data in nodes:
+        if str(data.get("type")) != "harness":
+            continue
+        slug = str(data.get("label") or str(node_id).rsplit(":", 1)[-1]).strip()
+        if not slug or slug in seen:
+            continue
+        expanded.append({
+            "name": slug,
+            "type": "harness",
+            "score": 75.0,
+            "normalized_score": 0.0,
+            "matching_tags": [],
+            "source": data.get("source") or "catalog",
+        })
+        seen.add(slug)
+    return expanded
 
 
 def _annotate_harness_fit(

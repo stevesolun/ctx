@@ -215,6 +215,39 @@ def test_ctx_init_ignores_model_version_tokens_for_local_harness_fit(
     assert "llama3" not in results[0]["missing_signals"]
 
 
+def test_ctx_init_recommends_harness_from_wiki_frontmatter_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = nx.Graph()
+    graph.add_node(
+        "harness:frontmatter-only",
+        label="frontmatter-only",
+        type="harness",
+        tags=[],
+        model_providers=["openai"],
+    )
+    monkeypatch.setattr(ctx_init, "_load_recommendation_graph", lambda: graph)
+    monkeypatch.setattr(
+        ctx_init,
+        "_harness_frontmatter_from_wiki",
+        lambda slug: {
+            "tags": ["browser", "automation"],
+            "capabilities": ["browser automation", "agent harness"],
+            "model_providers": ["openai"],
+        } if slug == "frontmatter-only" else {},
+    )
+
+    results = ctx_init.recommend_harnesses(
+        "build an openai browser automation agent harness",
+        top_k=5,
+        model_provider="openai",
+    )
+
+    assert [row["name"] for row in results] == ["frontmatter-only"]
+    assert results[0]["fit_score"] >= 0.85
+    assert set(results[0]["fit_signals"]) >= {"agent", "automation", "browser", "openai"}
+
+
 def test_ctx_init_rejects_weak_single_signal_harness_match(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
