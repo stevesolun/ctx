@@ -175,6 +175,7 @@ def test_ci_required_rejects_missing_required_dependencies() -> None:
 
     assert failures["package-smoke"] == "missing"
     assert failures["clean-host-contract"] == "missing"
+    assert failures["contract-compat"] == "missing"
     assert failures["test"] == "missing"
 
 
@@ -195,6 +196,7 @@ def test_ci_required_allows_heavy_jobs_to_skip_on_docs_only_pr() -> None:
             "graph-check": {"result": "skipped"},
             "static": {"result": "skipped"},
             "unit-linux": {"result": "skipped"},
+            "contract-compat": {"result": "skipped"},
             "e2e-canary": {"result": "skipped"},
             "package-build": {"result": "skipped"},
             "package-smoke": {"result": "skipped"},
@@ -234,6 +236,7 @@ def test_ci_required_allows_heavy_jobs_to_skip_on_graph_only_pr() -> None:
             "docs-check": {"result": "skipped"},
             "static": {"result": "skipped"},
             "unit-linux": {"result": "skipped"},
+            "contract-compat": {"result": "skipped"},
             "e2e-canary": {"result": "skipped"},
             "package-build": {"result": "skipped"},
             "package-smoke": {"result": "skipped"},
@@ -282,6 +285,20 @@ def test_ci_required_rejects_missing_similarity_gate_on_source_pr() -> None:
 
     assert failed_required_jobs(needs, event_name="pull_request") == {
         "similarity-integration": "skipped",
+    }
+
+
+def test_ci_required_rejects_contract_compat_skip_on_source_pr() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {"docs_only": "false", "graph_only": "false"},
+        },
+        **{"contract-compat": {"result": "skipped"}},
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "contract-compat": "skipped",
     }
 
 

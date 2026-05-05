@@ -8,6 +8,7 @@ from typing import Any
 
 CHEAP_PR_SKIPPABLE_JOBS = {
     "clean-host-contract",
+    "contract-compat",
     "e2e-canary",
     "no-test-no-merge",
     "package-build",
@@ -20,6 +21,7 @@ REQUIRED_JOBS = {
     "browser-security",
     "classify",
     "clean-host-contract",
+    "contract-compat",
     "docs-check",
     "e2e-canary",
     "graph-check",

@@ -186,6 +186,37 @@ jobs:
       - name: Run tests without coverage
         run: pytest -q -m "not browser" --no-cov
 
+  contract-compat:
+    name: "Contract compatibility (${{ matrix.os }})"
+    needs: classify
+    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true') }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+
+      - name: Run cross-OS contract tests
+        run: python -m pytest -q --no-cov src/tests/test_clean_host_contract.py src/tests/test_package_scaffold.py
+
   e2e-canary:
     name: "A-Z alive-loop E2E canary"
     needs: classify
@@ -534,6 +565,7 @@ jobs:
       - unit-linux
       - similarity-integration
       - test
+      - contract-compat
       - e2e-canary
       - docs-check
       - graph-check
