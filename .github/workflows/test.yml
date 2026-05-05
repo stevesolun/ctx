@@ -443,7 +443,9 @@ jobs:
 
           unsafe_help = {"ctx-mcp-server"}
           safe_help = sorted(expected_scripts - unsafe_help)
-          with open("ctx-console-help.txt", "w", encoding="utf-8") as fh:
+          with open(
+              "ctx-console-help.txt", "w", encoding="utf-8", newline="\n"
+          ) as fh:
               fh.write("\n".join(safe_help) + "\n")
           print(
               f"loaded {len(script_eps)} ctx console scripts from wheel "
@@ -451,6 +453,8 @@ jobs:
           )
           PY
           while IFS= read -r cmd; do
+            cmd="${cmd%$'\r'}"
+            [[ -z "$cmd" ]] && continue
             echo "help smoke: $cmd"
             "$cmd" --help >/dev/null
           done < ctx-console-help.txt
