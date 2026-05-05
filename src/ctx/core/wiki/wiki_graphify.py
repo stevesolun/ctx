@@ -352,6 +352,16 @@ def _float_or_none(value: object) -> float | None:
         return None
 
 
+def _frontmatter_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
+
+
 def _adamic_adar_scores(
     nodes: list[str],
     pairs: set[tuple[str, str]],
@@ -477,7 +487,13 @@ def build_graph(
                 tags = [t.strip() for t in tags.split(",") if t.strip()]
             slug = page.stem
             node_id = f"{entity_type}:{slug}"
-            G.add_node(node_id, label=slug, type=entity_type, tags=tags)
+            G.add_node(
+                node_id,
+                label=slug,
+                type=entity_type,
+                tags=tags,
+                never_load=_frontmatter_bool(meta.get("never_load")),
+            )
             entities[node_id] = meta
             embed_nodes.append(_sem.SemanticNode(
                 node_id=node_id,
@@ -702,6 +718,7 @@ def build_graph(
             "direct_targets": list(data.get("direct_targets", []) or []),
             "quality_signal": data.get("quality_signal"),
             "usage_signal": data.get("usage_signal"),
+            "never_load": _frontmatter_bool(data.get("never_load")),
         }
         for nid, data in G.nodes(data=True)
     }
@@ -778,6 +795,11 @@ def _metadata_affected_nodes(
             affected.add(nid)
             continue
         if set(prior.get("tags", []) or []) != set(info.get("tags", []) or []):
+            affected.add(nid)
+            continue
+        if _frontmatter_bool(prior.get("never_load")) != _frontmatter_bool(
+            info.get("never_load")
+        ):
             affected.add(nid)
             continue
         if set(prior.get("source_keys", []) or []) != set(
@@ -896,6 +918,7 @@ def patch_graph(
             direct_targets=list(info.get("direct_targets", [])),
             quality_signal=info.get("quality_signal"),
             usage_signal=info.get("usage_signal"),
+            never_load=_frontmatter_bool(info.get("never_load")),
         )
     # Refresh attrs on existing nodes (tags may have changed).
     for nid in current_ids & prior_ids:
@@ -907,6 +930,7 @@ def patch_graph(
         prior.nodes[nid]["direct_targets"] = list(info.get("direct_targets", []))
         prior.nodes[nid]["quality_signal"] = info.get("quality_signal")
         prior.nodes[nid]["usage_signal"] = info.get("usage_signal")
+        prior.nodes[nid]["never_load"] = _frontmatter_bool(info.get("never_load"))
 
     # Edge delta — only touch edges incident on affected nodes.
     # Pairs where both endpoints are unaffected are guaranteed to
