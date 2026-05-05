@@ -17,8 +17,8 @@ decision visible in review.
 
 from __future__ import annotations
 
-import sys
 import json
+import sys
 from pathlib import Path
 
 SRC_DIR = Path(__file__).resolve().parents[1]
@@ -38,6 +38,56 @@ def test_metadata_affected_nodes_detects_tag_changes() -> None:
         current_node_info={
             "skill:alpha": {"label": "alpha", "type": "skill", "tags": ["testing"]},
             "skill:beta": {"label": "beta", "type": "skill", "tags": ["python"]},
+        },
+    )
+
+    assert affected == {"skill:alpha"}
+
+
+def test_metadata_affected_nodes_detects_edge_signal_changes() -> None:
+    prior = wg.nx.Graph()
+    prior.add_node(
+        "skill:alpha",
+        label="alpha",
+        type="skill",
+        tags=["python"],
+        source_keys=["repo:https://example.com/old"],
+        direct_targets=["skill:old"],
+        quality_signal=0.7,
+        usage_signal=0.2,
+    )
+    prior.add_node(
+        "skill:beta",
+        label="beta",
+        type="skill",
+        tags=["python"],
+        source_keys=[],
+        direct_targets=[],
+        quality_signal=None,
+        usage_signal=None,
+    )
+
+    affected = wg._metadata_affected_nodes(
+        prior_graph=prior,
+        current_node_info={
+            "skill:alpha": {
+                "label": "alpha",
+                "type": "skill",
+                "tags": ["python"],
+                "source_keys": ["repo:https://example.com/new"],
+                "direct_targets": ["skill:new"],
+                "quality_signal": 0.9,
+                "usage_signal": 0.4,
+            },
+            "skill:beta": {
+                "label": "beta",
+                "type": "skill",
+                "tags": ["python"],
+                "source_keys": [],
+                "direct_targets": [],
+                "quality_signal": None,
+                "usage_signal": None,
+            },
         },
     )
 

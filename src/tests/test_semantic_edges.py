@@ -1015,6 +1015,44 @@ class TestComputeSemanticEdgesWithFakeEmbedder:
         self._run(nodes, tmp_path=tmp_path, embed_vecs=vecs, dim=2, min_cosine=0.5)
         assert (tmp_path / "topk-state.json").exists()
 
+    def test_persist_cache_false_skips_all_cache_writes(self, tmp_path: Path) -> None:
+        nodes = [SemanticNode("a", "ta"), SemanticNode("b", "tb")]
+        vecs = np.array([[1.0, 0.0], [1.0, 0.0]], dtype="float32")
+
+        def _fake_embed_missing(missing, embedder, batch_size):
+            return np.array([vecs[row_i] for row_i, _, _ in missing], dtype="float32")
+
+        fake_embedder = MagicMock()
+        fake_embedder.name = "fake-model"
+        fake_eb_module = MagicMock()
+        fake_eb_module.get_embedder.return_value = fake_embedder
+
+        with patch.dict("sys.modules", {"embedding_backend": fake_eb_module}):
+            import importlib
+            from ctx.core.graph import semantic_edges as se_mod
+            importlib.reload(se_mod)
+
+            with (
+                patch.object(se_mod, "_embed_missing", side_effect=_fake_embed_missing),
+                patch.object(se_mod, "_save_cache") as save_cache,
+                patch.object(se_mod, "_save_topk_state") as save_topk,
+            ):
+                pairs = se_mod.compute_semantic_edges(
+                    nodes,
+                    top_k=5,
+                    min_cosine=0.5,
+                    batch_size=32,
+                    cache_dir=tmp_path,
+                    incremental=False,
+                    persist_cache=False,
+                )
+
+        assert ("a", "b") in pairs
+        save_cache.assert_not_called()
+        save_topk.assert_not_called()
+        assert not (tmp_path / "embeddings.npz").exists()
+        assert not (tmp_path / "topk-state.json").exists()
+
     def test_incremental_false_does_full_rebuild(self, tmp_path: Path) -> None:
         nodes = [SemanticNode("a", "ta"), SemanticNode("b", "tb")]
         vecs = np.array([[1.0, 0.0], [1.0, 0.0]], dtype="float32")

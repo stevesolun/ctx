@@ -17,7 +17,7 @@ import json
 import math
 import os
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,6 +44,7 @@ GRAPH_RELATED_BLOCK_RE = re.compile(
     re.DOTALL,
 )
 ENTITY_WIKILINK_RE = re.compile(r"\[\[entities/(?P<section>[^/\]#|]+)/(?P<target>[^\]#|]+)")
+CONCEPT_GENERATED_MARKER = "<!-- ctx-generated-community -->"
 
 WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki"))
 SKILL_ENTITIES = WIKI_DIR / "entities" / "skills"
@@ -59,6 +60,10 @@ GRAPH_OUT = WIKI_DIR / "graphify-out"
 # ``src/skill_quality.py``. Graph nodes get ``quality_score`` and
 # ``quality_grade`` attached when a matching sidecar exists.
 QUALITY_SIDECAR_DIR = Path(os.path.expanduser("~/.claude/skill-quality"))
+DEFAULT_WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki")).resolve()
+DEFAULT_GRAPH_SEMANTIC_CACHE_DIR = (
+    DEFAULT_WIKI_DIR / ".embedding-cache" / "graph"
+).resolve()
 
 
 def configure_wiki_dir(wiki_dir: Path) -> None:
@@ -269,6 +274,18 @@ def _direct_link_targets(content: str) -> set[str]:
     return out
 
 
+def _effective_semantic_cache_dir(configured_cache_dir: Path) -> Path:
+    """Keep custom ``--wiki-dir`` graph builds out of the live cache by default."""
+    configured = configured_cache_dir.expanduser()
+    try:
+        configured_resolved = configured.resolve()
+    except OSError:
+        configured_resolved = configured
+    if WIKI_DIR != DEFAULT_WIKI_DIR and configured_resolved == DEFAULT_GRAPH_SEMANTIC_CACHE_DIR:
+        return WIKI_DIR / ".embedding-cache" / "graph"
+    return configured
+
+
 def _type_affinity_score(left: str, right: str) -> float:
     if left == right:
         return 0.35
@@ -392,6 +409,7 @@ def _pairs_from_index(
 
 def build_graph(
     *, incremental: bool = True,
+    persist_semantic_cache: bool = True,
     _affected_out: set[str] | None = None,
 ) -> tuple[nx.Graph, dict[str, dict]]:
     """Build a networkx graph from all entity pages.
@@ -479,11 +497,18 @@ def build_graph(
         for token in _slug_tokens(slug):
             token_index[token].append(nid)
         meta = entities.get(nid, {})
-        for source_key in _source_keys(meta):
+        source_keys = _source_keys(meta)
+        direct_targets = sorted(
+            target
+            for target in _direct_link_targets(str(meta.get("_content", "")))
+            if target in G and target != nid
+        )
+        data["source_keys"] = source_keys
+        data["direct_targets"] = direct_targets
+        for source_key in source_keys:
             source_index[source_key].append(nid)
-        for target in _direct_link_targets(str(meta.get("_content", ""))):
-            if target in G and target != nid:
-                direct_pairs.add(_pair(nid, target))
+        for target in direct_targets:
+            direct_pairs.add(_pair(nid, target))
 
     tag_counts, tag_shared = _pairs_from_index(
         tag_index,
@@ -514,10 +539,11 @@ def build_graph(
             top_k=_cfg.graph_semantic_top_k,
             min_cosine=_cfg.graph_semantic_build_floor,
             batch_size=_cfg.graph_semantic_batch_size,
-            cache_dir=_cfg.graph_semantic_cache_dir,
+            cache_dir=_effective_semantic_cache_dir(_cfg.graph_semantic_cache_dir),
             backend=_cfg.intake_backend,
             model=_cfg.intake_model,
             incremental=incremental,
+            persist_cache=persist_semantic_cache,
             affected_out=semantic_affected,
         )
     else:
@@ -544,6 +570,12 @@ def build_graph(
         | direct_pairs
     )
     quality_usage = _quality_usage_signals(QUALITY_SIDECAR_DIR)
+    for nid, data in G.nodes(data=True):
+        signals = quality_usage.get(nid, {})
+        quality = signals.get("quality")
+        usage = signals.get("usage")
+        data["quality_signal"] = round(quality, 4) if quality is not None else None
+        data["usage_signal"] = round(usage, 4) if usage is not None else None
     adamic_scores = _adamic_adar_scores(list(G.nodes), all_pairs)
 
     # Materialise the target edge set as ``{pair: attr_dict}`` — both
@@ -666,6 +698,10 @@ def build_graph(
             "label": data.get("label", nid.split(":", 1)[-1]),
             "type": data.get("type", ""),
             "tags": list(data.get("tags", []) or []),
+            "source_keys": list(data.get("source_keys", []) or []),
+            "direct_targets": list(data.get("direct_targets", []) or []),
+            "quality_signal": data.get("quality_signal"),
+            "usage_signal": data.get("usage_signal"),
         }
         for nid, data in G.nodes(data=True)
     }
@@ -725,8 +761,9 @@ def _metadata_affected_nodes(
     """Return nodes whose graph-driving metadata changed.
 
     Semantic body changes are reported by ``compute_semantic_edges``.
-    Tag, type, and label changes also affect blended edge weights, so
-    the patch path must refresh those incident edges as well.
+    Tag, type, label, source keys, direct links, and quality/usage
+    sidecar signals all affect blended edge weights, so the patch path
+    must refresh those incident edges as well.
     """
     affected: set[str] = set()
     for nid, info in current_node_info.items():
@@ -741,6 +778,22 @@ def _metadata_affected_nodes(
             affected.add(nid)
             continue
         if set(prior.get("tags", []) or []) != set(info.get("tags", []) or []):
+            affected.add(nid)
+            continue
+        if set(prior.get("source_keys", []) or []) != set(
+            info.get("source_keys", []) or []
+        ):
+            affected.add(nid)
+            continue
+        if set(prior.get("direct_targets", []) or []) != set(
+            info.get("direct_targets", []) or []
+        ):
+            affected.add(nid)
+            continue
+        if prior.get("quality_signal") != info.get("quality_signal"):
+            affected.add(nid)
+            continue
+        if prior.get("usage_signal") != info.get("usage_signal"):
             affected.add(nid)
     return affected
 
@@ -839,6 +892,10 @@ def patch_graph(
             label=info.get("label", nid.split(":", 1)[-1]),
             type=info.get("type", ""),
             tags=list(info.get("tags", [])),
+            source_keys=list(info.get("source_keys", [])),
+            direct_targets=list(info.get("direct_targets", [])),
+            quality_signal=info.get("quality_signal"),
+            usage_signal=info.get("usage_signal"),
         )
     # Refresh attrs on existing nodes (tags may have changed).
     for nid in current_ids & prior_ids:
@@ -846,6 +903,10 @@ def patch_graph(
         prior.nodes[nid]["label"] = info.get("label", nid.split(":", 1)[-1])
         prior.nodes[nid]["type"] = info.get("type", prior.nodes[nid].get("type", ""))
         prior.nodes[nid]["tags"] = list(info.get("tags", []))
+        prior.nodes[nid]["source_keys"] = list(info.get("source_keys", []))
+        prior.nodes[nid]["direct_targets"] = list(info.get("direct_targets", []))
+        prior.nodes[nid]["quality_signal"] = info.get("quality_signal")
+        prior.nodes[nid]["usage_signal"] = info.get("usage_signal")
 
     # Edge delta — only touch edges incident on affected nodes.
     # Pairs where both endpoints are unaffected are guaranteed to
@@ -1106,14 +1167,56 @@ def label_community(G: nx.Graph, members: list[str]) -> str:
     return " + ".join(t[0].title() for t in top_tags)
 
 
+def _community_tags(G: nx.Graph, members: list[str], *, limit: int = 5) -> list[str]:
+    counts: Counter[str] = Counter()
+    for nid in members:
+        counts.update(
+            str(tag)
+            for tag in G.nodes[nid].get("tags", [])
+            if tag and tag != "uncategorized"
+        )
+    return [tag for tag, _count in counts.most_common(limit)]
+
+
+def _reconcile_generated_concept_pages(
+    wanted_filenames: set[str],
+    *,
+    dry_run: bool,
+) -> int:
+    if not CONCEPTS_DIR.is_dir():
+        return 0
+    removed = 0
+    for page in CONCEPTS_DIR.glob("community-*.md"):
+        if page.name in wanted_filenames:
+            continue
+        try:
+            content = page.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        generated = (
+            CONCEPT_GENERATED_MARKER in content
+            or "*Generated by wiki_graphify.py" in content
+        )
+        if not generated:
+            continue
+        if dry_run:
+            print(f"  [DRY RUN] Would remove stale: concepts/{page.name}")
+        else:
+            page.unlink()
+        removed += 1
+    return removed
+
+
 def generate_concept_pages(
     G: nx.Graph,
     communities: dict[int, list[str]],
     dry_run: bool = False,
 ) -> list[str]:
     """Generate concept pages for each community."""
-    CONCEPTS_DIR.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        CONCEPTS_DIR.mkdir(parents=True, exist_ok=True)
     created: list[str] = []
+    wanted_filenames: set[str] = set()
 
     # Reverse index: O(1) community lookup per neighbor instead of O(C) linear
     # scan through communities.items(). Reduces cross-edge loop from O(C²·members)
@@ -1132,7 +1235,9 @@ def generate_concept_pages(
 
         label = community_labels[cid]
         safe_name = label.lower().replace(" + ", "-").replace(" ", "-")
+        safe_name = re.sub(r"[^a-z0-9._-]+", "-", safe_name).strip("-") or f"{cid}"
         filename = f"community-{safe_name}.md"
+        wanted_filenames.add(filename)
 
         # Top members by degree.
         #
@@ -1164,6 +1269,7 @@ def generate_concept_pages(
             f"- {lbl} ({cnt} connections)"
             for lbl, cnt in sorted(cross.items(), key=lambda x: -x[1])[:8]
         )
+        tags = _community_tags(G, members)
 
         page = f"""---
 title: "{label}"
@@ -1172,8 +1278,10 @@ updated: {TODAY}
 type: concept
 community_id: {cid}
 member_count: {len(members)}
-tags: [{', '.join(t for t, _ in sorted(defaultdict(int, {t: c for m in members for t, c in [(tag, 1) for tag in G.nodes[m].get('tags', [])] if t != 'uncategorized'}).items(), key=lambda x: -x[1])[:5])}]
+tags: [{', '.join(tags)}]
 ---
+
+{CONCEPT_GENERATED_MARKER}
 
 # {label}
 
@@ -1198,7 +1306,9 @@ tags: [{', '.join(t for t, _ in sorted(defaultdict(int, {t: c for m in members f
             safe_atomic_write_text(CONCEPTS_DIR / filename, page, encoding="utf-8")
         created.append(filename)
 
-    print(f"Concept pages: {len(created)} created")
+    removed = _reconcile_generated_concept_pages(wanted_filenames, dry_run=dry_run)
+    action = "would create" if dry_run else "created"
+    print(f"Concept pages: {len(created)} {action}, {removed} stale removed")
     return created
 
 
@@ -1399,10 +1509,15 @@ def main() -> None:
 
     affected: set[str] = set()
     G, entities = build_graph(
-        incremental=args.incremental, _affected_out=affected,
+        incremental=args.incremental,
+        persist_semantic_cache=not args.dry_run,
+        _affected_out=affected,
     )
     communities = detect_communities(G)
-    export_graph(G, communities, delta_nodes=affected)
+    if args.dry_run:
+        print(f"  [DRY RUN] Would export graph artifacts to {GRAPH_OUT}/")
+    else:
+        export_graph(G, communities, delta_nodes=affected)
 
     if args.graph_only:
         return
