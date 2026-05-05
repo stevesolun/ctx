@@ -173,7 +173,7 @@ class HarnessRecord:
 
 
 def _parse_frontmatter(text: str) -> dict[str, Any]:
-    match = re.match(r"^---\n(.*?\n)---\n", text, re.DOTALL)
+    match = re.match(r"^---\r?\n(.*?\r?\n)---\r?\n", text, re.DOTALL)
     if not match:
         return {}
     try:

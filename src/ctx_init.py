@@ -41,6 +41,7 @@ import os
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -104,7 +105,21 @@ def seed_user_config(claude: Path, *, force: bool = False) -> Path | None:
 # ─── Toolbox seeding ────────────────────────────────────────────────────────
 
 
-def seed_toolboxes(*, force: bool = False) -> int:
+@dataclass(frozen=True)
+class ToolboxSeedResult:
+    returncode: int
+    already_present: bool = False
+
+
+def _toolbox_init_already_present(stderr: str) -> bool:
+    return (
+        "Global config already has" in stderr
+        and "toolbox" in stderr
+        and "Use --force to overwrite" in stderr
+    )
+
+
+def seed_toolboxes(*, force: bool = False) -> ToolboxSeedResult:
     """Invoke ``toolbox init`` to drop the 5 starter templates.
 
     Returns 0 on success, non-zero on failure. Safe to call when the
@@ -115,11 +130,17 @@ def seed_toolboxes(*, force: bool = False) -> int:
     if force:
         cmd.append("--force")
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if (
+        not force
+        and result.returncode != 0
+        and _toolbox_init_already_present(result.stderr)
+    ):
+        return ToolboxSeedResult(returncode=0, already_present=True)
     if result.stdout.strip():
         print(result.stdout.rstrip())
     if result.stderr.strip():
         print(result.stderr.rstrip(), file=sys.stderr)
-    return result.returncode
+    return ToolboxSeedResult(returncode=result.returncode)
 
 
 # ─── Hook injection (opt-in) ────────────────────────────────────────────────
@@ -849,9 +870,17 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("  [skip] skill-system-config.json already present (use --force to overwrite)")
 
-    toolbox_rc = seed_toolboxes(force=args.force)
+    toolbox_seed = seed_toolboxes(force=args.force)
+    if isinstance(toolbox_seed, ToolboxSeedResult):
+        toolbox_rc = toolbox_seed.returncode
+        toolbox_already_present = toolbox_seed.already_present
+    else:
+        toolbox_rc = int(toolbox_seed)
+        toolbox_already_present = False
     final_rc = 0
-    if toolbox_rc == 0:
+    if toolbox_already_present:
+        print("  [skip] starter toolboxes already present (use --force to overwrite)")
+    elif toolbox_rc == 0:
         print("  [ok] toolboxes seeded")
     else:
         print(f"  [warn] toolbox init returned {toolbox_rc} — inspect above", file=sys.stderr)

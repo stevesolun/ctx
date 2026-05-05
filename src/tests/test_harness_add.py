@@ -86,6 +86,26 @@ def test_readd_merges_sources_without_duplicate_file(tmp_path: Path) -> None:
     assert len(list((wiki / "entities" / "harnesses").glob("*.md"))) == 1
 
 
+def test_readd_parses_crlf_frontmatter_before_merge(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    harness_add.add_harness(record=_record(sources=["manual"]), wiki_path=wiki)
+    page = wiki / "entities" / "harnesses" / "text-to-cad.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").replace("\n", "\r\n"),
+        encoding="utf-8",
+        newline="",
+    )
+
+    result = harness_add.add_harness(
+        record=_record(sources=["external-review"]),
+        wiki_path=wiki,
+    )
+
+    fm = _frontmatter(page)
+    assert result["sources"] == ["external-review", "manual"]
+    assert fm["sources"] == ["external-review", "manual"]
+
+
 def test_existing_harness_review_skips_without_mutating_page(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     harness_add.add_harness(

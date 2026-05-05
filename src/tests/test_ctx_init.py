@@ -87,6 +87,32 @@ def test_main_creates_everything_in_dry_mode(tmp_path: Path, monkeypatch,
     assert "[skip] graph build" in out
 
 
+def test_main_treats_existing_toolboxes_as_idempotent_skip(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+
+    class _FakeResult:
+        returncode = 1
+        stdout = ""
+        stderr = (
+            "Global config already has 5 toolbox(es). "
+            "Use --force to overwrite."
+        )
+
+    monkeypatch.setattr(ci.subprocess, "run", lambda *_args, **_kwargs: _FakeResult())
+
+    rc = ci.main(["--model-mode", "skip"])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "starter toolboxes already present" in captured.out
+    assert "toolbox init returned" not in captured.err
+    assert "Global config already has" not in captured.err
+
+
 def test_main_auto_wizard_in_terminal_configures_custom_model(
     tmp_path: Path,
     monkeypatch,
