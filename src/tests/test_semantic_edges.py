@@ -674,6 +674,26 @@ class TestPartitionForIncremental:
         # b has a as top_k neighbor and a changed → b contaminated
         assert "b" in need
 
+    def test_transitive_neighbor_contamination_recomputed(self) -> None:
+        h_a = _content_hash("text-a")
+        h_b = _content_hash("text-b")
+        h_c_old = _content_hash("old-text-c")
+        nodes = [
+            SemanticNode("a", "text-a"),
+            SemanticNode("b", "text-b"),
+            SemanticNode("c", "new-text-c"),
+        ]
+        prior = self._prior({
+            "a": {"content_hash": h_a, "top_k": [["b", 0.8]]},
+            "b": {"content_hash": h_b, "top_k": [["c", 0.8]]},
+            "c": {"content_hash": h_c_old, "top_k": []},
+        })
+
+        need, unchanged = _partition_for_incremental(nodes, prior)
+
+        assert need == {"a", "b", "c"}
+        assert unchanged == set()
+
     def test_removed_node_contaminates_neighbor(self) -> None:
         h_a = _content_hash("text-a")
         h_b = _content_hash("text-b")

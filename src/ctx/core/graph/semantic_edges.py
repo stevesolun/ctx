@@ -177,16 +177,9 @@ def _partition_for_incremental(
       3. Any neighbor in its prior top-K has itself been invalidated
          — either removed from the current set, or its hash changed.
 
-    Propagation is conservative single-pass: we compute the first-order
-    "affected" set (new + hash-changed + removed), then for every
-    unchanged node check if any of its prior top-K neighbors fell into
-    that set. That covers the common case (a handful of entities
-    updated in the latest ingest). It does NOT iterate to stability —
-    second-order shifts (where A's neighbor B drops because B's
-    neighbor C changed) are picked up on the next full rebuild.
-    The trade-off is acceptable because cosine scores are relative-
-    rank stable for small changes; transitive rotation of the tail
-    of a top-20 list rarely changes the recommendations.
+    Propagation runs to a fixed point: if C changed, B previously ranked
+    C, and A previously ranked B, both B and A are recomputed. That avoids
+    preserving second-order stale top-K state after larger catalog updates.
     """
     current_by_id: dict[str, str] = {
         n.node_id: _content_hash(n.text) for n in current_nodes
@@ -206,19 +199,29 @@ def _partition_for_incremental(
 
     first_order_affected = new | changed | removed
 
-    # Second pass: any unchanged node whose prior top-K contained an
-    # affected node must be recomputed.
-    contaminated: set[str] = set()
+    # Any unchanged node whose prior top-K contained an affected node
+    # must be recomputed. Repeat to a fixed point so contamination also
+    # flows through nodes that become affected during this pass.
+    dependents: dict[str, set[str]] = {}
     for nid in overlap - changed:
         prior_neighbors = prior.nodes[nid].get("top_k", [])
         for entry in prior_neighbors:
-            # entry is [neighbor_id, score]; defensive in case of shape drift.
             if not entry:
                 continue
             neighbor_id = entry[0] if isinstance(entry, list) else str(entry)
-            if neighbor_id in first_order_affected:
+            dependents.setdefault(str(neighbor_id), set()).add(nid)
+
+    contaminated: set[str] = set()
+    frontier = set(first_order_affected)
+    while frontier:
+        next_frontier: set[str] = set()
+        for affected_id in frontier:
+            for nid in dependents.get(affected_id, set()):
+                if nid in contaminated:
+                    continue
                 contaminated.add(nid)
-                break
+                next_frontier.add(nid)
+        frontier = next_frontier
 
     need_recompute = new | changed | contaminated
     unchanged = current_ids - need_recompute
