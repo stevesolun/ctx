@@ -87,3 +87,34 @@ def test_benign_render_still_works():
     html = wv.build_html_with_filters(G, pos, title="Knowledge Graph")
     assert "<title>Knowledge Graph</title>" in html
     assert "alpha" in html and "beta" in html
+
+
+def test_default_min_weight_preserves_fractional_semantic_edges():
+    import wiki_visualize as wv
+    G = nx.Graph()
+    G.add_node("skill:a", label="alpha", type="skill", tags=[])
+    G.add_node("skill:b", label="beta", type="skill", tags=[])
+    G.add_edge("skill:a", "skill:b", weight=0.42)
+
+    sub = wv.extract_subgraph(G, seeds=["alpha"], hops=1)
+
+    assert sub.number_of_edges() == 1
+
+
+def test_visualizer_renders_mcp_and_harness_type_filters():
+    import wiki_visualize as wv
+    G = nx.Graph()
+    G.add_node("mcp-server:filesystem", label="filesystem", type="mcp-server", tags=[])
+    G.add_node("harness:text-to-cad", label="text-to-cad", type="harness", tags=[])
+    G.add_edge("mcp-server:filesystem", "harness:text-to-cad", weight=1)
+    pos = {
+        "mcp-server:filesystem": (0.0, 0.0),
+        "harness:text-to-cad": (1.0, 1.0),
+    }
+
+    html = wv.build_html_with_filters(G, pos)
+
+    assert 'data-type="mcp-server"' in html
+    assert 'data-type="harness"' in html
+    assert '"mcp-server": "#06b6d4"' in html
+    assert '"harness": "#22c55e"' in html

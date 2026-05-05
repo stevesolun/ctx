@@ -170,7 +170,7 @@ def _token_idf(graph: Any) -> dict[str, float]:
     """Inverse-document-frequency table over slug tokens in ``graph``.
 
     A token's IDF is ``log(N / df)`` where ``df`` is the number of
-    nodes whose label contains that token (after slug-tokenisation).
+    nodes whose label or tags contain that token (after slug-tokenisation).
     Common tokens (``python`` over ~600 nodes) get IDF near 0; rare
     tokens (``fastapi`` over ~10 nodes) get IDF around 7. The query
     ranker multiplies match scores by IDF so rare tokens dominate.
@@ -185,7 +185,10 @@ def _token_idf(graph: Any) -> dict[str, float]:
             continue
         label = str(data.get("label") or _node_name(node_id))
         n += 1
-        for tok in _slug_tokens(label):
+        tokens = set(_slug_tokens(label))
+        for tag in data.get("tags", []):
+            tokens.update(_slug_tokens(str(tag)))
+        for tok in tokens:
             if len(tok) >= 3:
                 df[tok] += 1
     if n == 0:

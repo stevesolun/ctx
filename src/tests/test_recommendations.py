@@ -179,6 +179,18 @@ def test_tag_match_idf_weighting() -> None:
     assert sorted(names[1:]) == ["alpha", "beta", "gamma"]
 
 
+def test_rare_tag_outranks_common_tag_when_each_node_matches_once() -> None:
+    G = _build_graph([
+        ("alpha", ["common"]),
+        ("beta", ["common"]),
+        ("gamma", ["common"]),
+        ("delta", ["rare"]),
+    ])
+
+    results = recommend_by_tags(G, ["common", "rare"], top_n=4)
+    assert results[0]["name"] == "delta"
+
+
 def test_empty_query_returns_empty_list() -> None:
     G = _build_graph([("foo", [])])
     assert recommend_by_tags(G, [], top_n=5) == []

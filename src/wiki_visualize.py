@@ -60,6 +60,8 @@ COMMUNITIES_PATH = WIKI_DIR / "graphify-out" / "communities.json"
 TYPE_COLORS = {
     "skill": "#6366f1",   # indigo
     "agent": "#f59e0b",   # amber
+    "mcp-server": "#06b6d4",  # cyan
+    "harness": "#22c55e",  # green
 }
 
 # Community color palette
@@ -97,7 +99,7 @@ def extract_subgraph(
     *,
     seeds: list[str] | None = None,
     hops: int = 1,
-    min_weight: int = 1,
+    min_weight: float = 0.0,
     community_id: int | None = None,
     tag_filter: str | None = None,
     top_n: int | None = None,
@@ -154,7 +156,7 @@ def extract_subgraph(
     sub = G.subgraph(nodes).copy()
 
     # Filter edges by min_weight
-    if min_weight > 1:
+    if min_weight > 0:
         weak_edges = [
             (u, v) for u, v, d in sub.edges(data=True)
             if d.get("weight", 1) < min_weight
@@ -251,8 +253,7 @@ def build_html_with_filters(G: nx.Graph, pos: dict, title: str = "Knowledge Grap
   <div id="title">{safe_title}</div>
   <div class="stat" id="stat-line">Loading...</div>
   <div class="legend">
-    <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div>Skills</div>
-    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>Agents</div>
+    {''.join(f'<div class="legend-item"><div class="legend-dot" style="background:{html.escape(color)}"></div>{html.escape(node_type)}</div>' for node_type, color in TYPE_COLORS.items())}
   </div>
 
   <h2>Search</h2>
@@ -263,8 +264,7 @@ def build_html_with_filters(G: nx.Graph, pos: dict, title: str = "Knowledge Grap
 
   <h2>Node Type</h2>
   <div class="filter-group">
-    <label><input type="checkbox" id="show-skills" checked onchange="applyFilters()"> Skills</label>
-    <label><input type="checkbox" id="show-agents" checked onchange="applyFilters()"> Agents</label>
+    {''.join(f'<label><input type="checkbox" class="type-filter" data-type="{html.escape(node_type, quote=True)}" checked onchange="applyFilters()"> {html.escape(node_type)}</label>' for node_type in TYPE_COLORS)}
   </div>
 
   <h2>Min Connections: <span id="deg-val">1</span></h2>
@@ -287,7 +287,7 @@ def build_html_with_filters(G: nx.Graph, pos: dict, title: str = "Knowledge Grap
 <script>
 const NODES = {_safe_json_for_script(nodes_data)};
 const EDGES = {_safe_json_for_script(edges_data)};
-const TYPE_COLORS = {{"skill": "#6366f1", "agent": "#f59e0b"}};
+const TYPE_COLORS = {_safe_json_for_script(TYPE_COLORS)};
 const COMM_COLORS = ["#ef4444","#f97316","#eab308","#22c55e","#06b6d4","#3b82f6","#8b5cf6","#ec4899","#14b8a6","#f43f5e","#84cc16","#0ea5e9","#a855f7","#e11d48","#10b981"];
 
 function esc(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }}
@@ -338,15 +338,13 @@ function toggleTag(el) {{
 
 function applyFilters() {{
   const search = document.getElementById('search').value.toLowerCase();
-  const showSkills = document.getElementById('show-skills').checked;
-  const showAgents = document.getElementById('show-agents').checked;
+  const enabledTypes = new Set(Array.from(document.querySelectorAll('.type-filter:checked')).map(el => el.dataset.type));
   const minDeg = parseInt(document.getElementById('min-degree').value);
   const showLabels = document.getElementById('show-labels').checked;
 
   const visible = new Set();
   const filtered = NODES.filter(n => {{
-    if (!showSkills && n.type === 'skill') return false;
-    if (!showAgents && n.type === 'agent') return false;
+    if (!enabledTypes.has(n.type)) return false;
     if (n.degree < minDeg) return false;
     if (search && !n.label.toLowerCase().includes(search)) return false;
     if (activeTags.size > 0 && !n.tags.some(t => activeTags.has(t))) return false;
@@ -371,7 +369,7 @@ function applyFilters() {{
     hoverinfo: 'none', showlegend: false
   }}];
 
-  ['skill','agent'].forEach(type => {{
+  Object.keys(TYPE_COLORS).forEach(type => {{
     const tn = filtered.filter(n => n.type === type);
     if (!tn.length) return;
     traces.push({{
@@ -548,7 +546,7 @@ The full graph is too large to render. Choose a view:
 
     seeds = None
     hops = 1
-    min_weight = 1
+    min_weight = 0.0
     community_id = None
     tag_filter = None
     top_n = None
@@ -563,8 +561,8 @@ The full graph is too large to render. Choose a view:
         seeds = [s.strip() for s in seed_input.split(",")]
         hops_input = input("Hop depth [1]: ").strip()
         hops = int(hops_input) if hops_input else 1
-        weight_input = input("Min edge weight [1]: ").strip()
-        min_weight = int(weight_input) if weight_input else 1
+        weight_input = input("Min edge weight [0]: ").strip()
+        min_weight = float(weight_input) if weight_input else 0.0
 
     elif choice == "2":
         print(f"\nTop tags: {', '.join(f'{t}({c})' for t, c in tags[:20])}")
@@ -593,7 +591,7 @@ The full graph is too large to render. Choose a view:
         top_input = input("How many top nodes? [50]: ").strip()
         top_n = int(top_input) if top_input else 50
         weight_input = input("Min edge weight [2]: ").strip()
-        min_weight = int(weight_input) if weight_input else 2
+        min_weight = float(weight_input) if weight_input else 2.0
 
     elif choice == "5":
         print(f"\nFull graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
@@ -664,7 +662,7 @@ def main() -> None:
     )
     parser.add_argument("--seed", help="Comma-separated skill/agent names to center on")
     parser.add_argument("--hops", type=int, default=1, help="Neighborhood depth from seeds (default 1)")
-    parser.add_argument("--min-weight", type=int, default=1, help="Minimum edge weight to include (default 1)")
+    parser.add_argument("--min-weight", type=float, default=0.0, help="Minimum edge weight to include (default 0)")
     parser.add_argument("--community", type=int, help="Show a specific community by ID")
     parser.add_argument("--tag", help="Show only nodes with this tag")
     parser.add_argument("--top", type=int, help="Show only the top-N most connected nodes")
