@@ -405,9 +405,13 @@ jobs:
           python -m pip install dist/*.whl
           python -m pip check
           python - <<'PY'
+          import tomllib
           from importlib.metadata import entry_points, version
 
           import ctx
+
+          with open("pyproject.toml", "rb") as fh:
+              expected_scripts = set(tomllib.load(fh)["project"]["scripts"])
 
           dist_version = version("claude-ctx")
           if ctx.__version__ != dist_version:
@@ -415,24 +419,41 @@ jobs:
                   f"ctx.__version__={ctx.__version__!r} != metadata {dist_version!r}"
               )
 
-          scripts = [
-              ep for ep in entry_points(group="console_scripts")
+          script_eps = {
+              ep.name: ep
+              for ep in entry_points(group="console_scripts")
               if ep.name == "ctx" or ep.name.startswith("ctx-")
-          ]
+          }
+          missing = sorted(expected_scripts - set(script_eps))
+          extra = sorted(set(script_eps) - expected_scripts)
+          if missing or extra:
+              raise SystemExit(
+                  "wheel console-script surface mismatch\n"
+                  f"missing: {missing}\n"
+                  f"extra: {extra}"
+              )
           failures = []
-          for ep in scripts:
+          for ep in script_eps.values():
               try:
                   ep.load()
               except Exception as exc:
                   failures.append(f"{ep.name}: {exc!r}")
           if failures:
               raise SystemExit("console script load failures:\n" + "\n".join(failures))
-          print(f"loaded {len(scripts)} ctx console scripts from wheel {dist_version}")
+
+          unsafe_help = {"ctx-mcp-server"}
+          safe_help = sorted(expected_scripts - unsafe_help)
+          with open("ctx-console-help.txt", "w", encoding="utf-8") as fh:
+              fh.write("\n".join(safe_help) + "\n")
+          print(
+              f"loaded {len(script_eps)} ctx console scripts from wheel "
+              f"{dist_version}; help-smoke={len(safe_help)}"
+          )
           PY
-          ctx-init --help >/dev/null
-          ctx-scan-repo --help >/dev/null
-          ctx-wiki-graphify --help >/dev/null
-          ctx --help >/dev/null
+          while IFS= read -r cmd; do
+            echo "help smoke: $cmd"
+            "$cmd" --help >/dev/null
+          done < ctx-console-help.txt
 
   clean-host-contract:
     name: "Clean host contract"
