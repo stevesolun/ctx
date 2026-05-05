@@ -555,6 +555,7 @@ def compute_semantic_edges(
     backend: str = "sentence-transformers",
     model: str | None = None,
     incremental: bool = True,
+    affected_out: set[str] | None = None,
 ) -> dict[tuple[str, str], float]:
     """Build the semantic-similarity edge map.
 
@@ -579,6 +580,10 @@ def compute_semantic_edges(
             to a full rebuild when the state file is missing or its
             schema/model/top_k/build_floor don't match the current
             run — see ``TopKState.is_compatible``.
+        affected_out: Optional set populated with node IDs whose
+            incident semantic edges were recomputed. Callers that patch
+            an existing graph must use this before the new top-K state
+            replaces the old one.
 
     Returns:
         ``{(node_id_low, node_id_high): cosine}`` with node IDs
@@ -774,6 +779,9 @@ def compute_semantic_edges(
         # State is an optimisation — a failure to persist doesn't
         # invalidate the edges we just produced.
         _logger.warning("semantic_edges: topk-state save failed (%s)", exc)
+
+    if affected_out is not None:
+        affected_out.update(need_recompute)
 
     return pairs
 

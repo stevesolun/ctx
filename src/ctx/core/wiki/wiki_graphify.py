@@ -507,6 +507,7 @@ def build_graph(
     # down to the floor lets operators A/B different display thresholds
     # without regraphifying — the slow path only runs when the floor
     # itself, top_k, or the embedding text changes.
+    semantic_affected: set[str] = set()
     if _cfg.graph_edge_weight_semantic > 0.0:
         sem_pairs = _sem.compute_semantic_edges(
             embed_nodes,
@@ -517,6 +518,7 @@ def build_graph(
             backend=_cfg.intake_backend,
             model=_cfg.intake_model,
             incremental=incremental,
+            affected_out=semantic_affected,
         )
     else:
         sem_pairs = {}
@@ -667,21 +669,13 @@ def build_graph(
         }
         for nid, data in G.nodes(data=True)
     }
-    # The "affected" set for the patch path is every node that got a
-    # fresh top-K this run (semantic_edges Option B partition). We
-    # recover it from the edge delta: any node that appears in an
-    # edge whose semantic_sim is from a fresh computation. As a
-    # proxy we use "every node in target_edges" — too aggressive but
-    # correct; a future refinement can thread the exact affected set
-    # out of semantic_edges explicitly.
-    # For the first patch-capable release we flag ALL nodes that
-    # currently have a target edge as affected — that's not strictly
-    # minimal but it's correct, and edge-count in the prior graph's
-    # unaffected set is still large enough to pay off.
     if prior_graph is not None and incremental:
-        affected_nodes = _recover_affected_from_sem_state(
-            cache_dir=_cfg.graph_semantic_cache_dir,
-            current_ids=set(current_node_info),
+        affected_nodes = set(semantic_affected)
+        affected_nodes.update(
+            _metadata_affected_nodes(
+                prior_graph=prior_graph,
+                current_node_info=current_node_info,
+            )
         )
         patched = patch_graph(
             prior_graph,
@@ -723,58 +717,31 @@ def build_graph(
     return G, entities
 
 
-def _recover_affected_from_sem_state(
-    *, cache_dir: Path, current_ids: set[str],
+def _metadata_affected_nodes(
+    *,
+    prior_graph: nx.Graph,
+    current_node_info: dict[str, dict],
 ) -> set[str]:
-    """Compute the set of node IDs whose incident edges need refresh.
+    """Return nodes whose graph-driving metadata changed.
 
-    Reads the Option-B top-K state and returns the set of nodes whose
-    content_hash differs from whatever is currently on disk, plus nodes
-    that are new this run. Nodes that are in the prior state but NOT
-    in current_ids are implicitly affected (they'll be removed) and
-    are left for patch_graph to handle via its own node-delta pass.
-
-    Falls back to "all current nodes" when the state file is missing
-    or unreadable — that's correct but loses the patch speedup.
+    Semantic body changes are reported by ``compute_semantic_edges``.
+    Tag, type, and label changes also affect blended edge weights, so
+    the patch path must refresh those incident edges as well.
     """
-    import json  # noqa: PLC0415
-
-    state_path = cache_dir / "topk-state.json"
-    if not state_path.is_file():
-        return set(current_ids)
-    try:
-        raw = json.loads(state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return set(current_ids)
-    prior_nodes = raw.get("nodes", {})
-    if not isinstance(prior_nodes, dict):
-        return set(current_ids)
-    prior_ids = set(prior_nodes.keys())
-    # New nodes are always affected; the per-hash diff for overlap
-    # nodes is already computed inside compute_semantic_edges and
-    # folded into the returned pairs, but we don't thread the exact
-    # list out of there today. Instead we treat as affected: (a) new
-    # nodes and (b) nodes whose prior top-K contained a now-removed
-    # neighbour. That catches the common "a few entities changed"
-    # case. For a full rebuild run, the caller passes incremental=False
-    # and this function is never reached.
-    new_nodes = current_ids - prior_ids
-    removed = prior_ids - current_ids
-    affected = set(new_nodes)
-    if removed:
-        for nid, entry in prior_nodes.items():
-            if nid not in current_ids:
-                continue
-            for tk in entry.get("top_k", []):
-                if not tk:
-                    continue
-                neighbor = tk[0]
-                if neighbor in removed:
-                    affected.add(nid)
-                    break
-    # Also mark anything with a content-hash change. We compute hashes
-    # against the current texts fresh here — cheap, and avoids
-    # threading state through the caller.
+    affected: set[str] = set()
+    for nid, info in current_node_info.items():
+        if nid not in prior_graph:
+            affected.add(nid)
+            continue
+        prior = prior_graph.nodes[nid]
+        if prior.get("label") != info.get("label"):
+            affected.add(nid)
+            continue
+        if prior.get("type") != info.get("type"):
+            affected.add(nid)
+            continue
+        if set(prior.get("tags", []) or []) != set(info.get("tags", []) or []):
+            affected.add(nid)
     return affected
 
 
