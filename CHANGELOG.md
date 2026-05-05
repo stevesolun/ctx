@@ -7,6 +7,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - No unreleased changes yet.
 
+## [0.7.7] - 2026-05-05
+
+### Fixed
+
+- Made graph export artifacts generation-aware so interrupted graph/delta
+  writes are rejected instead of reused as mixed crash states.
+- Recovered artifact promotions that completed the file replacement but
+  crashed before metadata finalization.
+- Kept harness onboarding fast while scoring frontmatter-only harness
+  catalog matches through the same fit/provider gates.
+- Propagated incremental semantic top-K contamination to a fixed point so
+  larger catalog updates do not preserve second-order stale neighbors.
+- Synced README and docs collected-test counts with the current suite.
+
 ## [0.7.6] - 2026-05-05
 
 ### Fixed
