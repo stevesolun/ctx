@@ -18,6 +18,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Hardened package-smoke and xdist CI against Windows CRLF command lists,
   nondeterministic test collection, macOS system temp symlinks, and
   Windows xdist benchmark variance.
+- Moved the no-test merge policy into a tested Python helper and added a
+  narrow exemption for release metadata-only version bumps.
 - Pinned the wheel console-script surface and clean-host environment
   isolation so packaged installs stay aligned with `pyproject.toml`.
 
