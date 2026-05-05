@@ -25,17 +25,7 @@ if str(SRC_DIR) not in sys.path:
 
 _FIXTURE_PATH = Path(__file__).parent / "fixtures" / "awesome_mcp_excerpt.md"
 
-try:
-    from mcp_sources.awesome_mcp import SOURCE, _parse_readme  # type: ignore[import-untyped]
-
-    _IMPORT_OK = True
-except ImportError:
-    _IMPORT_OK = False
-
-pytestmark = pytest.mark.skipif(
-    not _IMPORT_OK,
-    reason="awaits Phase 2a wiring: mcp_sources.awesome_mcp not yet present",
-)
+from mcp_sources.awesome_mcp import SOURCE, _parse_readme  # type: ignore[import-untyped]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

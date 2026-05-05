@@ -26,22 +26,13 @@ SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-try:
-    from mcp_sources.base import (
-        ALLOWED_HOSTS,
-        Source,
-        cache_path,
-        fetch_text,
-        read_cache,
-        write_cache,
-    )
-
-    _IMPORT_OK = True
-except ImportError:
-    _IMPORT_OK = False
-
-pytestmark = pytest.mark.skipif(
-    not _IMPORT_OK, reason="awaits Phase 2a wiring: mcp_sources.base not yet present"
+from mcp_sources.base import (  # noqa: E402
+    ALLOWED_HOSTS,
+    Source,
+    cache_path,
+    fetch_text,
+    read_cache,
+    write_cache,
 )
 
 

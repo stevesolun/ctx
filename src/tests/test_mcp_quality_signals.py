@@ -24,18 +24,8 @@ SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-_IMPORT_OK = False
-try:
-    import mcp_quality_signals as mqs  # noqa: E402
-    from mcp_entity import McpRecord  # noqa: E402
-    _IMPORT_OK = True
-except ImportError:
-    pass
-
-pytestmark = pytest.mark.skipif(
-    not _IMPORT_OK,
-    reason="mcp_quality_signals or its dependencies not yet available",
-)
+import mcp_quality_signals as mqs  # noqa: E402
+from mcp_entity import McpRecord  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
