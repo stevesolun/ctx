@@ -399,7 +399,7 @@ repo_url: https://github.com/earthtojake/text-to-cad
     assert "openscad" in results[0]["fit_signals"]
 
 
-def test_recommend_harnesses_enables_semantic_query_scoring(
+def test_recommend_harnesses_avoids_semantic_model_load_by_default(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -452,7 +452,7 @@ def test_recommend_harnesses_enables_semantic_query_scoring(
     assert results[0]["name"] == "langgraph"
     assert calls["query"] == "build an agent workflow"
     assert calls["entity_types"] == ("harness",)
-    assert calls["use_semantic_query"] is True
+    assert calls["use_semantic_query"] is False
 
 
 def test_main_custom_model_requires_model(tmp_path: Path, monkeypatch) -> None:

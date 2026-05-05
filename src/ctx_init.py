@@ -314,7 +314,9 @@ def recommend_harnesses(
             query=goal,
             entity_types=("harness",),
             min_normalized_score=0.0,
-            use_semantic_query=True,
+            # Harness fit is recomputed from provider/runtime/capability terms below.
+            # Avoid loading local embedding models on the latency-sensitive CLI path.
+            use_semantic_query=False,
         )
         results = [
             row for row in results
