@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -42,7 +43,18 @@ def promote_staged_artifact(
     """
     staged = Path(staged_path)
     target = Path(target_path)
+    metadata = (
+        Path(metadata_path) if metadata_path is not None
+        else _default_metadata_path(target)
+    )
     if not staged.is_file():
+        recovered = _recover_completed_promotion(
+            target=target,
+            metadata=metadata,
+            validate=validate,
+        )
+        if recovered is not None:
+            return recovered
         raise FileNotFoundError(f"staged artifact does not exist: {staged}")
     reject_symlink_path(staged)
     reject_symlink_path(target)
@@ -52,7 +64,6 @@ def promote_staged_artifact(
     if validate is not None:
         validate(staged)
 
-    metadata = Path(metadata_path) if metadata_path is not None else _default_metadata_path(target)
     reject_symlink_path(metadata)
     metadata.parent.mkdir(parents=True, exist_ok=True)
     reject_symlink_path(metadata)
@@ -91,6 +102,52 @@ def promote_staged_artifact(
 
 def _default_metadata_path(target: Path) -> Path:
     return target.with_name(f"{target.name}.promotion.json")
+
+
+def _recover_completed_promotion(
+    *,
+    target: Path,
+    metadata: Path,
+    validate: ArtifactValidator | None,
+) -> ArtifactPromotionResult | None:
+    if not metadata.is_file():
+        return None
+    reject_symlink_path(metadata)
+    reject_symlink_path(target)
+    try:
+        record = json.loads(metadata.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(record, dict) or record.get("status") != "staged":
+        return None
+    if str(record.get("target") or "") != str(target):
+        return None
+    candidate = record.get("candidate")
+    previous = record.get("previous")
+    if not isinstance(candidate, dict) or not isinstance(previous, dict):
+        return None
+    candidate_sha = candidate.get("sha256")
+    if not isinstance(candidate_sha, str) or not candidate_sha:
+        return None
+    current = _snapshot(target)
+    if current.get("sha256") != candidate_sha:
+        return None
+    if validate is not None:
+        validate(target)
+    promoted_record = {
+        **record,
+        "status": "promoted",
+        "promoted_at": _timestamp(),
+        "current": current,
+    }
+    atomic_write_json(metadata, promoted_record, indent=2)
+    return ArtifactPromotionResult(
+        target=target,
+        metadata_path=metadata,
+        previous=previous,
+        candidate=candidate,
+        current=current,
+    )
 
 
 def _snapshot(path: Path) -> dict[str, Any]:

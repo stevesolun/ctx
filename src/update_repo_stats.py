@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-update_repo_stats.py -- Patch README numbers from authoritative sources.
+update_repo_stats.py -- Patch README/docs numbers from authoritative sources.
 
-Run by the pre-commit hook so README badges and inline counts never drift from
-reality. Reads only committed files and a live pytest collection, so it's
-safe and fast (<1 s).
+Run by the pre-commit hook so README/docs badges and inline counts never drift
+from reality. Reads only committed files and a live pytest collection.
 
 Sources of truth:
   - graph/communities.json      -> total_communities
@@ -13,8 +12,8 @@ Sources of truth:
   - pytest --collect-only -q    -> collected test count
 
 Usage:
-  python src/update_repo_stats.py          # patch README.md in place
-  python src/update_repo_stats.py --check  # exit 1 if README is stale (for CI)
+  python src/update_repo_stats.py          # patch README/docs in place
+  python src/update_repo_stats.py --check  # exit 1 if README/docs are stale
 """
 
 from __future__ import annotations
@@ -30,6 +29,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 README = REPO_ROOT / "README.md"
+DOCS_INDEX = REPO_ROOT / "docs" / "index.md"
 _MAX_TAR_JSON_BYTES = 512 * 1024 * 1024
 _MAX_TAR_TEXT_BYTES = 2 * 1024 * 1024
 _GRAPH_JSON_MEMBER = "graphify-out/graph.json"
@@ -560,6 +560,15 @@ def build_replacements(stats: dict, tests: int | None, converted: int | None) ->
     return reps
 
 
+def build_docs_replacements(tests: int | None) -> list[tuple[re.Pattern[str], str]]:
+    if tests is None:
+        return []
+    return [(
+        re.compile(r"[\d,]+\s+tests collected"),
+        f"{tests:,} tests collected",
+    )]
+
+
 def patch_readme(check_only: bool = False) -> int:
     stats = read_graph_stats()
     tests = read_test_count()
@@ -569,28 +578,54 @@ def patch_readme(check_only: bool = False) -> int:
     if missing:
         print(f"warning: could not resolve {missing}; those fields will be left untouched", file=sys.stderr)
 
-    original = README.read_text(encoding="utf-8")
-    patched = original
-    for pattern, replacement in build_replacements(stats, tests, converted):
-        patched = pattern.sub(replacement, patched)
+    changes: list[tuple[Path, str, str]] = []
+    for target in (README, DOCS_INDEX):
+        if not target.exists():
+            continue
+        replacements = (
+            build_replacements(stats, tests, converted)
+            if target == README else build_docs_replacements(tests)
+        )
+        original = target.read_text(encoding="utf-8")
+        patched = original
+        for pattern, replacement in replacements:
+            patched = pattern.sub(replacement, patched)
+        if patched != original:
+            changes.append((target, original, patched))
 
-    if patched == original:
-        print("README is up to date.")
+    if not changes:
+        print("README/docs stats are up to date.")
         return 0
 
     if check_only:
-        print("README is STALE — run `python src/update_repo_stats.py` to refresh.", file=sys.stderr)
-        diff = [
-            (i + 1, o, p) for i, (o, p) in enumerate(zip(original.splitlines(), patched.splitlines())) if o != p
-        ]
-        for lineno, o, p in diff[:10]:
-            print(f"  line {lineno}:\n    - {o}\n    + {p}", file=sys.stderr)
+        print(
+            "README/docs stats are STALE -- run `python src/update_repo_stats.py` "
+            "to refresh.",
+            file=sys.stderr,
+        )
+        for target, original, patched in changes:
+            diff = [
+                (i + 1, o, p)
+                for i, (o, p) in enumerate(
+                    zip(original.splitlines(), patched.splitlines())
+                )
+                if o != p
+            ]
+            for lineno, o, p in diff[:10]:
+                rel = target.relative_to(REPO_ROOT)
+                print(f"  {rel}:{lineno}:\n    - {o}\n    + {p}", file=sys.stderr)
         return 1
 
-    README.write_text(patched, encoding="utf-8")
-    print(f"README patched: {sum(1 for o, p in zip(original.splitlines(), patched.splitlines()) if o != p)} lines changed")
+    total = 0
+    for target, original, patched in changes:
+        target.write_text(patched, encoding="utf-8")
+        changed_lines = sum(
+            1 for o, p in zip(original.splitlines(), patched.splitlines()) if o != p
+        )
+        total += changed_lines
+        print(f"{target.relative_to(REPO_ROOT)} patched: {changed_lines} lines changed")
+    print(f"Repository stats patched: {total} lines changed")
     return 0
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)

@@ -27,11 +27,70 @@ logger = logging.getLogger(__name__)
 
 WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki"))
 GRAPH_PATH = WIKI_DIR / "graphify-out" / "graph.json"
+GRAPH_EXPORT_MANIFEST = "graph-export-manifest.json"
 
 # A valid node-link graph dict must have "nodes" and either "links" or "edges"
 # (networkx >= 3.0 uses "edges"; older versions used "links").
 _EDGE_KEYS = frozenset({"links", "edges"})
 _SIMILARITY_EDGE_KEYS = frozenset({"semantic_sim", "tag_sim", "token_sim"})
+
+
+def _export_manifest_allows_graph(graph_path: Path, data: dict) -> bool:
+    graph_export_id: str | None = None
+    graph_meta = data.get("graph")
+    if isinstance(graph_meta, dict):
+        raw_graph_export_id = graph_meta.get("export_id")
+        if isinstance(raw_graph_export_id, str):
+            graph_export_id = raw_graph_export_id
+
+    manifest_path = graph_path.with_name(GRAPH_EXPORT_MANIFEST)
+    if manifest_path.is_file():
+        try:
+            manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "graph export manifest unreadable (%s); returning empty graph",
+                exc,
+            )
+            return False
+        if not isinstance(manifest_data, dict):
+            logger.warning(
+                "graph export manifest has wrong schema; returning empty graph",
+            )
+            return False
+        if graph_export_id != manifest_data.get("export_id"):
+            logger.warning(
+                "graph.json export id does not match manifest; returning empty graph",
+            )
+            return False
+        artifacts = manifest_data.get("artifacts")
+        if not isinstance(artifacts, dict):
+            logger.warning(
+                "graph export manifest missing artifacts; returning empty graph",
+            )
+            return False
+        for key in ("delta", "communities", "report"):
+            artifact_name = artifacts.get(key)
+            if not isinstance(artifact_name, str):
+                logger.warning(
+                    "graph export manifest missing %s; returning empty graph",
+                    key,
+                )
+                return False
+            if not graph_path.with_name(artifact_name).is_file():
+                logger.warning(
+                    "graph export artifact %s missing; returning empty graph",
+                    artifact_name,
+                )
+                return False
+        return True
+
+    if graph_export_id:
+        logger.warning(
+            "graph.json has an export id but no manifest; returning empty graph",
+        )
+        return False
+    return True
 
 
 def _configured_semantic_min_cosine() -> float | None:
@@ -89,6 +148,8 @@ def load_graph(path: Path | None = None) -> nx.Graph:
                 "graph.json missing required keys ('nodes' + one of %s); returning empty graph",
                 sorted(_EDGE_KEYS),
             )
+            return nx.Graph()
+        if not _export_manifest_allows_graph(graph_path, data):
             return nx.Graph()
         # NetworkX 2.x wrote edges under "links"; NetworkX 3.x defaults to
         # "edges" and errors out when the schema doesn't match. Detect

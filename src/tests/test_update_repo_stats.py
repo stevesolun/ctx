@@ -164,6 +164,16 @@ def test_test_badge_is_labeled_collected_not_passing() -> None:
     assert "_passing" not in patched
 
 
+def test_docs_landing_test_count_is_updated() -> None:
+    text = "CI-matrixed, 3,617 tests collected. Ships console scripts."
+    patched = text
+    for pattern, replacement in urs.build_docs_replacements(tests=3619):
+        patched = pattern.sub(replacement, patched)
+
+    assert "3,619 tests collected" in patched
+    assert "3,617 tests collected" not in patched
+
+
 def test_harness_aware_readme_prose_is_updated() -> None:
     text = (
         "walks a **1,000 skills, 20 agents, 30 MCP servers, "

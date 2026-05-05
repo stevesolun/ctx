@@ -23,6 +23,11 @@ Hugging Face repo-card frontmatter to the uploaded `README.md`, and refuses to
 publish if `graph/wiki-graph.tar.gz` or `graph/skills-sh-catalog.json.gz` is
 missing, too small, or still a Git LFS pointer.
 
+The script prefers Hugging Face's resumable large-folder uploader when the
+remote already has no stale paths. If the remote contains files that are not in
+the current git snapshot, the script falls back to a single clean replacement
+commit so deleted local files cannot survive remotely.
+
 Do not paste the token into a command line. Prompt for it, set it only for the
 current process, and clear it after the upload.
 

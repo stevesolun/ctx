@@ -12,6 +12,35 @@ if str(SCRIPTS_DIR) not in sys.path:
 import sync_huggingface  # noqa: E402
 
 
+class _FakeRepoInfo:
+    sha = "abc1234"
+
+
+class _FakeCommitInfo:
+    commit_url = "https://huggingface.co/datasets/Stevesolun/ctx/commit/fallback"
+
+
+class _FakeHfApi:
+    def __init__(self, remote_files: list[str]) -> None:
+        self.remote_files = remote_files
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def list_repo_files(self, **kwargs: object) -> list[str]:
+        self.calls.append(("list_repo_files", kwargs))
+        return self.remote_files
+
+    def upload_large_folder(self, **kwargs: object) -> None:
+        self.calls.append(("upload_large_folder", kwargs))
+
+    def upload_folder(self, **kwargs: object) -> _FakeCommitInfo:
+        self.calls.append(("upload_folder", kwargs))
+        return _FakeCommitInfo()
+
+    def repo_info(self, **kwargs: object) -> _FakeRepoInfo:
+        self.calls.append(("repo_info", kwargs))
+        return _FakeRepoInfo()
+
+
 def test_committed_readme_does_not_start_with_hf_frontmatter() -> None:
     readme = Path(__file__).resolve().parents[2] / "README.md"
 
@@ -44,6 +73,62 @@ def test_hf_publish_docs_use_hardened_sync_script_without_inline_token() -> None
     assert '$env:HF_TOKEN = "<' not in text
     assert "api.upload_folder" not in text
     assert "Read-Host \"HF write token\"" in text
+
+
+def test_hf_upload_prefers_large_folder_when_remote_has_no_stale_paths(
+    tmp_path: Path,
+) -> None:
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    (export_dir / "README.md").write_text("# ctx\n", encoding="utf-8")
+    (export_dir / "graph").mkdir()
+    (export_dir / "graph" / "wiki-graph.tar.gz").write_bytes(b"gz")
+    api = _FakeHfApi(remote_files=["README.md"])
+
+    url = sync_huggingface._upload_export(
+        api=api,
+        export_dir=export_dir,
+        repo_id="Stevesolun/ctx",
+        repo_type="dataset",
+        head="abcdef1234567890",
+        prefer_large_upload=True,
+    )
+
+    assert url == "https://huggingface.co/datasets/Stevesolun/ctx/commit/abc1234"
+    assert [call[0] for call in api.calls] == [
+        "list_repo_files",
+        "upload_large_folder",
+        "repo_info",
+    ]
+    large_upload = api.calls[1][1]
+    assert large_upload["repo_id"] == "Stevesolun/ctx"
+    assert large_upload["repo_type"] == "dataset"
+    assert large_upload["folder_path"] == str(export_dir)
+    assert large_upload["print_report"] is True
+
+
+def test_hf_upload_falls_back_to_clean_upload_when_remote_has_stale_paths(
+    tmp_path: Path,
+) -> None:
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    (export_dir / "README.md").write_text("# ctx\n", encoding="utf-8")
+    api = _FakeHfApi(remote_files=["README.md", "old-report.md"])
+
+    url = sync_huggingface._upload_export(
+        api=api,
+        export_dir=export_dir,
+        repo_id="Stevesolun/ctx",
+        repo_type="dataset",
+        head="abcdef1234567890",
+        prefer_large_upload=True,
+    )
+
+    assert url == "https://huggingface.co/datasets/Stevesolun/ctx/commit/fallback"
+    assert [call[0] for call in api.calls] == ["list_repo_files", "upload_folder"]
+    clean_upload = api.calls[1][1]
+    assert clean_upload["delete_patterns"] == "*"
+    assert clean_upload["commit_message"] == "Sync ctx abcdef1"
 
 
 def test_hf_export_copies_hydrated_tracked_artifacts(
