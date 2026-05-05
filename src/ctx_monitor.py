@@ -57,7 +57,7 @@ import secrets
 import sys
 import threading
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -75,6 +75,7 @@ _GRAPH_CACHE_KEY: tuple[Path, float, int, int] | None = None
 _GRAPH_CACHE_VALUE: Any | None = None
 _WIKI_INDEX_LIMIT_PER_TYPE = 500
 _GRAPH_REPORT_RE = re.compile(r"Nodes:\s*([\d,]+)\s*\|\s*Edges:\s*([\d,]+)")
+_MAX_POST_BODY_BYTES = 64 * 1024
 
 
 # ─── Data sources ────────────────────────────────────────────────────────────
@@ -530,19 +531,22 @@ def _status_payload() -> dict[str, Any]:
 def _read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
     if not path.exists():
         return []
-    out: list[dict] = []
+    if limit is not None and limit <= 0:
+        return []
+    out: deque[dict] | list[dict]
+    out = deque(maxlen=limit) if limit is not None else []
     with path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
             try:
-                out.append(json.loads(line))
+                event = json.loads(line)
             except json.JSONDecodeError:
                 continue
-    if limit is not None:
-        out = out[-limit:]
-    return out
+            if isinstance(event, dict):
+                out.append(event)
+    return list(out)
 
 
 def _sidecar_entity_type(sidecar: dict, fallback: str = "skill") -> str:
@@ -2428,6 +2432,53 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             and secrets.compare_digest(token, _MONITOR_TOKEN)
         )
 
+    def _content_length(self) -> int | None:
+        raw = self.headers.get("Content-Length")
+        if raw is None:
+            return 0
+        try:
+            length = int(raw)
+        except ValueError:
+            self._send_json_status(400, {"detail": "invalid Content-Length"})
+            return None
+        if length < 0:
+            self._send_json_status(400, {"detail": "invalid Content-Length"})
+            return None
+        if length > _MAX_POST_BODY_BYTES:
+            self._send_json_status(413, {"detail": "JSON body too large"})
+            return None
+        return length
+
+    def _read_json_body(self) -> dict[str, Any] | None:
+        content_type = self.headers.get("Content-Type", "").split(";", 1)[0]
+        if content_type.lower() != "application/json":
+            self._send_json_status(415, {"detail": "JSON body required"})
+            return None
+        length = self._content_length()
+        if length is None:
+            return None
+        raw = self.rfile.read(length) if length else b""
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send_json_status(400, {"detail": "invalid JSON body"})
+            return None
+        if not isinstance(body, dict):
+            self._send_json_status(400, {"detail": "JSON object body required"})
+            return None
+        return body
+
+    def _discard_small_body(self) -> None:
+        raw = self.headers.get("Content-Length")
+        if raw is None:
+            return
+        try:
+            length = int(raw)
+        except ValueError:
+            return
+        if 0 < length <= _MAX_POST_BODY_BYTES:
+            self.rfile.read(length)
+
     def do_GET(self) -> None:  # noqa: N802 — stdlib signature
         # Parse once so we can reuse the query string for /graph?slug=…
         raw_path, _, raw_query = self.path.partition("?")
@@ -2514,31 +2565,26 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         """Mutation endpoints. Same-origin only; JSON body required."""
         path = self.path.split("?", 1)[0]
         try:
-            length = int(self.headers.get("Content-Length") or 0)
-            raw = self.rfile.read(length) if length else b""
             if not self._mutations_enabled():
+                self._discard_small_body()
                 self._send_json_status(
                     403, {"detail": "monitor mutations disabled on non-loopback bind"},
                 )
                 return
             if not self._same_origin():
+                self._discard_small_body()
                 self._send_json_status(
                     403, {"detail": "cross-origin POST denied"},
                 )
                 return
             if not self._mutation_authorized():
+                self._discard_small_body()
                 self._send_json_status(
                     403, {"detail": "monitor token required"},
                 )
                 return
-            content_type = self.headers.get("Content-Type", "").split(";", 1)[0]
-            if content_type.lower() != "application/json":
-                self._send_json_status(415, {"detail": "JSON body required"})
-                return
-            try:
-                body = json.loads(raw.decode("utf-8")) if raw else {}
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                self._send_json_status(400, {"detail": "invalid JSON body"})
+            body = self._read_json_body()
+            if body is None:
                 return
 
             if path == "/api/load":

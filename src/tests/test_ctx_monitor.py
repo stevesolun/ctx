@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import threading
 import urllib.error
@@ -51,6 +52,31 @@ def _write_mcp_sidecar(claude: Path, slug: str, body: dict) -> None:
     (mcp_dir / f"{slug}.json").write_text(json.dumps(body), encoding="utf-8")
 
 
+def test_read_jsonl_skips_non_object_lines(tmp_path: Path) -> None:
+    path = tmp_path / "events.jsonl"
+    path.write_text(
+        "\n".join([
+            json.dumps({"event": "ok"}),
+            json.dumps(["not", "an", "object"]),
+            "not-json",
+            json.dumps("scalar"),
+        ]),
+        encoding="utf-8",
+    )
+
+    assert cm._read_jsonl(path) == [{"event": "ok"}]
+
+
+def test_read_jsonl_limit_keeps_tail_without_full_slice(tmp_path: Path) -> None:
+    path = tmp_path / "events.jsonl"
+    path.write_text(
+        "\n".join(json.dumps({"i": i}) for i in range(5)),
+        encoding="utf-8",
+    )
+
+    assert cm._read_jsonl(path, limit=2) == [{"i": 3}, {"i": 4}]
+
+
 def _post_json(port: int, path: str, body: dict, token: str | None = None) -> tuple[int, dict]:
     headers = {"Content-Type": "application/json"}
     if token is not None:
@@ -66,6 +92,28 @@ def _post_json(port: int, path: str, body: dict, token: str | None = None) -> tu
             return response.status, json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         return exc.code, json.loads(exc.read().decode("utf-8"))
+
+
+def _post_raw(
+    port: int,
+    path: str,
+    *,
+    headers: dict[str, str],
+    body: bytes = b"",
+) -> tuple[int, dict]:
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        conn.putrequest("POST", path)
+        for key, value in headers.items():
+            conn.putheader(key, value)
+        conn.endheaders()
+        if body:
+            conn.send(body)
+        response = conn.getresponse()
+        payload = json.loads(response.read().decode("utf-8"))
+        return response.status, payload
+    finally:
+        conn.close()
 
 
 def _serve_monitor(
@@ -475,6 +523,97 @@ def test_monitor_post_accepts_valid_token(
         assert status == 200
         assert body == {"ok": True, "detail": "loaded"}
         assert calls == [("python-patterns", "agent")]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_monitor_post_rejects_cross_origin_with_valid_token(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
+        calls.append(slug)
+        return True, f"loaded {entity_type}"
+
+    monkeypatch.setattr(cm, "_perform_load", fake_load)
+    server, thread, port = _serve_monitor(monkeypatch)
+    body = json.dumps({"slug": "python-patterns"}).encode("utf-8")
+    try:
+        status, payload = _post_raw(
+            port,
+            "/api/load",
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+                "X-CTX-Monitor-Token": "test-token",
+                "Origin": "http://evil.example",
+            },
+            body=body,
+        )
+        assert status == 403
+        assert "cross-origin" in payload["detail"]
+        assert calls == []
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+@pytest.mark.parametrize(
+    ("length", "status", "detail"),
+    [
+        ("nope", 400, "invalid Content-Length"),
+        ("-1", 400, "invalid Content-Length"),
+        (str(cm._MAX_POST_BODY_BYTES + 1), 413, "too large"),
+    ],
+)
+def test_monitor_post_rejects_bad_content_length_before_body_read(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    length: str,
+    status: int,
+    detail: str,
+) -> None:
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        code, payload = _post_raw(
+            port,
+            "/api/load",
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": length,
+                "X-CTX-Monitor-Token": "test-token",
+            },
+        )
+        assert code == status
+        assert detail in payload["detail"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_monitor_post_rejects_non_object_json_body(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server, thread, port = _serve_monitor(monkeypatch)
+    body = b"[]"
+    try:
+        status, payload = _post_raw(
+            port,
+            "/api/load",
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+                "X-CTX-Monitor-Token": "test-token",
+            },
+            body=body,
+        )
+        assert status == 400
+        assert "object" in payload["detail"]
     finally:
         server.shutdown()
         server.server_close()
