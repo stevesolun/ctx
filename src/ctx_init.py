@@ -236,10 +236,25 @@ _HARNESS_SIGNAL_ALIASES: dict[str, set[str]] = {
     "local": {"local", "ollama", "vllm"},
     "mcp": {"mcp", "server", "servers"},
     "openai": {"openai", "gpt"},
+    "private": {"private", "local", "offline", "self", "hosted"},
     "python": {"python", "py"},
     "tool": {"tool", "tools"},
     "tools": {"tool", "tools"},
 }
+
+_MODEL_VERSION_PREFIXES = (
+    "claude",
+    "codellama",
+    "deepseek",
+    "gemini",
+    "glm",
+    "gpt",
+    "llama",
+    "mistral",
+    "mixtral",
+    "phi",
+    "qwen",
+)
 
 _PROVIDER_KEY_ENV: dict[str, str] = {
     "openrouter": "OPENROUTER_API_KEY",
@@ -365,19 +380,24 @@ def _annotate_harness_fit(
     """Return absolute fit metadata for a harness recommendation row."""
     relevant_signals = _relevant_harness_signals(signals)
     terms = _harness_candidate_terms(graph, row)
-    matched = [
-        signal for signal in relevant_signals
-        if _harness_signal_matches(signal, terms)
-    ]
+    scored_signals: list[str] = []
+    matched: list[str] = []
+    for signal in relevant_signals:
+        signal_matches = _harness_signal_matches(signal, terms)
+        if not signal_matches and _looks_like_model_version_signal(signal):
+            continue
+        scored_signals.append(signal)
+        if signal_matches:
+            matched.append(signal)
     matched_set = set(matched)
     missing = [
-        signal for signal in relevant_signals
+        signal for signal in scored_signals
         if signal not in matched_set
     ]
 
     coverage = (
-        len(matched) / len(relevant_signals)
-        if relevant_signals else 0.0
+        len(matched) / len(scored_signals)
+        if scored_signals else 0.0
     )
     breadth = min(len(matched_set) / 3.0, 1.0)
     raw_strength = _clamp_harness_score(float(row.get("score") or 0.0) / 75.0)
@@ -389,7 +409,7 @@ def _annotate_harness_fit(
         "fit_score": fit_score,
         "fit_signals": sorted(matched_set),
         "missing_signals": missing[:8],
-        "fit_reason": _harness_fit_reason(matched, relevant_signals),
+        "fit_reason": _harness_fit_reason(matched, scored_signals),
     }
 
 
@@ -412,6 +432,13 @@ def _relevant_harness_signals(signals: list[str]) -> list[str]:
             continue
         seen.setdefault(token, None)
     return list(seen.keys())
+
+
+def _looks_like_model_version_signal(signal: str) -> bool:
+    token = signal.strip().lower()
+    return any(char.isdigit() for char in token) and token.startswith(
+        _MODEL_VERSION_PREFIXES
+    )
 
 
 def _harness_candidate_terms(graph: Any, row: dict[str, Any]) -> set[str]:

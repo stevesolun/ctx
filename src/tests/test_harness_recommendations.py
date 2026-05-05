@@ -58,6 +58,13 @@ def _harness_graph() -> nx.Graph:
         model_providers=["ollama"],
     )
     graph.add_node(
+        "harness:text-to-cad",
+        label="text-to-cad",
+        type="harness",
+        tags=["cad", "3d", "local", "ollama", "harness"],
+        model_providers=["ollama"],
+    )
+    graph.add_node(
         "skill:python-helper",
         label="python-helper",
         type="skill",
@@ -188,6 +195,24 @@ def test_ctx_init_filters_harnesses_by_model_provider(
     )
 
     assert [row["name"] for row in results] == ["local-workbench"]
+
+
+def test_ctx_init_ignores_model_version_tokens_for_local_harness_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ctx_init, "_load_recommendation_graph", _harness_graph)
+
+    results = ctx_init.recommend_harnesses(
+        "build a private CAD workflow with a local model ollama ollama/llama3.1 harness",
+        top_k=5,
+        model_provider="ollama",
+        model="ollama/llama3.1",
+    )
+
+    assert results
+    assert results[0]["name"] == "text-to-cad"
+    assert results[0]["fit_score"] >= 0.85
+    assert "llama3" not in results[0]["missing_signals"]
 
 
 def test_ctx_init_rejects_weak_single_signal_harness_match(
