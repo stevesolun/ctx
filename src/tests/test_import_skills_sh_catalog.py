@@ -766,6 +766,8 @@ def test_update_wiki_tarball_drops_special_archive_members(tmp_path: Path) -> No
     with tarfile.open(tarball, "w:gz") as tf:
         _add_text(tf, "./graphify-out/graph.json", json.dumps(graph))
         _add_text(tf, "./entities/skills/keep.md", "# Keep\n")
+        _add_text(tf, "./index.md.lock", "")
+        _add_text(tf, "./log.md.lock", "")
         link = tarfile.TarInfo("./entities/skills/unsafe-link.md")
         link.type = tarfile.SYMTYPE
         link.linkname = "/etc/passwd"
@@ -792,6 +794,8 @@ def test_update_wiki_tarball_drops_special_archive_members(tmp_path: Path) -> No
 
     assert "./entities/skills/keep.md" in members
     assert "./entities/skills/unsafe-link.md" not in members
+    assert "./index.md.lock" not in members
+    assert "./log.md.lock" not in members
     assert all(member.isfile() or member.isdir() for member in members.values())
 
 

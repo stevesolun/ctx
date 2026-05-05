@@ -7,7 +7,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from validate_graph_artifacts import (
     GraphArtifactError,
@@ -47,6 +47,7 @@ def _write_archive(
     *,
     include_converted: bool = True,
     include_original: bool = False,
+    include_lock: bool = False,
 ) -> None:
     graph = {
         "nodes": [
@@ -77,6 +78,8 @@ def _write_archive(
             _add_text(tf, "./converted/skills-sh-example-skill/references/01-scope.md", "# Scope\n")
         if include_original:
             _add_text(tf, "./converted/skills-sh-example-skill/SKILL.md.original", "# Raw\n")
+        if include_lock:
+            _add_text(tf, "./index.md.lock", "")
 
 
 def test_validate_graph_artifacts_checks_catalog_paths_and_deep_graph_stats(
@@ -176,6 +179,18 @@ def test_validate_graph_artifacts_rejects_original_backup_members(tmp_path: Path
     _write_archive(tmp_path, include_original=True)
 
     with pytest.raises(GraphArtifactError, match="raw backup"):
+        validate_graph_artifacts(tmp_path)
+
+
+def test_validate_graph_artifacts_rejects_lock_members(tmp_path: Path) -> None:
+    _write_catalog(
+        tmp_path,
+        converted_path="converted/skills-sh-example-skill/SKILL.md",
+    )
+    (tmp_path / "communities.json").write_text("{}", encoding="utf-8")
+    _write_archive(tmp_path, include_lock=True)
+
+    with pytest.raises(GraphArtifactError, match="lock member"):
         validate_graph_artifacts(tmp_path)
 
 

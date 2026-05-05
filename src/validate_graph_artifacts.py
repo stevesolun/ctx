@@ -209,6 +209,8 @@ def validate_graph_artifacts(
                 raise GraphArtifactError(f"archive member is not a regular file/dir: {member.name}")
             if name.endswith(".original"):
                 raise GraphArtifactError(f"archive contains raw backup member: {member.name}")
+            if name.endswith(".lock"):
+                raise GraphArtifactError(f"archive contains lock member: {member.name}")
             if name.startswith("entities/skills/") and name.endswith(".md"):
                 skill_pages += 1
             elif name.startswith("entities/agents/") and name.endswith(".md"):

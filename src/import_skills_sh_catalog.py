@@ -1560,6 +1560,7 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                         and parts[1] in replacement_slugs
                     )
                     or safe_name.endswith(".original")
+                    or safe_name.endswith(".lock")
                 ):
                     continue
                 if safe_name == "graphify-out/graph-report.md":
@@ -1700,6 +1701,8 @@ def _validate_wiki_tarball_candidate(candidate: Path) -> None:
                 raise ValueError(f"unsafe tar member in candidate: {member.name!r}")
             if safe_name.endswith(".original"):
                 raise ValueError(f"raw backup member leaked into candidate: {safe_name}")
+            if safe_name.endswith(".lock"):
+                raise ValueError(f"lock member leaked into candidate: {safe_name}")
             seen.add(safe_name)
             if safe_name == "graphify-out/graph.json":
                 graph = _read_tar_json(tf, member, "graph.json")
