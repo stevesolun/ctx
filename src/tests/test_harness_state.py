@@ -118,7 +118,7 @@ class TestSessionIdValidation:
             "abc123",
             "nightly_backfill",
             "2026-04-24-trial",
-            new_session_id(),
+            "f9eaad988e79443b85b819099f3679a3",
         ],
     )
     def test_accepts_good(self, good: str) -> None:
