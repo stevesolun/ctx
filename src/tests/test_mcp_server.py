@@ -52,6 +52,18 @@ from ctx.mcp_server.server import (
 )
 
 _SRC_DIR = Path(__file__).resolve().parents[1]
+_EXPECTED_TOOL_NAMES = {
+    "ctx__recommend_bundle",
+    "ctx__graph_query",
+    "ctx__wiki_search",
+    "ctx__wiki_get",
+    "ctx__observe_dev_event",
+    "ctx__load_entity",
+    "ctx__mark_entity_used",
+    "ctx__unload_entity",
+    "ctx__session_end",
+    "ctx__session_state",
+}
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -200,12 +212,7 @@ class TestToolsList:
         response = frames[0]
         assert "error" not in response
         tool_names = {t["name"] for t in response["result"]["tools"]}
-        assert tool_names == {
-            "ctx__recommend_bundle",
-            "ctx__graph_query",
-            "ctx__wiki_search",
-            "ctx__wiki_get",
-        }
+        assert tool_names == _EXPECTED_TOOL_NAMES
 
     def test_tool_shape_is_mcp_standard(self) -> None:
         frames = _drive(_encode_request(1, "tools/list"))
@@ -286,6 +293,46 @@ class TestToolsCall:
         result = frames[0]["result"]
         assert result["isError"] is True
 
+    def test_lifecycle_tool_call_records_event(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(tmp_path / "runtime"))
+        frames = _drive(
+            _encode_request(
+                1,
+                "tools/call",
+                {
+                    "name": "ctx__load_entity",
+                    "arguments": {
+                        "session_id": "s-1",
+                        "entity_type": "skill",
+                        "slug": "python-patterns",
+                    },
+                },
+            )
+        )
+        result = frames[0]["result"]
+        assert result["isError"] is False
+        payload = json.loads(result["content"][0]["text"])
+        assert payload["ok"] is True
+        event = json.loads((tmp_path / "runtime" / "events.jsonl").read_text())
+        assert event["action"] == "load_requested"
+
+        frames = _drive(
+            _encode_request(
+                2,
+                "tools/call",
+                {
+                    "name": "ctx__session_state",
+                    "arguments": {"session_id": "s-1"},
+                },
+            )
+        )
+        state_payload = json.loads(frames[0]["result"]["content"][0]["text"])
+        assert state_payload["unload_candidates"][0]["slug"] == "python-patterns"
+
 
 # ── Handler unit tests (direct, no I/O loop) ────────────────────────────────
 
@@ -294,7 +341,7 @@ class TestHandlersDirect:
     def test_tools_list_direct(self) -> None:
         state = _ServerState()
         result = _handle_tools_list(state, {})
-        assert len(result["tools"]) == 4
+        assert len(result["tools"]) == len(_EXPECTED_TOOL_NAMES)
 
     def test_tools_call_rejects_missing_name(self) -> None:
         from ctx.mcp_server.server import _JsonRpcError
@@ -394,12 +441,7 @@ class TestRoundTripWithH2Client:
         with McpClient(cfg) as client:
             tools = client.list_tools()
             names = {t.name for t in tools}
-            assert names == {
-                "ctx__recommend_bundle",
-                "ctx__graph_query",
-                "ctx__wiki_search",
-                "ctx__wiki_get",
-            }
+            assert names == _EXPECTED_TOOL_NAMES
 
     def test_client_calls_tool_and_reads_response(self, tmp_path: Path) -> None:
         wiki = self._build_synthetic_wiki(tmp_path)

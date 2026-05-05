@@ -36,6 +36,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from ctx_config import cfg
+from ctx.core.entity_types import INDEX_SECTION_FOR_SUBJECT
 from ctx.core.wiki.wiki_utils import parse_frontmatter as _parse_frontmatter
 
 WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*)?\]\]")
@@ -250,24 +251,25 @@ def check_contradictions(pages: dict[str, Path]) -> list[Finding]:
                              f"Flagged for contradiction review: {raw}"))
     return out
 
+
+def _index_section_for_slug(slug: str) -> str:
+    parts = slug.replace("\\", "/").split("/")
+    if len(parts) >= 2 and parts[0] == "entities":
+        return INDEX_SECTION_FOR_SUBJECT.get(parts[1], "## Skills")
+    return INDEX_SECTION_FOR_SUBJECT.get(parts[0], "## Skills")
+
 def fix_index(wiki: Path, missing_slugs: list[str]) -> int:
     idx = wiki / "index.md"
     if not idx.exists() or not missing_slugs:
         return 0
     lines = _read(idx).splitlines()
     content = "\n".join(lines)
-    section_map = {
-        "skills": "## Skills", "plugins": "## Plugins", "mcp": "## MCP Servers",
-        "concepts": "## Concepts", "comparisons": "## Comparisons", "queries": "## Queries",
-    }
     added = 0
     for slug in sorted(missing_slugs):
         entry = f"- [[{slug}]]"
         if entry in content:
             continue
-        section = next(
-            (h for key, h in section_map.items() if key in slug), "## Skills"
-        )
+        section = _index_section_for_slug(slug)
         insert_at = next(
             (i + 1 for i, ln in enumerate(lines) if ln.strip() == section), len(lines)
         )

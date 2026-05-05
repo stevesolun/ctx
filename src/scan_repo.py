@@ -3,7 +3,7 @@
 scan_repo.py -- Analyze a repository and produce a stack profile JSON.
 
 Usage:
-    python scan_repo.py --repo /path/to/repo --output /tmp/stack-profile.json
+    python scan_repo.py --repo /path/to/repo --output .ctx/stack-profile.json
 
 The scanner reads directory structure and config files to detect:
 - Languages, frameworks, infrastructure, data stores, testing, AI tooling,
@@ -18,10 +18,19 @@ import json
 import os
 import re
 import sys
+import tempfile
 import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+_CTX_CFG: Any | None
+try:
+    from ctx_config import cfg as _ctx_cfg
+except Exception:  # pragma: no cover - config load failures fall back below
+    _CTX_CFG = None
+else:
+    _CTX_CFG = _ctx_cfg
 
 # Directories to always skip
 SKIP_DIRS = {
@@ -33,6 +42,14 @@ SKIP_DIRS = {
 
 # Max depth for directory scanning
 MAX_DEPTH = 3
+
+
+def _default_output_path() -> Path:
+    """Return the OS-portable default stack profile path."""
+    configured = getattr(_CTX_CFG, "stack_profile_tmp", None)
+    if configured:
+        return Path(configured)
+    return Path(tempfile.gettempdir()) / "skill-stack-profile.json"
 
 
 def scan_directory(repo_path: str, max_depth: int = MAX_DEPTH) -> dict:
@@ -709,7 +726,7 @@ def _print_recommendations(repo: str, profile: dict) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Scan a repo and produce a stack profile")
     parser.add_argument("--repo", required=True, help="Path to the repository")
-    parser.add_argument("--output", default="/tmp/stack-profile.json", help="Output JSON path")
+    parser.add_argument("--output", default=str(_default_output_path()), help="Output JSON path")
     parser.add_argument("--depth", type=int, default=MAX_DEPTH, help="Max scan depth")
     parser.add_argument(
         "--recommend",

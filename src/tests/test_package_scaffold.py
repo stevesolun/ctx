@@ -39,6 +39,41 @@ _EXPECTED_SUBPACKAGES: tuple[str, ...] = (
     "ctx.utils",
 )
 
+_EXPECTED_CONSOLE_SCRIPTS: tuple[str, ...] = (
+    "ctx",
+    "ctx-agent-add",
+    "ctx-agent-install",
+    "ctx-agent-mirror",
+    "ctx-bundle-suggest",
+    "ctx-dedup-check",
+    "ctx-harness-add",
+    "ctx-harness-install",
+    "ctx-init",
+    "ctx-install-hooks",
+    "ctx-lifecycle",
+    "ctx-mcp-add",
+    "ctx-mcp-enrich",
+    "ctx-mcp-fetch",
+    "ctx-mcp-ingest",
+    "ctx-mcp-install",
+    "ctx-mcp-quality",
+    "ctx-mcp-rebuild-index",
+    "ctx-mcp-server",
+    "ctx-mcp-uninstall",
+    "ctx-monitor",
+    "ctx-recommend",
+    "ctx-scan-repo",
+    "ctx-skill-add",
+    "ctx-skill-health",
+    "ctx-skill-install",
+    "ctx-skill-mirror",
+    "ctx-skill-quality",
+    "ctx-tag-backfill",
+    "ctx-toolbox",
+    "ctx-wiki-graphify",
+    "ctx-wiki-worker",
+)
+
 
 @pytest.mark.parametrize("qualified_name", _EXPECTED_SUBPACKAGES)
 def test_subpackage_importable(qualified_name: str) -> None:
@@ -119,6 +154,15 @@ def test_flat_console_scripts_are_packaged() -> None:
     root = Path(__file__).resolve().parent.parent.parent
     with open(root / "pyproject.toml", "rb") as fh:
         data = tomllib.load(fh)
+
+    declared_scripts = set(data["project"]["scripts"])
+    expected_scripts = set(_EXPECTED_CONSOLE_SCRIPTS)
+    assert declared_scripts == expected_scripts, (
+        "pyproject.toml console scripts changed without updating the "
+        "package-surface contract. "
+        f"Missing: {sorted(expected_scripts - declared_scripts)}; "
+        f"extra: {sorted(declared_scripts - expected_scripts)}"
+    )
 
     packaged_modules = set(data["tool"]["setuptools"].get("py-modules", []))
     flat_targets = {

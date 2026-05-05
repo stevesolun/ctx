@@ -5,7 +5,9 @@ from __future__ import annotations
 import builtins
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
+import networkx as nx
 import ctx_init as ci
 
 
@@ -85,6 +87,32 @@ def test_main_creates_everything_in_dry_mode(tmp_path: Path, monkeypatch,
     assert "[ok]" in out
     assert "[skip] hook injection" in out
     assert "[skip] graph build" in out
+
+
+def test_main_treats_existing_toolboxes_as_idempotent_skip(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+
+    class _FakeResult:
+        returncode = 1
+        stdout = ""
+        stderr = (
+            "Global config already has 5 toolbox(es). "
+            "Use --force to overwrite."
+        )
+
+    monkeypatch.setattr(ci.subprocess, "run", lambda *_args, **_kwargs: _FakeResult())
+
+    rc = ci.main(["--model-mode", "skip"])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "starter toolboxes already present" in captured.out
+    assert "toolbox init returned" not in captured.err
+    assert "Global config already has" not in captured.err
 
 
 def test_main_auto_wizard_in_terminal_configures_custom_model(
@@ -285,6 +313,89 @@ def test_main_custom_model_writes_profile_and_recommends_harness(
     assert recommendation_calls[0]["model_provider"] == "openai"
     assert recommendation_calls[0]["model"] == "openai/gpt-5.5"
     assert "text-to-cad" in capsys.readouterr().out
+
+
+def test_main_custom_model_no_fit_points_to_harness_plan(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
+    monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
+    monkeypatch.setattr(ci, "recommend_harnesses", lambda *args, **kwargs: [])
+
+    rc = ci.main([
+        "--model-mode", "custom",
+        "--model", "ollama/llama3.1",
+        "--goal", "private local CAD workflow",
+    ])
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "no harness recommendations matched yet" in output
+    assert "ctx-harness-install --recommend" in output
+    assert "--plan-on-no-fit" in output
+
+
+def test_recommend_harnesses_uses_wiki_frontmatter_for_fit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    wiki = tmp_path / "wiki"
+    page = wiki / "entities" / "harnesses" / "text-to-cad.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        """---
+title: Text to CAD
+type: harness
+tags:
+  - cad
+runtimes:
+  - python
+model_providers:
+  - openai
+capabilities:
+  - Generate CAD artifacts from natural language prompts
+    with OpenSCAD and mesh validation
+repo_url: https://github.com/earthtojake/text-to-cad
+---
+# Text to CAD
+""",
+        encoding="utf-8",
+    )
+    graph = nx.Graph()
+    graph.add_node(
+        "harness:text-to-cad",
+        label="text-to-cad",
+        type="harness",
+        tags=["cad"],
+    )
+    monkeypatch.setattr(ci, "_load_recommendation_graph", lambda: graph)
+    import ctx_config
+
+    monkeypatch.setattr(
+        ctx_config,
+        "cfg",
+        SimpleNamespace(
+            wiki_dir=wiki,
+            claude_dir=tmp_path / ".claude",
+            recommendation_top_k=5,
+            harness_recommendation_min_fit_score=0.85,
+        ),
+    )
+
+    results = ci.recommend_harnesses(
+        "text to cad openscad openai gpt-5 harness",
+        model_provider="openai",
+        model="openai/gpt-5.5",
+    )
+
+    assert results
+    assert results[0]["name"] == "text-to-cad"
+    assert results[0]["fit_score"] >= 0.85
+    assert "openai" in results[0]["fit_signals"]
+    assert "gpt-5" in results[0]["fit_signals"]
+    assert "openscad" in results[0]["fit_signals"]
 
 
 def test_main_custom_model_requires_model(tmp_path: Path, monkeypatch) -> None:

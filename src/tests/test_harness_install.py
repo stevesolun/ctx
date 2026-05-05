@@ -86,8 +86,20 @@ def test_install_copies_local_source_and_writes_manifest(tmp_path: Path) -> None
     )
     assert manifest["slug"] == "text-to-cad"
     assert manifest["status"] == "installed"
+    assert {Path(path).as_posix() for path in manifest["attach_files"]} == {
+        ".ctx/attach/README.md",
+        ".ctx/attach/ctx-run.txt",
+        ".ctx/attach/mcp.json",
+        ".ctx/attach/python.py",
+    }
     assert manifest["setup_commands_run"] == []
     assert manifest["verify_commands_run"] == []
+    attach_dir = tmp_path / "installs" / "text-to-cad" / ".ctx" / "attach"
+    assert json.loads((attach_dir / "mcp.json").read_text(encoding="utf-8")) == {
+        "mcpServers": {"ctx-wiki": {"command": "ctx-mcp-server", "args": []}}
+    }
+    assert "recommend_bundle" in (attach_dir / "python.py").read_text(encoding="utf-8")
+    assert "ctx run --model" in (attach_dir / "ctx-run.txt").read_text(encoding="utf-8")
 
 
 def test_write_manifest_uses_atomic_json_writer(
@@ -121,6 +133,7 @@ def test_write_manifest_uses_atomic_json_writer(
         runtimes=("python",),
         model_providers=("openai",),
         capabilities=("Generate CAD",),
+        attach_modes=("mcp", "python-library", "ctx-run"),
         setup_commands=(),
         verify_commands=(),
     )
@@ -131,10 +144,48 @@ def test_write_manifest_uses_atomic_json_writer(
         manifest_dir=tmp_path / "manifests",
         setup_runs=[],
         verify_runs=[],
+        attach_files=[],
     )
 
     assert path == tmp_path / "manifests" / "text-to-cad.json"
     assert calls == [(path, json.loads(path.read_text(encoding="utf-8")), 2)]
+
+
+def test_install_respects_catalog_attach_modes(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=str(source), attach_modes=["mcp"])
+
+    result = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=tmp_path / "manifests",
+        allow_local_sources=True,
+    )
+
+    assert result.status == "installed"
+    attach_dir = tmp_path / "installs" / "text-to-cad" / ".ctx" / "attach"
+    assert (attach_dir / "README.md").exists()
+    assert (attach_dir / "mcp.json").exists()
+    assert not (attach_dir / "python.py").exists()
+    assert not (attach_dir / "ctx-run.txt").exists()
+
+
+def test_dry_run_does_not_write_attach_files(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki)
+    result = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=tmp_path / "manifests",
+        dry_run=True,
+    )
+
+    assert result.status == "dry-run"
+    assert not (tmp_path / "installs" / "text-to-cad" / ".ctx").exists()
 
 
 def test_install_accepts_file_uri_local_source_with_opt_in(tmp_path: Path) -> None:
@@ -232,10 +283,10 @@ def test_setup_and_verify_commands_require_explicit_flags(
         run_verify=True,
         allow_local_sources=True,
     )
-    assert calls == [
-        ["python", "-m", "pip", "install", "-e", "."],
-        ["python", "-m", "pytest"],
-    ]
+    assert Path(calls[0][0]).name.lower().startswith("python")
+    assert calls[0][1:] == ["-m", "pip", "install", "-e", "."]
+    assert Path(calls[1][0]).name.lower().startswith("python")
+    assert calls[1][1:] == ["-m", "pytest"]
 
 
 def test_target_must_stay_inside_installs_root(tmp_path: Path) -> None:
@@ -508,6 +559,47 @@ def test_cataloged_commands_use_sanitized_env_and_redact_output(
     assert run["stdout"] == f"token {harness_install._REDACTION}"
 
 
+def test_run_command_resolves_bare_executable(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    resolved = str(tmp_path / "npx.cmd")
+    captured_cmd: list[str] = []
+
+    def fake_which(command: str, *, path: str | None = None) -> str | None:
+        return resolved if command == "npx" else None
+
+    def fake_run(cmd: list[str], **_kwargs: Any) -> _FakeRun:
+        captured_cmd.extend(cmd)
+        return _FakeRun(stdout="9.0.0")
+
+    monkeypatch.setattr(harness_install.shutil, "which", fake_which)
+    monkeypatch.setattr(harness_install.subprocess, "run", fake_run)
+
+    run = harness_install._run_command("npx --version", cwd=tmp_path)
+
+    assert run["returncode"] == 0
+    assert captured_cmd[0] == resolved
+
+
+def test_split_command_preserves_windows_backslashes(monkeypatch: Any) -> None:
+    monkeypatch.setattr(harness_install.os, "name", "nt")
+
+    parts = harness_install._split_command(r'python "C:\Users\me\script.py"')
+
+    assert parts == ["python", r"C:\Users\me\script.py"]
+
+
+def test_failed_run_message_includes_redacted_output() -> None:
+    message = harness_install._failed_run_message(
+        "setup",
+        "npm install",
+        {"stderr": "token leaked", "stdout": ""},
+    )
+
+    assert message == "setup command failed: npm install: token leaked"
+
+
 def test_recommend_mode_prints_install_handoff(
     monkeypatch: Any,
     capsys: Any,
@@ -540,3 +632,56 @@ def test_recommend_mode_prints_install_handoff(
     output = capsys.readouterr().out
     assert "Recommended harnesses" in output
     assert "ctx-harness-install text-to-cad --dry-run" in output
+
+
+def test_recommend_no_fit_prints_custom_harness_plan(
+    monkeypatch: Any,
+    capsys: Any,
+) -> None:
+    monkeypatch.setattr(harness_install, "recommend_harnesses_for_cli", lambda **_: [])
+
+    rc = harness_install.main([
+        "--recommend",
+        "--goal",
+        "build a private CAD workflow with a local model",
+        "--model-provider",
+        "ollama",
+        "--model",
+        "ollama/llama3.1",
+        "--plan-on-no-fit",
+    ])
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "No harness recommendations matched." in output
+    assert "# Custom Harness PRD" in output
+    assert "ctx-mcp-server" in output
+    assert "ctx.recommend_bundle" in output
+    assert "Windows, macOS, and Linux" in output
+
+
+def test_recommend_no_fit_writes_custom_harness_plan(
+    tmp_path: Path,
+    monkeypatch: Any,
+    capsys: Any,
+) -> None:
+    monkeypatch.setattr(harness_install, "recommend_harnesses_for_cli", lambda **_: [])
+    target = tmp_path / "custom-harness.md"
+
+    rc = harness_install.main([
+        "--recommend",
+        "--goal",
+        "repair a legacy Python service",
+        "--model",
+        "openrouter/openai/gpt-5.5",
+        "--plan-on-no-fit",
+        "--plan-output",
+        str(target),
+    ])
+
+    assert rc == 0
+    assert f"Custom harness plan: {target}" in capsys.readouterr().out
+    text = target.read_text(encoding="utf-8")
+    assert "repair a legacy Python service" in text
+    assert "openrouter/openai/gpt-5.5" in text
+    assert "Build the harness described above" in text

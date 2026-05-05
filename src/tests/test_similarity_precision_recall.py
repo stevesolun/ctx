@@ -50,8 +50,6 @@ from pathlib import Path
 
 import pytest
 
-sentence_transformers = pytest.importorskip("sentence_transformers")
-
 SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
@@ -197,6 +195,7 @@ def _embedder():
     typical cause is sentence-transformers not being installed or
     network access being blocked on first download.
     """
+    pytest.importorskip("sentence_transformers")
     try:
         return cfg.build_intake_embedder()
     except Exception as exc:  # noqa: BLE001 — environment failures should skip, not fail
@@ -280,7 +279,6 @@ def test_similarity_precision_and_recall(_embedder, _tmp_cache_root):
     assert precision >= _MIN_PRECISION, message
 
 
-@pytest.mark.integration
 def test_fixture_schema_integrity():
     """Fail fast if any fixture file is malformed — catches JSONL typos
     without having to load the embedder.

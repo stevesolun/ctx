@@ -214,13 +214,14 @@ class TestParseToolCall:
         tc = _parse_tool_call(raw)
         assert tc == ToolCall(id="c1", name="fs_read", arguments={"path": "/tmp"})
 
-    def test_malformed_json_args_fall_back_to_empty_dict(self) -> None:
+    def test_malformed_json_args_preserve_parse_error(self) -> None:
         raw = {
             "id": "c1",
             "function": {"name": "fs_read", "arguments": "not json"},
         }
         tc = _parse_tool_call(raw)
         assert tc.arguments == {}
+        assert "invalid JSON arguments" in tc.parse_error
 
     def test_dict_args_passthrough(self) -> None:
         raw = {
@@ -229,6 +230,7 @@ class TestParseToolCall:
         }
         tc = _parse_tool_call(raw)
         assert tc.arguments == {"path": "/tmp"}
+        assert tc.parse_error == ""
 
     def test_missing_function_fields(self) -> None:
         tc = _parse_tool_call({"id": "c1"})

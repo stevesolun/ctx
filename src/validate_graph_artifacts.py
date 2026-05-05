@@ -28,7 +28,14 @@ DEFAULT_HARNESSES = {
     "semantic-kernel",
     "text-to-cad",
 }
-_NONZERO_SEMANTIC_RE = re.compile(rb'"semantic_sim":(?!0(?:\.0+)?[,}])')
+_NODE_ID_RE = re.compile(rb'"id"\s*:')
+_EDGE_TARGET_RE = re.compile(rb'"target"\s*:')
+_SOURCE_SKILLS_SH_RE = re.compile(rb'"source_catalog"\s*:\s*"skills\.sh"')
+_HARNESS_TYPE_RE = re.compile(rb'"type"\s*:\s*"harness"')
+_SEMANTIC_SIM_RE = re.compile(
+    rb'"semantic_sim"\s*:\s*(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)',
+)
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
 
 class GraphArtifactError(RuntimeError):
@@ -41,6 +48,7 @@ class GraphArtifactStats:
     graph_nodes: int
     graph_edges: int
     graph_semantic_edges: int
+    harness_nodes: int
     skills_sh_nodes: int
     skills_sh_catalog_entries: int
     skills_sh_converted: int
@@ -73,9 +81,18 @@ def _require_real_file(path: Path) -> None:
 
 
 def _safe_tar_name(raw_name: str) -> str:
-    name = raw_name.replace("\\", "/").lstrip("./")
-    parts = [part for part in name.split("/") if part]
-    if not parts or raw_name.startswith(("/", "\\")) or ".." in parts:
+    name = raw_name.replace("\\", "/")
+    if (
+        not name
+        or name.startswith("/")
+        or _WINDOWS_DRIVE_RE.match(name)
+        or "\x00" in name
+    ):
+        raise GraphArtifactError(f"unsafe archive member path: {raw_name}")
+    while name.startswith("./"):
+        name = name[2:]
+    parts = name.split("/")
+    if not parts or any(part in ("", ".", "..") for part in parts):
         raise GraphArtifactError(f"unsafe archive member path: {raw_name}")
     return "/".join(parts)
 
@@ -90,19 +107,33 @@ def _scan_graph_json(stream: IO[bytes]) -> tuple[int, int, int, int, int]:
     while chunk := stream.read(1024 * 1024):
         old_tail = tail
         data = tail + chunk
-        nodes += data.count(b'"id":') - old_tail.count(b'"id":')
-        edges += data.count(b'"target":') - old_tail.count(b'"target":')
+        nodes += len(_NODE_ID_RE.findall(data)) - len(_NODE_ID_RE.findall(old_tail))
+        edges += len(_EDGE_TARGET_RE.findall(data)) - len(_EDGE_TARGET_RE.findall(old_tail))
         semantic_edges += (
-            len(_NONZERO_SEMANTIC_RE.findall(data))
-            - len(_NONZERO_SEMANTIC_RE.findall(old_tail))
+            _count_nonzero_semantic_matches(data)
+            - _count_nonzero_semantic_matches(old_tail)
         )
         skills_sh_nodes += (
-            data.count(b'"source_catalog":"skills.sh"')
-            - old_tail.count(b'"source_catalog":"skills.sh"')
+            len(_SOURCE_SKILLS_SH_RE.findall(data))
+            - len(_SOURCE_SKILLS_SH_RE.findall(old_tail))
         )
-        harness_nodes += data.count(b'"type":"harness"') - old_tail.count(b'"type":"harness"')
-        tail = data[-128:]
+        harness_nodes += (
+            len(_HARNESS_TYPE_RE.findall(data))
+            - len(_HARNESS_TYPE_RE.findall(old_tail))
+        )
+        tail = data[-512:]
     return nodes, edges, semantic_edges, skills_sh_nodes, harness_nodes
+
+
+def _count_nonzero_semantic_matches(data: bytes) -> int:
+    count = 0
+    for match in _SEMANTIC_SIM_RE.finditer(data):
+        try:
+            if float(match.group(1)) != 0.0:
+                count += 1
+        except ValueError:
+            continue
+    return count
 
 
 def _catalog_skills(catalog: dict[str, Any]) -> list[dict[str, Any]]:
@@ -121,6 +152,17 @@ def validate_graph_artifacts(
     expected_harnesses: set[str] | None = None,
     line_threshold: int = 180,
     max_stage_lines: int = 40,
+    expected_nodes: int | None = None,
+    expected_edges: int | None = None,
+    expected_semantic_edges: int | None = None,
+    expected_harness_nodes: int | None = None,
+    expected_skills_sh_nodes: int | None = None,
+    expected_skills_sh_catalog_entries: int | None = None,
+    expected_skills_sh_converted: int | None = None,
+    expected_skill_pages: int | None = None,
+    expected_agent_pages: int | None = None,
+    expected_mcp_pages: int | None = None,
+    expected_harness_pages: int | None = None,
 ) -> GraphArtifactStats:
     graph_dir = Path(graph_dir)
     tarball = graph_dir / "wiki-graph.tar.gz"
@@ -155,6 +197,7 @@ def validate_graph_artifacts(
 
     names: set[str] = set()
     graph_nodes = graph_edges = graph_semantic_edges = skills_sh_nodes = 0
+    harness_nodes = 0
     skill_pages = agent_pages = mcp_pages = harness_pages = skills_sh_converted = 0
     expected_harnesses = DEFAULT_HARNESSES if expected_harnesses is None else expected_harnesses
 
@@ -185,7 +228,7 @@ def validate_graph_artifacts(
                     graph_edges,
                     graph_semantic_edges,
                     skills_sh_nodes,
-                    _harness_nodes,
+                    harness_nodes,
                 ) = _scan_graph_json(f)
             elif member.isfile() and deep and name.startswith("converted/skills-sh-"):
                 if name.endswith("/SKILL.md") or "/references/" in name:
@@ -236,11 +279,12 @@ def validate_graph_artifacts(
                 f"semantic edge count {graph_semantic_edges} below floor {min_semantic_edges}",
             )
 
-    return GraphArtifactStats(
+    stats = GraphArtifactStats(
         tar_members=len(names),
         graph_nodes=graph_nodes,
         graph_edges=graph_edges,
         graph_semantic_edges=graph_semantic_edges,
+        harness_nodes=harness_nodes,
         skills_sh_nodes=skills_sh_nodes,
         skills_sh_catalog_entries=len(skills),
         skills_sh_converted=skills_sh_converted,
@@ -249,6 +293,39 @@ def validate_graph_artifacts(
         mcp_pages=mcp_pages,
         harness_pages=harness_pages,
     )
+    if not deep and any(
+        value is not None
+        for value in (
+            expected_nodes,
+            expected_edges,
+            expected_semantic_edges,
+            expected_harness_nodes,
+            expected_skills_sh_nodes,
+        )
+    ):
+        raise GraphArtifactError("deep=True is required for exact graph node/edge counts")
+    expected_counts = {
+        "graph_nodes": expected_nodes,
+        "graph_edges": expected_edges,
+        "graph_semantic_edges": expected_semantic_edges,
+        "harness_nodes": expected_harness_nodes,
+        "skills_sh_nodes": expected_skills_sh_nodes,
+        "skills_sh_catalog_entries": expected_skills_sh_catalog_entries,
+        "skills_sh_converted": expected_skills_sh_converted,
+        "skill_pages": expected_skill_pages,
+        "agent_pages": expected_agent_pages,
+        "mcp_pages": expected_mcp_pages,
+        "harness_pages": expected_harness_pages,
+    }
+    for field_name, expected in expected_counts.items():
+        if expected is None:
+            continue
+        actual = getattr(stats, field_name)
+        if actual != expected:
+            raise GraphArtifactError(
+                f"{field_name} exact count mismatch: expected {expected}, got {actual}",
+            )
+    return stats
 
 
 def main() -> None:
@@ -261,7 +338,27 @@ def main() -> None:
     parser.add_argument("--min-semantic-edges", type=int, default=1_000_000)
     parser.add_argument("--line-threshold", type=int, default=180)
     parser.add_argument("--max-stage-lines", type=int, default=40)
+    parser.add_argument("--expected-nodes", type=int)
+    parser.add_argument("--expected-edges", type=int)
+    parser.add_argument("--expected-semantic-edges", type=int)
+    parser.add_argument("--expected-harness-nodes", type=int)
+    parser.add_argument("--expected-skills-sh-nodes", type=int)
+    parser.add_argument("--expected-skills-sh-catalog-entries", type=int)
+    parser.add_argument("--expected-skills-sh-converted", type=int)
+    parser.add_argument("--expected-skill-pages", type=int)
+    parser.add_argument("--expected-agent-pages", type=int)
+    parser.add_argument("--expected-mcp-pages", type=int)
+    parser.add_argument("--expected-harness-pages", type=int)
     args = parser.parse_args()
+    deep_expected = (
+        args.expected_nodes,
+        args.expected_edges,
+        args.expected_semantic_edges,
+        args.expected_harness_nodes,
+        args.expected_skills_sh_nodes,
+    )
+    if not args.deep and any(value is not None for value in deep_expected):
+        parser.error("--deep is required for exact graph node/edge count checks")
     stats = validate_graph_artifacts(
         args.graph_dir,
         deep=args.deep,
@@ -271,6 +368,17 @@ def main() -> None:
         min_semantic_edges=args.min_semantic_edges,
         line_threshold=args.line_threshold,
         max_stage_lines=args.max_stage_lines,
+        expected_nodes=args.expected_nodes,
+        expected_edges=args.expected_edges,
+        expected_semantic_edges=args.expected_semantic_edges,
+        expected_harness_nodes=args.expected_harness_nodes,
+        expected_skills_sh_nodes=args.expected_skills_sh_nodes,
+        expected_skills_sh_catalog_entries=args.expected_skills_sh_catalog_entries,
+        expected_skills_sh_converted=args.expected_skills_sh_converted,
+        expected_skill_pages=args.expected_skill_pages,
+        expected_agent_pages=args.expected_agent_pages,
+        expected_mcp_pages=args.expected_mcp_pages,
+        expected_harness_pages=args.expected_harness_pages,
     )
     print(json.dumps(stats.__dict__, indent=2, sort_keys=True))
 

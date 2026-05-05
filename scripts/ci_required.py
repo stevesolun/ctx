@@ -12,7 +12,23 @@ CHEAP_PR_SKIPPABLE_JOBS = {
     "no-test-no-merge",
     "package-build",
     "package-smoke",
+    "similarity-integration",
     "static",
+    "unit-linux",
+}
+REQUIRED_JOBS = {
+    "browser-security",
+    "classify",
+    "clean-host-contract",
+    "docs-check",
+    "e2e-canary",
+    "graph-check",
+    "no-test-no-merge",
+    "package-build",
+    "package-smoke",
+    "similarity-integration",
+    "static",
+    "test",
     "unit-linux",
 }
 
@@ -35,6 +51,8 @@ def failed_required_jobs(
     event_name: str,
 ) -> dict[str, str | None]:
     failures: dict[str, str | None] = {}
+    for name in sorted(REQUIRED_JOBS - set(needs)):
+        failures[name] = "missing"
     docs_only_pr = (
         event_name == "pull_request"
         and _job_output(needs, "classify", "docs_only") == "true"

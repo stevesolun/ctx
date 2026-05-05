@@ -179,6 +179,18 @@ def test_tag_match_idf_weighting() -> None:
     assert sorted(names[1:]) == ["alpha", "beta", "gamma"]
 
 
+def test_rare_tag_outranks_common_tag_when_each_node_matches_once() -> None:
+    G = _build_graph([
+        ("alpha", ["common"]),
+        ("beta", ["common"]),
+        ("gamma", ["common"]),
+        ("delta", ["rare"]),
+    ])
+
+    results = recommend_by_tags(G, ["common", "rare"], top_n=4)
+    assert results[0]["name"] == "delta"
+
+
 def test_empty_query_returns_empty_list() -> None:
     G = _build_graph([("foo", [])])
     assert recommend_by_tags(G, [], top_n=5) == []
@@ -251,7 +263,12 @@ def test_semantic_boost_changes_top_result(monkeypatch) -> None:
         "skill:bar-skill": 0.90,
     })
     out = recommend_by_tags(
-        G, ["common"], top_n=2, query="anything", semantic_weight=100.0,
+        G,
+        ["common"],
+        top_n=2,
+        query="anything",
+        semantic_weight=100.0,
+        use_semantic_query=True,
     )
     names = [r["name"] for r in out]
     assert names[0] == "bar-skill", (
@@ -260,10 +277,8 @@ def test_semantic_boost_changes_top_result(monkeypatch) -> None:
     )
 
 
-def test_semantic_off_when_query_omitted(monkeypatch) -> None:
-    """The semantic path must NOT fire if no query is supplied —
-    callers that only have tags should get the legacy ranking unchanged.
-    """
+def test_semantic_off_by_default_even_with_query(monkeypatch) -> None:
+    """The semantic path must not fire unless explicitly requested."""
     from ctx.core.resolve import recommendations as rec
 
     called = {"load": 0, "embed": 0}
@@ -281,10 +296,10 @@ def test_semantic_off_when_query_omitted(monkeypatch) -> None:
     rec._semantic_cache.clear()
 
     G = _build_graph([("foo", ["common"]), ("bar", ["common"])])
-    recommend_by_tags(G, ["common"], top_n=2)  # no query=
+    recommend_by_tags(G, ["common"], top_n=2, query="common work")
 
-    assert called["load"] == 0, "semantic index must not load when query is None"
-    assert called["embed"] == 0, "query must not be embedded when query is None"
+    assert called["load"] == 0, "semantic index must not load by default"
+    assert called["embed"] == 0, "query must not be embedded by default"
 
 
 def test_semantic_index_failure_falls_through(monkeypatch) -> None:

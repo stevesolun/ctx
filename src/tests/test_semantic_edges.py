@@ -1037,6 +1037,7 @@ class TestComputeSemanticEdgesIncrementalPath:
         embed_vecs: np.ndarray,
         top_k: int = 5,
         min_cosine: float = 0.0,
+        affected_out: set[str] | None = None,
     ) -> dict[tuple[str, str], float]:
         _save_topk_state(tmp_path, prior_state)
         embed_vecs.shape[1]
@@ -1066,6 +1067,7 @@ class TestComputeSemanticEdgesIncrementalPath:
                     batch_size=32,
                     cache_dir=tmp_path,
                     incremental=True,
+                    affected_out=affected_out,
                 )
 
     def test_incremental_reuses_unchanged_pairs(self, tmp_path: Path) -> None:
@@ -1088,6 +1090,42 @@ class TestComputeSemanticEdgesIncrementalPath:
         pairs = self._run_with_prior_state(nodes, prior, tmp_path=tmp_path, embed_vecs=vecs)
         # Pair should be present (reused from prior OR recomputed — either is valid)
         assert ("a", "b") in pairs
+
+    def test_incremental_reports_changed_nodes_to_patch_caller(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        nodes = [
+            SemanticNode("a", "text_a_changed"),
+            SemanticNode("b", "text_b"),
+        ]
+        prior = _make_state(
+            model_id="fake-model",
+            top_k=5,
+            build_floor=0.0,
+            nodes={
+                "a": {
+                    "content_hash": _content_hash("text_a_old"),
+                    "top_k": [["b", 0.75]],
+                },
+                "b": {
+                    "content_hash": _content_hash("text_b"),
+                    "top_k": [["a", 0.75]],
+                },
+            },
+        )
+        affected: set[str] = set()
+        vecs = np.array([[1.0, 0.0], [1.0, 0.0]], dtype="float32")
+
+        self._run_with_prior_state(
+            nodes,
+            prior,
+            tmp_path=tmp_path,
+            embed_vecs=vecs,
+            affected_out=affected,
+        )
+
+        assert affected == {"a", "b"}
 
     def test_incompatible_prior_forces_full_rebuild(self, tmp_path: Path) -> None:
         nodes = [SemanticNode("a", "ta"), SemanticNode("b", "tb")]

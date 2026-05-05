@@ -410,6 +410,59 @@ class TestToolDispatch:
         assert result.stop_reason == "tool_error"
         assert "kaboom" in result.detail
 
+    def test_malformed_tool_call_arguments_are_not_executed(self) -> None:
+        tc = ToolCall(
+            id="c1",
+            name="custom__dangerous",
+            arguments={},
+            parse_error="invalid JSON arguments: Unterminated string",
+        )
+        invoked = False
+
+        def exec_(_call: ToolCall) -> str:
+            nonlocal invoked
+            invoked = True
+            return "should-not-run"
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(tc), _stop_response("unreached")]),
+            system_prompt="",
+            task="call tool",
+            tool_executor=exec_,
+        )
+
+        assert result.stop_reason == "tool_error"
+        assert "invalid tool call arguments" in result.detail
+        assert not invoked
+
+    def test_length_finish_with_tool_calls_is_not_executed(self) -> None:
+        tc = ToolCall(id="c1", name="custom__dangerous", arguments={})
+        invoked = False
+
+        def exec_(_call: ToolCall) -> str:
+            nonlocal invoked
+            invoked = True
+            return "should-not-run"
+
+        truncated = CompletionResponse(
+            content="",
+            tool_calls=(tc,),
+            finish_reason="length",
+            usage=Usage(input_tokens=10, output_tokens=4096),
+            provider="scripted",
+            model="x",
+        )
+        result = run_loop(
+            provider=_Scripted([truncated, _stop_response("unreached")]),
+            system_prompt="",
+            task="call tool",
+            tool_executor=exec_,
+        )
+
+        assert result.stop_reason == "length"
+        assert not invoked
+        assert not [m for m in result.messages if m.role == "tool"]
+
     def test_tool_policy_denies_before_executor(self) -> None:
         tc = ToolCall(id="c1", name="custom__delete", arguments={"path": "x"})
         invoked = False

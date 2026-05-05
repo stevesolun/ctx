@@ -23,16 +23,7 @@ SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-try:
-    import mcp_fetch  # type: ignore[import-untyped]
-
-    _IMPORT_OK = True
-except ImportError:
-    _IMPORT_OK = False
-
-pytestmark = pytest.mark.skipif(
-    not _IMPORT_OK, reason="awaits Phase 2a wiring: mcp_fetch not yet present"
-)
+import mcp_fetch  # type: ignore[import-untyped]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +88,9 @@ class TestListSources:
         monkeypatch.setattr(sys, "argv", ["ctx-mcp-fetch", "--list-sources"])
         with pytest.raises(SystemExit):
             mcp_fetch.main()
-        out = capsys.readouterr().out
+        captured = capsys.readouterr()
+        assert captured.err == ""
+        out = captured.out
         assert "awesome-mcp" in out
 
 
@@ -122,9 +115,9 @@ class TestNoArgs:
         with pytest.raises(SystemExit):
             mcp_fetch.main()
         captured = capsys.readouterr()
-        # Error should appear on stderr (argparse default) or stdout
-        error_output = captured.err + captured.out
-        assert error_output.strip() != "", "Expected some error output for missing args"
+        assert captured.out == ""
+        assert "usage:" in captured.err
+        assert "error:" in captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -150,8 +143,10 @@ class TestUnknownSource:
         with pytest.raises(SystemExit):
             mcp_fetch.main()
         captured = capsys.readouterr()
-        error_output = captured.err + captured.out
-        assert error_output.strip() != ""
+        assert captured.out == ""
+        assert "unknown source" in captured.err
+        assert "does-not-exist" in captured.err
+        assert "awesome-mcp" in captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -170,9 +165,12 @@ class TestJsonlOutput:
         with pytest.raises(SystemExit) as exc_info:
             mcp_fetch.main()
         assert exc_info.value.code == 0
-        out = capsys.readouterr().out
-        lines = [ln for ln in out.splitlines() if ln.strip()]
-        assert len(lines) == 2, f"Expected 2 JSONL lines, got {len(lines)}: {out!r}"
+        captured = capsys.readouterr()
+        assert captured.err == ""
+        lines = [ln for ln in captured.out.splitlines() if ln.strip()]
+        assert len(lines) == 2, (
+            f"Expected 2 JSONL lines, got {len(lines)}: {captured.out!r}"
+        )
 
     def test_output_lines_are_valid_json(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -183,14 +181,35 @@ class TestJsonlOutput:
         )
         with pytest.raises(SystemExit):
             mcp_fetch.main()
-        out = capsys.readouterr().out
-        for line in out.splitlines():
+        captured = capsys.readouterr()
+        assert captured.err == ""
+        records = []
+        for line in captured.out.splitlines():
             if not line.strip():
                 continue
             try:
-                json.loads(line)
+                records.append(json.loads(line))
             except json.JSONDecodeError as exc:
                 pytest.fail(f"Output line is not valid JSON: {line!r} — {exc}")
+
+
+        assert [record["name"] for record in records] == ["tool-0", "tool-1"]
+
+    def test_verbose_success_reports_progress_on_stderr(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _patch_sources(monkeypatch, _FakeSource(name="fake-source"))
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["ctx-mcp-fetch", "--source", "fake-source", "--limit", "1", "-v"],
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            mcp_fetch.main()
+
+        captured = capsys.readouterr()
+        assert exc_info.value.code == 0
+        assert "[fake-source] emitted 1 record(s)" in captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -229,8 +248,9 @@ class TestFetchError:
             mcp_fetch.main()
         captured = capsys.readouterr()
         # Error detail must surface somewhere — prefer stderr
-        error_output = captured.err + captured.out
-        assert error_output.strip() != "", "Expected error output when fetch raises"
+        assert captured.out == ""
+        assert "bad-source" in captured.err
+        assert "simulated fetch failure" in captured.err
 
 
 class TestVerboseFlag:

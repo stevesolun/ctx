@@ -28,15 +28,9 @@ MCP servers):
         Fetch a single entity page by slug — returns its full
         frontmatter + body for the model to reason about.
 
-Install semantics are DELIBERATELY out of scope for v1:
-    A generic-harness install would mean "stage this skill's body
-    into the next turn's context" (no filesystem auto-load like
-    Claude Code has). That is more opinionated than ctx.core should
-    be, so it lives in the host adapter layer (H7 ctx-run CLI
-    decides how to surface the recommendation; H9 per-host adapters
-    like Aider get their own install path). For now, the model
-    *recommends* and *reads*; the user or a higher-level adapter
-    chooses whether to install.
+Load/unload tools are explicit lifecycle records, not filesystem
+auto-installs. The host remains responsible for asking the user and
+deciding how to place selected entities into context.
 
 Plan 001 Phase H6.
 """
@@ -50,6 +44,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ctx.adapters.generic.providers import ToolCall, ToolDefinition
+from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
 from ctx.adapters.generic.tools import TOOL_SEPARATOR
 from ctx.core.entity_types import (
     RECOMMENDABLE_ENTITY_TYPES,
@@ -87,7 +82,7 @@ class BundleEntry:
 
 
 class CtxCoreToolbox:
-    """Read-only ctx-core surface, packaged as harness tools.
+    """ctx-core recommendation and lifecycle surface for harness tools.
 
     Lazy-initialises heavy deps (networkx graph load, wiki page
     scan) so a harness that never asks for ctx-core tools doesn't
@@ -104,9 +99,11 @@ class CtxCoreToolbox:
         *,
         wiki_dir: Path | None = None,
         graph_path: Path | None = None,
+        lifecycle_dir: Path | None = None,
     ) -> None:
         self._wiki_dir = wiki_dir
         self._graph_path = graph_path
+        self._lifecycle = RuntimeLifecycleStore(lifecycle_dir)
         self._graph: Any | None = None       # networkx.Graph
         self._pages: list[Any] | None = None  # list[SkillPage]
 
@@ -114,7 +111,7 @@ class CtxCoreToolbox:
 
     def tool_definitions(self) -> list[ToolDefinition]:
         """Return the list of tools this toolbox exposes to the model."""
-        return [
+        definitions = [
             ToolDefinition(
                 name=f"{_NAMESPACE}recommend_bundle",
                 description=(
@@ -227,6 +224,8 @@ class CtxCoreToolbox:
                 },
             ),
         ]
+        definitions.extend(_lifecycle_tool_definitions())
+        return definitions
 
     def dispatch(self, call: ToolCall) -> str:
         """Execute one ctx-core tool call. Returns a JSON string.
@@ -251,6 +250,18 @@ class CtxCoreToolbox:
             return self._dispatch_wiki_search(args)
         if local_name == "wiki_get":
             return self._dispatch_wiki_get(args)
+        if local_name == "observe_dev_event":
+            return self._dispatch_lifecycle(args, "observe_dev_event")
+        if local_name == "load_entity":
+            return self._dispatch_lifecycle(args, "load_entity")
+        if local_name == "mark_entity_used":
+            return self._dispatch_lifecycle(args, "mark_entity_used")
+        if local_name == "unload_entity":
+            return self._dispatch_lifecycle(args, "unload_entity")
+        if local_name == "session_end":
+            return self._dispatch_lifecycle(args, "session_end")
+        if local_name == "session_state":
+            return self._dispatch_lifecycle(args, "session_state")
 
         raise ValueError(f"unknown ctx-core tool {local_name!r}")
 
@@ -422,6 +433,56 @@ class CtxCoreToolbox:
             "looked_in": [str(p) for _, p, _ in candidates],
         })
 
+    def _dispatch_lifecycle(self, args: dict[str, Any], name: str) -> str:
+        try:
+            if name == "observe_dev_event":
+                result = self._lifecycle.record_dev_event(
+                    session_id=str(args.get("session_id") or ""),
+                    event_type=str(args.get("event_type") or ""),
+                    host=str(args.get("host") or "") or None,
+                    cwd=str(args.get("cwd") or "") or None,
+                    payload=_dict_arg(args.get("payload")),
+                )
+            elif name == "load_entity":
+                result = self._lifecycle.load_entity(
+                    session_id=str(args.get("session_id") or ""),
+                    entity_type=str(args.get("entity_type") or ""),
+                    slug=str(args.get("slug") or ""),
+                    reason=str(args.get("reason") or "") or None,
+                )
+            elif name == "mark_entity_used":
+                result = self._lifecycle.mark_entity_used(
+                    session_id=str(args.get("session_id") or ""),
+                    entity_type=str(args.get("entity_type") or ""),
+                    slug=str(args.get("slug") or ""),
+                    evidence=str(args.get("evidence") or "") or None,
+                )
+            elif name == "unload_entity":
+                result = self._lifecycle.unload_entity(
+                    session_id=str(args.get("session_id") or ""),
+                    entity_type=str(args.get("entity_type") or ""),
+                    slug=str(args.get("slug") or ""),
+                    reason=str(args.get("reason") or "") or None,
+                )
+            elif name == "session_end":
+                result = self._lifecycle.end_session(
+                    session_id=str(args.get("session_id") or ""),
+                    status=str(args.get("status") or "") or None,
+                    summary=str(args.get("summary") or "") or None,
+                )
+            elif name == "session_state":
+                result = self._lifecycle.session_state(
+                    session_id=str(args.get("session_id") or ""),
+                    min_unused_seconds=_float_arg(
+                        args.get("min_unused_seconds"),
+                    ),
+                )
+            else:
+                raise ValueError(f"unknown lifecycle tool {name}")
+        except ValueError as exc:
+            return json.dumps({"ok": False, "error": str(exc)})
+        return json.dumps(result)
+
     def _serialise_page(self, path: Path, entity_type: str, wikilink: str) -> str:
         from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body  # noqa: PLC0415
 
@@ -505,6 +566,138 @@ def _query_to_tags(query: str) -> list[str]:
     from ctx.core.resolve.recommendations import query_to_tags  # noqa: PLC0415
 
     return query_to_tags(query)
+
+
+def _lifecycle_tool_definitions() -> list[ToolDefinition]:
+    entity_enum = list(RECOMMENDABLE_ENTITY_TYPES)
+    session = {
+        "type": "string",
+        "description": "Host-generated session id for lifecycle correlation.",
+    }
+    entity_type = {
+        "type": "string",
+        "enum": entity_enum,
+        "description": "Entity type to load/use/unload.",
+    }
+    slug = {
+        "type": "string",
+        "description": "Entity slug from ctx recommendations or wiki search.",
+    }
+    return [
+        ToolDefinition(
+            name=f"{_NAMESPACE}observe_dev_event",
+            description=(
+                "Record the current development event for a custom/API/local "
+                "harness. Use before recommending when the host has task, "
+                "file, error, or verification context to preserve."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "session_id": session,
+                    "event_type": {"type": "string"},
+                    "host": {"type": "string"},
+                    "cwd": {"type": "string"},
+                    "payload": {"type": "object"},
+                },
+                "required": ["session_id", "event_type"],
+            },
+        ),
+        ToolDefinition(
+            name=f"{_NAMESPACE}load_entity",
+            description=(
+                "Record that the host/user chose to load a recommended skill, "
+                "agent, MCP server, or harness into the current session."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "session_id": session,
+                    "entity_type": entity_type,
+                    "slug": slug,
+                    "reason": {"type": "string"},
+                },
+                "required": ["session_id", "entity_type", "slug"],
+            },
+        ),
+        ToolDefinition(
+            name=f"{_NAMESPACE}mark_entity_used",
+            description="Record evidence that a loaded ctx entity was useful.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "session_id": session,
+                    "entity_type": entity_type,
+                    "slug": slug,
+                    "evidence": {"type": "string"},
+                },
+                "required": ["session_id", "entity_type", "slug"],
+            },
+        ),
+        ToolDefinition(
+            name=f"{_NAMESPACE}unload_entity",
+            description=(
+                "Record that the host/user chose to unload a ctx entity. "
+                "Hosts should ask the user before calling this."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "session_id": session,
+                    "entity_type": entity_type,
+                    "slug": slug,
+                    "reason": {"type": "string"},
+                },
+                "required": ["session_id", "entity_type", "slug"],
+            },
+        ),
+        ToolDefinition(
+            name=f"{_NAMESPACE}session_end",
+            description="Record that a custom/API/local harness session ended.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "session_id": session,
+                    "status": {"type": "string"},
+                    "summary": {"type": "string"},
+                },
+                "required": ["session_id"],
+            },
+        ),
+        ToolDefinition(
+            name=f"{_NAMESPACE}session_state",
+            description=(
+                "Read the current lifecycle state for a session, including "
+                "loaded entities, used entities, and unload candidates that "
+                "were loaded but have no usage evidence."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "session_id": session,
+                    "min_unused_seconds": {
+                        "type": "number",
+                        "description": (
+                            "Minimum age before an unused loaded entity is "
+                            "returned as an unload candidate. Default 0."
+                        ),
+                    },
+                },
+                "required": ["session_id"],
+            },
+        ),
+    ]
+
+
+def _dict_arg(raw: Any) -> dict[str, Any]:
+    return raw if isinstance(raw, dict) else {}
+
+
+def _float_arg(raw: Any) -> float:
+    try:
+        return float(raw) if raw is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _excerpt(body: str, max_chars: int) -> str:

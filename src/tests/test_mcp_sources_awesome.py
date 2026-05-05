@@ -25,17 +25,7 @@ if str(SRC_DIR) not in sys.path:
 
 _FIXTURE_PATH = Path(__file__).parent / "fixtures" / "awesome_mcp_excerpt.md"
 
-try:
-    from mcp_sources.awesome_mcp import SOURCE, _parse_readme  # type: ignore[import-untyped]
-
-    _IMPORT_OK = True
-except ImportError:
-    _IMPORT_OK = False
-
-pytestmark = pytest.mark.skipif(
-    not _IMPORT_OK,
-    reason="awaits Phase 2a wiring: mcp_sources.awesome_mcp not yet present",
-)
+from mcp_sources.awesome_mcp import SOURCE, _parse_readme  # type: ignore[import-untyped]  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -71,10 +61,7 @@ class TestParseReadmeEdgeCases:
             "- [valid-mcp](https://github.com/example/valid-mcp) - A valid entry.\n"
         )
         result = _parse_readme(text)
-        # The malformed line must be silently skipped; valid entry survives
-        assert len(result) >= 1
-        names = [r["name"] for r in result]
-        assert any("valid-mcp" in n for n in names)
+        assert [r["name"] for r in result] == ["valid-mcp"]
 
 
 # ---------------------------------------------------------------------------
@@ -84,10 +71,19 @@ class TestParseReadmeEdgeCases:
 
 class TestParseReadmeExcerpt:
     def test_excerpt_produces_correct_entry_count(self) -> None:
-        # Fixture has 5 well-formed link entries; 1 malformed line skipped
         result = _parse_readme(_excerpt())
-        # There may also be an additional entry after the malformed line
-        assert len(result) >= 5
+        assert len(result) == 6
+
+    def test_excerpt_produces_exact_expected_names(self) -> None:
+        result = _parse_readme(_excerpt())
+        assert [entry["name"] for entry in result] == [
+            "github-mcp",
+            "gitlab-mcp",
+            "postgres-mcp",
+            "sqlite-mcp",
+            "notion-mcp",
+            "another-tool",
+        ]
 
     def test_each_dict_has_name_key(self) -> None:
         result = _parse_readme(_excerpt())
@@ -113,37 +109,33 @@ class TestParseReadmeExcerpt:
             )
 
     def test_github_url_extracted_for_github_links(self) -> None:
-        result = _parse_readme(_excerpt())
-        github_entries = [r for r in result if "github.com" in (r.get("github_url") or "")]
-        assert len(github_entries) >= 1, "Expected at least one entry with a github_url"
+        result = {entry["name"]: entry for entry in _parse_readme(_excerpt())}
+        assert result["github-mcp"]["github_url"] == (
+            "https://github.com/modelcontextprotocol/github-mcp"
+        )
+        assert result["gitlab-mcp"]["github_url"] == "https://github.com/acmecorp/gitlab-mcp"
+        assert result["postgres-mcp"]["github_url"] == "https://github.com/example/postgres-mcp"
+        assert result["sqlite-mcp"]["github_url"] == "https://github.com/example/sqlite-mcp"
+        assert result["another-tool"]["github_url"] == "https://github.com/example/another-tool"
+        assert "github_url" not in result["notion-mcp"]
 
     def test_non_github_url_extracted_as_homepage_url(self) -> None:
         # The fixture has notion-mcp linking to www.notion.so — not github
-        result = _parse_readme(_excerpt())
-        non_github = [
-            r
-            for r in result
-            if not r.get("github_url") and r.get("homepage_url")
-        ]
-        assert len(non_github) >= 1, (
-            "Expected at least one entry with homepage_url but no github_url"
+        result = {entry["name"]: entry for entry in _parse_readme(_excerpt())}
+        assert result["notion-mcp"]["homepage_url"] == (
+            "https://www.notion.so/integrations/notion-mcp"
         )
+        assert "homepage_url" not in result["github-mcp"]
 
     def test_section_header_produces_tag_on_entries_below(self) -> None:
         # Entries under "### 🐙 Version Control" should carry a version-control tag
-        result = _parse_readme(_excerpt())
-        vc_entries = [
-            r
-            for r in result
-            if r.get("name") in ("github-mcp", "gitlab-mcp")
-        ]
-        assert len(vc_entries) >= 1, "Expected entries from 'Version Control' section"
-        for entry in vc_entries:
-            tags = entry.get("tags") or []
-            tag_str = " ".join(str(t).lower() for t in tags)
-            assert "version" in tag_str or "control" in tag_str or "vcs" in tag_str, (
-                f"Expected version-control tag for {entry['name']}, got tags={tags}"
-            )
+        result = {entry["name"]: entry for entry in _parse_readme(_excerpt())}
+        assert result["github-mcp"]["tags"] == ["version-control"]
+        assert result["gitlab-mcp"]["tags"] == ["version-control"]
+        assert result["postgres-mcp"]["tags"] == ["databases"]
+        assert result["sqlite-mcp"]["tags"] == ["databases"]
+        assert result["notion-mcp"]["tags"] == ["productivity"]
+        assert result["another-tool"]["tags"] == ["productivity"]
 
     def test_parsed_dicts_round_trip_through_mcp_record(self) -> None:
         from mcp_entity import McpRecord  # noqa: PLC0415

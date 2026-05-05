@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import networkx as nx
 import pytest
@@ -136,14 +137,18 @@ def toolbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CtxCoreToolbox:
     )
     graph_path = _build_synthetic_graph(tmp_path)
     wiki_dir = _build_synthetic_wiki(tmp_path)
-    return CtxCoreToolbox(wiki_dir=wiki_dir, graph_path=graph_path)
+    return CtxCoreToolbox(
+        wiki_dir=wiki_dir,
+        graph_path=graph_path,
+        lifecycle_dir=tmp_path / "runtime",
+    )
 
 
 # ── Tool definitions ────────────────────────────────────────────────────
 
 
 class TestToolDefinitions:
-    def test_four_tools_exposed(self, toolbox: CtxCoreToolbox) -> None:
+    def test_ctx_tools_exposed(self, toolbox: CtxCoreToolbox) -> None:
         defs = toolbox.tool_definitions()
         names = [d.name for d in defs]
         assert set(names) == {
@@ -151,6 +156,12 @@ class TestToolDefinitions:
             "ctx__graph_query",
             "ctx__wiki_search",
             "ctx__wiki_get",
+            "ctx__observe_dev_event",
+            "ctx__load_entity",
+            "ctx__mark_entity_used",
+            "ctx__unload_entity",
+            "ctx__session_end",
+            "ctx__session_state",
         }
 
     def test_all_are_tool_definitions(self, toolbox: CtxCoreToolbox) -> None:
@@ -192,6 +203,116 @@ class TestDispatchRouting:
     def test_dispatch_unknown_tool(self, toolbox: CtxCoreToolbox) -> None:
         with pytest.raises(ValueError, match="unknown ctx-core tool"):
             toolbox.dispatch(ToolCall(id="c1", name="ctx__bogus", arguments={}))
+
+
+class TestRuntimeLifecycle:
+    def test_lifecycle_tools_append_events(
+        self,
+        toolbox: CtxCoreToolbox,
+        tmp_path: Path,
+    ) -> None:
+        calls: list[tuple[str, dict[str, Any]]] = [
+            ("ctx__observe_dev_event", {
+                "session_id": "s-1",
+                "event_type": "task",
+                "payload": {"goal": "ship api"},
+            }),
+            ("ctx__load_entity", {
+                "session_id": "s-1",
+                "entity_type": "skill",
+                "slug": "fastapi-pro",
+            }),
+            ("ctx__mark_entity_used", {
+                "session_id": "s-1",
+                "entity_type": "skill",
+                "slug": "fastapi-pro",
+                "evidence": "used in implementation",
+            }),
+            ("ctx__unload_entity", {
+                "session_id": "s-1",
+                "entity_type": "skill",
+                "slug": "fastapi-pro",
+                "reason": "not needed",
+            }),
+            ("ctx__session_end", {"session_id": "s-1", "status": "complete"}),
+        ]
+
+        for name, arguments in calls:
+            result = json.loads(
+                toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments))
+            )
+            assert result["ok"] is True
+
+        events = [
+            json.loads(line)
+            for line in (tmp_path / "runtime" / "events.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+        ]
+        assert [event["action"] for event in events] == [
+            "dev_event",
+            "load_requested",
+            "used",
+            "unload_requested",
+            "session_end",
+        ]
+
+    def test_lifecycle_validation_errors_are_structured(
+        self,
+        toolbox: CtxCoreToolbox,
+    ) -> None:
+        result = json.loads(
+            toolbox.dispatch(ToolCall(
+                id="c1",
+                name="ctx__load_entity",
+                arguments={
+                    "session_id": "s-1",
+                    "entity_type": "bogus",
+                    "slug": "fastapi-pro",
+                },
+            ))
+        )
+
+        assert result["ok"] is False
+        assert "entity_type" in result["error"]
+
+    def test_session_state_surfaces_unused_loads_as_unload_candidates(
+        self,
+        toolbox: CtxCoreToolbox,
+    ) -> None:
+        for name, arguments in [
+            ("ctx__load_entity", {
+                "session_id": "s-2",
+                "entity_type": "skill",
+                "slug": "fastapi-pro",
+            }),
+            ("ctx__load_entity", {
+                "session_id": "s-2",
+                "entity_type": "agent",
+                "slug": "code-reviewer",
+            }),
+            ("ctx__mark_entity_used", {
+                "session_id": "s-2",
+                "entity_type": "agent",
+                "slug": "code-reviewer",
+                "evidence": "reviewed diff",
+            }),
+        ]:
+            toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments))
+
+        result = json.loads(
+            toolbox.dispatch(ToolCall(
+                id="c1",
+                name="ctx__session_state",
+                arguments={"session_id": "s-2"},
+            ))
+        )
+
+        assert result["ok"] is True
+        assert [entry["slug"] for entry in result["used"]] == ["code-reviewer"]
+        assert [entry["slug"] for entry in result["unload_candidates"]] == [
+            "fastapi-pro",
+        ]
 
 
 # ── recommend_bundle ───────────────────────────────────────────────────────

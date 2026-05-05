@@ -38,8 +38,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -103,7 +105,21 @@ def seed_user_config(claude: Path, *, force: bool = False) -> Path | None:
 # ─── Toolbox seeding ────────────────────────────────────────────────────────
 
 
-def seed_toolboxes(*, force: bool = False) -> int:
+@dataclass(frozen=True)
+class ToolboxSeedResult:
+    returncode: int
+    already_present: bool = False
+
+
+def _toolbox_init_already_present(stderr: str) -> bool:
+    return (
+        "Global config already has" in stderr
+        and "toolbox" in stderr
+        and "Use --force to overwrite" in stderr
+    )
+
+
+def seed_toolboxes(*, force: bool = False) -> ToolboxSeedResult:
     """Invoke ``toolbox init`` to drop the 5 starter templates.
 
     Returns 0 on success, non-zero on failure. Safe to call when the
@@ -114,11 +130,17 @@ def seed_toolboxes(*, force: bool = False) -> int:
     if force:
         cmd.append("--force")
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if (
+        not force
+        and result.returncode != 0
+        and _toolbox_init_already_present(result.stderr)
+    ):
+        return ToolboxSeedResult(returncode=0, already_present=True)
     if result.stdout.strip():
         print(result.stdout.rstrip())
     if result.stderr.strip():
         print(result.stderr.rstrip(), file=sys.stderr)
-    return result.returncode
+    return ToolboxSeedResult(returncode=result.returncode)
 
 
 # ─── Hook injection (opt-in) ────────────────────────────────────────────────
@@ -171,6 +193,51 @@ def build_graph() -> int:
 
 
 _MODEL_PROFILE_NAME = "ctx-model-profile.json"
+
+_HARNESS_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+_HARNESS_GOAL_NOISE = frozenset({
+    "build",
+    "create",
+    "make",
+    "write",
+    "need",
+    "want",
+    "using",
+    "custom",
+    "harness",
+    "harnesses",
+    "model",
+    "models",
+    "llm",
+    "llms",
+    "api",
+    "apis",
+    "work",
+    "workflow",
+    "workflows",
+    "project",
+    "repo",
+    "development",
+    "dev",
+})
+
+_HARNESS_SIGNAL_ALIASES: dict[str, set[str]] = {
+    "ai": {"ai", "llm", "model"},
+    "agent": {"agent", "agents", "agentic"},
+    "agents": {"agent", "agents", "agentic"},
+    "browser": {"browser", "web"},
+    "cad": {"cad", "3d", "modeling", "modelling"},
+    "checkpoint": {"checkpoint", "checkpoints", "checkpointing"},
+    "checkpointing": {"checkpoint", "checkpoints", "checkpointing"},
+    "cli": {"cli", "command", "commands"},
+    "local": {"local", "ollama", "vllm"},
+    "mcp": {"mcp", "server", "servers"},
+    "openai": {"openai", "gpt"},
+    "python": {"python", "py"},
+    "tool": {"tool", "tools"},
+    "tools": {"tool", "tools"},
+}
 
 _PROVIDER_KEY_ENV: dict[str, str] = {
     "openrouter": "OPENROUTER_API_KEY",
@@ -237,9 +304,10 @@ def recommend_harnesses(
             return []
         limit = max(1, min(int(top_k), cfg.recommendation_top_k))
         candidate_limit = max(limit * 4, 25)
+        signals = query_to_tags(goal)
         results = recommend_by_tags(
             graph,
-            query_to_tags(goal),
+            signals,
             top_n=candidate_limit,
             query=goal,
             entity_types=("harness",),
@@ -260,15 +328,21 @@ def recommend_harnesses(
                 row for row in results
                 if str(row.get("name") or "") not in installed
             ]
-        threshold = cfg.harness_recommendation_min_normalized_score
+        threshold = cfg.harness_recommendation_min_fit_score
         for row in results:
-            score = float(row.get("score") or 0.0)
-            row.setdefault("normalized_score", round(min(max(score, 0.0), 1.0), 4))
+            row.update(_annotate_harness_fit(graph, row, signals))
         if results:
             results = [
                 row for row in results
-                if float(row.get("normalized_score") or 0.0) >= threshold
+                if float(row.get("fit_score") or 0.0) >= threshold
             ]
+            results.sort(
+                key=lambda row: (
+                    -float(row.get("fit_score") or 0.0),
+                    -float(row.get("normalized_score") or 0.0),
+                    str(row.get("name") or ""),
+                )
+            )
     except Exception as exc:  # noqa: BLE001
         print(
             f"  [warn] harness recommendation failed: {type(exc).__name__}: {exc}",
@@ -276,6 +350,136 @@ def recommend_harnesses(
         )
         return []
     return results[:limit]
+
+
+def _annotate_harness_fit(
+    graph: Any,
+    row: dict[str, Any],
+    signals: list[str],
+) -> dict[str, Any]:
+    """Return absolute fit metadata for a harness recommendation row."""
+    relevant_signals = _relevant_harness_signals(signals)
+    terms = _harness_candidate_terms(graph, row)
+    matched = [
+        signal for signal in relevant_signals
+        if _harness_signal_matches(signal, terms)
+    ]
+    matched_set = set(matched)
+    missing = [
+        signal for signal in relevant_signals
+        if signal not in matched_set
+    ]
+
+    coverage = (
+        len(matched) / len(relevant_signals)
+        if relevant_signals else 0.0
+    )
+    breadth = min(len(matched_set) / 3.0, 1.0)
+    raw_strength = _clamp_harness_score(float(row.get("score") or 0.0) / 75.0)
+    fit_score = round(
+        _clamp_harness_score((0.8 * coverage * breadth) + (0.2 * raw_strength)),
+        4,
+    )
+    return {
+        "fit_score": fit_score,
+        "fit_signals": sorted(matched_set),
+        "missing_signals": missing[:8],
+        "fit_reason": _harness_fit_reason(matched, relevant_signals),
+    }
+
+
+def _harness_fit_reason(matched: list[str], relevant_signals: list[str]) -> str:
+    if not relevant_signals:
+        return "no concrete goal signals were provided"
+    if not matched:
+        return "no concrete goal signals matched this harness"
+    matched_set = set(matched)
+    if len(matched_set) < min(3, len(set(relevant_signals))):
+        return "matched too few concrete goal signals: " + ", ".join(sorted(matched_set))
+    return "matched concrete goal signals: " + ", ".join(sorted(matched_set))
+
+
+def _relevant_harness_signals(signals: list[str]) -> list[str]:
+    seen: dict[str, None] = {}
+    for signal in signals:
+        token = signal.strip().lower()
+        if len(token) < 3 or token in _HARNESS_GOAL_NOISE:
+            continue
+        seen.setdefault(token, None)
+    return list(seen.keys())
+
+
+def _harness_candidate_terms(graph: Any, row: dict[str, Any]) -> set[str]:
+    terms: set[str] = set()
+    slug = str(row.get("name") or "")
+    terms.update(_harness_tokens(slug))
+    terms.update(_harness_tokens(str(row.get("type") or "")))
+    terms.update(_harness_tokens(str(row.get("source") or "")))
+    for key in ("matching_tags", "shared_tags", "tags"):
+        raw = row.get(key)
+        if isinstance(raw, (list, tuple, set, frozenset)):
+            for item in raw:
+                terms.update(_harness_tokens(str(item)))
+    node_data = _harness_node_data(graph, slug)
+    for key in ("label", "description", "summary", "source"):
+        terms.update(_harness_tokens(str(node_data.get(key) or "")))
+    for key in ("tags", "capabilities", "model_providers", "runtimes"):
+        _add_harness_terms(terms, node_data.get(key))
+    wiki_fm = _harness_frontmatter_from_wiki(slug)
+    for key in ("title", "description", "summary", "repo_url", "docs_url"):
+        terms.update(_harness_tokens(str(wiki_fm.get(key) or "")))
+    for key in ("tags", "capabilities", "model_providers", "runtimes"):
+        _add_harness_terms(terms, wiki_fm.get(key))
+    return terms
+
+
+def _add_harness_terms(terms: set[str], raw: object) -> None:
+    if isinstance(raw, str):
+        terms.update(_harness_tokens(raw))
+    elif isinstance(raw, (list, tuple, set, frozenset)):
+        for item in raw:
+            terms.update(_harness_tokens(str(item)))
+
+
+def _harness_node_data(graph: Any, slug: str) -> dict[str, Any]:
+    try:
+        nodes = graph.nodes(data=True)
+    except Exception:
+        return {}
+    for node_id, data in nodes:
+        if str(data.get("type")) != "harness":
+            continue
+        label = str(data.get("label") or "")
+        if label == slug or str(node_id).rsplit(":", 1)[-1] == slug:
+            return dict(data)
+    return {}
+
+
+def _harness_signal_matches(signal: str, terms: set[str]) -> bool:
+    candidates = set(_HARNESS_SIGNAL_ALIASES.get(signal, {signal}))
+    candidates.update(_harness_tokens(signal))
+    if signal.endswith("ies"):
+        candidates.add(signal[:-3] + "y")
+    elif signal.endswith("s") and len(signal) > 3:
+        candidates.add(signal[:-1])
+    else:
+        candidates.add(signal + "s")
+    return bool(candidates & terms)
+
+
+def _harness_tokens(value: str) -> set[str]:
+    tokens = {
+        token for token in _HARNESS_TOKEN_RE.findall(value.lower())
+        if len(token) >= 2
+    }
+    expanded = set(tokens)
+    for token in tokens:
+        expanded.update(_HARNESS_SIGNAL_ALIASES.get(token, ()))
+    return expanded
+
+
+def _clamp_harness_score(value: float) -> float:
+    return max(0.0, min(1.0, value))
 
 
 def _installed_harness_slugs(manifest_dir: Path) -> set[str]:
@@ -379,6 +583,12 @@ def _harness_model_providers_from_graph(graph: Any, slug: str) -> set[str]:
 
 
 def _harness_model_providers_from_wiki(slug: str) -> set[str]:
+    return _normalise_model_providers(
+        _harness_frontmatter_from_wiki(slug).get("model_providers")
+    )
+
+
+def _harness_frontmatter_from_wiki(slug: str) -> dict[str, Any]:
     try:
         from ctx.core.entity_types import entity_page_path  # noqa: PLC0415
         from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body  # noqa: PLC0415
@@ -386,13 +596,13 @@ def _harness_model_providers_from_wiki(slug: str) -> set[str]:
 
         path = entity_page_path(cfg.wiki_dir, "harness", slug)
         if path is None or not path.is_file():
-            return set()
+            return {}
         fm, _body = parse_frontmatter_and_body(
             path.read_text(encoding="utf-8", errors="replace"),
         )
-        return _normalise_model_providers(fm.get("model_providers"))
+        return fm
     except Exception:
-        return set()
+        return {}
 
 
 def _load_recommendation_graph() -> Any:
@@ -591,12 +801,17 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
     if harnesses:
         print("  [ok] recommended harnesses:")
         for row in harnesses:
-            norm = float(row.get("normalized_score") or 0.0)
+            fit = float(row.get("fit_score") or row.get("normalized_score") or 0.0)
             name = row.get("name")
-            print(f"       - {name} (match {norm:.2f})")
+            print(f"       - {name} (fit {fit:.2f})")
             print(f"         install: ctx-harness-install {name} --dry-run")
     elif goal or mode == "custom":
         print("  [info] no harness recommendations matched yet")
+        print(
+            "       build plan: ctx-harness-install --recommend "
+            f"--goal {json.dumps(goal or args.model or 'custom model work')} "
+            f"--model {json.dumps(args.model or '')} --plan-on-no-fit"
+        )
     return rc
 
 
@@ -670,9 +885,17 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("  [skip] skill-system-config.json already present (use --force to overwrite)")
 
-    toolbox_rc = seed_toolboxes(force=args.force)
+    toolbox_seed = seed_toolboxes(force=args.force)
+    if isinstance(toolbox_seed, ToolboxSeedResult):
+        toolbox_rc = toolbox_seed.returncode
+        toolbox_already_present = toolbox_seed.already_present
+    else:
+        toolbox_rc = int(toolbox_seed)
+        toolbox_already_present = False
     final_rc = 0
-    if toolbox_rc == 0:
+    if toolbox_already_present:
+        print("  [skip] starter toolboxes already present (use --force to overwrite)")
+    elif toolbox_rc == 0:
         print("  [ok] toolboxes seeded")
     else:
         print(f"  [warn] toolbox init returned {toolbox_rc} — inspect above", file=sys.stderr)

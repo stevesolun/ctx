@@ -319,6 +319,15 @@ def run_loop(
             stop_detail = "provider reported content_filter finish"
             break
 
+        # Never execute tool calls from a truncated provider response.
+        # Tool-call arguments may be partial even when the provider
+        # surfaced a tool call object.
+        if response.finish_reason == "length":
+            final_message = response.content or ""
+            stop_reason = "length"
+            stop_detail = "provider truncated response (finish_reason=length)"
+            break
+
         # No tool calls → the model answered in-line. Codex review fix #5:
         # only call it ``completed`` when the answer is non-empty AND the
         # provider ended on a normal finish. Truncated, empty, or oddly-
@@ -359,15 +368,22 @@ def run_loop(
         # Evaluator agent (H11) is where retry strategy will live.
         tool_error_occurred = False
         for call in response.tool_calls:
-            denial = _check_tool_policy(call, tool_policy)
-            if denial is None:
-                tool_result, error = _execute_tool(
-                    call,
-                    router=router,
-                    tool_executor=tool_executor,
-                )
+            denial: str | None
+            error: str | None
+            parse_error = getattr(call, "parse_error", "")
+            if parse_error:
+                denial = None
+                tool_result, error = "", f"invalid tool call arguments: {parse_error}"
             else:
-                tool_result, error = "", f"policy: {denial}"
+                denial = _check_tool_policy(call, tool_policy)
+                if denial is None:
+                    tool_result, error = _execute_tool(
+                        call,
+                        router=router,
+                        tool_executor=tool_executor,
+                    )
+                else:
+                    tool_result, error = "", f"policy: {denial}"
             obs.on_tool_call(iteration, call, tool_result, error)
             conversation.append(
                 Message(

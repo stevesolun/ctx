@@ -44,7 +44,7 @@ def _emit(records: Iterator[dict]) -> int:
 
 
 def _run_one(
-    source_name: str, *, limit: int | None, refresh: bool
+    source_name: str, *, limit: int | None, refresh: bool, verbosity: int = 0
 ) -> tuple[int, int]:
     """Fetch from a single named source.  Return ``(emitted, errors)``."""
     try:
@@ -63,14 +63,15 @@ def _run_one(
         print(f"Error: source {source_name!r} failed: {exc}", file=sys.stderr)
         return 0, 1
 
-    print(
-        f"[{source_name}] emitted {emitted} record(s)",
-        file=sys.stderr,
-    )
+    if verbosity > 0:
+        print(
+            f"[{source_name}] emitted {emitted} record(s)",
+            file=sys.stderr,
+        )
     return emitted, 0
 
 
-def _run_all(*, limit: int | None) -> tuple[int, int]:
+def _run_all(*, limit: int | None, verbosity: int = 0) -> tuple[int, int]:
     """Fetch from every registered source, summing emissions and errors.
 
     ``--limit`` applies *per source*.  Applying a single global cap would
@@ -80,7 +81,7 @@ def _run_all(*, limit: int | None) -> tuple[int, int]:
     total_emitted = 0
     total_errors = 0
     for name in sorted(SOURCES):
-        emitted, errors = _run_one(name, limit=limit, refresh=False)
+        emitted, errors = _run_one(name, limit=limit, refresh=False, verbosity=verbosity)
         total_emitted += emitted
         total_errors += errors
     return total_emitted, total_errors
@@ -211,9 +212,14 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(2)
-        _, errors = _run_all(limit=args.limit)
+        _, errors = _run_all(limit=args.limit, verbosity=args.verbose)
     else:
-        _, errors = _run_one(args.source, limit=args.limit, refresh=args.refresh)
+        _, errors = _run_one(
+            args.source,
+            limit=args.limit,
+            refresh=args.refresh,
+            verbosity=args.verbose,
+        )
 
     sys.exit(1 if errors else 0)
 

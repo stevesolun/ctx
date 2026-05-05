@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -30,9 +31,19 @@ from scripts.clean_host_contract import (
 )
 
 
+@dataclass(frozen=True)
+class RecordedRun:
+    args: tuple[str, ...]
+    cwd: Path
+    env: dict[str, str]
+    check: bool
+    timeout_seconds: float | None
+
+
 class RecordingRunner(CommandRunner):
     def __init__(self, venv: Path) -> None:
         self.calls: list[tuple[str, ...]] = []
+        self.records: list[RecordedRun] = []
         self.venv = venv
 
     def run(
@@ -44,9 +55,17 @@ class RecordingRunner(CommandRunner):
         check: bool = True,
         timeout_seconds: float | None = None,
     ) -> CompletedCommand:
-        del cwd, env, check, timeout_seconds
         call = tuple(args)
         self.calls.append(call)
+        self.records.append(
+            RecordedRun(
+                args=call,
+                cwd=cwd,
+                env=dict(env),
+                check=check,
+                timeout_seconds=timeout_seconds,
+            )
+        )
         if call[:4] == (sys.executable, "-m", "pip", "wheel"):
             outdir = Path(call[call.index("--wheel-dir") + 1])
             outdir.mkdir(parents=True, exist_ok=True)
@@ -79,7 +98,7 @@ class RecordingRunner(CommandRunner):
                     {"command": "ctx.adapters.claude_code.hooks.lifecycle_hooks"},
                 ],
             })
-            return CompletedCommand(call, Path.cwd(), 0, stdout, "")
+            return CompletedCommand(call, cwd, 0, stdout, "")
         elif call and Path(call[0]).name.startswith("claude"):
             if "-p" in call:
                 sentinel = self.venv.parent / "live-claude-hooks.jsonl"
@@ -98,10 +117,10 @@ class RecordingRunner(CommandRunner):
                     ]),
                     encoding="utf-8",
                 )
-            return CompletedCommand(call, Path.cwd(), 0, "claude preflight\n", "")
+            return CompletedCommand(call, cwd, 0, "claude preflight\n", "")
         stdout = '{"stop_reason": "tool_denied"}' if "--deny-tool" in call else ""
         rc = 2 if "--deny-tool" in call else 0
-        return CompletedCommand(call, Path.cwd(), rc, stdout, "")
+        return CompletedCommand(call, cwd, rc, stdout, "")
 
 
 def test_isolated_env_redirects_user_state(tmp_path: Path) -> None:
@@ -224,6 +243,11 @@ def test_contract_command_sequence_without_real_build(tmp_path: Path, monkeypatc
     paths = make_paths(tmp_path)
     runner = RecordingRunner(paths.venv)
     monkeypatch.setenv("CTX_TEST_HOME_OVERRIDE", str(paths.home))
+    monkeypatch.setenv("HOME", str(tmp_path / "real-home"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "real-appdata"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "real-localappdata"))
+    monkeypatch.setenv("PIP_CACHE_DIR", str(tmp_path / "real-pip-cache"))
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "real-pythonpath"))
 
     run_contract(
         project_root=tmp_path,
@@ -241,6 +265,25 @@ def test_contract_command_sequence_without_real_build(tmp_path: Path, monkeypatc
     assert any("ctx-scan-repo" in call and "--recommend" in call for call in joined)
     assert any("ctx run" in call or "ctx.exe run" in call for call in joined)
     assert any("--deny-tool ctx__wiki_get" in call for call in joined)
+
+    assert runner.records
+    for record in runner.records:
+        assert_inside(record.cwd, paths.root)
+        assert record.env["HOME"] == str(paths.home)
+        assert record.env["USERPROFILE"] == str(paths.home)
+        assert record.env["APPDATA"] == str(paths.appdata)
+        assert record.env["LOCALAPPDATA"] == str(paths.localappdata)
+        assert record.env["XDG_CONFIG_HOME"] == str(paths.xdg_config)
+        assert record.env["XDG_CACHE_HOME"] == str(paths.xdg_cache)
+        assert record.env["PIP_CACHE_DIR"] == str(paths.pip_cache)
+        assert record.env.get("PYTHONPATH") in (None, str(paths.fake_modules))
+        assert str(tmp_path / "real-pythonpath") not in record.env.values()
+    denied_records = [
+        record for record in runner.records
+        if "--deny-tool" in record.args
+    ]
+    assert denied_records
+    assert denied_records[0].check is False
 
 
 def test_live_claude_command_is_bounded_and_streamed(tmp_path: Path) -> None:

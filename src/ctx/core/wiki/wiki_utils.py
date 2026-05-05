@@ -90,12 +90,26 @@ def parse_frontmatter(text: str) -> dict[str, Any]:
             # handled inline lists and silently dropped these, collapsing
             # every graph-edge source to slug tokens alone.
             collected: list[str] = []
+            current_parts: list[str] = []
             i += 1
-            while i < len(lines) and lines[i].lstrip().startswith("- "):
-                item = lines[i].lstrip()[2:].strip().strip("'\"")
-                if item:
-                    collected.append(item)
-                i += 1
+            while i < len(lines):
+                raw_item = lines[i]
+                stripped = raw_item.lstrip()
+                indent = len(raw_item) - len(stripped)
+                if stripped.startswith("- "):
+                    if current_parts:
+                        collected.append(" ".join(current_parts))
+                    item = stripped[2:].strip().strip("'\"")
+                    current_parts = [item] if item else []
+                    i += 1
+                    continue
+                if current_parts and indent > 0 and stripped:
+                    current_parts.append(stripped.strip().strip("'\""))
+                    i += 1
+                    continue
+                break
+            if current_parts:
+                collected.append(" ".join(current_parts))
             fm[key] = collected
             continue
         if (val.startswith('"') and val.endswith('"')) or \

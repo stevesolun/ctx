@@ -115,6 +115,32 @@ class TestWikiStats:
         assert "mcps" in s  # key present even at zero
 
 
+class TestGraphStats:
+    def test_graph_stats_reads_report_without_loading_full_graph(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        wiki = tmp_path / "skill-wiki"
+        (wiki / "graphify-out").mkdir(parents=True)
+        (wiki / "graphify-out" / "graph-report.md").write_text(
+            "> Nodes: 102,696 | Edges: 2,900,834 | Communities: 52\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(_cm, "_wiki_dir", lambda: wiki)
+        monkeypatch.setattr(
+            _cm,
+            "_load_dashboard_graph",
+            lambda: (_ for _ in ()).throw(AssertionError("loaded graph.json")),
+        )
+
+        assert _cm._graph_stats() == {
+            "nodes": 102696,
+            "edges": 2900834,
+            "available": True,
+        }
+
+
 # ────────────────────────────────────────────────────────────────────
 # _wiki_index_entries
 # ────────────────────────────────────────────────────────────────────
@@ -160,6 +186,19 @@ class TestWikiIndexEntries:
 
         assert entry["tags"] == ["one", "two", "three", "four", "five", "six"]
         assert "seventh" in entry["search_tags"]
+
+    def test_index_entries_can_sample_per_entity_type(self, wiki_3type):
+        entries = _cm._wiki_index_entries(limit_per_type=1)
+        counts: dict[str, int] = {}
+        for entry in entries:
+            counts[entry["type"]] = counts.get(entry["type"], 0) + 1
+
+        assert counts == {
+            "skill": 1,
+            "agent": 1,
+            "mcp-server": 1,
+            "harness": 1,
+        }
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -231,6 +270,27 @@ class TestSessionSummaries3Type:
         assert session["skills_unloaded"] == []
         assert session["mcps_loaded"] == ["anthropic-python-sdk"]
         assert session["mcps_unloaded"] == ["anthropic-python-sdk"]
+
+    def test_sessions_index_renders_agent_and_mcp_columns(self, monkeypatch):
+        monkeypatch.setattr(_cm, "_summarize_sessions", lambda: [{
+            "session_id": "S1",
+            "first_seen": "2026-05-02T10:00:00Z",
+            "last_seen": "2026-05-02T10:02:00Z",
+            "skills_loaded": [],
+            "skills_unloaded": [],
+            "agents_loaded": [],
+            "agents_unloaded": ["code-reviewer"],
+            "mcps_loaded": ["anthropic-python-sdk"],
+            "mcps_unloaded": ["anthropic-python-sdk"],
+            "lifecycle_transitions": 0,
+        }])
+
+        html = _cm._render_sessions_index()
+
+        assert "Agents↓" in html
+        assert "MCPs↑" in html
+        assert "MCPs↓" in html
+        assert "<td>1</td><td>1</td><td>1</td>" in html
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -676,6 +736,15 @@ class TestRenderGraphSidebar:
         # loosen this — just require SOME style block exists.
         assert "shape" in html.split('node[type = "mcp-server"]')[1][:300]
         assert "shape" in html.split('node[type = "harness"]')[1][:300]
+
+    def test_cytoscape_hides_edges_connected_to_filtered_nodes(self, monkeypatch):
+        monkeypatch.setattr(_cm, "_graph_stats",
+                            lambda: {"nodes": 0, "edges": 0, "available": False})
+        monkeypatch.setattr(_cm, "_top_degree_seeds", lambda: [])
+        html = _cm._render_graph()
+
+        assert "edge.hidden-by-filter" in html
+        assert "e.toggleClass('hidden-by-filter', srcHidden || tgtHidden)" in html
 
     def test_tap_handler_strips_mcp_server_prefix(self, monkeypatch):
         """Clicking an MCP node must route to /wiki/<slug> — the

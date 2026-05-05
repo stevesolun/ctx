@@ -59,12 +59,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import stat
 import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, TextIO, cast
 
 from ctx.adapters.generic.loop import LoopResult, LoopObserver
 from ctx.adapters.generic.providers import (
@@ -119,6 +120,47 @@ def new_session_id() -> str:
 
 
 # ── Serialisation helpers ─────────────────────────────────────────────────
+
+
+def _reject_symlink(path: Path, label: str = "session path") -> None:
+    try:
+        is_link = path.is_symlink()
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be inspected: {path}") from exc
+    if is_link:
+        raise ValueError(f"{label} must not be a symlink: {path}")
+
+
+def _open_regular_text(
+    path: Path,
+    *,
+    append: bool = False,
+    overwrite: bool = False,
+    read: bool = False,
+) -> TextIO:
+    _reject_symlink(path.parent, "sessions directory")
+    _reject_symlink(path, "session log")
+    if read:
+        flags = os.O_RDONLY
+        fd_mode = "r"
+    elif append:
+        flags = os.O_WRONLY | os.O_APPEND
+        fd_mode = "a"
+    else:
+        flags = os.O_WRONLY | os.O_CREAT
+        flags |= os.O_TRUNC if overwrite else os.O_EXCL
+        fd_mode = "w"
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags, 0o600)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise ValueError(f"session log must be a regular file: {path}")
+        return cast(TextIO, os.fdopen(fd, fd_mode, encoding="utf-8", buffering=1))
+    except Exception:
+        os.close(fd)
+        raise
 
 
 def _message_to_dict(msg: Message) -> dict[str, Any]:
@@ -247,9 +289,8 @@ class SessionStore:
         self._lock = threading.Lock()
         self._closed = False
         path.parent.mkdir(parents=True, exist_ok=True)
-        mode = "a" if append else ("w" if overwrite else "x")
         # Line-buffered so crash-ish terminations still flush per line.
-        self._fh = path.open(mode, encoding="utf-8", buffering=1)
+        self._fh = _open_regular_text(path, append=append, overwrite=overwrite)
 
     # ── construction ─────────────────────────────────────────────────────
 
@@ -275,6 +316,8 @@ class SessionStore:
         """Open an existing session in append mode (for --resume)."""
         sdir = sessions_dir if sessions_dir is not None else default_sessions_dir()
         path = sdir / f"{_safe_session_id(session_id)}.jsonl"
+        _reject_symlink(sdir, "sessions directory")
+        _reject_symlink(path, "session log")
         if not path.is_file():
             raise FileNotFoundError(f"session log not found: {path}")
         return cls(session_id=session_id, path=path, append=True)
@@ -542,7 +585,7 @@ class ReplayState:
 
 def _iter_events(path: Path) -> Iterator[dict[str, Any]]:
     """Yield each valid JSON object from a JSONL file. Malformed lines skipped."""
-    with path.open("r", encoding="utf-8") as fh:
+    with _open_regular_text(path, read=True) as fh:
         for line_no, raw in enumerate(fh, 1):
             line = raw.strip()
             if not line:
@@ -569,6 +612,8 @@ def load_session(
     """
     sdir = sessions_dir if sessions_dir is not None else default_sessions_dir()
     path = sdir / f"{_safe_session_id(session_id)}.jsonl"
+    _reject_symlink(sdir, "sessions directory")
+    _reject_symlink(path, "session log")
     if not path.is_file():
         raise FileNotFoundError(f"session log not found: {path}")
 
@@ -614,10 +659,10 @@ def load_session(
 def list_sessions(sessions_dir: Path | None = None) -> list[str]:
     """Return all session ids in the sessions dir, sorted alphabetically."""
     sdir = sessions_dir if sessions_dir is not None else default_sessions_dir()
-    if not sdir.is_dir():
+    if not sdir.is_dir() or sdir.is_symlink():
         return []
     ids: list[str] = []
     for entry in sdir.iterdir():
-        if entry.is_file() and entry.suffix == ".jsonl":
+        if not entry.is_symlink() and entry.is_file() and entry.suffix == ".jsonl":
             ids.append(entry.stem)
     return sorted(ids)

@@ -218,8 +218,9 @@ class TokenBudgetCompactor:
             )
 
         head = messages[: self._keep_head]
-        tail = messages[-self._keep_tail :]
-        middle = messages[self._keep_head : -self._keep_tail]
+        tail = messages[-self._keep_tail :] if self._keep_tail else []
+        middle_end = -self._keep_tail if self._keep_tail else None
+        middle = messages[self._keep_head : middle_end]
 
         summary_text, summary_usage = self._summarise_middle_with_usage(middle, provider)
         notice_count = len(middle)

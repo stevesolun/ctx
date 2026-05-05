@@ -95,6 +95,38 @@ def test_log_never_raises_on_unwritable_path(tmp_path: Path) -> None:
     )
 
 
+def test_log_never_raises_on_unserializable_meta(tmp_path: Path) -> None:
+    target = tmp_path / "audit.jsonl"
+    cal.log(
+        "skill.loaded",
+        subject_type="skill",
+        subject="x",
+        meta={"path": tmp_path, "items": {"a", "b"}},
+        path=target,
+    )
+
+    record = json.loads(target.read_text(encoding="utf-8"))
+    assert record["meta"]["path"] == str(tmp_path)
+    assert sorted(record["meta"]["items"]) == ["a", "b"]
+
+
+def test_log_never_raises_on_circular_meta(tmp_path: Path) -> None:
+    target = tmp_path / "audit.jsonl"
+    meta: dict[str, object] = {}
+    meta["self"] = meta
+
+    cal.log(
+        "skill.loaded",
+        subject_type="skill",
+        subject="x",
+        meta=meta,
+        path=target,
+    )
+
+    record = json.loads(target.read_text(encoding="utf-8"))
+    assert record["meta"]["self"] == "<circular>"
+
+
 def test_log_skill_event_wrapper(tmp_path: Path, monkeypatch) -> None:
     target = tmp_path / "audit.jsonl"
     monkeypatch.setattr(cal, "audit_log_path", lambda: target)

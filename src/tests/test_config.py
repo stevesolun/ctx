@@ -7,6 +7,7 @@ Covers:
 """
 
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,7 @@ def _minimal_raw(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
             "intent_log": "~/.claude/intent-log.jsonl",
             "pending_skills": "~/.claude/pending-skills.json",
             "skill_registry": "~/.claude/skill-registry.json",
-            "stack_profile_tmp": "/tmp/skill-stack-profile.json",
+            "stack_profile_tmp": "~/.claude/skill-stack-profile.json",
             "catalog": "~/.claude/skill-wiki/catalog.md",
         },
         "resolver": {},
@@ -116,11 +117,25 @@ class TestConfigPathsArePathlib:
     ]
 
     @pytest.mark.parametrize("attr", PATH_ATTRS)
-    def test_attr_is_path(self, attr: str) -> None:
+    def test_attr_is_path(
+        self,
+        attr: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         cfg = Config(_minimal_raw())
         assert isinstance(getattr(cfg, attr), Path), (
             f"cfg.{attr} should be a Path, got {type(getattr(cfg, attr))}"
         )
+
+        if attr == "stack_profile_tmp":
+            raw = _minimal_raw()
+            del raw["paths"]["stack_profile_tmp"]
+            monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+
+            cfg = Config(raw)
+
+            assert cfg.stack_profile_tmp == tmp_path / "skill-stack-profile.json"
 
 
 class TestConfigExpandTilde:

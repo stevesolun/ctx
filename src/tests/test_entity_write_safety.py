@@ -13,6 +13,7 @@ SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from ctx.utils import _fs_utils  # noqa: E402
 from ctx.utils._fs_utils import safe_atomic_write_text  # noqa: E402
 from mcp_entity import McpRecord  # noqa: E402
 
@@ -45,6 +46,21 @@ def test_safe_atomic_write_text_rejects_symlinked_target(tmp_path: Path) -> None
         safe_atomic_write_text(link, "owned\n")
 
     assert outside.read_text(encoding="utf-8") == "outside\n"
+
+
+def test_darwin_system_symlink_ancestor_is_allowlisted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_fs_utils.sys, "platform", "darwin")
+
+    def fake_resolve(self: Path, *, strict: bool = False) -> Path:
+        if self == Path("/var"):
+            return Path("/private/var")
+        return self
+
+    monkeypatch.setattr(Path, "resolve", fake_resolve)
+
+    assert _fs_utils._is_allowed_system_symlink_ancestor(Path("/var"))
 
 
 def test_skill_and_agent_entity_writers_reject_symlinked_targets(

@@ -87,4 +87,4 @@ jobs:
           if [ "$status" -ne 0 ]; then
             echo "::warning::xdist experiment failed on $RUNNER_OS with exit code $status"
           fi
-          exit 0
+          exit "$status"

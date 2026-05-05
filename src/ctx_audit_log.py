@@ -88,6 +88,7 @@ Actor = Literal["hook", "cli", "lifecycle", "user", "scheduler"]
 # Cross-process safety comes from O_APPEND semantics on POSIX + the atomic
 # write-then-fsync pattern below on Windows.
 _LOCK = threading.Lock()
+_MAX_SAFE_DEPTH = 8
 
 
 def audit_log_path() -> Path:
@@ -112,6 +113,46 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
         "+00:00", "Z"
     )
+
+
+def _json_safe(value: Any, *, depth: int = 0, seen: set[int] | None = None) -> Any:
+    if seen is None:
+        seen = set()
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if depth >= _MAX_SAFE_DEPTH:
+        return repr(value)
+    ident = id(value)
+    if ident in seen:
+        return "<circular>"
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        seen.add(ident)
+        try:
+            return {
+                str(_json_safe(k, depth=depth + 1, seen=seen)):
+                _json_safe(v, depth=depth + 1, seen=seen)
+                for k, v in value.items()
+            }
+        finally:
+            seen.discard(ident)
+    if isinstance(value, (list, tuple, set, frozenset)):
+        seen.add(ident)
+        try:
+            return [
+                _json_safe(item, depth=depth + 1, seen=seen)
+                for item in value
+            ]
+        finally:
+            seen.discard(ident)
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        try:
+            return isoformat()
+        except Exception:  # noqa: BLE001
+            pass
+    return repr(value)
 
 
 def log(
@@ -151,10 +192,16 @@ def log(
     if meta:
         record["meta"] = meta
 
-    target = path if path is not None else audit_log_path()
-    line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
-
     try:
+        target = path if path is not None else audit_log_path()
+        line = (
+            json.dumps(
+                _json_safe(record),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
         with _LOCK:
             target.parent.mkdir(parents=True, exist_ok=True)
             # Append-only. O_APPEND is atomic per-write for writes up to
@@ -164,7 +211,7 @@ def log(
             # an audit log (each record is a valid JSON document).
             with open(target, "a", encoding="utf-8") as f:
                 f.write(line)
-    except OSError:
+    except Exception:  # noqa: BLE001
         # Never raise. Losing an audit line is strictly less bad than
         # taking down a hook that's about to write valuable data
         # elsewhere. Callers depend on this.

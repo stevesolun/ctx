@@ -9,7 +9,7 @@ Routes:
 
     /                           Home — summary stats + session list + links
     /loaded                     Live manifest view + load/unload actions
-    /sessions                   List of sessions (from audit + events jsonl)
+    /sessions                   List of sessions (skills/agents/MCP activity)
     /session/<id>               Skills + agents seen in that session
     /skills                     Sidecar card grid with grade + score filters
     /skill/<slug>               Sidecar breakdown + timeline of audit events
@@ -33,7 +33,8 @@ Design notes:
 - No Flask / Starlette / FastAPI dependency. stdlib only — keeps
   ``pip install claude-ctx`` lean. Request handling is threaded so one
   open SSE client cannot monopolize the local dashboard.
-- Reads append-only files; never mutates them.
+- GET views read append-only files. POST mutation endpoints require
+  loopback access, a per-process token, and same-origin headers.
 - SSE endpoint tails ``~/.claude/ctx-audit.jsonl`` and pushes each new
   line as a server-sent event. Clients auto-reconnect.
 - Security: binds to 127.0.0.1 by default. ``--host`` override requires
@@ -51,11 +52,12 @@ import html
 import ipaddress
 import json
 import os
+import re
 import secrets
 import sys
 import threading
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -71,6 +73,9 @@ _MONITOR_TOKEN = ""
 _MONITOR_MUTATIONS_ENABLED = True
 _GRAPH_CACHE_KEY: tuple[Path, float, int, int] | None = None
 _GRAPH_CACHE_VALUE: Any | None = None
+_WIKI_INDEX_LIMIT_PER_TYPE = 500
+_GRAPH_REPORT_RE = re.compile(r"Nodes:\s*([\d,]+)\s*\|\s*Edges:\s*([\d,]+)")
+_MAX_POST_BODY_BYTES = 64 * 1024
 
 
 # ─── Data sources ────────────────────────────────────────────────────────────
@@ -457,6 +462,17 @@ def _file_status(path: Path) -> dict[str, Any]:
     }
 
 
+def _repo_graph_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "graph"
+
+
+def _first_existing_file_status(*paths: Path) -> dict[str, Any]:
+    for path in paths:
+        if path.exists():
+            return _file_status(path)
+    return _file_status(paths[0])
+
+
 def _promotion_status(path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -490,11 +506,13 @@ def _artifact_status() -> dict[str, Any]:
     """Return shipped graph/wiki artifact file state and promotion metadata."""
     wiki = _wiki_dir()
     graph_dir = wiki / "graphify-out"
+    claude_graph_dir = _claude_dir() / "graph"
+    repo_graph_dir = _repo_graph_dir()
     promotion_paths = sorted(
         {
             *graph_dir.glob("*.promotion.json"),
             *wiki.glob("*.promotion.json"),
-            *(_claude_dir() / "graph").glob("*.promotion.json"),
+            *claude_graph_dir.glob("*.promotion.json"),
         },
         key=lambda path: str(path),
     )
@@ -507,9 +525,13 @@ def _artifact_status() -> dict[str, Any]:
         "graph_json": _file_status(graph_dir / "graph.json"),
         "graph_delta_json": _file_status(graph_dir / "graph-delta.json"),
         "communities_json": _file_status(graph_dir / "communities.json"),
-        "wiki_graph_tar": _file_status(_claude_dir() / "graph" / "wiki-graph.tar.gz"),
-        "skills_sh_catalog": _file_status(
-            _claude_dir() / "graph" / "skills-sh-catalog.json.gz",
+        "wiki_graph_tar": _first_existing_file_status(
+            claude_graph_dir / "wiki-graph.tar.gz",
+            repo_graph_dir / "wiki-graph.tar.gz",
+        ),
+        "skills_sh_catalog": _first_existing_file_status(
+            claude_graph_dir / "skills-sh-catalog.json.gz",
+            repo_graph_dir / "skills-sh-catalog.json.gz",
         ),
         "promotion_count": len(promotions),
         "promotions": promotions,
@@ -526,19 +548,22 @@ def _status_payload() -> dict[str, Any]:
 def _read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
     if not path.exists():
         return []
-    out: list[dict] = []
+    if limit is not None and limit <= 0:
+        return []
+    out: deque[dict] | list[dict]
+    out = deque(maxlen=limit) if limit is not None else []
     with path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
             try:
-                out.append(json.loads(line))
+                event = json.loads(line)
             except json.JSONDecodeError:
                 continue
-    if limit is not None:
-        out = out[-limit:]
-    return out
+            if isinstance(event, dict):
+                out.append(event)
+    return list(out)
 
 
 def _sidecar_entity_type(sidecar: dict, fallback: str = "skill") -> str:
@@ -919,6 +944,19 @@ def _graph_neighborhood(
 
 def _graph_stats() -> dict:
     """Top-line graph stats for the home page."""
+    report = _wiki_dir() / "graphify-out" / "graph-report.md"
+    try:
+        match = _GRAPH_REPORT_RE.search(
+            report.read_text(encoding="utf-8", errors="replace"),
+        )
+        if match:
+            return {
+                "nodes": int(match.group(1).replace(",", "")),
+                "edges": int(match.group(2).replace(",", "")),
+                "available": True,
+            }
+    except OSError:
+        pass
     try:
         G = _load_dashboard_graph()
     except Exception:  # noqa: BLE001
@@ -1058,6 +1096,9 @@ def _render_sessions_index() -> str:
             f"<td>{len(s['skills_loaded'])}</td>"
             f"<td>{len(s['skills_unloaded'])}</td>"
             f"<td>{len(s['agents_loaded'])}</td>"
+            f"<td>{len(s['agents_unloaded'])}</td>"
+            f"<td>{len(s['mcps_loaded'])}</td>"
+            f"<td>{len(s['mcps_unloaded'])}</td>"
             f"<td>{s['lifecycle_transitions']}</td>"
             f"</tr>"
         )
@@ -1066,7 +1107,9 @@ def _render_sessions_index() -> str:
         f"<p class='muted'>{len(sessions)} unique sessions observed.</p>"
         "<table>"
         "<tr><th>Session</th><th>First seen</th><th>Last seen</th>"
-        "<th>Skills↑</th><th>Skills↓</th><th>Agents↑</th><th>Lifecycle</th></tr>"
+        "<th>Skills↑</th><th>Skills↓</th>"
+        "<th>Agents↑</th><th>Agents↓</th>"
+        "<th>MCPs↑</th><th>MCPs↓</th><th>Lifecycle</th></tr>"
         + "".join(rows)
         + "</table>"
     )
@@ -1440,6 +1483,9 @@ def _render_graph(focus: str | None = None, focus_type: str | None = None) -> st
         "      { selector: 'node.hidden-by-filter', style: {\n"
         "        'display': 'none',\n"
         "      }},\n"
+        "      { selector: 'edge.hidden-by-filter', style: {\n"
+        "        'display': 'none',\n"
+        "      }},\n"
         "      { selector: 'edge', style: {\n"
         "        'width': 'mapData(weight, 1, 10, 0.5, 4)',\n"
         "        'line-color': '#cbd5e1', 'curve-style': 'straight',\n"
@@ -1599,11 +1645,14 @@ def _render_wiki_entity(slug: str, entity_type: str | None = None) -> str:
     return _layout(slug, body)
 
 
-def _wiki_index_entries() -> list[dict]:
+def _wiki_index_entries(
+    limit_per_type: int | None = _WIKI_INDEX_LIMIT_PER_TYPE,
+) -> list[dict]:
     """List every wiki entity page under ~/.claude/skill-wiki/entities/.
 
-    Returns a slug-sorted list of ``{slug, type, tags, description, path}``.
-    Reads only the YAML frontmatter (cheap) — never parses full bodies.
+    Returns ``{slug, type, tags, description}`` rows. The full Skills.sh
+    corpus is too large to render as one HTML page, so the dashboard samples
+    a bounded number of pages per entity type.
     """
     base = _wiki_dir() / "entities"
     if not base.is_dir():
@@ -1616,8 +1665,11 @@ def _wiki_index_entries() -> list[dict]:
         d = base / sub
         if not d.is_dir():
             continue
-        paths = sorted(d.rglob("*.md") if recursive else d.glob("*.md"))
+        paths = d.rglob("*.md") if recursive else d.glob("*.md")
+        seen_for_type = 0
         for path in paths:
+            if limit_per_type is not None and seen_for_type >= limit_per_type:
+                break
             slug = path.stem
             if not _is_safe_slug(slug):
                 continue
@@ -1635,12 +1687,15 @@ def _wiki_index_entries() -> list[dict]:
                 "search_tags": all_tags,
                 "description": _frontmatter_text(meta.get("description", ""))[:200],
             })
+            seen_for_type += 1
     return out
 
 
 def _render_wiki_index() -> str:
     """Card grid of every wiki entity — search + type filter + sidecar grades."""
     entries = _wiki_index_entries()
+    wstats = _wiki_stats()
+    total_available = int(wstats.get("total") or len(entries))
     # Join with grade pills where a sidecar exists.
     grade_by_key: dict[tuple[str, str], str] = {}
     for sc in _all_sidecars():
@@ -1648,9 +1703,12 @@ def _render_wiki_index() -> str:
         if slug:
             grade_by_key[(str(slug), _sidecar_entity_type(sc))] = sc.get("grade", "")
 
-    type_counts = {entity_type: 0 for entity_type in _DASHBOARD_ENTITY_TYPES}
-    for e in entries:
-        type_counts[e["type"]] = type_counts.get(e["type"], 0) + 1
+    type_counts = {
+        "skill": int(wstats.get("skills") or 0),
+        "agent": int(wstats.get("agents") or 0),
+        "mcp-server": int(wstats.get("mcps") or 0),
+        "harness": int(wstats.get("harnesses") or 0),
+    }
 
     cards = "".join(
         "<a class='wiki-card' "
@@ -1688,9 +1746,10 @@ def _render_wiki_index() -> str:
 
     body = (
         "<h1>Wiki</h1>"
-        f"<p class='muted'>{len(entries)} entity pages under "
+        f"<p class='muted'>{len(entries):,} shown of {total_available:,} entity pages under "
         f"<code>~/.claude/skill-wiki/entities/</code> · "
-        "search by slug / description / tag, or click a card to read the page.</p>"
+        "search by slug / description / tag within the visible sample, "
+        "or click a card to read the page.</p>"
         "<div style='display:grid; grid-template-columns:220px 1fr; gap:1.25rem; align-items:start;'>"
         # Left sidebar
         "<aside style='position:sticky; top:1rem;'>"
@@ -1784,7 +1843,7 @@ def _render_kpi() -> str:
             "The KPI dashboard reads from "
             "<code>~/.claude/skill-quality/*.json</code> and "
             "<code>*.lifecycle.json</code>. Run "
-            "<code>ctx-skill-quality score --all</code> to populate "
+            "<code>ctx-skill-quality recompute --all</code> to populate "
             "sidecars, then reload this page.</p>"
             "<p class='muted'>CLI equivalent: "
             "<code>python -m kpi_dashboard render</code></p></div>"
@@ -2390,6 +2449,53 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             and secrets.compare_digest(token, _MONITOR_TOKEN)
         )
 
+    def _content_length(self) -> int | None:
+        raw = self.headers.get("Content-Length")
+        if raw is None:
+            return 0
+        try:
+            length = int(raw)
+        except ValueError:
+            self._send_json_status(400, {"detail": "invalid Content-Length"})
+            return None
+        if length < 0:
+            self._send_json_status(400, {"detail": "invalid Content-Length"})
+            return None
+        if length > _MAX_POST_BODY_BYTES:
+            self._send_json_status(413, {"detail": "JSON body too large"})
+            return None
+        return length
+
+    def _read_json_body(self) -> dict[str, Any] | None:
+        content_type = self.headers.get("Content-Type", "").split(";", 1)[0]
+        if content_type.lower() != "application/json":
+            self._send_json_status(415, {"detail": "JSON body required"})
+            return None
+        length = self._content_length()
+        if length is None:
+            return None
+        raw = self.rfile.read(length) if length else b""
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send_json_status(400, {"detail": "invalid JSON body"})
+            return None
+        if not isinstance(body, dict):
+            self._send_json_status(400, {"detail": "JSON object body required"})
+            return None
+        return body
+
+    def _discard_small_body(self) -> None:
+        raw = self.headers.get("Content-Length")
+        if raw is None:
+            return
+        try:
+            length = int(raw)
+        except ValueError:
+            return
+        if 0 < length <= _MAX_POST_BODY_BYTES:
+            self.rfile.read(length)
+
     def do_GET(self) -> None:  # noqa: N802 — stdlib signature
         # Parse once so we can reuse the query string for /graph?slug=…
         raw_path, _, raw_query = self.path.partition("?")
@@ -2476,31 +2582,26 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         """Mutation endpoints. Same-origin only; JSON body required."""
         path = self.path.split("?", 1)[0]
         try:
-            length = int(self.headers.get("Content-Length") or 0)
-            raw = self.rfile.read(length) if length else b""
             if not self._mutations_enabled():
+                self._discard_small_body()
                 self._send_json_status(
                     403, {"detail": "monitor mutations disabled on non-loopback bind"},
                 )
                 return
             if not self._same_origin():
+                self._discard_small_body()
                 self._send_json_status(
                     403, {"detail": "cross-origin POST denied"},
                 )
                 return
             if not self._mutation_authorized():
+                self._discard_small_body()
                 self._send_json_status(
                     403, {"detail": "monitor token required"},
                 )
                 return
-            content_type = self.headers.get("Content-Type", "").split(";", 1)[0]
-            if content_type.lower() != "application/json":
-                self._send_json_status(415, {"detail": "JSON body required"})
-                return
-            try:
-                body = json.loads(raw.decode("utf-8")) if raw else {}
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                self._send_json_status(400, {"detail": "invalid JSON body"})
+            body = self._read_json_body()
+            if body is None:
                 return
 
             if path == "/api/load":

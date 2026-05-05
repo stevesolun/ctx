@@ -216,6 +216,35 @@ system prompt overrides, session resume, JSON output, ...).
 
 ---
 
+## Installed harness attachment
+
+`ctx-harness-install <slug>` creates `.ctx/attach/` inside the installed
+harness target. The directory contains the attach files for the modes that
+catalog entry supports:
+
+- `README.md` describes the supported modes and safety expectations.
+- `mcp.json` starts `ctx-mcp-server` for MCP-speaking hosts.
+- `python.py` shows the Python recommendation/wiki calls for custom loops.
+- `ctx-run.txt` gives a `ctx run` command template.
+
+The install command does not run the harness or store secrets in those files.
+Setup commands still require `--approve-commands`; verification commands still
+require `--run-verify`.
+
+If no catalog harness fits, generate a build handoff instead of forcing a weak
+match:
+
+```bash
+ctx-harness-install --recommend \
+  --goal "build a private CAD workflow with a local model" \
+  --model-provider ollama \
+  --model ollama/llama3.1 \
+  --plan-on-no-fit \
+  --plan-output custom-harness.md
+```
+
+---
+
 ## Choosing the right path
 
 | Situation | Path |
@@ -223,6 +252,7 @@ system prompt overrides, session resume, JSON output, ...).
 | Your host already speaks MCP | 1 (MCP server) — zero Python code on your side |
 | You want the alive-skill system inside your existing Python loop | 2 (library) |
 | You're comparing models and need a harness | 3 (CLI) |
+| No catalog harness fits your model/goal | generated custom harness plan |
 | You're building an IDE extension | 1 if the IDE speaks MCP (most do), else 2 |
 
 All three paths share `~/.claude/skill-wiki/` as the source-of-truth

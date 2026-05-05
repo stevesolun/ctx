@@ -26,6 +26,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
+import os
+import shlex
 import sys
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -33,6 +36,7 @@ from typing import Any
 
 from ctx.adapters.generic.compaction import TokenBudgetCompactor
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox, make_tool_executor
+from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
 from ctx.adapters.generic.loop import ToolPolicy, run_loop
 from ctx.adapters.generic.contract import ContractBuilder
 from ctx.adapters.generic.evaluator import Evaluator, run_with_evaluation
@@ -50,6 +54,7 @@ from ctx.adapters.generic.tools import McpRouter, McpServerConfig
 
 
 _logger = logging.getLogger(__name__)
+_CTX_SESSION_MARKER = "ctx runtime session id:"
 
 
 # ── Provider key-env defaults ───────────────────────────────────────────────
@@ -88,6 +93,26 @@ def _resolve_api_key_env(
 
 
 # ── MCP spec parsing ───────────────────────────────────────────────────────
+
+
+def _positive_int(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return value
+
+
+def _positive_float(raw: str) -> float:
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError("must be a finite number > 0")
+    return value
 
 
 def _normalise_tool_patterns(patterns: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
@@ -183,7 +208,10 @@ def _parse_mcp_spec(spec: str) -> McpServerConfig:
         invocation = invocation.strip()
         if not name or not invocation:
             raise SystemExit(f"malformed --mcp spec: {spec!r}")
-        parts = invocation.split()
+        try:
+            parts = _split_mcp_invocation(invocation)
+        except ValueError as exc:
+            raise SystemExit(f"malformed --mcp spec: {spec!r}: {exc}") from exc
         if not parts:
             raise SystemExit(f"malformed --mcp spec: {spec!r}")
         if name == "filesystem" and len(parts) == 1:
@@ -208,6 +236,20 @@ def _parse_mcp_spec(spec: str) -> McpServerConfig:
             f"{sorted(_MCP_PRESETS)}"
         )
     return preset
+
+
+def _split_mcp_invocation(invocation: str) -> list[str]:
+    """Split an MCP command string without invoking a shell."""
+    parts = shlex.split(invocation, posix=os.name != "nt")
+    if os.name == "nt":
+        parts = [_strip_surrounding_quotes(part) for part in parts]
+    return parts
+
+
+def _strip_surrounding_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
 
 
 _MCP_PRESETS: dict[str, McpServerConfig] = {
@@ -297,6 +339,35 @@ Workflow:
 
 Be concise. Preserve file paths and slugs verbatim in your responses.
 """
+
+
+def _with_ctx_session_instructions(system_prompt: str, session_id: str) -> str:
+    if _CTX_SESSION_MARKER in system_prompt:
+        return system_prompt
+    return (
+        system_prompt.rstrip()
+        + "\n\n"
+        + "ctx runtime session id: "
+        + session_id
+        + "\n"
+        + "Use this exact session_id when calling ctx lifecycle tools. "
+        + "Record ctx__load_entity when the user/host chooses a recommended "
+        + "skill, agent, MCP server, or harness; record ctx__mark_entity_used "
+        + "when it materially helps; call ctx__unload_entity only after user "
+        + "confirmation or an explicit skip/unload instruction.\n"
+    )
+
+
+def _record_lifecycle_safely(
+    lifecycle: RuntimeLifecycleStore,
+    method_name: str,
+    **kwargs: Any,
+) -> None:
+    method = getattr(lifecycle, method_name)
+    try:
+        method(**kwargs)
+    except (OSError, ValueError) as exc:
+        _logger.warning("ctx runtime lifecycle record failed: %s", exc)
 
 
 # ── Main entry ─────────────────────────────────────────────────────────────
@@ -392,19 +463,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Sampling temperature (default 0.7).",
     )
     r.add_argument(
-        "--max-iterations", type=int, default=25,
+        "--max-iterations", type=_positive_int, default=25,
         help="Hard cap on agent loop iterations (default 25).",
     )
     r.add_argument(
-        "--max-tokens", type=int, default=None,
+        "--max-tokens", type=_positive_int, default=None,
         help="Max tokens per provider call (default: provider default).",
     )
     r.add_argument(
-        "--budget-usd", type=float, default=None,
+        "--budget-usd", type=_positive_float, default=None,
         help="Stop when cumulative cost exceeds this many USD.",
     )
     r.add_argument(
-        "--budget-tokens", type=int, default=None,
+        "--budget-tokens", type=_positive_int, default=None,
         help="Stop when input+output tokens exceed this total.",
     )
     r.add_argument(
@@ -465,7 +536,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     r.add_argument(
         "--evaluator-rounds",
-        type=int,
+        type=_positive_int,
         default=2,
         help=(
             "Max Generator->Evaluator rounds (1 = one generation "
@@ -587,8 +658,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         api_key_env=api_key_env,
     )
 
-    system_prompt = _resolve_system_prompt(args.system_prompt)
     session_id = args.session_id or new_session_id()
+    system_prompt = _resolve_system_prompt(args.system_prompt)
 
     # Planner pass (opt-in, SOLO path only — when --evaluator is set,
     # run_with_evaluation owns the planner call so the P/G/E agents
@@ -614,14 +685,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
 
+    ctx_tools_enabled = not args.no_ctx_tools
+    if ctx_tools_enabled:
+        system_prompt = _with_ctx_session_instructions(system_prompt, session_id)
+
     mcp_configs = [_parse_mcp_spec(spec) for spec in args.mcp]
     router = McpRouter(mcp_configs) if mcp_configs else None
 
     # ctx-core tools.
+    lifecycle = RuntimeLifecycleStore()
     extra_tools = []
     tool_executor = None
-    if not args.no_ctx_tools:
-        toolbox = CtxCoreToolbox()
+    if ctx_tools_enabled:
+        toolbox = CtxCoreToolbox(lifecycle_dir=lifecycle.root)
         extra_tools.extend(toolbox.tool_definitions())
         tool_executor = make_tool_executor(toolbox, fallback=None)
 
@@ -643,6 +719,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     metadata = {
         "task": args.task,
         "model": args.model,
@@ -658,7 +737,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         "budget_tokens": args.budget_tokens,
         "mcp": [{"name": c.name, "command": c.command, "args": list(c.args)}
                 for c in mcp_configs],
-        "ctx_tools_enabled": not args.no_ctx_tools,
+        "ctx_tools_enabled": ctx_tools_enabled,
         "tool_policy": {"allow": list(allow_tools), "deny": list(deny_tools)},
         "planner_used": plan_artifact is not None,
         "contract_used": bool(args.evaluator and args.contract),
@@ -676,6 +755,20 @@ def _cmd_run(args: argparse.Namespace) -> int:
         ),
     }
     observer = JsonlObserver(store, session_metadata=metadata)
+    if ctx_tools_enabled:
+        _record_lifecycle_safely(
+            lifecycle,
+            "record_dev_event",
+            session_id=session_id,
+            event_type="task",
+            host="ctx-run",
+            cwd=str(Path.cwd()),
+            payload={
+                "task": args.task,
+                "model": args.model,
+                "provider": args.provider or _model_provider_prefix(args.model),
+            },
+        )
 
     if not args.quiet:
         print(f"[ctx] session {session_id}  ({store.path})", file=sys.stderr)
@@ -685,6 +778,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     evaluator_rounds: list[dict[str, Any]] | None = None
     contract_artifact = None  # populated only on P/C/G/E path
+    result = None
     try:
         if router is not None:
             if not args.quiet:
@@ -800,6 +894,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 compactor=compactor,
             )
     finally:
+        if ctx_tools_enabled:
+            _record_lifecycle_safely(
+                lifecycle,
+                "end_session",
+                session_id=session_id,
+                status=str(getattr(result, "stop_reason", "error")),
+            )
         store.close()
         if router is not None:
             router.stop()
@@ -814,9 +915,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
 # ── Command: resume ────────────────────────────────────────────────────────
 
 
+def _load_session_for_cli(session_id: str, sessions_dir: Path) -> Any | None:
+    try:
+        return load_session(session_id, sessions_dir=sessions_dir)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return None
+
+
 def _cmd_resume(args: argparse.Namespace) -> int:
     sdir = Path(args.sessions_dir) if args.sessions_dir else default_sessions_dir()
-    state = load_session(args.session_id, sessions_dir=sdir)
+    state = _load_session_for_cli(args.session_id, sdir)
+    if state is None:
+        return 1
 
     meta = state.metadata
     model = args.model or meta.get("model")
@@ -828,7 +939,13 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         )
         return 1
 
+    use_ctx_tools = bool(meta.get("ctx_tools_enabled", True))
     system_prompt = meta.get("system_prompt") or _DEFAULT_SYSTEM_PROMPT
+    if use_ctx_tools:
+        system_prompt = _with_ctx_session_instructions(
+            str(system_prompt),
+            args.session_id,
+        )
     provider_name = args.provider or meta.get("provider") or meta.get("provider_prefix")
     provider_key = provider_name if isinstance(provider_name, str) else None
     if args.api_key_env is not None:
@@ -862,11 +979,11 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     mcp_configs = recorded_mcp_configs if args.restore_session_mcp else []
     router = McpRouter(mcp_configs) if mcp_configs else None
 
+    lifecycle = RuntimeLifecycleStore()
     extra_tools: list[ToolDefinition] = []
     tool_executor = None
-    use_ctx_tools = bool(meta.get("ctx_tools_enabled", True))
     if use_ctx_tools:
-        ctx_toolbox = CtxCoreToolbox()
+        ctx_toolbox = CtxCoreToolbox(lifecycle_dir=lifecycle.root)
         extra_tools.extend(ctx_toolbox.tool_definitions())
         tool_executor = make_tool_executor(ctx_toolbox)
     allow_tools, deny_tools = _resume_tool_policy_patterns(args, meta)
@@ -900,6 +1017,18 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
 
+    if use_ctx_tools:
+        _record_lifecycle_safely(
+            lifecycle,
+            "record_dev_event",
+            session_id=args.session_id,
+            event_type="resume_task",
+            host="ctx-resume",
+            cwd=str(Path.cwd()),
+            payload={"task": args.task, "model": model},
+        )
+
+    result = None
     try:
         if router is not None:
             router.start()
@@ -928,6 +1057,13 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             budget_tokens=meta.get("budget_tokens"),
         )
     finally:
+        if use_ctx_tools:
+            _record_lifecycle_safely(
+                lifecycle,
+                "end_session",
+                session_id=args.session_id,
+                status=str(getattr(result, "stop_reason", "error")),
+            )
         store.close()
         if router is not None:
             router.stop()
@@ -953,7 +1089,9 @@ def _cmd_sessions(args: argparse.Namespace) -> int:
         return 0
 
     # Detail view: load + summarise.
-    state = load_session(args.session_id, sessions_dir=sdir)
+    state = _load_session_for_cli(args.session_id, sdir)
+    if state is None:
+        return 1
     summary = {
         "session_id": state.session_id,
         "path": str(state.path),

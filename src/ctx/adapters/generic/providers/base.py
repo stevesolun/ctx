@@ -49,11 +49,14 @@ class ToolCall:
     correlate a later tool-result message with this call. ``name``
     and ``arguments`` are already parsed — ``arguments`` is the
     parsed JSON dict the provider emitted, not the raw string.
+    ``parse_error`` is set when the provider emitted an invalid tool
+    argument payload; the loop must refuse to execute those calls.
     """
 
     id: str
     name: str
     arguments: dict[str, Any]
+    parse_error: str = ""
 
 
 @dataclass(frozen=True)

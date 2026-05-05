@@ -189,6 +189,24 @@ class TestReadLoadedSkills:
         monkeypatch.setattr(_ut, "MANIFEST_PATH", mpath)
         assert read_loaded_skills() == []
 
+    def test_skips_non_skill_and_malformed_load_entries(self, tmp_path, monkeypatch):
+        manifest = {
+            "load": [
+                {"skill": "legacy-skill"},
+                {"skill": "typed-skill", "entity_type": "skill"},
+                {"skill": "reviewer", "entity_type": "agent"},
+                {"skill": "github", "entity_type": "mcp-server"},
+                {"skill": "openhands", "entity_type": "harness"},
+                {"entity_type": "skill"},
+                "not-a-dict",
+            ]
+        }
+        mpath = tmp_path / "manifest.json"
+        mpath.write_text(json.dumps(manifest))
+        monkeypatch.setattr(_ut, "MANIFEST_PATH", mpath)
+
+        assert read_loaded_skills() == ["legacy-skill", "typed-skill"]
+
 
 # ---------------------------------------------------------------------------
 # _set_frontmatter_field
@@ -277,6 +295,25 @@ class TestUpdateSkillPage:
         pending = json.loads((tmp_path / "pending.json").read_text())
         names = [s["name"] for s in pending["suggestions"]]
         assert "old-skill" in names
+
+    def test_stale_threshold_uses_incremented_session_count(self, tmp_path, monkeypatch):
+        entities = tmp_path / "entities" / "skills"
+        entities.mkdir(parents=True)
+        _make_entity_page(entities, "almost-old-skill", {
+            "session_count": str(_ut.STALE_THRESHOLD - 1),
+            "use_count": "0",
+        })
+        monkeypatch.setattr(_ut, "ENTITIES_DIR", entities)
+        monkeypatch.setattr(_ut, "PENDING_UNLOAD", tmp_path / "pending.json")
+
+        updated, queued = update_skill_page("almost-old-skill", used=False)
+
+        assert updated is True
+        assert queued is True
+        pending = json.loads((tmp_path / "pending.json").read_text())
+        suggestion = pending["suggestions"][0]
+        assert suggestion["name"] == "almost-old-skill"
+        assert suggestion["session_count"] == _ut.STALE_THRESHOLD
 
     def test_invalid_skill_name_returns_false(self, tmp_path, monkeypatch):
         monkeypatch.setattr(_ut, "ENTITIES_DIR", tmp_path)

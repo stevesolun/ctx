@@ -28,6 +28,22 @@ if str(SRC_DIR) not in sys.path:
 from ctx.core.wiki import wiki_graphify as wg  # noqa: E402
 
 
+def test_metadata_affected_nodes_detects_tag_changes() -> None:
+    prior = wg.nx.Graph()
+    prior.add_node("skill:alpha", label="alpha", type="skill", tags=["python"])
+    prior.add_node("skill:beta", label="beta", type="skill", tags=["python"])
+
+    affected = wg._metadata_affected_nodes(
+        prior_graph=prior,
+        current_node_info={
+            "skill:alpha": {"label": "alpha", "type": "skill", "tags": ["testing"]},
+            "skill:beta": {"label": "beta", "type": "skill", "tags": ["python"]},
+        },
+    )
+
+    assert affected == {"skill:alpha"}
+
+
 def _write_entity(
     path: Path,
     *,

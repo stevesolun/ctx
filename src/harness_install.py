@@ -25,7 +25,7 @@ from urllib.request import url2pathname
 
 from ctx.core.entity_types import entity_page_path
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body, validate_skill_name
-from ctx.utils._fs_utils import atomic_write_json, reject_symlink_path
+from ctx.utils._fs_utils import atomic_write_json, atomic_write_text, reject_symlink_path
 from ctx_config import cfg
 
 _COMMAND_ENV_ALLOWLIST = {
@@ -59,6 +59,7 @@ class HarnessRecord:
     runtimes: tuple[str, ...]
     model_providers: tuple[str, ...]
     capabilities: tuple[str, ...]
+    attach_modes: tuple[str, ...]
     setup_commands: tuple[str, ...]
     verify_commands: tuple[str, ...]
 
@@ -98,9 +99,31 @@ def _load_page(path: Path, slug: str) -> HarnessRecord:
         runtimes=_as_tuple(fm.get("runtimes")),
         model_providers=_as_tuple(fm.get("model_providers")),
         capabilities=_as_tuple(fm.get("capabilities")),
+        attach_modes=_normalize_attach_modes(fm.get("attach_modes")),
         setup_commands=_as_tuple(fm.get("setup_commands")),
         verify_commands=_as_tuple(fm.get("verify_commands")),
     )
+
+
+def _normalize_attach_modes(raw: object) -> tuple[str, ...]:
+    aliases = {
+        "mcp": "mcp",
+        "mcp-server": "mcp",
+        "python": "python-library",
+        "python-library": "python-library",
+        "library": "python-library",
+        "ctx": "ctx-run",
+        "ctx-run": "ctx-run",
+        "cli": "ctx-run",
+        "manual": "manual",
+    }
+    values = _as_tuple(raw) or ("mcp", "python-library", "ctx-run")
+    modes: list[str] = []
+    for value in values:
+        mode = aliases.get(value.strip().lower())
+        if mode and mode not in modes:
+            modes.append(mode)
+    return tuple(modes) or ("manual",)
 
 
 def _repo_key(raw: str) -> str:
@@ -186,6 +209,10 @@ def render_plan(record: HarnessRecord, *, target: Path) -> str:
         lines.append(f"Runtimes: {', '.join(record.runtimes)}")
     if record.model_providers:
         lines.append(f"Model providers: {', '.join(record.model_providers)}")
+    if record.capabilities:
+        lines.append(f"Capabilities: {', '.join(record.capabilities)}")
+    if record.attach_modes:
+        lines.append(f"Attach modes: {', '.join(record.attach_modes)}")
     if record.setup_commands:
         lines.append("Setup commands:")
         lines.extend(f"  - {cmd}" for cmd in record.setup_commands)
@@ -252,19 +279,30 @@ def _materialize_source(
 
 
 def _run_command(command: str, *, cwd: Path) -> dict[str, Any]:
-    tokens = shlex.split(command)
+    tokens = _split_command(command)
     if not tokens:
         raise ValueError("empty harness command")
+    env = _command_env()
+    tokens[0] = _resolve_command_executable(tokens[0], env)
     started = time.time()
-    proc = subprocess.run(
-        tokens,
-        cwd=str(cwd),
-        env=_command_env(),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=600,
-    )
+    try:
+        proc = subprocess.run(
+            tokens,
+            cwd=str(cwd),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=600,
+        )
+    except OSError as exc:
+        return {
+            "command": command,
+            "returncode": 127,
+            "stdout": "",
+            "stderr": _redact_output(str(exc))[-4000:],
+            "duration_seconds": round(time.time() - started, 3),
+        }
     return {
         "command": command,
         "returncode": proc.returncode,
@@ -272,6 +310,31 @@ def _run_command(command: str, *, cwd: Path) -> dict[str, Any]:
         "stderr": _redact_output(proc.stderr)[-4000:],
         "duration_seconds": round(time.time() - started, 3),
     }
+
+
+def _split_command(command: str) -> list[str]:
+    parts = shlex.split(command, posix=os.name != "nt")
+    if os.name == "nt":
+        parts = [_strip_surrounding_quotes(part) for part in parts]
+    return parts
+
+
+def _strip_surrounding_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _resolve_command_executable(command: str, env: dict[str, str]) -> str:
+    if os.path.isabs(command) or any(sep in command for sep in ("/", "\\")):
+        return command
+    return shutil.which(command, path=env.get("PATH")) or command
+
+
+def _failed_run_message(kind: str, command: str, run: dict[str, Any]) -> str:
+    tail = str(run.get("stderr") or run.get("stdout") or "").strip()
+    suffix = f": {tail[-1000:]}" if tail else ""
+    return f"{kind} command failed: {command}{suffix}"
 
 
 def _command_env() -> dict[str, str]:
@@ -321,13 +384,13 @@ def _stage_harness(
             run = _run_command(command, cwd=stage_path)
             setup_runs.append(run)
             if run["returncode"] != 0:
-                raise RuntimeError(f"setup command failed: {command}")
+                raise RuntimeError(_failed_run_message("setup", command, run))
     if run_verify:
         for command in record.verify_commands:
             run = _run_command(command, cwd=stage_path)
             verify_runs.append(run)
             if run["returncode"] != 0:
-                raise RuntimeError(f"verify command failed: {command}")
+                raise RuntimeError(_failed_run_message("verify", command, run))
     return setup_runs, verify_runs
 
 
@@ -388,6 +451,7 @@ def _write_manifest(
     manifest_dir: Path,
     setup_runs: list[dict[str, Any]],
     verify_runs: list[dict[str, Any]],
+    attach_files: list[Path] | None = None,
 ) -> Path:
     path = manifest_dir / f"{record.slug}.json"
     reject_symlink_path(path)
@@ -399,6 +463,9 @@ def _write_manifest(
         "repo_url": record.repo_url,
         "target": str(target),
         "installed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "attach_files": [
+            str(path.relative_to(target)) for path in (attach_files or [])
+        ],
         "setup_commands_run": setup_runs,
         "verify_commands_run": verify_runs,
     }
@@ -470,12 +537,14 @@ def install_harness(
             run_verify=run_verify,
             allow_local_sources=allow_local_sources,
         )
+        attach_files = _write_attach_files(record, target=target_path)
         manifest_path = _write_manifest(
             record=record,
             target=target_path,
             manifest_dir=manifest_dir,
             setup_runs=setup_runs,
             verify_runs=verify_runs,
+            attach_files=attach_files,
         )
     except FileExistsError as exc:
         return InstallResult(
@@ -497,6 +566,89 @@ def install_harness(
         "installed",
         target=target_path,
         manifest_path=manifest_path,
+    )
+
+
+def _write_attach_files(record: HarnessRecord, *, target: Path) -> list[Path]:
+    attach_dir = target / ".ctx" / "attach"
+    attach_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+
+    readme = attach_dir / "README.md"
+    reject_symlink_path(readme)
+    atomic_write_text(readme, _render_attach_readme(record))
+    written.append(readme)
+
+    if "mcp" in record.attach_modes:
+        path = attach_dir / "mcp.json"
+        reject_symlink_path(path)
+        atomic_write_text(path, _render_mcp_attach_config())
+        written.append(path)
+    if "python-library" in record.attach_modes:
+        path = attach_dir / "python.py"
+        reject_symlink_path(path)
+        atomic_write_text(path, _render_python_attach_snippet())
+        written.append(path)
+    if "ctx-run" in record.attach_modes:
+        path = attach_dir / "ctx-run.txt"
+        reject_symlink_path(path)
+        atomic_write_text(path, _render_ctx_run_attach_template(record))
+        written.append(path)
+    return written
+
+
+def _render_attach_readme(record: HarnessRecord) -> str:
+    modes = ", ".join(record.attach_modes)
+    return f"""# ctx Attachment for {record.title}
+
+This harness was installed by `ctx-harness-install`.
+
+Supported attach modes: {modes}
+
+Use the files in this directory to connect the harness to ctx:
+
+- `mcp.json`: start `ctx-mcp-server` from any MCP-speaking host.
+- `python.py`: call ctx recommendation/wiki APIs from a Python loop.
+- `ctx-run.txt`: run the built-in ctx generic harness with your model.
+
+The attachment files do not run setup commands and do not contain secrets.
+"""
+
+
+def _render_mcp_attach_config() -> str:
+    return json.dumps(
+        {
+            "mcpServers": {
+                "ctx-wiki": {
+                    "command": "ctx-mcp-server",
+                    "args": [],
+                }
+            }
+        },
+        indent=2,
+    ) + "\n"
+
+
+def _render_python_attach_snippet() -> str:
+    return """from ctx import graph_query, recommend_bundle, wiki_get, wiki_search
+
+
+def recommend_for_turn(goal: str) -> list[dict]:
+    return recommend_bundle(goal, top_k=5)
+
+
+def load_entity(slug: str) -> dict | None:
+    return wiki_get(slug)
+
+"""
+
+
+def _render_ctx_run_attach_template(record: HarnessRecord) -> str:
+    task = record.capabilities[0] if record.capabilities else f"use {record.title}"
+    return (
+        "ctx run --model <provider/model> "
+        f"--task {json.dumps(task)} "
+        "--mcp ctx-wiki:ctx-mcp-server\n"
     )
 
 
@@ -635,6 +787,91 @@ def recommend_harnesses_for_cli(
     )
 
 
+def render_no_fit_harness_plan(
+    *,
+    goal: str,
+    model_provider: str | None,
+    model: str | None,
+) -> str:
+    """Render a build handoff when no catalog harness fits the user's setup."""
+    provider = model_provider or "unknown provider"
+    model_name = model or "unspecified model"
+    goal_text = goal.strip() or "unspecified development goal"
+    return "\n".join([
+        "# Custom Harness PRD",
+        "",
+        "ctx did not find a catalog harness above the configured fit score.",
+        "Use this handoff to build an attachable harness for your local/API model.",
+        "",
+        "## Inputs",
+        "",
+        f"- Goal: {goal_text}",
+        f"- Model provider: {provider}",
+        f"- Model: {model_name}",
+        "- Target operating systems: Windows, macOS, and Linux unless narrowed by the user",
+        "",
+        "## Required Interview Before Building",
+        "",
+        "- Confirm the exact model, API base URL or local runtime, context window, and tool-call support.",
+        "- Confirm the user's goal, repository type, stack, expected autonomy, and time horizon.",
+        "- Confirm filesystem, shell, browser, network, secret, and package-manager access.",
+        "- Confirm verification commands: tests, lint, type check, build, smoke, and dashboard/browser checks.",
+        "- Confirm approval policy for destructive commands, network calls, dependency installs, and secret use.",
+        "",
+        "## Harness Architecture",
+        "",
+        "- Instructions: short root instructions plus deeper task, quality, safety, and verification docs.",
+        "- State: durable session file, active task summary, loaded ctx entities, and handoff/progress log.",
+        "- Scope: explicit allow/deny tool registry, cwd boundaries, environment allowlist, and secret redaction.",
+        "- Verification: every completion requires runnable evidence captured in the session log.",
+        "- Lifecycle: start session, observe dev events, request ctx recommendations, mark use, propose unload, end session.",
+        "",
+        "## ctx Attachment Contract",
+        "",
+        "- MCP mode: start `ctx-mcp-server` and expose ctx tools to the host.",
+        "- Python mode: call `ctx.recommend_bundle`, `ctx.wiki_get`, `ctx.wiki_search`, and `ctx.graph_query`.",
+        "- CLI mode: use `ctx run --model <model> --task <task>` when the user wants ctx to own the loop.",
+        "- Each dev window sends the current goal, stack, touched files, errors, and verification state to ctx.",
+        "- ctx returns at most five skills/agents/MCPs. The harness asks before loading or unloading anything.",
+        "",
+        "## Acceptance Tests",
+        "",
+        "- Fresh install on Windows, macOS, and Linux can start the harness without secrets printed in logs.",
+        "- A sample task triggers no more than five ctx skill/agent/MCP recommendations.",
+        "- A selected recommendation is recorded as used with evidence.",
+        "- An unused loaded entity produces an unload proposal and respects a user skip.",
+        "- A failing verification command prevents the harness from reporting completion.",
+        "",
+        "## Prompt For A Strong LLM",
+        "",
+        "Build the harness described above. Keep ctx integration attachable through MCP or Python. "
+        "Do not hard-code secrets. Implement cross-platform startup and verification commands. "
+        "Produce a minimal working harness first, then add durable state and unload lifecycle.",
+        "",
+        "Design reference: https://github.com/walkinglabs/learn-harness-engineering",
+    ]) + "\n"
+
+
+def write_no_fit_harness_plan(
+    path: Path,
+    *,
+    goal: str,
+    model_provider: str | None,
+    model: str | None,
+) -> Path:
+    target = path.expanduser()
+    reject_symlink_path(target)
+    atomic_write_text(
+        target,
+        render_no_fit_harness_plan(
+            goal=goal,
+            model_provider=model_provider,
+            model=model,
+        ),
+    )
+    return target
+
+
 def print_recommendations(results: list[dict[str, Any]]) -> None:
     if not results:
         print("No harness recommendations matched.")
@@ -642,9 +879,9 @@ def print_recommendations(results: list[dict[str, Any]]) -> None:
     print("Recommended harnesses:")
     for row in results:
         slug = str(row.get("name") or "")
-        score = float(row.get("normalized_score") or 0.0)
-        reason = str(row.get("reason") or "").strip()
-        print(f"- {slug} (match {score:.2f})")
+        score = float(row.get("fit_score") or row.get("normalized_score") or 0.0)
+        reason = str(row.get("fit_reason") or row.get("reason") or "").strip()
+        print(f"- {slug} (fit {score:.2f})")
         if reason:
             print(f"  reason: {reason}")
         print(f"  install: ctx-harness-install {slug} --dry-run")
@@ -677,6 +914,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model-provider", help="Model provider prefix, e.g. openai or ollama")
     parser.add_argument("--model", help="Model slug, e.g. openrouter/openai/gpt-5.5")
     parser.add_argument("--top-k", type=int, default=5, help="Maximum recommendations to print")
+    parser.add_argument(
+        "--plan-on-no-fit",
+        action="store_true",
+        help="When --recommend finds no harness, print a custom harness PRD",
+    )
+    parser.add_argument(
+        "--plan-output",
+        help="Write the no-fit custom harness PRD to this markdown file",
+    )
     parser.add_argument("--force", action="store_true", help="Replace target if it exists")
     parser.add_argument(
         "--update",
@@ -739,6 +985,24 @@ def main(argv: list[str] | None = None) -> int:
             top_k=max(1, min(int(args.top_k), 5)),
         )
         print_recommendations(results)
+        if not results and args.plan_on_no_fit:
+            if args.plan_output:
+                path = write_no_fit_harness_plan(
+                    Path(os.path.expanduser(args.plan_output)),
+                    goal=goal,
+                    model_provider=args.model_provider,
+                    model=args.model,
+                )
+                print(f"Custom harness plan: {path}")
+            else:
+                print()
+                print(render_no_fit_harness_plan(
+                    goal=goal,
+                    model_provider=args.model_provider,
+                    model=args.model,
+                ), end="")
+        elif not results:
+            print("Use --plan-on-no-fit to generate a custom harness PRD.")
         return 0
     if not args.identifier:
         parser.error("identifier is required unless --recommend is used")

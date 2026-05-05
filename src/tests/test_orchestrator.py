@@ -150,3 +150,45 @@ class TestOrchestratorStatusReturnsCounts:
         assert len(entity_pages) == 2, f"Expected 2 entity pages, got {len(entity_pages)}"
         assert len(converted_names) == 1, f"Expected 1 converted skill, got {converted_names}"
         assert "skill-two" in converted_names
+
+    def test_entity_pages_include_all_recommendable_entity_types(self, tmp_path: Path) -> None:
+        wiki = _minimal_wiki_for_orchestrator(tmp_path)
+
+        make_entity_page(wiki, "skill-one", ["python"], body="One.", updated=_FRESH_DATE)
+        (wiki / "entities" / "agents").mkdir(parents=True)
+        (wiki / "entities" / "agents" / "reviewer.md").write_text(
+            "---\ntitle: reviewer\ncreated: 2025-01-01\nupdated: 2026-03-01\ntype: agent\ntags: [testing]\n---\n",
+            encoding="utf-8",
+        )
+        (wiki / "entities" / "mcp-servers" / "g").mkdir(parents=True)
+        (wiki / "entities" / "mcp-servers" / "g" / "github.md").write_text(
+            "---\ntitle: github\ncreated: 2025-01-01\nupdated: 2026-03-01\ntype: mcp-server\ntags: [testing]\n---\n",
+            encoding="utf-8",
+        )
+        (wiki / "entities" / "harnesses").mkdir(parents=True)
+        (wiki / "entities" / "harnesses" / "openhands.md").write_text(
+            "---\ntitle: openhands\ncreated: 2025-01-01\nupdated: 2026-03-01\ntype: harness\ntags: [testing]\n---\n",
+            encoding="utf-8",
+        )
+
+        entity_pages = [p.relative_to(wiki).as_posix() for p in wo._entity_pages(wiki)]
+
+        assert entity_pages == [
+            "entities/agents/reviewer.md",
+            "entities/harnesses/openhands.md",
+            "entities/mcp-servers/g/github.md",
+            "entities/skills/skill-one.md",
+        ]
+
+    def test_run_check_uses_package_linter_for_non_entity_pages(self, tmp_path: Path) -> None:
+        wiki = _minimal_wiki_for_orchestrator(tmp_path)
+        (wiki / "concepts").mkdir()
+        (wiki / "concepts" / "no-frontmatter.md").write_text(
+            "# No frontmatter\n\nThis should be audited by wiki_lint.\n",
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(wo, "_skill_names_on_disk", return_value=[]):
+            report = wo.run_check(wiki)
+
+        assert any("[lint]" in warning and "no-frontmatter" in warning for warning in report.warnings)

@@ -15,26 +15,17 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
+
 import pytest
 
 SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-_IMPORT_OK = False
-try:
-    import mcp_quality as mq  # noqa: E402
-    from ctx.core.quality.quality_signals import SignalResult  # noqa: E402
-
-    _IMPORT_OK = True
-except ImportError:
-    pass
-
-pytestmark = pytest.mark.skipif(
-    not _IMPORT_OK,
-    reason="mcp_quality or its dependencies not yet available",
-)
+import mcp_quality as mq  # noqa: E402
+from ctx.core.quality.quality_signals import SignalResult  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -230,9 +221,9 @@ class TestComputeQuality:
             slug="github",
             signals=_all_signals(1.0),
         )
-        # Should be a non-empty ISO-format string.
         assert isinstance(result.computed_at, str)
-        assert "T" in result.computed_at
+        parsed = datetime.fromisoformat(result.computed_at)
+        assert parsed.tzinfo is not None
 
     def test_to_dict_is_json_serializable(self) -> None:
         result = mq.compute_quality(
@@ -317,6 +308,17 @@ class TestPersistQuality:
 
         sidecar = fake_home / ".claude" / "skill-quality" / "mcp" / "github.json"
         assert sidecar.is_file(), f"sidecar not found at {sidecar}"
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+        assert payload["slug"] == "github"
+        assert payload["score"] == pytest.approx(score.score)
+        assert payload["raw_score"] == pytest.approx(score.raw_score)
+        assert payload["grade"] == score.grade
+        assert set(payload["signals"]) == set(_SIGNAL_NAMES)
+        assert set(payload["weights"]) == set(_SIGNAL_NAMES)
+        datetime.fromisoformat(payload["computed_at"])
+        for name in _SIGNAL_NAMES:
+            assert payload["signals"][name]["score"] == pytest.approx(score.signals[name].score)
+            assert isinstance(payload["signals"][name]["evidence"], dict)
 
     def test_frontmatter_keys_injected_after_persist(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -365,6 +367,27 @@ class TestPersistQuality:
         assert content.count("<!-- quality:begin -->") == 1
         assert content.count("<!-- quality:end -->") == 1
         assert content.count("quality_score:") == 1
+        assert content.count("quality_grade:") == 1
+        assert content.count("quality_updated_at:") == 1
+
+        replacement = _make_score(
+            slug="github",
+            score=0.6,
+            computed_at="2026-04-21T00:00:00+00:00",
+        )
+        mq.persist_quality(replacement, wiki_dir=wiki_dir)
+
+        content = entity_path.read_text(encoding="utf-8")
+        assert content.count("<!-- quality:begin -->") == 1
+        assert content.count("<!-- quality:end -->") == 1
+        assert content.count("quality_score:") == 1
+        assert content.count("quality_grade:") == 1
+        assert content.count("quality_updated_at:") == 1
+        assert "quality_score: 0.6000" in content
+        assert "quality_grade: B" in content
+        assert "quality_updated_at: 2026-04-21T00:00:00+00:00" in content
+        assert "- **Grade:** B" in content
+        assert "- **Computed:** 2026-04-21T00:00:00+00:00" in content
 
 
 # ---------------------------------------------------------------------------

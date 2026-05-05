@@ -357,4 +357,15 @@ class TestCtxCoreToolboxRexport:
         # Doesn't load anything at construction time.
         toolbox = ctx.CtxCoreToolbox()
         defs = toolbox.tool_definitions()
-        assert len(defs) == 4
+        assert {definition.name for definition in defs} == {
+            "ctx__recommend_bundle",
+            "ctx__graph_query",
+            "ctx__wiki_search",
+            "ctx__wiki_get",
+            "ctx__observe_dev_event",
+            "ctx__load_entity",
+            "ctx__mark_entity_used",
+            "ctx__unload_entity",
+            "ctx__session_end",
+            "ctx__session_state",
+        }
