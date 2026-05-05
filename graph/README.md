@@ -78,6 +78,7 @@ python src/validate_graph_artifacts.py --deep \
   --expected-nodes 102696 \
   --expected-edges 2900834 \
   --expected-semantic-edges 1682825 \
+  --expected-harness-nodes 13 \
   --expected-skills-sh-nodes 89463 \
   --expected-skills-sh-catalog-entries 89463 \
   --expected-skills-sh-converted 89463 \

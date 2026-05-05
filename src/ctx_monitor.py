@@ -1826,7 +1826,7 @@ def _render_kpi() -> str:
             "The KPI dashboard reads from "
             "<code>~/.claude/skill-quality/*.json</code> and "
             "<code>*.lifecycle.json</code>. Run "
-            "<code>ctx-skill-quality score --all</code> to populate "
+            "<code>ctx-skill-quality recompute --all</code> to populate "
             "sidecars, then reload this page.</p>"
             "<p class='muted'>CLI equivalent: "
             "<code>python -m kpi_dashboard render</code></p></div>"

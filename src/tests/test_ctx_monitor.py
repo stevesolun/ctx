@@ -1029,7 +1029,9 @@ def test_render_kpi_empty_state(fake_claude: Path) -> None:
     """With no sidecars, /kpi must render a helpful empty state, not 500."""
     html_out = cm._render_kpi()
     assert "<h1>KPIs</h1>" in html_out
-    assert "No KPI data yet" in html_out or "ctx-skill-quality" in html_out
+    assert "No KPI data yet" in html_out
+    assert "ctx-skill-quality recompute --all" in html_out
+    assert "ctx-skill-quality score --all" not in html_out
 
 
 def test_render_kpi_with_sidecars(fake_claude: Path) -> None:

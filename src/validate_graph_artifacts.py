@@ -48,6 +48,7 @@ class GraphArtifactStats:
     graph_nodes: int
     graph_edges: int
     graph_semantic_edges: int
+    harness_nodes: int
     skills_sh_nodes: int
     skills_sh_catalog_entries: int
     skills_sh_converted: int
@@ -154,6 +155,7 @@ def validate_graph_artifacts(
     expected_nodes: int | None = None,
     expected_edges: int | None = None,
     expected_semantic_edges: int | None = None,
+    expected_harness_nodes: int | None = None,
     expected_skills_sh_nodes: int | None = None,
     expected_skills_sh_catalog_entries: int | None = None,
     expected_skills_sh_converted: int | None = None,
@@ -195,6 +197,7 @@ def validate_graph_artifacts(
 
     names: set[str] = set()
     graph_nodes = graph_edges = graph_semantic_edges = skills_sh_nodes = 0
+    harness_nodes = 0
     skill_pages = agent_pages = mcp_pages = harness_pages = skills_sh_converted = 0
     expected_harnesses = DEFAULT_HARNESSES if expected_harnesses is None else expected_harnesses
 
@@ -225,7 +228,7 @@ def validate_graph_artifacts(
                     graph_edges,
                     graph_semantic_edges,
                     skills_sh_nodes,
-                    _harness_nodes,
+                    harness_nodes,
                 ) = _scan_graph_json(f)
             elif member.isfile() and deep and name.startswith("converted/skills-sh-"):
                 if name.endswith("/SKILL.md") or "/references/" in name:
@@ -281,6 +284,7 @@ def validate_graph_artifacts(
         graph_nodes=graph_nodes,
         graph_edges=graph_edges,
         graph_semantic_edges=graph_semantic_edges,
+        harness_nodes=harness_nodes,
         skills_sh_nodes=skills_sh_nodes,
         skills_sh_catalog_entries=len(skills),
         skills_sh_converted=skills_sh_converted,
@@ -295,6 +299,7 @@ def validate_graph_artifacts(
             expected_nodes,
             expected_edges,
             expected_semantic_edges,
+            expected_harness_nodes,
             expected_skills_sh_nodes,
         )
     ):
@@ -303,6 +308,7 @@ def validate_graph_artifacts(
         "graph_nodes": expected_nodes,
         "graph_edges": expected_edges,
         "graph_semantic_edges": expected_semantic_edges,
+        "harness_nodes": expected_harness_nodes,
         "skills_sh_nodes": expected_skills_sh_nodes,
         "skills_sh_catalog_entries": expected_skills_sh_catalog_entries,
         "skills_sh_converted": expected_skills_sh_converted,
@@ -335,6 +341,7 @@ def main() -> None:
     parser.add_argument("--expected-nodes", type=int)
     parser.add_argument("--expected-edges", type=int)
     parser.add_argument("--expected-semantic-edges", type=int)
+    parser.add_argument("--expected-harness-nodes", type=int)
     parser.add_argument("--expected-skills-sh-nodes", type=int)
     parser.add_argument("--expected-skills-sh-catalog-entries", type=int)
     parser.add_argument("--expected-skills-sh-converted", type=int)
@@ -347,6 +354,7 @@ def main() -> None:
         args.expected_nodes,
         args.expected_edges,
         args.expected_semantic_edges,
+        args.expected_harness_nodes,
         args.expected_skills_sh_nodes,
     )
     if not args.deep and any(value is not None for value in deep_expected):
@@ -363,6 +371,7 @@ def main() -> None:
         expected_nodes=args.expected_nodes,
         expected_edges=args.expected_edges,
         expected_semantic_edges=args.expected_semantic_edges,
+        expected_harness_nodes=args.expected_harness_nodes,
         expected_skills_sh_nodes=args.expected_skills_sh_nodes,
         expected_skills_sh_catalog_entries=args.expected_skills_sh_catalog_entries,
         expected_skills_sh_converted=args.expected_skills_sh_converted,

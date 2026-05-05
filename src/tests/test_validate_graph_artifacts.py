@@ -104,6 +104,7 @@ def test_validate_graph_artifacts_checks_catalog_paths_and_deep_graph_stats(
         expected_nodes=2,
         expected_edges=1,
         expected_semantic_edges=1,
+        expected_harness_nodes=1,
         expected_skills_sh_nodes=1,
         expected_skills_sh_catalog_entries=1,
         expected_skills_sh_converted=1,
@@ -115,6 +116,7 @@ def test_validate_graph_artifacts_checks_catalog_paths_and_deep_graph_stats(
 
     assert stats.graph_nodes == 2
     assert stats.graph_edges == 1
+    assert stats.harness_nodes == 1
     assert stats.skills_sh_catalog_entries == 1
     assert stats.skills_sh_converted == 1
     assert stats.harness_pages == 1
