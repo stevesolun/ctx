@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/stevesolun-ctx-badge.png)](https://mseep.ai/app/stevesolun-ctx)
+
 # ctx — Skill, Agent, MCP & Harness Recommendations
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
