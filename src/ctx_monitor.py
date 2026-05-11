@@ -264,6 +264,10 @@ def _frontmatter_tags(value: Any, *, limit: int | None = 6) -> list[str]:
 
 
 _WIKI_INLINE_RE = re.compile(r"(`[^`\n]+`|\[\[[^\]\n]+\]\])")
+_WIKI_QUALITY_BLOCK_RE = re.compile(
+    r"<!--\s*quality:begin\s*-->\s*(.*?)\s*<!--\s*quality:end\s*-->",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _wiki_link_href(target: str) -> tuple[str, str]:
@@ -370,6 +374,21 @@ def _render_wiki_markdown(markdown_text: str) -> str:
     return "".join(out) if out else "<p class='muted'>No body.</p>"
 
 
+def _extract_embedded_quality_block(markdown_text: str) -> tuple[str, str | None]:
+    matches = list(_WIKI_QUALITY_BLOCK_RE.finditer(markdown_text))
+    if not matches:
+        return markdown_text, None
+    quality_blocks = [
+        match.group(1).strip()
+        for match in matches
+        if match.group(1).strip()
+    ]
+    body = _WIKI_QUALITY_BLOCK_RE.sub("\n\n", markdown_text)
+    body = re.sub(r"\n{3,}", "\n\n", body).strip()
+    quality_markdown = "\n\n".join(quality_blocks).strip() or None
+    return body, quality_markdown
+
+
 def _slugish(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
 
@@ -460,9 +479,21 @@ def _render_entity_subgraph(slug: str, entity_type: str | None = None) -> str:
     )
 
 
-def _render_quality_drilldown(sidecar: dict | None) -> str:
+def _render_quality_drilldown(
+    sidecar: dict | None,
+    embedded_quality_markdown: str | None = None,
+) -> str:
     """Explain quality score signals for a wiki entity."""
     if sidecar is None:
+        if embedded_quality_markdown:
+            quality_markdown = embedded_quality_markdown.strip()
+            if not re.search(r"^#{1,6}\s+Quality\b", quality_markdown, re.IGNORECASE | re.MULTILINE):
+                quality_markdown = "## Quality\n\n" + quality_markdown
+            return (
+                "<div class='card wiki-body'>"
+                + _render_wiki_markdown(quality_markdown)
+                + "</div>"
+            )
         return (
             "<div class='card'>"
             "<h2>Quality</h2>"
@@ -2076,7 +2107,8 @@ def _render_wiki_entity(slug: str, entity_type: str | None = None) -> str:
             "</div></div>"
         )
 
-    display_body = _strip_duplicate_wiki_heading(md_body, slug)
+    md_body_without_quality, embedded_quality_markdown = _extract_embedded_quality_block(md_body)
+    display_body = _strip_duplicate_wiki_heading(md_body_without_quality, slug)
     body_preview, body_truncated = _truncate_text(display_body, 12000)
     body_html = _render_wiki_markdown(body_preview)
     body_truncated_html = (
@@ -2096,7 +2128,7 @@ def _render_wiki_entity(slug: str, entity_type: str | None = None) -> str:
         "</div>"
     )
     subgraph_html = _render_entity_subgraph(slug, entity_type=entity_type)
-    quality_html = _render_quality_drilldown(sidecar)
+    quality_html = _render_quality_drilldown(sidecar, embedded_quality_markdown)
     tab_script = """
 <script>
 (function () {

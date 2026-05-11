@@ -1098,6 +1098,63 @@ def test_render_mcp_wiki_entity_has_tabs_subgraph_and_quality(
     assert "<pre style=" not in html_out
 
 
+@pytest.mark.parametrize(
+    ("entity_type", "subdir", "slug"),
+    [
+        ("skill", "skills", "quality-skill"),
+        ("agent", "agents", "quality-agent"),
+        ("mcp-server", "mcp-servers/q", "quality-mcp"),
+        ("harness", "harnesses", "quality-harness"),
+    ],
+)
+def test_render_wiki_entity_moves_embedded_quality_block_to_quality_tab(
+    fake_claude: Path,
+    entity_type: str,
+    subdir: str,
+    slug: str,
+) -> None:
+    entity_dir = fake_claude / "skill-wiki" / "entities" / subdir
+    entity_dir.mkdir(parents=True)
+    (entity_dir / f"{slug}.md").write_text(
+        "---\n"
+        f"type: {entity_type}\n"
+        "---\n"
+        f"# {slug}\n\n"
+        "Overview body stays here.\n\n"
+        "<!-- quality:begin -->\n"
+        "## Quality\n\n"
+        "- **Grade:** C\n"
+        "- **Score:** 0.45 (raw 0.45)\n"
+        "- **Computed:** 2026-05-09T15:47:33+00:00\n\n"
+        "| Signal | Score | Weight |\n"
+        "| --- | --- | --- |\n"
+        "| telemetry | 0.45 | 0.40 |\n"
+        "<!-- quality:end -->\n\n"
+        "Overview continues here.\n",
+        encoding="utf-8",
+    )
+
+    html_out = cm._render_wiki_entity(slug, entity_type=entity_type)
+
+    overview_start = html_out.index("data-entity-tab-panel='overview'")
+    overview_end = html_out.index("data-entity-tab-panel='subgraph'")
+    overview_html = html_out[overview_start:overview_end]
+    quality_start = html_out.index("data-entity-tab-panel='quality'")
+    quality_html = html_out[quality_start:]
+
+    assert "data-entity-tab='overview'" in html_out
+    assert "data-entity-tab='quality'" in html_out
+    assert "Overview body stays here." in overview_html
+    assert "Overview continues here." in overview_html
+    assert "quality:begin" not in html_out
+    assert "quality:end" not in html_out
+    assert "**Grade:** C" not in overview_html
+    assert "**Score:** 0.45" not in overview_html
+    assert "Grade:" in quality_html
+    assert "0.45 (raw 0.45)" in quality_html
+    assert "No quality sidecar exists" not in quality_html
+
+
 def test_render_wiki_entity_missing_slug(fake_claude: Path) -> None:
     out = cm._render_wiki_entity("nope-not-here")
     assert "No wiki page" in out
