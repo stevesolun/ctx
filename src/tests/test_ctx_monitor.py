@@ -1029,6 +1029,59 @@ def test_render_wiki_entity_renders_markdown_and_wikilinks(fake_claude: Path) ->
     assert "<pre style=" not in html_out
 
 
+def test_render_mcp_wiki_entity_has_tabs_subgraph_and_quality(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import networkx as nx
+
+    mcp_dir = fake_claude / "skill-wiki" / "entities" / "mcp-servers" / "g"
+    mcp_dir.mkdir(parents=True)
+    (mcp_dir / "github.md").write_text(
+        "---\n"
+        "type: mcp-server\n"
+        "description: Manage repositories and issues.\n"
+        "---\n"
+        "# GitHub\n\n"
+        "Manage repositories, issues, and search code via GitHub API.\n",
+        encoding="utf-8",
+    )
+    _write_mcp_sidecar(fake_claude, "github", {
+        "slug": "github",
+        "subject_type": "mcp-server",
+        "grade": "B",
+        "raw_score": 0.7106,
+        "hard_floor": "missing-license",
+        "weights": {"freshness": 0.25, "docs": 0.75},
+        "signals": {
+            "docs": {"score": 0.9, "evidence": {"has_install": True}},
+            "freshness": {"score": 0.2, "evidence": {"last_commit_at": None}},
+        },
+    })
+    graph = nx.Graph()
+    graph.add_node("mcp-server:github", label="github", type="mcp-server", tags=["reference"])
+    graph.add_node("skill:github-actions", label="github-actions", type="skill", tags=["github", "ci"])
+    graph.add_node("agent:repo-reviewer", label="repo-reviewer", type="agent", tags=["github", "review"])
+    graph.add_edge("mcp-server:github", "skill:github-actions", weight=0.91, shared_tags=["github", "ci"])
+    graph.add_edge("mcp-server:github", "agent:repo-reviewer", weight=0.83, shared_tags=["github"])
+    monkeypatch.setattr(cm, "_load_dashboard_graph", lambda: graph)
+
+    html_out = cm._render_wiki_entity("github", entity_type="mcp-server")
+
+    assert "data-entity-tab='overview'" in html_out
+    assert "data-entity-tab='subgraph'" in html_out
+    assert "data-entity-tab='quality'" in html_out
+    assert "<h2>Subgraph</h2>" in html_out
+    assert "href='/wiki/github-actions?type=skill'" in html_out
+    assert "href='/wiki/repo-reviewer?type=agent'" in html_out
+    assert "/graph?slug=github&amp;type=mcp-server" in html_out
+    assert "<h2>Quality</h2>" in html_out
+    assert "freshness" in html_out
+    assert "has_install" in html_out
+    assert "missing-license" in html_out
+    assert "<pre style=" not in html_out
+
+
 def test_render_wiki_entity_missing_slug(fake_claude: Path) -> None:
     out = cm._render_wiki_entity("nope-not-here")
     assert "No wiki page" in out

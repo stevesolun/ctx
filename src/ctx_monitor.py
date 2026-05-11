@@ -389,6 +389,134 @@ def _strip_duplicate_wiki_heading(markdown_text: str, slug: str) -> str:
     return "\n".join(lines)
 
 
+def _entity_wiki_href(slug: str, entity_type: str | None = None) -> str:
+    suffix = f"?type={quote(entity_type)}" if entity_type in _DASHBOARD_ENTITY_TYPES else ""
+    return f"/wiki/{quote(slug)}{suffix}"
+
+
+def _graph_type_from_node_id(node_id: str, fallback: str = "skill") -> str:
+    prefix = node_id.split(":", 1)[0] if ":" in node_id else ""
+    return {
+        "skill": "skill",
+        "agent": "agent",
+        "mcp-server": "mcp-server",
+        "harness": "harness",
+    }.get(prefix, fallback)
+
+
+def _render_entity_subgraph(slug: str, entity_type: str | None = None) -> str:
+    """Render a compact 1-hop subgraph table for wiki entity pages."""
+    graph = _graph_neighborhood(slug, hops=1, limit=32, entity_type=entity_type)
+    center = graph.get("center")
+    nodes = graph.get("nodes") or []
+    edges = graph.get("edges") or []
+    if not center:
+        return (
+            "<div class='card'>"
+            "<p class='muted'>No graph node was found for this entity.</p>"
+            "</div>"
+        )
+    node_by_id = {
+        str(node.get("data", {}).get("id", "")): node.get("data", {})
+        for node in nodes
+    }
+    rows: list[str] = []
+    for edge in edges:
+        data = edge.get("data", {})
+        source = str(data.get("source", ""))
+        target = str(data.get("target", ""))
+        other_id = target if source == center else source
+        if other_id == center or other_id not in node_by_id:
+            continue
+        other = node_by_id[other_id]
+        other_type = _graph_type_from_node_id(other_id, str(other.get("type", "skill")))
+        other_slug = other_id.split(":", 1)[-1]
+        shared = ", ".join(str(tag) for tag in data.get("shared_tags", [])[:6])
+        shared_html = html.escape(shared) if shared else "<span class='muted'>none</span>"
+        rows.append(
+            "<tr>"
+            f"<td><a href='{html.escape(_entity_wiki_href(other_slug, other_type))}'>"
+            f"{html.escape(str(other.get('label') or other_slug))}</a></td>"
+            f"<td><span class='pill entity-type-{html.escape(other_type)}'>"
+            f"{html.escape(other_type)}</span></td>"
+            f"<td><code>{float(data.get('weight', 0.0)):.3f}</code></td>"
+            f"<td>{shared_html}</td>"
+            "</tr>"
+        )
+    table = (
+        "<table><tr><th>Entity</th><th>Type</th><th>Weight</th><th>Shared signals</th></tr>"
+        + ("".join(rows) if rows else "<tr><td colspan='4' class='muted'>No neighbors under the current limit.</td></tr>")
+        + "</table>"
+    )
+    graph_type = entity_type if entity_type in _DASHBOARD_ENTITY_TYPES else _graph_type_from_node_id(center)
+    return (
+        "<div class='card'>"
+        "<h2>Subgraph</h2>"
+        f"<p class='muted'>{len(nodes)} nodes and {len(edges)} edges in the 1-hop neighborhood.</p>"
+        f"<p><a href='/graph?slug={html.escape(slug)}&amp;type={html.escape(graph_type)}'>"
+        "Open interactive graph view</a></p>"
+        + table
+        + "</div>"
+    )
+
+
+def _render_quality_drilldown(sidecar: dict | None) -> str:
+    """Explain quality score signals for a wiki entity."""
+    if sidecar is None:
+        return (
+            "<div class='card'>"
+            "<h2>Quality</h2>"
+            "<p class='muted'>No quality sidecar exists for this entity yet.</p>"
+            "</div>"
+    )
+    grade = str(sidecar.get("grade", "F"))
+    score = float(sidecar.get("raw_score", sidecar.get("score", 0.0)) or 0.0)
+    weights_raw = sidecar.get("weights")
+    signals_raw = sidecar.get("signals")
+    weights: dict[str, Any] = weights_raw if isinstance(weights_raw, dict) else {}
+    signals: dict[str, Any] = signals_raw if isinstance(signals_raw, dict) else {}
+    signal_rows: list[str] = []
+    for name, signal in sorted(signals.items()):
+        signal_data = signal if isinstance(signal, dict) else {}
+        signal_score = float(signal_data.get("score", 0.0) or 0.0)
+        weight = float(weights.get(name, 0.0) or 0.0)
+        contribution = signal_score * weight
+        evidence = signal_data.get("evidence", {})
+        evidence_text = json.dumps(evidence, ensure_ascii=False, sort_keys=True, default=str)
+        evidence_preview, evidence_truncated = _truncate_text(evidence_text, 420)
+        truncated_marker = " <span class='muted'>(truncated)</span>" if evidence_truncated else ""
+        signal_rows.append(
+            "<tr>"
+            f"<td><code>{html.escape(str(name))}</code></td>"
+            f"<td><code>{signal_score:.3f}</code></td>"
+            f"<td><code>{weight:.3f}</code></td>"
+            f"<td><code>{contribution:.3f}</code></td>"
+            f"<td><code>{html.escape(evidence_preview)}</code>{truncated_marker}</td>"
+            "</tr>"
+        )
+    if not signal_rows:
+        signal_rows.append("<tr><td colspan='5' class='muted'>No signal breakdown was recorded.</td></tr>")
+    hard_floor = sidecar.get("hard_floor")
+    floor_html = f" <span class='muted'>floor {html.escape(str(hard_floor))}</span>" if hard_floor else ""
+    return (
+        "<div class='card'>"
+        "<h2>Quality</h2>"
+        f"<p><span class='pill grade-{html.escape(grade)}'>{html.escape(grade)}</span> "
+        f"score <strong>{score:.3f}</strong>"
+        f"{floor_html}</p>"
+        "<p class='muted'>Score is the weighted sum of recorded quality signals. "
+        "A hard floor can cap the final grade even when individual signals pass.</p>"
+        "<table class='quality-signal-table'>"
+        "<tr><th>Signal</th><th>Signal score</th><th>Weight</th><th>Contribution</th><th>Evidence</th></tr>"
+        + "".join(signal_rows)
+        + "</table>"
+        "<details><summary>Raw sidecar JSON</summary>"
+        f"<pre>{html.escape(json.dumps(sidecar, indent=2, ensure_ascii=False, default=str)[:6000])}</pre>"
+        "</details>"
+        "</div>"
+    )
+
+
 def _save_manifest(manifest: dict) -> None:
     _atomic_write_text(_manifest_path(), json.dumps(manifest, indent=2) + "\n")
 
@@ -1068,6 +1196,13 @@ pre { padding: 0.6rem 0.8rem; overflow-x: auto; }
 .wiki-body pre { white-space: pre-wrap; }
 .frontmatter-table { table-layout: fixed; font-size: 0.85rem; }
 .frontmatter-table td:last-child code { white-space: normal; overflow-wrap: anywhere; }
+.entity-tabs { display: flex; gap: 0.4rem; margin: 0.8rem 0 1rem; flex-wrap: wrap; }
+.entity-tab-button { border: 1px solid #d1d5db; border-radius: 6px; background: #fff;
+                     color: inherit; cursor: pointer; padding: 0.35rem 0.7rem; }
+.entity-tab-button.active { background: #111827; color: #fff; border-color: #111827; }
+.entity-tab-panel[hidden] { display: none; }
+.quality-signal-table { table-layout: fixed; }
+.quality-signal-table td:last-child code { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 860px) {
     .wiki-entity-grid { grid-template-columns: 1fr; }
 }
@@ -1076,6 +1211,8 @@ pre { padding: 0.6rem 0.8rem; overflow-x: auto; }
     th { background: rgba(255,255,255,0.05); }
     tr:hover { background: rgba(255,255,255,0.03); }
     .card { border-color: #334155; }
+    .entity-tab-button { background: #0f172a; border-color: #334155; }
+    .entity-tab-button.active { background: #e2e8f0; color: #0f172a; }
     code, pre { background: rgba(255,255,255,0.06); }
     .error { color: #fecaca; background: rgba(127,29,29,0.25);
              border-color: rgba(248,113,113,0.35); }
@@ -1924,17 +2061,18 @@ def _render_wiki_entity(slug: str, entity_type: str | None = None) -> str:
         )
     fm_rows = "".join(fm_row_parts)
 
-    sidecar_html = ""
+    quality_summary_html = ""
     if sidecar is not None:
-        sidecar_html = (
+        quality_summary_html = (
             "<div class='card'>"
             f"<strong>Quality</strong> <span class='pill grade-{html.escape(sidecar.get('grade', 'F'))}'>"
             f"{html.escape(sidecar.get('grade', 'F'))}</span> "
             f"score <strong>{sidecar.get('raw_score', 0.0):.3f}</strong>"
-            f"{' · floor ' + html.escape(sidecar.get('hard_floor','')) if sidecar.get('hard_floor') else ''}"
+            f"{' &middot; floor ' + html.escape(sidecar.get('hard_floor','')) if sidecar.get('hard_floor') else ''}"
             f"<div style='margin-top:0.4rem;'>"
-            f"<a href='/skill/{html.escape(slug)}?type={html.escape(entity_type or '')}'>sidecar detail →</a> · "
-            f"<a href='/graph?slug={html.escape(slug)}{type_suffix}'>graph neighborhood →</a>"
+            "<a href='#quality' data-open-entity-tab='quality'>quality drilldown &rarr;</a> &middot; "
+            f"<a href='/skill/{html.escape(slug)}?type={html.escape(entity_type or '')}'>sidecar detail &rarr;</a> &middot; "
+            f"<a href='/graph?slug={html.escape(slug)}{type_suffix}'>graph neighborhood &rarr;</a>"
             "</div></div>"
         )
 
@@ -1946,10 +2084,8 @@ def _render_wiki_entity(slug: str, entity_type: str | None = None) -> str:
         if body_truncated
         else ""
     )
-    body = (
-        f"<h1>{html.escape(slug)}</h1>"
-        + sidecar_html
-        + "<div class='wiki-entity-grid'>"
+    overview_html = (
+        "<div class='wiki-entity-grid'>"
         f"<div class='card wiki-body'>{body_html}"
         f"{body_truncated_html}</div>"
         f"<div class='card'><strong>Frontmatter</strong>"
@@ -1958,6 +2094,64 @@ def _render_wiki_entity(slug: str, entity_type: str | None = None) -> str:
         + (fm_rows or "<tr><td class='muted' colspan='2'>none</td></tr>")
         + "</table></div>"
         "</div>"
+    )
+    subgraph_html = _render_entity_subgraph(slug, entity_type=entity_type)
+    quality_html = _render_quality_drilldown(sidecar)
+    tab_script = """
+<script>
+(function () {
+  function showEntityTab(name) {
+    document.querySelectorAll('[data-entity-tab]').forEach(function (button) {
+      var active = button.getAttribute('data-entity-tab') === name;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-entity-tab-panel]').forEach(function (panel) {
+      panel.hidden = panel.getAttribute('data-entity-tab-panel') !== name;
+    });
+  }
+  document.querySelectorAll('[data-entity-tab]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var name = button.getAttribute('data-entity-tab');
+      showEntityTab(name);
+      if (history.replaceState) {
+        history.replaceState(null, '', '#' + name);
+      }
+    });
+  });
+  document.querySelectorAll('[data-open-entity-tab]').forEach(function (link) {
+    link.addEventListener('click', function (event) {
+      event.preventDefault();
+      var name = link.getAttribute('data-open-entity-tab');
+      showEntityTab(name);
+      if (history.replaceState) {
+        history.replaceState(null, '', '#' + name);
+      }
+    });
+  });
+  var initial = (location.hash || '#overview').replace('#', '');
+  if (!document.querySelector('[data-entity-tab="' + initial + '"]')) {
+    initial = 'overview';
+  }
+  showEntityTab(initial);
+})();
+</script>
+"""
+    body = (
+        f"<h1>{html.escape(slug)}</h1>"
+        + quality_summary_html
+        + "<div class='entity-tabs' role='tablist' aria-label='Entity sections'>"
+        "<button type='button' class='entity-tab-button active' role='tab' aria-selected='true' "
+        "data-entity-tab='overview'>Overview</button>"
+        "<button type='button' class='entity-tab-button' role='tab' aria-selected='false' "
+        "data-entity-tab='subgraph'>Subgraph</button>"
+        "<button type='button' class='entity-tab-button' role='tab' aria-selected='false' "
+        "data-entity-tab='quality'>Quality</button>"
+        "</div>"
+        f"<section id='overview' class='entity-tab-panel' data-entity-tab-panel='overview'>{overview_html}</section>"
+        f"<section id='subgraph' class='entity-tab-panel' data-entity-tab-panel='subgraph' hidden>{subgraph_html}</section>"
+        f"<section id='quality' class='entity-tab-panel' data-entity-tab-panel='quality' hidden>{quality_html}</section>"
+        + tab_script
     )
     return _layout(slug, body)
 
