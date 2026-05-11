@@ -91,6 +91,9 @@ markdown_extensions:
 plugins:
   - search
 
+extra_javascript:
+  - assets/javascripts/repo-stats-refresh.js
+
 nav:
   - Home: index.md
   - Knowledge graph: knowledge-graph.md
