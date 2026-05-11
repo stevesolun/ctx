@@ -145,6 +145,46 @@ def test_graph_page_uses_builtin_svg_renderer(
         harness.close()
 
 
+def test_events_page_shows_backlog_and_appends_live_events(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    page: Any,
+) -> None:
+    audit_path = fake_claude / "ctx-audit.jsonl"
+    audit_path.write_text(
+        json.dumps({
+            "ts": "2026-04-28T00:00:00Z",
+            "event": "skill.loaded",
+            "subject": "python-patterns",
+            "session_id": "events-page-backlog",
+        }) + "\n",
+        encoding="utf-8",
+    )
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        page.goto(f"{harness.base_url}/events")
+        page.wait_for_selector("#stream", timeout=5000)
+        assert "Showing last 1 audit events" in page.locator("body").inner_text()
+        assert "events-page-backlog" in page.locator("#stream").inner_text()
+
+        with audit_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "ts": "2026-04-28T00:00:01Z",
+                "event": "agent.loaded",
+                "subject": "repo-reviewer",
+                "session_id": "events-page-live",
+            }) + "\n")
+        _wait_for_browser_state(
+            page,
+            "() => document.getElementById('stream').textContent.includes('events-page-live')",
+            timeout=5.0,
+        )
+        status_text = page.locator("#stream-status").inner_text()
+        assert status_text in {"connected; waiting for new events", "live"}
+    finally:
+        harness.close()
+
+
 def test_loaded_page_token_controls_browser_mutations(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,

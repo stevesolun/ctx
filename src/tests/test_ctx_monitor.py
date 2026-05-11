@@ -981,6 +981,22 @@ def test_monitor_shutdown_signals_open_sse_workers(
         server.server_close()
 
 
+def test_render_events_shows_recent_audit_backlog(fake_claude: Path) -> None:
+    _write_audit(fake_claude, [
+        {"ts": "t1", "event": "skill.loaded", "subject": "python-patterns"},
+        {"ts": "t2", "event": "agent.loaded", "subject": "repo-reviewer"},
+    ])
+
+    html_out = cm._render_events()
+
+    assert "Showing last 2 audit events" in html_out
+    assert "skill.loaded" in html_out
+    assert "python-patterns" in html_out
+    assert "agent.loaded" in html_out
+    assert "repo-reviewer" in html_out
+    assert "id='stream-status'" in html_out
+
+
 def test_wiki_entity_path_finds_skill_page(fake_claude: Path) -> None:
     skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
     skills_dir.mkdir(parents=True)

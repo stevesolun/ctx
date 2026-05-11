@@ -2589,20 +2589,41 @@ def _render_status() -> str:
 
 def _render_events() -> str:
     """SSE endpoint page. The server emits events at /api/events.stream."""
+    entries = _read_jsonl(_audit_log_path(), limit=200)
+    event_lines = [
+        json.dumps(entry, ensure_ascii=False, default=str)
+        for entry in entries
+    ]
+    initial_stream = "\n".join(event_lines)
+    if not initial_stream:
+        initial_stream = "-- no audit events recorded yet; waiting for new events --"
     return _layout(
         "Live events",
         "<h1>Live events</h1>"
         "<p class='muted'>Tails <code>~/.claude/ctx-audit.jsonl</code> "
         "via server-sent events.</p>"
+        "<div class='card'>"
+        f"<strong>Showing last {len(entries)} audit events</strong>; "
+        "new writes append below. "
+        "<span id='stream-status' class='muted'>connecting...</span>"
+        "</div>"
         "<pre id='stream' style='min-height:20rem; max-height:70vh; "
-        "overflow-y:scroll; font-size:0.78rem;'></pre>"
+        "overflow-y:scroll; font-size:0.78rem;'>"
+        f"{html.escape(initial_stream)}"
+        "</pre>"
         "<script>\n"
         "const src = new EventSource('/api/events.stream');\n"
         "const pre = document.getElementById('stream');\n"
-        "src.onmessage = (e) => { pre.textContent += e.data + '\\n'; "
-        "pre.scrollTop = pre.scrollHeight; };\n"
-        "src.onerror = () => { pre.textContent += '-- stream error; "
-        "reconnecting --\\n'; };\n"
+        "const status = document.getElementById('stream-status');\n"
+        "const appendLine = (line) => {\n"
+        "  if (pre.textContent && !pre.textContent.endsWith('\\n')) pre.textContent += '\\n';\n"
+        "  pre.textContent += line + '\\n';\n"
+        "  pre.scrollTop = pre.scrollHeight;\n"
+        "};\n"
+        "pre.scrollTop = pre.scrollHeight;\n"
+        "src.onopen = () => { status.textContent = 'connected; waiting for new events'; };\n"
+        "src.onmessage = (e) => { appendLine(e.data); status.textContent = 'live'; };\n"
+        "src.onerror = () => { status.textContent = 'stream error; reconnecting'; };\n"
         "</script>",
     )
 
