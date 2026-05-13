@@ -39625,6 +39625,7 @@
         "skill:awareness-stage-mapper",
         "skill:azure-ai-translation-text-py",
         "skill:beautiful-prose",
+        "skill:book-to-skill",
         "skill:brand-guidelines",
         "skill:brand-voice",
         "skill:code-documentation-code-explain",
@@ -102958,6 +102959,6 @@
     }
   },
   "total_communities": 52,
-  "generated": "2026-05-05T11:10:21+00:00",
-  "export_id": "ctx-graph-20260505T111202Z-102696-2900834"
+  "generated": "2026-05-12T03:39:49+00:00",
+  "export_id": "ctx-graph-20260512T033949Z-102697-2900910"
 }

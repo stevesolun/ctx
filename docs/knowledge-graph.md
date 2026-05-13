@@ -13,7 +13,7 @@ agents, and MCP servers.
 ## What's in it
 
 Authoritative numbers from the shipped tarball. The curated-core snapshot
-is **13,233 nodes** (1,969 curated skills + 464 agents + 10,787 MCP servers
+is **13,234 nodes** (1,970 curated skills + 464 agents + 10,787 MCP servers
 + 13 harnesses). Harness pages under `entities/harnesses/` are ingested into
 local rebuilds and the separate harness-catalog recommendation path. The
 tarball also carries **89,463 body-backed Skills.sh `skill` nodes**,
@@ -22,19 +22,19 @@ hydrated Skills.sh bodies are shipped as installable `SKILL.md` files under
 `converted/skills-sh-*/`; the **28,612** entries over the configured line
 limit were converted to gated micro-skill orchestrators. Full original bodies
 are used during graph rebuilds for semantic similarity, but
-`SKILL.md.original` backups and transient `.lock` files are omitted from the
-shipped tarball.
+`SKILL.md.original` backups, transient `.lock` files, and `.ctx/` queue state
+are omitted from the shipped tarball.
 
 | | Count |
 |---|---:|
-| Total nodes | **102,696** |
-| Curated core nodes | **13,233** (1,969 skills + 464 agents + 10,787 MCP servers + 13 harnesses) |
+| Total nodes | **102,697** |
+| Curated core nodes | **13,234** (1,970 skills + 464 agents + 10,787 MCP servers + 13 harnesses) |
 | Remote-cataloged Skills.sh skill nodes | **89,463** (`skill`, `status=remote-cataloged`, body-backed) |
-| Total edges | **2,900,834** |
-| Skills.sh incident edges | **2,605,971** |
-| Skills.sh semantic incident edges | **1,500,685** |
+| Total edges | **2,900,910** |
+| Skills.sh incident edges | **2,605,992** |
+| Skills.sh semantic incident edges | **1,500,706** |
 | Communities | **52** (Louvain) |
-| Edge sources (overlap-deduped) | semantic 1,682,825 - tag 891,684 - token 433,074 |
+| Edge sources (overlap-deduped) | semantic 1,682,846 - tag 891,739 - token 433,074 |
 | Cross-type edges (skill <-> agent) | ~65K |
 | Cross-type edges (skill <-> MCP) | ~41K |
 | Cross-type edges (agent <-> MCP) | ~223 |
@@ -170,7 +170,7 @@ raw = json.loads(
 edges_key = "links" if "links" in raw else "edges"
 G = node_link_graph(raw, edges=edges_key)
 
-# 102,696 nodes, 2,900,834 edges
+# 102,697 nodes, 2,900,910 edges
 print(G.number_of_nodes(), G.number_of_edges())
 
 # Find entities related to 'fastapi-pro' by edge weight
@@ -267,8 +267,9 @@ next run rebuilds instead of trusting mixed graph files.
 | 2026-05-02 GitNexus MCP pass | **2,960,215** | Added GitNexus as a cataloged MCP server entity with 26 cross-type edges to its Skills.sh skill pages and related architecture/refactoring agents; semantic edge count unchanged. |
 | 2026-05-04 v0.7.3 artifact refresh | **2,960,215** | Hydrated one recoverable Skills.sh command-injection-testing body, raising hydrated Skills.sh `SKILL.md` files to 89,463; generated micro-skill markdown now defangs high-risk command-injection payloads before packaging. Graph topology unchanged. |
 | 2026-05-04 body-backed Skills.sh prune | **2,900,834** | Removed 1,383 Skills.sh records that had no packaged `SKILL.md` body and no parseable Skills.sh prose body. Remaining Skills.sh catalog entries, graph nodes, entity pages, and converted `SKILL.md` bodies are all **89,463**. |
-| 2026-05-05 artifact hygiene refresh | **2,900,834** | Repacked `graph/wiki-graph.tar.gz` to remove transient `.lock` files from the shipped LLM-wiki. Topology unchanged; current tar members: **598,135**. |
+| 2026-05-05 artifact hygiene refresh | **2,900,834** | Repacked `graph/wiki-graph.tar.gz` to remove transient `.lock` files from the shipped LLM-wiki. Topology unchanged. |
 | 2026-05-10 v1.0.0 release prep | **2,900,834** | Refreshed shipped HTML previews from the current export, validated their export IDs in CI, and removed stale PNG previews. Topology unchanged. |
+| 2026-05-12 book-to-skill + queue hygiene | **2,900,910** | Added `book-to-skill` as a curated skill entity (+1 node, +76 edges), restored the missing converted Skills.sh body for `skills-sh-yaklang-hack-skills-csv-formula-injection`, and repacked `graph/wiki-graph.tar.gz` to omit `.ctx/` queue state. Current tar members: **598,154**. |
 
 The full audit history lives in `CHANGELOG.md`. The current build is
 fully reproducible from the wiki content.

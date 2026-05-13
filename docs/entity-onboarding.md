@@ -14,6 +14,7 @@ After adding any entity, rebuild the graph when you want it to participate in
 recommendations:
 
 ```bash
+python scripts/graph_artifact_guard.py park
 ctx-wiki-graphify
 ctx-scan-repo --repo . --recommend
 ```
@@ -30,12 +31,16 @@ the update is treated like a release step.
    fields, likely benefits, regressions, and security findings. Do not pass
    `--update-existing` until those findings are acceptable.
 3. Run the security/cyber check below.
-4. Rebuild the curated wiki graph with `ctx-wiki-graphify`.
-5. Repack `graph/wiki-graph.tar.gz` through the artifact promotion path:
+4. Park heavyweight graph artifacts locally before rebuilds:
+   `python scripts/graph_artifact_guard.py park`. This keeps background Git
+   integrations from repeatedly LFS-cleaning the full wiki tarball while it is
+   still changing.
+5. Rebuild the curated wiki graph with `ctx-wiki-graphify`.
+6. Repack `graph/wiki-graph.tar.gz` through the artifact promotion path:
    write a staged tarball, validate it, atomically promote it, and keep the
    generated `*.promotion.json` metadata with the previous/current hashes.
    Never commit local review reports or raw caches.
-6. Refresh the Skills.sh catalog overlay when shipping catalog coverage.
+7. Refresh the Skills.sh catalog overlay when shipping catalog coverage.
    This adds remote-cataloged first-class `skill` nodes under the
    `skills-sh-` prefix, skill pages under `entities/skills/`, install
    commands, duplicate hints, and metadata-only quality/security signals:
@@ -46,9 +51,13 @@ the update is treated like a release step.
      --wiki-tar graph/wiki-graph.tar.gz \
      --update-wiki-tar
    ```
-7. Refresh published counts with `python src/update_repo_stats.py`.
-8. Verify the changed entity can be recommended through
+8. Refresh published counts with `python src/update_repo_stats.py`.
+9. Verify the changed entity can be recommended through
    `ctx-scan-repo --repo . --recommend` or `ctx__recommend_bundle`.
+10. Unpark and stage the graph artifacts once the release candidate is final:
+    `python scripts/graph_artifact_guard.py unpark`, then `git add` the graph
+    artifacts intentionally. Run `python scripts/graph_artifact_guard.py prune`
+    after interrupted Git/LFS runs or after release staging.
 
 The durable wiki worker drains `entity-upsert`, `graph-export`,
 `catalog-refresh`, `tar-refresh`, and `artifact-promotion` jobs. Use
@@ -110,6 +119,37 @@ ctx-harness-add --from-json ./text-to-cad-harness.json --update-existing
 `ctx-harness-install --update` is different: it refreshes an installed harness
 checkout under `~/.claude/harnesses/<slug>`. Catalog entity replacement uses
 `ctx-harness-add --update-existing`.
+
+## Removing or Retiring an Entity
+
+Removal has three separate meanings. First decide which one you need.
+
+- **Catalog removal** stops ctx from showing the entity in the wiki, graph, and
+  recommendations. Use the dashboard: `ctx-monitor serve`, open **Manage**,
+  search for the slug and type, then choose **Delete selected**. This deletes
+  the wiki page and queues an `entity-upsert` delete plus `graph-export` job.
+- **Runtime unload** removes a currently loaded entity from the live manifest.
+  Use the dashboard **Loaded** page. MCP unloads call the Claude MCP removal
+  path when available; skill and agent unloads remove the manifest row.
+- **Installed-file removal** is type-specific. Use
+  `ctx-harness-install <slug> --uninstall` for harness checkouts,
+  `ctx-mcp-uninstall <slug>` for installed MCPs, and `ctx-lifecycle archive`
+  then `ctx-lifecycle purge` for stale local skills that should be deleted
+  after the configured grace period.
+
+After deleting a catalog page, drain or rebuild before trusting recommendation
+results:
+
+```bash
+ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1
+ctx-wiki-graphify
+ctx-scan-repo --repo . --recommend
+```
+
+If you need an auditable manual flow without the browser, use the dashboard
+local API only from loopback with the per-process monitor token printed into
+the served page. The API route is `POST /api/entity/delete` with
+`{"slug": "...", "entity_type": "skill|agent|mcp-server|harness"}`.
 
 ## Add a Skill
 

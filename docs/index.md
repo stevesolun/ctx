@@ -5,7 +5,7 @@ hide:
 
 # ctx — Skill, Agent, MCP & Harness Catalog
 
-Watches what you develop, walks a knowledge graph of **91,432 skills, 464
+Watches what you develop, walks a knowledge graph of **91,433 skills, 464
 agents, 10,787 MCP servers, and 13 cataloged harnesses**, and recommends the
 right execution bundle on the fly. The live execution bundle is skills,
 agents, and MCP servers only; custom/API/local model users get a separate
@@ -76,11 +76,11 @@ graph-based discovery:
 
 - A Karpathy 3-layer wiki at `~/.claude/skill-wiki/` is the single source
   of truth.
-- **102,696 entity pages/nodes** for the shipped skill/agent/MCP/harness
+- **102,697 entity pages/nodes** for the shipped skill/agent/MCP/harness
   inventory, including 89,463 body-backed Skills.sh skill pages
   and 13 cataloged harness pages under `entities/harnesses/`.
   Each page tracks tags, status, provenance, and usage where it applies.
-- A **knowledge graph** (102,696 nodes, 2,900,834 edges) built from a
+- A **knowledge graph** (102,697 nodes, 2,900,910 edges) built from a
   13,233-node curated core plus 89,463 body-backed Skills.sh `skill`
   nodes. The graph has 52 Louvain communities and blends semantic cosine,
   tag overlap, and slug-token overlap; 89,463 hydrated Skills.sh bodies are
@@ -117,9 +117,9 @@ ones are flagged. New ones self-ingest.
 
     ---
 
-    102,696 shipped graph nodes: 13,233 curated skill/agent/MCP/harness
+    102,697 shipped graph nodes: 13,234 curated skill/agent/MCP/harness
     nodes plus 89,463 body-backed Skills.sh skill nodes. The graph has
-    2,900,834 weighted edges and 52 Louvain communities.
+    2,900,910 weighted edges and 52 Louvain communities.
     Ships pre-built in `graph/wiki-graph.tar.gz` and powers the
     graph-aware recommendations + the pre-ship `ctx-dedup-check` gate.
 
@@ -189,12 +189,12 @@ ones are flagged. New ones self-ingest.
     ---
 
     **v1.0.4** — MIT, CI-matrixed (Ubuntu + Windows × Python 3.11/3.12),
-    3,747 tests collected. Ships console scripts including `ctx-init`,
+    3,750 tests collected. Ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),
     `ctx-dedup-check` (pre-ship near-duplicate gate), and
     `ctx-tag-backfill` (catalog hygiene), plus a fast runtime graph artifact
-    and the full ~336 MiB wiki tarball with **102,696 nodes / 2,900,834
+    and the full ~334 MiB wiki tarball with **102,697 nodes / 2,900,910
     edges / 52 Louvain communities**.
 
     [:octicons-arrow-right-24: CHANGELOG](https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md) ·

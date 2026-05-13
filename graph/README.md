@@ -4,10 +4,10 @@ This directory ships the pre-built ctx LLM-wiki and knowledge graph.
 
 Current snapshot:
 
-- **102,696 graph nodes**
-- **2,900,834 graph edges**
+- **102,697 graph nodes**
+- **2,900,910 graph edges**
 - **52 Louvain communities**
-- **91,432 skill entity pages**: 1,969 curated/imported skills plus 89,463 body-backed Skills.sh skills
+- **91,433 skill entity pages**: 1,970 curated/imported skills plus 89,463 body-backed Skills.sh skills
 - **464 agent pages**
 - **10,787 MCP server pages**
 - **13 harness pages**
@@ -64,10 +64,10 @@ want local wiki browsing, Obsidian, or the converted skill body tree.
 - `SCHEMA.md`, `index.md`, `log.md`, `catalog.md` - wiki contract and indexes
 - `.obsidian/` - vault metadata for local graph browsing
 
-`SKILL.md.original` backups and transient `.lock` files are not shipped. Local
-micro-skill conversion may keep `.original` files for traceability, but the
-packaged tarball excludes them so users do not ingest raw long bodies after
-conversion.
+`SKILL.md.original` backups, transient `.lock` files, and `.ctx/` queue state
+are not shipped. Local micro-skill conversion may keep `.original` files for
+traceability, but the packaged tarball excludes them so users do not ingest raw
+long bodies after conversion.
 
 ## Extract
 
@@ -109,14 +109,14 @@ For release-count validation, pin the exact snapshot numbers:
 
 ```bash
 python src/validate_graph_artifacts.py --deep \
-  --expected-nodes 102696 \
-  --expected-edges 2900834 \
-  --expected-semantic-edges 1682825 \
+  --expected-nodes 102697 \
+  --expected-edges 2900910 \
+  --expected-semantic-edges 1682846 \
   --expected-harness-nodes 13 \
   --expected-skills-sh-nodes 89463 \
   --expected-skills-sh-catalog-entries 89463 \
   --expected-skills-sh-converted 89463 \
-  --expected-skill-pages 91432 \
+  --expected-skill-pages 91433 \
   --expected-agent-pages 464 \
   --expected-mcp-pages 10787 \
   --expected-harness-pages 13
@@ -129,6 +129,7 @@ tar -tzf graph/wiki-graph.tar.gz | grep 'graphify-out/graph.json'
 tar -tzf graph/wiki-graph.tar.gz | grep 'external-catalogs/skills-sh/catalog.json'
 tar -tzf graph/wiki-graph.tar.gz | grep 'SKILL.md.original' && exit 1 || true
 tar -tzf graph/wiki-graph.tar.gz | grep '\.lock$' && exit 1 || true
+tar -tzf graph/wiki-graph.tar.gz | grep '^\./\.ctx/' && exit 1 || true
 ```
 
 Windows PowerShell equivalent for the exclusion checks:
@@ -136,6 +137,7 @@ Windows PowerShell equivalent for the exclusion checks:
 ```powershell
 tar -tzf graph/wiki-graph.tar.gz | Select-String 'SKILL.md.original'
 tar -tzf graph/wiki-graph.tar.gz | Select-String '\.lock$'
+tar -tzf graph/wiki-graph.tar.gz | Select-String '^\./\.ctx/'
 ```
 
 The PowerShell commands should print nothing.
@@ -145,10 +147,30 @@ The PowerShell commands should print nothing.
 After adding or updating skills, agents, MCP servers, or harnesses:
 
 ```bash
+python scripts/graph_artifact_guard.py park
 ctx-wiki-graphify
 python src/validate_graph_artifacts.py --deep
 python src/update_repo_stats.py --check
 ```
+
+`park` sets Git's local `skip-worktree` bit for the heavyweight generated
+archives: `graph/wiki-graph.tar.gz`, `graph/wiki-graph-runtime.tar.gz`, and
+`graph/skills-sh-catalog.json.gz`. Keep them parked while graph/wiki generation,
+validation, dashboard smoke, and stats checks are still in progress. This
+prevents background Git integrations from repeatedly staging hundreds of
+megabytes through the Git LFS clean filter. When the release candidate is final,
+unpark and stage the artifacts exactly once:
+
+```bash
+python scripts/graph_artifact_guard.py unpark
+git add graph/wiki-graph.tar.gz graph/wiki-graph-runtime.tar.gz graph/skills-sh-catalog.json.gz
+python scripts/graph_artifact_guard.py prune
+```
+
+If a local Git integration gets interrupted while artifacts are dirty,
+`python scripts/graph_artifact_guard.py prune` removes unreachable local Git
+objects and prunable local LFS cache entries. It does not delete tracked graph
+files, rewrite history, or change the remote LFS store.
 
 For a Skills.sh catalog/body refresh, update the existing shipped tarball
 through the release refresh path:
@@ -173,6 +195,7 @@ tar --force-local -czf /path/to/ctx/graph/wiki-graph.tar.gz.staged \
     --exclude='./.embedding-cache' \
     --exclude='./.ingest-checkpoint' \
     --exclude='./.enrich-checkpoint' \
+    --exclude='./.ctx' \
     --exclude='./graphify-out/graph.pickle' \
     --exclude='*.original' \
     --exclude='*.lock' \
@@ -189,7 +212,8 @@ gets a sibling `*.promotion.json` file with current, candidate, and `last_good`
 hashes for review or rollback. The graph, delta, communities, report, and
 export manifest are shipped together and carry the same export ID so validation
 can reject mixed or partially refreshed graph generations. Raw `.original`
-backups and transient `.lock` files must not appear in the shipped tarball.
+backups, transient `.lock` files, and `.ctx/` queue state must not appear in
+the shipped tarball.
 
 ## Implementation Notes
 

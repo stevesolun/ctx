@@ -300,6 +300,10 @@ def validate_graph_artifacts(
                 raise GraphArtifactError(f"archive contains raw backup member: {member.name}")
             if name.endswith(".lock"):
                 raise GraphArtifactError(f"archive contains lock member: {member.name}")
+            if name == ".ctx" or name.startswith(".ctx/"):
+                raise GraphArtifactError(
+                    f"archive contains transient queue state: {member.name}",
+                )
             if name.startswith("entities/skills/") and name.endswith(".md"):
                 skill_pages += 1
             elif name.startswith("entities/agents/") and name.endswith(".md"):
@@ -476,6 +480,10 @@ def _validate_runtime_graph_archive(
             if name.endswith(".lock"):
                 raise GraphArtifactError(
                     f"runtime archive contains lock member: {member.name}",
+                )
+            if name == ".ctx" or name.startswith(".ctx/"):
+                raise GraphArtifactError(
+                    f"runtime archive contains transient queue state: {member.name}",
                 )
             if member.isfile() and name == "graphify-out/graph.json":
                 f = tf.extractfile(member)
