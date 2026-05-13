@@ -123,7 +123,7 @@ class TestGraphStats:
         wiki = tmp_path / "skill-wiki"
         (wiki / "graphify-out").mkdir(parents=True)
         (wiki / "graphify-out" / "graph-report.md").write_text(
-            "> Nodes: 102,696 | Edges: 2,900,834 | Communities: 52\n",
+            "> Nodes: 102,697 | Edges: 2,900,910 | Communities: 52\n",
             encoding="utf-8",
         )
         monkeypatch.setattr(_cm, "_wiki_dir", lambda: wiki)
@@ -134,8 +134,8 @@ class TestGraphStats:
         )
 
         assert _cm._graph_stats() == {
-            "nodes": 102696,
-            "edges": 2900834,
+            "nodes": 102697,
+            "edges": 2900910,
             "available": True,
         }
 

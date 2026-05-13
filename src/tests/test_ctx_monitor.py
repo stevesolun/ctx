@@ -2123,8 +2123,8 @@ def test_render_graph_landing_does_not_cold_load_graph_for_seed_chips(
         raise AssertionError("graph cold-loaded")
 
     monkeypatch.setattr(cm, "_graph_stats", lambda: {
-        "nodes": 102696,
-        "edges": 2900834,
+        "nodes": 102697,
+        "edges": 2900910,
         "available": True,
     })
     monkeypatch.setattr(cm, "_load_dashboard_graph", fake_load_graph)
