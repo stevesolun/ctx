@@ -177,9 +177,13 @@ jobs:
 
               candidates = []
               for release in releases:
-                  if release.get("draft") or release.get("prerelease"):
+                  tag_name = str(release.get("tag_name") or "")
+                  is_graph_cache = tag_name.startswith("graph-artifacts-")
+                  if release.get("draft") or (
+                      release.get("prerelease") and not is_graph_cache
+                  ):
                       continue
-                  if release.get("tag_name") == current_tag:
+                  if tag_name == current_tag:
                       continue
                   for asset in release.get("assets", []):
                       if asset.get("name") != graph_tar.name:
@@ -190,7 +194,7 @@ jobs:
                           continue
                       if digest and digest != f"sha256:{expected_oid}":
                           continue
-                      candidates.append((release.get("tag_name"), asset))
+                      candidates.append((tag_name, asset))
 
               if not candidates:
                   raise SystemExit(

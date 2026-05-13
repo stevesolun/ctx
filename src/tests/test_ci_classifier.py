@@ -170,6 +170,7 @@ def test_graph_artifact_job_uses_release_asset_fallback_for_lfs_budget() -> None
 
     assert "Resolve graph LFS artifacts" in workflow
     assert "Git LFS download failed; trying matching prior release asset." in workflow
+    assert 'tag_name.startswith("graph-artifacts-")' in workflow
     assert "sha256:{expected_oid} size:{expected_size}" in workflow
     assert "Hydrated {path_name} from" in workflow
     assert "graph/wiki-graph-runtime.tar.gz" in workflow
@@ -199,6 +200,7 @@ def test_publish_workflow_validates_and_uploads_graph_assets() -> None:
 
     assert "Resolve release graph LFS artifacts" in workflow
     assert "trying matching prior release asset" in workflow
+    assert 'tag_name.startswith("graph-artifacts-")' in workflow
     assert "sha256:{expected_oid} size:{expected_size}" in workflow
     assert "Validate release graph artifacts" in workflow
     assert "python src/validate_graph_artifacts.py" in workflow
