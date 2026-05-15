@@ -1037,6 +1037,71 @@ def _render_entity_subgraph(slug: str, entity_type: str | None = None) -> str:
     )
 
 
+def _entity_tab_script() -> str:
+    return """
+<script>
+(function () {
+  function showEntityTab(name) {
+    document.querySelectorAll('[data-entity-tab]').forEach(function (button) {
+      var active = button.getAttribute('data-entity-tab') === name;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-entity-tab-panel]').forEach(function (panel) {
+      panel.hidden = panel.getAttribute('data-entity-tab-panel') !== name;
+    });
+  }
+  document.querySelectorAll('[data-entity-tab]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var name = button.getAttribute('data-entity-tab');
+      showEntityTab(name);
+      if (history.replaceState) {
+        history.replaceState(null, '', '#' + name);
+      }
+    });
+  });
+  document.querySelectorAll('[data-open-entity-tab]').forEach(function (link) {
+    link.addEventListener('click', function (event) {
+      event.preventDefault();
+      var name = link.getAttribute('data-open-entity-tab');
+      showEntityTab(name);
+      if (history.replaceState) {
+        history.replaceState(null, '', '#' + name);
+      }
+    });
+  });
+  var initial = (location.hash || '#overview').replace('#', '');
+  if (!document.querySelector('[data-entity-tab="' + initial + '"]')) {
+    initial = 'overview';
+  }
+  showEntityTab(initial);
+})();
+</script>
+"""
+
+
+def _render_entity_tabs(
+    *,
+    overview_html: str,
+    subgraph_html: str,
+    quality_html: str,
+) -> str:
+    return (
+        "<div class='entity-tabs' role='tablist' aria-label='Entity sections'>"
+        "<button type='button' class='entity-tab-button active' role='tab' aria-selected='true' "
+        "data-entity-tab='overview'>Overview</button>"
+        "<button type='button' class='entity-tab-button' role='tab' aria-selected='false' "
+        "data-entity-tab='subgraph'>Subgraph</button>"
+        "<button type='button' class='entity-tab-button' role='tab' aria-selected='false' "
+        "data-entity-tab='quality'>Quality</button>"
+        "</div>"
+        f"<section id='overview' class='entity-tab-panel' data-entity-tab-panel='overview'>{overview_html}</section>"
+        f"<section id='subgraph' class='entity-tab-panel' data-entity-tab-panel='subgraph' hidden>{subgraph_html}</section>"
+        f"<section id='quality' class='entity-tab-panel' data-entity-tab-panel='quality' hidden>{quality_html}</section>"
+        + _entity_tab_script()
+    )
+
+
 def _render_quality_drilldown(
     sidecar: dict | None,
     embedded_quality_markdown: str | None = None,
@@ -4093,10 +4158,236 @@ def _render_graph(focus: str | None = None, focus_type: str | None = None) -> st
     return _layout("Graph", body)
 
 
-def _render_wiki_entity(slug: str, entity_type: str | None = None) -> str:
+def _runtime_graph_center_data(graph: dict) -> dict[str, Any] | None:
+    center = str(graph.get("center") or "")
+    if not center:
+        return None
+    for node in graph.get("nodes", []):
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data", {})
+        if isinstance(data, dict) and str(data.get("id") or "") == center:
+            return data
+    return None
+
+
+def _runtime_graph_metric_row(label: str, value: object) -> str:
+    if value is None or value == "":
+        value_html = "<span class='muted'>unknown</span>"
+    elif isinstance(value, float):
+        value_html = f"<code>{value:.3f}</code>"
+    else:
+        value_html = f"<code>{html.escape(str(value))}</code>"
+    return f"<tr><td class='muted'>{html.escape(label)}</td><td>{value_html}</td></tr>"
+
+
+def _render_runtime_entity_action(
+    slug: str,
+    entity_type: str,
+    *,
+    mutations_enabled: bool,
+) -> str:
+    escaped_slug = html.escape(slug)
+    escaped_type = html.escape(entity_type)
+    if entity_type == "harness":
+        return (
+            "<div class='card'>"
+            "<h2>Install harness</h2>"
+            "<p class='muted'>Harnesses are installed through the harness CLI so ctx can "
+            "collect the model, goal, and verification details before wiring recommendations.</p>"
+            f"<pre><code>ctx-harness-install {escaped_slug} --dry-run\n"
+            f"ctx-harness-install {escaped_slug}</code></pre>"
+            "</div>"
+        )
+
+    disabled = " disabled" if not mutations_enabled else ""
+    disabled_note = (
+        "<p class='muted'>Load/install actions are disabled because this dashboard is not "
+        "bound to loopback.</p>"
+        if not mutations_enabled
+        else ""
+    )
+    return (
+        "<div class='card'>"
+        "<h2>Load or install</h2>"
+        "<p class='muted'>Use this when the backing wiki contains the installable entity. "
+        "If runtime mode only installed graph metadata, install the full wiki first.</p>"
+        f"<button type='button' class='action-btn' data-testid='runtime-entity-load' "
+        f"data-runtime-slug='{escaped_slug}' data-runtime-type='{escaped_type}'{disabled}>"
+        "Load / install from current wiki</button>"
+        f"{disabled_note}"
+        "<p id='runtime-entity-load-result' class='muted'></p>"
+        "</div>"
+    )
+
+
+def _render_runtime_entity_load_script(
+    slug: str,
+    entity_type: str,
+    *,
+    mutations_enabled: bool,
+) -> str:
+    return (
+        "<script>\n"
+        f"const CTX_RUNTIME_ENTITY_MUTATIONS_ENABLED = {json.dumps(mutations_enabled)};\n"
+        f"const CTX_RUNTIME_ENTITY_TOKEN = {json.dumps(_MONITOR_TOKEN if mutations_enabled else '')};\n"
+        f"const CTX_RUNTIME_ENTITY_SLUG = {json.dumps(slug)};\n"
+        f"const CTX_RUNTIME_ENTITY_TYPE = {json.dumps(entity_type)};\n"
+        "document.querySelectorAll('[data-testid=\"runtime-entity-load\"]').forEach(function (button) {\n"
+        "  button.addEventListener('click', async function () {\n"
+        "    const result = document.getElementById('runtime-entity-load-result');\n"
+        "    if (!CTX_RUNTIME_ENTITY_MUTATIONS_ENABLED) {\n"
+        "      if (result) result.textContent = 'mutations disabled on non-loopback bind';\n"
+        "      return;\n"
+        "    }\n"
+        "    button.disabled = true;\n"
+        "    if (result) result.textContent = 'loading...';\n"
+        "    try {\n"
+        "      const response = await fetch('/api/load', {\n"
+        "        method: 'POST',\n"
+        "        headers: {'Content-Type': 'application/json', 'X-CTX-Monitor-Token': CTX_RUNTIME_ENTITY_TOKEN},\n"
+        "        body: JSON.stringify({slug: CTX_RUNTIME_ENTITY_SLUG, entity_type: CTX_RUNTIME_ENTITY_TYPE})\n"
+        "      });\n"
+        "      const payload = await response.json();\n"
+        "      if (result) result.textContent = (payload.ok ? 'loaded: ' : 'not loaded: ') + (payload.msg || response.status);\n"
+        "    } catch (error) {\n"
+        "      if (result) result.textContent = 'load failed: ' + error;\n"
+        "    } finally {\n"
+        "      button.disabled = false;\n"
+        "    }\n"
+        "  });\n"
+        "});\n"
+        "</script>"
+    )
+
+
+def _render_runtime_graph_entity(
+    slug: str,
+    entity_type: str | None = None,
+    *,
+    mutations_enabled: bool | None = None,
+) -> str | None:
+    """Render graph metadata when the fast runtime graph lacks a full wiki page."""
+    normalized_type = _normalize_dashboard_entity_type(entity_type) if entity_type else None
+    if entity_type is not None and normalized_type is None:
+        return None
+    graph = _graph_neighborhood(slug, hops=1, limit=32, entity_type=normalized_type)
+    data = _runtime_graph_center_data(graph)
+    if data is None:
+        return None
+
+    node_id = str(data.get("id") or graph.get("center") or "")
+    resolved_slug = _graph_slug_from_node_id(node_id) or slug
+    resolved_type = _graph_type_from_node_id(
+        node_id,
+        str(data.get("type") or normalized_type or "skill"),
+    )
+    label = str(data.get("label") or resolved_slug)
+    description = str(data.get("description") or "").strip()
+    tags = [str(tag) for tag in data.get("tags", []) if str(tag).strip()][:12]
+    sidecar = _load_sidecar(resolved_slug, entity_type=resolved_type)
+    quality_score = data.get("quality_score")
+    usage_score = data.get("usage_score")
+    degree = data.get("degree")
+    mutations = _MONITOR_MUTATIONS_ENABLED if mutations_enabled is None else mutations_enabled
+
+    tag_html = (
+        "".join(f"<span class='pill'>{html.escape(tag)}</span> " for tag in tags)
+        if tags
+        else "<span class='muted'>no tags in runtime graph</span>"
+    )
+    description_html = (
+        f"<p>{html.escape(description)}</p>"
+        if description
+        else "<p class='muted'>No description is present in the runtime graph metadata.</p>"
+    )
+    quality_summary = (
+        "<div class='card'>"
+        "<strong>Runtime graph entity</strong> "
+        f"<span class='pill entity-type-{html.escape(resolved_type)}'>{html.escape(resolved_type)}</span> "
+        f"<span class='muted'>node <code>{html.escape(node_id)}</code></span>"
+        "<div style='margin-top:0.4rem;'>"
+        "<a href='#subgraph' data-open-entity-tab='subgraph'>graph neighborhood &rarr;</a> &middot; "
+        "<a href='#quality' data-open-entity-tab='quality'>quality drilldown &rarr;</a>"
+        "</div></div>"
+    )
+    overview_html = (
+        "<div class='wiki-entity-grid'>"
+        "<div class='card wiki-body'>"
+        "<h2>Runtime graph entity</h2>"
+        + description_html
+        + "<h3>Tags</h3>"
+        + f"<p>{tag_html}</p>"
+        + "<h3>Full wiki page</h3>"
+        + "<p class='muted'>This entity exists in the installed runtime graph, but its full "
+        "Markdown wiki page is not expanded locally. The graph and recommendation paths still "
+        "work. Install the full wiki when you want the complete body/docs in this dashboard.</p>"
+        + "<pre><code>ctx-init --graph --graph-install-mode full</code></pre>"
+        + "</div>"
+        "<div class='card'><strong>Runtime metadata</strong>"
+        "<table class='frontmatter-table'><tr><th>Field</th><th>Value</th></tr>"
+        + _runtime_graph_metric_row("slug", resolved_slug)
+        + _runtime_graph_metric_row("type", resolved_type)
+        + _runtime_graph_metric_row("node_id", node_id)
+        + _runtime_graph_metric_row("quality_score", quality_score)
+        + _runtime_graph_metric_row("usage_score", usage_score)
+        + _runtime_graph_metric_row("degree", degree)
+        + "</table></div>"
+        "</div>"
+        + _render_runtime_entity_action(
+            resolved_slug,
+            resolved_type,
+            mutations_enabled=mutations,
+        )
+    )
+    quality_html = (
+        _render_quality_drilldown(sidecar)
+        if isinstance(sidecar, dict)
+        else (
+            "<div class='card'>"
+            "<h2>Runtime graph quality</h2>"
+            "<p class='muted'>No full quality sidecar is installed for this entity. "
+            "The runtime graph still exposes the ranking signals available at graph build time.</p>"
+            "<table class='frontmatter-table'><tr><th>Signal</th><th>Value</th></tr>"
+            + _runtime_graph_metric_row("quality_score", quality_score)
+            + _runtime_graph_metric_row("usage_score", usage_score)
+            + _runtime_graph_metric_row("degree", degree)
+            + "</table></div>"
+        )
+    )
+    body = (
+        f"<h1>{html.escape(label)}</h1>"
+        + quality_summary
+        + _render_entity_tabs(
+            overview_html=overview_html,
+            subgraph_html=_render_entity_subgraph(resolved_slug, entity_type=resolved_type),
+            quality_html=quality_html,
+        )
+        + _render_runtime_entity_load_script(
+            resolved_slug,
+            resolved_type,
+            mutations_enabled=mutations,
+        )
+    )
+    return _layout(label, body)
+
+
+def _render_wiki_entity(
+    slug: str,
+    entity_type: str | None = None,
+    *,
+    mutations_enabled: bool | None = None,
+) -> str:
     """Render one wiki entity page (frontmatter + body)."""
     path = _wiki_entity_path(slug, entity_type=entity_type)
     if path is None:
+        runtime_html = _render_runtime_graph_entity(
+            slug,
+            entity_type=entity_type,
+            mutations_enabled=mutations_enabled,
+        )
+        if runtime_html is not None:
+            return runtime_html
         return _layout(
             slug,
             f"<h1>{html.escape(slug)}</h1>"
@@ -4165,61 +4456,14 @@ def _render_wiki_entity(slug: str, entity_type: str | None = None) -> str:
     )
     subgraph_html = _render_entity_subgraph(slug, entity_type=entity_type)
     quality_html = _render_quality_drilldown(sidecar, embedded_quality_markdown)
-    tab_script = """
-<script>
-(function () {
-  function showEntityTab(name) {
-    document.querySelectorAll('[data-entity-tab]').forEach(function (button) {
-      var active = button.getAttribute('data-entity-tab') === name;
-      button.classList.toggle('active', active);
-      button.setAttribute('aria-selected', active ? 'true' : 'false');
-    });
-    document.querySelectorAll('[data-entity-tab-panel]').forEach(function (panel) {
-      panel.hidden = panel.getAttribute('data-entity-tab-panel') !== name;
-    });
-  }
-  document.querySelectorAll('[data-entity-tab]').forEach(function (button) {
-    button.addEventListener('click', function () {
-      var name = button.getAttribute('data-entity-tab');
-      showEntityTab(name);
-      if (history.replaceState) {
-        history.replaceState(null, '', '#' + name);
-      }
-    });
-  });
-  document.querySelectorAll('[data-open-entity-tab]').forEach(function (link) {
-    link.addEventListener('click', function (event) {
-      event.preventDefault();
-      var name = link.getAttribute('data-open-entity-tab');
-      showEntityTab(name);
-      if (history.replaceState) {
-        history.replaceState(null, '', '#' + name);
-      }
-    });
-  });
-  var initial = (location.hash || '#overview').replace('#', '');
-  if (!document.querySelector('[data-entity-tab="' + initial + '"]')) {
-    initial = 'overview';
-  }
-  showEntityTab(initial);
-})();
-</script>
-"""
     body = (
         f"<h1>{html.escape(slug)}</h1>"
         + quality_summary_html
-        + "<div class='entity-tabs' role='tablist' aria-label='Entity sections'>"
-        "<button type='button' class='entity-tab-button active' role='tab' aria-selected='true' "
-        "data-entity-tab='overview'>Overview</button>"
-        "<button type='button' class='entity-tab-button' role='tab' aria-selected='false' "
-        "data-entity-tab='subgraph'>Subgraph</button>"
-        "<button type='button' class='entity-tab-button' role='tab' aria-selected='false' "
-        "data-entity-tab='quality'>Quality</button>"
-        "</div>"
-        f"<section id='overview' class='entity-tab-panel' data-entity-tab-panel='overview'>{overview_html}</section>"
-        f"<section id='subgraph' class='entity-tab-panel' data-entity-tab-panel='subgraph' hidden>{subgraph_html}</section>"
-        f"<section id='quality' class='entity-tab-panel' data-entity-tab-panel='quality' hidden>{quality_html}</section>"
-        + tab_script
+        + _render_entity_tabs(
+            overview_html=overview_html,
+            subgraph_html=subgraph_html,
+            quality_html=quality_html,
+        )
     )
     return _layout(slug, body)
 
@@ -6227,7 +6471,13 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 self._send_html(_render_wiki_index())
             elif path.startswith("/wiki/"):
                 slug = path.split("/wiki/", 1)[1]
-                self._send_html(_render_wiki_entity(slug, qs.get("type")))
+                self._send_html(
+                    _render_wiki_entity(
+                        slug,
+                        qs.get("type"),
+                        mutations_enabled=self._mutations_enabled(),
+                    ),
+                )
             elif path == "/kpi":
                 self._send_html(_render_kpi())
             elif path == "/runtime":

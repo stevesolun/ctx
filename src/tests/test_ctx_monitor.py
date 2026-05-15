@@ -1234,6 +1234,79 @@ def test_render_wiki_entity_missing_slug(fake_claude: Path) -> None:
     assert "No wiki page" in out
 
 
+def test_render_wiki_entity_falls_back_to_runtime_graph_metadata(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cm, "_MONITOR_MUTATIONS_ENABLED", True)
+    monkeypatch.setattr(cm, "_MONITOR_TOKEN", "runtime-token")
+
+    def fake_graph(slug: str, **_kwargs) -> dict:
+        assert slug == "github"
+        return {
+            "center": "mcp-server:github",
+            "nodes": [{
+                "data": {
+                    "id": "mcp-server:github",
+                    "label": "GitHub",
+                    "type": "mcp-server",
+                    "tags": ["git", "issues", "pull-requests"],
+                    "description": "Manage repositories, issues, and pull requests.",
+                    "quality_score": 0.81,
+                    "usage_score": 0.42,
+                    "degree": 27,
+                },
+            }],
+            "edges": [],
+        }
+
+    monkeypatch.setattr(cm, "_graph_neighborhood", fake_graph)
+
+    html_out = cm._render_wiki_entity("github", entity_type="mcp-server")
+
+    assert "Runtime graph entity" in html_out
+    assert "Manage repositories, issues, and pull requests." in html_out
+    assert "git" in html_out
+    assert "0.810" in html_out
+    assert "ctx-init --graph --graph-install-mode full" in html_out
+    assert "data-entity-tab='overview'" in html_out
+    assert "data-entity-tab='subgraph'" in html_out
+    assert "data-entity-tab='quality'" in html_out
+    assert "data-testid='runtime-entity-load'" in html_out
+    assert "/api/load" in html_out
+    assert "X-CTX-Monitor-Token" in html_out
+
+
+def test_render_runtime_harness_entity_shows_install_commands(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_graph(slug: str, **_kwargs) -> dict:
+        assert slug == "mirage"
+        return {
+            "center": "harness:mirage",
+            "nodes": [{
+                "data": {
+                    "id": "harness:mirage",
+                    "label": "Mirage",
+                    "type": "harness",
+                    "tags": ["harness", "sandbox"],
+                    "description": "Virtual filesystem harness for agent tools.",
+                },
+            }],
+            "edges": [],
+        }
+
+    monkeypatch.setattr(cm, "_graph_neighborhood", fake_graph)
+
+    html_out = cm._render_wiki_entity("mirage", entity_type="harness")
+
+    assert "Install harness" in html_out
+    assert "ctx-harness-install mirage --dry-run" in html_out
+    assert "ctx-harness-install mirage" in html_out
+    assert "data-testid='runtime-entity-load'" not in html_out
+
+
 def test_render_graph_uses_builtin_3d_mount(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         cm,

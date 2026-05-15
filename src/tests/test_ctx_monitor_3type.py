@@ -919,6 +919,7 @@ class TestMonitorRoutesPreserveEntityType:
         handler._send_404 = lambda detail: sent.setdefault("404", detail)
         handler._send_500 = lambda exc: sent.setdefault("500", exc)
         handler._api_reads_enabled = lambda: True
+        handler._mutations_enabled = lambda: True
         if html_fn is not None:
             handler._send_html = html_fn
         if json_fn is not None:
@@ -944,9 +945,10 @@ class TestMonitorRoutesPreserveEntityType:
     def test_wiki_route_passes_type_query(self, monkeypatch):
         calls = {}
 
-        def fake_render_wiki_entity(slug, entity_type=None):
+        def fake_render_wiki_entity(slug, entity_type=None, *, mutations_enabled=None):
             calls["slug"] = slug
             calls["entity_type"] = entity_type
+            calls["mutations_enabled"] = mutations_enabled
             return "wiki"
 
         monkeypatch.setattr(_cm, "_render_wiki_entity", fake_render_wiki_entity)
@@ -954,7 +956,11 @@ class TestMonitorRoutesPreserveEntityType:
         sent = self._run_get("/wiki/langgraph?type=harness")
 
         assert sent["html"] == "wiki"
-        assert calls == {"slug": "langgraph", "entity_type": "harness"}
+        assert calls == {
+            "slug": "langgraph",
+            "entity_type": "harness",
+            "mutations_enabled": True,
+        }
 
     def test_graph_api_route_passes_type_query(self, monkeypatch):
         calls = {}
