@@ -7,6 +7,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - No unreleased changes yet.
 
+## [1.0.8] - 2026-05-15
+
+### Fixed
+
+- Render runtime graph-only entities as dashboard wiki fallback pages instead
+  of a dead "No wiki page found" state. Runtime pages now keep the entity
+  tabs, show graph metadata, link to the graph/quality sections, and explain
+  how to install the full wiki with `ctx-init --graph --graph-install-mode full`.
+- Added dashboard load/install actions for runtime skill, agent, and MCP
+  fallback pages while keeping harness installs on the dedicated
+  `ctx-harness-install <slug> --dry-run` flow.
+
 ## [1.0.7] - 2026-05-15
 
 ### Fixed
@@ -1558,6 +1570,7 @@ pass. Full test suite: **1316 passed, 2 skipped**.
 - 5 dead imports removed (`os`, `Mapping`, `timedelta` from
   `ctx_lifecycle`; `Path` from `intake_gate`, `intake_pipeline`).
 
+[1.0.8]: https://github.com/stevesolun/ctx/releases/tag/v1.0.8
 [1.0.7]: https://github.com/stevesolun/ctx/releases/tag/v1.0.7
 [1.0.6]: https://github.com/stevesolun/ctx/releases/tag/v1.0.6
 [1.0.5]: https://github.com/stevesolun/ctx/releases/tag/v1.0.5
