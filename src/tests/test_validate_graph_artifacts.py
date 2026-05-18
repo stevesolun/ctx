@@ -862,3 +862,19 @@ def test_graph_only_workflow_uses_exact_release_counts() -> None:
         "--line-threshold": "180",
         "--max-stage-lines": "40",
     }
+
+
+def test_graph_only_workflow_waits_for_release_asset_upload() -> None:
+    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(
+        encoding="utf-8"
+    ))
+    steps = workflow["jobs"]["graph-check"]["steps"]
+    resolve_step = next(
+        step for step in steps if step.get("name") == "Resolve graph LFS artifacts"
+    )
+    script = resolve_step["run"]
+
+    assert "release_asset_wait_seconds = 300" in script
+    assert "while True:" in script
+    assert "Waiting for matching release asset" in script
+    assert "time.sleep(release_asset_poll_seconds)" in script

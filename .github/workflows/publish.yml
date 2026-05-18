@@ -150,14 +150,19 @@ jobs:
           import os
           from pathlib import Path
           import subprocess
+          import time
           import urllib.request
 
           repo = os.environ["GITHUB_REPOSITORY"]
           current_tag = os.environ.get("TAG_NAME", "")
-          releases = json.loads(subprocess.check_output(
-              ["gh", "api", f"repos/{repo}/releases?per_page=50"],
-              text=True,
-          ))
+          release_asset_wait_seconds = 300
+          release_asset_poll_seconds = 10
+
+          def load_releases() -> list[dict]:
+              return json.loads(subprocess.check_output(
+                  ["gh", "api", f"repos/{repo}/releases?per_page=50"],
+                  text=True,
+              ))
 
           def hydrate_from_release(path_name: str, hydrated_min_size: int) -> None:
               graph_tar = Path(path_name)
@@ -175,32 +180,41 @@ jobs:
                       return
                   raise SystemExit(f"{path_name} is neither hydrated nor an LFS pointer")
 
-              candidates = []
-              for release in releases:
-                  tag_name = str(release.get("tag_name") or "")
-                  is_graph_cache = tag_name.startswith("graph-artifacts-")
-                  if release.get("draft") or (
-                      release.get("prerelease") and not is_graph_cache
-                  ):
-                      continue
-                  if tag_name == current_tag:
-                      continue
-                  for asset in release.get("assets", []):
-                      if asset.get("name") != graph_tar.name:
+              deadline = time.monotonic() + release_asset_wait_seconds
+              while True:
+                  candidates = []
+                  for release in load_releases():
+                      tag_name = str(release.get("tag_name") or "")
+                      is_graph_cache = tag_name.startswith("graph-artifacts-")
+                      if release.get("draft") or (
+                          release.get("prerelease") and not is_graph_cache
+                      ):
                           continue
-                      digest = str(asset.get("digest") or "")
-                      size = int(asset.get("size") or 0)
-                      if size != expected_size:
+                      if tag_name == current_tag:
                           continue
-                      if digest and digest != f"sha256:{expected_oid}":
-                          continue
-                      candidates.append((tag_name, asset))
+                      for asset in release.get("assets", []):
+                          if asset.get("name") != graph_tar.name:
+                              continue
+                          digest = str(asset.get("digest") or "")
+                          size = int(asset.get("size") or 0)
+                          if size != expected_size:
+                              continue
+                          if digest and digest != f"sha256:{expected_oid}":
+                              continue
+                          candidates.append((tag_name, asset))
 
-              if not candidates:
-                  raise SystemExit(
-                      f"No previous release asset matches {path_name} "
+                  if candidates:
+                      break
+                  if time.monotonic() >= deadline:
+                      raise SystemExit(
+                          f"No previous release asset matches {path_name} "
+                          f"sha256:{expected_oid} size:{expected_size}"
+                      )
+                  print(
+                      f"Waiting for matching release asset {graph_tar.name} "
                       f"sha256:{expected_oid} size:{expected_size}"
                   )
+                  time.sleep(release_asset_poll_seconds)
 
               source_tag, asset = candidates[0]
               tmp = graph_tar.with_name(f"{graph_tar.name}.download")
