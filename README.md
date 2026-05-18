@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-3825_collected-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-3831_collected-brightgreen.svg)](#)
 [![Graph](https://img.shields.io/badge/Graph-102%2C720_nodes_/_2.9M_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 [![Repo views](https://hits.sh/github.com/stevesolun/ctx.svg?label=repo%20views)](https://hits.sh/github.com/stevesolun/ctx/)
@@ -92,6 +92,18 @@ ctx-skill-health dashboard # structural health + drift detection
 ctx-toolbox run --event pre-commit          # run a council on the current diff
 ctx-monitor serve          # local dashboard: http://127.0.0.1:8765/
 ```
+
+Before pushing, run the local PR gate:
+
+```bash
+python scripts/ci_preflight.py --profile pr
+```
+
+It uses the same changed-file classifier as GitHub Actions, then runs the
+matching local checks: stats, ruff, mypy, pip check, unit coverage, canaries,
+package build, twine, docs, graph validation, browser, and similarity gates as
+needed. Use `--profile full` before release work to force the source/package
+gates even for docs-only or graph-only changes.
 
 The **`ctx-monitor`** dashboard shows currently loaded skills, agents, MCP servers, installed harness records, and generic-harness validation/escalation state. It provides load/unload buttons where ctx owns the live action, a graph view (`/graph?slug=...`), the LLM-wiki entity browser (`/wiki/<slug>`), a filterable skills grid, a session timeline, audit/runtime log views, and a live SSE event stream. Installed harness records appear in `/loaded`; harness pages appear in `/wiki` and `/graph`. Harness install/update/uninstall actions stay in `ctx-harness-install`.
 

@@ -88,6 +88,7 @@ strix_runs/
 
 # Test coverage
 .coverage
+.ci-preflight-dist/
 htmlcov/
 .pytest_cache/
 .mypy_cache/

@@ -38,6 +38,19 @@ memory that gets smarter every session.
     `ctx-init --model-mode custom --model <provider/model> --goal "<task>"`
     to record the model profile and surface harness recommendations.
 
+!!! tip "Before pushing"
+
+    ```bash
+    python scripts/ci_preflight.py --profile pr
+    ```
+
+    The preflight uses the same changed-file classifier as GitHub Actions and
+    runs the matching local gates before you open a PR: stats, ruff, mypy, pip
+    check, unit coverage, canaries, package build, twine, docs, graph
+    validation, browser, and similarity checks as needed. Use `--profile full`
+    before release work to force the source/package gates even for docs-only or
+    graph-only changes.
+
 ## Why this exists
 
 Claude Code skills, agents, MCP servers, and model harness profiles are
@@ -191,7 +204,7 @@ ones are flagged. New ones self-ingest.
     ---
 
     **v1.0.8** — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-    3,825 tests collected. Ships console scripts including `ctx-init`,
+    3,831 tests collected. Ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),
     `ctx-incremental-attach`, `ctx-incremental-shadow`, `ctx-dedup-check`
