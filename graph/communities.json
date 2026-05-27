@@ -8085,7 +8085,9 @@
         "skill:wordpress-centric-high-seo-optimized-blogwriting-skill",
         "skill:x-article-publisher-skill",
         "skill:zendesk-automation",
-        "skill:zoho-crm-automation"
+        "skill:zoho-crm-automation",
+        "skill:nango-integration-catalog",
+        "mcp-server:nango-docs"
       ]
     },
     "3": {
@@ -103179,11 +103181,12 @@
         "skill:skills-sh-ythx-101-antigravity-bridge-antigravity-bridge",
         "skill:skills-sh-zreadai-zread-skill-zread",
         "skill:skills-sh-zw008-vmware-aiops-vmware-aiops",
-        "skill:skills-sh-zw008-vmware-monitor-vmware-monitor"
+        "skill:skills-sh-zw008-vmware-monitor-vmware-monitor",
+        "mcp-server:nango-mcp"
       ]
     }
   },
   "total_communities": 52,
-  "generated": "20260526T150500Z",
-  "export_id": "ctx-graph-overlay-20260526T150500Z-102925-2913930"
+  "generated": "20260527T144500Z",
+  "export_id": "ctx-graph-overlay-20260527T144500Z-102928-2913960"
 }

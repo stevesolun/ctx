@@ -4,11 +4,11 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
 [![Tests](https://img.shields.io/badge/Tests-3843_collected-brightgreen.svg)](#)
-[![Graph](https://img.shields.io/badge/Graph-102%2C925_nodes_/_2.9M_edges-red.svg)](graph/)
+[![Graph](https://img.shields.io/badge/Graph-102%2C928_nodes_/_2.9M_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 [![Repo views](https://hits.sh/github.com/stevesolun/ctx.svg?label=repo%20views)](https://hits.sh/github.com/stevesolun/ctx/)
 
-ctx watches what you are building, walks a **102,925-node** graph, and
+ctx watches what you are building, walks a **102,928-node** graph, and
 recommends a small, top-scored bundle of skills, agents, and MCP servers for
 the current task. If you use your own local/API model instead of Claude Code,
 ctx has a separate harness setup flow: tell it the model and goal, review the
@@ -16,8 +16,8 @@ recommended harness, then install with dry-run/update/uninstall controls.
 
 Current shipped snapshot:
 
-- **91,463 skill entity pages**, with **89,465** hydrated installable `SKILL.md` bodies.
-- **467 agents**, **10,788 MCP servers**, and **207 harnesses**.
+- **91,464 skill entity pages**, with **89,465** hydrated installable `SKILL.md` bodies.
+- **467 agents**, **10,790 MCP servers**, and **207 harnesses**.
 - **2.9M graph edges** across semantic similarity, tags, slug tokens, source overlap, direct links, quality, usage, type affinity, and graph structure.
 - **28,612 long skill bodies** converted through the micro-skill gate instead of shipping raw long prompts.
 - Entity updates for skills, agents, MCPs, and harnesses print benefits/risks and skip replacement unless you explicitly approve the update.

@@ -4,12 +4,12 @@ This directory ships the pre-built ctx LLM-wiki and knowledge graph.
 
 Current snapshot:
 
-- **102,925 graph nodes**
-- **2,913,930 graph edges**
+- **102,928 graph nodes**
+- **2,913,960 graph edges**
 - **52 Louvain communities**
-- **91,463 skill entity pages**; **89,465** have hydrated installable bodies
+- **91,464 skill entity pages**; **89,465** have hydrated catalog bodies
 - **467 agent pages**
-- **10,788 MCP server pages**
+- **10,790 MCP server pages**
 - **207 harness pages**
 - **89,465 hydrated `SKILL.md` bodies**
 - **28,612 long skill bodies converted through the micro-skill gate**
@@ -111,13 +111,13 @@ For release-count validation, pin the exact snapshot numbers:
 
 ```bash
 python src/validate_graph_artifacts.py --deep \
-  --expected-nodes 102925 \
-  --expected-edges 2913930 \
+  --expected-nodes 102928 \
+  --expected-edges 2913960 \
   --expected-semantic-edges 1683163 \
   --expected-harness-nodes 207 \
-  --expected-skill-pages 91463 \
+  --expected-skill-pages 91464 \
   --expected-agent-pages 467 \
-  --expected-mcp-pages 10788 \
+  --expected-mcp-pages 10790 \
   --expected-harness-pages 207
 ```
 
