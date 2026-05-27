@@ -205,7 +205,7 @@ def test_main_attach_writes_idempotent_overlay_used_by_resolver(tmp_path) -> Non
     assert not loaded_after_change.has_edge("skill:new-python", "skill:python-testing")
 
 
-def test_main_attach_default_min_score_matches_runtime_semantic_floor(tmp_path) -> None:
+def test_main_attach_default_min_score_matches_build_floor(tmp_path) -> None:
     index_dir = tmp_path / "vector-index"
     build_vector_index(
         kind="numpy-flat",
@@ -230,4 +230,5 @@ def test_main_attach_default_min_score_matches_runtime_semantic_floor(tmp_path) 
     ]) == 0
 
     payload = json.loads(overlay.read_text(encoding="utf-8"))
-    assert payload["edges"] == []
+    assert payload["edges"][0]["target"] == "skill:almost-python"
+    assert payload["edges"][0]["semantic_sim"] == pytest.approx(0.76, abs=0.001)

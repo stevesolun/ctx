@@ -206,7 +206,7 @@ def _try_incremental_attach(
             vector_json=None,
             model_id=None,
             top_k=int(cfg.graph_semantic_top_k),
-            min_score=float(cfg.graph_semantic_min_cosine),
+            min_score=float(cfg.graph_semantic_build_floor),
             min_final_weight=_DEFAULT_ATTACH_MIN_FINAL_WEIGHT,
         )
     except Exception as exc:  # noqa: BLE001 - attach is derived, not source of truth.

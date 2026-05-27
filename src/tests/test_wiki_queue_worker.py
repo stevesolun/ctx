@@ -114,7 +114,7 @@ def test_process_next_entity_upsert_runs_incremental_attach_when_index_exists(
             "vector_json": None,
             "model_id": None,
             "top_k": 20,
-            "min_score": 0.8,
+            "min_score": 0.5,
             "min_final_weight": 0.03,
         }
     ]

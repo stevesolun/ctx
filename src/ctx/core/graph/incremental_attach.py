@@ -21,6 +21,7 @@ from ctx.core.graph.vector_index import load_vector_index
 
 _PERCENTILES = (50, 60, 75, 90, 95)
 _DEFAULT_MIN_SEMANTIC_SCORE = 0.80
+_DEFAULT_SEMANTIC_BUILD_FLOOR = 0.50
 _DEFAULT_MIN_FINAL_WEIGHT = 0.03
 _ATTACH_METHOD = "ann_attach_v1"
 
@@ -283,9 +284,9 @@ def _default_min_semantic_score() -> float:
     try:
         from ctx_config import cfg  # noqa: PLC0415
 
-        return float(cfg.graph_semantic_min_cosine)
+        return float(cfg.graph_semantic_build_floor)
     except Exception:  # pragma: no cover - standalone CLI fallback.
-        return _DEFAULT_MIN_SEMANTIC_SCORE
+        return _DEFAULT_SEMANTIC_BUILD_FLOOR
 
 
 def _read_index_meta(index_dir: Path) -> dict[str, Any]:
