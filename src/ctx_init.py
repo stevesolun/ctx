@@ -218,6 +218,14 @@ def _resolve_ctx_src_dir() -> Path:
 _GRAPH_ARCHIVE_NAME = "wiki-graph.tar.gz"
 _GRAPH_RUNTIME_ARCHIVE_NAME = "wiki-graph-runtime.tar.gz"
 _GRAPH_ENTITY_OVERLAY_NAME = "entity-overlays.jsonl"
+_GRAPH_ENTITY_OVERLAY_SCORE_FIELDS = (
+    "weight",
+    "final_weight",
+    "similarity_score",
+    "semantic_sim",
+    "tag_sim",
+    "token_sim",
+)
 _GRAPH_ENTITY_OVERLAY_SHA256 = (
     "cc1a69d3452d2018bec1e049fc4ab1fa8f933adecfdcae4802a815be03f8611c"
 )
@@ -436,7 +444,8 @@ def _validate_graph_entity_overlay(path: Path) -> None:
                 raise ValueError(
                     f"{path} line {lineno} edge {index} must contain source/target"
                 )
-            for field in ("weight", "final_weight", "similarity_score"):
+            numeric_scores: dict[str, float] = {}
+            for field in _GRAPH_ENTITY_OVERLAY_SCORE_FIELDS:
                 value = edge.get(field)
                 if value is None:
                     continue
@@ -444,6 +453,15 @@ def _validate_graph_entity_overlay(path: Path) -> None:
                     raise ValueError(
                         f"{path} line {lineno} edge {index} {field} must be 0..1"
                     )
+                numeric_scores[field] = float(value)
+            if (
+                "weight" in numeric_scores
+                and "final_weight" in numeric_scores
+                and abs(numeric_scores["weight"] - numeric_scores["final_weight"]) > 1e-9
+            ):
+                raise ValueError(
+                    f"{path} line {lineno} edge {index} weight must equal final_weight"
+                )
 
 
 def _release_graph_url(install_mode: str = "runtime") -> str:

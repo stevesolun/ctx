@@ -210,6 +210,13 @@ def _partition_for_incremental(
     removed = prior_ids - current_ids
     overlap = current_ids & prior_ids
 
+    if new:
+        # A new node can displace any existing node's prior top-K even when
+        # no prior row could reference it. Interactive single-entity adds use
+        # the ANN overlay attach path; the semantic graph builder must preserve
+        # parity with a full top-K rebuild.
+        return current_ids, set()
+
     changed: set[str] = set()
     for nid in overlap:
         cached_hash = prior.nodes[nid].get("content_hash", "")
@@ -524,6 +531,9 @@ def _topk_pairs(
     n = vecs.shape[0]
     out: dict[tuple[str, str], float] = {}
 
+    if top_k <= 0 or n <= 1:
+        return {}
+
     # top_k + 1 because argpartition returns the node itself (cosine=1.0)
     # as its own nearest neighbor. We mask self below, but asking for
     # one extra is defensive against ties.
@@ -542,17 +552,16 @@ def _topk_pairs(
         idx_unsorted = np.argpartition(-sims, effective_k - 1, axis=1)[:, :effective_k]
         for i in range(end - start):
             src_id = node_ids[start + i]
-            for j in idx_unsorted[i]:
-                if j == start + i:
-                    continue
-                score = float(sims[i, j])
-                if score < min_cosine:
-                    continue
-                dst_id = node_ids[int(j)]
-                pair = (src_id, dst_id) if src_id < dst_id else (dst_id, src_id)
-                existing = out.get(pair)
-                if existing is None or score > existing:
-                    out[pair] = score
+            _merge_exact_topk_row(
+                out,
+                src_id=src_id,
+                src_index=start + i,
+                node_ids=node_ids,
+                scores=sims[i],
+                candidate_indices=idx_unsorted[i],
+                top_k=top_k,
+                min_cosine=min_cosine,
+            )
         if end == n or (start // chunk_size + 1) % 10 == 0:
             print(
                 "semantic_edges: top-k rows "
@@ -848,6 +857,8 @@ def _topk_pairs_subset(
 
     if not subset_indices:
         return {}
+    if top_k <= 0 or vecs.shape[0] <= 1:
+        return {}
 
     out: dict[tuple[str, str], float] = {}
     effective_k = min(top_k + 1, vecs.shape[0])
@@ -867,18 +878,16 @@ def _topk_pairs_subset(
         idx_unsorted = np.argpartition(-sims, effective_k - 1, axis=1)[:, :effective_k]
         for i, abs_i in enumerate(chunk_indices):
             src_id = node_ids[abs_i]
-            for j in idx_unsorted[i]:
-                j = int(j)
-                if j == abs_i:
-                    continue
-                score = float(sims[i, j])
-                if score < min_cosine:
-                    continue
-                dst_id = node_ids[j]
-                pair = (src_id, dst_id) if src_id < dst_id else (dst_id, src_id)
-                existing = out.get(pair)
-                if existing is None or score > existing:
-                    out[pair] = score
+            _merge_exact_topk_row(
+                out,
+                src_id=src_id,
+                src_index=abs_i,
+                node_ids=node_ids,
+                scores=sims[i],
+                candidate_indices=idx_unsorted[i],
+                top_k=top_k,
+                min_cosine=min_cosine,
+            )
     return out
 
 
@@ -987,6 +996,41 @@ def _merge_neighbor_rows(
             emitted += 1
             if emitted >= top_k:
                 break
+
+
+def _merge_exact_topk_row(
+    out: dict[tuple[str, str], float],
+    *,
+    src_id: str,
+    src_index: int,
+    node_ids: Sequence[str],
+    scores: "np.ndarray",
+    candidate_indices: Sequence[int],
+    top_k: int,
+    min_cosine: float,
+) -> None:
+    if top_k <= 0:
+        return
+    ordered = sorted(
+        (int(index) for index in candidate_indices),
+        key=lambda index: float(scores[index]),
+        reverse=True,
+    )
+    emitted = 0
+    for j in ordered:
+        if j == src_index:
+            continue
+        score = float(scores[j])
+        if score < min_cosine:
+            continue
+        dst_id = node_ids[j]
+        pair = (src_id, dst_id) if src_id < dst_id else (dst_id, src_id)
+        existing = out.get(pair)
+        if existing is None or score > existing:
+            out[pair] = score
+        emitted += 1
+        if emitted >= top_k:
+            break
 
 
 def _reuse_prior_pairs(

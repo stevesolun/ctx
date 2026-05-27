@@ -26,6 +26,7 @@ import re
 import subprocess
 import sys
 import tarfile
+from collections.abc import Mapping
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -571,13 +572,19 @@ def build_replacements(stats: dict, tests: int | None, converted: int | None) ->
     return reps
 
 
-def build_docs_replacements(tests: int | None) -> list[tuple[re.Pattern[str], str]]:
+def build_docs_replacements(
+    stats: Mapping[str, int | None],
+    tests: int | None,
+    converted: int | None,
+) -> list[tuple[re.Pattern[str], str]]:
+    reps = build_replacements(stats, tests, converted)
     if tests is None:
-        return []
-    return [(
+        return reps
+    reps.append((
         re.compile(r"[\d,]+\s+tests collected"),
         f"{tests:,} tests collected",
-    )]
+    ))
+    return reps
 
 
 def patch_readme(check_only: bool = False) -> int:
@@ -595,7 +602,7 @@ def patch_readme(check_only: bool = False) -> int:
             continue
         replacements = (
             build_replacements(stats, tests, converted)
-            if target == README else build_docs_replacements(tests)
+            if target == README else build_docs_replacements(stats, tests, converted)
         )
         original = target.read_text(encoding="utf-8")
         patched = original

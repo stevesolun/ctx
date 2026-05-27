@@ -58,6 +58,14 @@ _SKILL_BUNDLE_REF_MARKERS = (
 _SEMANTIC_SIM_RE = re.compile(
     rb'"semantic_sim"\s*:\s*(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)',
 )
+_EDGE_SCORE_FIELDS = (
+    "weight",
+    "final_weight",
+    "similarity_score",
+    "semantic_sim",
+    "tag_sim",
+    "token_sim",
+)
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 _PREVIEW_HTML_FILES = (
     "sample-top60.html",
@@ -175,7 +183,8 @@ def _validate_root_entity_overlay(path: Path) -> None:
                     f"graph/entity-overlays.jsonl line {lineno} edge {index} "
                     "must contain source/target",
                 )
-            for field in ("weight", "final_weight", "similarity_score"):
+            numeric_scores: dict[str, float] = {}
+            for field in _EDGE_SCORE_FIELDS:
                 value = edge.get(field)
                 if value is not None and (
                     not isinstance(value, int | float) or not 0 <= float(value) <= 1
@@ -184,6 +193,17 @@ def _validate_root_entity_overlay(path: Path) -> None:
                         f"graph/entity-overlays.jsonl line {lineno} edge {index} "
                         f"{field} must be 0..1",
                     )
+                if value is not None:
+                    numeric_scores[field] = float(value)
+            if (
+                "weight" in numeric_scores
+                and "final_weight" in numeric_scores
+                and abs(numeric_scores["weight"] - numeric_scores["final_weight"]) > 1e-9
+            ):
+                raise GraphArtifactError(
+                    f"graph/entity-overlays.jsonl line {lineno} edge {index} "
+                    "weight must equal final_weight",
+                )
         records += 1
     if records == 0:
         raise GraphArtifactError("graph/entity-overlays.jsonl has no overlay records")

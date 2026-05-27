@@ -124,6 +124,16 @@ def merge_node_attrs(existing: Mapping[str, Any], incoming: Mapping[str, Any]) -
     return merged
 
 
+def replace_node_attrs(existing: Mapping[str, Any], incoming: Mapping[str, Any]) -> dict[str, Any]:
+    """Overlay incoming non-empty node attrs onto an existing node."""
+    merged = dict(existing)
+    for key, value in incoming.items():
+        if key == "id" or value in _EMPTY_VALUES:
+            continue
+        merged[key] = value
+    return merged
+
+
 def merge_edge_attrs(existing: Mapping[str, Any], incoming: Mapping[str, Any]) -> dict[str, Any]:
     merged = dict(existing)
     for key, value in incoming.items():
@@ -138,6 +148,15 @@ def merge_edge_attrs(existing: Mapping[str, Any], incoming: Mapping[str, Any]) -
         elif key not in merged or merged.get(key) in _EMPTY_VALUES:
             merged[key] = value
     return merged
+
+
+def replace_edge_attrs(incoming: Mapping[str, Any]) -> dict[str, Any]:
+    """Return only the current non-empty edge attrs from an authoritative overlay."""
+    return {
+        key: value
+        for key, value in incoming.items()
+        if key not in {"source", "target"} and value not in _EMPTY_VALUES
+    }
 
 
 def load_overlay_records(path: Path) -> list[dict[str, Any]]:

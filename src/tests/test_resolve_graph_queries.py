@@ -294,6 +294,54 @@ class TestLoadGraph:
         assert "skill:deleted" in G
         assert G.has_edge("skill:deleted", "skill:A")
 
+    def test_ann_overlay_replaces_existing_edge_scores_for_updated_node(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        source = _build_simple_graph()
+        p = tmp_path / "graph.json"
+        p.write_text(json.dumps(_serialise_graph(source)), encoding="utf-8")
+        (tmp_path / "entity-overlays.jsonl").write_text(
+            json.dumps({
+                "kind": "ann_attach",
+                "attach_key": "ann:v1:model:skill:A:updated",
+                "replace_scope": "ann:v1:model:skill:A",
+                "node_id": "skill:A",
+                "nodes": [
+                    {
+                        "id": "skill:A",
+                        "type": "skill",
+                        "label": "Updated Alpha",
+                        "content_hash": "updated",
+                    },
+                ],
+                "edges": [
+                    {
+                        "source": "skill:A",
+                        "target": "skill:B",
+                        "weight": 0.2,
+                        "final_weight": 0.2,
+                        "semantic_sim": 0.8,
+                        "similarity_score": 0.8,
+                        "method": "ann_attach_v1",
+                    },
+                ],
+            })
+            + "\n",
+            encoding="utf-8",
+        )
+
+        G = resolve_graph.load_graph(p)
+
+        assert G.nodes["skill:A"]["label"] == "Updated Alpha"
+        edge = G.edges["skill:A", "skill:B"]
+        assert edge["weight"] == pytest.approx(0.2)
+        assert edge["final_weight"] == pytest.approx(0.2)
+        assert edge["semantic_sim"] == pytest.approx(0.8)
+        assert edge["similarity_score"] == pytest.approx(0.8)
+        assert edge["method"] == "ann_attach_v1"
+        assert "shared_tags" not in edge
+
     def test_entity_overlay_does_not_lower_existing_edge(self, tmp_path: Path) -> None:
         source = _build_simple_graph()
         p = tmp_path / "graph.json"

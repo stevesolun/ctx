@@ -15,6 +15,7 @@ import yaml  # type: ignore[import-untyped]
 from validate_graph_artifacts import (
     DEFAULT_HARNESSES,
     GraphArtifactError,
+    _validate_root_entity_overlay,
     _safe_tar_name,
     _scan_graph_json,
     validate_graph_artifacts,
@@ -851,6 +852,53 @@ def test_scan_graph_json_handles_pretty_printed_graph() -> None:
     payload = json.dumps(graph, indent=2).encode("utf-8")
 
     assert _scan_graph_json(BytesIO(payload)) == (2, 2, 1, 1, 1, None)
+
+
+@pytest.mark.parametrize("field", ["semantic_sim", "tag_sim", "token_sim"])
+def test_overlay_validation_rejects_out_of_range_similarity_fields(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    (tmp_path / "entity-overlays.jsonl").write_text(
+        json.dumps({
+            "nodes": [{"id": "skill:a"}],
+            "edges": [
+                {
+                    "source": "skill:a",
+                    "target": "skill:b",
+                    "weight": 0.5,
+                    "final_weight": 0.5,
+                    field: 2.0,
+                },
+            ],
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(GraphArtifactError, match=f"{field} must be 0..1"):
+        _validate_root_entity_overlay(tmp_path / "entity-overlays.jsonl")
+
+
+def test_overlay_validation_rejects_weight_final_weight_drift(tmp_path: Path) -> None:
+    (tmp_path / "entity-overlays.jsonl").write_text(
+        json.dumps({
+            "nodes": [{"id": "skill:a"}],
+            "edges": [
+                {
+                    "source": "skill:a",
+                    "target": "skill:b",
+                    "weight": 0.7,
+                    "final_weight": 0.5,
+                },
+            ],
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(GraphArtifactError, match="weight must equal final_weight"):
+        _validate_root_entity_overlay(tmp_path / "entity-overlays.jsonl")
 
 
 def test_scan_graph_json_extracts_top_level_graph_export_id() -> None:

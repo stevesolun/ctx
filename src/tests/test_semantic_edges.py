@@ -362,6 +362,19 @@ class TestTopKPairs:
         # Orthogonal → cosine=0 everywhere → no pairs above 0.5
         assert pairs == {}
 
+    def test_top_k_caps_non_orthogonal_rows(self) -> None:
+        vecs = _l2_normalize(np.array([
+            [1.0, 0.0],
+            [0.99, 0.01],
+            [0.5, 0.5],
+        ], dtype="float32"))
+        pairs = _topk_pairs(vecs, ["a", "b", "c"], top_k=1, min_cosine=0.0)
+        assert pairs == {
+            ("a", "b"): pytest.approx(float(vecs[0] @ vecs[1])),
+            ("b", "c"): pytest.approx(float(vecs[1] @ vecs[2])),
+        }
+        assert ("a", "c") not in pairs
+
     def test_small_chunk_size_gives_same_result(self) -> None:
         vecs = np.array([[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype="float32")
         ids = ["x", "y", "z"]
@@ -413,6 +426,16 @@ class TestTopKPairsSubset:
         ids = ["a", "b"]
         assert _topk_pairs_subset(vecs, ids, [0], top_k=1, min_cosine=0.999)
         assert not _topk_pairs_subset(vecs, ids, [0], top_k=1, min_cosine=1.1)
+
+
+    def test_subset_top_k_caps_non_orthogonal_row(self) -> None:
+        vecs = _l2_normalize(np.array([
+            [1.0, 0.0],
+            [0.99, 0.01],
+            [0.5, 0.5],
+        ], dtype="float32"))
+        pairs = _topk_pairs_subset(vecs, ["a", "b", "c"], [0], top_k=1, min_cosine=0.0)
+        assert pairs == {("a", "b"): pytest.approx(float(vecs[0] @ vecs[1]))}
 
 
 class TestTopKPairsSubsetWithOptionalIndex:
@@ -828,7 +851,7 @@ class TestPartitionForIncremental:
         assert "b" in need
         assert "a" in unchanged
 
-    def test_new_node_does_not_contaminate_unchanged_with_unrelated_neighbors(self) -> None:
+    def test_new_node_recomputes_all_rows_to_preserve_full_topk_parity(self) -> None:
         h_a = _content_hash("text-a")
         h_b = _content_hash("text-b")
         prior = self._prior({
@@ -842,10 +865,8 @@ class TestPartitionForIncremental:
             SemanticNode("new", "text-new"),
         ]
         need, unchanged = _partition_for_incremental(nodes, prior)
-        assert "new" in need
-        # a and b don't have "new" in their prior top_k → not contaminated
-        assert "a" in unchanged
-        assert "b" in unchanged
+        assert need == {"a", "b", "new"}
+        assert unchanged == set()
 
     def test_empty_top_k_list_entry_skipped(self) -> None:
         h_a = _content_hash("ta")

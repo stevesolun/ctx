@@ -75,7 +75,7 @@ from collections import defaultdict, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlsplit
 
 from ctx.core.wiki import wiki_queue
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
@@ -110,6 +110,26 @@ def _host_allows_mutations(host: str) -> bool:
         return ipaddress.ip_address(normalized).is_loopback
     except ValueError:
         return False
+
+
+def _request_host_name(host_header: str) -> str:
+    value = (host_header or "").strip()
+    if not value:
+        return ""
+    if value.startswith("["):
+        end = value.find("]")
+        return value[1:end].rstrip(".").lower() if end != -1 else ""
+    return value.rsplit(":", 1)[0].rstrip(".").lower()
+
+
+def _origin_host_name(origin: str) -> str:
+    try:
+        parsed = urlsplit(origin)
+    except ValueError:
+        return ""
+    if parsed.scheme not in {"http", "https"}:
+        return ""
+    return (parsed.hostname or "").rstrip(".").lower()
 
 
 def _claude_dir() -> Path:
@@ -6362,11 +6382,12 @@ class _MonitorHandler(BaseHTTPRequestHandler):
     # require same-origin POSTs plus a per-process token injected into the
     # served dashboard page.
     def _same_origin(self) -> bool:
+        request_host = _request_host_name(self.headers.get("Host", ""))
+        if not _host_allows_mutations(request_host):
+            return False
         origin = self.headers.get("Origin") or ""
         if origin:
-            host_header = self.headers.get("Host", "")
-            expected = f"http://{host_header}"
-            return origin == expected
+            return _origin_host_name(origin) == request_host
         # No Origin header (curl, direct tool calls) is acceptable only
         # when the mutation token below is also present.
         return True

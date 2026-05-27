@@ -780,6 +780,40 @@ def test_monitor_post_rejects_cross_origin_with_valid_token(
         thread.join(timeout=2)
 
 
+def test_monitor_post_rejects_rebound_host_with_valid_token(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
+        calls.append(slug)
+        return True, f"loaded {entity_type}"
+
+    monkeypatch.setattr(cm, "_perform_load", fake_load)
+    server, thread, port = _serve_monitor(monkeypatch)
+    body = json.dumps({"slug": "python-patterns"}).encode("utf-8")
+    try:
+        status, payload = _post_raw(
+            port,
+            "/api/load",
+            headers={
+                "Host": "evil.example",
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+                "X-CTX-Monitor-Token": "test-token",
+                "Origin": "http://evil.example",
+            },
+            body=body,
+        )
+        assert status == 403
+        assert "cross-origin" in payload["detail"]
+        assert calls == []
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
 @pytest.mark.parametrize(
     ("length", "status", "detail"),
     [

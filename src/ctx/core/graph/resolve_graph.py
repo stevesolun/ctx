@@ -18,7 +18,9 @@ import math
 import os
 import sys
 from collections import defaultdict
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import networkx as nx
 from networkx.readwrite import node_link_graph
@@ -27,6 +29,8 @@ from ctx.core.graph.entity_overlays import (
     active_overlay_records,
     merge_edge_attrs,
     merge_node_attrs,
+    replace_edge_attrs,
+    replace_node_attrs,
 )
 
 logger = logging.getLogger(__name__)
@@ -189,6 +193,7 @@ def _apply_entity_overlays(G: nx.Graph, graph_path: Path) -> nx.Graph:
         records.append(payload)
 
     for payload in active_overlay_records(records):
+        authoritative_nodes = _authoritative_overlay_nodes(payload)
         nodes = payload.get("nodes", [])
         if isinstance(nodes, list):
             for node in nodes:
@@ -199,7 +204,11 @@ def _apply_entity_overlays(G: nx.Graph, graph_path: Path) -> nx.Graph:
                     continue
                 attrs = {key: value for key, value in node.items() if key != "id"}
                 if node_id in G:
-                    attrs = merge_node_attrs(G.nodes[node_id], attrs)
+                    attrs = (
+                        replace_node_attrs(G.nodes[node_id], attrs)
+                        if node_id in authoritative_nodes
+                        else merge_node_attrs(G.nodes[node_id], attrs)
+                    )
                 G.add_node(node_id, **attrs)
                 applied_nodes += 1
 
@@ -219,7 +228,12 @@ def _apply_entity_overlays(G: nx.Graph, graph_path: Path) -> nx.Graph:
                     for key, value in edge.items()
                     if key not in {"source", "target"}
                 }
-                if G.has_edge(source, target):
+                authoritative_edge = source in authoritative_nodes or target in authoritative_nodes
+                if authoritative_edge:
+                    attrs = replace_edge_attrs(edge)
+                    if G.has_edge(source, target):
+                        G.remove_edge(source, target)
+                elif G.has_edge(source, target):
                     attrs = merge_edge_attrs(G.edges[source, target], attrs)
                 G.add_edge(source, target, **attrs)
                 applied_edges += 1
@@ -228,6 +242,33 @@ def _apply_entity_overlays(G: nx.Graph, graph_path: Path) -> nx.Graph:
     G.graph["ctx_entity_overlay_nodes"] = applied_nodes
     G.graph["ctx_entity_overlay_edges"] = applied_edges
     return G
+
+
+def _authoritative_overlay_nodes(payload: Mapping[str, Any]) -> set[str]:
+    """Return node IDs whose overlay rows should replace current ANN scores."""
+    kind = payload.get("kind")
+    attach_key = payload.get("attach_key")
+    replace_scope = payload.get("replace_scope")
+    is_ann_record = (
+        kind == "ann_attach"
+        or (isinstance(attach_key, str) and attach_key.startswith("ann:v1:"))
+        or (isinstance(replace_scope, str) and replace_scope.startswith("ann:v1:"))
+    )
+    if not is_ann_record:
+        return set()
+
+    node_ids: set[str] = set()
+    node_id = payload.get("node_id")
+    if isinstance(node_id, str) and node_id:
+        node_ids.add(node_id)
+    nodes = payload.get("nodes")
+    if isinstance(nodes, list):
+        for node in nodes:
+            if isinstance(node, dict):
+                nested_id = node.get("id")
+                if isinstance(nested_id, str) and nested_id:
+                    node_ids.add(nested_id)
+    return node_ids
 
 
 def load_graph(

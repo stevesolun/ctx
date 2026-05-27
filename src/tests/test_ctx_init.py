@@ -571,6 +571,57 @@ def test_graph_install_copies_local_entity_overlay(
     assert payload["edges"][0]["method"] == "manual_direct_overlay_v1"
 
 
+@pytest.mark.parametrize("field", ["semantic_sim", "tag_sim", "token_sim"])
+def test_graph_overlay_validation_rejects_out_of_range_similarity_fields(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    overlay = tmp_path / "entity-overlays.jsonl"
+    overlay.write_text(
+        json.dumps({
+            "nodes": [{"id": "skill:a"}],
+            "edges": [
+                {
+                    "source": "skill:a",
+                    "target": "skill:b",
+                    "weight": 0.5,
+                    "final_weight": 0.5,
+                    field: 2.0,
+                },
+            ],
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=f"{field} must be 0..1"):
+        ci._validate_graph_entity_overlay(overlay)
+
+
+def test_graph_overlay_validation_rejects_weight_final_weight_drift(
+    tmp_path: Path,
+) -> None:
+    overlay = tmp_path / "entity-overlays.jsonl"
+    overlay.write_text(
+        json.dumps({
+            "nodes": [{"id": "skill:a"}],
+            "edges": [
+                {
+                    "source": "skill:a",
+                    "target": "skill:b",
+                    "weight": 0.7,
+                    "final_weight": 0.5,
+                },
+            ],
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="weight must equal final_weight"):
+        ci._validate_graph_entity_overlay(overlay)
+
+
 def test_runtime_graph_install_extracts_harness_pages_after_required_files(
     tmp_path: Path,
     monkeypatch,
