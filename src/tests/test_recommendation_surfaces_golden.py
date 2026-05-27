@@ -305,6 +305,67 @@ def test_generic_toolbox_can_opt_into_semantic_query_scoring(
     assert calls["use_semantic_query"] is True
 
 
+def test_generic_toolbox_allows_tagless_semantic_query_opt_in(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph_path = tmp_path / "skill-wiki" / "graphify-out" / "graph.json"
+    _write_golden_graph(graph_path)
+    calls: dict[str, Any] = {}
+
+    def fake_recommend_by_tags(
+        graph: Any,
+        tags: list[str],
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        calls["tags"] = tags
+        calls.update(kwargs)
+        return [
+            {
+                "name": "go-helper",
+                "type": "skill",
+                "score": 0.9,
+                "normalized_score": 1.0,
+            }
+        ]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "ctx.core.resolve.recommendations",
+        type(
+            "FakeRecommendModule",
+            (),
+            {
+                "query_to_tags": staticmethod(lambda query: []),
+                "recommend_by_tags": staticmethod(fake_recommend_by_tags),
+            },
+        ),
+    )
+    toolbox = CtxCoreToolbox(
+        wiki_dir=tmp_path / "skill-wiki",
+        graph_path=graph_path,
+    )
+
+    payload = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="semantic",
+                name="ctx__recommend_bundle",
+                arguments={
+                    "query": "go",
+                    "top_k": 3,
+                    "use_semantic_query": True,
+                },
+            )
+        )
+    )
+
+    assert payload["results"][0]["name"] == "go-helper"
+    assert calls["tags"] == []
+    assert calls["query"] == "go"
+    assert calls["use_semantic_query"] is True
+
+
 def test_scan_repo_recommendations_use_shared_graph_bundle(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

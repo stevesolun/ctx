@@ -320,7 +320,8 @@ class CtxCoreToolbox:
         )
 
         tags = _query_to_tags(query)
-        if not tags:
+        use_semantic_query = bool(args.get("use_semantic_query"))
+        if not tags and not use_semantic_query:
             return json.dumps({
                 "error": "query produced no usable tags",
                 "results": [],
@@ -335,7 +336,6 @@ class CtxCoreToolbox:
 
         from ctx.core.resolve.recommendations import recommend_by_tags  # noqa: PLC0415
 
-        use_semantic_query = bool(args.get("use_semantic_query"))
         if use_semantic_query:
             self._refresh_semantic_cache_signature()
         raw = recommend_by_tags(

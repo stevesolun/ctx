@@ -20,7 +20,7 @@ from ctx.core.graph.entity_overlays import upsert_overlay_record
 from ctx.core.graph.vector_index import load_vector_index
 
 _PERCENTILES = (50, 60, 75, 90, 95)
-_DEFAULT_MIN_SEMANTIC_SCORE = 0.75
+_DEFAULT_MIN_SEMANTIC_SCORE = 0.80
 _DEFAULT_MIN_FINAL_WEIGHT = 0.03
 _ATTACH_METHOD = "ann_attach_v1"
 
@@ -218,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     attach.add_argument("--embedding-backend", default="sentence-transformers")
     attach.add_argument("--embedding-model")
     attach.add_argument("--top-k", type=int, default=20)
-    attach.add_argument("--min-score", type=float, default=_DEFAULT_MIN_SEMANTIC_SCORE)
+    attach.add_argument("--min-score", type=float)
     attach.add_argument("--min-final-weight", type=float, default=_DEFAULT_MIN_FINAL_WEIGHT)
     attach.add_argument("--dry-run", action="store_true", help="Print the overlay record without writing")
     attach.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
@@ -246,7 +246,11 @@ def main(argv: list[str] | None = None) -> int:
                 vector_json=args.vector_json,
                 model_id=args.model_id,
                 top_k=args.top_k,
-                min_score=args.min_score,
+                min_score=(
+                    args.min_score
+                    if args.min_score is not None
+                    else _default_min_semantic_score()
+                ),
                 min_final_weight=args.min_final_weight,
                 dry_run=args.dry_run,
                 embedding_backend=args.embedding_backend,
@@ -273,6 +277,15 @@ def _resolve_text_input(text: str | None, text_file: str | None) -> str | None:
         return path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ValueError(f"cannot read --text-file {path}") from exc
+
+
+def _default_min_semantic_score() -> float:
+    try:
+        from ctx_config import cfg  # noqa: PLC0415
+
+        return float(cfg.graph_semantic_min_cosine)
+    except Exception:  # pragma: no cover - standalone CLI fallback.
+        return _DEFAULT_MIN_SEMANTIC_SCORE
 
 
 def _read_index_meta(index_dir: Path) -> dict[str, Any]:

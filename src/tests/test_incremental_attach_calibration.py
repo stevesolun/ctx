@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import networkx as nx
 import numpy as np
 import pytest
@@ -47,7 +49,7 @@ def test_calibrate_attach_defaults_ignores_missing_semantic_scores() -> None:
 
     assert summary.semantic_score_percentiles == {}
     assert summary.final_weight_percentiles[50] == pytest.approx(0.4)
-    assert summary.recommended_min_semantic_score == pytest.approx(0.75)
+    assert summary.recommended_min_semantic_score == pytest.approx(0.80)
     assert summary.recommended_max_edges_per_node == 1
 
 
@@ -201,3 +203,31 @@ def test_main_attach_writes_idempotent_overlay_used_by_resolver(tmp_path) -> Non
     assert overlay.read_text(encoding="utf-8").count("\n") == 2
     assert loaded_after_change.has_edge("skill:new-python", "skill:ruby-testing")
     assert not loaded_after_change.has_edge("skill:new-python", "skill:python-testing")
+
+
+def test_main_attach_default_min_score_matches_runtime_semantic_floor(tmp_path) -> None:
+    index_dir = tmp_path / "vector-index"
+    build_vector_index(
+        kind="numpy-flat",
+        model_id="model-a",
+        node_ids=["skill:almost-python"],
+        content_hashes=["ha"],
+        vectors=np.asarray([[0.76, 0.65]], dtype="float32"),
+    ).save(index_dir)
+    overlay = tmp_path / "entity-overlays.jsonl"
+
+    assert main([
+        "attach",
+        "--index-dir", str(index_dir),
+        "--overlay", str(overlay),
+        "--node-id", "skill:new-python",
+        "--label", "new-python",
+        "--type", "skill",
+        "--text", "new python testing helper",
+        "--model-id", "model-a",
+        "--vector-json", "[1.0, 0.0]",
+        "--top-k", "1",
+    ]) == 0
+
+    payload = json.loads(overlay.read_text(encoding="utf-8"))
+    assert payload["edges"] == []
