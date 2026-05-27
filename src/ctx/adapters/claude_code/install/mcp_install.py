@@ -103,6 +103,7 @@ _BANNED_INTERPRETER_ARGS: dict[str, frozenset[str]] = {
     # npx / uvx / bunx intentionally unrestricted — they ARE the
     # package-launcher pattern MCP servers are expected to use.
 }
+_WINDOWS_EXEC_SUFFIXES = (".exe", ".cmd", ".bat", ".ps1")
 
 _SECRET_KEY_MARKERS: tuple[str, ...] = (
     "token",
@@ -141,7 +142,7 @@ def _rejects_banned_args(tokens: list[str]) -> str | None:
     for the rest."""
     if not tokens:
         return None
-    exe = tokens[0]
+    exe = _normalized_executable(tokens[0])
     banned = _BANNED_INTERPRETER_ARGS.get(exe)
     if banned is None:
         return None
@@ -206,6 +207,14 @@ def _find_inline_secret(obj: object, *, path: str = "") -> str | None:
             if nested is not None:
                 return nested
     return None
+
+
+def _normalized_executable(value: str) -> str:
+    name = Path(value).name.lower()
+    for suffix in _WINDOWS_EXEC_SUFFIXES:
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
 
 
 def _find_inline_secret_arg(tokens: list[str]) -> str | None:
@@ -546,7 +555,8 @@ def install_mcp(
         # (which is under entity-file control); treat it as untrusted.
         # Only known MCP-runtime launchers are allowed — if your
         # server needs a bespoke runtime, add-json is the right path.
-        if tokens[0] not in _ALLOWED_CMD_EXECS:
+        executable = _normalized_executable(tokens[0])
+        if executable not in _ALLOWED_CMD_EXECS:
             return InstallResult(
                 slug=slug, status="invalid-cmd", command=effective_cmd,
                 message=(

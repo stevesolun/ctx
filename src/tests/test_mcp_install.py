@@ -395,6 +395,38 @@ class TestInstallMcp:
             "two words",
         ]
 
+    @pytest.mark.parametrize("cmd", ["npx.cmd -y pkg", "python.exe server.py"])
+    def test_windows_wrapper_executables_are_allowlisted(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+        cmd: str,
+    ) -> None:
+        _write_entity(wiki_dir, "srv", {"status": "cataloged"})
+
+        r = mcp_install.install_mcp("srv", wiki_dir=wiki_dir, command=cmd, auto=True)
+
+        assert r.status == "installed"
+
+    def test_windows_wrapper_still_rejects_code_execution_args(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+    ) -> None:
+        _write_entity(wiki_dir, "srv", {"status": "cataloged"})
+
+        r = mcp_install.install_mcp(
+            "srv",
+            wiki_dir=wiki_dir,
+            command='python.exe -c "print(1)"',
+            auto=True,
+        )
+
+        assert r.status == "invalid-cmd"
+        assert fake_claude["calls"] == []
+
     # Strix vuln-0002 regression: even when the first token is allowlisted,
     # code-execution argument forms must be rejected. A tampered frontmatter
     # install_cmd could otherwise invoke arbitrary interpreter-controlled
