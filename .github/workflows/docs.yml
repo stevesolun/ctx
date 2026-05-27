@@ -17,11 +17,8 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
-# GitHub Pages requires these permissions on the deploy job.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # Allow only one concurrent deploy; cancel in-progress runs on a new push.
 concurrency:
@@ -63,6 +60,10 @@ jobs:
     name: Deploy to GitHub Pages
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -258,6 +258,33 @@ def test_remote_install_requires_pinned_commit_by_default(tmp_path: Path) -> Non
     assert not (tmp_path / "installs" / "text-to-cad").exists()
 
 
+@pytest.mark.parametrize(
+    "repo_url",
+    [
+        "ssh://github.com/earthtojake/text-to-cad",
+        "https://token@example.test/private/repo",
+        "-c.helper=!calc",
+    ],
+)
+def test_remote_install_rejects_unsafe_repo_urls(
+    tmp_path: Path,
+    repo_url: str,
+) -> None:
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=repo_url, commit_sha="a" * 40)
+
+    result = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=tmp_path / "manifests",
+    )
+
+    assert result.status == "install-failed"
+    assert "repo_url" in result.message
+    assert not (tmp_path / "installs" / "text-to-cad").exists()
+
+
 def test_remote_install_fetches_pinned_commit_and_records_manifest(
     tmp_path: Path,
     monkeypatch: Any,
@@ -288,6 +315,7 @@ def test_remote_install_fetches_pinned_commit_and_records_manifest(
 
     assert result.status == "installed"
     assert git_calls[0][:2] == ["clone", "--no-checkout"]
+    assert git_calls[0][2] == "--"
     assert any(
         call[0] == "-C"
         and call[2:6] == ["fetch", "--depth", "1", "origin"]

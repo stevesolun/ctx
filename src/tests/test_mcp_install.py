@@ -451,6 +451,47 @@ class TestInstallMcp:
             f"legitimate launcher {cmd!r} falsely rejected (msg={r.message})"
         )
 
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "npx -y pkg GITHUB_TOKEN=ghp_supersecret123456789012345",
+            "npx -y pkg --api-key sk-supersecret123456789012345",
+            "npx -y pkg --client-secret=plain-secret-value",
+        ],
+    )
+    def test_install_cmd_rejects_inline_secret_arguments(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+        cmd: str,
+    ) -> None:
+        _write_entity(wiki_dir, "srv", {"status": "cataloged"})
+
+        r = mcp_install.install_mcp("srv", wiki_dir=wiki_dir, command=cmd, auto=True)
+
+        assert r.status == "invalid-cmd"
+        assert "inline secret" in r.message
+        assert fake_claude["calls"] == []
+
+    def test_install_cmd_allows_secret_env_reference(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+    ) -> None:
+        _write_entity(wiki_dir, "srv", {"status": "cataloged"})
+
+        r = mcp_install.install_mcp(
+            "srv",
+            wiki_dir=wiki_dir,
+            command="npx -y pkg --api-key $API_KEY",
+            auto=True,
+        )
+
+        assert r.status == "installed"
+        assert fake_claude["calls"]
+
     def test_empty_command_tokens_rejected(
         self, wiki_dir: Path, fake_claude: dict[str, Any], isolated_manifest: Path
     ) -> None:

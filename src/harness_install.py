@@ -252,6 +252,16 @@ def _local_source_from_repo_url(repo_url: str) -> Path | None:
     return candidate if candidate.exists() else None
 
 
+def _validate_remote_repo_url(repo_url: str) -> None:
+    parsed = urlparse(repo_url)
+    if repo_url.startswith("-"):
+        raise ValueError("remote harness repo_url must not start with '-'")
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ValueError("remote harness repo_url must be an https:// URL")
+    if parsed.username or parsed.password:
+        raise ValueError("remote harness repo_url must not include credentials")
+
+
 def _reject_symlink_tree(root: Path) -> None:
     if root.is_symlink():
         raise ValueError(f"refusing symlinked harness source: {root}")
@@ -265,9 +275,11 @@ def _is_full_commit_sha(value: str | None) -> bool:
 
 
 def _run_git(args: list[str], *, timeout: int = 300) -> subprocess.CompletedProcess[str]:
+    env = _command_env()
+    env["GIT_ALLOW_PROTOCOL"] = "https"
     return subprocess.run(
         ["git", *args],
-        env=_command_env(),
+        env=env,
         capture_output=True,
         text=True,
         check=False,
@@ -296,7 +308,7 @@ def _materialize_source(
         if not allow_local_sources:
             raise ValueError(
                 "local harness repo_url requires --allow-local-source; "
-                "cataloged harnesses should normally use https:// repositories"
+            "cataloged harnesses should normally use https:// repositories"
             )
         local_source = local_source.expanduser().resolve()
         if not local_source.is_dir():
@@ -304,6 +316,8 @@ def _materialize_source(
         _reject_symlink_tree(local_source)
         shutil.copytree(local_source, target)
         return {"source_type": "local"}
+
+    _validate_remote_repo_url(record.repo_url)
 
     if record.repo_ref and not _is_full_commit_sha(record.repo_ref):
         raise ValueError(
@@ -314,10 +328,10 @@ def _materialize_source(
         raise ValueError(
             "remote harness repo_url is not pinned to a commit; add commit_sha "
             "to the catalog page or pass --allow-mutable-repo-head explicitly"
-        )
+    )
 
     if record.repo_ref:
-        proc = _run_git(["clone", "--no-checkout", record.repo_url, str(target)])
+        proc = _run_git(["clone", "--no-checkout", "--", record.repo_url, str(target)])
         if proc.returncode != 0:
             stderr = proc.stderr.strip() or proc.stdout.strip()
             raise RuntimeError(f"git clone failed: {stderr}")
@@ -337,7 +351,7 @@ def _materialize_source(
             "resolved_commit": _git_resolved_commit(target) or "",
         }
 
-    proc = _run_git(["clone", "--depth", "1", record.repo_url, str(target)])
+    proc = _run_git(["clone", "--depth", "1", "--", record.repo_url, str(target)])
     if proc.returncode != 0:
         stderr = proc.stderr.strip() or proc.stdout.strip()
         raise RuntimeError(f"git clone failed: {stderr}")

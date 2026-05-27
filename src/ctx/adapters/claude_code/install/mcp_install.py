@@ -208,6 +208,34 @@ def _find_inline_secret(obj: object, *, path: str = "") -> str | None:
     return None
 
 
+def _find_inline_secret_arg(tokens: list[str]) -> str | None:
+    for token in tokens:
+        assignment = _SECRET_ASSIGNMENT_RE.search(token)
+        if assignment and not _placeholder_secret_value(assignment.group(2)):
+            return assignment.group(1)
+        for pattern in _TOKEN_VALUE_PATTERNS:
+            if pattern.search(token):
+                return token
+        if token.startswith("--") and "=" in token:
+            key, value = token.split("=", 1)
+            if _secret_key_like(key) and not _placeholder_secret_value(value):
+                return key
+
+    for index, token in enumerate(tokens[:-1]):
+        if not token.startswith("-"):
+            continue
+        key = token.lstrip("-").replace("-", "_")
+        value = tokens[index + 1]
+        if (
+            _secret_key_like(key)
+            and value
+            and not value.startswith("-")
+            and not _placeholder_secret_value(value)
+        ):
+            return token
+    return None
+
+
 def _redact_output(text: str) -> str:
     if not text:
         return text
@@ -469,6 +497,25 @@ def install_mcp(
                 ),
             )
 
+    command_tokens: list[str] | None = None
+    if effective_cmd:
+        try:
+            command_tokens = _split_install_command(effective_cmd)
+        except ValueError as exc:
+            return InstallResult(
+                slug=slug, status="invalid-cmd", command=effective_cmd,
+                message=f"could not parse --cmd/install_cmd: {exc}",
+            )
+        inline_secret_arg = _find_inline_secret_arg(command_tokens)
+        if inline_secret_arg is not None:
+            return InstallResult(
+                slug=slug, status="invalid-cmd", command=None,
+                message=(
+                    f"--cmd/install_cmd argument {inline_secret_arg!r} looks like "
+                    "an inline secret; pass an environment variable reference instead."
+                ),
+            )
+
     card = render_card(fm, slug, command=effective_cmd)
     print(card)
 
@@ -489,13 +536,7 @@ def install_mcp(
         rc, stdout, stderr = _run_claude_mcp(["add-json", slug, json_config])
     else:
         assert effective_cmd is not None  # narrowed by dry_run branch above
-        try:
-            tokens = _split_install_command(effective_cmd)
-        except ValueError as exc:
-            return InstallResult(
-                slug=slug, status="invalid-cmd", command=effective_cmd,
-                message=f"could not parse --cmd/install_cmd: {exc}",
-            )
+        tokens = command_tokens if command_tokens is not None else _split_install_command(effective_cmd)
         if not tokens:
             return InstallResult(
                 slug=slug, status="invalid-cmd", command=effective_cmd,
