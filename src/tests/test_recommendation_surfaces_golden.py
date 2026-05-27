@@ -303,6 +303,9 @@ def test_generic_toolbox_can_opt_into_semantic_query_scoring(
     assert calls["query"] == "fastapi python"
     assert calls["entity_types"] == ("skill", "agent", "mcp-server")
     assert calls["use_semantic_query"] is True
+    assert calls["semantic_cache_dir"] == (
+        tmp_path / "skill-wiki" / ".embedding-cache" / "graph"
+    )
 
 
 def test_generic_toolbox_allows_tagless_semantic_query_opt_in(
@@ -364,6 +367,9 @@ def test_generic_toolbox_allows_tagless_semantic_query_opt_in(
     assert calls["tags"] == []
     assert calls["query"] == "go"
     assert calls["use_semantic_query"] is True
+    assert calls["semantic_cache_dir"] == (
+        tmp_path / "skill-wiki" / ".embedding-cache" / "graph"
+    )
 
 
 def test_scan_repo_recommendations_use_shared_graph_bundle(

@@ -336,8 +336,10 @@ class CtxCoreToolbox:
 
         from ctx.core.resolve.recommendations import recommend_by_tags  # noqa: PLC0415
 
+        semantic_cache_dir = None
         if use_semantic_query:
             self._refresh_semantic_cache_signature()
+            semantic_cache_dir = _semantic_cache_dir(self._wiki_dir_resolved())
         raw = recommend_by_tags(
             graph,
             tags,
@@ -346,6 +348,7 @@ class CtxCoreToolbox:
             entity_types=("skill", "agent", "mcp-server"),
             min_normalized_score=cfg.recommendation_min_normalized_score,
             use_semantic_query=use_semantic_query,
+            semantic_cache_dir=semantic_cache_dir,
         )
         results = [
             {
@@ -728,6 +731,16 @@ def _wiki_pages_signature(wiki: Path) -> tuple[int, int, int]:
 def _semantic_cache_signature(
     wiki: Path | None,
 ) -> tuple[FileSignature | None, ...] | None:
+    cache_dir = _semantic_cache_dir(wiki)
+    if cache_dir is None:
+        return None
+    return (
+        _file_signature(cache_dir / "embeddings.npz"),
+        _file_signature(cache_dir / "topk-state.json"),
+    )
+
+
+def _semantic_cache_dir(wiki: Path | None) -> Path | None:
     try:
         from ctx_config import cfg  # noqa: PLC0415
 
@@ -740,10 +753,7 @@ def _semantic_cache_signature(
         default_cache = Path("~/.claude/skill-wiki/.embedding-cache/graph").expanduser()
         if wiki is not None and cache_dir == default_cache:
             cache_dir = wiki / ".embedding-cache" / "graph"
-    return (
-        _file_signature(cache_dir / "embeddings.npz"),
-        _file_signature(cache_dir / "topk-state.json"),
-    )
+    return cache_dir
 
 
 def _query_to_tags(query: str) -> list[str]:

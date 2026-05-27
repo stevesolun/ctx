@@ -896,6 +896,32 @@ def test_scan_graph_json_rejects_weight_final_weight_drift() -> None:
         _scan_graph_json(BytesIO(payload))
 
 
+def test_scan_graph_json_rejects_weight_drift_with_nested_score_components() -> None:
+    graph = {
+        "nodes": [{"id": "skill:a", "type": "skill"}],
+        "edges": [
+            {
+                "source": "skill:a",
+                "target": "skill:b",
+                "semantic_sim": 0.8,
+                "tag_sim": 0.0,
+                "token_sim": 0.0,
+                "weight": 0.7,
+                "final_weight": 0.5,
+                "score_components": {
+                    "semantic": 0.8,
+                    "tag": 0.0,
+                    "token": 0.0,
+                },
+            },
+        ],
+    }
+    payload = json.dumps(graph).encode("utf-8")
+
+    with pytest.raises(GraphArtifactError, match="weight must equal final_weight"):
+        _scan_graph_json(BytesIO(payload))
+
+
 @pytest.mark.parametrize("field", ["semantic_sim", "tag_sim", "token_sim"])
 def test_overlay_validation_rejects_out_of_range_similarity_fields(
     tmp_path: Path,

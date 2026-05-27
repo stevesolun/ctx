@@ -62,7 +62,11 @@ _EDGE_SCORE_VALUE_RE = re.compile(
     rb'"(weight|final_weight|similarity_score|semantic_sim|tag_sim|token_sim)"'
     rb'\s*:\s*("[^"]*"|-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)',
 )
-_EDGE_OBJECT_RE = re.compile(rb'\{[^{}]*"source"\s*:[^{}]*"target"\s*:[^{}]*\}')
+_EDGE_SEGMENT_RE = re.compile(
+    rb'"source"\s*:\s*"[^"]+"\s*,\s*"target"\s*:\s*"[^"]+"'
+    rb'(?P<body>.*?)(?=(?:\{\s*"source"\s*:)|(?:\]\s*(?:,|\})))',
+    re.DOTALL,
+)
 _EDGE_SCORE_FIELDS = (
     "weight",
     "final_weight",
@@ -452,7 +456,7 @@ def _validate_graph_edge_score_fields(data: bytes) -> None:
 
 
 def _validate_graph_edge_weight_drift(data: bytes) -> None:
-    for match in _EDGE_OBJECT_RE.finditer(data):
+    for match in _EDGE_SEGMENT_RE.finditer(data):
         edge = match.group(0)
         values: dict[str, float] = {}
         for field_match in _EDGE_SCORE_VALUE_RE.finditer(edge):
