@@ -62,6 +62,13 @@ _EDGE_SCORE_VALUE_RE = re.compile(
     rb'"(weight|final_weight|similarity_score|semantic_sim|tag_sim|token_sim)"'
     rb'\s*:\s*("[^"]*"|-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)',
 )
+_SCORE_COMPONENTS_RE = re.compile(
+    rb'"score_components"\s*:\s*\{(?P<body>[^{}]*)\}',
+    re.DOTALL,
+)
+_SCORE_COMPONENT_VALUE_RE = re.compile(
+    rb'"[^"]+"\s*:\s*("[^"]*"|-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)',
+)
 _EDGE_SEGMENT_RE = re.compile(
     rb'"source"\s*:\s*"[^"]+"\s*,\s*"target"\s*:\s*"[^"]+"'
     rb'(?P<body>.*?)(?=(?:\{\s*"source"\s*:)|(?:\]\s*(?:,|\})))',
@@ -83,6 +90,7 @@ _PREVIEW_HTML_FILES = (
     "viz-python.html",
     "viz-security.html",
 )
+_SCORE_COMPONENT_TOLERANCE = 0.001
 _GRAPH_RUNTIME_REQUIRED_NAMES = {
     "index.md",
     "graphify-out/graph.json",
@@ -213,6 +221,11 @@ def _validate_root_entity_overlay(path: Path) -> None:
                     f"graph/entity-overlays.jsonl line {lineno} edge {index} "
                     "weight must equal final_weight",
                 )
+            _validate_score_component_mapping(
+                edge.get("final_weight"),
+                edge.get("score_components"),
+                context=f"graph/entity-overlays.jsonl line {lineno} edge {index}",
+            )
         records += 1
     if records == 0:
         raise GraphArtifactError("graph/entity-overlays.jsonl has no overlay records")
@@ -469,6 +482,66 @@ def _validate_graph_edge_weight_drift(data: bytes) -> None:
             and abs(values["weight"] - values["final_weight"]) > 1e-9
         ):
             raise GraphArtifactError("graph.json edge weight must equal final_weight")
+        if "final_weight" in values:
+            _validate_score_component_bytes(
+                edge,
+                final_weight=values["final_weight"],
+                context="graph.json edge",
+            )
+
+
+def _validate_score_component_mapping(
+    final_weight: object,
+    components: object,
+    *,
+    context: str,
+) -> None:
+    if components is None:
+        return
+    if not isinstance(final_weight, int | float) or not isinstance(components, dict):
+        raise GraphArtifactError(f"{context} score_components must sum to final_weight")
+    numeric_components: list[float] = []
+    for value in components.values():
+        if not isinstance(value, int | float):
+            raise GraphArtifactError(f"{context} score_components must be numeric")
+        numeric_components.append(float(value))
+    _validate_score_component_sum(
+        float(final_weight),
+        numeric_components,
+        context=context,
+    )
+
+
+def _validate_score_component_bytes(
+    edge: bytes,
+    *,
+    final_weight: float,
+    context: str,
+) -> None:
+    components_match = _SCORE_COMPONENTS_RE.search(edge)
+    if components_match is None:
+        return
+    raw_components = components_match.group("body")
+    component_values: list[float] = []
+    for field_match in _SCORE_COMPONENT_VALUE_RE.finditer(raw_components):
+        try:
+            component_values.append(float(field_match.group(1)))
+        except ValueError as exc:
+            raise GraphArtifactError(f"{context} score_components must be numeric") from exc
+    if not component_values:
+        raise GraphArtifactError(f"{context} score_components must sum to final_weight")
+    _validate_score_component_sum(final_weight, component_values, context=context)
+
+
+def _validate_score_component_sum(
+    final_weight: float,
+    component_values: list[float],
+    *,
+    context: str,
+) -> None:
+    component_total = min(sum(component_values), 1.0)
+    if abs(component_total - final_weight) > _SCORE_COMPONENT_TOLERANCE:
+        raise GraphArtifactError(f"{context} score_components must sum to final_weight")
 
 
 def _catalog_skills(catalog: dict[str, Any]) -> list[dict[str, Any]]:

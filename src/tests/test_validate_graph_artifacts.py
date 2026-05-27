@@ -922,6 +922,31 @@ def test_scan_graph_json_rejects_weight_drift_with_nested_score_components() -> 
         _scan_graph_json(BytesIO(payload))
 
 
+def test_scan_graph_json_rejects_score_component_drift() -> None:
+    graph = {
+        "nodes": [{"id": "skill:a", "type": "skill"}],
+        "edges": [
+            {
+                "source": "skill:a",
+                "target": "skill:b",
+                "semantic_sim": 0.8,
+                "tag_sim": 0.0,
+                "token_sim": 0.0,
+                "weight": 0.8,
+                "final_weight": 0.8,
+                "score_components": {
+                    "semantic": 0.4,
+                    "type_affinity": 0.1,
+                },
+            },
+        ],
+    }
+    payload = json.dumps(graph).encode("utf-8")
+
+    with pytest.raises(GraphArtifactError, match="score_components must sum"):
+        _scan_graph_json(BytesIO(payload))
+
+
 @pytest.mark.parametrize("field", ["semantic_sim", "tag_sim", "token_sim"])
 def test_overlay_validation_rejects_out_of_range_similarity_fields(
     tmp_path: Path,
@@ -966,6 +991,31 @@ def test_overlay_validation_rejects_weight_final_weight_drift(tmp_path: Path) ->
     )
 
     with pytest.raises(GraphArtifactError, match="weight must equal final_weight"):
+        _validate_root_entity_overlay(tmp_path / "entity-overlays.jsonl")
+
+
+def test_overlay_validation_rejects_score_component_drift(tmp_path: Path) -> None:
+    (tmp_path / "entity-overlays.jsonl").write_text(
+        json.dumps({
+            "nodes": [{"id": "skill:a"}],
+            "edges": [
+                {
+                    "source": "skill:a",
+                    "target": "skill:b",
+                    "weight": 0.8,
+                    "final_weight": 0.8,
+                    "score_components": {
+                        "semantic": 0.4,
+                        "type_affinity": 0.1,
+                    },
+                },
+            ],
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(GraphArtifactError, match="score_components must sum"):
         _validate_root_entity_overlay(tmp_path / "entity-overlays.jsonl")
 
 
