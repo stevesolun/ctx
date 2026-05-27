@@ -134,7 +134,12 @@ def test_tarball_stats_uses_report_when_graph_json_is_large(
         ],
     )
 
-    assert urs._read_graph_from_tarball() == {
+    stats = urs._read_graph_from_tarball()
+    assert stats is not None
+    assert {
+        key: stats[key]
+        for key in ("nodes", "edges", "skills", "agents", "mcps", "harnesses", "communities")
+    } == {
         "nodes": 104078,
         "edges": 2881027,
         "skills": 1,
@@ -187,6 +192,55 @@ def test_docs_landing_test_count_is_updated() -> None:
     assert "3,617 tests collected" not in patched
 
 
+def test_knowledge_graph_counts_are_updated() -> None:
+    text = "\n".join([
+        "| Total nodes | **102,925** |",
+        "| Curated core nodes | **13,460** (1,998 skills + 467 agents + 10,788 MCP servers + 207 harnesses) |",
+        "| Body-backed skill nodes | **89,463** hydrated installable skill entries |",
+        "| Total edges | **2,913,930** |",
+        "| Hydrated skill incident edges | **2,605,000** |",
+        "| Hydrated skill semantic incident edges | **1,500,000** |",
+        "| Edge sources (overlap-deduped) | semantic 1,683,163 - tag 897,754 - token 433,245 |",
+        "| Cross-type edges (skill <-> agent) | ~67K |",
+        "| Cross-type edges (skill <-> MCP) | ~41K |",
+        "| Cross-type edges (agent <-> MCP) | ~223 |",
+        "| Harness edges | **6,571** |",
+    ])
+    stats = {
+        "nodes": 102928,
+        "edges": 2913960,
+        "skills": 91464,
+        "agents": 467,
+        "mcps": 10790,
+        "harnesses": 207,
+        "communities": 52,
+        "skills_sh_entries": 89465,
+        "skills_sh_bodies": 89465,
+        "semantic_edges": 1683193,
+        "tag_edges": 897784,
+        "token_edges": 433245,
+        "hydrated_incident_edges": 2605721,
+        "hydrated_semantic_incident_edges": 1500648,
+        "cross_skill_agent_edges": 66799,
+        "cross_skill_mcp_edges": 41521,
+        "cross_agent_mcp_edges": 229,
+        "harness_edges": 6576,
+    }
+    patched = text
+    for pattern, replacement in urs.build_replacements(stats, tests=None, converted=None):
+        patched = pattern.sub(replacement, patched)
+
+    assert "| Total nodes | **102,928** |" in patched
+    assert "| Curated core nodes | **13,463** (1,999 skills + 467 agents + 10,790 MCP servers + 207 harnesses) |" in patched
+    assert "| Body-backed skill nodes | **89,465** hydrated installable skill entries |" in patched
+    assert "| Total edges | **2,913,960** |" in patched
+    assert "semantic 1,683,193 - tag 897,784 - token 433,245" in patched
+    assert "| Cross-type edges (skill <-> agent) | ~66,799 |" in patched
+    assert "| Cross-type edges (skill <-> MCP) | ~41,521 |" in patched
+    assert "| Cross-type edges (agent <-> MCP) | ~229 |" in patched
+    assert "| Harness edges | **6,576** |" in patched
+
+
 def test_harness_aware_readme_prose_is_updated() -> None:
     text = (
         "walks a **1,000 skills, 20 agents, 30 MCP servers, "
@@ -206,6 +260,41 @@ def test_harness_aware_readme_prose_is_updated() -> None:
         patched = pattern.sub(replacement, patched)
 
     assert "**92,815 skills, 464 agents, 10,787 MCP servers, and 13 harnesses**" in patched
+
+
+def test_patch_readme_checks_knowledge_graph_doc(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    readme = tmp_path / "README.md"
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    docs_index = docs / "index.md"
+    docs_knowledge = docs / "knowledge-graph.md"
+    readme.write_text("Graph has 10 nodes and 20 edges\n", encoding="utf-8")
+    docs_index.write_text("3 tests collected\n", encoding="utf-8")
+    docs_knowledge.write_text("| Total nodes | **10** |\n", encoding="utf-8")
+    monkeypatch.setattr(urs, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(urs, "README", readme)
+    monkeypatch.setattr(urs, "DOCS_INDEX", docs_index)
+    monkeypatch.setattr(urs, "DOCS_KNOWLEDGE_GRAPH", docs_knowledge)
+    monkeypatch.setattr(
+        urs,
+        "read_graph_stats",
+        lambda: {
+            "nodes": 11,
+            "edges": 21,
+            "skills": None,
+            "agents": None,
+            "mcps": None,
+            "harnesses": None,
+            "communities": 1,
+        },
+    )
+    monkeypatch.setattr(urs, "read_test_count", lambda: None)
+    monkeypatch.setattr(urs, "read_converted_count", lambda: None)
+
+    assert urs.patch_readme(check_only=True) == 1
 
 
 def test_read_test_count_prefers_project_python(

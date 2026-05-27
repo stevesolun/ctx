@@ -32,6 +32,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 README = REPO_ROOT / "README.md"
 DOCS_INDEX = REPO_ROOT / "docs" / "index.md"
+DOCS_KNOWLEDGE_GRAPH = REPO_ROOT / "docs" / "knowledge-graph.md"
 _MAX_TAR_JSON_BYTES = 512 * 1024 * 1024
 _MAX_TAR_TEXT_BYTES = 2 * 1024 * 1024
 _GRAPH_JSON_MEMBER = "graphify-out/graph.json"
@@ -115,6 +116,63 @@ def _parse_graph_report(text: str) -> dict[str, int]:
         "edges": int(match.group(2).replace(",", "")),
         "communities": int(match.group(3).replace(",", "")),
     }
+
+
+def _read_edge_source_stats(tf: tarfile.TarFile) -> dict[str, int]:
+    matches = [
+        member for member in tf.getmembers() if _safe_tar_name(member.name) == _GRAPH_JSON_MEMBER
+    ]
+    if len(matches) != 1 or not matches[0].isfile():
+        return {}
+    graph_stream = tf.extractfile(matches[0])
+    if graph_stream is None:
+        return {}
+    try:
+        graph = json.load(graph_stream)
+    except json.JSONDecodeError:
+        return {}
+    finally:
+        graph_stream.close()
+    edges = graph.get("edges", []) if isinstance(graph, dict) else []
+    totals = {
+        "semantic_edges": 0,
+        "tag_edges": 0,
+        "token_edges": 0,
+        "hydrated_incident_edges": 0,
+        "hydrated_semantic_incident_edges": 0,
+        "cross_skill_agent_edges": 0,
+        "cross_skill_mcp_edges": 0,
+        "cross_agent_mcp_edges": 0,
+        "harness_edges": 0,
+    }
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        semantic = float(edge.get("semantic_sim") or 0.0) != 0.0
+        if semantic:
+            totals["semantic_edges"] += 1
+        if float(edge.get("tag_sim") or 0.0) != 0.0:
+            totals["tag_edges"] += 1
+        if float(edge.get("token_sim") or 0.0) != 0.0:
+            totals["token_edges"] += 1
+        if "skills-sh-" in source or "skills-sh-" in target:
+            totals["hydrated_incident_edges"] += 1
+            if semantic:
+                totals["hydrated_semantic_incident_edges"] += 1
+        source_type = source.split(":", 1)[0]
+        target_type = target.split(":", 1)[0]
+        edge_types = {source_type, target_type}
+        if edge_types == {"skill", "agent"}:
+            totals["cross_skill_agent_edges"] += 1
+        elif edge_types == {"skill", "mcp-server"}:
+            totals["cross_skill_mcp_edges"] += 1
+        elif edge_types == {"agent", "mcp-server"}:
+            totals["cross_agent_mcp_edges"] += 1
+        if source_type == "harness" or target_type == "harness":
+            totals["harness_edges"] += 1
+    return totals
 
 
 def _read_skills_sh_catalog_stats() -> dict[str, int]:
@@ -235,6 +293,7 @@ def _read_graph_from_tarball() -> dict[str, int | None] | None:
                 for key in ("nodes", "edges", "communities"):
                     if key in parsed:
                         stats[key] = parsed[key]
+                stats.update(_read_edge_source_stats(tf))
 
             if stats["nodes"] is None or stats["edges"] is None:
                 body = _read_json_member(tf, _GRAPH_JSON_MEMBER)
@@ -452,6 +511,16 @@ def build_replacements(
                 f"{stats['mcps']:,} MCP servers, and "
                 f"{stats['harnesses']:,} harnesses**",
             ))
+            reps.append((
+                re.compile(
+                    r"\*\*[\d,]+\s+skill pages,\s+[\d,]+\s+agents,\s+"
+                    r"[\d,]+\s+MCP\s+servers,\s+and\s+[\d,]+\s+"
+                    r"(?:cataloged\s+)?harnesses\*\*"
+                ),
+                f"**{s:,} skill pages, {stats['agents']:,} agents, "
+                f"{stats['mcps']:,} MCP servers, and "
+                f"{stats['harnesses']:,} cataloged harnesses**",
+            ))
         # 3-type pattern: "1,789 skills, 464 agents, and 10,786 MCP servers"
         # Order matters — this regex is more specific than the 2-type one
         # below, so match it first. Handles the MCP-aware tagline that
@@ -497,6 +566,10 @@ def build_replacements(
             re.compile(r"\*\*[\d,]+-node\*\*\s+graph"),
             f"**{n:,}-node** graph",
         ))
+        reps.append((
+            re.compile(r"\*\*[\d,]+\s+graph nodes\*\*"),
+            f"**{n:,} graph nodes**",
+        ))
         # "A pre-built knowledge graph of 2,211 nodes and 642K edges"
         # style phrasing. Caught a stale v0.6.0 README sentence that
         # the older regex only matched on "nodes, edges, communities".
@@ -504,10 +577,22 @@ def build_replacements(
             re.compile(r"([\d,]+)\s+nodes\s+and\s+[\d,.]+[KM]?\s+edges"),
             f"{n:,} nodes and {e_fmt} edges",
         ))
+        reps.append((
+            re.compile(r"\(([\d,]+)\s+nodes,\s+[\d,]+\s+edges\)"),
+            f"({n:,} nodes, {e:,} edges)",
+        ))
+        reps.append((
+            re.compile(r"\*\*[\d,]+\s+nodes\s*/\s*[\d,]+\s+edges\s*/\s*[\d,]+\s+Louvain communities\*\*"),
+            f"**{n:,} nodes / {e:,} edges / {stats['communities']:,} Louvain communities**",
+        ))
         # Graph.json inline Python example: "# 2,211 nodes, 642,468 edges"
         reps.append((
             re.compile(r"#\s*([\d,]+)\s+nodes,\s*([\d,]+)\s+edges"),
             f"# {n:,} nodes, {e:,} edges",
+        ))
+        reps.append((
+            re.compile(r"[\d,]+ weighted edges and [\d,]+ Louvain communities"),
+            f"{e:,} weighted edges and {stats['communities']:,} Louvain communities",
         ))
         # "2,211 nodes, 642K edges, 865 communities"
         reps.append((re.compile(r"([\d,]+)\s+nodes,\s+[\w.]+\s+edges,\s+([\d,]+)\s+communities"),
@@ -526,6 +611,102 @@ def build_replacements(
                 f"**{n:,} entity pages** ({stats['skills']:,} skills + {stats['agents']:,} agents)",
             ))
 
+        bodies_for_core = stats.get("skills_sh_bodies")
+        if (
+            bodies_for_core is not None
+            and stats.get("skills")
+            and stats.get("agents")
+            and stats.get("mcps")
+            and stats.get("harnesses")
+        ):
+            core_nodes = int(n) - int(bodies_for_core)
+            curated_skills = int(stats["skills"] or 0) - int(bodies_for_core)
+            reps.append((
+                re.compile(
+                    r"[\d,]+-node core plus [\d,]+ body-backed skill nodes"
+                ),
+                f"{core_nodes:,}-node core plus {int(bodies_for_core):,} "
+                "body-backed skill nodes",
+            ))
+            reps.append((
+                re.compile(
+                    r"[\d,]+ shipped graph nodes: [\d,]+ curated "
+                    r"skill/agent/MCP/harness\s+nodes plus [\d,]+ "
+                    r"body-backed skill nodes"
+                ),
+                f"{n:,} shipped graph nodes: {core_nodes:,} curated "
+                "skill/agent/MCP/harness nodes plus "
+                f"{int(bodies_for_core):,} body-backed skill nodes",
+            ))
+            reps.append((
+                re.compile(
+                    r"\*\*[\d,]+\*\* \([\d,]+ skills \+ [\d,]+ agents "
+                    r"\+ [\d,]+ MCP servers \+ [\d,]+ harnesses\)"
+                ),
+                f"**{core_nodes:,}** ({curated_skills:,} skills + "
+                f"{stats['agents']:,} agents + {stats['mcps']:,} MCP servers "
+                f"+ {stats['harnesses']:,} harnesses)",
+            ))
+            reps.append((
+                re.compile(r"including [\d,]+ skill pages"),
+                f"including {stats['skills']:,} skill pages",
+            ))
+            reps.append((
+                re.compile(
+                    r"is \*\*[\d,]+ nodes\*\* \([\d,]+ curated skills "
+                    r"\+ [\d,]+ agents \+ [\d,]+ MCP servers\s+\+ "
+                    r"[\d,]+ harnesses\)"
+                ),
+                f"is **{core_nodes:,} nodes** ({curated_skills:,} curated skills "
+                f"+ {stats['agents']:,} agents + {stats['mcps']:,} MCP servers "
+                f"+ {stats['harnesses']:,} harnesses)",
+            ))
+
+        table_values = {
+            "Total nodes": n,
+            "Total edges": e,
+            "Harness edges": stats.get("harness_edges"),
+        }
+        for label, value in table_values.items():
+            if value is not None:
+                reps.append((
+                    re.compile(rf"\| {re.escape(label)} \| \*\*[\d,]+\*\* \|"),
+                    f"| {label} | **{int(value):,}** |",
+                ))
+
+        if stats.get("semantic_edges") and stats.get("tag_edges") and stats.get("token_edges"):
+            reps.append((
+                re.compile(
+                    r"semantic [\d,]+ - tag [\d,]+ - token [\d,]+"
+                ),
+                f"semantic {stats['semantic_edges']:,} - "
+                f"tag {stats['tag_edges']:,} - token {stats['token_edges']:,}",
+            ))
+
+        for label, key in (
+            ("Hydrated skill incident edges", "hydrated_incident_edges"),
+            ("Hydrated skill semantic incident edges", "hydrated_semantic_incident_edges"),
+        ):
+            value = stats.get(key)
+            if value is not None:
+                reps.append((
+                    re.compile(rf"\| {re.escape(label)} \| \*\*?[\d,]+\*?\*? \|"),
+                    f"| {label} | **{int(value):,}** |",
+                ))
+
+        for label, key in (
+            ("Cross-type edges \\(skill <-> agent\\)", "cross_skill_agent_edges"),
+            ("Cross-type edges \\(skill <-> MCP\\)", "cross_skill_mcp_edges"),
+            ("Cross-type edges \\(agent <-> MCP\\)", "cross_agent_mcp_edges"),
+        ):
+            value = stats.get(key)
+            if value is not None:
+                display_label = label.replace("\\", "")
+                reps.append((
+                    re.compile(rf"\| {label} \| ~?[\d,.]+[KM]? \|"),
+                    f"| {display_label} | ~{int(value):,} |",
+                ))
+
     skills_sh_entries = stats.get("skills_sh_entries")
     skills_sh_bodies = stats.get("skills_sh_bodies")
     if skills_sh_entries is not None and skills_sh_bodies is not None:
@@ -540,6 +721,40 @@ def build_replacements(
             ),
             f"**{skill_pages:,} skill entity pages**, with **{bodies:,}** "
             "hydrated installable `SKILL.md` bodies.",
+        ))
+        reps.append((
+            re.compile(
+                r"[\d,]+ skill entity pages under `entities/skills/`, "
+                r"[\d,]+ hydrated"
+            ),
+            f"{skill_pages:,} skill entity pages under `entities/skills/`, "
+            f"{bodies:,} hydrated",
+        ))
+        reps.append((
+            re.compile(r"\*\*[\d,]+ skill pages\*\*; \*\*[\d,]+\*\*"),
+            f"**{skill_pages:,} skill pages**; **{bodies:,}**",
+        ))
+        reps.append((
+            re.compile(
+                r"\*\*[\d,]+\*\*\s+hydrated installable skill entries"
+            ),
+            f"**{bodies:,}** hydrated installable skill entries",
+        ))
+        reps.append((
+            re.compile(
+                r"\| Body-backed skill nodes \| \*\*[\d,]+\*\* "
+                r"hydrated installable skill entries \|"
+            ),
+            f"| Body-backed skill nodes | **{bodies:,}** "
+            "hydrated installable skill entries |",
+        ))
+        reps.append((
+            re.compile(r"\*\*[\d,]+\*\*\s+observed body-backed skill entries"),
+            f"**{bodies:,}** observed body-backed skill entries",
+        ))
+        reps.append((
+            re.compile(r"\*\*[\d,]+\*\*\s+have hydrated catalog bodies"),
+            f"**{bodies:,}** have hydrated catalog bodies",
         ))
         reps.append((
             re.compile(
@@ -603,7 +818,7 @@ def patch_readme(check_only: bool = False) -> int:
         print(f"warning: could not resolve {missing}; those fields will be left untouched", file=sys.stderr)
 
     changes: list[tuple[Path, str, str]] = []
-    for target in (README, DOCS_INDEX):
+    for target in (README, DOCS_INDEX, DOCS_KNOWLEDGE_GRAPH):
         if not target.exists():
             continue
         replacements = (

@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-3872_collected-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-3879_collected-brightgreen.svg)](#)
 [![Graph](https://img.shields.io/badge/Graph-102%2C928_nodes_/_2.9M_edges-red.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 [![Repo views](https://hits.sh/github.com/stevesolun/ctx.svg?label=repo%20views)](https://hits.sh/github.com/stevesolun/ctx/)
@@ -62,7 +62,7 @@ ctx-init --graph --graph-install-mode full
 ```
 
 The full `wiki-graph.tar.gz` includes the shipped skill index,
-91,463 skill entity pages under `entities/skills/`, 89,465 hydrated
+91,464 skill entity pages under `entities/skills/`, 89,465 hydrated
 installable `SKILL.md` files under `converted/`,
 and 207 harness pages under
 `entities/harnesses/`.
