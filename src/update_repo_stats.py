@@ -427,7 +427,11 @@ def format_edges(n: int) -> str:
     return str(n)
 
 
-def build_replacements(stats: dict, tests: int | None, converted: int | None) -> list[tuple[re.Pattern, str]]:
+def build_replacements(
+    stats: Mapping[str, int | None],
+    tests: int | None,
+    converted: int | None,
+) -> list[tuple[re.Pattern, str]]:
     """Return (regex, replacement) pairs for every stat."""
     reps: list[tuple[re.Pattern, str]] = []
 
@@ -522,9 +526,11 @@ def build_replacements(stats: dict, tests: int | None, converted: int | None) ->
                 f"**{n:,} entity pages** ({stats['skills']:,} skills + {stats['agents']:,} agents)",
             ))
 
-    if stats.get("skills_sh_entries") and stats.get("skills_sh_bodies"):
-        entries = int(stats["skills_sh_entries"])
-        bodies = int(stats["skills_sh_bodies"])
+    skills_sh_entries = stats.get("skills_sh_entries")
+    skills_sh_bodies = stats.get("skills_sh_bodies")
+    if skills_sh_entries is not None and skills_sh_bodies is not None:
+        entries = int(skills_sh_entries)
+        bodies = int(skills_sh_bodies)
         skill_pages = int(stats.get("skills") or entries)
         reps.append((
             re.compile(
