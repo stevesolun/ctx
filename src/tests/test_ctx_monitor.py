@@ -2608,6 +2608,67 @@ def test_entity_delete_api_removes_wiki_page_and_queues_graph_refresh(
         server.server_close()
 
 
+def test_entity_delete_unloads_live_entity_before_removing_page(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skill_dir = fake_claude / "skill-wiki" / "entities" / "skills"
+    skill_dir.mkdir(parents=True)
+    entity_path = skill_dir / "python-patterns.md"
+    entity_path.write_text(
+        "---\ntitle: Python Patterns\ntype: skill\n---\n# Python Patterns\n",
+        encoding="utf-8",
+    )
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        cm,
+        "_read_manifest",
+        lambda: {"load": [{"skill": "python-patterns", "entity_type": "skill"}]},
+    )
+
+    def fake_unload(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
+        calls.append((slug, entity_type))
+        return True, "unloaded"
+
+    monkeypatch.setattr(cm, "_perform_unload", fake_unload)
+
+    ok, detail = cm._delete_wiki_entity("python-patterns", "skill")
+
+    assert ok is True
+    assert "deleted skill:python-patterns" in detail
+    assert calls == [("python-patterns", "skill")]
+    assert not entity_path.exists()
+
+
+def test_entity_delete_keeps_page_when_live_unload_fails(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness_dir = fake_claude / "skill-wiki" / "entities" / "harnesses"
+    harness_dir.mkdir(parents=True)
+    entity_path = harness_dir / "local-harness.md"
+    entity_path.write_text(
+        "---\ntitle: Local Harness\ntype: harness\n---\n# Local Harness\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        cm,
+        "_read_manifest",
+        lambda: {"load": [{"skill": "local-harness", "entity_type": "harness"}]},
+    )
+    monkeypatch.setattr(
+        cm,
+        "_perform_unload",
+        lambda slug, entity_type="skill": (False, "use ctx-harness-install"),
+    )
+
+    ok, detail = cm._delete_wiki_entity("local-harness", "harness")
+
+    assert ok is False
+    assert "is loaded" in detail
+    assert entity_path.exists()
+
+
 def test_sidecar_cache_invalidates_on_file_rewrite(fake_claude: Path) -> None:
     cm._SIDECAR_INDEX_CACHE_KEY = None
     cm._SIDECAR_INDEX_CACHE_VALUE = None

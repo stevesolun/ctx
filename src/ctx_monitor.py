@@ -528,6 +528,20 @@ def _upsert_wiki_entity(payload: dict[str, Any]) -> tuple[bool, str]:
     return True, f"saved {entity_type}:{slug} and queued graph refresh"
 
 
+def _entity_live_in_manifest(slug: str, entity_type: str) -> bool:
+    manifest = _read_manifest()
+    for entry in manifest.get("load", []):
+        if not isinstance(entry, dict):
+            continue
+        entry_slug = str(entry.get("skill") or entry.get("slug") or "")
+        entry_type = _normalize_dashboard_entity_type(
+            str(entry.get("entity_type") or entry.get("type") or "skill"),
+        )
+        if entry_slug == slug and entry_type == entity_type:
+            return True
+    return False
+
+
 def _delete_wiki_entity(slug: str, entity_type: str) -> tuple[bool, str]:
     try:
         normalized = _normalize_dashboard_entity_type(entity_type)
@@ -538,6 +552,14 @@ def _delete_wiki_entity(slug: str, entity_type: str) -> tuple[bool, str]:
         path = _wiki_entity_path(slug, entity_type=normalized)
         if path is None:
             return False, f"no wiki entity found for {normalized}:{slug}"
+        if _entity_live_in_manifest(slug, normalized):
+            unloaded, unload_detail = _perform_unload(slug, normalized)
+            if not unloaded:
+                return (
+                    False,
+                    f"{normalized}:{slug} is loaded; unload before delete failed: "
+                    f"{unload_detail}",
+                )
         with file_lock(path):
             path.unlink()
         _queue_entity_refresh(
