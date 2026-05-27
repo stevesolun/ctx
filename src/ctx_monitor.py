@@ -6409,8 +6409,9 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         return self._mutations_enabled()
 
     def _read_authorized(self, qs: dict[str, str]) -> bool:
+        request_host = _request_host_name(self.headers.get("Host", ""))
         if self._mutations_enabled():
-            return True
+            return _host_allows_mutations(request_host)
         token = self.headers.get("X-CTX-Monitor-Token") or qs.get("token", "")
         return bool(_MONITOR_TOKEN) and secrets.compare_digest(token, _MONITOR_TOKEN)
 

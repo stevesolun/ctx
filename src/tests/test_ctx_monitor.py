@@ -127,6 +127,25 @@ def _get_json(port: int, path: str) -> tuple[int, dict]:
         return exc.code, json.loads(exc.read().decode("utf-8"))
 
 
+def _get_raw(
+    port: int,
+    path: str,
+    *,
+    headers: dict[str, str],
+) -> tuple[int, dict]:
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        conn.putrequest("GET", path, skip_host=True)
+        for key, value in headers.items():
+            conn.putheader(key, value)
+        conn.endheaders()
+        response = conn.getresponse()
+        payload = json.loads(response.read().decode("utf-8"))
+        return response.status, payload
+    finally:
+        conn.close()
+
+
 def _post_raw(
     port: int,
     path: str,
@@ -136,7 +155,7 @@ def _post_raw(
 ) -> tuple[int, dict]:
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     try:
-        conn.putrequest("POST", path)
+        conn.putrequest("POST", path, skip_host=True)
         for key, value in headers.items():
             conn.putheader(key, value)
         conn.endheaders()
@@ -808,6 +827,25 @@ def test_monitor_post_rejects_rebound_host_with_valid_token(
         assert status == 403
         assert "cross-origin" in payload["detail"]
         assert calls == []
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_monitor_get_rejects_rebound_host_in_loopback_mode(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        status, payload = _get_raw(
+            port,
+            "/api/status.json",
+            headers={"Host": "evil.example"},
+        )
+        assert status == 403
+        assert "monitor read" in payload["detail"]
     finally:
         server.shutdown()
         server.server_close()
