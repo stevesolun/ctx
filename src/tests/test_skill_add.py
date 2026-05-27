@@ -852,6 +852,67 @@ class TestAddSkill:
         assert installed.read_text(encoding="utf-8") == updated_text
         assert entity.read_text(encoding="utf-8").startswith("---\n")
 
+    def test_short_skill_add_writes_converted_install_mirror(
+        self, tmp_path, monkeypatch
+    ):
+        wiki = self._setup_wiki(tmp_path)
+        skills_dir = tmp_path / "skills"
+        source = tmp_path / "SKILL.md"
+        source_text = self._skill_text(
+            description="Short installable skill with enough prose for intake.",
+            tags=["python", "testing"],
+        )
+        source.write_text(source_text, encoding="utf-8")
+        self._setup_intake_allow()
+        monkeypatch.setattr(_sa, "update_index", MagicMock())
+        monkeypatch.setattr(_sa, "append_log", MagicMock())
+
+        result = add_skill(
+            source_path=source,
+            name="myskill",
+            wiki_path=wiki,
+            skills_dir=skills_dir,
+        )
+
+        mirror = wiki / "converted" / "myskill" / "SKILL.md"
+        assert result["converted"] is False
+        assert mirror.read_text(encoding="utf-8") == source_text
+
+    def test_existing_short_skill_update_refreshes_converted_install_mirror(
+        self, tmp_path, monkeypatch
+    ):
+        wiki = self._setup_wiki(tmp_path)
+        skills_dir = tmp_path / "skills"
+        installed = skills_dir / "myskill" / "SKILL.md"
+        installed.parent.mkdir(parents=True)
+        installed.write_text(self._skill_text(), encoding="utf-8")
+        mirror = wiki / "converted" / "myskill" / "SKILL.md"
+        mirror.parent.mkdir(parents=True)
+        mirror.write_text("old mirror\n", encoding="utf-8")
+        entity = wiki / "entities" / "skills" / "myskill.md"
+        entity.write_text("# existing entity\n", encoding="utf-8")
+        source = tmp_path / "SKILL.md"
+        updated_text = self._skill_text(
+            description="Updated short skill with better guidance.",
+            tags=["python", "api"],
+        )
+        source.write_text(updated_text, encoding="utf-8")
+        self._setup_intake_allow()
+        monkeypatch.setattr(_sa, "update_index", MagicMock())
+        monkeypatch.setattr(_sa, "append_log", MagicMock())
+
+        result = add_skill(
+            source_path=source,
+            name="myskill",
+            wiki_path=wiki,
+            skills_dir=skills_dir,
+            review_existing=True,
+            update_existing=True,
+        )
+
+        assert result["converted"] is False
+        assert mirror.read_text(encoding="utf-8") == updated_text
+
     def test_main_with_skip_existing_skips(self, tmp_path, monkeypatch, capsys):
         """--skip-existing skips already-installed skills."""
         skills_dir = tmp_path / "skills"

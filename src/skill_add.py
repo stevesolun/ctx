@@ -52,6 +52,13 @@ def install_skill(source: Path, skills_dir: Path, name: str) -> Path:
     return dest
 
 
+def mirror_install_body(installed_path: Path, name: str, converted_root: Path) -> Path:
+    """Mirror a short installed SKILL.md into the wiki install source tree."""
+    dest = converted_root / name / "SKILL.md"
+    safe_copy_file(installed_path, dest, dest_root=converted_root)
+    return dest
+
+
 # ── Conversion ────────────────────────────────────────────────────────────────
 
 def maybe_convert(
@@ -368,6 +375,8 @@ def add_skill(
     # 2. Convert if above threshold
     converted_root = wiki_path / "converted"
     converted, pipeline_path = maybe_convert(installed_path, name, converted_root, line_count)
+    if not converted:
+        mirror_install_body(installed_path, name, converted_root)
 
     # 3. Detect related skills and scan sources (before writing new page)
     related = find_related_skills(wiki_path, name, tags)

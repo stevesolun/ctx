@@ -53,6 +53,14 @@ def install_agent(source: Path, agents_dir: Path, name: str) -> Path:
     return dest
 
 
+def mirror_agent_body(installed_path: Path, wiki_path: Path, name: str) -> Path:
+    """Mirror the installed agent body into the wiki install source tree."""
+    mirror_root = wiki_path / "converted-agents"
+    dest = mirror_root / f"{name}.md"
+    safe_copy_file(installed_path, dest, dest_root=mirror_root)
+    return dest
+
+
 def write_entity_page(wiki_path: Path, name: str, content: str) -> bool:
     """Write agent entity page. Returns True if newly created."""
     page = wiki_path / "entities" / "agents" / f"{name}.md"
@@ -147,6 +155,7 @@ def add_agent(
 
     # 1. Install into agents-dir.
     installed_path = install_agent(source_path, agents_dir, name)
+    mirror_agent_body(installed_path, wiki_path, name)
 
     # 2. Record embedding. Non-fatal on failure — install already
     # succeeded and a missing vector only weakens the next check.

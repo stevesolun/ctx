@@ -138,6 +138,56 @@ def test_existing_agent_update_existing_applies_change(
     )
 
 
+def test_new_agent_add_writes_converted_agent_mirror(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    wiki, agents_dir, source = _setup_paths(tmp_path)
+    source_text = _agent_text(description="Installable mirrored agent.")
+    source.write_text(source_text, encoding="utf-8")
+    _patch_side_effects(monkeypatch)
+
+    result = agent_add.add_agent(
+        source_path=source,
+        name="reviewer-agent",
+        wiki_path=wiki,
+        agents_dir=agents_dir,
+    )
+
+    mirror = wiki / "converted-agents" / "reviewer-agent.md"
+    assert result["is_new_page"] is True
+    assert mirror.read_text(encoding="utf-8") == source_text
+
+
+def test_existing_agent_update_refreshes_converted_agent_mirror(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    wiki, agents_dir, source = _setup_paths(tmp_path)
+    installed = agents_dir / "reviewer-agent.md"
+    installed.write_text(_agent_text(), encoding="utf-8")
+    mirror = wiki / "converted-agents" / "reviewer-agent.md"
+    mirror.parent.mkdir(parents=True)
+    mirror.write_text("old mirror\n", encoding="utf-8")
+    entity = wiki / "entities" / "agents" / "reviewer-agent.md"
+    entity.write_text("# existing entity\n", encoding="utf-8")
+    updated_text = _agent_text(description="Updated mirrored agent.")
+    source.write_text(updated_text, encoding="utf-8")
+    _patch_side_effects(monkeypatch)
+
+    result = agent_add.add_agent(
+        source_path=source,
+        name="reviewer-agent",
+        wiki_path=wiki,
+        agents_dir=agents_dir,
+        review_existing=True,
+        update_existing=True,
+    )
+
+    assert result["is_new_page"] is False
+    assert mirror.read_text(encoding="utf-8") == updated_text
+
+
 def test_main_existing_agent_prints_update_review(
     tmp_path: Path,
     monkeypatch: Any,
