@@ -930,7 +930,7 @@ def test_graph_only_workflow_uses_exact_release_counts() -> None:
         "--min-semantic-edges": "1000000",
         "--expected-nodes": "102928",
         "--expected-edges": "2913960",
-        "--expected-semantic-edges": "1683163",
+        "--expected-semantic-edges": "1683193",
         "--expected-harness-nodes": "207",
         "--expected-skills-sh-nodes": "89471",
         "--expected-skills-sh-catalog-entries": "89465",

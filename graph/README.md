@@ -113,7 +113,7 @@ For release-count validation, pin the exact snapshot numbers:
 python src/validate_graph_artifacts.py --deep \
   --expected-nodes 102928 \
   --expected-edges 2913960 \
-  --expected-semantic-edges 1683163 \
+  --expected-semantic-edges 1683193 \
   --expected-harness-nodes 207 \
   --expected-skill-pages 91464 \
   --expected-agent-pages 467 \

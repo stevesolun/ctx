@@ -15,6 +15,7 @@ from typing import Any, Iterable
 import networkx as nx
 import numpy as np
 
+from ctx.core.graph.edge_scoring import type_affinity_score
 from ctx.core.graph.entity_overlays import upsert_overlay_record
 from ctx.core.graph.vector_index import load_vector_index
 
@@ -177,6 +178,7 @@ def attach_entity(
         model_id=resolved_model_id,
         created_at=now,
         candidates_considered=len(neighbors),
+        min_final_weight=min_final_weight,
         neighbors=[
             {
                 "node_id": neighbor.node_id,
@@ -184,7 +186,6 @@ def attach_entity(
                 "rank": rank,
             }
             for rank, neighbor in enumerate(neighbors, 1)
-            if float(neighbor.score) >= min_final_weight
         ],
     )
     status = "dry-run" if dry_run else upsert_overlay_record(overlay_path, record)
@@ -340,25 +341,43 @@ def _build_attach_record(
     model_id: str,
     created_at: str,
     candidates_considered: int,
+    min_final_weight: float,
     neighbors: list[dict[str, Any]],
 ) -> dict[str, Any]:
     attach_key = f"ann:v1:{model_id}:{node_id}:{content_hash}"
     edges: list[dict[str, Any]] = []
     for neighbor in neighbors:
-        score = float(neighbor["score"])
+        semantic = float(neighbor["score"])
+        target_type = _node_type_from_id(str(neighbor["node_id"]))
+        type_affinity = type_affinity_score(entity_type, target_type)
+        final, components = _blend_ann_score(
+            semantic=semantic,
+            type_affinity=type_affinity,
+        )
+        if final < min_final_weight:
+            continue
         edges.append(
             {
                 "source": node_id,
                 "target": neighbor["node_id"],
-                "weight": score,
-                "final_weight": score,
-                "semantic_sim": score,
-                "similarity_score": score,
+                "weight": final,
+                "final_weight": final,
+                "semantic_sim": semantic,
+                "similarity_score": semantic,
+                "type_affinity": type_affinity,
+                "score_components": components,
                 "method": _ATTACH_METHOD,
                 "provenance": _ATTACH_METHOD,
                 "rank": int(neighbor["rank"]),
                 "candidates_considered": candidates_considered,
-                "edge_reasons": ["semantic-ann"],
+                "edge_reasons": [
+                    reason
+                    for reason, enabled in (
+                        ("semantic-ann", semantic > 0.0),
+                        ("type-affinity", type_affinity > 0.0),
+                    )
+                    if enabled
+                ],
                 "created_at": created_at,
             }
         )
@@ -396,6 +415,33 @@ def _content_hash(text: str) -> str:
 
 def _slug_label(node_id: str) -> str:
     return node_id.split(":", 1)[-1]
+
+
+def _node_type_from_id(node_id: str) -> str:
+    return node_id.split(":", 1)[0] if ":" in node_id else ""
+
+
+def _blend_ann_score(
+    *,
+    semantic: float,
+    type_affinity: float,
+) -> tuple[float, dict[str, float]]:
+    try:
+        from ctx_config import cfg  # noqa: PLC0415
+
+        semantic_weight = float(cfg.graph_edge_weight_semantic)
+        type_weight = float(cfg.graph_edge_boost_type_affinity)
+    except Exception:  # pragma: no cover - defensive fallback for standalone CLI use.
+        semantic_weight = 0.70
+        type_weight = 0.03
+    components = {
+        "semantic": round(semantic_weight * semantic, 4),
+        "type_affinity": round(type_weight * type_affinity, 4),
+    }
+    final = min(sum(components.values()), 1.0)
+    return round(final, 4), {
+        key: value for key, value in components.items() if value > 0.0
+    }
 
 
 def _utc_now() -> str:

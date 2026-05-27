@@ -172,7 +172,14 @@ def test_main_attach_writes_idempotent_overlay_used_by_resolver(tmp_path) -> Non
 
     assert overlay.read_text(encoding="utf-8").count("\n") == 1
     assert loaded.has_edge("skill:new-python", "skill:python-testing")
-    assert loaded.edges["skill:new-python", "skill:python-testing"]["semantic_sim"] == pytest.approx(1.0)
+    edge = loaded.edges["skill:new-python", "skill:python-testing"]
+    assert edge["semantic_sim"] == pytest.approx(1.0)
+    assert edge["type_affinity"] == pytest.approx(0.35)
+    assert edge["score_components"] == {
+        "semantic": pytest.approx(0.7),
+        "type_affinity": pytest.approx(0.0105),
+    }
+    assert edge["final_weight"] == pytest.approx(0.7105)
 
     changed_args = [
         "attach",

@@ -219,15 +219,15 @@ _GRAPH_ARCHIVE_NAME = "wiki-graph.tar.gz"
 _GRAPH_RUNTIME_ARCHIVE_NAME = "wiki-graph-runtime.tar.gz"
 _GRAPH_ENTITY_OVERLAY_NAME = "entity-overlays.jsonl"
 _GRAPH_ENTITY_OVERLAY_SHA256 = (
-    "1f055f8c269913ef9cb668bfc2b7a0cd45180067e35ac7772215f9717e89f568"
+    "cc1a69d3452d2018bec1e049fc4ab1fa8f933adecfdcae4802a815be03f8611c"
 )
 _GRAPH_ARCHIVE_NAMES = {
     "runtime": _GRAPH_RUNTIME_ARCHIVE_NAME,
     "full": _GRAPH_ARCHIVE_NAME,
 }
 _GRAPH_ARCHIVE_SHA256 = {
-    "runtime": "b8821004e653b8b4fbad654e18536352fa2fb9db43eb2d3ec1744153aae0bdbe",
-    "full": "958a79055168da81d23356da7486a042006c0d02191f32d9673dd0c4ed4bead7",
+    "runtime": "334fb19bace3fd6e4b92087850f17297fb248032957d123f3f1432dfde2e36c0",
+    "full": "91b30795e7d200cf31a62a8749969d12658f5f74636d2de06d6b2b24b393c12f",
 }
 _GRAPH_RELEASE_URL = (
     "https://github.com/stevesolun/ctx/releases/download/"
