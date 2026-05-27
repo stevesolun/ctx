@@ -156,6 +156,8 @@ def _post_raw(
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     try:
         conn.putrequest("POST", path, skip_host=True)
+        if "Host" not in headers:
+            conn.putheader("Host", f"127.0.0.1:{port}")
         for key, value in headers.items():
             conn.putheader(key, value)
         conn.endheaders()
