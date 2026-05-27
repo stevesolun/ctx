@@ -129,7 +129,7 @@ jobs:
   similarity-integration:
     name: "Similarity precision/recall"
     needs: classify
-    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true' && needs.classify.outputs.similarity_changed == 'true') }}
+    if: ${{ github.event_name != 'pull_request' || (needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.similarity_changed == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

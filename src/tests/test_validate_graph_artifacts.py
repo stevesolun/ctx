@@ -854,6 +854,48 @@ def test_scan_graph_json_handles_pretty_printed_graph() -> None:
     assert _scan_graph_json(BytesIO(payload)) == (2, 2, 1, 1, 1, None)
 
 
+def test_scan_graph_json_rejects_out_of_range_edge_scores() -> None:
+    graph = {
+        "nodes": [{"id": "skill:a", "type": "skill"}],
+        "edges": [
+            {
+                "source": "skill:a",
+                "target": "skill:b",
+                "semantic_sim": 2.0,
+                "tag_sim": 0.0,
+                "token_sim": 0.0,
+                "weight": 0.5,
+                "final_weight": 0.5,
+            },
+        ],
+    }
+    payload = json.dumps(graph).encode("utf-8")
+
+    with pytest.raises(GraphArtifactError, match="semantic_sim must be 0..1"):
+        _scan_graph_json(BytesIO(payload))
+
+
+def test_scan_graph_json_rejects_weight_final_weight_drift() -> None:
+    graph = {
+        "nodes": [{"id": "skill:a", "type": "skill"}],
+        "edges": [
+            {
+                "source": "skill:a",
+                "target": "skill:b",
+                "semantic_sim": 0.8,
+                "tag_sim": 0.0,
+                "token_sim": 0.0,
+                "weight": 0.7,
+                "final_weight": 0.5,
+            },
+        ],
+    }
+    payload = json.dumps(graph).encode("utf-8")
+
+    with pytest.raises(GraphArtifactError, match="weight must equal final_weight"):
+        _scan_graph_json(BytesIO(payload))
+
+
 @pytest.mark.parametrize("field", ["semantic_sim", "tag_sim", "token_sim"])
 def test_overlay_validation_rejects_out_of_range_similarity_fields(
     tmp_path: Path,

@@ -58,6 +58,11 @@ _SKILL_BUNDLE_REF_MARKERS = (
 _SEMANTIC_SIM_RE = re.compile(
     rb'"semantic_sim"\s*:\s*(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)',
 )
+_EDGE_SCORE_VALUE_RE = re.compile(
+    rb'"(weight|final_weight|similarity_score|semantic_sim|tag_sim|token_sim)"'
+    rb'\s*:\s*("[^"]*"|-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)',
+)
+_EDGE_OBJECT_RE = re.compile(rb'\{[^{}]*"source"\s*:[^{}]*"target"\s*:[^{}]*\}')
 _EDGE_SCORE_FIELDS = (
     "weight",
     "final_weight",
@@ -348,6 +353,8 @@ def _scan_graph_json(stream: IO[bytes]) -> tuple[int, int, int, int, int, str | 
     while chunk := stream.read(1024 * 1024):
         old_tail = tail
         data = tail + chunk
+        _validate_graph_edge_score_fields(data)
+        _validate_graph_edge_weight_drift(data)
         if export_id is None:
             graph_probe = (graph_probe + chunk)[-1024 * 1024:]
             export_id = _extract_graph_export_id(graph_probe)
@@ -365,7 +372,7 @@ def _scan_graph_json(stream: IO[bytes]) -> tuple[int, int, int, int, int, str | 
             len(_HARNESS_TYPE_RE.findall(data))
             - len(_HARNESS_TYPE_RE.findall(old_tail))
         )
-        tail = data[-512:]
+        tail = data[-65536:]
     return nodes, edges, semantic_edges, skills_sh_nodes, harness_nodes, export_id
 
 
@@ -430,6 +437,34 @@ def _count_nonzero_semantic_matches(data: bytes) -> int:
         except ValueError:
             continue
     return count
+
+
+def _validate_graph_edge_score_fields(data: bytes) -> None:
+    for match in _EDGE_SCORE_VALUE_RE.finditer(data):
+        field = match.group(1).decode("ascii")
+        raw_value = match.group(2)
+        try:
+            value = float(raw_value)
+        except ValueError as exc:
+            raise GraphArtifactError(f"graph.json edge {field} must be numeric") from exc
+        if not 0 <= value <= 1:
+            raise GraphArtifactError(f"graph.json edge {field} must be 0..1")
+
+
+def _validate_graph_edge_weight_drift(data: bytes) -> None:
+    for match in _EDGE_OBJECT_RE.finditer(data):
+        edge = match.group(0)
+        values: dict[str, float] = {}
+        for field_match in _EDGE_SCORE_VALUE_RE.finditer(edge):
+            field = field_match.group(1).decode("ascii")
+            if field in {"weight", "final_weight"}:
+                values[field] = float(field_match.group(2))
+        if (
+            "weight" in values
+            and "final_weight" in values
+            and abs(values["weight"] - values["final_weight"]) > 1e-9
+        ):
+            raise GraphArtifactError("graph.json edge weight must equal final_weight")
 
 
 def _catalog_skills(catalog: dict[str, Any]) -> list[dict[str, Any]]:

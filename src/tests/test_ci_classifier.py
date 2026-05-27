@@ -593,6 +593,25 @@ def test_ci_required_rejects_missing_similarity_gate_on_source_pr() -> None:
     }
 
 
+def test_ci_required_rejects_missing_similarity_gate_on_graph_only_pr() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {
+                "docs_only": "false",
+                "graph_only": "true",
+                "graph_artifact_changed": "true",
+                "similarity_changed": "true",
+            },
+        },
+        **{"similarity-integration": {"result": "skipped"}},
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "similarity-integration": "skipped",
+    }
+
+
 def test_ci_required_allows_similarity_skip_for_unrelated_source_pr() -> None:
     needs = _required_needs(
         classify={

@@ -75,6 +75,10 @@ def failed_required_jobs(
         event_name == "pull_request"
         and _job_output(needs, "classify", "graph_artifact_changed") == "true"
     )
+    similarity_changed_pr = (
+        event_name == "pull_request"
+        and _job_output(needs, "classify", "similarity_changed") == "true"
+    )
     cheap_pr = docs_only_pr or graph_only_pr
     for name, details in sorted(needs.items()):
         result = details.get("result")
@@ -86,7 +90,12 @@ def failed_required_jobs(
             and result == "skipped"
         ):
             continue
-        if cheap_pr and name in CHEAP_PR_SKIPPABLE_JOBS and result == "skipped":
+        if (
+            cheap_pr
+            and name in CHEAP_PR_SKIPPABLE_JOBS
+            and not (name == "similarity-integration" and similarity_changed_pr)
+            and result == "skipped"
+        ):
             continue
         if (
             event_name == "pull_request"
