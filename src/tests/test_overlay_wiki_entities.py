@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
+import sys
 import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.overlay_wiki_entities import overlay_entities
+import pytest
+
+from scripts.overlay_wiki_entities import _entity_page, _skill_replacements, overlay_entities
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _add_text(tf: tarfile.TarFile, name: str, text: str) -> None:
@@ -117,3 +123,50 @@ def test_overlay_entities_preserves_existing_graph_and_adds_selected_pages(tmp_p
             ("new-skill",),
         ).fetchone() == ("skill:new-skill",)
     assert json.loads(root_communities.read_text())["export_id"] == stats.export_id
+
+
+def test_script_direct_invocation_help_works() -> None:
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "overlay_wiki_entities.py"), "--help"],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0
+    assert "Overlay explicit local wiki entities" in proc.stdout
+
+
+def test_overlay_rejects_symlinked_entity_page(tmp_path: Path) -> None:
+    source_wiki = tmp_path / "wiki"
+    (source_wiki / "entities" / "skills").mkdir(parents=True)
+    outside = tmp_path / "outside.md"
+    outside.write_text("secret", encoding="utf-8")
+    link = source_wiki / "entities" / "skills" / "new-skill.md"
+    try:
+        link.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+
+    with pytest.raises(ValueError, match="symlinked path"):
+        _entity_page(source_wiki, "skill", "new-skill")
+
+
+def test_overlay_rejects_symlinked_skill_reference(tmp_path: Path) -> None:
+    source_wiki = tmp_path / "wiki"
+    skills_root = tmp_path / "skills"
+    skill_dir = skills_root / "new-skill"
+    (skill_dir / "references").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# body\n", encoding="utf-8")
+    outside = tmp_path / "outside.md"
+    outside.write_text("secret", encoding="utf-8")
+    link = skill_dir / "references" / "leak.md"
+    try:
+        link.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+
+    with pytest.raises(ValueError, match="symlinked path"):
+        _skill_replacements(source_wiki, "new-skill", skills_root=skills_root)

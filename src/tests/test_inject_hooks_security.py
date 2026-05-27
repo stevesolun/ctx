@@ -128,6 +128,29 @@ class TestNoShellInjectionVars:
             f"{cmds_with_stdin}"
         )
 
+    def test_merge_hooks_repairs_partial_posttooluse_matcher(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        new_hooks = make_hooks(str(tmp_path / "ctx"))
+        existing = {
+            "hooks": {
+                "PostToolUse": [
+                    {
+                        "matcher": ".*",
+                        "hooks": [new_hooks["PostToolUse"][0]["hooks"][0]],
+                    },
+                ],
+            },
+        }
+
+        merged = merge_hooks(existing, new_hooks)
+
+        commands = _all_commands({"PostToolUse": merged["hooks"]["PostToolUse"]})
+        assert any("context_monitor" in command for command in commands)
+        assert any("skill_add_detector" in command for command in commands)
+        assert any("bundle_orchestrator" in command for command in commands)
+
 
 # ---------------------------------------------------------------------------
 # Fix 2 — Stop array contains both usage_tracker and quality_on_session_end

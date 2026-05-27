@@ -173,10 +173,40 @@ def merge_hooks(existing: dict, new_hooks: dict) -> dict:
                 new_cmd = new_entry.get("command", "")
                 new_hooks_list = new_entry.get("hooks", [])
 
-                # Check if any command in this entry already exists
-                new_cmds = {new_cmd} if new_cmd else {h.get("command", "") for h in new_hooks_list}
-                if not new_cmds.intersection(existing_commands):
+                if isinstance(new_hooks_list, list) and new_hooks_list:
+                    missing_hooks = [
+                        hook for hook in new_hooks_list
+                        if isinstance(hook, dict)
+                        and hook.get("command")
+                        and hook.get("command") not in existing_commands
+                    ]
+                    if not missing_hooks:
+                        continue
+                    matcher = new_entry.get("matcher")
+                    target_entry = next(
+                        (
+                            entry for entry in existing_list
+                            if isinstance(entry, dict)
+                            and entry.get("matcher") == matcher
+                            and isinstance(entry.get("hooks"), list)
+                        ),
+                        None,
+                    )
+                    if target_entry is not None:
+                        target_entry["hooks"].extend(missing_hooks)
+                    else:
+                        entry = dict(new_entry)
+                        entry["hooks"] = missing_hooks
+                        existing_list.append(entry)
+                    existing_commands.update(
+                        hook["command"] for hook in missing_hooks
+                        if isinstance(hook.get("command"), str)
+                    )
+                    continue
+
+                if new_cmd and new_cmd not in existing_commands:
                     existing_list.append(new_entry)
+                    existing_commands.add(new_cmd)
 
     return existing
 

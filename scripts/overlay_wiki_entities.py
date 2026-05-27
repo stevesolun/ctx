@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import tarfile
 import tempfile
 from collections import Counter
@@ -18,9 +19,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ctx.core.wiki.artifact_promotion import promote_staged_artifact
-from ctx.utils._fs_utils import atomic_write_text, reject_symlink_path
-from scripts.build_dashboard_graph_index import build_dashboard_index
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from ctx.core.wiki.artifact_promotion import promote_staged_artifact  # noqa: E402
+from ctx.utils._fs_utils import atomic_write_text, reject_symlink_path  # noqa: E402
+from scripts.build_dashboard_graph_index import build_dashboard_index  # noqa: E402
 
 GRAPH_EXPORT_NAMES = {
     "graphify-out/graph.json",
@@ -215,7 +220,7 @@ def _collect_replacements(
         entity_type, slug = _split_node_id(node_id)
         page = _entity_page(source_wiki, entity_type, slug)
         if page is not None and (not runtime or entity_type == "harness"):
-            replacements[page.relative_to(source_wiki).as_posix()] = page.read_bytes()
+            replacements[page.relative_to(source_wiki).as_posix()] = _read_safe_bytes(page)
         if not runtime and entity_type == "skill":
             replacements.update(_skill_replacements(source_wiki, slug, skills_root=skills_root))
     return replacements
@@ -241,12 +246,13 @@ def _entity_page(source_wiki: Path, entity_type: str, slug: str) -> Path | None:
         ],
     }.get(entity_type, [])
     for candidate in candidates:
-        if candidate.is_file():
+        if _is_safe_file(candidate):
             return candidate
     if entity_type == "mcp-server":
         matches = list((source_wiki / "entities" / "mcp-servers").rglob(f"{slug}.md"))
-        if matches:
-            return matches[0]
+        for match in matches:
+            if _is_safe_file(match):
+                return match
     return None
 
 
@@ -257,14 +263,24 @@ def _skill_replacements(source_wiki: Path, slug: str, *, skills_root: Path | Non
         root / slug / "SKILL.md",
     ]
     for candidate in candidates:
-        if candidate.is_file():
+        if _is_safe_file(candidate):
             skill_dir = candidate.parent
             return {
-                f"converted/{slug}/{path.relative_to(skill_dir).as_posix()}": path.read_bytes()
+                f"converted/{slug}/{path.relative_to(skill_dir).as_posix()}": _read_safe_bytes(path)
                 for path in sorted(skill_dir.rglob("*"))
-                if path.is_file() and not path.name.endswith((".original", ".lock"))
+                if _is_safe_file(path) and not path.name.endswith((".original", ".lock"))
             }
     return {}
+
+
+def _is_safe_file(path: Path) -> bool:
+    reject_symlink_path(path)
+    return path.is_file()
+
+
+def _read_safe_bytes(path: Path) -> bytes:
+    reject_symlink_path(path)
+    return path.read_bytes()
 
 
 def _rewrite_tarball(tarball: Path, replacements: dict[str, bytes]) -> None:
