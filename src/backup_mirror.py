@@ -370,12 +370,16 @@ def create_snapshot(backups_dir: Path | None = None,
             for src in _iter_tree(src_rel):
                 rel = src.relative_to(root)
                 dest_rel_path = Path(dest_rel) / rel
+                if _CFG.is_excluded(dest_rel_path.as_posix()):
+                    continue
                 entries.append(_capture_file(src, tmp_path, dest_rel_path.as_posix()))
 
         for slug, src in _iter_memory_files():
             memory_root = claude_home / "projects" / slug / "memory"
             rel = src.relative_to(memory_root)
             dest_rel_path = Path("memory") / slug / rel
+            if _CFG.is_excluded(dest_rel_path.as_posix()):
+                continue
             entries.append(_capture_file(src, tmp_path, dest_rel_path.as_posix()))
 
         manifest = {

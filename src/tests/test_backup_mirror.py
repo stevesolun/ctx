@@ -77,6 +77,27 @@ def test_create_captures_all_expected_files(fake_home):
     assert "memory/demo-slug/MEMORY.md" in dests
 
 
+def test_create_snapshot_does_not_copy_always_excluded_names_inside_trees(fake_home):
+    _seed_home(fake_home)
+    (fake_home / "skills" / "brainstorming" / ".credentials.json").write_text(
+        '{"token":"leaked"}',
+        encoding="utf-8",
+    )
+    (fake_home / "projects" / "demo-slug" / "memory" / "claude.json").write_text(
+        '{"token":"leaked"}',
+        encoding="utf-8",
+    )
+
+    snap = bm.create_snapshot()
+    manifest = json.loads((snap / "manifest.json").read_text())
+    dests = {entry["dest"] for entry in manifest["entries"]}
+
+    assert "skills/brainstorming/.credentials.json" not in dests
+    assert "memory/demo-slug/claude.json" not in dests
+    assert not (snap / "skills" / "brainstorming" / ".credentials.json").exists()
+    assert not (snap / "memory" / "demo-slug" / "claude.json").exists()
+
+
 def test_create_hashes_every_non_skipped_file(fake_home):
     _seed_home(fake_home)
     snap = bm.create_snapshot()
