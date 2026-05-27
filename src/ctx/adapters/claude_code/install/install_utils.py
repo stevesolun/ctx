@@ -29,12 +29,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import shutil
 from pathlib import Path
 from typing import Callable, Literal
 
+from ctx_config import cfg
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 from ctx.utils._file_lock import file_lock
 
@@ -42,7 +42,7 @@ _logger = logging.getLogger(__name__)
 
 EntityType = Literal["skill", "agent", "mcp-server"]
 
-MANIFEST_PATH = Path(os.path.expanduser("~/.claude/skill-manifest.json"))
+MANIFEST_PATH = cfg.skill_manifest
 
 _FRONTMATTER_HEAD_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 

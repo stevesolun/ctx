@@ -162,6 +162,25 @@ class TestConfigExpandTilde:
         assert cfg.wiki_dir.is_absolute()
 
 
+def test_claude_adapter_modules_use_cfg_paths() -> None:
+    from ctx.adapters.claude_code import skill_health, skill_loader
+    from ctx.adapters.claude_code.install import install_utils, skill_unload
+
+    assert install_utils.MANIFEST_PATH == ctx_config.cfg.skill_manifest
+    assert skill_loader.SKILLS_DIR == ctx_config.cfg.skills_dir
+    assert skill_loader.AGENTS_DIR == ctx_config.cfg.agents_dir
+    assert skill_loader.WIKI_DIR == ctx_config.cfg.wiki_dir
+    assert skill_loader.PENDING_SKILLS == ctx_config.cfg.pending_skills
+    assert skill_loader.MANIFEST_PATH == ctx_config.cfg.skill_manifest
+    assert skill_unload.CLAUDE_DIR == ctx_config.cfg.claude_dir
+    assert skill_unload.WIKI_DIR == ctx_config.cfg.wiki_dir
+    assert skill_unload.MANIFEST_PATH == ctx_config.cfg.skill_manifest
+    assert skill_health.SKILLS_DIR == ctx_config.cfg.skills_dir
+    assert skill_health.AGENTS_DIR == ctx_config.cfg.agents_dir
+    assert skill_health.PENDING_PATH == ctx_config.cfg.pending_skills
+    assert skill_health.MANIFEST_PATH == ctx_config.cfg.skill_manifest
+
+
 class TestConfigReload:
     """test_config_reload -- reload() picks up changes to the raw config."""
 

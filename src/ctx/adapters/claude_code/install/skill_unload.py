@@ -22,11 +22,12 @@ from pathlib import Path
 from ctx.core.wiki.wiki_utils import validate_skill_name
 from ctx.utils._file_lock import file_lock
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
+from ctx_config import cfg
 
-CLAUDE_DIR = Path(os.path.expanduser("~/.claude"))
-MANIFEST_PATH = CLAUDE_DIR / "skill-manifest.json"
+CLAUDE_DIR = cfg.claude_dir
+MANIFEST_PATH = cfg.skill_manifest
 PENDING_UNLOAD = CLAUDE_DIR / "pending-unload.json"
-WIKI_DIR = CLAUDE_DIR / "skill-wiki"
+WIKI_DIR = cfg.wiki_dir
 SKILL_ENTITIES = WIKI_DIR / "entities" / "skills"
 AGENT_ENTITIES = WIKI_DIR / "entities" / "agents"
 

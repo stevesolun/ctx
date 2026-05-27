@@ -39,6 +39,24 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     from ctx.adapters.claude_code.install import skill_unload
     importlib.reload(skill_unload)
+    monkeypatch.setattr(skill_unload, "CLAUDE_DIR", home / ".claude")
+    monkeypatch.setattr(
+        skill_unload,
+        "MANIFEST_PATH",
+        home / ".claude" / "skill-manifest.json",
+    )
+    monkeypatch.setattr(skill_unload, "PENDING_UNLOAD", home / ".claude" / "pending-unload.json")
+    monkeypatch.setattr(skill_unload, "WIKI_DIR", home / ".claude" / "skill-wiki")
+    monkeypatch.setattr(
+        skill_unload,
+        "SKILL_ENTITIES",
+        home / ".claude" / "skill-wiki" / "entities" / "skills",
+    )
+    monkeypatch.setattr(
+        skill_unload,
+        "AGENT_ENTITIES",
+        home / ".claude" / "skill-wiki" / "entities" / "agents",
+    )
     return skill_unload, home
 
 

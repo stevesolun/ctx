@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from dataclasses import asdict, dataclass, field
@@ -47,10 +46,10 @@ from ctx.utils._fs_utils import atomic_write_text as _atomic_write
 # ── Paths & config defaults ────────────────────────────────────────────────
 
 
-SKILLS_DIR = Path(os.path.expanduser("~/.claude/skills"))
-AGENTS_DIR = Path(os.path.expanduser("~/.claude/agents"))
-MANIFEST_PATH = Path(os.path.expanduser("~/.claude/skill-manifest.json"))
-PENDING_PATH = Path(os.path.expanduser("~/.claude/pending-skills.json"))
+SKILLS_DIR = cfg.skills_dir
+AGENTS_DIR = cfg.agents_dir
+MANIFEST_PATH = cfg.skill_manifest
+PENDING_PATH = cfg.pending_skills
 
 DEFAULT_LINE_THRESHOLD = cfg.line_threshold
 DEFAULT_MIN_BODY_LINES = 5

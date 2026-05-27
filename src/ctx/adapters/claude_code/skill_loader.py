@@ -16,12 +16,12 @@ Outputs the skill/agent content path so Claude can read and apply it.
 import argparse
 import json
 import logging
-import os
 import sys
 import uuid
 from pathlib import Path
 from typing import Any
 
+from ctx_config import cfg
 from ctx.core.wiki.wiki_utils import validate_skill_name
 from ctx.utils._file_lock import file_lock
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
@@ -32,11 +32,11 @@ _logger = logging.getLogger(__name__)
 _SESSION_ID: str = uuid.uuid4().hex
 
 
-SKILLS_DIR = Path(os.path.expanduser("~/.claude/skills"))
-AGENTS_DIR = Path(os.path.expanduser("~/.claude/agents"))
-WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki"))
-PENDING_SKILLS = Path(os.path.expanduser("~/.claude/pending-skills.json"))
-MANIFEST_PATH = Path(os.path.expanduser("~/.claude/skill-manifest.json"))
+SKILLS_DIR = cfg.skills_dir
+AGENTS_DIR = cfg.agents_dir
+WIKI_DIR = cfg.wiki_dir
+PENDING_SKILLS = cfg.pending_skills
+MANIFEST_PATH = cfg.skill_manifest
 
 
 def _resolved_under(candidate: Path, base: Path) -> bool:
