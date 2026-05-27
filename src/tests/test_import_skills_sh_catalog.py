@@ -1160,8 +1160,12 @@ def test_hydration_falls_back_to_github_raw_skill_md(monkeypatch) -> None:
         ),
     )
     fetched_urls: list[str] = []
+    branch_sha = "0123456789abcdef0123456789abcdef01234567"
 
     class FakeResponse:
+        def __init__(self, payload: bytes) -> None:
+            self._payload = payload
+
         def __enter__(self) -> "FakeResponse":
             return self
 
@@ -1169,14 +1173,17 @@ def test_hydration_falls_back_to_github_raw_skill_md(monkeypatch) -> None:
             return None
 
         def read(self, size: int = -1) -> bytes:
-            return b"# Brand Identity\n\nUse this skill for brand strategy.\n"
+            return self._payload
 
     def fake_urlopen(req: object, timeout: int) -> FakeResponse:
         url = req.full_url  # type: ignore[attr-defined]
         fetched_urls.append(url)
+        if url.endswith("/repos/travisjneuman/.claude/branches/main"):
+            return FakeResponse(json.dumps({"commit": {"sha": branch_sha}}).encode())
         if "/skills/brand-identity/" not in url:
             raise OSError("not found")
-        return FakeResponse()
+        assert f"/{branch_sha}/" in url
+        return FakeResponse(b"# Brand Identity\n\nUse this skill for brand strategy.\n")
 
     monkeypatch.setattr(importer.urllib.request, "urlopen", fake_urlopen)
     catalog: dict[str, Any] = {
@@ -1199,9 +1206,31 @@ def test_hydration_falls_back_to_github_raw_skill_md(monkeypatch) -> None:
     assert skill["skill_body"].startswith("# Brand Identity")
     assert skill["body_source_url"] == (
         "https://raw.githubusercontent.com/travisjneuman/.claude/"
-        "main/skills/brand-identity/SKILL.md"
+        f"{branch_sha}/skills/brand-identity/SKILL.md"
     )
     assert fetched_urls[-1] == skill["body_source_url"]
+
+
+def test_github_raw_fallback_requires_pinned_branch_sha(monkeypatch) -> None:
+    fetched_urls: list[str] = []
+
+    def fake_urlopen(req: object, timeout: int) -> object:
+        fetched_urls.append(req.full_url)  # type: ignore[attr-defined]
+        raise OSError("branch lookup failed")
+
+    monkeypatch.setattr(importer.urllib.request, "urlopen", fake_urlopen)
+
+    body, url, error = importer._fetch_github_raw_skill_body(
+        {
+            "source": "owner/repo",
+            "skill_id": "danger",
+        },
+    )
+
+    assert body is None
+    assert url is None
+    assert "found no pinned SKILL.md candidates" in str(error)
+    assert all("raw.githubusercontent.com" not in candidate for candidate in fetched_urls)
 
 
 def test_hydration_rejects_non_skills_sh_detail_urls(monkeypatch) -> None:

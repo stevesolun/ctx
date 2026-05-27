@@ -68,6 +68,8 @@ CONVERTED_SKILL_ROOT = "converted"
 DEFAULT_DETAIL_MAX_BYTES = 2_000_000
 DEFAULT_SKILL_BODY_MAX_CHARS = 120_000
 GITHUB_RAW_HOST = "raw.githubusercontent.com"
+GITHUB_API_HOST = "api.github.com"
+_GITHUB_COMMIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 _HYDRATION_CHECKPOINT_FIELDS = (
     "id",
     "ctx_slug",
@@ -376,18 +378,23 @@ def _fetch_detail_html(
     return payload.decode("utf-8", errors="replace"), None
 
 
-def _github_raw_skill_urls(source: str, skill_id: str) -> list[str]:
+def _github_repo_parts(source: str) -> tuple[str, str] | None:
     if (
         "/" not in source
         or source.startswith(("http://", "https://"))
-        or not skill_id.strip()
     ):
-        return []
+        return None
     owner, repo = source.split("/", 1)
     if not owner or not repo:
+        return None
+    return owner, repo
+
+
+def _github_raw_skill_candidate_paths(source: str, skill_id: str) -> list[str]:
+    repo_parts = _github_repo_parts(source)
+    if repo_parts is None or not skill_id.strip():
         return []
-    owner_q = urllib.parse.quote(owner, safe="")
-    repo_q = urllib.parse.quote(repo, safe=".-_")
+    _, repo = repo_parts
     skill_q = urllib.parse.quote(skill_id.strip("/"), safe="")
     filenames = ("SKILL.md", "Skill.md", "skill.md")
     candidate_paths = [
@@ -403,11 +410,79 @@ def _github_raw_skill_urls(source: str, skill_id: str) -> list[str]:
     ]
     if _slugify(repo) == _slugify(skill_id):
         candidate_paths.extend(filenames)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for path in candidate_paths:
+        if path not in seen:
+            seen.add(path)
+            deduped.append(path)
+    return deduped
+
+
+def _resolve_github_branch_sha(
+    owner: str,
+    repo: str,
+    branch: str,
+    *,
+    timeout: int,
+) -> str | None:
+    owner_q = urllib.parse.quote(owner, safe="")
+    repo_q = urllib.parse.quote(repo, safe="")
+    branch_q = urllib.parse.quote(branch, safe="")
+    url = f"https://{GITHUB_API_HOST}/repos/{owner_q}/{repo_q}/branches/{branch_q}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            payload = response.read(32_768)
+    except Exception:
+        return None
+    try:
+        data = json.loads(payload.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    commit = data.get("commit")
+    sha = commit.get("sha") if isinstance(commit, dict) else None
+    if isinstance(sha, str) and _GITHUB_COMMIT_SHA_RE.fullmatch(sha):
+        return sha
+    return None
+
+
+def _github_raw_skill_urls(
+    source: str,
+    skill_id: str,
+    *,
+    timeout: int = 12,
+) -> list[str]:
+    repo_parts = _github_repo_parts(source)
+    if repo_parts is None:
+        return []
+    owner, repo = repo_parts
+    candidate_paths = _github_raw_skill_candidate_paths(source, skill_id)
+    if not candidate_paths:
+        return []
+    owner_q = urllib.parse.quote(owner, safe="")
+    repo_q = urllib.parse.quote(repo, safe=".-_")
     urls: list[str] = []
     for branch in ("main", "master"):
+        branch_sha = _resolve_github_branch_sha(
+            owner,
+            repo,
+            branch,
+            timeout=timeout,
+        )
+        if branch_sha is None:
+            continue
         for path in candidate_paths:
             urls.append(
-                f"https://{GITHUB_RAW_HOST}/{owner_q}/{repo_q}/{branch}/{path}",
+                f"https://{GITHUB_RAW_HOST}/{owner_q}/{repo_q}/{branch_sha}/{path}",
             )
     return urls
 
@@ -421,7 +496,7 @@ def _fetch_github_raw_skill_body(
     source = str(item.get("source") or "")
     skill_id = str(item.get("skill_id") or item.get("skillId") or "")
     raw_timeout = min(timeout, 12)
-    for url in _github_raw_skill_urls(source, skill_id):
+    for url in _github_raw_skill_urls(source, skill_id, timeout=raw_timeout):
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         try:
             with urllib.request.urlopen(req, timeout=raw_timeout) as response:
@@ -433,7 +508,7 @@ def _fetch_github_raw_skill_body(
         body = _normalize_skill_body_text(payload.decode("utf-8", errors="replace"))
         if body:
             return body, url, None
-    return None, None, "GitHub raw fallback found no SKILL.md candidates"
+    return None, None, "GitHub raw fallback found no pinned SKILL.md candidates"
 
 
 def _refresh_body_summary(catalog: dict[str, Any]) -> dict[str, Any]:
