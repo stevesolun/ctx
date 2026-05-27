@@ -86,6 +86,12 @@ def _normalize_path(path: str) -> str:
     return path.strip().lstrip("\ufeff").replace("\\", "/")
 
 
+def _is_graph_artifact_path(path: str) -> bool:
+    if _matches(path, GRAPH_ARTIFACT_PATTERNS):
+        return True
+    return _matches(path, ("graph/**",)) and path != "graph/README.md"
+
+
 def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
     files = [
         normalized
@@ -94,9 +100,7 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
     ]
     ci_changed = any(_matches(path, (".github/workflows/**",)) for path in files)
     docs_changed = any(_matches(path, DOCS_PATTERNS) for path in files)
-    graph_artifact_changed = any(
-        _matches(path, GRAPH_ARTIFACT_PATTERNS) for path in files
-    )
+    graph_artifact_changed = any(_is_graph_artifact_path(path) for path in files)
     graph_only = bool(files) and all(_matches(path, ("graph/**",)) for path in files)
     return {
         "browser_changed": ci_changed

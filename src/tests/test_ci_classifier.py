@@ -70,6 +70,16 @@ def test_graph_preview_html_is_graph_artifact() -> None:
     assert flags["graph_only"] is True
 
 
+def test_unknown_graph_file_is_graph_artifact() -> None:
+    flags = classify_paths(["graph/notes.json"])
+
+    assert flags["docs_changed"] is False
+    assert flags["docs_only"] is False
+    assert flags["graph_artifact_changed"] is True
+    assert flags["graph_changed"] is True
+    assert flags["graph_only"] is True
+
+
 def test_graph_readme_is_docs_not_graph_artifact() -> None:
     flags = classify_paths(["graph/README.md"])
 
@@ -525,6 +535,25 @@ def test_ci_required_rejects_missing_graph_check_on_graph_only_pr() -> None:
         classify={
             "result": "success",
             "outputs": {"graph_artifact_changed": "true", "graph_only": "true"},
+        },
+        **{"graph-check": {"result": "skipped"}},
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "graph-check": "skipped",
+    }
+
+
+def test_ci_required_rejects_missing_graph_check_on_unknown_graph_change() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {
+                "docs_only": "false",
+                "graph_artifact_changed": "false",
+                "graph_changed": "true",
+                "graph_only": "true",
+            },
         },
         **{"graph-check": {"result": "skipped"}},
     )

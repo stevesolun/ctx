@@ -67,6 +67,10 @@ def failed_required_jobs(
         event_name == "pull_request"
         and _job_output(needs, "classify", "graph_only") == "true"
     )
+    graph_changed_pr = (
+        event_name == "pull_request"
+        and _job_output(needs, "classify", "graph_changed") == "true"
+    )
     graph_artifact_changed_pr = (
         event_name == "pull_request"
         and _job_output(needs, "classify", "graph_artifact_changed") == "true"
@@ -96,6 +100,7 @@ def failed_required_jobs(
             and name == "graph-check"
             and result == "skipped"
             and not graph_artifact_changed_pr
+            and not (graph_changed_pr and not docs_only_pr)
         ):
             continue
         if (
