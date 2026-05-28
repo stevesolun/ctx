@@ -544,7 +544,7 @@ def test_ci_required_rejects_missing_graph_check_on_graph_only_pr() -> None:
     }
 
 
-def test_ci_required_rejects_missing_graph_check_on_unknown_graph_change() -> None:
+def test_ci_required_allows_graph_check_skip_for_nonartifact_graph_change() -> None:
     needs = _required_needs(
         classify={
             "result": "success",
@@ -558,9 +558,7 @@ def test_ci_required_rejects_missing_graph_check_on_unknown_graph_change() -> No
         **{"graph-check": {"result": "skipped"}},
     )
 
-    assert failed_required_jobs(needs, event_name="pull_request") == {
-        "graph-check": "skipped",
-    }
+    assert failed_required_jobs(needs, event_name="pull_request") == {}
 
 
 def test_ci_required_allows_browser_skip_for_unrelated_pr_only() -> None:
