@@ -193,6 +193,26 @@ class TestCollectRows:
             ("filesystem", "mcp-server")
         ]
 
+    def test_mcp_rows_do_not_probe_skill_or_agent_sources(
+        self, sources: cl.LifecycleSources, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_quality(
+            sources.sidecar_dir / "mcp",
+            "filesystem",
+            subject_type="mcp-server",
+            grade="A",
+            score=0.88,
+        )
+
+        def fail_source_probe(*args: object, **kwargs: object) -> Path | None:
+            raise AssertionError("MCP rows should not stat skill/agent source paths")
+
+        monkeypatch.setattr(kd, "_skill_source_path", fail_source_probe)
+
+        rows = kd.collect_rows(sources=sources)
+
+        assert rows[0].category == "uncategorized"
+
     def test_lifecycle_only_mcp_keeps_subject_type(
         self, sources: cl.LifecycleSources,
     ) -> None:

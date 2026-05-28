@@ -91,11 +91,17 @@ _MONITOR_TOKEN = ""
 _MONITOR_MUTATIONS_ENABLED = True
 _GRAPH_CACHE_KEY: tuple[Any, ...] | None = None
 _GRAPH_CACHE_VALUE: Any | None = None
+_PACKAGED_GRAPH_EXPORT_ID_CACHE: str | None | bool = None
 _OVERLAY_INDEX_COVERAGE_CACHE_KEY: tuple[Any, ...] | None = None
 _OVERLAY_INDEX_COVERAGE_CACHE_VALUE: bool | None = None
 _SIDECAR_INDEX_CACHE_KEY: tuple[tuple[Path, float, int], ...] | None = None
 _SIDECAR_INDEX_CACHE_VALUE: dict[tuple[str, str], dict] | None = None
+_KPI_SUMMARY_CACHE_KEY: tuple[Any, ...] | None = None
+_KPI_SUMMARY_CACHE_VALUE: Any | None = None
+_KPI_SUMMARY_CACHE_AT = 0.0
 _WIKI_INDEX_LIMIT_PER_TYPE = 500
+_SKILLS_PAGE_RENDER_LIMIT = 1000
+_KPI_SUMMARY_CACHE_SECONDS = 30
 _GRAPH_REPORT_RE = re.compile(r"Nodes:\s*([\d,]+)\s*\|\s*Edges:\s*([\d,]+)")
 _MAX_POST_BODY_BYTES = 64 * 1024
 _DASHBOARD_INDEX_MEMBER = "graphify-out/dashboard-neighborhoods.sqlite3"
@@ -1772,6 +1778,21 @@ def _all_sidecars() -> list[dict]:
     return list(_sidecar_index().values())
 
 
+def _skills_page_sidecars() -> tuple[list[dict], int, bool]:
+    """Return the bounded sidecar set that the /skills page renders."""
+    files = _sidecar_files()
+    total = len(files)
+    if total <= _SKILLS_PAGE_RENDER_LIMIT:
+        return _all_sidecars(), total, True
+
+    sidecars: list[dict] = []
+    for path in files[:_SKILLS_PAGE_RENDER_LIMIT]:
+        sidecar = _read_sidecar_file(path)
+        if sidecar is not None:
+            sidecars.append(sidecar)
+    return sidecars, total, False
+
+
 # ─── Aggregations ────────────────────────────────────────────────────────────
 
 
@@ -2623,6 +2644,30 @@ def _dashboard_graph_index_archives() -> list[Path]:
     return archives
 
 
+def _packaged_graph_export_id() -> str | None:
+    global _PACKAGED_GRAPH_EXPORT_ID_CACHE
+    if isinstance(_PACKAGED_GRAPH_EXPORT_ID_CACHE, bool):
+        return None
+    if isinstance(_PACKAGED_GRAPH_EXPORT_ID_CACHE, str):
+        return _PACKAGED_GRAPH_EXPORT_ID_CACHE
+    module_root = Path(__file__).resolve().parent.parent
+    try:
+        data = json.loads(
+            (module_root / "graph" / "communities.json").read_text(
+                encoding="utf-8",
+            )
+        )
+    except (OSError, json.JSONDecodeError):
+        _PACKAGED_GRAPH_EXPORT_ID_CACHE = False
+        return None
+    export_id = data.get("export_id") if isinstance(data, dict) else None
+    if isinstance(export_id, str) and export_id.strip():
+        _PACKAGED_GRAPH_EXPORT_ID_CACHE = export_id.strip()
+        return export_id.strip()
+    _PACKAGED_GRAPH_EXPORT_ID_CACHE = False
+    return None
+
+
 def _archive_graph_export_id(archive: Path) -> str | None:
     try:
         with tarfile.open(archive, "r:gz") as tar:
@@ -2652,13 +2697,20 @@ def _ensure_dashboard_graph_index() -> Path | None:
             target.unlink()
         except OSError:
             return None
-    if (_wiki_dir() / "graphify-out" / "graph-report.md").is_file():
+
+    manifest_export_id = _dashboard_graph_manifest_export_id()
+    packaged_export_id = _packaged_graph_export_id()
+    if (
+        manifest_export_id is not None
+        and packaged_export_id is not None
+        and manifest_export_id != packaged_export_id
+    ):
         return None
 
     archives = _dashboard_graph_index_archives()
     if not archives:
         return None
-    if _dashboard_graph_manifest_export_id() is None:
+    if manifest_export_id is None:
         return None
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -2672,8 +2724,7 @@ def _ensure_dashboard_graph_index() -> Path | None:
                 except OSError:
                     return None
             for archive in archives:
-                archive_export_id = _archive_graph_export_id(archive)
-                manifest_export_id = _dashboard_graph_manifest_export_id()
+                archive_export_id = packaged_export_id or _archive_graph_export_id(archive)
                 if manifest_export_id and archive_export_id and archive_export_id != manifest_export_id:
                     continue
                 try:
@@ -2992,6 +3043,15 @@ def _graph_neighborhood(
         )
         if indexed is not None:
             return indexed
+    manifest_export_id = _dashboard_graph_manifest_export_id()
+    packaged_export_id = _packaged_graph_export_id()
+    if (
+        not _dashboard_graph_index_path().is_file()
+        and manifest_export_id is not None
+        and packaged_export_id is not None
+        and manifest_export_id != packaged_export_id
+    ):
+        return {"nodes": [], "edges": [], "center": None}
     try:
         G = _load_dashboard_graph()
     except Exception:  # noqa: BLE001 — graph is advisory; blank on error
@@ -3419,7 +3479,7 @@ def _render_session_detail(session_id: str) -> str:
 
 
 def _render_skills() -> str:
-    sidecars = _all_sidecars()
+    sidecars, total_sidecars, complete_sidecar_list = _skills_page_sidecars()
     sidecars.sort(key=lambda s: (s.get("grade", "F"), -s.get("raw_score", 0.0)))
 
     # Sidebar stats for the filter UI.
@@ -3471,11 +3531,21 @@ def _render_skills() -> str:
         f"</label>"
         for t in _DASHBOARD_ENTITY_TYPES
     )
+    sample_note = (
+        ""
+        if complete_sidecar_list
+        else (
+            "<p class='muted'>Rendering the first "
+            f"{len(sidecars)} sidecars out of {total_sidecars}. Use Wiki, Graph, "
+            "or direct sidecar URLs for full-catalog lookup.</p>"
+        )
+    )
 
     body = (
         "<h1>Quality sidecars</h1>"
-        f"<p class='muted'>{len(sidecars)} sidecars · click any card to drill in.</p>"
-        "<div style='display:grid; grid-template-columns:220px 1fr; gap:1.25rem; align-items:start;'>"
+        f"<p class='muted'>{total_sidecars} sidecars · click any card to drill in.</p>"
+        + sample_note
+        + "<div style='display:grid; grid-template-columns:220px 1fr; gap:1.25rem; align-items:start;'>"
         # ── Left filter sidebar ──────────────────────────────────────
         "<aside style='position:sticky; top:1rem;'>"
         "<div class='card'><strong>Search</strong>"
@@ -5745,6 +5815,17 @@ def _render_harness_wizard() -> str:
     return _layout("Harness Setup", body)
 
 
+def _kpi_summary_cache_key(sidecar_dir: Path) -> tuple[Any, ...]:
+    parts: list[Any] = []
+    for path in (sidecar_dir, sidecar_dir / "mcp"):
+        try:
+            stat = path.stat()
+            parts.extend((path.resolve(), stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            parts.extend((path.resolve(), None, None))
+    return tuple(parts)
+
+
 def _kpi_summary():
     """Compute the KPI DashboardSummary using the default source layout.
 
@@ -5760,6 +5841,14 @@ def _kpi_summary():
     sidecar_dir = _sidecar_dir()
     if not sidecar_dir.is_dir():
         return None
+    cache_key = _kpi_summary_cache_key(sidecar_dir)
+    global _KPI_SUMMARY_CACHE_AT, _KPI_SUMMARY_CACHE_KEY, _KPI_SUMMARY_CACHE_VALUE
+    if (
+        _KPI_SUMMARY_CACHE_KEY == cache_key
+        and _KPI_SUMMARY_CACHE_VALUE is not None
+        and time.monotonic() - _KPI_SUMMARY_CACHE_AT < _KPI_SUMMARY_CACHE_SECONDS
+    ):
+        return _KPI_SUMMARY_CACHE_VALUE
     try:
         from ctx_config import cfg  # type: ignore
         sources = LifecycleSources(
@@ -5774,9 +5863,13 @@ def _kpi_summary():
             sidecar_dir=sidecar_dir,
         )
     try:
-        return generate(sources=sources, top_n=25)
+        summary = generate(sources=sources, top_n=25)
     except Exception:  # noqa: BLE001
         return None
+    _KPI_SUMMARY_CACHE_KEY = cache_key
+    _KPI_SUMMARY_CACHE_VALUE = summary
+    _KPI_SUMMARY_CACHE_AT = time.monotonic()
+    return summary
 
 
 def _render_kpi() -> str:

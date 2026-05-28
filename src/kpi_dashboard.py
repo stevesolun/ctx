@@ -26,6 +26,7 @@ Design notes:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import logging
 import sys
@@ -41,10 +42,9 @@ from ctx_lifecycle import (
     STATE_ARCHIVE,
     STATE_DEMOTE,
     STATE_WATCH,
-    load_lifecycle_state,
 )
 from skill_category import CATEGORIES, infer_category, read_existing_category
-from skill_quality import QualityScore, load_quality
+from skill_quality import QualityScore
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
 
 _logger = logging.getLogger(__name__)
@@ -54,6 +54,8 @@ _UNCATEGORIZED = "uncategorized"
 _LIFECYCLE_STATES: tuple[str, ...] = (
     STATE_ACTIVE, STATE_WATCH, STATE_DEMOTE, STATE_ARCHIVE,
 )
+_PARALLEL_QUALITY_READ_THRESHOLD = 512
+_QUALITY_READ_WORKERS = 8
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -109,19 +111,33 @@ class DashboardSummary:
 # ────────────────────────────────────────────────────────────────────
 
 
-def _skill_source_path(slug: str, sources: LifecycleSources) -> Path | None:
-    skill_path = sources.skills_dir / slug / "SKILL.md"
-    if skill_path.is_file():
-        return skill_path
-    agent_path = sources.agents_dir / f"{slug}.md"
-    if agent_path.is_file():
-        return agent_path
+def _skill_source_path(
+    slug: str,
+    sources: LifecycleSources,
+    *,
+    subject_type: str | None = None,
+) -> Path | None:
+    if subject_type in (None, "skill"):
+        skill_path = sources.skills_dir / slug / "SKILL.md"
+        if skill_path.is_file():
+            return skill_path
+    if subject_type in (None, "agent"):
+        agent_path = sources.agents_dir / f"{slug}.md"
+        if agent_path.is_file():
+            return agent_path
     return None
 
 
-def _resolve_category(slug: str, sources: LifecycleSources) -> str:
+def _resolve_category(
+    slug: str,
+    sources: LifecycleSources,
+    *,
+    subject_type: str | None = None,
+) -> str:
     """Read existing category, else infer from tags, else uncategorized."""
-    path = _skill_source_path(slug, sources)
+    if subject_type not in (None, "skill", "agent"):
+        return _UNCATEGORIZED
+    path = _skill_source_path(slug, sources, subject_type=subject_type)
     if path is None:
         return _UNCATEGORIZED
     try:
@@ -165,16 +181,38 @@ def _iter_quality_slugs(sidecar_dir: Path) -> list[str]:
     return out
 
 
-def _quality_sources(sidecar_dir: Path) -> list[tuple[str, Path]]:
-    out: list[tuple[str, Path]] = [
-        (slug, sidecar_dir)
+def _quality_sources(sidecar_dir: Path) -> list[tuple[str, Path, Path]]:
+    out: list[tuple[str, Path, Path]] = [
+        (slug, sidecar_dir, sidecar_dir / f"{slug}.json")
         for slug in _iter_quality_slugs(sidecar_dir)
     ]
     mcp_dir = sidecar_dir / "mcp"
     if mcp_dir.is_dir():
         for slug in _iter_quality_slugs(mcp_dir):
-            out.append((slug, mcp_dir))
+            out.append((slug, mcp_dir, mcp_dir / f"{slug}.json"))
     return out
+
+
+def _read_quality_file(
+    path: Path,
+    *,
+    subject_type_override: str | None = None,
+) -> QualityScore | None:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"quality sidecar must be a JSON object: {path}")
+    subject_type = subject_type_override or str(data.get("subject_type") or "skill")
+    return QualityScore(
+        slug=str(data["slug"]),
+        subject_type=subject_type,
+        raw_score=float(data.get("raw_score", 0.0)),
+        score=float(data.get("score", 0.0)),
+        grade=str(data.get("grade") or "D"),
+        hard_floor=data.get("hard_floor"),
+        signals={},
+        weights={},
+        computed_at=str(data.get("computed_at") or ""),
+    )
 
 
 def _iter_lifecycle_slugs(sidecar_dir: Path) -> list[str]:
@@ -182,6 +220,44 @@ def _iter_lifecycle_slugs(sidecar_dir: Path) -> list[str]:
         return []
     suffix = ".lifecycle.json"
     return sorted(p.name[: -len(suffix)] for p in sidecar_dir.glob(f"*{suffix}"))
+
+
+def _read_lifecycle_file(path: Path) -> LifecycleState | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    history_raw = data.get("history", [])
+    history = tuple(
+        dict(e) for e in history_raw if isinstance(e, dict)
+    )
+    try:
+        streak = int(data.get("consecutive_d_count", 0))
+    except (TypeError, ValueError):
+        streak = 0
+    return LifecycleState(
+        slug=str(data.get("slug") or path.name.removesuffix(".lifecycle.json")),
+        subject_type=str(data.get("subject_type") or "skill"),
+        state=str(data.get("state") or STATE_ACTIVE),
+        state_since=str(data.get("state_since") or ""),
+        consecutive_d_count=streak,
+        last_grade=str(data.get("last_grade") or ""),
+        last_seen_computed_at=str(data.get("last_seen_computed_at") or ""),
+        history=history,
+    )
+
+
+def _load_lifecycle_states(sidecar_dir: Path) -> dict[str, LifecycleState]:
+    if not sidecar_dir.is_dir():
+        return {}
+    states: dict[str, LifecycleState] = {}
+    for path in sorted(sidecar_dir.glob("*.lifecycle.json")):
+        state = _read_lifecycle_file(path)
+        if state is not None:
+            states[state.slug] = state
+    return states
 
 
 def _build_row(
@@ -201,7 +277,7 @@ def _build_row(
     return EntityRow(
         slug=slug,
         subject_type=subject,
-        category=_resolve_category(slug, sources),
+        category=_resolve_category(slug, sources, subject_type=subject),
         grade=(score.grade if score is not None else ""),
         score=(score.score if score is not None else 0.0),
         hard_floor=(score.hard_floor if score is not None else None),
@@ -224,28 +300,51 @@ def collect_rows(
     *, sources: LifecycleSources,
 ) -> list[EntityRow]:
     """Walk both sinks and return one row per known slug (union)."""
-    quality_rows: list[tuple[str, Path, QualityScore | None, LifecycleState | None]] = []
-    quality_subjects: set[tuple[str, str]] = set()
-    for slug, sidecar_dir in _quality_sources(sources.sidecar_dir):
+    lifecycle_cache: dict[Path, dict[str, LifecycleState]] = {}
+
+    def lifecycle_states(sidecar_dir: Path) -> dict[str, LifecycleState]:
+        if sidecar_dir not in lifecycle_cache:
+            lifecycle_cache[sidecar_dir] = _load_lifecycle_states(sidecar_dir)
+        return lifecycle_cache[sidecar_dir]
+
+    def load_quality_source(
+        source: tuple[str, Path, Path],
+    ) -> tuple[str, Path, QualityScore | None]:
+        slug, sidecar_dir, sidecar_path = source
         try:
-            score = load_quality(
-                slug,
-                sidecar_dir=sidecar_dir,
+            score = _read_quality_file(
+                sidecar_path,
+                subject_type_override=(
+                    "mcp-server" if sidecar_dir.name == "mcp" else None
+                ),
             )
-        except (json.JSONDecodeError, ValueError, OSError) as exc:
+        except (json.JSONDecodeError, ValueError, OSError, KeyError, TypeError) as exc:
             _logger.warning("kpi_dashboard: skipping %s: %s", slug, exc)
             score = None
+        return slug, sidecar_dir, score
+
+    quality_sources = _quality_sources(sources.sidecar_dir)
+    if len(quality_sources) >= _PARALLEL_QUALITY_READ_THRESHOLD:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=_QUALITY_READ_WORKERS,
+        ) as pool:
+            quality_results = list(pool.map(load_quality_source, quality_sources))
+    else:
+        quality_results = [load_quality_source(source) for source in quality_sources]
+
+    quality_rows: list[tuple[str, Path, QualityScore | None, LifecycleState | None]] = []
+    quality_subjects: set[tuple[str, str]] = set()
+    for slug, sidecar_dir, score in quality_results:
         if score is not None:
             quality_subjects.add((slug, score.subject_type))
         quality_rows.append((slug, sidecar_dir, score, None))
 
     lifecycle_rows: list[tuple[str, Path, QualityScore | None, LifecycleState | None]] = []
-    for slug in _iter_lifecycle_slugs(sources.sidecar_dir):
-        lc = load_lifecycle_state(slug, sidecar_dir=sources.sidecar_dir)
-        if lc is None:
-            continue
-        if (slug, lc.subject_type) not in quality_subjects:
-            lifecycle_rows.append((slug, sources.sidecar_dir, None, lc))
+    for lifecycle_slug, lifecycle_state in lifecycle_states(sources.sidecar_dir).items():
+        if (lifecycle_slug, lifecycle_state.subject_type) not in quality_subjects:
+            lifecycle_rows.append(
+                (lifecycle_slug, sources.sidecar_dir, None, lifecycle_state)
+            )
 
     row_sources = sorted(
         quality_rows + lifecycle_rows,
@@ -259,12 +358,12 @@ def collect_rows(
             if sidecar_dir != sources.sidecar_dir:
                 candidates.append(sources.sidecar_dir)
             for candidate_dir in candidates:
-                candidate = load_lifecycle_state(slug, sidecar_dir=candidate_dir)
+                candidate = lifecycle_states(candidate_dir).get(slug)
                 if candidate is not None and candidate.subject_type == score.subject_type:
                     lc = candidate
                     break
         elif lc is None:
-            lc = load_lifecycle_state(slug, sidecar_dir=sidecar_dir)
+            lc = lifecycle_states(sidecar_dir).get(slug)
         if lc is not None:
             state = lc.state
             streak = lc.consecutive_d_count
