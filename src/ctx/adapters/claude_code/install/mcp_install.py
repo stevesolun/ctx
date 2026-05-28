@@ -59,6 +59,7 @@ from pathlib import Path
 from ctx_config import cfg
 from ctx.adapters.claude_code.install.install_utils import (
     bump_entity_status,
+    load_manifest,
     record_install,
     record_uninstall,
 )
@@ -464,6 +465,16 @@ def install_mcp(
     existing_status = fm.get("status", "")
 
     if existing_status == "installed" and not force:
+        manifest_extra: dict[str, str] = {}
+        install_cmd = fm.get("install_cmd")
+        if isinstance(install_cmd, str) and install_cmd:
+            manifest_extra["command"] = install_cmd
+        record_install(
+            slug,
+            entity_type="mcp-server",
+            source="ctx-mcp-install",
+            extra=manifest_extra,
+        )
         return InstallResult(
             slug=slug, status="skipped-existing", command=None,
             message="already installed; pass --force to reinstall",
@@ -643,9 +654,14 @@ def uninstall_mcp(
         )
 
     entity = _entity_path(wiki_dir, slug)
+    manifest_entry = _manifest_load_entry(slug)
     if entity.is_file():
         fm = _parse_entity_frontmatter(entity)
-        if fm.get("status", "") != "installed" and not force:
+        if (
+            fm.get("status", "") != "installed"
+            and manifest_entry is None
+            and not force
+        ):
             return UninstallResult(
                 slug=slug, status="not-installed",
                 message="entity status is not 'installed'; pass --force to run claude mcp remove anyway",
@@ -677,6 +693,17 @@ def uninstall_mcp(
         slug=slug, status="uninstalled",
         message=stdout.strip() or "removed",
     )
+
+
+def _manifest_load_entry(slug: str) -> dict | None:
+    manifest = load_manifest()
+    for entry in manifest.get("load", []):
+        if (
+            entry.get("skill") == slug
+            and entry.get("entity_type", "skill") == "mcp-server"
+        ):
+            return entry
+    return None
 
 
 # ── CLIs ─────────────────────────────────────────────────────────────────────

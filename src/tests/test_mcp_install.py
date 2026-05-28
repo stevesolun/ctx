@@ -274,6 +274,28 @@ class TestInstallMcp:
         )
         assert r.status == "skipped-existing"
 
+    def test_already_installed_reconciles_missing_manifest(
+        self,
+        wiki_dir: Path,
+        isolated_manifest: Path,
+    ) -> None:
+        _write_entity(
+            wiki_dir,
+            "gh",
+            {"status": "installed", "install_cmd": "npx -y old-pkg"},
+        )
+
+        r = mcp_install.install_mcp("gh", wiki_dir=wiki_dir, auto=True)
+
+        assert r.status == "skipped-existing"
+        manifest = install_utils.load_manifest()
+        assert manifest["load"] == [{
+            "skill": "gh",
+            "entity_type": "mcp-server",
+            "source": "ctx-mcp-install",
+            "command": "npx -y old-pkg",
+        }]
+
     def test_force_overrides_skip(
         self,
         wiki_dir: Path,
@@ -286,6 +308,41 @@ class TestInstallMcp:
             auto=True, force=True,
         )
         assert r.status == "installed"
+
+    def test_force_reinstall_updates_existing_manifest_command(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+    ) -> None:
+        _write_entity(
+            wiki_dir,
+            "gh",
+            {"status": "installed", "install_cmd": "npx -y old-pkg"},
+        )
+        install_utils.record_install(
+            "gh",
+            entity_type="mcp-server",
+            source="ctx-mcp-install",
+            extra={"command": "npx -y old-pkg"},
+        )
+
+        r = mcp_install.install_mcp(
+            "gh",
+            wiki_dir=wiki_dir,
+            command="npx -y new-pkg",
+            auto=True,
+            force=True,
+        )
+
+        assert r.status == "installed"
+        manifest = install_utils.load_manifest()
+        assert manifest["load"] == [{
+            "skill": "gh",
+            "entity_type": "mcp-server",
+            "source": "ctx-mcp-install",
+            "command": "npx -y new-pkg",
+        }]
 
     def test_no_command_no_json(self, wiki_dir: Path) -> None:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
@@ -693,12 +750,46 @@ class TestUninstallMcp:
         assert r.status == "not-installed"
 
     def test_not_installed_short_circuits(
-        self, wiki_dir: Path, fake_claude: dict[str, Any]
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
     ) -> None:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
         r = mcp_install.uninstall_mcp("gh", wiki_dir=wiki_dir)
         assert r.status == "not-installed"
         assert fake_claude["calls"] == []
+
+    def test_manifest_loaded_cataloged_entity_can_uninstall(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+    ) -> None:
+        entity = _write_entity(
+            wiki_dir,
+            "gh",
+            {"status": "cataloged", "install_cmd": "npx -y pkg"},
+        )
+        install_utils.record_install(
+            "gh",
+            entity_type="mcp-server",
+            source="ctx-mcp-install",
+            extra={"command": "npx -y pkg"},
+        )
+
+        result = mcp_install.uninstall_mcp("gh", wiki_dir=wiki_dir)
+
+        assert result.status == "uninstalled"
+        assert "status: cataloged" in entity.read_text(encoding="utf-8")
+        manifest = install_utils.load_manifest()
+        assert manifest["load"] == []
+        assert manifest["unload"] == [{
+            "skill": "gh",
+            "entity_type": "mcp-server",
+            "source": "ctx-mcp-uninstall",
+            "command": "npx -y pkg",
+        }]
 
     def test_dry_run(
         self, wiki_dir: Path, fake_claude: dict[str, Any]
@@ -920,6 +1011,7 @@ class TestInstallMain:
         self,
         wiki_dir: Path,
         fake_claude: dict[str, Any],
+        isolated_manifest: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})

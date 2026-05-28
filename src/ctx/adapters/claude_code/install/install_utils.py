@@ -134,18 +134,37 @@ def record_install(
     when an agent with the same slug already existed.)
     """
     def mutate(manifest: dict) -> None:
-        loaded: set[tuple[str, str]] = {
-            (e.get("skill"), e.get("entity_type", "skill"))
-            for e in manifest["load"]
+        entry: dict = {
+            "skill": slug,
+            "entity_type": entity_type,
+            "source": source,
         }
-        if (slug, entity_type) not in loaded:
-            entry: dict = {
-                "skill": slug,
-                "entity_type": entity_type,
-                "source": source,
-            }
-            if extra:
-                entry.update(extra)
+        if extra:
+            entry.update(extra)
+
+        replaced = False
+        stale_extra_fields = {
+            "command",
+            "json_config_sha256",
+            "json_config_keys",
+            "json_config_command",
+            "json_config_args_count",
+            "json_config_env_keys",
+            "priority",
+            "reason",
+        }
+        for existing in manifest["load"]:
+            if (
+                existing.get("skill") == slug
+                and existing.get("entity_type", "skill") == entity_type
+            ):
+                for field in stale_extra_fields - set(entry):
+                    existing.pop(field, None)
+                existing.update(entry)
+                replaced = True
+                break
+
+        if not replaced:
             manifest["load"].append(entry)
 
         manifest["unload"] = [
