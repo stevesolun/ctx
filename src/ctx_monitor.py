@@ -96,6 +96,8 @@ _OVERLAY_INDEX_COVERAGE_CACHE_KEY: tuple[Any, ...] | None = None
 _OVERLAY_INDEX_COVERAGE_CACHE_VALUE: bool | None = None
 _SIDECAR_INDEX_CACHE_KEY: tuple[tuple[Path, float, int], ...] | None = None
 _SIDECAR_INDEX_CACHE_VALUE: dict[tuple[str, str], dict] | None = None
+_SIDECAR_FILTER_CACHE_SIGNATURE: tuple[Any, ...] | None = None
+_SIDECAR_FILTER_CACHE_VALUE: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
 _KPI_SUMMARY_CACHE_KEY: tuple[Any, ...] | None = None
 _KPI_SUMMARY_CACHE_VALUE: Any | None = None
 _KPI_SUMMARY_CACHE_AT = 0.0
@@ -1828,6 +1830,92 @@ def _sidecar_card_payload(sidecar: dict) -> dict[str, Any]:
     }
 
 
+def _sidecar_filter_signature(files: list[Path]) -> tuple[Any, ...]:
+    roots = (_sidecar_dir(), _sidecar_dir() / "mcp")
+    root_counts = {
+        root.resolve(): sum(1 for path in files if path.parent == root)
+        for root in roots
+    }
+    signature: list[tuple[str, int, int]] = []
+    for root in roots:
+        if not root.is_dir():
+            signature.append((str(root.resolve()), 0, 0))
+            continue
+        stat = root.stat()
+        signature.append((
+            str(root.resolve()),
+            int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
+            root_counts.get(root.resolve(), 0),
+        ))
+    return tuple(signature)
+
+
+def _sidecar_candidate_files(
+    files: list[Path],
+    *,
+    q: str,
+    types: set[str],
+) -> list[Path]:
+    q_lower = q.lower()
+    candidates = [
+        path for path in files
+        if not q_lower or q_lower in path.stem.lower()
+    ]
+    if not types:
+        return candidates
+    if types == {"mcp-server"}:
+        return [path for path in candidates if path.parent.name == "mcp"]
+    if "mcp-server" not in types:
+        return [path for path in candidates if path.parent.name != "mcp"]
+    return candidates
+
+
+def _filtered_sidecar_records(
+    files: list[Path],
+    *,
+    q: str,
+    types: set[str],
+    grades: set[str],
+    hide_floor: bool,
+) -> list[dict[str, Any]]:
+    """Return cached filtered sidecar card records for /skills search."""
+    global _SIDECAR_FILTER_CACHE_SIGNATURE, _SIDECAR_FILTER_CACHE_VALUE
+
+    signature = _sidecar_filter_signature(files)
+    if _SIDECAR_FILTER_CACHE_SIGNATURE != signature:
+        _SIDECAR_FILTER_CACHE_SIGNATURE = signature
+        _SIDECAR_FILTER_CACHE_VALUE = {}
+    cache_key = (
+        q.lower(),
+        tuple(sorted(types)),
+        tuple(sorted(grades)),
+        hide_floor,
+    )
+    cached = _SIDECAR_FILTER_CACHE_VALUE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    records: list[dict[str, Any]] = []
+    for path in _sidecar_candidate_files(files, q=q, types=types):
+        sidecar = _read_sidecar_file(path)
+        if sidecar is None:
+            continue
+        if not _sidecar_matches_filters(
+            sidecar,
+            q=q,
+            types=types,
+            grades=grades,
+            hide_floor=hide_floor,
+        ):
+            continue
+        records.append(_sidecar_card_payload(sidecar))
+    records.sort(key=_sidecar_sort_key)
+    if len(_SIDECAR_FILTER_CACHE_VALUE) >= 32:
+        _SIDECAR_FILTER_CACHE_VALUE.clear()
+    _SIDECAR_FILTER_CACHE_VALUE[cache_key] = records
+    return records
+
+
 def _sidecar_matches_filters(
     sidecar: dict,
     *,
@@ -1846,13 +1934,7 @@ def _sidecar_matches_filters(
     if hide_floor and floor:
         return False
     if q:
-        haystack = " ".join((
-            str(sidecar.get("slug") or ""),
-            entity_type,
-            grade,
-            floor,
-        )).lower()
-        return q.lower() in haystack
+        return q.lower() in str(sidecar.get("slug") or "").lower()
     return True
 
 
@@ -1876,19 +1958,13 @@ def _sidecar_page_payload(qs: dict[str, str] | None = None) -> dict[str, Any]:
     catalog_total = len(files)
     has_filters = bool(q or types or grades or hide_floor)
     if has_filters:
-        sidecars = [
-            sidecar
-            for path in files
-            if (sidecar := _read_sidecar_file(path)) is not None
-            and _sidecar_matches_filters(
-                sidecar,
-                q=q,
-                types=types,
-                grades=grades,
-                hide_floor=hide_floor,
-            )
-        ]
-        sidecars.sort(key=_sidecar_sort_key)
+        sidecars = _filtered_sidecar_records(
+            files,
+            q=q,
+            types=types,
+            grades=grades,
+            hide_floor=hide_floor,
+        )
         total = len(sidecars)
         start = (page - 1) * limit
         page_sidecars = sidecars[start:start + limit]

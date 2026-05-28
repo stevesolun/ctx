@@ -29,6 +29,10 @@ def fake_claude(tmp_path: Path, monkeypatch) -> Path:
     (claude / "skill-quality").mkdir(parents=True)
     monkeypatch.setattr(cm, "_claude_dir", lambda: claude)
     monkeypatch.setattr(cm, "_dashboard_graph_index_archives", lambda: [])
+    monkeypatch.setattr(cm, "_SIDECAR_INDEX_CACHE_KEY", None)
+    monkeypatch.setattr(cm, "_SIDECAR_INDEX_CACHE_VALUE", None)
+    monkeypatch.setattr(cm, "_SIDECAR_FILTER_CACHE_SIGNATURE", None)
+    monkeypatch.setattr(cm, "_SIDECAR_FILTER_CACHE_VALUE", {})
     monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_KEY", None)
     monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_VALUE", None)
     monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_AT", 0.0)
@@ -2411,7 +2415,7 @@ def test_render_skills_emits_sidebar_filters(fake_claude: Path) -> None:
                                        "subject_type": "agent",
                                        "hard_floor": "intake_fail"})
     html_out = cm._render_skills()
-    # Sidebar must expose a text search + grade checkboxes + type checkboxes.
+    # Sidebar must expose text search plus grade/type filters.
     assert "id='skill-search'" in html_out
     assert "class='grade-filter'" in html_out
     assert "class='type-filter'" in html_out
@@ -2486,6 +2490,48 @@ def test_sidecar_page_payload_filters_type_grade_and_floor(fake_claude: Path) ->
 
     assert payload["total"] == 1
     assert payload["items"][0]["slug"] == "agent-a"
+
+
+def test_sidecar_page_payload_reuses_cached_search_records(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for slug in ("alpha-review", "beta-review"):
+        _write_sidecar(fake_claude, slug, {
+            "slug": slug,
+            "grade": "A",
+            "raw_score": 0.9,
+            "subject_type": "skill",
+        })
+    original_read = cm._read_sidecar_file
+    reads = 0
+
+    def counting_read(path: Path) -> dict | None:
+        nonlocal reads
+        reads += 1
+        return original_read(path)
+
+    monkeypatch.setattr(cm, "_read_sidecar_file", counting_read)
+
+    first = cm._sidecar_page_payload({"q": "review"})
+    reads_after_first_search = reads
+    second = cm._sidecar_page_payload({"q": "review"})
+
+    assert [item["slug"] for item in first["items"]] == ["alpha-review", "beta-review"]
+    assert [item["slug"] for item in second["items"]] == ["alpha-review", "beta-review"]
+    assert reads_after_first_search == 2
+    assert reads == reads_after_first_search
+
+    _write_sidecar(fake_claude, "delta-review", {
+        "slug": "delta-review",
+        "grade": "A",
+        "raw_score": 0.8,
+        "subject_type": "skill",
+    })
+    refreshed = cm._sidecar_page_payload({"q": "delta"})
+
+    assert [item["slug"] for item in refreshed["items"]] == ["delta-review"]
+    assert reads > reads_after_first_search
 
 
 def test_render_wiki_index_lists_entities(fake_claude: Path) -> None:
