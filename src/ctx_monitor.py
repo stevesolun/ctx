@@ -72,6 +72,7 @@ import threading
 import time
 import zlib
 from collections import defaultdict, deque
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -97,6 +98,7 @@ _WIKI_INDEX_LIMIT_PER_TYPE = 500
 _GRAPH_REPORT_RE = re.compile(r"Nodes:\s*([\d,]+)\s*\|\s*Edges:\s*([\d,]+)")
 _MAX_POST_BODY_BYTES = 64 * 1024
 _DASHBOARD_INDEX_MEMBER = "graphify-out/dashboard-neighborhoods.sqlite3"
+_READ_TOKEN_COOKIE = "ctx_monitor_read_token"
 
 
 # ─── Data sources ────────────────────────────────────────────────────────────
@@ -130,6 +132,18 @@ def _origin_host_name(origin: str) -> str:
     if parsed.scheme not in {"http", "https"}:
         return ""
     return (parsed.hostname or "").rstrip(".").lower()
+
+
+def _read_token_cookie(cookie_header: str) -> str:
+    if not cookie_header:
+        return ""
+    try:
+        cookie = SimpleCookie()
+        cookie.load(cookie_header)
+    except CookieError:
+        return ""
+    morsel = cookie.get(_READ_TOKEN_COOKIE)
+    return morsel.value if morsel is not None else ""
 
 
 def _claude_dir() -> Path:
@@ -6436,13 +6450,23 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         request_host = _request_host_name(self.headers.get("Host", ""))
         if self._mutations_enabled():
             return _host_allows_mutations(request_host)
-        token = self.headers.get("X-CTX-Monitor-Token") or qs.get("token", "")
+        token = (
+            self.headers.get("X-CTX-Monitor-Token")
+            or qs.get("token", "")
+            or _read_token_cookie(self.headers.get("Cookie", ""))
+        )
         return bool(_MONITOR_TOKEN) and secrets.compare_digest(token, _MONITOR_TOKEN)
 
     def _send_security_headers(self, *, html_response: bool = False) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "DENY")
+        if getattr(self, "_ctx_set_read_cookie", False):
+            self.send_header(
+                "Set-Cookie",
+                f"{_READ_TOKEN_COOKIE}={_MONITOR_TOKEN}; Path=/; "
+                "HttpOnly; SameSite=Strict",
+            )
         if html_response:
             self.send_header(
                 "Content-Security-Policy",
@@ -6507,6 +6531,7 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             from urllib.parse import parse_qs
             qs = {k: v[0] for k, v in parse_qs(raw_query).items()}
         try:
+            self._ctx_set_read_cookie = False
             read_authorized = getattr(self, "_read_authorized", lambda _qs: True)
             if not read_authorized(qs):
                 if path.startswith("/api/"):
@@ -6521,6 +6546,13 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                         "<p>monitor read token required on non-loopback bind</p>",
                     )
                 return
+            query_token = qs.get("token", "")
+            self._ctx_set_read_cookie = (
+                not self._mutations_enabled()
+                and bool(query_token)
+                and bool(_MONITOR_TOKEN)
+                and secrets.compare_digest(query_token, _MONITOR_TOKEN)
+            )
             if path == "/":
                 self._send_html(_render_home())
             elif path == "/sessions":
@@ -6858,16 +6890,16 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
     """Run the monitor. Blocks until Ctrl+C."""
     global _MONITOR_TOKEN
     server = _make_monitor_server(host, port)
-    _MONITOR_TOKEN = (
-        secrets.token_urlsafe(32)
-        if bool(getattr(server, "_ctx_mutations_enabled", False))
-        else ""
-    )
+    _MONITOR_TOKEN = secrets.token_urlsafe(32)
+    mutations_enabled = bool(getattr(server, "_ctx_mutations_enabled", False))
     url = f"http://{host}:{port}/"
+    if not mutations_enabled:
+        url = f"{url}?token={_MONITOR_TOKEN}"
     print(f"ctx-monitor serving at {url}  (Ctrl+C to stop)", flush=True)
-    if not bool(getattr(server, "_ctx_mutations_enabled", False)):
+    if not mutations_enabled:
         print(
-            "ctx-monitor: non-loopback bind; load/unload mutations disabled",
+            "ctx-monitor: non-loopback bind; read token required and "
+            "load/unload mutations disabled",
             flush=True,
         )
     try:

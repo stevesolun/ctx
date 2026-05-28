@@ -193,6 +193,46 @@ class TestCollectRows:
             ("filesystem", "mcp-server")
         ]
 
+    def test_lifecycle_only_mcp_keeps_subject_type(
+        self, sources: cl.LifecycleSources,
+    ) -> None:
+        _write_lifecycle(
+            sources.sidecar_dir,
+            "filesystem",
+            subject_type="mcp-server",
+            state=cl.STATE_ARCHIVE,
+        )
+
+        rows = kd.collect_rows(sources=sources)
+
+        assert [(r.slug, r.subject_type, r.lifecycle_state) for r in rows] == [
+            ("filesystem", "mcp-server", cl.STATE_ARCHIVE)
+        ]
+
+    def test_lifecycle_only_mcp_is_not_dropped_by_same_slug_skill_quality(
+        self, sources: cl.LifecycleSources,
+    ) -> None:
+        _write_quality(
+            sources.sidecar_dir,
+            "langgraph",
+            subject_type="skill",
+            grade="B",
+            score=0.65,
+        )
+        _write_lifecycle(
+            sources.sidecar_dir,
+            "langgraph",
+            subject_type="mcp-server",
+            state=cl.STATE_ARCHIVE,
+        )
+
+        rows = kd.collect_rows(sources=sources)
+
+        assert sorted((r.slug, r.subject_type, r.grade, r.lifecycle_state) for r in rows) == [
+            ("langgraph", "mcp-server", "", cl.STATE_ARCHIVE),
+            ("langgraph", "skill", "B", cl.STATE_ACTIVE),
+        ]
+
     def test_duplicate_skill_and_mcp_slugs_are_distinct_rows(
         self, sources: cl.LifecycleSources,
     ) -> None:

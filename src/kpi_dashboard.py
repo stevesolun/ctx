@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from ctx_lifecycle import (
+    LifecycleState,
     LifecycleSources,
     STATE_ACTIVE,
     STATE_ARCHIVE,
@@ -187,11 +188,16 @@ def _build_row(
     slug: str,
     *,
     score: QualityScore | None,
+    lifecycle_subject_type: str | None = None,
     lifecycle_state: str,
     consecutive_d_count: int,
     sources: LifecycleSources,
 ) -> EntityRow:
-    subject = score.subject_type if score is not None else _guess_subject(slug, sources)
+    subject = (
+        score.subject_type
+        if score is not None
+        else lifecycle_subject_type or _guess_subject(slug, sources)
+    )
     return EntityRow(
         slug=slug,
         subject_type=subject,
@@ -218,16 +224,9 @@ def collect_rows(
     *, sources: LifecycleSources,
 ) -> list[EntityRow]:
     """Walk both sinks and return one row per known slug (union)."""
-    quality_sources = _quality_sources(sources.sidecar_dir)
-    quality_keys = set(quality_sources)
-    quality_slugs = {slug for slug, _sidecar_dir in quality_sources}
-    lifecycle_slugs = set(_iter_lifecycle_slugs(sources.sidecar_dir))
-    row_sources = sorted(quality_keys, key=lambda item: (item[0], str(item[1]))) + [
-        (slug, sources.sidecar_dir)
-        for slug in sorted(lifecycle_slugs - quality_slugs)
-    ]
-    rows: list[EntityRow] = []
-    for slug, sidecar_dir in row_sources:
+    quality_rows: list[tuple[str, Path, QualityScore | None, LifecycleState | None]] = []
+    quality_subjects: set[tuple[str, str]] = set()
+    for slug, sidecar_dir in _quality_sources(sources.sidecar_dir):
         try:
             score = load_quality(
                 slug,
@@ -236,17 +235,49 @@ def collect_rows(
         except (json.JSONDecodeError, ValueError, OSError) as exc:
             _logger.warning("kpi_dashboard: skipping %s: %s", slug, exc)
             score = None
-        lc = load_lifecycle_state(slug, sidecar_dir=sidecar_dir)
+        if score is not None:
+            quality_subjects.add((slug, score.subject_type))
+        quality_rows.append((slug, sidecar_dir, score, None))
+
+    lifecycle_rows: list[tuple[str, Path, QualityScore | None, LifecycleState | None]] = []
+    for slug in _iter_lifecycle_slugs(sources.sidecar_dir):
+        lc = load_lifecycle_state(slug, sidecar_dir=sources.sidecar_dir)
+        if lc is None:
+            continue
+        if (slug, lc.subject_type) not in quality_subjects:
+            lifecycle_rows.append((slug, sources.sidecar_dir, None, lc))
+
+    row_sources = sorted(
+        quality_rows + lifecycle_rows,
+        key=lambda item: (item[0], str(item[1]), item[3].subject_type if item[3] else ""),
+    )
+    rows: list[EntityRow] = []
+    for slug, sidecar_dir, score, lifecycle_override in row_sources:
+        lc = lifecycle_override
+        if lc is None and score is not None:
+            candidates = [sidecar_dir]
+            if sidecar_dir != sources.sidecar_dir:
+                candidates.append(sources.sidecar_dir)
+            for candidate_dir in candidates:
+                candidate = load_lifecycle_state(slug, sidecar_dir=candidate_dir)
+                if candidate is not None and candidate.subject_type == score.subject_type:
+                    lc = candidate
+                    break
+        elif lc is None:
+            lc = load_lifecycle_state(slug, sidecar_dir=sidecar_dir)
         if lc is not None:
             state = lc.state
             streak = lc.consecutive_d_count
+            lifecycle_subject_type = lc.subject_type
         else:
             state = STATE_ACTIVE
             streak = 0
+            lifecycle_subject_type = None
         rows.append(
             _build_row(
                 slug,
                 score=score,
+                lifecycle_subject_type=lifecycle_subject_type,
                 lifecycle_state=state,
                 consecutive_d_count=streak,
                 sources=sources,

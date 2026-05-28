@@ -10,7 +10,7 @@ and harness wiki/graph browsing.
 ```bash
 ctx-monitor serve              # http://127.0.0.1:8765
 ctx-monitor serve --port 8888  # custom port
-ctx-monitor serve --host 0.0.0.0 --port 8888  # LAN-visible HTML only (explicit opt-in)
+ctx-monitor serve --host 0.0.0.0 --port 8888  # LAN read-only with startup token URL
 ```
 
 Zero Python dependencies added by the dashboard. Everything runs on
@@ -197,7 +197,9 @@ per-process monitor token injected into the rendered page.
 ### Mutation endpoints
 
 Dashboard GET views are read-only. When `ctx-monitor` is bound to a
-non-loopback host, `/api/*` JSON and SSE routes are disabled; keep the
+non-loopback host, HTML, `/api/*` JSON, and SSE routes require the
+read-token URL printed by `ctx-monitor`; the first successful token URL
+sets an HttpOnly same-site cookie for dashboard navigation. Keep the
 default loopback bind for local automation. Both POST endpoints enforce
 same-origin (browser tab open on another origin can't forge a request), require the per-process
 `X-CTX-Monitor-Token` injected into the dashboard page, and reject any
@@ -292,8 +294,10 @@ observability proof that ctx's telemetry pipeline is live.
 ## Security
 
 - **Binds to 127.0.0.1 by default**. Use `--host 0.0.0.0` only if
-  you actually want LAN-visible. No authentication; the server is
-  intended for a local developer's own machine.
+  you actually want LAN-visible read-only access. The startup output
+  prints a one-process read-token URL; without that token or the cookie
+  it sets, LAN HTML/API/SSE requests return 403. Mutations remain
+  disabled on non-loopback binds.
 - **Same-origin gating on mutation**. Any POST with an `Origin`
   header that doesn't match `Host` returns 403. Curl and direct
   tool calls are allowed (no Origin header at all).

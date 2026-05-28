@@ -943,9 +943,11 @@ def test_monitor_non_loopback_bind_is_read_only(
         ) as response:
             loaded_html = response.read().decode("utf-8")
             csp = response.headers.get("Content-Security-Policy", "")
+            cookie = response.headers.get("Set-Cookie", "")
         assert "browser-token" not in loaded_html
         assert "Read-only mode" in loaded_html
         assert "script-src 'self' 'unsafe-inline'" in csp
+        assert "ctx_monitor_read_token=browser-token" in cookie
 
         with pytest.raises(urllib.error.HTTPError) as excinfo:
             urllib.request.urlopen(
@@ -955,6 +957,17 @@ def test_monitor_non_loopback_bind_is_read_only(
         assert excinfo.value.code == 403
         body = json.loads(excinfo.value.read().decode("utf-8"))
         assert "read token required" in body["detail"]
+
+        status, body = _get_raw(
+            port,
+            "/api/manifest.json",
+            headers={
+                "Host": f"127.0.0.1:{port}",
+                "Cookie": "ctx_monitor_read_token=browser-token",
+            },
+        )
+        assert status == 200
+        assert body["load"] == []
 
         status, body = _post_json(
             port,
@@ -969,6 +982,31 @@ def test_monitor_non_loopback_bind_is_read_only(
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_serve_generates_read_token_for_non_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeServer:
+        _ctx_mutations_enabled = False
+
+        def serve_forever(self) -> None:
+            raise KeyboardInterrupt
+
+        def server_close(self) -> None:
+            return None
+
+    monkeypatch.setattr(cm, "_MONITOR_TOKEN", "")
+    monkeypatch.setattr(cm, "_make_monitor_server", lambda _host, _port: FakeServer())
+    monkeypatch.setattr(cm.secrets, "token_urlsafe", lambda _size: "lan-token")
+
+    cm.serve(host="0.0.0.0", port=8765)
+
+    assert cm._MONITOR_TOKEN == "lan-token"
+    out = capsys.readouterr().out
+    assert "http://0.0.0.0:8765/?token=lan-token" in out
+    assert "read token required" in out
 
 
 def test_host_allows_mutations_only_for_loopback() -> None:
