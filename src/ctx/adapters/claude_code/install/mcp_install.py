@@ -465,15 +465,15 @@ def install_mcp(
     existing_status = fm.get("status", "")
 
     if existing_status == "installed" and not force:
-        manifest_extra: dict[str, str] = {}
+        skipped_extra: dict[str, str] = {}
         install_cmd = fm.get("install_cmd")
         if isinstance(install_cmd, str) and install_cmd:
-            manifest_extra["command"] = install_cmd
+            skipped_extra["command"] = install_cmd
         record_install(
             slug,
             entity_type="mcp-server",
             source="ctx-mcp-install",
-            extra=manifest_extra,
+            extra=skipped_extra,
         )
         return InstallResult(
             slug=slug, status="skipped-existing", command=None,
