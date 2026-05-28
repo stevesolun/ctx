@@ -341,6 +341,8 @@ class TestLoadGraph:
         assert edge["similarity_score"] == pytest.approx(0.8)
         assert edge["method"] == "ann_attach_v1"
         assert "shared_tags" not in edge
+        assert not G.has_edge("skill:A", "skill:C")
+        assert G.has_edge("skill:B", "skill:C")
 
     def test_entity_overlay_does_not_lower_existing_edge(self, tmp_path: Path) -> None:
         source = _build_simple_graph()

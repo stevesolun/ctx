@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import math
 import re
 import sqlite3
 import tarfile
@@ -464,8 +465,35 @@ def _validate_graph_edge_score_fields(data: bytes) -> None:
             value = float(raw_value)
         except ValueError as exc:
             raise GraphArtifactError(f"graph.json edge {field} must be numeric") from exc
+        if not math.isfinite(value):
+            raise GraphArtifactError(f"graph.json edge {field} must be finite")
         if not 0 <= value <= 1:
             raise GraphArtifactError(f"graph.json edge {field} must be 0..1")
+    _validate_graph_edge_score_objects(data)
+
+
+def _validate_graph_edge_score_objects(data: bytes) -> None:
+    try:
+        graph = json.loads(data)
+    except json.JSONDecodeError:
+        return
+    edges = graph.get("edges") if isinstance(graph, dict) else None
+    if not isinstance(edges, list):
+        return
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        for field in _EDGE_SCORE_FIELDS:
+            if field not in edge:
+                continue
+            value = edge[field]
+            if not isinstance(value, int | float):
+                raise GraphArtifactError(f"graph.json edge {field} must be numeric")
+            numeric = float(value)
+            if not math.isfinite(numeric):
+                raise GraphArtifactError(f"graph.json edge {field} must be finite")
+            if not 0 <= numeric <= 1:
+                raise GraphArtifactError(f"graph.json edge {field} must be 0..1")
 
 
 def _validate_graph_edge_weight_drift(data: bytes) -> None:
@@ -500,11 +528,16 @@ def _validate_score_component_mapping(
         return
     if not isinstance(final_weight, int | float) or not isinstance(components, dict):
         raise GraphArtifactError(f"{context} score_components must sum to final_weight")
+    if not math.isfinite(float(final_weight)):
+        raise GraphArtifactError(f"{context} final_weight must be finite")
     numeric_components: list[float] = []
     for value in components.values():
         if not isinstance(value, int | float):
             raise GraphArtifactError(f"{context} score_components must be numeric")
-        numeric_components.append(float(value))
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            raise GraphArtifactError(f"{context} score_components must be finite")
+        numeric_components.append(numeric)
     _validate_score_component_sum(
         float(final_weight),
         numeric_components,
@@ -525,9 +558,12 @@ def _validate_score_component_bytes(
     component_values: list[float] = []
     for field_match in _SCORE_COMPONENT_VALUE_RE.finditer(raw_components):
         try:
-            component_values.append(float(field_match.group(1)))
+            component = float(field_match.group(1))
         except ValueError as exc:
             raise GraphArtifactError(f"{context} score_components must be numeric") from exc
+        if not math.isfinite(component):
+            raise GraphArtifactError(f"{context} score_components must be finite")
+        component_values.append(component)
     if not component_values:
         raise GraphArtifactError(f"{context} score_components must sum to final_weight")
     _validate_score_component_sum(final_weight, component_values, context=context)
@@ -539,6 +575,8 @@ def _validate_score_component_sum(
     *,
     context: str,
 ) -> None:
+    if not math.isfinite(final_weight):
+        raise GraphArtifactError(f"{context} final_weight must be finite")
     component_total = min(sum(component_values), 1.0)
     if abs(component_total - final_weight) > _SCORE_COMPONENT_TOLERANCE:
         raise GraphArtifactError(f"{context} score_components must sum to final_weight")

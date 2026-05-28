@@ -875,6 +875,20 @@ def test_scan_graph_json_rejects_out_of_range_edge_scores() -> None:
         _scan_graph_json(BytesIO(payload))
 
 
+@pytest.mark.parametrize("raw", ["NaN", "Infinity", "-Infinity"])
+def test_scan_graph_json_rejects_non_finite_edge_scores(raw: str) -> None:
+    payload = (
+        b'{"nodes":[{"id":"skill:a","type":"skill"}],"edges":['
+        b'{"source":"skill:a","target":"skill:b","semantic_sim":'
+        + raw.encode("ascii")
+        + b',"tag_sim":0.0,"token_sim":0.0,"weight":0.5,"final_weight":0.5}'
+        b"]}"
+    )
+
+    with pytest.raises(GraphArtifactError, match="semantic_sim must be finite"):
+        _scan_graph_json(BytesIO(payload))
+
+
 def test_scan_graph_json_rejects_weight_final_weight_drift() -> None:
     graph = {
         "nodes": [{"id": "skill:a", "type": "skill"}],

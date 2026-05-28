@@ -194,22 +194,26 @@ def _apply_entity_overlays(G: nx.Graph, graph_path: Path) -> nx.Graph:
 
     for payload in active_overlay_records(records):
         authoritative_nodes = _authoritative_overlay_nodes(payload)
+        for node_id in authoritative_nodes:
+            if node_id in G:
+                G.remove_edges_from(list(G.edges(node_id)))
         nodes = payload.get("nodes", [])
         if isinstance(nodes, list):
             for node in nodes:
                 if not isinstance(node, dict):
                     continue
-                node_id = node.get("id")
-                if not isinstance(node_id, str) or not node_id:
+                incoming_node_id = node.get("id")
+                if not isinstance(incoming_node_id, str) or not incoming_node_id:
                     continue
+                overlay_node_id: str = incoming_node_id
                 attrs = {key: value for key, value in node.items() if key != "id"}
-                if node_id in G:
+                if overlay_node_id in G:
                     attrs = (
-                        replace_node_attrs(G.nodes[node_id], attrs)
-                        if node_id in authoritative_nodes
-                        else merge_node_attrs(G.nodes[node_id], attrs)
+                        replace_node_attrs(G.nodes[overlay_node_id], attrs)
+                        if overlay_node_id in authoritative_nodes
+                        else merge_node_attrs(G.nodes[overlay_node_id], attrs)
                     )
-                G.add_node(node_id, **attrs)
+                G.add_node(overlay_node_id, **attrs)
                 applied_nodes += 1
 
         edges = payload.get("edges", [])
