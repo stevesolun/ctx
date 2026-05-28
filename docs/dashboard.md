@@ -150,7 +150,7 @@ Every page shows the same nav bar. The eleven tabs cover the
 dashboard-supported observable surface of ctx:
 
 ```
-Home · Loaded · Skills · Wiki · Graph · Status · KPIs · Runtime · Sessions · Logs · Live
+Home · Loaded · Skills · Wiki · Graph · Manage · Harness Setup · Docs · Config · Status · KPIs · Runtime · Sessions · Logs · Live
 ```
 
 ### HTML views
@@ -173,6 +173,10 @@ per-process monitor token injected into the rendered page.
 | `/wiki/<slug>?type=<entity>` | Dashboard-supported wiki entity page rendered: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views. The optional `type` query disambiguates duplicate slugs such as `langgraph`. |
 | `/graph` | **Graph explorer landing page** - node/edge count header, a "Popular seed slugs" block (18 highest-degree skill/agent/MCP/harness entities as clickable chips), search box for any skill/agent/MCP/harness slug, and the built-in graph list panel. Clicking a seed chip navigates to `/graph?slug=<slug>&type=<entity>`. |
 | `/graph?slug=<slug>&type=<entity>` | **Built-in** 1-hop neighborhood around the target skill/agent/MCP/harness slug. Entity pills identify skill, agent, MCP server, and harness rows. Tap any node to navigate to that entity's typed wiki page. Type and tag filters run client-side. |
+| `/manage` | Search, inspect, edit, delete, and manually import skill/agent/MCP/harness wiki entities through the same safe-name and mutation-token checks as live load/unload. |
+| `/harness` | Harness Setup wizard for non-Claude/custom API/local model users: collects model, goals, tool needs, safety constraints, and shows the harness recommendation/install path. |
+| `/docs` | Local repo docs rendered inside the dashboard with MkDocs-like tabs, sidebar table of contents, in-dashboard search, and source links. |
+| `/config` | Effective ctx config with defaults, required markers, field explanations, and editable user overrides where supported. |
 | `/status` | Durable queue and artifact status: job counts by state, recent queue jobs, graph/wiki artifact sizes, and crash-safe promotion metadata. |
 | `/kpi` | **KPI dashboard** — total entity count with subject breakdown, grade distribution pills, two-column tables for grade counts and lifecycle tiers (active · watch · demote · archive), hard-floor reasons with counts, **By category** table (count · avg score · A/B/C/D/F mix per category), **Top demotion candidates** (active/watch entries graded D or F, sorted by consecutive-D streak desc then score asc), and the **Archived** list. Same shape as `python -m kpi_dashboard render` but HTML |
 | `/runtime` | Generic harness runtime ledger from `CTX_RUNTIME_LIFECYCLE_DIR` or `~/.ctx/runtime/events.jsonl`: validation totals, failed/error checks, recent validation rows, and open escalations. |
@@ -192,6 +196,9 @@ per-process monitor token injected into the rendered page.
 | `GET /api/graph/<slug>.json?type=<entity>&hops=1&limit=40` | Dashboard-shaped skill/agent/MCP/harness `{nodes, edges, center}`; `type` is optional but recommended for duplicate slugs, `hops` is [1, 3], `limit` is [5, 150]. |
 | `GET /api/kpi.json` | `DashboardSummary` passthrough — `{total, by_subject, grade_counts, lifecycle_counts, category_breakdown, hard_floor_counts, low_quality_candidates, archived, generated_at}`. Returns `{total: 0, detail: "no sidecars yet"}` when the quality directory is empty |
 | `GET /api/runtime.json` | Runtime lifecycle summary: source path, validation count, failed/error count, open-escalation count, latest validation, recent validations, open escalations, and session IDs. |
+| `GET /api/config.json` | Effective/default/user config payload used by the Config tab. |
+| `GET /api/entities/search.json?q=<text>&type=<entity>&limit=80` | Wiki entity search results for Manage, Config, and entity picker flows. |
+| `GET /api/entity/<slug>.json?type=<entity>` | Frontmatter and Markdown body for one wiki entity. |
 | `GET /api/events.stream` | Server-sent events tail of `~/.claude/ctx-audit.jsonl` |
 
 ### Mutation endpoints
@@ -200,7 +207,7 @@ Dashboard GET views are read-only. When `ctx-monitor` is bound to a
 non-loopback host, HTML, `/api/*` JSON, and SSE routes require the
 read-token URL printed by `ctx-monitor`; the first successful token URL
 sets an HttpOnly same-site cookie for dashboard navigation. Keep the
-default loopback bind for local automation. Both POST endpoints enforce
+default loopback bind for local automation. POST endpoints enforce
 same-origin (browser tab open on another origin can't forge a request), require the per-process
 `X-CTX-Monitor-Token` injected into the dashboard page, and reject any
 slug failing the shared safe-name validator. That validator blocks path
@@ -216,6 +223,9 @@ load/unload mutation endpoint yet.
 | `POST /api/unload` | `{"slug": "...", "entity_type": "skill"}` | `skill_unload.unload_from_session([slug])` |
 | `POST /api/unload` | `{"slug": "...", "entity_type": "agent"}` | remove the agent row from `skill-manifest.json` and append an unload row |
 | `POST /api/unload` | `{"slug": "...", "entity_type": "mcp-server"}` | `mcp_install.uninstall_mcp(slug, wiki_dir=...)` |
+| `POST /api/config` | `{"updates": {...}}` | persist supported user config overrides after validation |
+| `POST /api/entity/upsert` | entity metadata/body payload | write or update a wiki entity, then attach graph/recommendation metadata |
+| `POST /api/entity/delete` | `{"slug": "...", "entity_type": "skill"}` | remove a dashboard-supported wiki entity after safe-name validation |
 
 Harness load/unload POSTs are rejected with the exact
 `ctx-harness-install ... --dry-run` command to run instead. Skill rows emit

@@ -85,3 +85,55 @@ def test_graph_artifact_guard_removes_only_stale_graph_files(
     assert not staged.exists()
     assert not partial.exists()
     assert outside.exists()
+
+
+def test_graph_artifact_guard_prune_is_lfs_only_by_default(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    guard = _load_guard(repo_root)
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run_git(
+        _repo: Path,
+        args: list[str],
+        *,
+        check: bool = True,
+        capture: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(tuple(args))
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(guard, "_run_git", fake_run_git)
+
+    guard._prune(tmp_path, include_lfs=True, include_git_prune=False)
+
+    assert ("lfs", "prune", "--verbose") in calls
+    assert not any(call[:1] == ("prune",) for call in calls)
+
+
+def test_graph_artifact_guard_prune_requires_explicit_git_prune(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    guard = _load_guard(repo_root)
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run_git(
+        _repo: Path,
+        args: list[str],
+        *,
+        check: bool = True,
+        capture: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(tuple(args))
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(guard, "_run_git", fake_run_git)
+
+    guard._prune(tmp_path, include_lfs=False, include_git_prune=True)
+
+    assert ("prune", "--expire=now", "--verbose") in calls
+    assert not any(call[:2] == ("lfs", "prune") for call in calls)

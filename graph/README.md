@@ -206,14 +206,16 @@ unpark and stage the artifacts exactly once:
 
 ```bash
 python scripts/graph_artifact_guard.py unpark
-git add graph/wiki-graph.tar.gz graph/wiki-graph-runtime.tar.gz graph/*.json.gz
+git add graph/wiki-graph.tar.gz graph/wiki-graph-runtime.tar.gz \
+  graph/skills-sh-catalog.json.gz graph/communities.json graph/entity-overlays.jsonl
 python scripts/graph_artifact_guard.py prune
 ```
 
 If a local Git integration gets interrupted while artifacts are dirty,
-`python scripts/graph_artifact_guard.py prune` removes unreachable local Git
-objects and prunable local LFS cache entries. It does not delete tracked graph
-files, rewrite history, or change the remote LFS store.
+`python scripts/graph_artifact_guard.py prune` removes prunable local LFS cache
+entries. It does not delete tracked graph files, rewrite history, or change the
+remote LFS store. Repo-wide `git prune --expire=now` is intentionally opt-in via
+`--include-git-prune` because it can discard unrelated dangling recovery objects.
 
 For a bulk skill refresh, update the existing shipped tarball through the
 release refresh path:

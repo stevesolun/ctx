@@ -82,12 +82,15 @@ def _print_status(repo: Path, artifacts: list[str]) -> None:
     _run_git(repo, ["count-objects", "-vH"])
 
 
-def _prune(repo: Path, *, include_lfs: bool) -> None:
-    _run_git(repo, ["prune", "--expire=now", "--verbose"])
+def _prune(repo: Path, *, include_lfs: bool, include_git_prune: bool) -> None:
+    if include_git_prune:
+        _run_git(repo, ["prune", "--expire=now", "--verbose"])
     if include_lfs:
         result = _run_git(repo, ["lfs", "prune", "--verbose"], check=False)
         if result.returncode != 0:
             raise SystemExit(result.returncode)
+    if not include_lfs and not include_git_prune:
+        print("No prune action selected.")
 
 
 def _clean_stale_graph_files(repo: Path, *, dry_run: bool) -> None:
@@ -127,7 +130,7 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "status shows skip-worktree state; park hides generated archives from "
             "normal Git status/stage scans; unpark re-enables release staging; "
-            "prune removes unreachable local Git/LFS objects; clean-stale "
+            "prune removes prunable local LFS cache entries; clean-stale "
             "removes interrupted graph promotion leftovers."
         ),
     )
@@ -152,6 +155,14 @@ def _parser() -> argparse.ArgumentParser:
         help="For prune only: skip git lfs prune.",
     )
     parser.add_argument(
+        "--include-git-prune",
+        action="store_true",
+        help=(
+            "For prune only: also run repo-wide git prune --expire=now. "
+            "This can discard unrelated dangling recovery objects."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="For clean-stale only: print stale files without deleting them.",
@@ -171,7 +182,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "unpark":
         _set_skip_worktree(repo, artifacts, enabled=False)
     elif args.command == "prune":
-        _prune(repo, include_lfs=not args.skip_lfs)
+        _prune(
+            repo,
+            include_lfs=not args.skip_lfs,
+            include_git_prune=args.include_git_prune,
+        )
     elif args.command == "clean-stale":
         _clean_stale_graph_files(repo, dry_run=args.dry_run)
     return 0

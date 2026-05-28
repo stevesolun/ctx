@@ -537,6 +537,8 @@ def _validate_score_component_mapping(
         numeric = float(value)
         if not math.isfinite(numeric):
             raise GraphArtifactError(f"{context} score_components must be finite")
+        if numeric < 0.0 or numeric > 1.0:
+            raise GraphArtifactError(f"{context} score_components must be 0..1")
         numeric_components.append(numeric)
     _validate_score_component_sum(
         float(final_weight),
@@ -563,6 +565,8 @@ def _validate_score_component_bytes(
             raise GraphArtifactError(f"{context} score_components must be numeric") from exc
         if not math.isfinite(component):
             raise GraphArtifactError(f"{context} score_components must be finite")
+        if component < 0.0 or component > 1.0:
+            raise GraphArtifactError(f"{context} score_components must be 0..1")
         component_values.append(component)
     if not component_values:
         raise GraphArtifactError(f"{context} score_components must sum to final_weight")

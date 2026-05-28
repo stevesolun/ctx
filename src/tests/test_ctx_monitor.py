@@ -1000,12 +1000,15 @@ def test_serve_generates_read_token_for_non_loopback(
     monkeypatch.setattr(cm, "_MONITOR_TOKEN", "")
     monkeypatch.setattr(cm, "_make_monitor_server", lambda _host, _port: FakeServer())
     monkeypatch.setattr(cm.secrets, "token_urlsafe", lambda _size: "lan-token")
+    monkeypatch.setattr(cm.socket, "gethostname", lambda: "devbox")
+    monkeypatch.setattr(cm.socket, "gethostbyname", lambda _name: "192.168.1.50")
 
     cm.serve(host="0.0.0.0", port=8765)
 
     assert cm._MONITOR_TOKEN == "lan-token"
     out = capsys.readouterr().out
-    assert "http://0.0.0.0:8765/?token=lan-token" in out
+    assert "http://192.168.1.50:8765/?token=lan-token" in out
+    assert "http://0.0.0.0:8765" not in out
     assert "read token required" in out
 
 
@@ -2924,6 +2927,31 @@ def test_render_docs_lists_repo_docs(
     assert "id='docs-search'" in html_out
     assert "https://stevesolun.github.io/ctx/" in html_out
     assert "doc-card" not in html_out
+
+
+def test_render_docs_sanitizes_active_html(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "mkdocs.yml").write_text(
+        "site_name: ctx\nnav:\n  - Home: index.md\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs" / "index.md").write_text(
+        "# Home\n\n"
+        "<script>alert('x')</script>\n\n"
+        "<a href=\"javascript:alert('x')\" onclick=\"alert('x')\">bad</a>\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cm, "_docs_roots", lambda: [tmp_path])
+
+    html_out = cm._render_docs()
+
+    assert "<script>alert('x')</script>" not in html_out
+    assert "&lt;script" in html_out
+    assert "onclick=" not in html_out
+    assert "href=\"javascript:" not in html_out
 
 
 def test_render_docs_falls_back_to_public_docs(

@@ -67,7 +67,9 @@ the update is treated like a release step.
 11. Unpark and stage the graph artifacts once the release candidate is final:
     `python scripts/graph_artifact_guard.py unpark`, then `git add` the graph
     artifacts intentionally. Run `python scripts/graph_artifact_guard.py prune`
-    after interrupted Git/LFS runs or after release staging.
+    after interrupted Git/LFS runs or after release staging to clean prunable
+    local LFS cache entries. Add `--include-git-prune` only when you explicitly
+    want repo-wide dangling Git objects removed too.
 
 The durable wiki worker drains `entity-upsert`, `graph-export`,
 `skill-index-refresh`, `tar-refresh`, and `artifact-promotion` jobs. Use

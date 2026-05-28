@@ -66,6 +66,7 @@ import os
 import re
 import secrets
 import sqlite3
+import socket
 import sys
 import tarfile
 import threading
@@ -5011,7 +5012,7 @@ def _render_docs_markdown(markdown_text: str, page_anchor: str) -> str:
     try:
         import markdown as markdown_lib  # type: ignore[import-untyped]
 
-        return str(markdown_lib.markdown(
+        rendered = str(markdown_lib.markdown(
             markdown_text,
             extensions=[
                 "admonition",
@@ -5038,14 +5039,75 @@ def _render_docs_markdown(markdown_text: str, page_anchor: str) -> str:
             },
             output_format="html5",
         ))
+        return _sanitize_docs_html(rendered)
     except Exception:
         return _render_wiki_markdown(markdown_text)
+
+
+def _sanitize_docs_html(rendered_html: str) -> str:
+    """Remove active HTML from local docs before embedding in the dashboard."""
+    dangerous_blocks = (
+        "script",
+        "style",
+        "iframe",
+        "object",
+        "embed",
+        "form",
+        "textarea",
+        "select",
+    )
+    dangerous_tags = (
+        "base",
+        "button",
+        "input",
+        "link",
+        "meta",
+    )
+
+    def escape_match(match: re.Match[str]) -> str:
+        return html.escape(match.group(0))
+
+    for tag in dangerous_blocks:
+        rendered_html = re.sub(
+            rf"<\s*{tag}\b[^>]*>.*?<\s*/\s*{tag}\s*>",
+            escape_match,
+            rendered_html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        rendered_html = re.sub(
+            rf"<\s*/?\s*{tag}\b[^>]*>",
+            escape_match,
+            rendered_html,
+            flags=re.IGNORECASE,
+        )
+    for tag in dangerous_tags:
+        rendered_html = re.sub(
+            rf"<\s*/?\s*{tag}\b[^>]*>",
+            escape_match,
+            rendered_html,
+            flags=re.IGNORECASE,
+        )
+
+    rendered_html = re.sub(
+        r"\s+on[a-zA-Z0-9_-]+\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)",
+        "",
+        rendered_html,
+        flags=re.IGNORECASE,
+    )
+    rendered_html = re.sub(
+        r"\s+(href|src)\s*=\s*([\"'])\s*(javascript:|data:text/html)",
+        r" \1=\2#",
+        rendered_html,
+        flags=re.IGNORECASE,
+    )
+    return rendered_html
 
 
 def _docs_search_text(entry: dict[str, str]) -> str:
     text = f"{entry['title']} {entry['path']} {entry['summary']} {entry['body']}"
     text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
     text = re.sub(r"!!!\s+\w+(?:\s+\"[^\"]+\")?", " ", text)
+    text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"[*_`#>\[\]().!:-]+", " ", text)
     return re.sub(r"\s+", " ", text).strip().lower()
 
@@ -6892,7 +6954,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
     server = _make_monitor_server(host, port)
     _MONITOR_TOKEN = secrets.token_urlsafe(32)
     mutations_enabled = bool(getattr(server, "_ctx_mutations_enabled", False))
-    url = f"http://{host}:{port}/"
+    url = f"http://{_monitor_display_host(host)}:{port}/"
     if not mutations_enabled:
         url = f"{url}?token={_MONITOR_TOKEN}"
     print(f"ctx-monitor serving at {url}  (Ctrl+C to stop)", flush=True)
@@ -6908,6 +6970,21 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
         print("ctx-monitor: shutdown", flush=True)
     finally:
         server.server_close()
+
+
+def _monitor_display_host(host: str) -> str:
+    """Return a URL host users can paste into a browser."""
+    if host in {"0.0.0.0", "::"}:
+        try:
+            candidate = socket.gethostbyname(socket.gethostname())
+        except OSError:
+            candidate = ""
+        if candidate and not candidate.startswith("127."):
+            return candidate
+        return "localhost"
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
 
 
 def main(argv: list[str] | None = None) -> int:

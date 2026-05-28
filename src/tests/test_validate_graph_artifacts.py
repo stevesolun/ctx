@@ -961,6 +961,29 @@ def test_scan_graph_json_rejects_score_component_drift() -> None:
         _scan_graph_json(BytesIO(payload))
 
 
+@pytest.mark.parametrize("value", [-0.1, 1.1])
+def test_scan_graph_json_rejects_out_of_range_score_components(value: float) -> None:
+    graph = {
+        "nodes": [{"id": "skill:a", "type": "skill"}],
+        "edges": [
+            {
+                "source": "skill:a",
+                "target": "skill:b",
+                "weight": 0.5,
+                "final_weight": 0.5,
+                "score_components": {
+                    "semantic": value,
+                    "tag": 0.5 - value,
+                },
+            },
+        ],
+    }
+    payload = json.dumps(graph).encode("utf-8")
+
+    with pytest.raises(GraphArtifactError, match="score_components must be 0..1"):
+        _scan_graph_json(BytesIO(payload))
+
+
 @pytest.mark.parametrize("field", ["semantic_sim", "tag_sim", "token_sim"])
 def test_overlay_validation_rejects_out_of_range_similarity_fields(
     tmp_path: Path,
@@ -1030,6 +1053,35 @@ def test_overlay_validation_rejects_score_component_drift(tmp_path: Path) -> Non
     )
 
     with pytest.raises(GraphArtifactError, match="score_components must sum"):
+        _validate_root_entity_overlay(tmp_path / "entity-overlays.jsonl")
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.1])
+def test_overlay_validation_rejects_out_of_range_score_components(
+    tmp_path: Path,
+    value: float,
+) -> None:
+    (tmp_path / "entity-overlays.jsonl").write_text(
+        json.dumps({
+            "nodes": [{"id": "skill:a"}],
+            "edges": [
+                {
+                    "source": "skill:a",
+                    "target": "skill:b",
+                    "weight": 0.5,
+                    "final_weight": 0.5,
+                    "score_components": {
+                        "semantic": value,
+                        "tag": 0.5 - value,
+                    },
+                },
+            ],
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(GraphArtifactError, match="score_components must be 0..1"):
         _validate_root_entity_overlay(tmp_path / "entity-overlays.jsonl")
 
 
