@@ -650,6 +650,8 @@ def _markdown_link_href(target: str) -> str | None:
     cleaned = target.strip()
     if not cleaned:
         return None
+    if cleaned.startswith("//"):
+        return None
     if cleaned.startswith(("/", "#")):
         return cleaned
     if re.match(r"^https?://", cleaned, re.IGNORECASE):
