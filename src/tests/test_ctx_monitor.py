@@ -303,7 +303,8 @@ def test_render_skills_includes_harness_filter_and_typed_links(fake_claude: Path
 
     html = cm._render_skills()
 
-    assert "class='type-filter' value='harness'" in html
+    assert "class='type-filter'" in html
+    assert "value='harness'" in html
     assert "/skill/langgraph?type=harness" in html
     assert "/wiki/langgraph?type=harness" in html
     assert "/graph?slug=langgraph&amp;type=harness" in html
@@ -2422,10 +2423,7 @@ def test_render_skills_emits_sidebar_filters(fake_claude: Path) -> None:
     assert ">graph</a>" in html_out
 
 
-def test_render_skills_caps_large_sidecar_page(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(cm, "_SKILLS_PAGE_RENDER_LIMIT", 2)
+def test_render_skills_paginates_sidecar_page(fake_claude: Path) -> None:
     for slug in ("a", "b", "c"):
         _write_sidecar(fake_claude, slug, {
             "slug": slug,
@@ -2434,12 +2432,60 @@ def test_render_skills_caps_large_sidecar_page(
             "subject_type": "skill",
         })
 
-    html_out = cm._render_skills()
+    html_out = cm._render_skills({"limit": "2"})
 
-    assert "Rendering the first 2 sidecars out of 3" in html_out
+    assert "Showing 1-2 of 3 sidecars" in html_out
+    assert "next</a>" in html_out
     assert "a</code>" in html_out
     assert "b</code>" in html_out
     assert "c</code>" not in html_out
+
+
+def test_sidecar_page_payload_searches_full_catalog(fake_claude: Path) -> None:
+    for slug in ("alpha-review", "beta-build", "gamma-review"):
+        _write_sidecar(fake_claude, slug, {
+            "slug": slug,
+            "grade": "A",
+            "raw_score": 0.9,
+            "subject_type": "skill",
+        })
+
+    payload = cm._sidecar_page_payload({"q": "review", "limit": "1"})
+
+    assert payload["total"] == 2
+    assert payload["pages"] == 2
+    assert [item["slug"] for item in payload["items"]] == ["alpha-review"]
+
+
+def test_sidecar_page_payload_filters_type_grade_and_floor(fake_claude: Path) -> None:
+    _write_sidecar(fake_claude, "agent-a", {
+        "slug": "agent-a",
+        "grade": "A",
+        "raw_score": 0.9,
+        "subject_type": "agent",
+    })
+    _write_sidecar(fake_claude, "skill-a", {
+        "slug": "skill-a",
+        "grade": "A",
+        "raw_score": 0.9,
+        "subject_type": "skill",
+    })
+    _write_sidecar(fake_claude, "agent-floored", {
+        "slug": "agent-floored",
+        "grade": "A",
+        "raw_score": 0.9,
+        "subject_type": "agent",
+        "hard_floor": "intake_fail",
+    })
+
+    payload = cm._sidecar_page_payload({
+        "type": "agent",
+        "grade": "A",
+        "hide_floor": "1",
+    })
+
+    assert payload["total"] == 1
+    assert payload["items"][0]["slug"] == "agent-a"
 
 
 def test_render_wiki_index_lists_entities(fake_claude: Path) -> None:

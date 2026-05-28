@@ -100,7 +100,8 @@ _KPI_SUMMARY_CACHE_KEY: tuple[Any, ...] | None = None
 _KPI_SUMMARY_CACHE_VALUE: Any | None = None
 _KPI_SUMMARY_CACHE_AT = 0.0
 _WIKI_INDEX_LIMIT_PER_TYPE = 500
-_SKILLS_PAGE_RENDER_LIMIT = 1000
+_SKILLS_PAGE_DEFAULT_LIMIT = 100
+_SKILLS_PAGE_MAX_LIMIT = 500
 _KPI_SUMMARY_CACHE_SECONDS = 30
 _GRAPH_REPORT_RE = re.compile(r"Nodes:\s*([\d,]+)\s*\|\s*Edges:\s*([\d,]+)")
 _MAX_POST_BODY_BYTES = 64 * 1024
@@ -1778,19 +1779,155 @@ def _all_sidecars() -> list[dict]:
     return list(_sidecar_index().values())
 
 
-def _skills_page_sidecars() -> tuple[list[dict], int, bool]:
-    """Return the bounded sidecar set that the /skills page renders."""
-    files = _sidecar_files()
-    total = len(files)
-    if total <= _SKILLS_PAGE_RENDER_LIMIT:
-        return _all_sidecars(), total, True
+def _skills_page_int(
+    value: str | None,
+    *,
+    default: int,
+    minimum: int = 1,
+    maximum: int | None = None,
+) -> int:
+    try:
+        parsed = int(str(value or "").strip())
+    except ValueError:
+        parsed = default
+    parsed = max(minimum, parsed)
+    if maximum is not None:
+        parsed = min(maximum, parsed)
+    return parsed
 
-    sidecars: list[dict] = []
-    for path in files[:_SKILLS_PAGE_RENDER_LIMIT]:
-        sidecar = _read_sidecar_file(path)
-        if sidecar is not None:
-            sidecars.append(sidecar)
-    return sidecars, total, False
+
+def _skills_query_values(raw: str | None, allowed: set[str]) -> set[str]:
+    values = {
+        item.strip()
+        for item in str(raw or "").split(",")
+        if item.strip()
+    }
+    return {item for item in values if item in allowed}
+
+
+def _sidecar_sort_key(sidecar: dict) -> tuple[str, float, str]:
+    return (
+        str(sidecar.get("grade") or "F"),
+        -float(sidecar.get("raw_score") or sidecar.get("score") or 0.0),
+        str(sidecar.get("slug") or ""),
+    )
+
+
+def _sidecar_card_payload(sidecar: dict) -> dict[str, Any]:
+    slug = str(sidecar.get("slug") or "")
+    entity_type = _sidecar_entity_type(sidecar)
+    return {
+        "slug": slug,
+        "grade": str(sidecar.get("grade") or "F"),
+        "type": entity_type,
+        "hard_floor": str(sidecar.get("hard_floor") or ""),
+        "raw_score": float(sidecar.get("raw_score") or sidecar.get("score") or 0.0),
+        "sidecar_href": f"/skill/{quote(slug)}?type={quote(entity_type)}",
+        "wiki_href": f"/wiki/{quote(slug)}?type={quote(entity_type)}",
+        "graph_href": f"/graph?slug={quote(slug)}&type={quote(entity_type)}",
+    }
+
+
+def _sidecar_matches_filters(
+    sidecar: dict,
+    *,
+    q: str,
+    types: set[str],
+    grades: set[str],
+    hide_floor: bool,
+) -> bool:
+    entity_type = _sidecar_entity_type(sidecar)
+    grade = str(sidecar.get("grade") or "F")
+    floor = str(sidecar.get("hard_floor") or "")
+    if types and entity_type not in types:
+        return False
+    if grades and grade not in grades:
+        return False
+    if hide_floor and floor:
+        return False
+    if q:
+        haystack = " ".join((
+            str(sidecar.get("slug") or ""),
+            entity_type,
+            grade,
+            floor,
+        )).lower()
+        return q.lower() in haystack
+    return True
+
+
+def _sidecar_page_payload(qs: dict[str, str] | None = None) -> dict[str, Any]:
+    """Return a paginated sidecar payload for /skills and its JSON API."""
+    qs = qs or {}
+    page = _skills_page_int(qs.get("page"), default=1)
+    limit = _skills_page_int(
+        qs.get("limit"),
+        default=_SKILLS_PAGE_DEFAULT_LIMIT,
+        maximum=_SKILLS_PAGE_MAX_LIMIT,
+    )
+    q = str(qs.get("q") or "").strip()
+    types = _skills_query_values(qs.get("type"), set(_DASHBOARD_ENTITY_TYPES))
+    grades = _skills_query_values(qs.get("grade"), {"A", "B", "C", "D", "F"})
+    hide_floor = str(qs.get("hide_floor") or "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+    files = _sidecar_files()
+    catalog_total = len(files)
+    has_filters = bool(q or types or grades or hide_floor)
+    if has_filters:
+        sidecars = [
+            sidecar
+            for path in files
+            if (sidecar := _read_sidecar_file(path)) is not None
+            and _sidecar_matches_filters(
+                sidecar,
+                q=q,
+                types=types,
+                grades=grades,
+                hide_floor=hide_floor,
+            )
+        ]
+        sidecars.sort(key=_sidecar_sort_key)
+        total = len(sidecars)
+        start = (page - 1) * limit
+        page_sidecars = sidecars[start:start + limit]
+    else:
+        total = catalog_total
+        start = (page - 1) * limit
+        selected_files = files[start:start + limit]
+        page_sidecars = [
+            sidecar
+            for path in selected_files
+            if (sidecar := _read_sidecar_file(path)) is not None
+        ]
+        if catalog_total <= limit:
+            page_sidecars.sort(key=_sidecar_sort_key)
+
+    pages = max(1, math.ceil(total / limit)) if total else 1
+    if page > pages:
+        page = pages
+        return _sidecar_page_payload({
+            **qs,
+            "page": str(page),
+            "limit": str(limit),
+        })
+
+    return {
+        "items": [_sidecar_card_payload(sidecar) for sidecar in page_sidecars],
+        "total": total,
+        "catalog_total": catalog_total,
+        "page": page,
+        "limit": limit,
+        "pages": pages,
+        "has_next": page < pages,
+        "has_prev": page > 1,
+        "filtered": has_filters,
+        "q": q,
+        "types": sorted(types),
+        "grades": sorted(grades),
+        "hide_floor": hide_floor,
+    }
 
 
 # ─── Aggregations ────────────────────────────────────────────────────────────
@@ -3478,17 +3615,9 @@ def _render_session_detail(session_id: str) -> str:
     return _layout(f"Session {session_id}", body)
 
 
-def _render_skills() -> str:
-    sidecars, total_sidecars, complete_sidecar_list = _skills_page_sidecars()
-    sidecars.sort(key=lambda s: (s.get("grade", "F"), -s.get("raw_score", 0.0)))
-
-    # Sidebar stats for the filter UI.
-    grade_counts = {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
-    type_counts = {entity_type: 0 for entity_type in _DASHBOARD_ENTITY_TYPES}
-    for sc in sidecars:
-        grade_counts[sc.get("grade", "F")] = grade_counts.get(sc.get("grade", "F"), 0) + 1
-        st = _sidecar_entity_type(sc)
-        type_counts[st] = type_counts.get(st, 0) + 1
+def _render_skills(qs: dict[str, str] | None = None) -> str:
+    payload = _sidecar_page_payload(qs)
+    sidecars = payload["items"]
 
     cards = "".join(
         f"<div class='skill-card' data-slug='{html.escape(s.get('slug', ''))}' "
@@ -3502,7 +3631,7 @@ def _render_skills() -> str:
         f"<span class='pill grade-{html.escape(s.get('grade', 'F'))}'>{html.escape(s.get('grade', 'F'))}</span>"
         f"</div>"
         f"<div class='muted' style='font-size:0.78rem;'>"
-        f"score {s.get('raw_score', 0.0):.3f} · {html.escape(s.get('subject_type', 'skill'))}"
+        f"score {s.get('raw_score', 0.0):.3f} · {html.escape(s.get('type', s.get('subject_type', 'skill')))}"
         f"{' · ' + html.escape(s.get('hard_floor','')) if s.get('hard_floor') else ''}"
         f"</div>"
         f"<div style='display:flex; gap:0.4rem; margin-top:0.2rem;'>"
@@ -3514,55 +3643,92 @@ def _render_skills() -> str:
         for s in sidecars
     )
 
-    grade_checkboxes = "".join(
-        f"<label style='display:flex; justify-content:space-between; "
-        f"padding:0.25rem 0;'>"
-        f"<span><input type='checkbox' class='grade-filter' value='{g}' checked> "
-        f"<span class='pill grade-{g}'>{g}</span></span>"
-        f"<span class='muted' style='font-size:0.78rem;'>{grade_counts[g]}</span>"
-        f"</label>"
-        for g in ("A", "B", "C", "D", "F")
+    start_index = ((payload["page"] - 1) * payload["limit"]) + 1 if payload["total"] else 0
+    end_index = min(payload["page"] * payload["limit"], payload["total"])
+    summary = (
+        f"Showing {start_index}-{end_index} of {payload['total']} matching sidecars"
+        if payload["filtered"]
+        else f"Showing {start_index}-{end_index} of {payload['catalog_total']} sidecars"
     )
-    type_checkboxes = "".join(
-        f"<label style='display:flex; justify-content:space-between; "
-        f"padding:0.25rem 0;'>"
-        f"<span><input type='checkbox' class='type-filter' value='{t}' checked> {t}</span>"
-        f"<span class='muted' style='font-size:0.78rem;'>{type_counts.get(t, 0)}</span>"
-        f"</label>"
+    query_base = {
+        key: value
+        for key, value in (qs or {}).items()
+        if key not in {"page"}
+    }
+
+    def page_href(page: int) -> str:
+        params = {
+            **query_base,
+            "page": str(max(1, page)),
+            "limit": str(payload["limit"]),
+        }
+        query = "&".join(
+            f"{quote(str(key))}={quote(str(value))}"
+            for key, value in params.items()
+            if str(value).strip()
+        )
+        return "/skills" + (f"?{query}" if query else "")
+
+    prev_link = (
+        f"<a href='{html.escape(page_href(payload['page'] - 1))}'>previous</a>"
+        if payload["has_prev"]
+        else "<span class='muted'>previous</span>"
+    )
+    next_link = (
+        f"<a href='{html.escape(page_href(payload['page'] + 1))}'>next</a>"
+        if payload["has_next"]
+        else "<span class='muted'>next</span>"
+    )
+    pagination = (
+        "<div class='card' style='display:flex; justify-content:space-between; "
+        "align-items:center; gap:1rem;'>"
+        f"<span id='match-count' class='muted'>{html.escape(summary)} · page "
+        f"{payload['page']} of {payload['pages']}</span>"
+        f"<span>{prev_link} · {next_link}</span>"
+        "</div>"
+    )
+    selected_type = ",".join(payload["types"])
+    selected_grade = ",".join(payload["grades"])
+    type_options = "<option value=''>all types</option>" + "".join(
+        f"<option value='{html.escape(t)}'"
+        f"{' selected' if selected_type == t else ''}>{html.escape(t)}</option>"
         for t in _DASHBOARD_ENTITY_TYPES
     )
-    sample_note = (
-        ""
-        if complete_sidecar_list
-        else (
-            "<p class='muted'>Rendering the first "
-            f"{len(sidecars)} sidecars out of {total_sidecars}. Use Wiki, Graph, "
-            "or direct sidecar URLs for full-catalog lookup.</p>"
-        )
+    grade_options = "<option value=''>all grades</option>" + "".join(
+        f"<option value='{g}'{' selected' if selected_grade == g else ''}>{g}</option>"
+        for g in ("A", "B", "C", "D", "F")
     )
+    limit_options = "".join(
+        f"<option value='{n}'{' selected' if payload['limit'] == n else ''}>{n}</option>"
+        for n in (50, 100, 200, 500)
+    )
+    hide_checked = " checked" if payload["hide_floor"] else ""
 
     body = (
         "<h1>Quality sidecars</h1>"
-        f"<p class='muted'>{total_sidecars} sidecars · click any card to drill in.</p>"
-        + sample_note
+        f"<p class='muted'>{payload['catalog_total']} sidecars · click any card to drill in.</p>"
+        + pagination
         + "<div style='display:grid; grid-template-columns:220px 1fr; gap:1.25rem; align-items:start;'>"
         # ── Left filter sidebar ──────────────────────────────────────
         "<aside style='position:sticky; top:1rem;'>"
-        "<div class='card'><strong>Search</strong>"
-        "<input type='text' id='skill-search' placeholder='filter by slug…' "
+        "<form class='card' id='skills-filter-form' method='get' action='/skills'>"
+        "<strong>Search</strong>"
+        f"<input type='text' id='skill-search' name='q' value='{html.escape(payload['q'])}' placeholder='filter by slug...' "
         "style='width:100%; margin-top:0.4rem; padding:0.35rem 0.5rem; "
-        "border:1px solid #ccc; border-radius:4px;'></div>"
-        "<div class='card'><strong>Grade</strong>"
-        + grade_checkboxes
-        + "</div>"
-        "<div class='card'><strong>Type</strong>"
-        + type_checkboxes
-        + "</div>"
-        "<div class='card'><strong>Hard floor</strong>"
-        "<label style='display:block; padding:0.25rem 0;'>"
-        "<input type='checkbox' id='hide-floor'> hide floored</label>"
-        "</div>"
-        "<div class='card'><span id='match-count' class='muted'>—</span></div>"
+        "border:1px solid #ccc; border-radius:4px;'>"
+        "<label style='display:block; margin-top:0.6rem; font-size:0.82rem;'>Type"
+        f"<select class='type-filter' name='type' style='width:100%; margin-top:0.25rem;'>{type_options}</select>"
+        "</label>"
+        "<label style='display:block; margin-top:0.6rem; font-size:0.82rem;'>Grade"
+        f"<select class='grade-filter' name='grade' style='width:100%; margin-top:0.25rem;'>{grade_options}</select>"
+        "</label>"
+        "<label style='display:block; margin-top:0.6rem; font-size:0.82rem;'>Limit"
+        f"<select name='limit' style='width:100%; margin-top:0.25rem;'>{limit_options}</select>"
+        "</label>"
+        "<label style='display:block; padding:0.55rem 0 0.35rem;'>"
+        f"<input type='checkbox' id='hide-floor' name='hide_floor' value='1'{hide_checked}> hide floored</label>"
+        "<button type='submit' style='width:100%;'>apply</button>"
+        "</form>"
         "</aside>"
         # ── Card grid ────────────────────────────────────────────────
         "<div id='card-grid' style='display:grid; "
@@ -3571,30 +3737,9 @@ def _render_skills() -> str:
         + "</div>"
         "</div>"
         "<script>\n"
-        "const cards = document.querySelectorAll('.skill-card');\n"
-        "const search = document.getElementById('skill-search');\n"
-        "const hideFloor = document.getElementById('hide-floor');\n"
-        "function activeGrades() { return Array.from(document.querySelectorAll('.grade-filter:checked')).map(x => x.value); }\n"
-        "function activeTypes() { return Array.from(document.querySelectorAll('.type-filter:checked')).map(x => x.value); }\n"
-        "function apply() {\n"
-        "  const q = search.value.trim().toLowerCase();\n"
-        "  const grades = new Set(activeGrades());\n"
-        "  const types = new Set(activeTypes());\n"
-        "  const hideF = hideFloor.checked;\n"
-        "  let shown = 0;\n"
-        "  cards.forEach(c => {\n"
-        "    const ok = grades.has(c.dataset.grade) && types.has(c.dataset.type)\n"
-        "      && (!q || c.dataset.slug.toLowerCase().includes(q))\n"
-        "      && (!hideF || !c.dataset.floor);\n"
-        "    c.style.display = ok ? '' : 'none';\n"
-        "    if (ok) shown++;\n"
-        "  });\n"
-        "  document.getElementById('match-count').textContent = shown + ' of ' + cards.length + ' match';\n"
-        "}\n"
-        "search.addEventListener('input', apply);\n"
-        "hideFloor.addEventListener('change', apply);\n"
-        "document.querySelectorAll('.grade-filter, .type-filter').forEach(el => el.addEventListener('change', apply));\n"
-        "apply();\n"
+        "document.querySelectorAll('#skills-filter-form select').forEach(el => {\n"
+        "  el.addEventListener('change', () => el.form.submit());\n"
+        "});\n"
         "</script>"
     )
     return _layout("Skills", body)
@@ -6715,7 +6860,7 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             elif path.startswith("/session/"):
                 self._send_html(_render_session_detail(path.split("/session/", 1)[1]))
             elif path == "/skills":
-                self._send_html(_render_skills())
+                self._send_html(_render_skills(qs))
             elif path.startswith("/skill/"):
                 self._send_html(_render_skill_detail(
                     path.split("/skill/", 1)[1],
@@ -6767,6 +6912,8 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 })
             elif path == "/api/grades.json":
                 self._send_json(_grade_distribution_payload())
+            elif path == "/api/sidecars.json":
+                self._send_json(_sidecar_page_payload(qs))
             elif path == "/api/runtime.json":
                 self._send_json(_runtime_lifecycle_summary())
             elif path == "/api/config.json":
