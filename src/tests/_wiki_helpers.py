@@ -12,6 +12,7 @@ Leading-underscore module name signals "internal to the tests package".
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -41,9 +42,9 @@ MAX_PAGE_LINES: 200
 Pages older than 90 days are considered stale.
 """
 
-_TODAY = "2026-04-09"
-_FRESH_DATE = "2026-03-01"   # ~39 days before TODAY -- not stale
-_STALE_DATE = "2024-01-01"   # >90 days before TODAY -- stale
+_TODAY = date.today().isoformat()
+_FRESH_DATE = _TODAY
+_STALE_DATE = "2024-01-01"   # safely older than the 90-day stale threshold
 
 
 def make_wiki(tmp_path: Path) -> Path:
