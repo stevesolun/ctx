@@ -133,7 +133,7 @@ def test_hf_upload_falls_back_to_clean_upload_when_remote_has_stale_paths(
     assert clean_upload["commit_message"] == "Sync ctx abcdef1"
 
 
-def test_hf_export_copies_hydrated_tracked_artifacts(
+def test_hf_export_copies_hydrated_artifacts_even_when_untracked(
     tmp_path: Path, monkeypatch
 ) -> None:
     repo = tmp_path / "repo"
@@ -159,7 +159,6 @@ def test_hf_export_copies_hydrated_tracked_artifacts(
         "_git_bytes",
         lambda _repo, *_args: (
             b"README.md\0"
-            b"graph/wiki-graph.tar.gz\0"
             b"graph/skills-sh-catalog.json.gz\0"
         ),
     )

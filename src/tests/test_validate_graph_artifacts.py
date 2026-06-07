@@ -1182,7 +1182,8 @@ def test_graph_only_workflow_waits_for_release_asset_upload() -> None:
     ))
     steps = workflow["jobs"]["graph-check"]["steps"]
     resolve_step = next(
-        step for step in steps if step.get("name") == "Resolve graph LFS artifacts"
+        step for step in steps
+        if step.get("name") == "Resolve graph artifacts from release assets"
     )
     script = resolve_step["run"]
 

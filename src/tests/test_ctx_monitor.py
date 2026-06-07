@@ -1579,7 +1579,7 @@ def test_graph_neighborhood_sizes_nodes_by_score_usage_and_popularity(
     assert "popularity" in hub["size_reason"]
 
 
-def test_graph_neighborhood_reuses_sidecar_index_for_slug_fallback(
+def test_graph_neighborhood_uses_direct_sidecar_scores_without_global_index(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1588,8 +1588,8 @@ def test_graph_neighborhood_reuses_sidecar_index_for_slug_fallback(
     monkeypatch.setattr(cm, "_SIDECAR_INDEX_CACHE_KEY", None)
     monkeypatch.setattr(cm, "_SIDECAR_INDEX_CACHE_VALUE", None)
     sidecar_dir = fake_claude / "skill-quality"
-    for i in range(12):
-        (sidecar_dir / f"alias-{i}.json").write_text(
+    for i in range(6):
+        (sidecar_dir / f"node-{i}.json").write_text(
             json.dumps({
                 "slug": f"node-{i}",
                 "subject_type": "skill",
@@ -1606,20 +1606,18 @@ def test_graph_neighborhood_reuses_sidecar_index_for_slug_fallback(
         G.add_edge("skill:center", f"skill:node-{i}", weight=1.0)
     monkeypatch.setattr(cm, "_load_dashboard_graph", lambda: G)
 
-    calls = 0
-    original = cm._read_sidecar_file
+    def fail_index() -> dict:
+        raise AssertionError("graph rendering should not build the global sidecar index")
 
-    def counted(path: Path):
-        nonlocal calls
-        calls += 1
-        return original(path)
-
-    monkeypatch.setattr(cm, "_read_sidecar_file", counted)
+    monkeypatch.setattr(cm, "_sidecar_index", fail_index)
 
     result = cm._graph_neighborhood("center", entity_type="skill")
 
     assert result["center"] == "skill:center"
-    assert calls == 12
+    assert all(
+        node["data"]["size_reason"].startswith("quality ")
+        for node in result["nodes"]
+    )
 
 
 def test_graph_helpers_reuse_graph_loaded_from_same_file(
@@ -2388,6 +2386,44 @@ def test_render_home_shows_stat_grid_even_with_no_sessions(fake_claude: Path) ->
         assert f"grade-{grade}" in html_out
     # Empty-state copy kicks in when there are no sessions / audit entries.
     assert "No sessions recorded" in html_out or "Recent sessions" in html_out
+
+
+def test_render_home_formats_large_counts_with_commas(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cm, "_summarize_sessions", lambda: [])
+    monkeypatch.setattr(cm, "_read_manifest", lambda: {"load": [None] * 10000})
+    monkeypatch.setattr(cm, "_read_jsonl", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(cm, "_graph_stats", lambda: {
+        "nodes": 100000,
+        "edges": 2900834,
+        "available": True,
+    })
+    monkeypatch.setattr(cm, "_wiki_stats", lambda: {
+        "skills": 10000,
+        "agents": 464,
+        "mcps": 10787,
+        "harnesses": 207,
+        "total": 121458,
+        "split_known": True,
+    })
+    monkeypatch.setattr(cm, "_runtime_lifecycle_summary", lambda: {
+        "validations_total": 10000,
+        "validation_failures": 1000,
+        "open_escalations_total": 100,
+    })
+
+    html_out = cm._render_home()
+
+    assert ">10,000</div>" in html_out
+    assert ">121,458</div>" in html_out
+    assert ">100,000</div>" in html_out
+    assert "2,900,834 edges" in html_out
+    assert "10,000 skills" in html_out
+    assert "10,787 MCPs" in html_out
+    assert "10000</div>" not in html_out
+    assert "100000</div>" not in html_out
 
 
 def test_render_home_defers_sidecar_grade_scan(
@@ -3352,6 +3388,27 @@ def test_render_graph_landing_shows_seeds_when_available(monkeypatch) -> None:
     assert "python-patterns" in html_out
     # Graph stats line shows node/edge counts.
     assert "nodes" in html_out
+
+
+def test_render_graph_landing_auto_loads_top_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cm, "_graph_stats", lambda: {
+        "nodes": 100000,
+        "edges": 2900834,
+        "available": True,
+    })
+    monkeypatch.setattr(cm, "_top_degree_seeds", lambda **_kwargs: [{
+        "slug": "python-patterns",
+        "type": "skill",
+        "degree": 10000,
+        "label": "python-patterns",
+    }])
+
+    html_out = cm._render_graph(None)
+
+    assert "const initial = \"python-patterns\";" in html_out
+    assert "const initialType = \"skill\";" in html_out
+    assert "value='python-patterns'" in html_out
+    assert "deg 10,000" in html_out
 
 
 def test_render_graph_landing_does_not_cold_load_graph_for_seed_chips(

@@ -262,6 +262,32 @@ def test_harness_aware_readme_prose_is_updated() -> None:
     assert "**92,815 skills, 464 agents, 10,787 MCP servers, and 13 harnesses**" in patched
 
 
+def test_readme_entity_badges_are_updated() -> None:
+    text = "\n".join([
+        "[![Skills](https://img.shields.io/badge/Skills-1-blue.svg)](graph/)",
+        "[![Agents](https://img.shields.io/badge/Agents-2-purple.svg)](graph/)",
+        "[![MCPs](https://img.shields.io/badge/MCPs-3-pink.svg)](graph/)",
+        "[![Harnesses](https://img.shields.io/badge/Harnesses-4-orange.svg)](graph/)",
+    ])
+    stats = {
+        "nodes": None,
+        "edges": None,
+        "skills": 91464,
+        "agents": 467,
+        "mcps": 10790,
+        "harnesses": 207,
+        "communities": None,
+    }
+    patched = text
+    for pattern, replacement in urs.build_replacements(stats, tests=None, converted=None):
+        patched = pattern.sub(replacement, patched)
+
+    assert "badge/Skills-91%2C464-blue" in patched
+    assert "badge/Agents-467-purple" in patched
+    assert "badge/MCPs-10%2C790-pink" in patched
+    assert "badge/Harnesses-207-orange" in patched
+
+
 def test_patch_readme_checks_knowledge_graph_doc(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

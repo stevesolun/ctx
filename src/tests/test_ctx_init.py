@@ -422,6 +422,26 @@ def test_local_graph_archive_checksum_is_verified(tmp_path: Path) -> None:
         ci._verify_local_graph_archive(archive, requested_install_mode="runtime")
 
 
+def test_lfs_pointer_graph_archive_is_ignored(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph_dir = tmp_path / "graph"
+    graph_dir.mkdir()
+    (graph_dir / "wiki-graph-runtime.tar.gz").write_text(
+        "version https://git-lfs.github.com/spec/v1\n"
+        "oid sha256:334fb19bace3fd6e4b92087850f17297fb248032957d123f3f1432dfde2e36c0\n"
+        "size 175773376\n",
+        encoding="utf-8",
+    )
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    monkeypatch.setattr(ci, "__file__", str(tmp_path / "src" / "ctx_init.py"))
+
+    assert ci._find_local_graph_archive("runtime") is None
+
+
 def test_custom_graph_url_requires_checksum_or_explicit_opt_out(
     tmp_path: Path,
     monkeypatch,

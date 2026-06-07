@@ -37,7 +37,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      graph_assets_available: ${{ steps.resolve_graph_lfs.outcome == 'success' }}
+      graph_assets_available: ${{ steps.resolve_graph_assets.outcome == 'success' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -132,18 +132,14 @@ jobs:
         env:
           INPUT_REPOSITORY: ${{ github.event.inputs.repository || 'pypi' }}
 
-      - name: Resolve release graph LFS artifacts
-        id: resolve_graph_lfs
+      - name: Resolve release graph artifacts from release assets
+        id: resolve_graph_assets
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          git lfs install --local
-          if git lfs pull --include="graph/wiki-graph.tar.gz,graph/wiki-graph-runtime.tar.gz" --exclude=""; then
-            exit 0
-          fi
-          echo "Git LFS download failed; trying matching prior release asset."
+          echo "Resolving graph artifacts from matching release assets to avoid Git LFS bandwidth."
           python - <<'PY'
           import hashlib
           import json
@@ -157,6 +153,16 @@ jobs:
           current_tag = os.environ.get("TAG_NAME", "")
           release_asset_wait_seconds = 300
           release_asset_poll_seconds = 10
+          expected_graph_assets = {
+              "graph/wiki-graph.tar.gz": {
+                  "sha256": "91b30795e7d200cf31a62a8749969d12658f5f74636d2de06d6b2b24b393c12f",
+                  "size": 457545675,
+              },
+              "graph/wiki-graph-runtime.tar.gz": {
+                  "sha256": "334fb19bace3fd6e4b92087850f17297fb248032957d123f3f1432dfde2e36c0",
+                  "size": 175773376,
+              },
+          }
 
           def load_releases() -> list[dict]:
               return json.loads(subprocess.check_output(
@@ -166,19 +172,19 @@ jobs:
 
           def hydrate_from_release(path_name: str, hydrated_min_size: int) -> None:
               graph_tar = Path(path_name)
-              pointer = graph_tar.read_text(encoding="utf-8", errors="replace")
-              expected_oid = ""
-              expected_size = 0
-              for line in pointer.splitlines():
-                  if line.startswith("oid sha256:"):
-                      expected_oid = line.split(":", 1)[1].strip()
-                  elif line.startswith("size "):
-                      expected_size = int(line.split(" ", 1)[1].strip())
-              if not expected_oid:
-                  if graph_tar.stat().st_size > hydrated_min_size:
+              fallback = expected_graph_assets[path_name]
+              expected_oid = fallback["sha256"]
+              expected_size = int(fallback["size"])
+              if graph_tar.exists():
+                  pointer = graph_tar.read_text(encoding="utf-8", errors="replace")
+                  for line in pointer.splitlines():
+                      if line.startswith("oid sha256:"):
+                          expected_oid = line.split(":", 1)[1].strip()
+                      elif line.startswith("size "):
+                          expected_size = int(line.split(" ", 1)[1].strip())
+                  if not pointer.startswith("version https://git-lfs.github.com/spec/v1") and graph_tar.stat().st_size > hydrated_min_size:
                       print(f"{graph_tar} is already hydrated")
                       return
-                  raise SystemExit(f"{path_name} is neither hydrated nor an LFS pointer")
 
               deadline = time.monotonic() + release_asset_wait_seconds
               while True:
@@ -247,7 +253,7 @@ jobs:
           PY
 
       - name: Validate release graph artifacts
-        if: steps.resolve_graph_lfs.outcome == 'success'
+        if: steps.resolve_graph_assets.outcome == 'success'
         run: |
           python src/validate_graph_artifacts.py \
             --graph-dir graph \
@@ -271,7 +277,7 @@ jobs:
             --max-stage-lines 40
 
       - name: Validate README and docs stats
-        if: steps.resolve_graph_lfs.outcome == 'success'
+        if: steps.resolve_graph_assets.outcome == 'success'
         run: python src/update_repo_stats.py --check
 
       - name: Static gates
@@ -400,7 +406,7 @@ jobs:
           path: dist/
 
       - name: Upload graph artifact bundle
-        if: steps.resolve_graph_lfs.outcome == 'success'
+        if: steps.resolve_graph_assets.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: graph-release-assets

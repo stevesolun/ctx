@@ -178,8 +178,9 @@ def test_ci_workflows_default_to_read_only_token_permissions() -> None:
 def test_graph_artifact_job_uses_release_asset_fallback_for_lfs_budget() -> None:
     workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
 
-    assert "Resolve graph LFS artifacts" in workflow
-    assert "Git LFS download failed; trying matching prior release asset." in workflow
+    assert "Resolve graph artifacts from release assets" in workflow
+    assert "Resolving graph artifacts from matching release assets" in workflow
+    assert "git lfs pull" not in workflow
     assert 'tag_name.startswith("graph-artifacts-")' in workflow
     assert "sha256:{expected_oid} size:{expected_size}" in workflow
     assert "Hydrated {path_name} from" in workflow
@@ -208,8 +209,9 @@ def test_publish_workflow_rejects_existing_pypi_versions() -> None:
 def test_publish_workflow_validates_and_uploads_graph_assets() -> None:
     workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
 
-    assert "Resolve release graph LFS artifacts" in workflow
-    assert "trying matching prior release asset" in workflow
+    assert "Resolve release graph artifacts from release assets" in workflow
+    assert "Resolving graph artifacts from matching release assets" in workflow
+    assert "git lfs pull" not in workflow
     assert 'tag_name.startswith("graph-artifacts-")' in workflow
     assert "sha256:{expected_oid} size:{expected_size}" in workflow
     assert "Validate release graph artifacts" in workflow

@@ -19,11 +19,11 @@ by git.
 
 ## Publish command
 
-Use the repository sync script. It exports only tracked files, adds the
-Hugging Face repo-card frontmatter to the uploaded `README.md`, and refuses to
-publish if the full wiki tarball, runtime wiki tarball, or compressed skill
-index is missing, too small, or still a Git LFS
-pointer.
+Use the repository sync script. It exports tracked files plus the validated
+local graph artifacts, adds the Hugging Face repo-card frontmatter to the
+uploaded `README.md`, and refuses to publish if the full wiki tarball, runtime
+wiki tarball, or compressed skill index is missing, too small, or still a Git
+LFS pointer.
 
 The script prefers Hugging Face's resumable large-folder uploader when the
 remote already has no stale paths. If the remote contains files that are not in
@@ -35,8 +35,6 @@ current process, and clear it after the upload.
 
 ```powershell
 python -m pip install --upgrade huggingface_hub
-git lfs install
-git lfs pull --include="graph/wiki-graph.tar.gz,graph/wiki-graph-runtime.tar.gz"
 
 $secureToken = Read-Host "HF write token" -AsSecureString
 $tokenPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)

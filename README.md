@@ -3,8 +3,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-3915_collected-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-3919_collected-brightgreen.svg)](#)
 [![Graph](https://img.shields.io/badge/Graph-102%2C928_nodes_/_2.9M_edges-red.svg)](graph/)
+[![Skills](https://img.shields.io/badge/Skills-91%2C464-blue.svg)](graph/)
+[![Agents](https://img.shields.io/badge/Agents-467-purple.svg)](graph/)
+[![MCPs](https://img.shields.io/badge/MCPs-10%2C790-pink.svg)](graph/)
+[![Harnesses](https://img.shields.io/badge/Harnesses-207-orange.svg)](graph/)
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 [![Repo views](https://hits.sh/github.com/stevesolun/ctx.svg?label=repo%20views)](https://hits.sh/github.com/stevesolun/ctx/)
 

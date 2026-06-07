@@ -543,7 +543,7 @@ def build_replacements(
 
     if stats["agents"]:
         a = stats["agents"]
-        reps.append((re.compile(r"badge/Agents-[0-9,]+-"), f"badge/Agents-{a}-"))
+        reps.append((re.compile(r"badge/Agents-[0-9%,]+-"), f"badge/Agents-{a:,}-".replace(",", "%2C")))
         reps.append((re.compile(r"#\s*([\d,]+)\s+entity pages\s*\(one per agent\)"),
                      f"# {a} entity pages (one per agent)"))
 
@@ -551,6 +551,11 @@ def build_replacements(
         m = stats["mcps"]
         reps.append((re.compile(r"badge/MCPs-[0-9,%]+-"),
                      f"badge/MCPs-{m:,}-".replace(",", "%2C")))
+
+    if stats["harnesses"]:
+        h = stats["harnesses"]
+        reps.append((re.compile(r"badge/Harnesses-[0-9,%]+-"),
+                     f"badge/Harnesses-{h:,}-".replace(",", "%2C")))
 
     if stats["nodes"] and stats["edges"]:
         n = stats["nodes"]

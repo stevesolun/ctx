@@ -2614,8 +2614,32 @@ def _unit_score(value: Any) -> float | None:
     return max(0.0, min(1.0, score))
 
 
+def _format_count(value: Any) -> str:
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return "0"
+
+
+def _load_direct_sidecar(slug: str, entity_type: str | None = None) -> dict | None:
+    if not _is_safe_slug(slug):
+        return None
+    for path in (
+        _sidecar_dir() / f"{slug}.json",
+        _sidecar_dir() / "mcp" / f"{slug}.json",
+    ):
+        if not path.exists():
+            continue
+        sidecar = _read_sidecar_file(path)
+        if sidecar is None:
+            continue
+        if entity_type is None or _sidecar_entity_type(sidecar) == entity_type:
+            return sidecar
+    return None
+
+
 def _sidecar_score_inputs(slug: str, entity_type: str) -> tuple[float | None, float | None]:
-    sidecar = _load_sidecar(slug, entity_type=entity_type)
+    sidecar = _load_direct_sidecar(slug, entity_type=entity_type)
     if not isinstance(sidecar, dict):
         return None, None
     quality = _unit_score(sidecar.get("score", sidecar.get("raw_score")))
@@ -3537,30 +3561,30 @@ def _render_home() -> str:
         "<div style='display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr));"
         " gap:0.8rem; margin-bottom:1.25rem;'>"
         + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Currently loaded</div>"
-        f"<div style='font-size:1.6rem; font-weight:600;'>{len(manifest.get('load', []))}</div>"
+        f"<div style='font-size:1.6rem; font-weight:600;'>{_format_count(len(manifest.get('load', [])))}</div>"
         f"<a href='/loaded'>manage →</a></div>"
         + "<div class='card'><div class='muted' style='font-size:0.8rem;'>Sidecars</div>"
         "<div id='home-sidecar-count' style='font-size:1.6rem; font-weight:600;'>...</div>"
         "<a href='/skills'>browse →</a></div>"
         + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Wiki entities</div>"
-        f"<div style='font-size:1.6rem; font-weight:600;'>{wstats['total']:,}</div>"
+        f"<div style='font-size:1.6rem; font-weight:600;'>{_format_count(wstats['total'])}</div>"
         f"<span class='muted' style='font-size:0.75rem;'>"
         f"{html.escape(wiki_detail)}</span></div>"
         + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Knowledge graph</div>"
-        f"<div style='font-size:1.6rem; font-weight:600;'>{gstats['nodes']}</div>"
-        f"<span class='muted' style='font-size:0.75rem;'>{gstats['edges']:,} edges</span>"
+        f"<div style='font-size:1.6rem; font-weight:600;'>{_format_count(gstats['nodes'])}</div>"
+        f"<span class='muted' style='font-size:0.75rem;'>{_format_count(gstats['edges'])} edges</span>"
         f" · <a href='/graph'>explore →</a></div>"
         + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Runtime checks</div>"
-        f"<div style='font-size:1.6rem; font-weight:600;'>{runtime['validations_total']}</div>"
+        f"<div style='font-size:1.6rem; font-weight:600;'>{_format_count(runtime['validations_total'])}</div>"
         f"<span class='muted' style='font-size:0.75rem;'>"
-        f"{runtime['validation_failures']} failed / "
-        f"{runtime['open_escalations_total']} open escalations</span>"
+        f"{_format_count(runtime['validation_failures'])} failed / "
+        f"{_format_count(runtime['open_escalations_total'])} open escalations</span>"
         f" / <a href='/runtime'>view -></a></div>"
         + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Audit events</div>"
-        f"<div style='font-size:1.6rem; font-weight:600;'>{audit_lines}</div>"
+        f"<div style='font-size:1.6rem; font-weight:600;'>{_format_count(audit_lines)}</div>"
         f"<a href='/logs'>view →</a> · <a href='/events'>live →</a></div>"
         + f"<div class='card'><div class='muted' style='font-size:0.8rem;'>Sessions</div>"
-        f"<div style='font-size:1.6rem; font-weight:600;'>{len(sessions)}</div>"
+        f"<div style='font-size:1.6rem; font-weight:600;'>{_format_count(len(sessions))}</div>"
         f"<a href='/sessions'>browse →</a></div>"
         + "</div>"
         # ── Grade distribution ────────────────────────────────────────
@@ -3573,6 +3597,7 @@ def _render_home() -> str:
         "</div>"
         "<script>"
         "(() => {"
+        "const fmt = n => Number(n || 0).toLocaleString();"
         "const countEl = document.getElementById('home-sidecar-count');"
         "const totalEl = document.getElementById('home-grade-total');"
         "fetch('/api/grades.json').then(r => r.ok ? r.json() : Promise.reject())"
@@ -3580,10 +3605,10 @@ def _render_home() -> str:
         "const grades = data.grades || {};"
         "['A','B','C','D','F'].forEach(g => {"
         "const el = document.querySelector(`[data-home-grade=\"${g}\"]`);"
-        "if (el) el.textContent = `${g}: ${grades[g] || 0}`;"
+        "if (el) el.textContent = `${g}: ${fmt(grades[g] || 0)}`;"
         "});"
-        "if (countEl) countEl.textContent = String(data.total || 0);"
-        "if (totalEl) totalEl.textContent = ` · total ${data.total || 0}`;"
+        "if (countEl) countEl.textContent = fmt(data.total || 0);"
+        "if (totalEl) totalEl.textContent = ` · total ${fmt(data.total || 0)}`;"
         "})"
         ".catch(() => {"
         "if (countEl) countEl.textContent = 'open';"
@@ -3593,7 +3618,7 @@ def _render_home() -> str:
         "</script>"
         # ── Two-column: recent sessions + recent audit ────────────────
         "<div style='display:grid; grid-template-columns:2fr 1fr; gap:1rem;'>"
-        f"<div class='card'><strong>Recent sessions</strong> ({len(sessions)} total)"
+        f"<div class='card'><strong>Recent sessions</strong> ({_format_count(len(sessions))} total)"
         + ("<table>"
            "<tr><th>Session</th><th>Last seen</th><th>Load</th>"
            "<th>Unload</th><th>Agents</th><th>Scores</th></tr>"
@@ -4218,14 +4243,19 @@ def _render_config() -> str:
 def _render_graph(focus: str | None = None, focus_type: str | None = None) -> str:
     """Interactive graph view backed by a dependency-free SVG renderer."""
     focus_slug = focus or ""
-    focus_js = _json_for_script(focus_slug)
-    focus_type_js = _json_for_script(focus_type or "")
     gstats = _graph_stats()
     seeds = (
         _top_degree_seeds(allow_load=False)
         if not focus_slug and gstats.get("available")
         else []
     )
+    initial_slug = focus_slug
+    initial_type = focus_type or ""
+    if not initial_slug and seeds:
+        initial_slug = str(seeds[0].get("slug") or "")
+        initial_type = str(seeds[0].get("type") or "")
+    focus_js = _json_for_script(initial_slug)
+    focus_type_js = _json_for_script(initial_type)
     seed_html = ""
     if seeds:
         chips = "".join(
@@ -4234,7 +4264,7 @@ def _render_graph(focus: str | None = None, focus_type: str | None = None) -> st
             f"border-radius:999px; background:{'#fef3c7' if s['type']=='agent' else '#fee2e2' if s['type']=='mcp-server' else '#dcfce7' if s['type']=='harness' else '#e0e7ff'}; "
             f"color:#111; font-size:0.82rem; text-decoration:none;'>"
             f"<code style='background:transparent;'>{html.escape(s['slug'])}</code> "
-            f"<span class='muted' style='font-size:0.72rem;'>· deg {s['degree']}</span>"
+            f"<span class='muted' style='font-size:0.72rem;'>· deg {_format_count(s['degree'])}</span>"
             f"</a>"
             for s in seeds
         )
@@ -4265,17 +4295,17 @@ def _render_graph(focus: str | None = None, focus_type: str | None = None) -> st
         "<div class='card'><strong>Focus</strong>"
         "<input type='text' id='focus' "
         "placeholder='skill / agent / mcp / harness slug' "
-        f"value='{html.escape(focus_slug)}' "
+        f"value='{html.escape(initial_slug)}' "
         "style='width:100%; margin-top:0.4rem; padding:0.35rem 0.5rem; "
         "border:1px solid #ccc; border-radius:4px;'>"
         "<select id='focus-type' "
         "style='width:100%; margin-top:0.4rem; padding:0.35rem 0.5rem; "
         "border:1px solid #ccc; border-radius:4px;'>"
         "<option value=''>auto type</option>"
-        f"<option value='skill' {'selected' if focus_type == 'skill' else ''}>skill</option>"
-        f"<option value='agent' {'selected' if focus_type == 'agent' else ''}>agent</option>"
-        f"<option value='mcp-server' {'selected' if focus_type == 'mcp-server' else ''}>mcp-server</option>"
-        f"<option value='harness' {'selected' if focus_type == 'harness' else ''}>harness</option>"
+        f"<option value='skill' {'selected' if initial_type == 'skill' else ''}>skill</option>"
+        f"<option value='agent' {'selected' if initial_type == 'agent' else ''}>agent</option>"
+        f"<option value='mcp-server' {'selected' if initial_type == 'mcp-server' else ''}>mcp-server</option>"
+        f"<option value='harness' {'selected' if initial_type == 'harness' else ''}>harness</option>"
         "</select>"
         "<button id='go' style='margin-top:0.4rem; width:100%;'>"
         "explore</button></div>"
@@ -4320,6 +4350,7 @@ def _render_graph(focus: str | None = None, focus_type: str | None = None) -> st
         "  return '#6366f1';\n"
         "}\n"
         "function escapeHtml(s) { return String(s).replace(/[&<>\"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[ch])); }\n"
+        "function fmtCount(n) { return Number(n || 0).toLocaleString(); }\n"
         "function rawNodeSlug(id) { return String(id || '').replace(/^(skill|agent|mcp-server|harness):/, ''); }\n"
         "function displaySlug(slug) { return String(slug || '').replace(/^skills-sh-/, ''); }\n"
         "function nodeSlug(id) { return displaySlug(rawNodeSlug(id)); }\n"
@@ -4500,11 +4531,11 @@ def _render_graph(focus: str | None = None, focus_type: str | None = None) -> st
         "    const hidden = hiddenIds.has(source) || hiddenIds.has(target);\n"
         "    e.style.display = hidden ? 'none' : '';\n"
         "  });\n"
-        "  document.getElementById('graph-count-skill').textContent = counts.skill;\n"
-        "  document.getElementById('graph-count-agent').textContent = counts.agent;\n"
-        "  document.getElementById('graph-count-mcp-server').textContent = counts['mcp-server'];\n"
-        "  document.getElementById('graph-count-harness').textContent = counts.harness;\n"
-        "  document.getElementById('graph-match-count').textContent = visible + ' visible';\n"
+        "  document.getElementById('graph-count-skill').textContent = fmtCount(counts.skill);\n"
+        "  document.getElementById('graph-count-agent').textContent = fmtCount(counts.agent);\n"
+        "  document.getElementById('graph-count-mcp-server').textContent = fmtCount(counts['mcp-server']);\n"
+        "  document.getElementById('graph-count-harness').textContent = fmtCount(counts.harness);\n"
+        "  document.getElementById('graph-match-count').textContent = fmtCount(visible) + ' visible';\n"
         "}\n"
         "async function load(slug, entityType = '') {\n"
         "  if (!slug) return;\n"
@@ -4516,7 +4547,7 @@ def _render_graph(focus: str | None = None, focus_type: str | None = None) -> st
         "  if (!g.center) { document.getElementById('msg').textContent = 'slug not in graph'; return; }\n"
         "  try { renderGraph3d(g); } catch (err) { renderFallback(g); }\n"
         "  const resolved = g.resolved && g.resolved.query !== g.resolved.slug ? ' · showing ' + g.resolved.slug + ' for ' + g.resolved.query : '';\n"
-        "  document.getElementById('msg').textContent = g.nodes.length + ' nodes · ' + g.edges.length + ' edges' + resolved;\n"
+        "  document.getElementById('msg').textContent = fmtCount(g.nodes.length) + ' nodes · ' + fmtCount(g.edges.length) + ' edges' + resolved;\n"
         "  applyFilters();\n"
         "}\n"
         "function selectedFocusType() { return document.getElementById('focus-type').value || ''; }\n"

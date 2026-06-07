@@ -369,9 +369,20 @@ def _find_local_graph_archive(install_mode: str = "runtime") -> Path | None:
         for graph_dir in graph_dirs
     ]
     for candidate in candidates:
-        if candidate.is_file():
+        if candidate.is_file() and not _is_lfs_pointer_file(candidate):
             return candidate
     return None
+
+
+def _is_lfs_pointer_file(path: Path) -> bool:
+    """Return True when a graph archive path is only a Git LFS pointer."""
+    try:
+        if path.stat().st_size > 1024:
+            return False
+        with path.open("rb") as fh:
+            return fh.readline().strip() == b"version https://git-lfs.github.com/spec/v1"
+    except OSError:
+        return False
 
 
 def _find_local_graph_entity_overlay() -> Path | None:

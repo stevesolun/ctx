@@ -86,7 +86,8 @@ def _assert_hydrated_artifacts(repo: Path) -> None:
         if size < min_bytes:
             raise RuntimeError(
                 f"{rel.as_posix()} is {size:,} bytes; expected at least "
-                f"{min_bytes:,}. Run git lfs pull before publishing."
+                f"{min_bytes:,}. Download or rebuild graph release artifacts "
+                "before publishing."
             )
         with artifact.open("rb") as fh:
             prefix = fh.read(len(LFS_POINTER_PREFIX))
@@ -127,6 +128,20 @@ def _export_tracked_tree(repo: Path, export_dir: Path) -> None:
         target = (export_root / rel).resolve()
         if target != export_root and not target.is_relative_to(export_root):
             raise ValueError(f"unsafe export path: {rel}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    _copy_hydrated_artifacts(repo_root, export_root)
+
+
+def _copy_hydrated_artifacts(repo_root: Path, export_root: Path) -> None:
+    """Copy required graph artifacts even when they are intentionally untracked."""
+    for rel in HYDRATED_ARTIFACT_MIN_BYTES:
+        source = (repo_root / rel).resolve()
+        if source != repo_root and not source.is_relative_to(repo_root):
+            raise ValueError(f"unsafe artifact source path: {rel}")
+        target = (export_root / rel).resolve()
+        if target != export_root and not target.is_relative_to(export_root):
+            raise ValueError(f"unsafe artifact export path: {rel}")
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
 
