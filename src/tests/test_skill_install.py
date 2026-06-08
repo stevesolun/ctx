@@ -18,6 +18,7 @@ import pytest
 from ctx.adapters.claude_code.install import agent_install
 from ctx.adapters.claude_code.install import install_utils
 from ctx.adapters.claude_code.install import skill_install
+from ctx.adapters.claude_code.install.skillspector_scan import run_skillspector_scan
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 
@@ -316,6 +317,112 @@ class TestInstallSkill:
 
         assert r.status == "installed"
         assert Path(seen.read_text(encoding="utf-8")) == converted
+
+    def test_security_scan_rejects_nested_symlink_before_scanner_runs(
+        self,
+        wiki_dir: Path,
+        skills_dir: Path,
+        isolated_manifest: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        converted = _seed_skill(wiki_dir, "s")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (converted / "scripts").mkdir()
+        _symlink_to(outside, converted / "scripts" / "outside", target_is_directory=True)
+
+        def fail_scan(*args: object, **kwargs: object) -> object:
+            pytest.fail("scanner should not run before symlink bundle rejection")
+
+        monkeypatch.setattr(skill_install, "run_skillspector_scan", fail_scan)
+
+        r = skill_install.install_skill(
+            "s",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+            security_scan=True,
+        )
+
+        assert r.status == "failed"
+        assert "unsafe symlinked wiki bundle" in r.message
+        assert not (skills_dir / "s").exists()
+
+    def test_security_scan_dry_run_rejects_nested_symlink_before_scanner_runs(
+        self,
+        wiki_dir: Path,
+        skills_dir: Path,
+        isolated_manifest: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        converted = _seed_skill(wiki_dir, "s")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (converted / "assets").mkdir()
+        _symlink_to(outside, converted / "assets" / "outside", target_is_directory=True)
+
+        def fail_scan(*args: object, **kwargs: object) -> object:
+            pytest.fail("scanner should not run before symlink bundle rejection")
+
+        monkeypatch.setattr(skill_install, "run_skillspector_scan", fail_scan)
+
+        r = skill_install.install_skill(
+            "s",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+            dry_run=True,
+            security_scan=True,
+        )
+
+        assert r.status == "failed"
+        assert "unsafe symlinked wiki bundle" in r.message
+        assert not (skills_dir / "s").exists()
+
+    def test_skillspector_static_scan_uses_minimal_env(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-secret")
+        scanner = tmp_path / "fake_skillspector.py"
+        scanner.write_text(
+            "import os\n"
+            "print(os.environ.get('OPENAI_API_KEY', '<missing>'))\n"
+            "raise SystemExit(0)\n",
+            encoding="utf-8",
+        )
+
+        r = run_skillspector_scan(
+            tmp_path,
+            command=[sys.executable, str(scanner)],
+        )
+
+        assert r.status == "passed"
+        assert "sk-test-secret" not in r.output
+        assert "<missing>" in r.output
+
+    def test_skillspector_output_is_sanitized(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        scanner = tmp_path / "fake_skillspector.py"
+        scanner.write_text(
+            "print('GITHUB_TOKEN=ghp_' + 'A' * 30)\n"
+            "print('\\x1b]0;evil\\x07\\x1b[31mred\\x1b[0m')\n"
+            "raise SystemExit(0)\n",
+            encoding="utf-8",
+        )
+
+        r = run_skillspector_scan(
+            tmp_path,
+            command=[sys.executable, str(scanner)],
+        )
+
+        assert "ghp_" not in r.output
+        assert "GITHUB_TOKEN=[REDACTED]" in r.output
+        assert "\x1b" not in r.output
+        assert "red" in r.output
 
     def test_dry_run_skips_writes(
         self,

@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from ctx_config import cfg
+from ctx.adapters.claude_code.install.skillspector_scan import SkillSpectorResult
+from ctx.adapters.claude_code.install.skillspector_scan import run_skillspector_scan
 from ctx.core.wiki.wiki_utils import validate_skill_name
 from ctx.utils._file_lock import file_lock
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
@@ -197,11 +199,60 @@ def show_pending() -> None:
             print(f"    - {s['name']} [{s['type']}] score={s.get('score', '?')} ({tags})")
 
 
+def _scan_target(result: dict) -> Path:
+    path = Path(str(result["path"]))
+    if result.get("type") == "skill" and path.name == "SKILL.md":
+        return path.parent
+    return path
+
+
+def _print_security_scan_report(scan: SkillSpectorResult) -> None:
+    print(f"  SkillSpector: {scan.status}")
+    print("  SkillSpector report:")
+    if scan.output:
+        for line in scan.output.splitlines():
+            print(f"    {line}")
+    else:
+        print("    <no output>")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Load a skill/agent into the current session")
     parser.add_argument("--name", help="Skill or agent name to load")
     parser.add_argument("--names", help="Comma-separated skill/agent names to load")
     parser.add_argument("--show-pending", action="store_true", help="Show pending suggestions")
+    parser.add_argument(
+        "--security-scan",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Run SkillSpector before loading skills and include its report in output "
+            "(default: enabled; use --no-security-scan to skip)"
+        ),
+    )
+    parser.add_argument(
+        "--security-scan-required",
+        action="store_true",
+        help="Do not load a skill unless SkillSpector exits cleanly",
+    )
+    parser.add_argument(
+        "--security-scan-llm",
+        action="store_true",
+        help="Allow SkillSpector LLM analysis instead of static-only --no-llm",
+    )
+    parser.add_argument(
+        "--skillspector-bin",
+        help=(
+            "SkillSpector executable. Defaults to CTX_SKILLSPECTOR_BIN or "
+            "'skillspector' on PATH."
+        ),
+    )
+    parser.add_argument(
+        "--security-scan-timeout",
+        type=int,
+        default=120,
+        help="SkillSpector timeout in seconds (default: 120)",
+    )
     args = parser.parse_args()
 
     if args.show_pending:
@@ -220,13 +271,42 @@ def main() -> None:
 
     loaded: list[dict] = []
     not_found: list[str] = []
+    security_failed: list[dict] = []
 
     for name in names:
         result = find_skill(name)
         if result:
+            scan_result = None
+            if args.security_scan and result["type"] == "skill":
+                scan_result = run_skillspector_scan(
+                    _scan_target(result),
+                    binary=args.skillspector_bin,
+                    use_llm=args.security_scan_llm,
+                    timeout_seconds=args.security_scan_timeout,
+                )
+                _print_security_scan_report(scan_result)
+                if args.security_scan_required and scan_result.status != "passed":
+                    blocked = {
+                        **result,
+                        "security_scan": scan_result.to_json(),
+                    }
+                    security_failed.append(blocked)
+                    print(
+                        (
+                            "  Blocked: "
+                            f"{result['name']} [{result['type']}] failed "
+                            f"SkillSpector ({scan_result.status})"
+                        ),
+                        file=sys.stderr,
+                    )
+                    continue
+
             update_manifest(name, entity_type=result["type"])
             emit_load_event(name)
-            loaded.append(result)
+            loaded_result = {**result}
+            if scan_result is not None:
+                loaded_result["security_scan"] = scan_result.to_json()
+            loaded.append(loaded_result)
             print(f"  Loaded: {result['name']} [{result['type']}] -> {result['path']}")
         else:
             not_found.append(name)
@@ -239,9 +319,12 @@ def main() -> None:
     output = {
         "loaded": loaded,
         "not_found": not_found,
+        "security_failed": security_failed,
         "instruction": "Read the file at each 'path' to apply the skill/agent to this session.",
     }
     print(json.dumps(output, indent=2))
+    if security_failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

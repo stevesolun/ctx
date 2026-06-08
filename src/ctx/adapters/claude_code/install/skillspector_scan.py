@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass
@@ -23,6 +24,39 @@ class SkillSpectorResult:
         return asdict(self)
 
 
+_SAFE_ENV_KEYS = {
+    "APPDATA",
+    "COMSPEC",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "PATHEXT",
+    "REQUESTS_CA_BUNDLE",
+    "SSL_CERT_FILE",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "USERPROFILE",
+    "VIRTUAL_ENV",
+    "WINDIR",
+}
+_ANSI_CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_ANSI_OSC_RE = re.compile(r"\x1b\][^\x07]*(?:\x07|\x1b\\)")
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b((?:[A-Z0-9_]*"
+    r"(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)"
+    r"[A-Z0-9_]*|HF_TOKEN|GITHUB_TOKEN|OPENAI_API_KEY)"
+    r"\s*[:=]\s*)([^\s]+)"
+)
+_KNOWN_TOKEN_RE = re.compile(
+    r"\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|hf_[A-Za-z0-9]{20,}|"
+    r"sk-[A-Za-z0-9_-]{20,})\b"
+)
+_MAX_OUTPUT_CHARS = 20_000
+
+
 def _resolve_command(
     command: Sequence[str] | None = None,
     binary: str | None = None,
@@ -36,12 +70,32 @@ def _resolve_command(
     return [found] if found else None
 
 
+def _scanner_env(*, use_llm: bool) -> dict[str, str] | None:
+    if use_llm:
+        return None
+    safe: dict[str, str] = {}
+    for key, value in os.environ.items():
+        if key.upper() in _SAFE_ENV_KEYS:
+            safe[key] = value
+    return safe
+
+
 def _stringify_output(value: str | bytes | None) -> str:
     if value is None:
         return ""
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return value
+
+
+def _sanitize_output(output: str) -> str:
+    clean = _ANSI_OSC_RE.sub("", output)
+    clean = _ANSI_CSI_RE.sub("", clean)
+    clean = _SECRET_ASSIGNMENT_RE.sub(r"\1[REDACTED]", clean)
+    clean = _KNOWN_TOKEN_RE.sub("[REDACTED]", clean)
+    if len(clean) > _MAX_OUTPUT_CHARS:
+        clean = clean[:_MAX_OUTPUT_CHARS] + "\n[truncated SkillSpector output]"
+    return clean
 
 
 def run_skillspector_scan(
@@ -87,6 +141,7 @@ def run_skillspector_scan(
             scan_command,
             capture_output=True,
             text=True,
+            env=_scanner_env(use_llm=use_llm),
             timeout=max(timeout_seconds, 1),
             check=False,
         )
@@ -96,7 +151,10 @@ def run_skillspector_scan(
             status="error",
             command=scan_command,
             exit_code=None,
-            output=(output.strip() or f"SkillSpector timed out after {timeout_seconds}s."),
+            output=(
+                _sanitize_output(output.strip())
+                or f"SkillSpector timed out after {timeout_seconds}s."
+            ),
         )
     except OSError as exc:
         return SkillSpectorResult(
@@ -111,6 +169,7 @@ def run_skillspector_scan(
         for part in (completed.stdout, completed.stderr)
         if part and part.strip()
     )
+    output = _sanitize_output(output)
     if completed.returncode == 0:
         status = "passed"
     elif completed.returncode == 1:

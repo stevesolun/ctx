@@ -158,6 +158,22 @@ def _iter_bundle_files(src_dir: Path) -> list[tuple[Path, Path]]:
     return files
 
 
+def _find_symlink_in_tree(root: Path) -> Path | None:
+    """Return the first symlink under root, including root itself."""
+    candidates = [root]
+    try:
+        candidates.extend(root.rglob("*"))
+    except OSError:
+        return root
+    for candidate in candidates:
+        try:
+            if candidate.is_symlink():
+                return candidate
+        except OSError:
+            return candidate
+    return None
+
+
 def _copy_bundle_files(src_dir: Path, dest_dir: Path) -> int:
     """Copy bundled references/resources/scripts/assets into an install dir."""
     copied = 0
@@ -227,6 +243,13 @@ def install_skill(
             message="wiki has no SKILL.md or SKILL.md.original",
         )
     assert variant is not None
+    unsafe_symlink = _find_symlink_in_tree(converted)
+    if unsafe_symlink is not None:
+        return InstallResult(
+            slug=slug, status="failed", installed_path=None,
+            source_variant=variant, references_copied=0,
+            message=f"unsafe symlinked wiki bundle at {unsafe_symlink}",
+        )
 
     dest_dir = skills_dir / slug
     dest = dest_dir / "SKILL.md"

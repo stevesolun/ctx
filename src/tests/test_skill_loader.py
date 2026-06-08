@@ -182,6 +182,169 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return skill_loader, home
 
 
+def test_main_security_scan_outputs_report_and_targets_bundle(
+    fake_home,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    loader, home = fake_home
+    scan_targets: list[Path] = []
+
+    def fake_scan(target: Path, **kwargs: object):
+        scan_targets.append(target)
+        return loader.SkillSpectorResult(
+            status="passed",
+            command=["skillspector", "scan", str(target), "--no-llm"],
+            exit_code=0,
+            output="static scan clean",
+        )
+
+    monkeypatch.setattr(loader, "run_skillspector_scan", fake_scan)
+    monkeypatch.setattr(sys, "argv", ["skill_loader.py", "--name", "goodskill"])
+
+    loader.main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out[captured.out.index("{"):])
+    assert scan_targets == [home / ".claude" / "skills" / "goodskill"]
+    assert "SkillSpector report:" in captured.out
+    assert "static scan clean" in captured.out
+    assert payload["loaded"][0]["security_scan"]["status"] == "passed"
+
+
+def test_main_security_scan_passes_scanner_knobs(
+    fake_home,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loader, _ = fake_home
+    observed: dict[str, object] = {}
+
+    def fake_scan(target: Path, **kwargs: object):
+        observed.update(kwargs)
+        return loader.SkillSpectorResult(
+            status="passed",
+            command=["custom-scan", "scan", str(target)],
+            exit_code=0,
+            output="ok",
+        )
+
+    monkeypatch.setattr(loader, "run_skillspector_scan", fake_scan)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "skill_loader.py",
+            "--name",
+            "goodskill",
+            "--skillspector-bin",
+            "custom-scan",
+            "--security-scan-llm",
+            "--security-scan-timeout",
+            "7",
+        ],
+    )
+
+    loader.main()
+
+    assert observed == {
+        "binary": "custom-scan",
+        "use_llm": True,
+        "timeout_seconds": 7,
+    }
+
+
+def test_main_security_scan_missing_scanner_is_visible(
+    fake_home,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    loader, _ = fake_home
+
+    def fake_scan(target: Path, **kwargs: object):
+        return loader.SkillSpectorResult(
+            status="missing",
+            command=["skillspector"],
+            exit_code=None,
+            output="SkillSpector is not installed or not on PATH.",
+        )
+
+    monkeypatch.setattr(loader, "run_skillspector_scan", fake_scan)
+    monkeypatch.setattr(sys, "argv", ["skill_loader.py", "--name", "goodskill"])
+
+    loader.main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out[captured.out.index("{"):])
+    assert "SkillSpector: missing" in captured.out
+    assert "SkillSpector is not installed or not on PATH." in captured.out
+    assert payload["loaded"][0]["security_scan"]["status"] == "missing"
+
+
+def test_main_security_scan_required_blocks_manifest_write(
+    fake_home,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    loader, home = fake_home
+
+    def fake_scan(target: Path, **kwargs: object):
+        return loader.SkillSpectorResult(
+            status="findings",
+            command=["skillspector", "scan", str(target), "--no-llm"],
+            exit_code=1,
+            output="HIGH prompt injection",
+        )
+
+    monkeypatch.setattr(loader, "run_skillspector_scan", fake_scan)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["skill_loader.py", "--name", "goodskill", "--security-scan-required"],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        loader.main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out[captured.out.index("{"):])
+    assert exc_info.value.code == 1
+    assert "Blocked: goodskill [skill] failed SkillSpector" in captured.err
+    assert payload["loaded"] == []
+    assert payload["security_failed"][0]["security_scan"]["status"] == "findings"
+    assert not (home / ".claude" / "skill-manifest.json").exists()
+
+
+def test_main_security_scan_skips_agents(
+    fake_home,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    loader, _ = fake_home
+    scan_calls = 0
+
+    def fake_scan(target: Path, **kwargs: object):
+        nonlocal scan_calls
+        scan_calls += 1
+        return loader.SkillSpectorResult(
+            status="passed",
+            command=["skillspector", "scan", str(target), "--no-llm"],
+            exit_code=0,
+            output="should not run",
+        )
+
+    monkeypatch.setattr(loader, "run_skillspector_scan", fake_scan)
+    monkeypatch.setattr(sys, "argv", ["skill_loader.py", "--name", "goodagent"])
+
+    loader.main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out[captured.out.index("{"):])
+    assert scan_calls == 0
+    assert "SkillSpector report:" not in captured.out
+    assert payload["loaded"][0]["type"] == "agent"
+    assert "security_scan" not in payload["loaded"][0]
+
+
 def test_valid_skill_name_resolves(fake_home):
     loader, _ = fake_home
     result = loader.find_skill("goodskill")
