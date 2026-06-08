@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -189,6 +190,34 @@ def _repo_commit_url(*, repo_id: str, repo_type: str, sha: str) -> str:
     return f"{_repo_url(repo_id=repo_id, repo_type=repo_type)}/commit/{sha}"
 
 
+def _hf_status_code(exc: BaseException) -> int | None:
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int):
+        return status
+    match = re.search(r"\b(4\d\d|5\d\d)\b", str(exc))
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _ensure_hf_repo_exists(*, api: Any, repo_id: str, repo_type: str) -> None:
+    try:
+        api.repo_info(repo_id=repo_id, repo_type=repo_type)
+        return
+    except Exception as info_exc:  # noqa: BLE001
+        if _hf_status_code(info_exc) != 404:
+            raise
+
+    try:
+        api.create_repo(repo_id, repo_type=repo_type, exist_ok=True)
+    except Exception as create_exc:  # noqa: BLE001
+        if _hf_status_code(create_exc) == 429:
+            api.repo_info(repo_id=repo_id, repo_type=repo_type)
+            return
+        raise
+
+
 def _remote_has_no_stale_paths(
     *,
     api: Any,
@@ -263,7 +292,7 @@ def sync_to_huggingface(
         _export_tracked_tree(repo, export_dir)
         _patch_export_readme(export_dir)
         api = HfApi(token=token)
-        api.create_repo(repo_id, repo_type=repo_type, exist_ok=True)
+        _ensure_hf_repo_exists(api=api, repo_id=repo_id, repo_type=repo_type)
         return _upload_export(
             api=api,
             repo_id=repo_id,

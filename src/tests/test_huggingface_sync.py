@@ -43,6 +43,31 @@ class _FakeHfApi:
         return _FakeRepoInfo()
 
 
+class _FakeHttpError(Exception):
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"{status_code} synthetic HF error")
+        self.response = type("Response", (), {"status_code": status_code})()
+
+
+class _FakeRepoCreateApi:
+    def __init__(self, repo_info_statuses: list[int | None], create_status: int | None = None) -> None:
+        self.repo_info_statuses = repo_info_statuses
+        self.create_status = create_status
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def repo_info(self, **kwargs: object) -> _FakeRepoInfo:
+        self.calls.append(("repo_info", kwargs))
+        status = self.repo_info_statuses.pop(0)
+        if status is not None:
+            raise _FakeHttpError(status)
+        return _FakeRepoInfo()
+
+    def create_repo(self, repo_id: str, **kwargs: object) -> None:
+        self.calls.append(("create_repo", {"repo_id": repo_id, **kwargs}))
+        if self.create_status is not None:
+            raise _FakeHttpError(self.create_status)
+
+
 def test_committed_readme_does_not_start_with_hf_frontmatter() -> None:
     readme = Path(__file__).resolve().parents[2] / "README.md"
 
@@ -94,6 +119,34 @@ def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:
     assert "scripts/sync_huggingface.py" in text
     assert "Set the HF_TOKEN repository secret" in text
     assert "hf_" not in text
+
+
+def test_hf_sync_skips_repo_create_when_repo_exists() -> None:
+    api = _FakeRepoCreateApi(repo_info_statuses=[None])
+
+    sync_huggingface._ensure_hf_repo_exists(
+        api=api,
+        repo_id="Stevesolun/ctx",
+        repo_type="dataset",
+    )
+
+    assert [call[0] for call in api.calls] == ["repo_info"]
+
+
+def test_hf_sync_tolerates_create_rate_limit_when_repo_exists_after_retry() -> None:
+    api = _FakeRepoCreateApi(repo_info_statuses=[404, None], create_status=429)
+
+    sync_huggingface._ensure_hf_repo_exists(
+        api=api,
+        repo_id="Stevesolun/ctx",
+        repo_type="dataset",
+    )
+
+    assert [call[0] for call in api.calls] == [
+        "repo_info",
+        "create_repo",
+        "repo_info",
+    ]
 
 
 def test_hf_upload_prefers_large_folder_when_remote_has_no_stale_paths(
