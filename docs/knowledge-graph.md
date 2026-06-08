@@ -310,35 +310,16 @@ rollback metadata. The manifest is promoted last, so a crash between artifact
 promotion and manifest promotion is detected as an incomplete export and the
 next run rebuilds instead of trusting mixed graph files.
 
-## Edge-count history
+## Current artifact record
 
-| Version | Edges | Note |
-|---|---|---|
-| v0.5.x | 642K (stale) / 861 (live) | Bundle had stale 642K; live rebuild silently produced 861 because `DENSE_TAG_THRESHOLD=20` dropped every popular tag. |
-| v0.6.0 | 454,719 | Threshold raised to 500, multi-line YAML lists parsed, slug-token pseudo-tags added. |
-| v0.7.x | 847,207 | Pulsemcp ingest added 10,786 MCP server nodes; sentence-embedding semantic edges added. |
-| 2026-04-27 graph rebuild pass | **963,068** | +21 mattpocock skills, +156 designdotmd designs (+106,702 edges); patch-path bug fixed (graphify now forces full rebuild when prior graph has 0 semantic edges but current run computed semantic pairs); community detection switched from CNM to Louvain. |
-| 2026-04-29 bulk skill import pass | **1,030,831** | +90,846 first-class `skill` nodes, +90,846 skill pages, and +67,519 sparse duplicate/tag metadata edges to the core graph. Full-body semantic edges are intentionally deferred to the hydration pass. |
-| 2026-04-29 text-to-cad harness pass | **1,031,011** | +1 first-class `harness` node, +1 harness page, and +224 explainable harness edges, including 44 skill edges. |
-| 2026-04-29 harness inventory pass | **1,033,253** | +12 first-class `harness` nodes/pages for LangGraph, CrewAI, AutoGen, Google ADK, Semantic Kernel, Mastra, Pydantic AI, Haystack, OpenAI Agents SDK, LiteLLM, Langfuse, and AgentOps; harness incident edges now total 2,700. |
-| 2026-04-30 skill semantic hydration pass | **2,881,027** | +full-body semantic edges for hydrated skill records; semantic top-K became the dominant large-scale signal. |
-| 2026-05-01 micro-skill pass | **2,960,189** | Enforced the <=180-line loader threshold across 89,461 hydrated `SKILL.md` files, converted 28,611 long bodies into gated micro-skill orchestrators, used full originals for semantic graphing, excluded `.original` backups from the shipped tarball, bounded generated stage/reference files to 40 lines, and rebuilt the graph. |
-| 2026-05-02 GitNexus MCP pass | **2,960,215** | Added GitNexus as an MCP server entity with 26 cross-type edges to related skill pages and architecture/refactoring agents; semantic edge count unchanged. |
-| 2026-05-04 v0.7.3 artifact refresh | **2,960,215** | Hydrated one recoverable command-injection-testing body, raising hydrated `SKILL.md` files to 89,463; generated micro-skill markdown now defangs high-risk command-injection payloads before packaging. Graph topology unchanged. |
-| 2026-05-04 body-backed skill prune | **2,900,834** | Removed 1,383 skill records that had no packaged `SKILL.md` body and no parseable prose body. Remaining skill records, graph nodes, entity pages, and converted `SKILL.md` bodies are all **89,463**. |
-| 2026-05-05 artifact hygiene refresh | **2,900,834** | Repacked `graph/wiki-graph.tar.gz` to remove transient `.lock` files from the shipped LLM-wiki. Topology unchanged. |
-| 2026-05-10 v1.0.0 release prep | **2,900,834** | Refreshed shipped HTML previews from the current export, validated their export IDs in CI, and removed stale PNG previews. Topology unchanged. |
-| 2026-05-12 book-to-skill + queue hygiene | **2,900,910** | Added `book-to-skill` as a skill entity (+1 node, +76 edges), restored a missing converted skill body, and repacked `graph/wiki-graph.tar.gz` to omit `.ctx/` queue state. Tar members: **598,154**. |
-| 2026-05-13 overlay pass | **2,911,220** | Added AGENTS.md, lat.md, OptiLLM, Matt Pocock refresh deltas, and Julius caveman entities through the safe overlay path (+21 nodes, +10,310 edges) while preserving the saturated skill topology. Tar members at that pass: **598,192**. |
-| 2026-05-14 Matt Pocock upstream refresh | **2,911,126** | Pinned `mattpocock/skills` to `e74f0061bb67222181640effa98c675bdb2fdaa7`, removed three stale legacy alias skill pages/nodes (`mattpocock-domain-model`, `mattpocock-github-triage`, `mattpocock-triage-issue`), refreshed `mattpocock-grill-with-docs`, and pruned 94 incident edges plus stale wiki references. Current tar members: **598,189**. |
-| 2026-05-14 Mirage + CodeGraph first-class wiki pass | **2,911,162** | Added Mirage as a shipped harness wiki/runtime page, added the CodeGraph MCP markdown page and `codegraph-agentic-codebase-analysis` skill page/body to the full LLM-wiki, added the compact dashboard neighborhood index, regenerated graph preview HTML from the current export, and refreshed exact validation counts. Current tar members: **598,193**. |
-| 2026-05-18 repo refresh | **2,911,575** | Refreshed `addyosmani/agent-skills` and `bytedance/deer-flow` from current upstream SKILL.md bodies, added Addy Osmani's `doubt-driven-development` and `interview-me` skills, replaced DeerFlow's stale `vercel-deploy` entry with `vercel-deploy-claimable`, retained `Imbad0202/academic-research-skills` as existing non-commercial upstream content, and added DeerFlow as a first-class harness page/runtime page. Current tar members: **598,596**. |
-| 2026-05-26 upstream repo ingest | **2,913,930** | Added `browsing-skills/browsing-skills` as a root browser skill plus 11 site-specific browser skills, refreshed `awesome-skills/code-review-skill` into `code-review-excellence` with its reference pack, refreshed `book-to-skill` through the micro-skill gate, added Presenton as both a harness and MCP server, refreshed DeerFlow's harness page, imported 190 harness catalog pages from `Picrew/awesome-agent-harness`, regenerated dashboard sqlite and preview HTML from the current export, and refreshed exact validation counts. Current tar members: **598,951**. |
-| 2026-05-27 Nango catalog/tooling overlay | **2,913,960** | Added `nango-integration-catalog` as a skill page/body, added Nango hosted action-function MCP and Nango docs MCP as first-class MCP pages, connected them to API/auth/tool-calling skills, common SaaS MCPs, and agent harnesses, regenerated dashboard sqlite and preview HTML, and refreshed exact validation counts. Current tar members: **598,955**. |
-| 2026-05-27 Nango semantic rescore | **2,913,960** | Replaced Nango's placeholder manual edge weights with measured MiniLM semantic cosines plus graphify-compatible tag/direct/type components. Topology unchanged; semantic edge count increased by 30 to **1,683,193**. |
+This page is intentionally current-state only. Older graph sizes made the public
+page look stale even when the headline table was correct, so historical refresh
+notes live in `CHANGELOG.md` instead of being repeated here.
 
-The full audit history lives in `CHANGELOG.md`. The current build is
-fully reproducible from the wiki content.
+The shipped artifact currently records **102,928 nodes**, **2,913,960 edges**,
+**52 Louvain communities**, **1,683,193 semantic edges**, **897,784 tag edges**,
+and **433,245 slug-token edges**. The current build is fully reproducible from
+the wiki content and the checked-in graph build configuration.
 
 ## Pre-ship gates
 

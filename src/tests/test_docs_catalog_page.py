@@ -32,3 +32,35 @@ def test_public_catalog_page_does_not_link_to_local_dashboard() -> None:
     assert "ctxLocalWikiUrl" not in text
     assert "ctxPublicCatalogUrl" in text
     assert "../dashboard/#catalog-badge-links" in text
+
+
+def test_public_docs_do_not_render_old_graph_totals() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    paths = [repo_root / "README.md"]
+    paths.extend((repo_root / "docs").rglob("*.md"))
+    paths.extend((repo_root / "graph").rglob("*.md"))
+    public_text = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace") for path in paths
+    )
+
+    for stale in (
+        "102,696",
+        "102,925",
+        "91,432",
+        "91,463",
+        "89,463",
+        "2,900,834",
+        "2,913,930",
+        "2,960,215",
+    ):
+        assert stale not in public_text
+
+    for current in (
+        "102,928",
+        "91,464",
+        "89,465",
+        "2,913,960",
+        "10,790",
+        "207 harnesses",
+    ):
+        assert current in public_text
