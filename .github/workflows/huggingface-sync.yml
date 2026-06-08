@@ -22,15 +22,27 @@ jobs:
     name: Sync dataset
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout with LFS artifacts
+      - name: Checkout
         uses: actions/checkout@v5
         with:
-          lfs: true
+          lfs: false
 
       - name: Skip when HF_TOKEN is not configured
         if: ${{ env.HF_TOKEN == '' }}
         run: |
           echo "::notice title=Hugging Face sync skipped::Set the HF_TOKEN repository secret to publish Stevesolun/ctx automatically."
+
+      - name: Hydrate required graph artifacts from release assets
+        if: ${{ env.HF_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest_tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          echo "Hydrating graph artifacts from release ${latest_tag}"
+          rm -f graph/wiki-graph.tar.gz graph/wiki-graph-runtime.tar.gz graph/skills-sh-catalog.json.gz
+          gh release download "$latest_tag" --repo "$GITHUB_REPOSITORY" --dir graph --pattern wiki-graph.tar.gz
+          gh release download "$latest_tag" --repo "$GITHUB_REPOSITORY" --dir graph --pattern wiki-graph-runtime.tar.gz
+          gh release download "$latest_tag" --repo "$GITHUB_REPOSITORY" --dir graph --pattern skills-sh-catalog.json.gz
 
       - name: Set up Python
         if: ${{ env.HF_TOKEN != '' }}
