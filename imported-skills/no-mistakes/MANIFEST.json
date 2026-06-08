@@ -1,0 +1,17 @@
+{
+  "upstream": "https://github.com/kunchenguid/no-mistakes",
+  "license": "MIT",
+  "namespace": "no-mistakes",
+  "total": 1,
+  "entries": [
+    {
+      "name": "no-mistakes",
+      "slug": "no-mistakes",
+      "type": "skill",
+      "source_path": "skills/no-mistakes/SKILL.md",
+      "description": "Validate committed feature-branch changes through the no-mistakes pipeline: intent, rebase, review, test, docs, lint, push, PR, and CI.",
+      "category": "workflow",
+      "invoke_command": "no-mistakes axi run --intent \"<what the user set out to accomplish>\""
+    }
+  ]
+}

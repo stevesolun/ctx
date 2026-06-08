@@ -158,6 +158,30 @@ def test_exact_slug_token_outscores_substring_only() -> None:
     assert names[0] == "api-design"
 
 
+def test_exact_entity_slug_query_beats_common_workflow_matches() -> None:
+    G = _build_graph([
+        ("no-mistakes", ["git", "validation", "ship", "workflow"]),
+        *[(f"git-workflow-{i}", ["git", "workflow"]) for i in range(40)],
+    ])
+
+    out = recommend_by_tags(G, ["no-mistakes", "git", "workflow"], top_n=5)
+
+    assert out[0]["name"] == "no-mistakes"
+
+
+def test_exact_entity_phrase_query_beats_common_workflow_matches() -> None:
+    G = _build_graph([
+        ("no-mistakes", ["git", "validation", "ship", "workflow"]),
+        ("run", ["workflow"]),
+        *[(f"git-workflow-{i}", ["git", "workflow"]) for i in range(40)],
+    ])
+    query = "run no mistakes before git workflow"
+
+    out = recommend_by_tags(G, query_to_tags(query), top_n=5, query=query)
+
+    assert out[0]["name"] == "no-mistakes"
+
+
 def test_tag_match_idf_weighting() -> None:
     """A rare tag should outweigh a common one in the score."""
     G = _build_graph([
