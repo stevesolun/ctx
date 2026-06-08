@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-3922_collected-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-3923_collected-brightgreen.svg)](#)
 [![Graph](https://img.shields.io/badge/Graph-102%2C928_nodes_/_2.9M_edges-red.svg)](https://stevesolun.github.io/ctx/knowledge-graph/)
 [![Skills](https://img.shields.io/badge/Skills-91%2C464-blue.svg)](https://stevesolun.github.io/ctx/dashboard/#catalog-badge-links)
 [![Agents](https://img.shields.io/badge/Agents-467-purple.svg)](https://stevesolun.github.io/ctx/dashboard/#catalog-badge-links)

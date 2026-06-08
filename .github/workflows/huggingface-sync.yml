@@ -1,0 +1,52 @@
+name: Sync Hugging Face
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "huggingface-sync-main"
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: Sync dataset
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with LFS artifacts
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Skip when HF_TOKEN is not configured
+        if: ${{ env.HF_TOKEN == '' }}
+        run: |
+          echo "::notice title=Hugging Face sync skipped::Set the HF_TOKEN repository secret to publish Stevesolun/ctx automatically."
+
+      - name: Set up Python
+        if: ${{ env.HF_TOKEN != '' }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: pyproject.toml
+
+      - name: Install sync dependencies
+        if: ${{ env.HF_TOKEN != '' }}
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" huggingface_hub
+
+      - name: Sync Hugging Face dataset
+        if: ${{ env.HF_TOKEN != '' }}
+        run: |
+          python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type dataset

@@ -77,6 +77,22 @@ def test_hf_publish_docs_use_hardened_sync_script_without_inline_token() -> None
     assert "Read-Host \"HF write token\"" in text
 
 
+def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:
+    workflow = (
+        Path(__file__).resolve().parents[2]
+        / ".github"
+        / "workflows"
+        / "huggingface-sync.yml"
+    )
+    text = workflow.read_text(encoding="utf-8")
+
+    assert "HF_TOKEN: ${{ secrets.HF_TOKEN }}" in text
+    assert "lfs: true" in text
+    assert "scripts/sync_huggingface.py" in text
+    assert "Set the HF_TOKEN repository secret" in text
+    assert "hf_" not in text
+
+
 def test_hf_upload_prefers_large_folder_when_remote_has_no_stale_paths(
     tmp_path: Path,
 ) -> None:

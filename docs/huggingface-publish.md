@@ -17,7 +17,20 @@ Ignored local reports, review notes, raw ingest caches, coverage files,
 `site/`, and `.pytest_cache/` are not uploaded because they are not tracked
 by git.
 
-## Publish command
+## Automatic publish
+
+Every push to `main` runs `.github/workflows/huggingface-sync.yml`. The job
+checks out Git LFS artifacts, installs the sync dependencies, and calls
+`scripts/sync_huggingface.py`. It publishes only when the repository secret
+`HF_TOKEN` is configured; otherwise it exits successfully with a notice so
+public forks and dry repos do not fail.
+
+The sync script is still the contract: it exports the tracked git snapshot,
+adds Hugging Face repo-card metadata, validates README/docs stats, verifies the
+graph artifacts are hydrated rather than LFS pointers, and refuses to publish
+stale or corrupt artifacts.
+
+## Manual publish
 
 Use the repository sync script. It exports tracked files plus the validated
 local graph artifacts, adds the Hugging Face repo-card frontmatter to the
