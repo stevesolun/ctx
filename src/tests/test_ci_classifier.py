@@ -270,8 +270,10 @@ def test_no_test_policy_exempts_release_metadata_with_generated_stats() -> None:
     diffs = {
         "CHANGELOG.md": "+## [0.7.17] - 2026-05-09\n",
         "README.md": (
-            "-[![Tests](https://img.shields.io/badge/Tests-3693_collected-brightgreen.svg)](#)\n"
-            "+[![Tests](https://img.shields.io/badge/Tests-3696_collected-brightgreen.svg)](#)\n"
+            "-[![Tests](https://img.shields.io/badge/Tests-3693_collected-brightgreen.svg)]"
+            "(https://github.com/stevesolun/ctx/actions/workflows/test.yml)\n"
+            "+[![Tests](https://img.shields.io/badge/Tests-3696_collected-brightgreen.svg)]"
+            "(https://github.com/stevesolun/ctx/actions/workflows/test.yml)\n"
         ),
         "docs/index.md": (
             "-    3,693 tests collected. Ships console scripts.\n"

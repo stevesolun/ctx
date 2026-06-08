@@ -503,6 +503,7 @@ def build_replacements(
     # public documentation. The live searchable catalog remains
     # http://127.0.0.1:8765/wiki?type=... after `ctx-monitor serve`.
     badge_targets = {
+        "Tests": f"https://github.com/{_GITHUB_REPO}/actions/workflows/test.yml",
         "Graph": f"{_PUBLIC_DOCS_BASE_URL}/knowledge-graph/",
         "Skills": f"{_PUBLIC_DOCS_BASE_URL}/catalog/?type=skill",
         "Agents": f"{_PUBLIC_DOCS_BASE_URL}/catalog/?type=agent",

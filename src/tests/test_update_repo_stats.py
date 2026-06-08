@@ -166,6 +166,10 @@ def test_test_badge_is_labeled_collected_not_passing() -> None:
         patched = pattern.sub(replacement, patched)
 
     assert "Tests-34_collected" in patched
+    assert (
+        "](https://github.com/stevesolun/ctx/actions/workflows/test.yml)"
+        in patched
+    )
     assert "_passing" not in patched
 
 
