@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import os
 import re
 import subprocess
 import sys
@@ -39,6 +40,8 @@ _GRAPH_JSON_MEMBER = "graphify-out/graph.json"
 _COMMUNITIES_JSON_MEMBER = "graphify-out/communities.json"
 _GRAPH_REPORT_MEMBER = "graphify-out/graph-report.md"
 _PYTEST_COLLECT_TIMEOUT_SECONDS = 180
+_GITHUB_REPO = os.environ.get("CTX_GITHUB_REPO", "stevesolun/ctx")
+_DASHBOARD_BASE_URL = os.environ.get("CTX_DASHBOARD_BASE_URL", "http://127.0.0.1:8765")
 
 
 def _safe_tar_name(name: str) -> str | None:
@@ -493,6 +496,21 @@ def build_replacements(
 ) -> list[tuple[re.Pattern, str]]:
     """Return (regex, replacement) pairs for every stat."""
     reps: list[tuple[re.Pattern, str]] = []
+    badge_targets = {
+        "Graph": f"{_DASHBOARD_BASE_URL}/graph",
+        "Skills": f"{_DASHBOARD_BASE_URL}/wiki?type=skill",
+        "Agents": f"{_DASHBOARD_BASE_URL}/wiki?type=agent",
+        "MCPs": f"{_DASHBOARD_BASE_URL}/wiki?type=mcp-server",
+        "Harnesses": f"{_DASHBOARD_BASE_URL}/wiki?type=harness",
+    }
+    for badge, href in badge_targets.items():
+        reps.append((
+            re.compile(
+                rf"(\[!\[{re.escape(badge)}\]\(https://img\.shields\.io/badge/"
+                rf"{re.escape(badge)}-[^)]+\.svg\)\])\([^)]+\)"
+            ),
+            rf"\1({href})",
+        ))
 
     if stats["skills"]:
         s = stats["skills"]
@@ -813,6 +831,57 @@ def build_docs_replacements(
     return reps
 
 
+def build_github_about_description(stats: Mapping[str, int | None]) -> str:
+    """Return the GitHub/HF one-line repo description from graph stats."""
+    nodes = int(stats.get("nodes") or 0)
+    skills = int(stats.get("skills") or 0)
+    agents = int(stats.get("agents") or 0)
+    mcps = int(stats.get("mcps") or 0)
+    harnesses = int(stats.get("harnesses") or 0)
+    if not all((nodes, skills, agents, mcps, harnesses)):
+        raise ValueError("missing graph stats for GitHub About description")
+    return (
+        "Skill, agent, MCP, and harness recommendations for Claude Code/custom "
+        f"LLMs: {nodes:,}-node LLM-wiki graph, {skills:,} skills, "
+        f"{agents:,} agents, {mcps:,} MCPs, {harnesses:,} harnesses, "
+        "and capped execution recommendations."
+    )
+
+
+def read_github_about_description(repo: str = _GITHUB_REPO) -> str:
+    """Read the current GitHub repository About description via gh."""
+    result = subprocess.run(
+        ["gh", "repo", "view", repo, "--json", "description", "-q", ".description"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def sync_github_about(*, check_only: bool = False, repo: str = _GITHUB_REPO) -> int:
+    """Check or update GitHub About so it matches README/docs graph stats."""
+    expected = build_github_about_description(read_graph_stats())
+    current = read_github_about_description(repo)
+    if current == expected:
+        print("GitHub About description is up to date.")
+        return 0
+    if check_only:
+        print("GitHub About description is STALE.", file=sys.stderr)
+        print(f"  repo: {repo}", file=sys.stderr)
+        print(f"  current:  {current}", file=sys.stderr)
+        print(f"  expected: {expected}", file=sys.stderr)
+        return 1
+    subprocess.run(
+        ["gh", "repo", "edit", repo, "--description", expected],
+        cwd=REPO_ROOT,
+        check=True,
+    )
+    print(f"GitHub About description updated for {repo}.")
+    return 0
+
+
 def patch_readme(check_only: bool = False) -> int:
     stats = read_graph_stats()
     tests = read_test_count()
@@ -874,7 +943,30 @@ def patch_readme(check_only: bool = False) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="exit 1 if README is stale (for CI)")
+    parser.add_argument(
+        "--check-github-about",
+        action="store_true",
+        help="exit 1 if GitHub About description is stale",
+    )
+    parser.add_argument(
+        "--sync-github-about",
+        action="store_true",
+        help="update GitHub About description via gh repo edit",
+    )
+    parser.add_argument(
+        "--print-github-description",
+        action="store_true",
+        help="print the generated GitHub/HF one-line description",
+    )
+    parser.add_argument("--github-repo", default=_GITHUB_REPO, help="GitHub repo owner/name")
     args = parser.parse_args()
+    if args.print_github_description:
+        print(build_github_about_description(read_graph_stats()))
+        return
+    if args.check_github_about:
+        sys.exit(sync_github_about(check_only=True, repo=args.github_repo))
+    if args.sync_github_about:
+        sys.exit(sync_github_about(check_only=False, repo=args.github_repo))
     sys.exit(patch_readme(check_only=args.check))
 
 

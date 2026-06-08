@@ -167,6 +167,7 @@ def test_hf_export_copies_hydrated_artifacts_even_when_untracked(
         "_validate_graph_artifact_integrity",
         lambda _repo: None,
     )
+    monkeypatch.setattr(sync_huggingface, "_assert_repo_stats_current", lambda _repo: None)
 
     sync_huggingface._export_tracked_tree(repo, export_dir)
 
@@ -197,6 +198,7 @@ def test_hf_export_rejects_lfs_pointer_artifact(tmp_path: Path, monkeypatch) -> 
             Path("graph/skills-sh-catalog.json.gz"): 4,
         },
     )
+    monkeypatch.setattr(sync_huggingface, "_assert_repo_stats_current", lambda _repo: None)
 
     try:
         sync_huggingface._export_tracked_tree(repo, export_dir)
@@ -204,6 +206,26 @@ def test_hf_export_rejects_lfs_pointer_artifact(tmp_path: Path, monkeypatch) -> 
         assert "Git LFS pointer" in str(exc)
     else:
         raise AssertionError("expected LFS pointer rejection")
+
+
+def test_hf_export_checks_repo_stats_before_upload(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    updater = repo / "src" / "update_repo_stats.py"
+    updater.parent.mkdir()
+    updater.write_text("print('ok')\n", encoding="utf-8")
+    calls: list[tuple[list[str], Path]] = []
+
+    def fake_run(cmd: list[str], *, cwd: Path, check: bool) -> object:
+        calls.append((cmd, cwd))
+        assert check is True
+        return object()
+
+    monkeypatch.setattr(sync_huggingface.subprocess, "run", fake_run)
+
+    sync_huggingface._assert_repo_stats_current(repo)
+
+    assert calls == [([sys.executable, str(updater), "--check"], repo)]
 
 
 def test_hf_export_rejects_corrupt_large_graph_artifact(

@@ -2601,6 +2601,30 @@ def test_render_wiki_index_lists_entities(fake_claude: Path) -> None:
     assert "href='/wiki/code-reviewer?type=agent'" in html_out
 
 
+def test_render_wiki_index_supports_type_query_and_autocomplete(fake_claude: Path) -> None:
+    skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
+    agents_dir = fake_claude / "skill-wiki" / "entities" / "agents"
+    skills_dir.mkdir(parents=True)
+    agents_dir.mkdir(parents=True)
+    (skills_dir / "python-patterns.md").write_text(
+        "---\ntype: skill\ndescription: Python work\ntags: [python]\n---\n# body\n",
+        encoding="utf-8",
+    )
+    (agents_dir / "code-reviewer.md").write_text(
+        "---\ntype: agent\ndescription: Review work\ntags: [review]\n---\n# body\n",
+        encoding="utf-8",
+    )
+
+    html_out = cm._render_wiki_index(entity_type="agent", query="review")
+
+    assert "id='wiki-entity-suggestions'" in html_out
+    assert "value='code-reviewer'" in html_out
+    assert 'wsearch.value = "review";' in html_out
+    assert "href='/wiki?type=agent'" in html_out
+    assert "value='agent' checked" in html_out
+    assert "value='skill' checked" not in html_out
+
+
 def test_render_wiki_index_hides_legacy_skill_source_prefix(fake_claude: Path) -> None:
     skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
     skills_dir.mkdir(parents=True)

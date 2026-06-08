@@ -286,6 +286,30 @@ def test_readme_entity_badges_are_updated() -> None:
     assert "badge/Agents-467-purple" in patched
     assert "badge/MCPs-10%2C790-pink" in patched
     assert "badge/Harnesses-207-orange" in patched
+    assert "](http://127.0.0.1:8765/wiki?type=skill)" in patched
+    assert "](http://127.0.0.1:8765/wiki?type=agent)" in patched
+    assert "](http://127.0.0.1:8765/wiki?type=mcp-server)" in patched
+    assert "](http://127.0.0.1:8765/wiki?type=harness)" in patched
+
+
+def test_github_about_description_uses_current_entity_counts() -> None:
+    stats = {
+        "nodes": 102928,
+        "edges": 2_900_000,
+        "skills": 91464,
+        "agents": 467,
+        "mcps": 10790,
+        "harnesses": 207,
+        "communities": 52,
+    }
+
+    description = urs.build_github_about_description(stats)
+
+    assert "102,928-node LLM-wiki graph" in description
+    assert "91,464 skills" in description
+    assert "467 agents" in description
+    assert "10,790 MCPs" in description
+    assert "207 harnesses" in description
 
 
 def test_patch_readme_checks_knowledge_graph_doc(

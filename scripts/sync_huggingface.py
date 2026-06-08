@@ -113,7 +113,19 @@ def _validate_graph_artifact_integrity(repo: Path) -> None:
         ) from exc
 
 
+def _assert_repo_stats_current(repo: Path) -> None:
+    updater = repo / "src" / "update_repo_stats.py"
+    if not updater.is_file():
+        raise FileNotFoundError("src/update_repo_stats.py is required before Hugging Face sync")
+    subprocess.run(
+        [sys.executable, str(updater), "--check"],
+        cwd=repo,
+        check=True,
+    )
+
+
 def _export_tracked_tree(repo: Path, export_dir: Path) -> None:
+    _assert_repo_stats_current(repo)
     _assert_hydrated_artifacts(repo)
     repo_root = repo.resolve()
     export_root = export_dir.resolve()

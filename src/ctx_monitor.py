@@ -4928,8 +4928,15 @@ def _wiki_index_entries(
     return out
 
 
-def _render_wiki_index() -> str:
+def _render_wiki_index(entity_type: str | None = None, query: str = "") -> str:
     """Card grid of every wiki entity — search + type filter + sidecar grades."""
+    selected_type = _normalize_dashboard_entity_type(entity_type) if entity_type else None
+    if entity_type is not None and selected_type is None:
+        return _layout(
+            "Wiki",
+            f"<div class='error'>Unsupported entity type: {html.escape(entity_type)}</div>",
+        )
+    initial_query = query.strip()
     entries = _wiki_index_entries()
     wstats = _wiki_stats()
     total_available = int(wstats.get("total") or len(entries))
@@ -4946,6 +4953,12 @@ def _render_wiki_index() -> str:
         "mcp-server": int(wstats.get("mcps") or 0),
         "harness": int(wstats.get("harnesses") or 0),
     }
+
+    suggestions = "".join(
+        f"<option value='{html.escape(e['slug'])}' "
+        f"label='{html.escape(e.get('display_slug') or e['slug'])}'>"
+        for e in entries[:1000]
+    )
 
     cards = "".join(
         "<a class='wiki-card' "
@@ -4976,9 +4989,15 @@ def _render_wiki_index() -> str:
 
     type_checkboxes = "".join(
         f"<label style='display:flex; justify-content:space-between; padding:0.25rem 0;'>"
-        f"<span><input type='checkbox' class='wiki-type-filter' value='{t}' checked> {t}</span>"
+        f"<span><input type='checkbox' class='wiki-type-filter' value='{t}' "
+        f"{'checked' if selected_type is None or selected_type == t else ''}> {t}</span>"
         f"<span class='muted' style='font-size:0.78rem;'>{type_counts.get(t, 0):,}</span>"
         f"</label>"
+        for t in _DASHBOARD_ENTITY_TYPES
+    )
+    badge_links = "".join(
+        f"<a class='pill entity-type-{html.escape(t)}' href='/wiki?type={quote(t)}'>"
+        f"{html.escape(t)}</a>"
         for t in _DASHBOARD_ENTITY_TYPES
     )
 
@@ -4986,12 +5005,15 @@ def _render_wiki_index() -> str:
         "<h1>Wiki</h1>"
         f"<p class='muted'>{len(entries):,} shown of {total_available:,} entity pages under "
         f"<code>~/.claude/skill-wiki/entities/</code> · "
-        "search by slug / description / tag within the visible sample, "
-        "or click a card to read the page.</p>"
+        "search by slug / description / tag, pick a suggestion, "
+        "or click a tile to read the full page.</p>"
+        "<div class='card' style='display:flex; gap:0.45rem; flex-wrap:wrap; align-items:center;'>"
+        f"<strong>Catalog shortcuts</strong>{badge_links}</div>"
         "<div style='display:grid; grid-template-columns:220px 1fr; gap:1.25rem; align-items:start;'>"
         # Left sidebar
         "<aside style='position:sticky; top:1rem;'>"
         "<div class='card'><strong>Search</strong>"
+        f"<datalist id='wiki-entity-suggestions'>{suggestions}</datalist>"
         "<input type='text' id='wiki-search' placeholder='slug / tag / text…' "
         "style='width:100%; margin-top:0.4rem; padding:0.35rem 0.5rem; "
         "border:1px solid #ccc; border-radius:4px;'></div>"
@@ -5009,6 +5031,8 @@ def _render_wiki_index() -> str:
         "<script>\n"
         "const wcards = document.querySelectorAll('.wiki-card');\n"
         "const wsearch = document.getElementById('wiki-search');\n"
+        "wsearch.setAttribute('list', 'wiki-entity-suggestions');\n"
+        f"wsearch.value = {json.dumps(initial_query)};\n"
         "function wActiveTypes() { return Array.from(document.querySelectorAll('.wiki-type-filter:checked')).map(x => x.value); }\n"
         "function wApply() {\n"
         "  const q = wsearch.value.trim().toLowerCase();\n"
@@ -6981,7 +7005,7 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             elif path == "/status":
                 self._send_html(_render_status())
             elif path == "/wiki":
-                self._send_html(_render_wiki_index())
+                self._send_html(_render_wiki_index(qs.get("type"), qs.get("q", "")))
             elif path.startswith("/wiki/"):
                 slug = path.split("/wiki/", 1)[1]
                 self._send_html(
