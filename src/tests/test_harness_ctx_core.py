@@ -444,6 +444,103 @@ class TestRuntimeLifecycle:
         assert result["ok"] is False
         assert "entity_type" in result["error"]
 
+    def test_skill_load_records_missing_security_scan_warning(
+        self,
+        toolbox: CtxCoreToolbox,
+    ) -> None:
+        result = json.loads(
+            toolbox.dispatch(ToolCall(
+                id="c1",
+                name="ctx__load_entity",
+                arguments={
+                    "session_id": "s-scan",
+                    "entity_type": "skill",
+                    "slug": "fastapi-pro",
+                },
+            ))
+        )
+
+        assert result["ok"] is True
+        assert result["event"]["security_scan"]["status"] == "not_provided"
+        assert (
+            result["event"]["security_scan"]["recommended_command"]
+            == "ctx-skill-install fastapi-pro --security-scan-required"
+        )
+
+        state = json.loads(
+            toolbox.dispatch(ToolCall(
+                id="c2",
+                name="ctx__session_state",
+                arguments={"session_id": "s-scan"},
+            ))
+        )
+        assert state["loaded"][0]["security_scan"]["status"] == "not_provided"
+
+    def test_skill_load_accepts_security_scan_proof(
+        self,
+        toolbox: CtxCoreToolbox,
+    ) -> None:
+        result = json.loads(
+            toolbox.dispatch(ToolCall(
+                id="c1",
+                name="ctx__load_entity",
+                arguments={
+                    "session_id": "s-scan-proof",
+                    "entity_type": "skill",
+                    "slug": "fastapi-pro",
+                    "security_scan": {
+                        "status": "passed",
+                        "required": True,
+                        "command": [
+                            "skillspector",
+                            "scan",
+                            "fastapi-pro",
+                            "--no-llm",
+                        ],
+                        "output": "clean",
+                    },
+                },
+            ))
+        )
+
+        assert result["ok"] is True
+        assert result["event"]["security_scan"] == {
+            "status": "passed",
+            "scanner": "skillspector",
+            "required": True,
+            "command": ["skillspector", "scan", "fastapi-pro", "--no-llm"],
+            "output": "clean",
+        }
+
+        state = json.loads(
+            toolbox.dispatch(ToolCall(
+                id="c2",
+                name="ctx__session_state",
+                arguments={"session_id": "s-scan-proof"},
+            ))
+        )
+        assert state["loaded"][0]["security_scan"]["status"] == "passed"
+
+    def test_invalid_security_scan_status_is_structured(
+        self,
+        toolbox: CtxCoreToolbox,
+    ) -> None:
+        result = json.loads(
+            toolbox.dispatch(ToolCall(
+                id="c1",
+                name="ctx__load_entity",
+                arguments={
+                    "session_id": "s-scan",
+                    "entity_type": "skill",
+                    "slug": "fastapi-pro",
+                    "security_scan": {"status": "unknown"},
+                },
+            ))
+        )
+
+        assert result["ok"] is False
+        assert "security_scan.status" in result["error"]
+
     def test_session_state_surfaces_unused_loads_as_unload_candidates(
         self,
         toolbox: CtxCoreToolbox,

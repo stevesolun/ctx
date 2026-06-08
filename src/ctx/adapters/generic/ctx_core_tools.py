@@ -506,6 +506,11 @@ class CtxCoreToolbox:
                     entity_type=str(args.get("entity_type") or ""),
                     slug=str(args.get("slug") or ""),
                     reason=str(args.get("reason") or "") or None,
+                    security_scan=(
+                        _dict_arg(args.get("security_scan"))
+                        if "security_scan" in args
+                        else None
+                    ),
                 )
             elif name == "mark_entity_used":
                 result = self._lifecycle.mark_entity_used(
@@ -855,6 +860,15 @@ def _lifecycle_tool_definitions(
                     "entity_type": entity_type,
                     "slug": slug,
                     "reason": {"type": "string"},
+                    "security_scan": {
+                        "type": "object",
+                        "description": (
+                            "Optional SkillSpector scan proof for skill loads. "
+                            "Pass the scanner result object returned by the host "
+                            "when available. If omitted for a skill, ctx records "
+                            "a not_provided warning in session_state."
+                        ),
+                    },
                 },
                 "required": ["session_id", "entity_type", "slug"],
             },

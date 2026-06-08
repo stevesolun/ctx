@@ -19,6 +19,14 @@ _SESSION_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _ENTITY_TYPES = set(RECOMMENDABLE_ENTITY_TYPES)
 _VALIDATION_STATUSES = {"passed", "failed", "skipped", "error"}
 _ESCALATION_STATUSES = {"open", "resolved", "ignored"}
+_SECURITY_SCAN_STATUSES = {
+    "passed",
+    "findings",
+    "missing",
+    "error",
+    "skipped",
+    "not_provided",
+}
 
 
 @dataclass(frozen=True)
@@ -52,13 +60,21 @@ class RuntimeLifecycleStore:
         entity_type: str,
         slug: str,
         reason: str | None = None,
+        security_scan: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        entity_type = _validate_entity_type(entity_type)
+        slug = _validate_slug(slug)
         return self._record(
             action="load_requested",
             session_id=session_id,
             entity_type=entity_type,
             slug=slug,
             reason=reason,
+            security_scan=_security_scan_state(
+                security_scan,
+                entity_type=entity_type,
+                slug=slug,
+            ),
         )
 
     def mark_entity_used(
@@ -191,6 +207,7 @@ class RuntimeLifecycleStore:
                     "loaded_at": event.get("created_at"),
                     "loaded_at_epoch": float(event.get("created_at_epoch") or 0),
                     "reason": event.get("reason"),
+                    "security_scan": event.get("security_scan"),
                     "used": False,
                     "use_count": 0,
                     "last_used_at": None,
@@ -327,6 +344,42 @@ def _validation_state(event: dict[str, Any]) -> dict[str, Any]:
         "slug": event.get("slug"),
         "payload": event.get("payload") or {},
     }
+
+
+def _security_scan_state(
+    raw: dict[str, Any] | None,
+    *,
+    entity_type: str,
+    slug: str,
+) -> dict[str, Any] | None:
+    if raw is None:
+        if entity_type != "skill":
+            return None
+        return {
+            "status": "not_provided",
+            "scanner": "skillspector",
+            "required": False,
+            "summary": (
+                "No SkillSpector scan proof was provided by the host for this "
+                "skill load."
+            ),
+            "recommended_command": f"ctx-skill-install {slug} --security-scan-required",
+        }
+
+    status = _validate_choice(
+        str(raw.get("status") or ""),
+        _SECURITY_SCAN_STATUSES,
+        "security_scan.status",
+    )
+    state: dict[str, Any] = {
+        "status": status,
+        "scanner": str(raw.get("scanner") or "skillspector"),
+        "required": bool(raw.get("required", False)),
+    }
+    for key in ("command", "exit_code", "output", "summary"):
+        if key in raw:
+            state[key] = raw[key]
+    return state
 
 
 def _escalation_state(event: dict[str, Any]) -> dict[str, Any]:
