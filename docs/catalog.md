@@ -4,7 +4,7 @@ Use this page when you click a README badge from GitHub, PyPI, or Hugging Face.
 It is public and always reachable. The full live catalog runs locally inside
 `ctx-monitor`.
 
-!!! tip "Open the live catalog"
+!!! tip "Run the full local catalog"
     ```bash
     ctx-init --graph --graph-install-mode full --model-mode skip
     ctx-monitor serve
@@ -37,8 +37,8 @@ It is public and always reachable. The full live catalog runs locally inside
   </div>
 
   <div class="ctx-catalog-actions">
-    <a id="ctx-open-live" class="md-button md-button--primary" href="http://127.0.0.1:8765/wiki">Open live catalog</a>
-    <a id="ctx-open-graph" class="md-button" href="http://127.0.0.1:8765/graph">Open graph</a>
+    <a class="md-button md-button--primary" href="../dashboard/#catalog-badge-links">Local catalog setup</a>
+    <a class="md-button" href="../knowledge-graph/">Knowledge graph docs</a>
   </div>
 
   <p id="ctx-catalog-count" class="ctx-catalog-muted"></p>
@@ -143,12 +143,12 @@ function ctxSelectedTypes() {
   return Array.from(document.querySelectorAll(".ctx-catalog-filters input:checked")).map((el) => el.value);
 }
 
-function ctxLocalWikiUrl(type, query) {
+function ctxPublicCatalogUrl(type, query) {
   const params = new URLSearchParams();
   if (type) params.set("type", type);
   if (query) params.set("q", query);
   const suffix = params.toString();
-  return "http://127.0.0.1:8765/wiki" + (suffix ? "?" + suffix : "");
+  return "./" + (suffix ? "?" + suffix : "");
 }
 
 function ctxRenderCatalog() {
@@ -161,16 +161,16 @@ function ctxRenderCatalog() {
   });
   grid.innerHTML = items.map((item) => {
     const launchQuery = query || item.query;
-    const href = ctxLocalWikiUrl(item.type, launchQuery);
+    const href = ctxPublicCatalogUrl(item.type, launchQuery);
     return `<article class="ctx-catalog-card">
       <span class="ctx-catalog-pill">${ctxTypeLabels[item.type]}</span>
       <h3>${item.title}</h3>
       <p class="ctx-catalog-muted">${item.count === "search" ? "Filtered catalog launcher" : item.count + " entities"}</p>
-      <a class="md-button" href="${href}">Open tiles</a>
+      <a class="md-button" href="${href}">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
     </article>`;
   }).join("");
   document.getElementById("ctx-catalog-count").textContent = `${items.length} tiles shown`;
-  document.getElementById("ctx-open-live").href = ctxLocalWikiUrl("", query);
 }
 
 const initialType = ctxParam("type");
