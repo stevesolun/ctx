@@ -264,6 +264,7 @@ def test_harness_aware_readme_prose_is_updated() -> None:
 
 def test_readme_entity_badges_are_updated() -> None:
     text = "\n".join([
+        "[![Graph](https://img.shields.io/badge/Graph-1_nodes_/_2_edges-red.svg)](graph/)",
         "[![Skills](https://img.shields.io/badge/Skills-1-blue.svg)](graph/)",
         "[![Agents](https://img.shields.io/badge/Agents-2-purple.svg)](graph/)",
         "[![MCPs](https://img.shields.io/badge/MCPs-3-pink.svg)](graph/)",
@@ -286,10 +287,12 @@ def test_readme_entity_badges_are_updated() -> None:
     assert "badge/Agents-467-purple" in patched
     assert "badge/MCPs-10%2C790-pink" in patched
     assert "badge/Harnesses-207-orange" in patched
-    assert "](http://127.0.0.1:8765/wiki?type=skill)" in patched
-    assert "](http://127.0.0.1:8765/wiki?type=agent)" in patched
-    assert "](http://127.0.0.1:8765/wiki?type=mcp-server)" in patched
-    assert "](http://127.0.0.1:8765/wiki?type=harness)" in patched
+    assert "](https://stevesolun.github.io/ctx/knowledge-graph/)" in patched
+    assert (
+        patched.count("](https://stevesolun.github.io/ctx/dashboard/#catalog-badge-links)")
+        == 4
+    )
+    assert "127.0.0.1" not in patched
 
 
 def test_github_about_description_uses_current_entity_counts() -> None:

@@ -56,6 +56,28 @@ generated graph/wiki artifacts that ctx can ship or consume. It reports:
 
 ### Browse the LLM wiki — `/wiki`
 
+#### Catalog badge links
+
+The README entity badges open this public docs section so they never point at a
+dead `127.0.0.1` URL from GitHub, PyPI, or Hugging Face. To open the live
+searchable tile catalog, install the full wiki pages and start the local
+dashboard:
+
+```bash
+ctx-init --graph --graph-install-mode full --model-mode skip
+ctx-monitor serve
+```
+
+Then use:
+
+- Skills: `http://127.0.0.1:8765/wiki?type=skill`
+- Agents: `http://127.0.0.1:8765/wiki?type=agent`
+- MCP servers: `http://127.0.0.1:8765/wiki?type=mcp-server`
+- Harnesses: `http://127.0.0.1:8765/wiki?type=harness`
+
+The local catalog includes search, browser autocomplete suggestions, type
+filters, tile cards, and click-through detail pages for each entity.
+
 The wiki tab requires full wiki markdown content from
 `ctx-init --graph --graph-install-mode full` or local/private wiki entities.
 The default runtime graph install powers recommendations and graph stats but

@@ -41,7 +41,10 @@ _COMMUNITIES_JSON_MEMBER = "graphify-out/communities.json"
 _GRAPH_REPORT_MEMBER = "graphify-out/graph-report.md"
 _PYTEST_COLLECT_TIMEOUT_SECONDS = 180
 _GITHUB_REPO = os.environ.get("CTX_GITHUB_REPO", "stevesolun/ctx")
-_DASHBOARD_BASE_URL = os.environ.get("CTX_DASHBOARD_BASE_URL", "http://127.0.0.1:8765")
+_PUBLIC_DOCS_BASE_URL = os.environ.get(
+    "CTX_PUBLIC_DOCS_BASE_URL",
+    "https://stevesolun.github.io/ctx",
+).rstrip("/")
 
 
 def _safe_tar_name(name: str) -> str | None:
@@ -496,12 +499,15 @@ def build_replacements(
 ) -> list[tuple[re.Pattern, str]]:
     """Return (regex, replacement) pairs for every stat."""
     reps: list[tuple[re.Pattern, str]] = []
+    # README badges are clicked from GitHub/Hugging Face, so they must point at
+    # public documentation. The live searchable catalog remains
+    # http://127.0.0.1:8765/wiki?type=... after `ctx-monitor serve`.
     badge_targets = {
-        "Graph": f"{_DASHBOARD_BASE_URL}/graph",
-        "Skills": f"{_DASHBOARD_BASE_URL}/wiki?type=skill",
-        "Agents": f"{_DASHBOARD_BASE_URL}/wiki?type=agent",
-        "MCPs": f"{_DASHBOARD_BASE_URL}/wiki?type=mcp-server",
-        "Harnesses": f"{_DASHBOARD_BASE_URL}/wiki?type=harness",
+        "Graph": f"{_PUBLIC_DOCS_BASE_URL}/knowledge-graph/",
+        "Skills": f"{_PUBLIC_DOCS_BASE_URL}/dashboard/#catalog-badge-links",
+        "Agents": f"{_PUBLIC_DOCS_BASE_URL}/dashboard/#catalog-badge-links",
+        "MCPs": f"{_PUBLIC_DOCS_BASE_URL}/dashboard/#catalog-badge-links",
+        "Harnesses": f"{_PUBLIC_DOCS_BASE_URL}/dashboard/#catalog-badge-links",
     }
     for badge, href in badge_targets.items():
         reps.append((
