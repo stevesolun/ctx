@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -220,6 +221,101 @@ class TestInstallSkill:
         # Entity status flipped.
         entity = wiki_dir / "entities" / "skills" / "s.md"
         assert "status: installed" in entity.read_text(encoding="utf-8")
+
+    def test_security_scan_output_is_attached_to_install_result(
+        self,
+        wiki_dir: Path,
+        skills_dir: Path,
+        isolated_manifest: Path,
+        tmp_path: Path,
+    ) -> None:
+        _seed_skill(wiki_dir, "s")
+        scanner = tmp_path / "fake_skillspector.py"
+        scanner.write_text(
+            "import sys\n"
+            "print('skillspector scanned ' + sys.argv[2])\n"
+            "raise SystemExit(0)\n",
+            encoding="utf-8",
+        )
+
+        r = skill_install.install_skill(
+            "s",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+            security_scan=True,
+            security_scan_command=[sys.executable, str(scanner)],
+        )
+
+        assert r.status == "installed"
+        assert r.message == "SkillSpector: passed"
+        assert r.security_scan is not None
+        assert r.security_scan.status == "passed"
+        assert "skillspector scanned" in r.security_scan.output
+        assert "--no-llm" in r.security_scan.command
+        assert Path(r.security_scan.command[3]) == wiki_dir / "converted" / "s"
+
+    def test_required_security_scan_blocks_install_on_findings(
+        self,
+        wiki_dir: Path,
+        skills_dir: Path,
+        isolated_manifest: Path,
+        tmp_path: Path,
+    ) -> None:
+        _seed_skill(wiki_dir, "s")
+        scanner = tmp_path / "fake_skillspector.py"
+        scanner.write_text(
+            "print('HIGH prompt injection')\nraise SystemExit(1)\n",
+            encoding="utf-8",
+        )
+
+        r = skill_install.install_skill(
+            "s",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+            security_scan=True,
+            security_scan_required=True,
+            security_scan_command=[sys.executable, str(scanner)],
+        )
+
+        assert r.status == "failed"
+        assert "SkillSpector security scan did not pass: findings" in r.message
+        assert r.security_scan is not None
+        assert r.security_scan.status == "findings"
+        assert "HIGH prompt injection" in r.security_scan.output
+        assert not (skills_dir / "s").exists()
+
+    def test_security_scan_targets_full_skill_bundle_directory(
+        self,
+        wiki_dir: Path,
+        skills_dir: Path,
+        isolated_manifest: Path,
+        tmp_path: Path,
+    ) -> None:
+        converted = _seed_skill(wiki_dir, "s")
+        (converted / "scripts").mkdir()
+        (converted / "scripts" / "danger.py").write_text(
+            "print('bundle script')\n",
+            encoding="utf-8",
+        )
+        scanner = tmp_path / "fake_skillspector.py"
+        seen = tmp_path / "seen.txt"
+        scanner.write_text(
+            "import pathlib, sys\n"
+            f"pathlib.Path({str(seen)!r}).write_text(sys.argv[2])\n"
+            "raise SystemExit(0)\n",
+            encoding="utf-8",
+        )
+
+        r = skill_install.install_skill(
+            "s",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+            security_scan=True,
+            security_scan_command=[sys.executable, str(scanner)],
+        )
+
+        assert r.status == "installed"
+        assert Path(seen.read_text(encoding="utf-8")) == converted
 
     def test_dry_run_skips_writes(
         self,
@@ -556,6 +652,60 @@ class TestMain:
         assert payload[0]["status"] == "installed"
         assert payload[0]["references_copied"] == 1
         assert payload[0]["source_variant"] == "transformed"
+        assert payload[0]["security_scan"] is None
+
+    def test_cli_security_scan_prints_skillspector_output(
+        self,
+        wiki_dir: Path,
+        skills_dir: Path,
+        isolated_manifest: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        _seed_skill(wiki_dir, "s")
+        scanner = tmp_path / "fake_skillspector.py"
+        scanner.write_text(
+            "print('scanner says ok')\nraise SystemExit(0)\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "ctx-skill-install",
+                "--slug",
+                "s",
+                "--wiki-dir",
+                str(wiki_dir),
+                "--skills-dir",
+                str(skills_dir),
+                "--security-scan",
+                "--skillspector-bin",
+                sys.executable,
+            ],
+        )
+        monkeypatch.setenv(
+            "PYTHONPATH",
+            str(scanner.parent),
+        )
+        monkeypatch.setattr(
+            skill_install,
+            "run_skillspector_scan",
+            lambda *args, **kwargs: skill_install.SkillSpectorResult(
+                status="passed",
+                command=["skillspector", "scan"],
+                exit_code=0,
+                output="scanner says ok",
+            ),
+        )
+
+        with pytest.raises(SystemExit) as ei:
+            skill_install.main()
+
+        out = capsys.readouterr().out
+        assert ei.value.code == 0
+        assert "SkillSpector report:" in out
+        assert "scanner says ok" in out
 
     def test_skipped_existing_exit_0(
         self,

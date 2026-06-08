@@ -145,7 +145,7 @@ class TestRenderBundleMessage:
             ("c", "mcp-server", 70),
         )
         msg = _bo.render_bundle_message(sugs, [], [], top_k=5)
-        assert "ctx-skill-install" in msg
+        assert "ctx-skill-install <slug> --security-scan-required" in msg
         assert "ctx-agent-install" in msg
         assert "ctx-mcp-install" in msg
 

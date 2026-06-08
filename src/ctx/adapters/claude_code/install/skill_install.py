@@ -50,6 +50,8 @@ from ctx.adapters.claude_code.install.install_utils import (
     record_install,
     safe_copy_file,
 )
+from ctx.adapters.claude_code.install.skillspector_scan import SkillSpectorResult
+from ctx.adapters.claude_code.install.skillspector_scan import run_skillspector_scan
 from ctx.core.wiki.wiki_utils import validate_skill_name
 
 _logger = logging.getLogger(__name__)
@@ -69,6 +71,7 @@ class InstallResult:
     source_variant: str | None  # "transformed" | "original" | None
     references_copied: int
     message: str = ""
+    security_scan: SkillSpectorResult | None = None
 
 
 # ── Wiki lookups ─────────────────────────────────────────────────────────────
@@ -172,6 +175,12 @@ def install_skill(
     prefer: str = "transformed",
     force: bool = False,
     dry_run: bool = False,
+    security_scan: bool = False,
+    security_scan_required: bool = False,
+    security_scan_use_llm: bool = False,
+    security_scan_command: list[str] | None = None,
+    skillspector_bin: str | None = None,
+    security_scan_timeout: int = 120,
 ) -> InstallResult:
     """Install one skill from the wiki into the live skills directory.
 
@@ -245,10 +254,21 @@ def install_skill(
                 message = "dry-run: would micro-convert before install"
         except OSError:
             pass
+        scan_result = None
+        if security_scan:
+            scan_result = run_skillspector_scan(
+                converted,
+                command=security_scan_command,
+                binary=skillspector_bin,
+                use_llm=security_scan_use_llm,
+                timeout_seconds=security_scan_timeout,
+            )
+            message = f"{message}; SkillSpector: {scan_result.status}"
         return InstallResult(
             slug=slug, status="would-install", installed_path=str(dest),
             source_variant=variant, references_copied=refs_count,
             message=message,
+            security_scan=scan_result,
         )
 
     source, variant, conversion_error = _ensure_micro_converted(
@@ -262,6 +282,23 @@ def install_skill(
             source_variant=variant, references_copied=0,
             message=conversion_error,
         )
+
+    scan_result = None
+    if security_scan:
+        scan_result = run_skillspector_scan(
+            converted,
+            command=security_scan_command,
+            binary=skillspector_bin,
+            use_llm=security_scan_use_llm,
+            timeout_seconds=security_scan_timeout,
+        )
+        if security_scan_required and scan_result.status != "passed":
+            return InstallResult(
+                slug=slug, status="failed", installed_path=None,
+                source_variant=variant, references_copied=0,
+                message=f"SkillSpector security scan did not pass: {scan_result.status}",
+                security_scan=scan_result,
+            )
 
     try:
         safe_copy_file(source, dest, dest_root=skills_dir)
@@ -280,6 +317,10 @@ def install_skill(
     return InstallResult(
         slug=slug, status="installed", installed_path=str(dest),
         source_variant=variant, references_copied=refs_copied,
+        message=(
+            f"SkillSpector: {scan_result.status}" if scan_result is not None else ""
+        ),
+        security_scan=scan_result,
     )
 
 
@@ -342,6 +383,34 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit results as JSON (useful for automation/UI integration)",
     )
+    parser.add_argument(
+        "--security-scan",
+        action="store_true",
+        help="Run SkillSpector before install and include its report in output",
+    )
+    parser.add_argument(
+        "--security-scan-required",
+        action="store_true",
+        help="Fail the install unless SkillSpector exits cleanly",
+    )
+    parser.add_argument(
+        "--security-scan-llm",
+        action="store_true",
+        help="Allow SkillSpector LLM analysis instead of static-only --no-llm",
+    )
+    parser.add_argument(
+        "--skillspector-bin",
+        help=(
+            "SkillSpector executable. Defaults to CTX_SKILLSPECTOR_BIN or "
+            "'skillspector' on PATH."
+        ),
+    )
+    parser.add_argument(
+        "--security-scan-timeout",
+        type=int,
+        default=120,
+        help="SkillSpector timeout in seconds (default: 120)",
+    )
     return parser
 
 
@@ -375,6 +444,11 @@ def main() -> None:
             prefer=args.prefer,
             force=args.force,
             dry_run=args.dry_run,
+            security_scan=args.security_scan or args.security_scan_required,
+            security_scan_required=args.security_scan_required,
+            security_scan_use_llm=args.security_scan_llm,
+            skillspector_bin=args.skillspector_bin,
+            security_scan_timeout=args.security_scan_timeout,
         )
         results.append(result)
 
@@ -386,6 +460,9 @@ def main() -> None:
                 "source_variant": r.source_variant,
                 "references_copied": r.references_copied,
                 "message": r.message,
+                "security_scan": (
+                    r.security_scan.to_json() if r.security_scan is not None else None
+                ),
             }
             for r in results
         ]
@@ -397,6 +474,13 @@ def main() -> None:
             variant = f" ({r.source_variant})" if r.source_variant else ""
             msg = f" -- {r.message}" if r.message else ""
             print(f"{tag} {r.slug}{variant}{extra}{msg}")
+            if r.security_scan is not None:
+                print("  SkillSpector report:")
+                if r.security_scan.output:
+                    for line in r.security_scan.output.splitlines():
+                        print(f"    {line}")
+                else:
+                    print("    <no output>")
 
     # Exit 1 if any install actually failed (not-in-wiki or hard error).
     # Skipped-existing is NOT a failure — idempotent reruns should exit 0.

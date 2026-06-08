@@ -63,7 +63,7 @@ _TYPE_DISPLAY: dict[str, str] = {
 # Install CLI hint per type — surfaced in the message so the user
 # knows how to act on each category.
 _TYPE_INSTALL_CLI: dict[str, str] = {
-    "skill": "ctx-skill-install <slug>",
+    "skill": "ctx-skill-install <slug> --security-scan-required",
     "agent": "ctx-agent-install <slug>",
     "mcp-server": "ctx-mcp-install <slug> --cmd '...'",
 }
