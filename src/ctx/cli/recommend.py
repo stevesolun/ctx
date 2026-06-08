@@ -42,7 +42,14 @@ def _render_row(row: dict[str, Any]) -> str:
     tags = row.get("matching_tags") or row.get("shared_tags") or []
     tag_text = ", ".join(str(t) for t in tags[:5]) if isinstance(tags, list) else ""
     suffix = f"  [{tag_text}]" if tag_text else ""
-    return f"{entity_type:>10}  {name:<40} score={score_text}{suffix}"
+    action = row.get("invoke_command")
+    action_text = f"  run={action}" if action else ""
+    category = row.get("category")
+    category_text = f"  category={category}" if category else ""
+    return (
+        f"{entity_type:>10}  {name:<40} score={score_text}"
+        f"{suffix}{category_text}{action_text}"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

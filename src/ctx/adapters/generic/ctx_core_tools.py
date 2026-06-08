@@ -366,6 +366,9 @@ class CtxCoreToolbox:
                 "installs": r.get("installs"),
                 "detail_url": r.get("detail_url"),
                 "install_command": r.get("install_command"),
+                "category": r.get("category"),
+                "invoke_command": r.get("invoke_command"),
+                "security_review": r.get("security_review"),
             }
             for r in raw
         ]

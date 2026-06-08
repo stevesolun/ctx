@@ -376,6 +376,9 @@ def recommend_by_tags(
             "installs": _safe_int(node_data.get("installs")),
             "detail_url": node_data.get("detail_url"),
             "install_command": node_data.get("install_command"),
+            "category": node_data.get("category"),
+            "invoke_command": node_data.get("invoke_command"),
+            "security_review": node_data.get("security_review"),
         })
         if len(graph_results) >= top_n:
             break
@@ -527,6 +530,9 @@ def _recommend_external_catalog(
             "installs": _safe_int(skill.get("installs")),
             "detail_url": skill.get("detail_url"),
             "install_command": skill.get("install_command"),
+            "category": skill.get("category"),
+            "invoke_command": skill.get("invoke_command"),
+            "security_review": skill.get("security_review"),
         }
         for score, skill, matching in ranked
     ]

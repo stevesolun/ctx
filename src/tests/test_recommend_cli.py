@@ -28,6 +28,31 @@ def test_recommend_cli_text(monkeypatch, capsys) -> None:
     assert captured.err == ""
 
 
+def test_recommend_cli_text_shows_workflow_action(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        recommend_cli,
+        "recommend_bundle",
+        lambda query, *, top_k: [
+            {
+                "name": "no-mistakes",
+                "type": "skill",
+                "normalized_score": 0.95,
+                "matching_tags": ["git", "validation"],
+                "category": "workflow",
+                "invoke_command": 'no-mistakes axi run --intent "<intent>"',
+            }
+        ],
+    )
+
+    exit_code = recommend_cli.main(["git", "validation", "--top-k", "5"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "no-mistakes" in captured.out
+    assert "category=workflow" in captured.out
+    assert 'run=no-mistakes axi run --intent "<intent>"' in captured.out
+
+
 def test_recommend_cli_json(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         recommend_cli,

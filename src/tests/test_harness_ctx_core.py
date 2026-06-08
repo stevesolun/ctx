@@ -50,6 +50,15 @@ def _build_synthetic_graph(tmp_path: Path) -> Path:
                tags=["python", "review"])
     G.add_node("mcp-server:filesystem", label="filesystem", type="mcp-server",
                tags=["filesystem", "io"])
+    G.add_node(
+        "skill:no-mistakes",
+        label="no-mistakes",
+        type="skill",
+        tags=["git", "validation", "pre-commit", "ship", "workflow"],
+        category="workflow",
+        invoke_command='no-mistakes axi run --intent "<intent>"',
+        security_review="external-gate",
+    )
     G.add_edge("skill:python-patterns", "skill:fastapi-pro",
                weight=0.8, shared_tags=["python"])
     G.add_edge("skill:python-patterns", "agent:code-reviewer",
@@ -824,6 +833,33 @@ class TestRecommendBundle:
         )
 
         assert result["companion_harnesses"] == []
+
+    def test_workflow_action_metadata_survives_generic_recommendation(
+        self,
+        toolbox: CtxCoreToolbox,
+    ) -> None:
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__recommend_bundle",
+                    arguments={
+                        "query": "git validation pre commit ship safely",
+                        "top_k": 5,
+                    },
+                )
+            )
+        )
+
+        no_mistakes = next(
+            row for row in result["results"] if row["name"] == "no-mistakes"
+        )
+        assert no_mistakes["category"] == "workflow"
+        assert (
+            no_mistakes["invoke_command"]
+            == 'no-mistakes axi run --intent "<intent>"'
+        )
+        assert no_mistakes["security_review"] == "external-gate"
 
     def test_empty_query(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(
