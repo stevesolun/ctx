@@ -93,6 +93,7 @@ plugins:
 
 extra_javascript:
   - assets/javascripts/repo-stats-refresh.js
+  - assets/javascripts/catalog.js
 
 nav:
   - Home: index.md

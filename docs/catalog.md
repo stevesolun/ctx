@@ -43,7 +43,113 @@ It is public and always reachable. The full live catalog runs locally inside
 
   <p id="ctx-catalog-count" class="ctx-catalog-muted"></p>
 
-  <div id="ctx-catalog-grid" class="ctx-catalog-grid"></div>
+  <div id="ctx-catalog-grid" class="ctx-catalog-grid">
+    <article class="ctx-catalog-card" data-type="skill" data-search="skill prompt workflow testing code review frontend backend security research">
+      <span class="ctx-catalog-pill">Skills</span>
+      <h3>Skills</h3>
+      <p class="ctx-catalog-muted">91,464 entities</p>
+      <a class="md-button" href="./?type=skill">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="agent" data-search="agent reviewer planner architect debugger security research">
+      <span class="ctx-catalog-pill">Agents</span>
+      <h3>Agents</h3>
+      <p class="ctx-catalog-muted">467 entities</p>
+      <a class="md-button" href="./?type=agent">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="mcp-server" data-search="mcp server github filesystem browser database api cloud">
+      <span class="ctx-catalog-pill">MCPs</span>
+      <h3>MCP servers</h3>
+      <p class="ctx-catalog-muted">10,790 entities</p>
+      <a class="md-button" href="./?type=mcp-server">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="harness" data-search="harness local model api model llm orchestration verification">
+      <span class="ctx-catalog-pill">Harnesses</span>
+      <h3>Harnesses</h3>
+      <p class="ctx-catalog-muted">207 entities</p>
+      <a class="md-button" href="./?type=harness">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="skill" data-search="code review review pr diff quality bug tests">
+      <span class="ctx-catalog-pill">Skills</span>
+      <h3>Code review skills</h3>
+      <p class="ctx-catalog-muted">Filtered catalog launcher</p>
+      <a class="md-button" href="./?type=skill&q=code+review">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="skill" data-search="testing pytest unit browser smoke regression">
+      <span class="ctx-catalog-pill">Skills</span>
+      <h3>Testing skills</h3>
+      <p class="ctx-catalog-muted">Filtered catalog launcher</p>
+      <a class="md-button" href="./?type=skill&q=testing">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="skill" data-search="frontend ui dashboard css react browser">
+      <span class="ctx-catalog-pill">Skills</span>
+      <h3>Frontend skills</h3>
+      <p class="ctx-catalog-muted">Filtered catalog launcher</p>
+      <a class="md-button" href="./?type=skill&q=frontend">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="agent" data-search="architecture design refactor planning">
+      <span class="ctx-catalog-pill">Agents</span>
+      <h3>Architecture agents</h3>
+      <p class="ctx-catalog-muted">Filtered catalog launcher</p>
+      <a class="md-button" href="./?type=agent&q=architecture">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="agent" data-search="security audit supply chain secrets">
+      <span class="ctx-catalog-pill">Agents</span>
+      <h3>Security agents</h3>
+      <p class="ctx-catalog-muted">Filtered catalog launcher</p>
+      <a class="md-button" href="./?type=agent&q=security">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="mcp-server" data-search="github repo issues pull requests graphql">
+      <span class="ctx-catalog-pill">MCPs</span>
+      <h3>GitHub MCPs</h3>
+      <p class="ctx-catalog-muted">Filtered catalog launcher</p>
+      <a class="md-button" href="./?type=mcp-server&q=github">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="mcp-server" data-search="cloud google cloud aws azure deploy">
+      <span class="ctx-catalog-pill">MCPs</span>
+      <h3>Cloud MCPs</h3>
+      <p class="ctx-catalog-muted">Filtered catalog launcher</p>
+      <a class="md-button" href="./?type=mcp-server&q=cloud">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="mcp-server" data-search="browser automation web scraping">
+      <span class="ctx-catalog-pill">MCPs</span>
+      <h3>Browser MCPs</h3>
+      <p class="ctx-catalog-muted">Filtered catalog launcher</p>
+      <a class="md-button" href="./?type=mcp-server&q=browser">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="harness" data-search="local api openai ollama vllm model harness">
+      <span class="ctx-catalog-pill">Harnesses</span>
+      <h3>Local/API model harnesses</h3>
+      <p class="ctx-catalog-muted">Filtered catalog launcher</p>
+      <a class="md-button" href="./?type=harness&q=local+model">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="harness" data-search="harness test eval guardrail validate verification">
+      <span class="ctx-catalog-pill">Harnesses</span>
+      <h3>Verification harnesses</h3>
+      <p class="ctx-catalog-muted">Filtered catalog launcher</p>
+      <a class="md-button" href="./?type=harness&q=verification">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+    <article class="ctx-catalog-card" data-type="harness" data-search="harness tools sandbox filesystem cloud tool access">
+      <span class="ctx-catalog-pill">Harnesses</span>
+      <h3>Tool-access harnesses</h3>
+      <p class="ctx-catalog-muted">Filtered catalog launcher</p>
+      <a class="md-button" href="./?type=harness&q=tool+access">Filter tiles</a>
+      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
+    </article>
+  </div>
 </div>
 
 <style>
@@ -108,80 +214,3 @@ It is public and always reachable. The full live catalog runs locally inside
   width: fit-content;
 }
 </style>
-
-<script>
-const ctxCatalogItems = [
-  {type: "skill", title: "Skills", count: "91,464", query: "", tags: "skill prompt workflow testing code review frontend backend security research"},
-  {type: "agent", title: "Agents", count: "467", query: "", tags: "agent reviewer planner architect debugger security research"},
-  {type: "mcp-server", title: "MCP servers", count: "10,790", query: "", tags: "mcp server github filesystem browser database api cloud"},
-  {type: "harness", title: "Harnesses", count: "207", query: "", tags: "harness local model api model llm orchestration verification"},
-  {type: "skill", title: "Code review skills", count: "search", query: "code review", tags: "review pr diff quality bug tests"},
-  {type: "skill", title: "Testing skills", count: "search", query: "testing", tags: "pytest unit browser smoke regression"},
-  {type: "skill", title: "Frontend skills", count: "search", query: "frontend", tags: "ui dashboard css react browser"},
-  {type: "agent", title: "Architecture agents", count: "search", query: "architecture", tags: "architecture design refactor planning"},
-  {type: "agent", title: "Security agents", count: "search", query: "security", tags: "security audit supply chain secrets"},
-  {type: "mcp-server", title: "GitHub MCPs", count: "search", query: "github", tags: "github repo issues pull requests graphql"},
-  {type: "mcp-server", title: "Cloud MCPs", count: "search", query: "cloud", tags: "google cloud aws azure deploy"},
-  {type: "mcp-server", title: "Browser MCPs", count: "search", query: "browser", tags: "browser automation web scraping"},
-  {type: "harness", title: "Local/API model harnesses", count: "search", query: "local model", tags: "local api openai ollama vllm model harness"},
-  {type: "harness", title: "Verification harnesses", count: "search", query: "verification", tags: "harness test eval guardrail validate"},
-  {type: "harness", title: "Tool-access harnesses", count: "search", query: "tool access", tags: "harness tools sandbox filesystem cloud"},
-];
-
-const ctxTypeLabels = {
-  "skill": "Skills",
-  "agent": "Agents",
-  "mcp-server": "MCPs",
-  "harness": "Harnesses",
-};
-
-function ctxParam(name) {
-  return new URLSearchParams(window.location.search).get(name) || "";
-}
-
-function ctxSelectedTypes() {
-  return Array.from(document.querySelectorAll(".ctx-catalog-filters input:checked")).map((el) => el.value);
-}
-
-function ctxPublicCatalogUrl(type, query) {
-  const params = new URLSearchParams();
-  if (type) params.set("type", type);
-  if (query) params.set("q", query);
-  const suffix = params.toString();
-  return "./" + (suffix ? "?" + suffix : "");
-}
-
-function ctxRenderCatalog() {
-  const query = document.getElementById("ctx-catalog-query").value.trim().toLowerCase();
-  const selected = new Set(ctxSelectedTypes());
-  const grid = document.getElementById("ctx-catalog-grid");
-  const items = ctxCatalogItems.filter((item) => {
-    const hay = `${item.type} ${item.title} ${item.query} ${item.tags}`.toLowerCase();
-    return selected.has(item.type) && (!query || hay.includes(query));
-  });
-  grid.innerHTML = items.map((item) => {
-    const launchQuery = query || item.query;
-    const href = ctxPublicCatalogUrl(item.type, launchQuery);
-    return `<article class="ctx-catalog-card">
-      <span class="ctx-catalog-pill">${ctxTypeLabels[item.type]}</span>
-      <h3>${item.title}</h3>
-      <p class="ctx-catalog-muted">${item.count === "search" ? "Filtered catalog launcher" : item.count + " entities"}</p>
-      <a class="md-button" href="${href}">Filter tiles</a>
-      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>
-    </article>`;
-  }).join("");
-  document.getElementById("ctx-catalog-count").textContent = `${items.length} tiles shown`;
-}
-
-const initialType = ctxParam("type");
-const initialQuery = ctxParam("q");
-if (initialQuery) document.getElementById("ctx-catalog-query").value = initialQuery;
-if (initialType) {
-  document.querySelectorAll(".ctx-catalog-filters input").forEach((el) => {
-    el.checked = el.value === initialType;
-  });
-}
-document.getElementById("ctx-catalog-query").addEventListener("input", ctxRenderCatalog);
-document.querySelectorAll(".ctx-catalog-filters input").forEach((el) => el.addEventListener("change", ctxRenderCatalog));
-ctxRenderCatalog();
-</script>
