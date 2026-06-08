@@ -504,10 +504,10 @@ def build_replacements(
     # http://127.0.0.1:8765/wiki?type=... after `ctx-monitor serve`.
     badge_targets = {
         "Graph": f"{_PUBLIC_DOCS_BASE_URL}/knowledge-graph/",
-        "Skills": f"{_PUBLIC_DOCS_BASE_URL}/dashboard/#catalog-badge-links",
-        "Agents": f"{_PUBLIC_DOCS_BASE_URL}/dashboard/#catalog-badge-links",
-        "MCPs": f"{_PUBLIC_DOCS_BASE_URL}/dashboard/#catalog-badge-links",
-        "Harnesses": f"{_PUBLIC_DOCS_BASE_URL}/dashboard/#catalog-badge-links",
+        "Skills": f"{_PUBLIC_DOCS_BASE_URL}/catalog/?type=skill",
+        "Agents": f"{_PUBLIC_DOCS_BASE_URL}/catalog/?type=agent",
+        "MCPs": f"{_PUBLIC_DOCS_BASE_URL}/catalog/?type=mcp-server",
+        "Harnesses": f"{_PUBLIC_DOCS_BASE_URL}/catalog/?type=harness",
     }
     for badge, href in badge_targets.items():
         reps.append((

@@ -96,6 +96,7 @@ extra_javascript:
 
 nav:
   - Home: index.md
+  - Catalog: catalog.md
   - Knowledge graph: knowledge-graph.md
   - Hugging Face publish: huggingface-publish.md
   - Entity onboarding: entity-onboarding.md

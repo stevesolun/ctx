@@ -288,10 +288,10 @@ def test_readme_entity_badges_are_updated() -> None:
     assert "badge/MCPs-10%2C790-pink" in patched
     assert "badge/Harnesses-207-orange" in patched
     assert "](https://stevesolun.github.io/ctx/knowledge-graph/)" in patched
-    assert (
-        patched.count("](https://stevesolun.github.io/ctx/dashboard/#catalog-badge-links)")
-        == 4
-    )
+    assert "](https://stevesolun.github.io/ctx/catalog/?type=skill)" in patched
+    assert "](https://stevesolun.github.io/ctx/catalog/?type=agent)" in patched
+    assert "](https://stevesolun.github.io/ctx/catalog/?type=mcp-server)" in patched
+    assert "](https://stevesolun.github.io/ctx/catalog/?type=harness)" in patched
     assert "127.0.0.1" not in patched
 
 
