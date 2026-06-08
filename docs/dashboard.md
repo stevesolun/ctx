@@ -54,14 +54,15 @@ generated graph/wiki artifacts that ctx can ship or consume. It reports:
 - artifact promotion metadata, including the latest promoted hash when
   the crash-safe promotion path has recorded it
 
-### Browse the LLM wiki — `/wiki`
+### Browse the LLM wiki - `/wiki`
 
 #### Catalog badge links
 
-The README entity badges open this public docs section so they never point at a
-dead `127.0.0.1` URL from GitHub, PyPI, or Hugging Face. To open the live
-searchable tile catalog, install the full wiki pages and start the local
-dashboard:
+The README entity badges open the public `/catalog/` launcher so they never
+point at a dead `127.0.0.1` URL from GitHub, PyPI, or Hugging Face. The public
+page provides search, autocomplete suggestions, and tile cards that deep-link
+into the local dashboard. To open the full live searchable tile catalog, install
+the full wiki pages and start the local dashboard:
 
 ```bash
 ctx-init --graph --graph-install-mode full --model-mode skip
