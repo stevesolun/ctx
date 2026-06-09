@@ -255,6 +255,25 @@ def install_skill(
     dest = dest_dir / "SKILL.md"
 
     if dest.exists() and not force:
+        scan_result = None
+        if security_scan:
+            scan_result = run_skillspector_scan(
+                converted,
+                command=security_scan_command,
+                binary=skillspector_bin,
+                use_llm=security_scan_use_llm,
+                timeout_seconds=security_scan_timeout,
+            )
+            if security_scan_required and scan_result.status != "passed":
+                return InstallResult(
+                    slug=slug, status="failed", installed_path=None,
+                    source_variant=variant, references_copied=0,
+                    message=(
+                        "SkillSpector security scan did not pass: "
+                        f"{scan_result.status}"
+                    ),
+                    security_scan=scan_result,
+                )
         # Already installed. Still refresh manifest/status so an earlier
         # install that didn't record into manifest gets reconciled.
         if not dry_run:
@@ -266,7 +285,15 @@ def install_skill(
             slug=slug, status="skipped-existing",
             installed_path=str(dest), source_variant=variant,
             references_copied=0,
-            message="already installed; pass --force to overwrite",
+            message=(
+                "already installed; pass --force to overwrite"
+                if scan_result is None
+                else (
+                    "already installed; pass --force to overwrite; "
+                    f"SkillSpector: {scan_result.status}"
+                )
+            ),
+            security_scan=scan_result,
         )
 
     if dry_run:

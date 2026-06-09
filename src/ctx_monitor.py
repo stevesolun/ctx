@@ -6751,6 +6751,7 @@ def _perform_load(
                 slug,
                 wiki_dir=_wiki_dir(),
                 skills_dir=_claude_dir() / "skills",
+                security_scan=True,
             )
     except ImportError as exc:
         return False, f"install import failed: {exc}"
@@ -6759,7 +6760,12 @@ def _perform_load(
     if result.status not in ("installed", "skipped-existing"):
         return False, f"load failed: {result.message or result.status}"
     _log_dashboard_entity_event(entity_type, "loaded", slug)
-    return True, result.message or f"loaded {entity_type}:{slug}"
+    message = result.message or f"loaded {entity_type}:{slug}"
+    scan = getattr(result, "security_scan", None)
+    scan_output = str(getattr(scan, "output", "") or "").strip()
+    if scan_output:
+        message = f"{message}\n\nSkillSpector report:\n{scan_output}"
+    return True, message
 
 
 def _perform_unload(slug: str, entity_type: str = "skill") -> tuple[bool, str]:

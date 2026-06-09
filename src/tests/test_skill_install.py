@@ -499,6 +499,38 @@ class TestInstallSkill:
             for e in install_utils.load_manifest()["load"]
         )
 
+    def test_skipped_existing_runs_requested_security_scan(
+        self,
+        wiki_dir: Path,
+        skills_dir: Path,
+        isolated_manifest: Path,
+        tmp_path: Path,
+    ) -> None:
+        _seed_skill(wiki_dir, "s")
+        (skills_dir / "s").mkdir()
+        (skills_dir / "s" / "SKILL.md").write_text("existing\n", encoding="utf-8")
+        scanner = tmp_path / "fake_skillspector.py"
+        scanner.write_text(
+            "import sys\n"
+            "print('scanned existing ' + sys.argv[2])\n"
+            "raise SystemExit(0)\n",
+            encoding="utf-8",
+        )
+
+        r = skill_install.install_skill(
+            "s",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+            security_scan=True,
+            security_scan_command=[sys.executable, str(scanner)],
+        )
+
+        assert r.status == "skipped-existing"
+        assert r.security_scan is not None
+        assert r.security_scan.status == "passed"
+        assert "scanned existing" in r.security_scan.output
+        assert "SkillSpector: passed" in r.message
+
     def test_skipped_existing_dry_run_leaves_manifest_alone(
         self,
         wiki_dir: Path,

@@ -688,6 +688,37 @@ def test_perform_load_rejects_invalid_slug() -> None:
     assert "invalid slug" in msg
 
 
+def test_perform_load_runs_skill_security_scan_and_surfaces_output(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ctx.adapters.claude_code.install import skill_install
+
+    calls: list[bool] = []
+
+    class Scan:
+        output = "SkillSpector found no issues"
+
+    class Result:
+        status = "installed"
+        message = "SkillSpector: passed"
+        security_scan = Scan()
+
+    def fake_install_skill(*args: object, **kwargs: object) -> Result:
+        calls.append(bool(kwargs.get("security_scan")))
+        return Result()
+
+    monkeypatch.setattr(skill_install, "install_skill", fake_install_skill)
+
+    ok, msg = cm._perform_load("python-patterns", entity_type="skill")
+
+    assert ok is True
+    assert calls == [True]
+    assert "SkillSpector: passed" in msg
+    assert "SkillSpector report:" in msg
+    assert "found no issues" in msg
+
+
 def test_perform_unload_rejects_invalid_slug() -> None:
     ok, msg = cm._perform_unload("../../hostile")
     assert ok is False
