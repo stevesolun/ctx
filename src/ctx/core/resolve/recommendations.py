@@ -260,7 +260,7 @@ def _explicit_entity_match_boost(
     }
     signal_slugs = {"-".join(_text_tokens(signal)) for signal in signals}
     query_tokens = _text_tokens(query or " ".join(signals))
-    query_slug = f"-{'-'.join(query_tokens)}-" if query_tokens else ""
+    query_raw = (query or "").lower()
     query_phrase = f" {' '.join(query_tokens)} " if query_tokens else ""
 
     boost = 0.0
@@ -276,9 +276,14 @@ def _explicit_entity_match_boost(
         )
         if alias_slug in signal_slugs and (not is_single_token or exact_single_query):
             boost = max(boost, 2000.0 + (25.0 * len(alias_tokens)))
-        if not is_single_token and query_slug and f"-{alias_slug}-" in query_slug:
+        if not is_single_token and alias_slug in query_raw:
             boost = max(boost, 1000.0 + (25.0 * len(alias_tokens)))
-        if not is_single_token and query_phrase and f" {alias_phrase} " in query_phrase:
+        if (
+            not is_single_token
+            and len(alias_tokens) <= 2
+            and query_phrase
+            and f" {alias_phrase} " in query_phrase
+        ):
             boost = max(boost, 1000.0 + (25.0 * len(alias_tokens)))
     return boost
 
