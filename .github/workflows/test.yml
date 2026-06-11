@@ -295,6 +295,16 @@ jobs:
         with:
           lfs: false
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install graph check dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+
       - name: Resolve graph artifacts from release assets
         shell: bash
         env:
