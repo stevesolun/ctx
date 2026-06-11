@@ -220,7 +220,9 @@ def test_wiki_index_sampling_is_sorted_by_slug(wiki_3type: Path) -> None:
 
 def test_wiki_entity_page_marks_truncated_body_and_frontmatter(
     wiki_3type: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(_cm, "_render_entity_subgraph", lambda *_, **__: "")
     long_description = "x" * 160
     long_body = "body-line\n" * 1400
     (wiki_3type / "entities" / "skills" / "long-page.md").write_text(

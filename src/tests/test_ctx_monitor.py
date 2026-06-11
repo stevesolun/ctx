@@ -766,6 +766,20 @@ def test_load_sidecar_can_disambiguate_duplicate_slug(fake_claude: Path) -> None
     assert harness["grade"] == "A"
 
 
+def test_load_sidecar_typed_miss_does_not_build_global_index(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_sidecar(fake_claude, "unrelated", {"slug": "unrelated"})
+    monkeypatch.setattr(
+        cm,
+        "_sidecar_index",
+        lambda: (_ for _ in ()).throw(AssertionError("cold full sidecar scan")),
+    )
+
+    assert cm._load_sidecar("missing", entity_type="skill") is None
+
+
 def test_monitor_post_requires_token(
     fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1714,10 +1714,18 @@ def _read_sidecar_file(path: Path) -> dict | None:
 def _load_sidecar(slug: str, entity_type: str | None = None) -> dict | None:
     if not _is_safe_slug(slug):
         return None
-    for path in (
+    paths = [
         _sidecar_dir() / f"{slug}.json",
         _sidecar_dir() / "mcp" / f"{slug}.json",
-    ):
+    ]
+    if entity_type is not None:
+        suffixes = [entity_type]
+        if entity_type == "mcp-server":
+            suffixes.append("mcp")
+        for suffix in suffixes:
+            paths.append(_sidecar_dir() / f"{slug}-{suffix}.json")
+
+    for path in paths:
         if not path.exists():
             continue
         sidecar = _read_sidecar_file(path)
@@ -1725,7 +1733,7 @@ def _load_sidecar(slug: str, entity_type: str | None = None) -> dict | None:
             continue
         if entity_type is None or _sidecar_entity_type(sidecar) == entity_type:
             return sidecar
-    if entity_type is not None:
+    if entity_type is not None and _SIDECAR_INDEX_CACHE_VALUE is not None:
         return _sidecar_index().get((slug, entity_type))
     return None
 
