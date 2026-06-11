@@ -202,6 +202,27 @@ def _json_config_manifest_summary(
     return extra
 
 
+def _json_config_card_summary(parsed_config: object) -> str:
+    if not isinstance(parsed_config, dict):
+        return f"type={type(parsed_config).__name__}"
+    parts: list[str] = []
+    command = parsed_config.get("command")
+    if isinstance(command, str) and command.strip():
+        parts.append(f"command={_redact_output(command)[:80]}")
+    args = parsed_config.get("args")
+    if isinstance(args, list):
+        parts.append(f"args={len(args)}")
+    env = parsed_config.get("env")
+    if isinstance(env, dict):
+        env_keys = ",".join(sorted(str(key) for key in env))[:120]
+        if env_keys:
+            parts.append(f"env={env_keys}")
+    keys = ",".join(sorted(str(key) for key in parsed_config))[:120]
+    if keys:
+        parts.append(f"keys={keys}")
+    return "; ".join(parts) if parts else "empty object"
+
+
 @dataclass(frozen=True)
 class InstallResult:
     slug: str
@@ -298,7 +319,13 @@ def _run_claude_mcp(args: list[str]) -> tuple[int, str, str]:
 # ── Why-install card ─────────────────────────────────────────────────────────
 
 
-def render_card(fm: dict[str, str], slug: str, *, command: str | None) -> str:
+def render_card(
+    fm: dict[str, str],
+    slug: str,
+    *,
+    command: str | None,
+    json_summary: str | None = None,
+) -> str:
     """Render a human-readable 'why install' card.
 
     Deliberately concise so a user approving a suggestion sees only
@@ -327,6 +354,8 @@ def render_card(fm: dict[str, str], slug: str, *, command: str | None) -> str:
         lines.append(f"  author:      {fm['author']}")
     if command:
         lines.append(f"  command:     claude mcp add {slug} -- {command}")
+    if json_summary:
+        lines.append(f"  json config: {json_summary}")
     lines.append("═" * 34)
     return "\n".join(lines)
 
@@ -465,7 +494,11 @@ def install_mcp(
                 ),
             )
 
-    card = render_card(fm, slug, command=effective_cmd)
+    json_summary = (
+        _json_config_card_summary(parsed_json_config)
+        if parsed_json_config is not None else None
+    )
+    card = render_card(fm, slug, command=effective_cmd, json_summary=json_summary)
     print(card)
 
     if dry_run:

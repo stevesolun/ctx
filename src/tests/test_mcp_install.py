@@ -789,6 +789,35 @@ class TestInstallMcp:
         assert r.status == "installed"
         assert fake_claude["calls"]
 
+    def test_json_config_confirmation_card_summarizes_config(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        _write_entity(wiki_dir, "gh", {"status": "cataloged"})
+        cfg = json.dumps({
+            "command": "npx",
+            "args": ["-y", "pkg"],
+            "env": {"GITHUB_TOKEN": "$GITHUB_TOKEN"},
+        })
+        monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+
+        r = mcp_install.install_mcp(
+            "gh", wiki_dir=wiki_dir, json_config=cfg, auto=False,
+        )
+        out = capsys.readouterr().out
+
+        assert r.status == "installed"
+        assert "json config:" in out
+        assert "command=npx" in out
+        assert "args=2" in out
+        assert "env=GITHUB_TOKEN" in out
+        assert "$GITHUB_TOKEN" not in out
+        assert fake_claude["calls"]
+
     def test_happy_path_writes_manifest_and_status(
         self,
         wiki_dir: Path,
