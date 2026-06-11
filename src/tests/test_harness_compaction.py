@@ -5,8 +5,8 @@ Covers:
   * should_compact triggers: max_chars, max_messages, no trigger.
   * compact() layout: head preserved, tail preserved, middle replaced
     with a single notice message containing the summary text.
-  * Summary failure tolerance (provider raises) → loop keeps running
-    with uncompacted conversation rather than crash.
+  * Summary failure tolerance (provider raises) yields a compacted
+    failure notice instead of crashing.
   * run_loop integration: compactor called between iterations, new
     messages observed by the next provider call.
   * Config validation: bad constructor args rejected.
@@ -228,6 +228,88 @@ class TestCompactLayout:
         assert "m1" in rendered_middle
         assert "m4" in rendered_middle
 
+    def test_tail_expands_to_preserve_tool_call_pair(self) -> None:
+        c = TokenBudgetCompactor(
+            max_chars=10**9, max_messages=10, keep_head=1, keep_tail=1, min_middle=1,
+        )
+        call = ToolCall(id="c1", name="fs__read", arguments={"path": "a.txt"})
+        msgs = [
+            Message(role="system", content="sys"),
+            Message(role="user", content="middle"),
+            Message(role="assistant", content="", tool_calls=(call,)),
+            Message(
+                role="tool",
+                content="file contents",
+                tool_call_id="c1",
+                name="fs__read",
+            ),
+        ]
+        p = self._provider_with_summary("MIDDLE_SUMMARY")
+
+        out = c.compact(msgs, p)
+
+        assert [m.role for m in out] == ["system", "assistant", "assistant", "tool"]
+        assert out[1].content.startswith("[Compacted 1 prior messages.]")
+        assert out[2].tool_calls == (call,)
+        assert out[3].tool_call_id == "c1"
+
+    def test_head_expands_to_preserve_tool_call_pair(self) -> None:
+        c = TokenBudgetCompactor(
+            max_chars=10**9, max_messages=20, keep_head=2, keep_tail=1, min_middle=1,
+        )
+        call = ToolCall(id="c1", name="fs__read", arguments={"path": "a.txt"})
+        msgs = [
+            Message(role="system", content="sys"),
+            Message(role="assistant", content="", tool_calls=(call,)),
+            Message(
+                role="tool",
+                content="file contents",
+                tool_call_id="c1",
+                name="fs__read",
+            ),
+            Message(role="user", content="middle-1"),
+            Message(role="assistant", content="middle-2"),
+            Message(role="user", content="tail"),
+        ]
+        p = self._provider_with_summary("MIDDLE_SUMMARY")
+
+        out = c.compact(msgs, p)
+
+        assert [m.role for m in out] == [
+            "system",
+            "assistant",
+            "tool",
+            "assistant",
+            "user",
+        ]
+        assert out[1].tool_calls == (call,)
+        assert out[2].tool_call_id == "c1"
+        assert out[3].content.startswith("[Compacted 2 prior messages.]")
+        assert out[-1].content == "tail"
+
+    def test_head_expansion_skips_when_tool_pair_consumes_middle(self) -> None:
+        c = TokenBudgetCompactor(
+            max_chars=10**9, max_messages=20, keep_head=2, keep_tail=1, min_middle=1,
+        )
+        call = ToolCall(id="c1", name="fs__read", arguments={"path": "a.txt"})
+        msgs = [
+            Message(role="system", content="sys"),
+            Message(role="assistant", content="", tool_calls=(call,)),
+            Message(
+                role="tool",
+                content="file contents",
+                tool_call_id="c1",
+                name="fs__read",
+            ),
+            Message(role="user", content="tail"),
+        ]
+        p = self._provider_with_summary("unused")
+
+        out = c.compact(msgs, p)
+
+        assert out == msgs
+        assert p.calls == []
+
 
 class TestCompactOnProviderError:
     def test_summary_call_failure_returns_stub(self) -> None:
@@ -404,34 +486,107 @@ class TestLoopIntegration:
         assert result.final_message == "final answer"
         # Confirm the iter-2 provider call saw a compacted list.
         # Calls 0 (iter1), 1 (summary), 2 (iter2), 3 (summary),
-        # 4 (iter3). Check that call 2 has <= call 0's message count.
-        iter1_msgs = provider.calls[0]
+        # 4 (iter3). Check that call 2 kept a compacted notice and
+        # did not split the assistant/tool pair at the tail boundary.
         iter2_msgs = provider.calls[2]
-        # After iter1: conversation had ~5 msgs (system, user, assistant, tool, ...)
-        # After compaction: kept head(1) + notice + tail(1) = 3.
-        assert len(iter2_msgs) <= len(iter1_msgs) + 1
-        # Notice message must be visible to iter2.
+        assert [m.role for m in iter2_msgs] == [
+            "system", "assistant", "assistant", "tool",
+        ]
         assert any(
             m.content.startswith("[Compacted") for m in iter2_msgs
         )
+        assert iter2_msgs[-2].tool_calls == (tc,)
+        assert iter2_msgs[-1].tool_call_id == "c1"
+
+    def test_compactor_never_sends_orphan_tool_result_to_provider(self) -> None:
+        class _RejectOrphanTool(_Scripted):
+            def complete(
+                self,
+                messages: list[Message],
+                tools: list[ToolDefinition] | None = None,
+                *,
+                model: str | None = None,
+                temperature: float = 0.7,
+                max_tokens: int | None = None,
+            ) -> CompletionResponse:
+                seen_call_ids: set[str] = set()
+                for message in messages:
+                    if message.role == "assistant":
+                        seen_call_ids.update(call.id for call in message.tool_calls)
+                    if (
+                        message.role == "tool"
+                        and message.tool_call_id not in seen_call_ids
+                    ):
+                        raise AssertionError(
+                            f"orphan tool result: {message.tool_call_id}"
+                        )
+                return super().complete(
+                    messages,
+                    tools,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+
+        tc = ToolCall(id="c1", name="srv__noop", arguments={})
+        provider = _RejectOrphanTool(
+            responses=[
+                _resp(content="", tool_calls=(tc,)),
+                _resp(content="summary-text"),
+                _resp(content="final answer"),
+            ]
+        )
+        compactor = TokenBudgetCompactor(
+            max_chars=10**9,
+            max_messages=3,
+            keep_head=1,
+            keep_tail=1,
+            min_middle=1,
+        )
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="sys",
+            task="task",
+            tool_executor=lambda _call: "tool-ok",
+            compactor=compactor,
+            max_iterations=3,
+        )
+
+        assert result.stop_reason == "completed"
+        assert result.final_message == "final answer"
 
     def test_compactor_error_does_not_crash_loop(self) -> None:
         class _AlwaysCompact:
+            calls = 0
+
             def should_compact(self, messages: list[Message]) -> bool:
                 return True
 
             def compact(self, messages, provider):
+                self.calls += 1
                 raise RuntimeError("bad compactor")
 
-        provider = _Scripted(responses=[_resp(content="done")])
+        tc = ToolCall(id="c1", name="srv__noop", arguments={})
+        compactor = _AlwaysCompact()
+        provider = _Scripted(
+            responses=[
+                _resp(content="", tool_calls=(tc,)),
+                _resp(content="done"),
+            ]
+        )
         result = run_loop(
             provider=provider,
             system_prompt="",
             task="hi",
-            compactor=_AlwaysCompact(),
+            tool_executor=lambda _call: "ok",
+            compactor=compactor,
         )
         # The compactor raised but the loop kept running.
         assert result.stop_reason == "completed"
+        assert result.final_message == "done"
+        assert compactor.calls == 1
+        assert len(provider.calls) == 2
 
     def test_no_compactor_parameter_is_backward_compatible(self) -> None:
         provider = _Scripted(responses=[_resp(content="done")])

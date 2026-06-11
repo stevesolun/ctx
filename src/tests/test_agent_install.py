@@ -50,6 +50,13 @@ def _seed_agent(wiki_dir: Path, slug: str, *, status: str = "cataloged") -> None
     )
 
 
+def _symlink_to(target: Path, link: Path, *, target_is_directory: bool) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+
+
 # ── install_agent ────────────────────────────────────────────────────────────
 
 
@@ -66,6 +73,28 @@ class TestInstallAgent:
         )
         assert r.status == "not-in-wiki"
         assert "ctx-agent-mirror" in r.message
+
+    def test_rejects_symlinked_wiki_source(
+        self,
+        wiki_dir: Path,
+        agents_dir: Path,
+        isolated_manifest: Path,
+    ) -> None:
+        _seed_agent(wiki_dir, "architect")
+        source = wiki_dir / "converted-agents" / "architect.md"
+        outside = wiki_dir.parent / "outside-agent.md"
+        outside.write_text("outside\n", encoding="utf-8")
+        source.unlink()
+        _symlink_to(outside, source, target_is_directory=False)
+
+        r = agent_install.install_agent(
+            "architect", wiki_dir=wiki_dir, agents_dir=agents_dir,
+        )
+
+        assert r.status == "failed"
+        assert "symlinked source" in r.message
+        assert not (agents_dir / "architect.md").exists()
+        assert install_utils.load_manifest()["load"] == []
 
     def test_happy_path(
         self,

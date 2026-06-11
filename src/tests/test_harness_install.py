@@ -48,6 +48,13 @@ class _FakeRun:
     stderr: str = ""
 
 
+def _symlink_to(target: Path, link: Path, *, target_is_directory: bool) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+
+
 def test_dry_run_prints_plan_without_writing(tmp_path: Path, capsys: Any) -> None:
     wiki = tmp_path / "wiki"
     _write_harness_page(wiki)
@@ -612,6 +619,47 @@ def test_uninstall_refuses_manifest_target_at_installs_root(tmp_path: Path) -> N
     assert sibling.exists()
 
 
+@pytest.mark.parametrize("target_is_directory", [False, True])
+@pytest.mark.parametrize("with_installs_root", [False, True])
+def test_uninstall_refuses_symlink_manifest_target_without_following(
+    tmp_path: Path,
+    target_is_directory: bool,
+    with_installs_root: bool,
+) -> None:
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    installs_root = tmp_path / "installs"
+    installs_root.mkdir()
+    outside = tmp_path / "outside"
+    link = installs_root / "text-to-cad"
+    if target_is_directory:
+        outside.mkdir()
+        marker = outside / "README.md"
+        marker.write_text("outside", encoding="utf-8")
+    else:
+        marker = outside
+        marker.write_text("outside", encoding="utf-8")
+    _symlink_to(outside, link, target_is_directory=target_is_directory)
+    manifest_path = manifest_dir / "text-to-cad.json"
+    manifest_path.write_text(
+        json.dumps({"slug": "text-to-cad", "target": str(link)}),
+        encoding="utf-8",
+    )
+
+    result = harness_install.uninstall_harness(
+        "text-to-cad",
+        manifest_dir=manifest_dir,
+        installs_root=installs_root if with_installs_root else None,
+    )
+
+    assert result.status == "invalid-target"
+    assert "symlink" in result.message.lower()
+    assert result.target == link
+    assert marker.read_text(encoding="utf-8") == "outside"
+    assert link.is_symlink()
+    assert manifest_path.exists()
+
+
 def test_update_replaces_installed_target_from_catalog_source(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
@@ -640,6 +688,46 @@ def test_update_replaces_installed_target_from_catalog_source(tmp_path: Path) ->
 
     assert result.status == "updated"
     assert (install.target / "README.md").read_text(encoding="utf-8") == "v2"
+
+
+def test_update_refuses_symlink_manifest_target_without_following(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "README.md").write_text("new", encoding="utf-8")
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=str(source))
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    installs_root = tmp_path / "installs"
+    installs_root.mkdir()
+    sibling = installs_root / "other"
+    sibling.mkdir()
+    sibling_marker = sibling / "README.md"
+    sibling_marker.write_text("do-not-replace", encoding="utf-8")
+    link = installs_root / "text-to-cad"
+    _symlink_to(sibling, link, target_is_directory=True)
+    manifest_path = manifest_dir / "text-to-cad.json"
+    manifest_path.write_text(
+        json.dumps({"slug": "text-to-cad", "target": str(link)}),
+        encoding="utf-8",
+    )
+
+    result = harness_install.update_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=installs_root,
+        manifest_dir=manifest_dir,
+        allow_local_sources=True,
+    )
+
+    assert result.status == "invalid-target"
+    assert "symlink" in result.message.lower()
+    assert result.target == link
+    assert sibling_marker.read_text(encoding="utf-8") == "do-not-replace"
+    assert link.is_symlink()
+    assert manifest_path.exists()
 
 
 def test_update_failure_preserves_existing_target_and_manifest(

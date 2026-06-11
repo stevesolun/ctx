@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 import re
+import sys
 from pathlib import Path
+
+repo_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(repo_root / "src"))
+
+import update_repo_stats as urs  # noqa: E402
+
+
+def _required_stat(stats: Mapping[str, int | None], key: str) -> int:
+    value = stats[key]
+    assert value is not None, f"missing graph stat: {key}"
+    return value
 
 
 def test_readme_badges_have_public_click_targets() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
     text = (repo_root / "README.md").read_text(encoding="utf-8")
     badge_lines = [line for line in text.splitlines() if line.startswith("[![")]
 
@@ -24,7 +36,6 @@ def test_readme_badges_have_public_click_targets() -> None:
 
 
 def test_public_catalog_page_does_not_link_to_local_dashboard() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
     text = (repo_root / "docs" / "catalog.md").read_text(encoding="utf-8")
     js_text = (
         repo_root / "docs" / "assets" / "javascripts" / "catalog.js"
@@ -44,7 +55,6 @@ def test_public_catalog_page_does_not_link_to_local_dashboard() -> None:
 
 
 def test_docs_pages_workflow_uploads_single_overwritable_pages_artifact() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
     text = (repo_root / ".github" / "workflows" / "docs.yml").read_text(
         encoding="utf-8"
     )
@@ -56,33 +66,25 @@ def test_docs_pages_workflow_uploads_single_overwritable_pages_artifact() -> Non
     assert "overwrite: true" in text
 
 
-def test_public_docs_do_not_render_old_graph_totals() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    paths = [repo_root / "README.md"]
-    paths.extend((repo_root / "docs").rglob("*.md"))
-    paths.extend((repo_root / "graph").rglob("*.md"))
-    public_text = "\n".join(
-        path.read_text(encoding="utf-8", errors="replace") for path in paths
+def test_public_docs_render_current_graph_contract_totals() -> None:
+    stats = urs._read_graph_contract_stats()
+    assert stats is not None
+    knowledge_text = (repo_root / "docs" / "knowledge-graph.md").read_text(
+        encoding="utf-8",
     )
+    graph_text = (repo_root / "graph" / "README.md").read_text(encoding="utf-8")
+    public_text = knowledge_text + "\n" + graph_text
 
-    for stale in (
-        "102,696",
-        "102,925",
-        "91,432",
-        "91,463",
-        "89,463",
-        "2,900,834",
-        "2,913,930",
-        "2,960,215",
-    ):
-        assert stale not in public_text
+    expected_rows = {
+        "Total nodes": _required_stat(stats, "nodes"),
+        "Total edges": _required_stat(stats, "edges"),
+        "Harness edges": _required_stat(stats, "harness_edges"),
+    }
+    for label, value in expected_rows.items():
+        assert f"| {label} | **{value:,}** |" in public_text
 
-    for current in (
-        "102,928",
-        "91,464",
-        "89,465",
-        "2,913,960",
-        "10,790",
-        "207 harnesses",
-    ):
-        assert current in public_text
+    assert f"semantic {_required_stat(stats, 'semantic_edges'):,}" in public_text
+    assert f"{_required_stat(stats, 'skills'):,} skill" in public_text
+    assert f"{_required_stat(stats, 'agents'):,} agent" in public_text
+    assert f"{_required_stat(stats, 'mcps'):,} MCP" in public_text
+    assert f"{_required_stat(stats, 'harnesses'):,} harness" in public_text

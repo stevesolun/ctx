@@ -1281,6 +1281,18 @@ def _cmd_sessions(args: argparse.Namespace) -> int:
 # ── Result emission ────────────────────────────────────────────────────────
 
 
+_ERROR_STOP_REASONS = frozenset({
+    "content_filter",
+    "empty_response",
+    "length",
+    "provider_error",
+    "provider_other",
+    "provider_timeout",
+    "tool_denied",
+    "tool_error",
+})
+
+
 def _emit_result(
     result: Any, session_id: str, *, as_json: bool, quiet: bool,
     evaluator_rounds: list[dict[str, Any]] | None = None,
@@ -1314,10 +1326,10 @@ def _emit_result(
                 print(f"[ctx] detail: {result.detail}", file=sys.stderr)
         print(result.final_message)
 
-    # Non-zero only on true errors / policy blocks. Everything else
-    # (including max_iterations / budget) exits 0 since the session
-    # ran to a defined stopping point. Cancellation also exits 0.
-    if result.stop_reason in {"tool_error", "tool_denied"}:
+    # Non-zero only on true errors / policy blocks. Defined stops
+    # (max_iterations / budget / cancellation) still exit 0 because
+    # the session reached a caller-configured stopping point.
+    if result.stop_reason in _ERROR_STOP_REASONS:
         return 2
     return 0
 

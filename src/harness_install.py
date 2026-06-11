@@ -792,7 +792,27 @@ def uninstall_harness(
     except Exception as exc:  # noqa: BLE001
         return InstallResult(slug or identifier, "not-installed", message=str(exc))
 
-    target = Path(str(manifest.get("target") or "")).expanduser().resolve()
+    raw_target_value = str(manifest.get("target") or "").strip()
+    if not raw_target_value:
+        return InstallResult(
+            slug,
+            "invalid-target",
+            manifest_path=manifest_path,
+            message="install manifest does not include target",
+        )
+    raw_target = Path(raw_target_value).expanduser()
+    if not keep_files:
+        try:
+            reject_symlink_path(raw_target)
+        except ValueError as exc:
+            return InstallResult(
+                slug,
+                "invalid-target",
+                target=raw_target,
+                manifest_path=manifest_path,
+                message=str(exc),
+            )
+    target = raw_target.resolve()
     if installs_root is not None:
         root = installs_root.expanduser().resolve()
         if target and not _is_strictly_within(target, root):
@@ -857,6 +877,15 @@ def update_harness(
             record.slug,
             "invalid-target",
             message="install manifest does not include target",
+        )
+    try:
+        reject_symlink_path(target)
+    except ValueError as exc:
+        return InstallResult(
+            record.slug,
+            "invalid-target",
+            target=target,
+            message=str(exc),
         )
     try:
         target_path = _resolve_target(

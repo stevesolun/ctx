@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 import yaml  # type: ignore[import-untyped]
 
+from scripts.ci_preflight import GRAPH_VALIDATE_ARGS
 from validate_graph_artifacts import (
     DEFAULT_HARNESSES,
     GraphArtifactError,
@@ -1124,7 +1125,7 @@ def test_scan_graph_json_ignores_node_level_export_id() -> None:
     assert _scan_graph_json(BytesIO(payload)) == (1, 0, 0, 1, 0, None)
 
 
-def test_graph_only_workflow_uses_exact_release_counts() -> None:
+def test_graph_only_workflow_uses_preflight_graph_contract() -> None:
     workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(
         encoding="utf-8"
     ))
@@ -1153,27 +1154,19 @@ def test_graph_only_workflow_uses_exact_release_counts() -> None:
             i += 2
 
     assert argv[:script_index + 1] == ["python", "src/validate_graph_artifacts.py"]
-    assert parsed == {
-        "--graph-dir": "graph",
-        "--deep": True,
-        "--min-nodes": "100000",
-        "--min-edges": "2000000",
-        "--min-skills-sh-nodes": "89000",
-        "--min-semantic-edges": "1000000",
-        "--expected-nodes": "102928",
-        "--expected-edges": "2913960",
-        "--expected-semantic-edges": "1683193",
-        "--expected-harness-nodes": "207",
-        "--expected-skills-sh-nodes": "89471",
-        "--expected-skills-sh-catalog-entries": "89465",
-        "--expected-skills-sh-converted": "89465",
-        "--expected-skill-pages": "91464",
-        "--expected-agent-pages": "467",
-        "--expected-mcp-pages": "10790",
-        "--expected-harness-pages": "207",
-        "--line-threshold": "180",
-        "--max-stage-lines": "40",
-    }
+    expected: dict[str, str | bool] = {}
+    expected_args = GRAPH_VALIDATE_ARGS[1:]
+    i = 0
+    while i < len(expected_args):
+        flag = expected_args[i]
+        if i + 1 >= len(expected_args) or expected_args[i + 1].startswith("--"):
+            expected[flag] = True
+            i += 1
+        else:
+            expected[flag] = expected_args[i + 1]
+            i += 2
+
+    assert parsed == expected
 
 
 def test_graph_only_workflow_waits_for_release_asset_upload() -> None:

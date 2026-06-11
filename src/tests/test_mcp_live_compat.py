@@ -16,8 +16,6 @@ import pytest
 
 from ctx.adapters.generic.tools.mcp_router import McpClient, McpServerConfig
 
-pytestmark = pytest.mark.integration
-
 
 def _trusted_payload(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -61,6 +59,7 @@ def test_server_config_rejects_non_boolean_inherit_env(
         )
 
 
+@pytest.mark.integration
 def test_live_mcp_servers_from_trusted_configs(
     pytestconfig: pytest.Config,
     tmp_path: Path,

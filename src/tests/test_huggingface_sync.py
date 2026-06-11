@@ -14,6 +14,46 @@ if str(SCRIPTS_DIR) not in sys.path:
 import sync_huggingface  # noqa: E402
 
 
+def _required_hydrated_artifacts() -> tuple[Path, ...]:
+    return tuple(sync_huggingface.HYDRATED_ARTIFACT_MIN_BYTES)
+
+
+def _write_small_hydrated_artifacts(repo: Path) -> None:
+    for rel in _required_hydrated_artifacts():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\x1f\x8b" + rel.name.encode("utf-8"))
+
+
+def _tiny_hydrated_min_bytes() -> dict[Path, int]:
+    return {rel: 4 for rel in _required_hydrated_artifacts()}
+
+
+def _flag_values(args: tuple[str, ...] | list[str]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if not token.startswith("--"):
+            i += 1
+            continue
+        if i + 1 < len(args) and not args[i + 1].startswith("--"):
+            values[token] = args[i + 1]
+            i += 2
+        else:
+            values[token] = ""
+            i += 1
+    return values
+
+
+def test_hf_hydrated_artifact_min_size_contract() -> None:
+    assert sync_huggingface.HYDRATED_ARTIFACT_MIN_BYTES == {
+        Path("graph/wiki-graph.tar.gz"): 100_000_000,
+        Path("graph/wiki-graph-runtime.tar.gz"): 10_000_000,
+        Path("graph/skills-sh-catalog.json.gz"): 1_000_000,
+    }
+
+
 class _FakeRepoInfo:
     sha = "abc1234"
 
@@ -115,7 +155,9 @@ def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:
     assert "lfs: false" in text
     assert "git lfs pull" not in text
     assert "gh release download" in text
-    assert "wiki-graph.tar.gz" in text
+    for artifact in _required_hydrated_artifacts():
+        assert artifact.as_posix() in text
+        assert f"--pattern {artifact.name}" in text
     assert "scripts/sync_huggingface.py" in text
     assert "Set the HF_TOKEN repository secret" in text
     assert "hf_" not in text
@@ -214,25 +256,16 @@ def test_hf_export_copies_hydrated_artifacts_even_when_untracked(
     (repo / "graph").mkdir()
     (repo / "README.md").write_text("# ctx\n", encoding="utf-8")
     (repo / "ignored-report.md").write_text("local only\n", encoding="utf-8")
-    (repo / "graph" / "wiki-graph.tar.gz").write_bytes(b"\x1f\x8bhydrated-wiki")
-    (repo / "graph" / "skills-sh-catalog.json.gz").write_bytes(
-        b"\x1f\x8bhydrated-catalog"
-    )
+    _write_small_hydrated_artifacts(repo)
     monkeypatch.setattr(
         sync_huggingface,
         "HYDRATED_ARTIFACT_MIN_BYTES",
-        {
-            Path("graph/wiki-graph.tar.gz"): 4,
-            Path("graph/skills-sh-catalog.json.gz"): 4,
-        },
+        _tiny_hydrated_min_bytes(),
     )
     monkeypatch.setattr(
         sync_huggingface,
         "_git_bytes",
-        lambda _repo, *_args: (
-            b"README.md\0"
-            b"graph/skills-sh-catalog.json.gz\0"
-        ),
+        lambda _repo, *_args: b"README.md\0",
     )
     monkeypatch.setattr(
         sync_huggingface,
@@ -247,6 +280,12 @@ def test_hf_export_copies_hydrated_artifacts_even_when_untracked(
     assert (export_dir / "graph" / "wiki-graph.tar.gz").read_bytes().startswith(
         b"\x1f\x8b"
     )
+    assert (
+        export_dir / "graph" / "wiki-graph-runtime.tar.gz"
+    ).read_bytes().startswith(b"\x1f\x8b")
+    assert (
+        export_dir / "graph" / "skills-sh-catalog.json.gz"
+    ).read_bytes().startswith(b"\x1f\x8b")
     assert not (export_dir / "ignored-report.md").exists()
 
 
@@ -256,19 +295,14 @@ def test_hf_export_rejects_lfs_pointer_artifact(tmp_path: Path, monkeypatch) -> 
     repo.mkdir()
     (repo / "graph").mkdir()
     (repo / "README.md").write_text("# ctx\n", encoding="utf-8")
+    _write_small_hydrated_artifacts(repo)
     (repo / "graph" / "wiki-graph.tar.gz").write_bytes(
         sync_huggingface.LFS_POINTER_PREFIX + b"\nsize 350608878\n"
-    )
-    (repo / "graph" / "skills-sh-catalog.json.gz").write_bytes(
-        b"\x1f\x8bhydrated-catalog"
     )
     monkeypatch.setattr(
         sync_huggingface,
         "HYDRATED_ARTIFACT_MIN_BYTES",
-        {
-            Path("graph/wiki-graph.tar.gz"): 4,
-            Path("graph/skills-sh-catalog.json.gz"): 4,
-        },
+        _tiny_hydrated_min_bytes(),
     )
     monkeypatch.setattr(sync_huggingface, "_assert_repo_stats_current", lambda _repo: None)
 
@@ -300,6 +334,73 @@ def test_hf_export_checks_repo_stats_before_upload(tmp_path: Path, monkeypatch) 
     assert calls == [([sys.executable, str(updater), "--check"], repo)]
 
 
+def test_hf_graph_validation_uses_ci_exact_count_contract(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from ci_preflight import GRAPH_VALIDATE_ARGS
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_small_hydrated_artifacts(repo)
+    seen: dict[str, object] = {}
+
+    def fake_validator(graph_dir: Path, **kwargs: object) -> object:
+        seen["graph_dir"] = graph_dir
+        seen["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(
+        sync_huggingface,
+        "HYDRATED_ARTIFACT_MIN_BYTES",
+        _tiny_hydrated_min_bytes(),
+    )
+    monkeypatch.setattr(
+        sync_huggingface,
+        "_load_graph_artifact_validator",
+        lambda _repo: fake_validator,
+    )
+
+    sync_huggingface._assert_hydrated_artifacts(repo)
+
+    flags = _flag_values(GRAPH_VALIDATE_ARGS[1:])
+    kwargs = seen["kwargs"]
+    assert seen["graph_dir"] == repo / "graph"
+    assert isinstance(kwargs, dict)
+    assert kwargs["deep"] is True
+    for flag, field_name in sync_huggingface.GRAPH_VALIDATOR_INT_FLAGS.items():
+        assert kwargs[field_name] == int(flags[flag])
+
+
+def test_hf_graph_validation_rejects_stale_exact_counts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_small_hydrated_artifacts(repo)
+
+    def fake_validator(_graph_dir: Path, **_kwargs: object) -> object:
+        raise ValueError("graph_nodes exact count mismatch: expected 102928, got 102927")
+
+    monkeypatch.setattr(
+        sync_huggingface,
+        "HYDRATED_ARTIFACT_MIN_BYTES",
+        _tiny_hydrated_min_bytes(),
+    )
+    monkeypatch.setattr(
+        sync_huggingface,
+        "_load_graph_artifact_validator",
+        lambda _repo: fake_validator,
+    )
+
+    try:
+        sync_huggingface._assert_hydrated_artifacts(repo)
+    except RuntimeError as exc:
+        assert "graph artifact integrity validation failed" in str(exc)
+        assert "graph_nodes exact count mismatch" in str(exc)
+    else:
+        raise AssertionError("expected stale graph artifact rejection")
+
+
 def test_hf_export_rejects_corrupt_large_graph_artifact(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -307,6 +408,7 @@ def test_hf_export_rejects_corrupt_large_graph_artifact(
     repo.mkdir()
     graph_dir = repo / "graph"
     graph_dir.mkdir()
+    _write_small_hydrated_artifacts(repo)
     (graph_dir / "wiki-graph.tar.gz").write_bytes(b"\x1f\x8bnot-a-valid-tar")
     with gzip.open(graph_dir / "skills-sh-catalog.json.gz", "wt", encoding="utf-8") as f:
         json.dump({"skills": []}, f)
@@ -314,10 +416,7 @@ def test_hf_export_rejects_corrupt_large_graph_artifact(
     monkeypatch.setattr(
         sync_huggingface,
         "HYDRATED_ARTIFACT_MIN_BYTES",
-        {
-            Path("graph/wiki-graph.tar.gz"): 4,
-            Path("graph/skills-sh-catalog.json.gz"): 4,
-        },
+        _tiny_hydrated_min_bytes(),
     )
 
     try:

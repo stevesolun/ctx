@@ -49,6 +49,13 @@ def _write_entity(wiki_dir: Path, slug: str, frontmatter: dict[str, str]) -> Pat
     return path
 
 
+def _symlink_to(target: Path, link: Path, *, target_is_directory: bool) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+
+
 @dataclass
 class _FakeProc:
     returncode: int
@@ -267,7 +274,30 @@ class TestInstallMcp:
         )
         assert r.status == "not-in-wiki"
 
-    def test_already_installed_skipped(self, wiki_dir: Path) -> None:
+    def test_rejects_symlinked_entity_page(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+    ) -> None:
+        entity = _write_entity(wiki_dir, "gh", {"status": "cataloged"})
+        outside = wiki_dir.parent / "outside.md"
+        outside.write_text("---\nstatus: cataloged\n---\noutside\n", encoding="utf-8")
+        entity.unlink()
+        _symlink_to(outside, entity, target_is_directory=False)
+
+        r = mcp_install.install_mcp(
+            "gh", wiki_dir=wiki_dir, command="npx -y p", auto=True,
+        )
+
+        assert r.status == "failed"
+        assert "symlinked wiki entity" in r.message
+        assert fake_claude["calls"] == []
+
+    def test_already_installed_skipped(
+        self,
+        wiki_dir: Path,
+        isolated_manifest: Path,
+    ) -> None:
         _write_entity(wiki_dir, "gh", {"status": "installed"})
         r = mcp_install.install_mcp(
             "gh", wiki_dir=wiki_dir, command="npx -y p", auto=True,
@@ -624,6 +654,23 @@ class TestInstallMcp:
         assert "ghp_supersecret" not in r.message
         assert "GITHUB_TOKEN=[redacted]" in r.message
 
+    def test_claude_cli_success_redacts_secret_output(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+    ) -> None:
+        _write_entity(wiki_dir, "gh", {"status": "cataloged"})
+        fake_claude["stdout"] = "registered OPENAI_API_KEY=sk-supersecret123456789012345"
+
+        r = mcp_install.install_mcp(
+            "gh", wiki_dir=wiki_dir, command="npx -y p", auto=True,
+        )
+
+        assert r.status == "installed"
+        assert "sk-supersecret" not in r.message
+        assert "OPENAI_API_KEY=[redacted]" in r.message
+
     def test_json_config_routes_to_add_json(
         self,
         wiki_dir: Path,
@@ -663,6 +710,60 @@ class TestInstallMcp:
 
         r = mcp_install.install_mcp(
             "gh", wiki_dir=wiki_dir, json_config=cfg, auto=True,
+        )
+
+        assert r.status == "invalid-cmd"
+        assert "inline secret" in r.message
+        assert fake_claude["calls"] == []
+
+    @pytest.mark.parametrize(
+        "cfg",
+        [
+            {"command": "npx", "args": ["-y", "pkg", "GITHUB_TOKEN=ghp_supersecret123456789012345"]},
+            {"command": "npx", "args": ["-y", "pkg", "--api-key", "sk-supersecret123456789012345"]},
+            {"command": "npx", "args": ["-y", "pkg", "--client-secret=plain-secret-value"]},
+        ],
+    )
+    def test_json_config_rejects_inline_secret_args(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+        cfg: dict[str, object],
+    ) -> None:
+        _write_entity(wiki_dir, "gh", {"status": "cataloged"})
+
+        r = mcp_install.install_mcp(
+            "gh", wiki_dir=wiki_dir, json_config=json.dumps(cfg), auto=True,
+        )
+
+        assert r.status == "invalid-cmd"
+        assert "inline secret" in r.message
+        assert fake_claude["calls"] == []
+
+    def test_json_config_rejects_nested_inline_secret_args(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+    ) -> None:
+        _write_entity(wiki_dir, "gh", {"status": "cataloged"})
+        cfg = {
+            "mcpServers": {
+                "gh": {
+                    "command": "npx",
+                    "args": [
+                        "-y",
+                        "pkg",
+                        "--api-key",
+                        "sk-supersecret123456789012345",
+                    ],
+                },
+            },
+        }
+
+        r = mcp_install.install_mcp(
+            "gh", wiki_dir=wiki_dir, json_config=json.dumps(cfg), auto=True,
         )
 
         assert r.status == "invalid-cmd"
@@ -760,6 +861,26 @@ class TestUninstallMcp:
         assert r.status == "not-installed"
         assert fake_claude["calls"] == []
 
+    def test_rejects_symlinked_entity_page(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+        tmp_path: Path,
+    ) -> None:
+        outside = tmp_path / "outside.md"
+        outside.write_text("status: installed\n", encoding="utf-8")
+        entity = _write_entity(wiki_dir, "gh", {"status": "installed"})
+        entity.unlink()
+        _symlink_to(outside, entity, target_is_directory=False)
+
+        result = mcp_install.uninstall_mcp("gh", wiki_dir=wiki_dir)
+
+        assert result.status == "failed"
+        assert "unsafe symlinked wiki entity" in result.message
+        assert fake_claude["calls"] == []
+        assert outside.read_text(encoding="utf-8") == "status: installed\n"
+
     def test_manifest_loaded_cataloged_entity_can_uninstall(
         self,
         wiki_dir: Path,
@@ -792,7 +913,10 @@ class TestUninstallMcp:
         }]
 
     def test_dry_run(
-        self, wiki_dir: Path, fake_claude: dict[str, Any]
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
     ) -> None:
         _write_entity(wiki_dir, "gh", {"status": "installed"})
         r = mcp_install.uninstall_mcp("gh", wiki_dir=wiki_dir, dry_run=True)
@@ -867,13 +991,47 @@ class TestUninstallMcp:
         }]
 
     def test_cli_failure_without_force(
-        self, wiki_dir: Path, fake_claude: dict[str, Any]
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
     ) -> None:
         _write_entity(wiki_dir, "gh", {"status": "installed"})
         fake_claude["rc"] = 1
         fake_claude["stderr"] = "drift"
         r = mcp_install.uninstall_mcp("gh", wiki_dir=wiki_dir)
         assert r.status == "claude-cli-failed"
+
+    def test_cli_failure_without_force_redacts_secret_output(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+    ) -> None:
+        _write_entity(wiki_dir, "gh", {"status": "installed"})
+        fake_claude["rc"] = 1
+        fake_claude["stderr"] = "failed GITHUB_TOKEN=ghp_supersecret123456789012345"
+
+        result = mcp_install.uninstall_mcp("gh", wiki_dir=wiki_dir)
+
+        assert result.status == "claude-cli-failed"
+        assert "ghp_supersecret" not in result.message
+        assert "GITHUB_TOKEN=[redacted]" in result.message
+
+    def test_successful_uninstall_redacts_cli_output(
+        self,
+        wiki_dir: Path,
+        fake_claude: dict[str, Any],
+        isolated_manifest: Path,
+    ) -> None:
+        _write_entity(wiki_dir, "gh", {"status": "installed"})
+        fake_claude["stdout"] = "removed OPENAI_API_KEY=sk-supersecret123456789012345"
+
+        result = mcp_install.uninstall_mcp("gh", wiki_dir=wiki_dir)
+
+        assert result.status == "uninstalled"
+        assert "sk-supersecret" not in result.message
+        assert "OPENAI_API_KEY=[redacted]" in result.message
 
     def test_cli_failure_with_force_still_flips_local(
         self,

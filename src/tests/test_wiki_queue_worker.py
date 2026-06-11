@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import json
+import sys
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import networkx as nx
+import numpy as np
 import pytest
+from networkx.readwrite import node_link_data
 
+from ctx.core.graph.entity_overlays import active_overlay_records, load_overlay_records
+from ctx.core.graph.resolve_graph import load_graph, resolve_by_seeds
+from ctx.core.graph.vector_index import build_vector_index
 from ctx.core.wiki import wiki_queue, wiki_queue_worker
 
 
@@ -16,6 +25,54 @@ def _write_entity(wiki: Path, relpath: str, text: str) -> Path:
     path.parent.mkdir(parents=True)
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def _write_base_graph_for_overlay(wiki: Path) -> Path:
+    graph_dir = wiki / "graphify-out"
+    graph_dir.mkdir(parents=True, exist_ok=True)
+    graph = nx.Graph()
+    graph.add_node(
+        "skill:python-testing",
+        type="skill",
+        label="python-testing",
+        tags=["python", "testing"],
+    )
+    graph.add_node(
+        "skill:ruby-testing",
+        type="skill",
+        label="ruby-testing",
+        tags=["ruby", "testing"],
+    )
+    graph_path = graph_dir / "graph.json"
+    graph_path.write_text(
+        json.dumps(node_link_data(graph, edges="edges")),
+        encoding="utf-8",
+    )
+    return graph_path
+
+
+def _build_vector_index_for_overlay(wiki: Path) -> Path:
+    index_dir = wiki / ".embedding-cache" / "graph" / "vector-index"
+    build_vector_index(
+        kind="numpy-flat",
+        model_id="test-model",
+        node_ids=["skill:python-testing", "skill:ruby-testing"],
+        content_hashes=["hash-python", "hash-ruby"],
+        vectors=np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+    ).save(index_dir)
+    return index_dir
+
+
+def _patch_test_embedder(monkeypatch: Any) -> None:
+    fake_embedder = SimpleNamespace(
+        name="test-model",
+        embed=lambda _texts: np.asarray([[1.0, 0.0]], dtype=np.float32),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "embedding_backend",
+        SimpleNamespace(get_embedder=lambda *_args, **_kwargs: fake_embedder),
+    )
 
 
 def test_process_next_entity_upsert_succeeds_and_refreshes_index(
@@ -120,6 +177,68 @@ def test_process_next_entity_upsert_runs_incremental_attach_when_index_exists(
     ]
 
 
+def test_process_next_entity_upsert_real_attach_writes_active_overlay_and_resolver_sees_it(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    wiki = tmp_path / "wiki"
+    graph_path = _write_base_graph_for_overlay(wiki)
+    _build_vector_index_for_overlay(wiki)
+    entity_text = "---\ntags:\n  - python\n  - testing\n---\n# worker-python\n"
+    entity_path = _write_entity(wiki, "entities/skills/worker-python.md", entity_text)
+    queued = wiki_queue.enqueue_entity_upsert(
+        wiki,
+        entity_type="skill",
+        slug="worker-python",
+        entity_path=entity_path,
+        content=entity_text,
+        action="created",
+        source="test",
+        now=10.0,
+    )
+    monkeypatch.setattr(wiki_queue_worker, "update_index", MagicMock())
+    _patch_test_embedder(monkeypatch)
+
+    result = wiki_queue_worker.process_next(wiki, worker_id="worker-a", now=20.0)
+
+    assert result is not None
+    assert result.job_id == queued.id
+    assert result.status == wiki_queue.STATUS_SUCCEEDED
+    assert "incremental attach inserted" in result.message
+
+    overlay_path = wiki / "graphify-out" / "entity-overlays.jsonl"
+    records = load_overlay_records(overlay_path)
+    active = active_overlay_records(records)
+    assert len(active) == 1
+    record = active[0]
+    assert record["kind"] == "ann_attach"
+    assert record["node_id"] == "skill:worker-python"
+    assert record["nodes"] == [
+        {
+            "id": "skill:worker-python",
+            "label": "worker-python",
+            "title": "worker-python",
+            "type": "skill",
+            "tags": ["python", "testing"],
+            "source": "incremental-attach",
+            "content_hash": record["content_hash"],
+            "updated": record["created_at"],
+        }
+    ]
+    assert len(record["edges"]) == 1
+    edge = record["edges"][0]
+    assert edge["target"] == "skill:python-testing"
+    assert edge["weight"] == edge["final_weight"]
+    assert edge["final_weight"] > 0
+    assert edge["semantic_sim"] == pytest.approx(1.0)
+    assert edge["score_components"]
+
+    graph = load_graph(graph_path)
+    assert graph.has_edge("skill:worker-python", "skill:python-testing")
+    resolved = resolve_by_seeds(graph, ["python-testing"], max_hops=1, top_n=5)
+    assert any(item["name"] == "worker-python" for item in resolved)
+
+
 def test_process_next_entity_upsert_does_not_fail_when_incremental_attach_fails(
     tmp_path: Path,
     monkeypatch: Any,
@@ -152,6 +271,17 @@ def test_process_next_entity_upsert_does_not_fail_when_incremental_attach_fails(
     assert result.job_id == queued.id
     assert result.status == wiki_queue.STATUS_SUCCEEDED
     assert "incremental attach skipped (embedding backend missing)" in result.message
+    jobs = wiki_queue.list_jobs(wiki_queue.queue_db_path(wiki))
+    assert [job.kind for job in jobs] == [
+        wiki_queue.ENTITY_UPSERT_JOB,
+        wiki_queue.GRAPH_EXPORT_JOB,
+    ]
+    assert jobs[1].status == wiki_queue.STATUS_PENDING
+    assert jobs[1].payload == {
+        "graph_only": True,
+        "incremental": True,
+        "source": "entity-upsert",
+    }
 
 
 def test_process_next_entity_delete_queues_full_graph_refresh(

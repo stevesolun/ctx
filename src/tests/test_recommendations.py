@@ -425,12 +425,25 @@ def test_semantic_index_failure_falls_through(monkeypatch) -> None:
     """
     from ctx.core.resolve import recommendations as rec
 
-    monkeypatch.setattr(rec, "_load_semantic_index", lambda g, c: None)
+    calls: list[object] = []
+
+    def fake_load(graph, cache_dir):  # noqa: ANN001
+        calls.append((graph, cache_dir))
+        return None
+
+    monkeypatch.setattr(rec, "_load_semantic_index", fake_load)
     rec._semantic_cache.clear()
 
     G = _build_graph([("python-foo", ["python"]), ("ruby-bar", ["ruby"])])
-    out = recommend_by_tags(G, ["python"], top_n=2, query="python work")
+    out = recommend_by_tags(
+        G,
+        ["python"],
+        top_n=2,
+        query="python work",
+        use_semantic_query=True,
+    )
     names = [r["name"] for r in out]
+    assert calls == [(G, None)]
     assert "python-foo" in names, (
         "tag-based ranking must still work when the embedding cache is missing"
     )

@@ -237,6 +237,7 @@ _DASHBOARD_ENTITY_SOURCES: tuple[tuple[str, str, bool], ...] = (
 _DASHBOARD_ENTITY_TYPES: tuple[str, ...] = tuple(
     entity_type for _, entity_type, _ in _DASHBOARD_ENTITY_SOURCES
 )
+_DEFAULT_GRAPH_FOCUS_SLUG = "github"
 
 
 def _normalize_dashboard_entity_type(raw: object) -> str | None:
@@ -4254,6 +4255,8 @@ def _render_graph(focus: str | None = None, focus_type: str | None = None) -> st
     if not initial_slug and seeds:
         initial_slug = str(seeds[0].get("slug") or "")
         initial_type = str(seeds[0].get("type") or "")
+    elif not initial_slug and gstats.get("available"):
+        initial_slug = _DEFAULT_GRAPH_FOCUS_SLUG
     focus_js = _json_for_script(initial_slug)
     focus_type_js = _json_for_script(initial_type)
     seed_html = ""
@@ -5404,6 +5407,53 @@ def _sanitize_docs_html(rendered_html: str) -> str:
     def escape_match(match: re.Match[str]) -> str:
         return html.escape(match.group(0))
 
+    def parse_attrs(tag_html: str) -> dict[str, str | None] | None:
+        attrs: dict[str, str | None] = {}
+        for match in re.finditer(
+            r"([a-zA-Z_:][\w:.-]*)(?:\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s\"'>]+))?",
+            tag_html,
+        ):
+            name = match.group(1).lower()
+            if name == "input":
+                continue
+            if name in attrs:
+                return None
+            raw_value = match.group(2)
+            if raw_value is None:
+                attrs[name] = None
+                continue
+            value = raw_value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+            attrs[name] = html.unescape(value)
+        return attrs
+
+    def is_safe_tabbed_input(tag_html: str) -> bool:
+        attrs = parse_attrs(tag_html)
+        if attrs is None:
+            return False
+        if set(attrs) - {"checked", "id", "name", "type"}:
+            return False
+        input_type = (attrs.get("type") or "").lower()
+        input_id = attrs.get("id") or ""
+        input_name = attrs.get("name") or ""
+        if input_type != "radio":
+            return False
+        if not re.fullmatch(r"__tabbed_\d+_\d+", input_id):
+            return False
+        if not re.fullmatch(r"__tabbed_\d+", input_name):
+            return False
+        if not input_id.startswith(f"{input_name}_"):
+            return False
+        checked = attrs.get("checked")
+        return checked is None or checked.lower() == "checked"
+
+    def escape_input_unless_safe(match: re.Match[str]) -> str:
+        tag_html = match.group(0)
+        if is_safe_tabbed_input(tag_html):
+            return tag_html
+        return html.escape(tag_html)
+
     for tag in dangerous_blocks:
         rendered_html = re.sub(
             rf"<\s*{tag}\b[^>]*>.*?<\s*/\s*{tag}\s*>",
@@ -5418,6 +5468,14 @@ def _sanitize_docs_html(rendered_html: str) -> str:
             flags=re.IGNORECASE,
         )
     for tag in dangerous_tags:
+        if tag == "input":
+            rendered_html = re.sub(
+                rf"<\s*/?\s*{tag}\b[^>]*>",
+                escape_input_unless_safe,
+                rendered_html,
+                flags=re.IGNORECASE,
+            )
+            continue
         rendered_html = re.sub(
             rf"<\s*/?\s*{tag}\b[^>]*>",
             escape_match,
@@ -5456,7 +5514,7 @@ def _render_docs_sidebar_page(
 ) -> str:
     page_anchor = page_anchors.get(entry["path"], (tab_slug, _docs_page_anchor(tab_slug, entry["path"])))[1]
     title = str(entry.get("nav_title") or entry["title"])
-    page_search = f"{title} {entry['path']}".lower()
+    page_search = _docs_search_text(entry)
     heading_links = "".join(
         "<a class='docs-heading-link "
         f"docs-heading-level-{int(heading['level'])}' "
@@ -5580,11 +5638,11 @@ def _render_docs() -> str:
         "function activeDocPanel() { return docPanels.find(panel => !panel.hidden); }\n"
         "function jumpToDocTarget(tab, target) {\n"
         "  activateDocTab(tab);\n"
+        "  if (target) history.replaceState(null, '', '#' + target);\n"
         "  window.requestAnimationFrame(() => {\n"
         "    const node = document.getElementById(target);\n"
         "    if (node) {\n"
         "      node.scrollIntoView({ block: 'start' });\n"
-        "      history.replaceState(null, '', '#' + target);\n"
         "    }\n"
         "  });\n"
         "}\n"
@@ -5598,7 +5656,18 @@ def _render_docs() -> str:
         "  docsSearchResults.replaceChildren();\n"
         "  docsSearchResults.hidden = !q;\n"
         "  if (!q) return;\n"
-        "  const matches = docLinks.filter(link => (link.dataset.docSearch || '').includes(q)).slice(0, 12);\n"
+        "  function docSearchScore(link) {\n"
+        "    const label = (link.dataset.docLabel || link.textContent || '').toLowerCase();\n"
+        "    let score = 0;\n"
+        "    if (label === q) score += 200;\n"
+        "    if (label.includes(q)) score += 100;\n"
+        "    if (link.classList.contains('docs-heading-link')) score += 25;\n"
+        "    if ((link.dataset.docSearch || '').includes(q)) score += 1;\n"
+        "    return score;\n"
+        "  }\n"
+        "  const matches = docLinks.filter(link => (link.dataset.docSearch || '').includes(q))\n"
+        "    .sort((a, b) => docSearchScore(b) - docSearchScore(a))\n"
+        "    .slice(0, 12);\n"
         "  if (!matches.length) {\n"
         "    const empty = document.createElement('div');\n"
         "    empty.className = 'docs-search-empty';\n"

@@ -41,12 +41,28 @@ def _text(raw: Any) -> str:
     return str(raw or "").strip()
 
 
+def _float(raw: Any) -> float | None:
+    try:
+        return float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _line_count(body: str) -> int:
     return len([line for line in body.splitlines() if line.strip()])
 
 
 def _sorted_join(values: set[str]) -> str:
     return ", ".join(sorted(values))
+
+
+_QUALITY_GRADE_RANK: dict[str, int] = {
+    "A": 5,
+    "B": 4,
+    "C": 3,
+    "D": 2,
+    "F": 1,
+}
 
 
 _SECURITY_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -114,8 +130,50 @@ def build_update_review(
 
     old_status = _text(existing_fm.get("status"))
     new_status = _text(proposed_fm.get("status"))
-    if old_status and new_status and old_status != new_status:
+    if old_status and not new_status:
+        risks.append(f"removes status {old_status}")
+    elif old_status and new_status and old_status != new_status:
         risks.append(f"status changes from {old_status} to {new_status}")
+    elif new_status and not old_status:
+        benefits.append(f"adds status {new_status}")
+
+    old_quality_score = _float(existing_fm.get("quality_score"))
+    new_quality_score = _float(proposed_fm.get("quality_score"))
+    if old_quality_score is not None and new_quality_score is None:
+        risks.append(f"removes quality score {old_quality_score:g}")
+    elif old_quality_score is not None and new_quality_score is not None:
+        if new_quality_score < old_quality_score:
+            risks.append(
+                f"quality score drops from {old_quality_score:g} to {new_quality_score:g}"
+            )
+        elif new_quality_score > old_quality_score:
+            benefits.append(
+                f"quality score improves from {old_quality_score:g} to {new_quality_score:g}"
+            )
+    elif new_quality_score is not None:
+        benefits.append(f"adds quality score {new_quality_score:g}")
+
+    old_quality_grade = _text(existing_fm.get("quality_grade")).upper()
+    new_quality_grade = _text(proposed_fm.get("quality_grade")).upper()
+    if old_quality_grade and not new_quality_grade:
+        risks.append(f"removes quality grade {old_quality_grade}")
+    elif old_quality_grade and new_quality_grade and old_quality_grade != new_quality_grade:
+        old_rank = _QUALITY_GRADE_RANK.get(old_quality_grade)
+        new_rank = _QUALITY_GRADE_RANK.get(new_quality_grade)
+        if old_rank is not None and new_rank is not None and new_rank < old_rank:
+            risks.append(
+                f"quality grade drops from {old_quality_grade} to {new_quality_grade}"
+            )
+        elif old_rank is not None and new_rank is not None and new_rank > old_rank:
+            benefits.append(
+                f"quality grade improves from {old_quality_grade} to {new_quality_grade}"
+            )
+        else:
+            risks.append(
+                f"quality grade changes from {old_quality_grade} to {new_quality_grade}"
+            )
+    elif new_quality_grade:
+        benefits.append(f"adds quality grade {new_quality_grade}")
 
     existing_lines = _line_count(existing_body)
     proposed_lines = _line_count(proposed_body)

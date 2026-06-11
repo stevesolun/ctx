@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 DEFAULT_REPO_ID = "Stevesolun/ctx"
 DEFAULT_REPO_TYPE = "dataset"
@@ -38,6 +38,25 @@ HYDRATED_ARTIFACT_MIN_BYTES = {
     Path("graph/wiki-graph.tar.gz"): 100_000_000,
     Path("graph/wiki-graph-runtime.tar.gz"): 10_000_000,
     Path("graph/skills-sh-catalog.json.gz"): 1_000_000,
+}
+GRAPH_VALIDATOR_INT_FLAGS = {
+    "--min-nodes": "min_nodes",
+    "--min-edges": "min_edges",
+    "--min-skills-sh-nodes": "min_skills_sh_nodes",
+    "--min-semantic-edges": "min_semantic_edges",
+    "--expected-nodes": "expected_nodes",
+    "--expected-edges": "expected_edges",
+    "--expected-semantic-edges": "expected_semantic_edges",
+    "--expected-harness-nodes": "expected_harness_nodes",
+    "--expected-skills-sh-nodes": "expected_skills_sh_nodes",
+    "--expected-skills-sh-catalog-entries": "expected_skills_sh_catalog_entries",
+    "--expected-skills-sh-converted": "expected_skills_sh_converted",
+    "--expected-skill-pages": "expected_skill_pages",
+    "--expected-agent-pages": "expected_agent_pages",
+    "--expected-mcp-pages": "expected_mcp_pages",
+    "--expected-harness-pages": "expected_harness_pages",
+    "--line-threshold": "line_threshold",
+    "--max-stage-lines": "max_stage_lines",
 }
 
 
@@ -100,18 +119,60 @@ def _assert_hydrated_artifacts(repo: Path) -> None:
 
 
 def _validate_graph_artifact_integrity(repo: Path) -> None:
-    src_dir = repo / "src"
-    if str(src_dir) not in sys.path:
-        sys.path.insert(0, str(src_dir))
+    validate_graph_artifacts = _load_graph_artifact_validator(repo)
     try:
-        from validate_graph_artifacts import validate_graph_artifacts
-
-        validate_graph_artifacts(repo / "graph")
+        validate_graph_artifacts(repo / "graph", **_graph_validation_kwargs(repo))
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(
             "graph artifact integrity validation failed before Hugging Face sync: "
             f"{exc}"
         ) from exc
+
+
+def _load_graph_artifact_validator(repo: Path) -> Callable[..., object]:
+    src_dir = repo / "src"
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+    from validate_graph_artifacts import validate_graph_artifacts
+
+    return validate_graph_artifacts
+
+
+def _graph_validation_kwargs(repo: Path) -> dict[str, object]:
+    scripts_dir = repo / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    from ci_preflight import GRAPH_VALIDATE_ARGS
+
+    args = list(GRAPH_VALIDATE_ARGS[1:])
+    kwargs: dict[str, object] = {}
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token == "--graph-dir":
+            if i + 1 >= len(args):
+                raise RuntimeError("GRAPH_VALIDATE_ARGS has --graph-dir without a value")
+            if args[i + 1] != "graph":
+                raise RuntimeError(
+                    "Hugging Face graph validation expects GRAPH_VALIDATE_ARGS "
+                    f"to use --graph-dir graph, got {args[i + 1]!r}"
+                )
+            i += 2
+            continue
+        if token == "--deep":
+            kwargs["deep"] = True
+            i += 1
+            continue
+        field_name = GRAPH_VALIDATOR_INT_FLAGS.get(token)
+        if field_name is None:
+            raise RuntimeError(
+                f"Hugging Face sync does not understand graph validator flag {token!r}"
+            )
+        if i + 1 >= len(args):
+            raise RuntimeError(f"GRAPH_VALIDATE_ARGS has {token} without a value")
+        kwargs[field_name] = int(args[i + 1])
+        i += 2
+    return kwargs
 
 
 def _assert_repo_stats_current(repo: Path) -> None:

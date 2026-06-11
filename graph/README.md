@@ -115,6 +115,9 @@ python src/validate_graph_artifacts.py --deep \
   --expected-edges 2913960 \
   --expected-semantic-edges 1683193 \
   --expected-harness-nodes 207 \
+  --expected-skills-sh-nodes 89471 \
+  --expected-skills-sh-catalog-entries 89465 \
+  --expected-skills-sh-converted 89465 \
   --expected-skill-pages 91464 \
   --expected-agent-pages 467 \
   --expected-mcp-pages 10790 \

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -21,5 +22,6 @@ def test_docs_refresh_github_repo_stats_at_runtime() -> None:
     assert "__source" in script
     assert "stargazers_count" in script
     assert "forks_count" in script
-    assert "103" not in script
-    assert "12" not in script
+    assert not re.search(r"\bstargazers_count\s*\|\|\s*[1-9]\d*\b", script)
+    assert not re.search(r"\bforks_count\s*\|\|\s*[1-9]\d*\b", script)
+    assert not re.search(r"\b(?:stars|forks)\s*:\s*\d+\b", script)

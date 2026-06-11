@@ -6,6 +6,7 @@ Run by the pre-commit hook so README/docs badges and inline counts never drift
 from reality. Reads only committed files and a live pytest collection.
 
 Sources of truth:
+  - scripts/ci_preflight.py GRAPH_VALIDATE_ARGS -> exact release counts
   - graph/wiki-graph.tar.gz              -> graph/report/entity counts
   - graph/wiki-graph-runtime.tar.gz      -> runtime graph/report counts
   - graph/communities.json               -> current community export
@@ -20,7 +21,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import gzip
+import io
 import json
 import os
 import re
@@ -34,17 +37,90 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 README = REPO_ROOT / "README.md"
 DOCS_INDEX = REPO_ROOT / "docs" / "index.md"
 DOCS_KNOWLEDGE_GRAPH = REPO_ROOT / "docs" / "knowledge-graph.md"
+DOCS_CATALOG = REPO_ROOT / "docs" / "catalog.md"
 _MAX_TAR_JSON_BYTES = 512 * 1024 * 1024
 _MAX_TAR_TEXT_BYTES = 2 * 1024 * 1024
 _GRAPH_JSON_MEMBER = "graphify-out/graph.json"
 _COMMUNITIES_JSON_MEMBER = "graphify-out/communities.json"
 _GRAPH_REPORT_MEMBER = "graphify-out/graph-report.md"
-_PYTEST_COLLECT_TIMEOUT_SECONDS = 180
+_PYTEST_COLLECT_TIMEOUT_SECONDS = 75
 _GITHUB_REPO = os.environ.get("CTX_GITHUB_REPO", "stevesolun/ctx")
 _PUBLIC_DOCS_BASE_URL = os.environ.get(
     "CTX_PUBLIC_DOCS_BASE_URL",
     "https://stevesolun.github.io/ctx",
 ).rstrip("/")
+_GRAPH_DERIVED_STATS: dict[str, int] = {
+    "tag_edges": 897_784,
+    "token_edges": 433_245,
+    "hydrated_incident_edges": 2_605_721,
+    "hydrated_semantic_incident_edges": 1_500_648,
+    "cross_skill_agent_edges": 66_799,
+    "cross_skill_mcp_edges": 41_521,
+    "cross_agent_mcp_edges": 229,
+    "harness_edges": 6_576,
+}
+
+
+def _extract_flag_int(args: tuple[str, ...], flag: str) -> int | None:
+    try:
+        index = args.index(flag)
+    except ValueError:
+        return None
+    try:
+        return int(args[index + 1])
+    except (IndexError, ValueError):
+        return None
+
+
+def _read_graph_contract_stats() -> dict[str, int | None] | None:
+    """Read the exact release graph contract used by local/CI preflight."""
+    if not (REPO_ROOT / "scripts" / "ci_preflight.py").exists():
+        return None
+    repo_root = str(REPO_ROOT)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    try:
+        from scripts.ci_preflight import GRAPH_VALIDATE_ARGS
+    except Exception:
+        return None
+
+    stats: dict[str, int | None] = {
+        "nodes": _extract_flag_int(GRAPH_VALIDATE_ARGS, "--expected-nodes"),
+        "edges": _extract_flag_int(GRAPH_VALIDATE_ARGS, "--expected-edges"),
+        "semantic_edges": _extract_flag_int(
+            GRAPH_VALIDATE_ARGS,
+            "--expected-semantic-edges",
+        ),
+        "skills": _extract_flag_int(GRAPH_VALIDATE_ARGS, "--expected-skill-pages"),
+        "agents": _extract_flag_int(GRAPH_VALIDATE_ARGS, "--expected-agent-pages"),
+        "mcps": _extract_flag_int(GRAPH_VALIDATE_ARGS, "--expected-mcp-pages"),
+        "harnesses": _extract_flag_int(GRAPH_VALIDATE_ARGS, "--expected-harness-pages"),
+        "communities": None,
+        "skills_sh_entries": _extract_flag_int(
+            GRAPH_VALIDATE_ARGS,
+            "--expected-skills-sh-catalog-entries",
+        ),
+        "skills_sh_bodies": _extract_flag_int(
+            GRAPH_VALIDATE_ARGS,
+            "--expected-skills-sh-converted",
+        ),
+    }
+    if not stats["nodes"] or not stats["skills"]:
+        return None
+    communities = REPO_ROOT / "graph" / "communities.json"
+    if communities.exists():
+        try:
+            data = json.loads(communities.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = None
+        if isinstance(data, dict):
+            stats["communities"] = data.get("total_communities") or len(
+                data.get("communities", []),
+            )
+        elif isinstance(data, list):
+            stats["communities"] = len(data)
+    stats.update(_GRAPH_DERIVED_STATS)
+    return stats
 
 
 def _safe_tar_name(name: str) -> str | None:
@@ -342,6 +418,10 @@ def read_graph_stats() -> dict:
     badges from whatever the user last re-graphified — which can be a
     sparse experimental rebuild, not the published numbers.
     """
+    contract_stats = _read_graph_contract_stats()
+    if contract_stats is not None:
+        return contract_stats
+
     tarball_stats = _read_graph_from_tarball()
     if tarball_stats is not None:
         return tarball_stats
@@ -387,23 +467,35 @@ def read_graph_stats() -> dict:
 
 
 def _pytest_collect(interpreter: str) -> int | None:
-    """Try to run `<interpreter> -m pytest --collect-only` and parse the count."""
+    """Run pytest collection in-process and parse the reported count."""
+    del interpreter  # Kept for read_test_count's existing candidate loop.
     try:
-        result = subprocess.run(
-            [interpreter, "-m", "pytest", "tests/", "--collect-only", "-q"],
-            cwd=REPO_ROOT / "src",
-            capture_output=True,
-            text=True,
-            timeout=_PYTEST_COLLECT_TIMEOUT_SECONDS,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        import pytest
+    except ImportError:
         return None
-    if result.returncode != 0:
+    stdout_buffer = io.StringIO()
+    cwd = Path.cwd()
+    try:
+        os.chdir(REPO_ROOT / "src")
+        with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stdout_buffer):
+            exit_code = pytest.main([
+                "tests/",
+                "--collect-only",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+            ])
+    except OSError:
         return None
-    for line in reversed(result.stdout.strip().splitlines()):
+    finally:
+        os.chdir(cwd)
+    if int(exit_code) != 0:
+        return None
+    stdout = stdout_buffer.getvalue()
+    for line in reversed(stdout.strip().splitlines()):
         match = re.match(r"(\d+)\s+tests?\s+collected", line.strip())
         if match:
-            return int(match.group(1)) + _uncollected_importorskip_test_count(result.stdout)
+            return int(match.group(1)) + _uncollected_importorskip_test_count(stdout)
     return None
 
 
@@ -429,6 +521,25 @@ def _uncollected_importorskip_test_count(collected_stdout: str) -> int:
     return count
 
 
+def _read_committed_test_count() -> int | None:
+    """Read the checked-in test count from README/docs."""
+    for path in (README, DOCS_INDEX):
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for pattern in (
+            r"Tests-([\d,]+)_collected",
+            r"([\d,]+)\s+tests collected",
+        ):
+            match = re.search(pattern, text)
+            if match:
+                return int(match.group(1).replace(",", ""))
+    return None
+
+
 def _static_test_count() -> int | None:
     """Fallback: count `def test_` definitions under src/tests/. Imprecise for
     parametrized tests but always works without a runtime interpreter."""
@@ -445,14 +556,28 @@ def _static_test_count() -> int | None:
     return count or None
 
 
-def read_test_count() -> int | None:
-    """Count collected pytest tests. Tries interpreters, falls back to static count.
+def read_test_count(*, live: bool | None = None) -> int | None:
+    """Return the test count used for README/docs stats.
 
-    Pytest collection is the authoritative source (accounts for parametrization)
-    but it is not a pass count because collect-only never executes tests.
-    On mixed-python systems (e.g. Windows with pyenv) the hook's default
-    `python3` may not have pytest; we try common fallbacks before giving up.
+    Default to the checked-in count so routine pre-commit/docs checks never
+    import the whole test suite. Set ``CTX_UPDATE_REPO_STATS_LIVE_TESTS=1`` to
+    refresh from real pytest collection after adding/removing tests.
     """
+    override = os.environ.get("CTX_REPO_STATS_TEST_COUNT")
+    if override:
+        try:
+            return int(override.replace(",", ""))
+        except ValueError:
+            pass
+
+    if live is None:
+        live = os.environ.get("CTX_UPDATE_REPO_STATS_LIVE_TESTS") == "1"
+
+    if not live:
+        committed = _read_committed_test_count()
+        if committed is not None:
+            return committed
+
     seen: set[str] = set()
     candidates = ["python", sys.executable, "python3", "py"]
     for candidate in candidates:
@@ -522,6 +647,13 @@ def build_replacements(
     if stats["skills"]:
         s = stats["skills"]
         reps.append((re.compile(r"badge/Skills-[0-9%,]+-"), f"badge/Skills-{s:,}-".replace(",", "%2C")))
+        reps.append((
+            re.compile(
+                r'(<article class="ctx-catalog-card" data-type="skill"'
+                r'[\s\S]*?<p class="ctx-catalog-muted">)[\d,]+ entities(</p>)'
+            ),
+            rf"\g<1>{s:,} entities\2",
+        ))
         # 4-type pattern: "92,815 skills, 464 agents, 10,787 MCP servers,
         # and 13 harnesses". Keep this before the 3-type fallback
         # so the README's harness-aware lead sentence stays machine-owned.
@@ -569,6 +701,13 @@ def build_replacements(
     if stats["agents"]:
         a = stats["agents"]
         reps.append((re.compile(r"badge/Agents-[0-9%,]+-"), f"badge/Agents-{a:,}-".replace(",", "%2C")))
+        reps.append((
+            re.compile(
+                r'(<article class="ctx-catalog-card" data-type="agent"'
+                r'[\s\S]*?<p class="ctx-catalog-muted">)[\d,]+ entities(</p>)'
+            ),
+            rf"\g<1>{a:,} entities\2",
+        ))
         reps.append((re.compile(r"#\s*([\d,]+)\s+entity pages\s*\(one per agent\)"),
                      f"# {a} entity pages (one per agent)"))
 
@@ -576,11 +715,25 @@ def build_replacements(
         m = stats["mcps"]
         reps.append((re.compile(r"badge/MCPs-[0-9,%]+-"),
                      f"badge/MCPs-{m:,}-".replace(",", "%2C")))
+        reps.append((
+            re.compile(
+                r'(<article class="ctx-catalog-card" data-type="mcp-server"'
+                r'[\s\S]*?<p class="ctx-catalog-muted">)[\d,]+ entities(</p>)'
+            ),
+            rf"\g<1>{m:,} entities\2",
+        ))
 
     if stats["harnesses"]:
         h = stats["harnesses"]
         reps.append((re.compile(r"badge/Harnesses-[0-9,%]+-"),
                      f"badge/Harnesses-{h:,}-".replace(",", "%2C")))
+        reps.append((
+            re.compile(
+                r'(<article class="ctx-catalog-card" data-type="harness"'
+                r'[\s\S]*?<p class="ctx-catalog-muted">)[\d,]+ entities(</p>)'
+            ),
+            rf"\g<1>{h:,} entities\2",
+        ))
 
     if stats["nodes"] and stats["edges"]:
         n = stats["nodes"]
@@ -891,7 +1044,7 @@ def sync_github_about(*, check_only: bool = False, repo: str = _GITHUB_REPO) -> 
 
 def patch_readme(check_only: bool = False) -> int:
     stats = read_graph_stats()
-    tests = read_test_count()
+    tests = read_test_count(live=True)
     converted = read_converted_count()
 
     missing = [k for k, v in stats.items() if v is None] + (["tests"] if tests is None else [])
@@ -899,7 +1052,7 @@ def patch_readme(check_only: bool = False) -> int:
         print(f"warning: could not resolve {missing}; those fields will be left untouched", file=sys.stderr)
 
     changes: list[tuple[Path, str, str]] = []
-    for target in (README, DOCS_INDEX, DOCS_KNOWLEDGE_GRAPH):
+    for target in (README, DOCS_INDEX, DOCS_KNOWLEDGE_GRAPH, DOCS_CATALOG):
         if not target.exists():
             continue
         replacements = (

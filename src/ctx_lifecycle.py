@@ -38,7 +38,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from ctx.utils._fs_utils import atomic_write_text as _atomic_write
+from ctx.utils._fs_utils import (
+    reject_symlink_path,
+    safe_atomic_write_text as _atomic_write,
+)
 from skill_quality import (
     QualityScore,
     default_sidecar_dir,
@@ -181,6 +184,7 @@ def load_lifecycle_state(
     slug: str, *, sidecar_dir: Path | None = None
 ) -> LifecycleState | None:
     path = lifecycle_sidecar_path(slug, sidecar_dir=sidecar_dir)
+    reject_symlink_path(path)
     if not path.is_file():
         return None
     try:
@@ -379,10 +383,12 @@ def _resolve_entity_root(
     _ensure_safe_slug(slug)
     if subject_type == "skill":
         candidate = sources.skills_dir / slug
+        reject_symlink_path(candidate)
         if candidate.is_dir():
             return candidate
     else:
         candidate = sources.agents_dir / f"{slug}.md"
+        reject_symlink_path(candidate)
         if candidate.is_file():
             return candidate
     return None
@@ -390,11 +396,13 @@ def _resolve_entity_root(
 
 def _safe_mv(src: Path, dst: Path) -> None:
     """Move ``src`` to ``dst``. Refuses to overwrite an existing target."""
+    reject_symlink_path(src)
     if not src.exists():
         raise FileNotFoundError(f"lifecycle mv: source missing: {src}")
-    if dst.exists():
+    if dst.exists() or dst.is_symlink():
         raise FileExistsError(f"lifecycle mv: target exists: {dst}")
     dst.parent.mkdir(parents=True, exist_ok=True)
+    reject_symlink_path(dst)
     shutil.move(str(src), str(dst))
 
 
@@ -454,6 +462,7 @@ def apply_proposal(
             src = demoted_root / proposal.slug
         else:
             src = demoted_root / f"{proposal.slug}.md"
+        reject_symlink_path(src)
         if not src.exists():
             _logger.warning(
                 "archive: source missing under %s; advancing state only", src
@@ -476,6 +485,7 @@ def apply_proposal(
             src = archive_root / proposal.slug
         else:
             src = archive_root / f"{proposal.slug}.md"
+        reject_symlink_path(src)
         if src.exists():
             if src.is_dir():
                 shutil.rmtree(src)

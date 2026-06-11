@@ -34,6 +34,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -501,6 +502,7 @@ class TestTopKPairsSubsetWithOptionalIndex:
         vecs = _l2_normalize(np.array([[1.0, 0.0], [0.99, 0.01]], dtype="float32"))
         ids = ["a", "b"]
         hashes = ["ha", "hb"]
+        from ctx.core.graph import vector_index
 
         first = _topk_pairs_subset_with_optional_index(
             vecs,
@@ -515,19 +517,24 @@ class TestTopKPairsSubsetWithOptionalIndex:
             cache_dir=tmp_path,
             persist_index=True,
         )
-        second = _topk_pairs_subset_with_optional_index(
-            vecs,
-            ids,
-            hashes,
-            [1],
-            top_k=1,
-            min_cosine=0.0,
-            vector_index_kind="numpy-flat",
-            model_id="model-a",
-            ann_enabled_above_nodes=1,
-            cache_dir=tmp_path,
-            persist_index=True,
-        )
+        with patch.object(
+            vector_index,
+            "build_vector_index",
+            side_effect=AssertionError("persisted vector index was rebuilt"),
+        ):
+            second = _topk_pairs_subset_with_optional_index(
+                vecs,
+                ids,
+                hashes,
+                [1],
+                top_k=1,
+                min_cosine=0.0,
+                vector_index_kind="numpy-flat",
+                model_id="model-a",
+                ann_enabled_above_nodes=1,
+                cache_dir=tmp_path,
+                persist_index=True,
+            )
 
         assert (tmp_path / "vector-index" / "vector-index.meta.json").is_file()
         assert first == {("a", "b"): pytest.approx(0.9999, abs=1e-4)}
@@ -604,7 +611,7 @@ class TestReusePriorPairs:
         # Defensive: empty entry [] is skipped; None should not crash.
         # Note: the code checks `if not tk: continue` so [] and None are skipped
         pairs = _reuse_prior_pairs(prior, {"a", "b"}, min_cosine=0.5)
-        assert ("a", "b") in pairs
+        assert pairs == {("a", "b"): pytest.approx(0.7)}
 
     def test_missing_score_defaults_zero(self) -> None:
         prior = self._prior({
@@ -1167,7 +1174,32 @@ class TestComputeSemanticEdgesWithFakeEmbedder:
         # First run seeds the cache
         self._run(nodes, tmp_path=tmp_path, embed_vecs=vecs, dim=2, min_cosine=0.5)
         # Second run — cache file should exist
+        fake_embedder = MagicMock()
+        fake_embedder.name = "fake-model"
+        fake_eb_module = MagicMock()
+        fake_eb_module.get_embedder.return_value = fake_embedder
+
+        with patch.dict("sys.modules", {"embedding_backend": fake_eb_module}):
+            import importlib
+            from ctx.core.graph import semantic_edges as se_mod
+            importlib.reload(se_mod)
+
+            with patch.object(
+                se_mod,
+                "_embed_missing",
+                side_effect=AssertionError("cached embeddings were recomputed"),
+            ):
+                pairs = se_mod.compute_semantic_edges(
+                    nodes,
+                    top_k=5,
+                    min_cosine=0.5,
+                    batch_size=32,
+                    cache_dir=tmp_path,
+                    incremental=False,
+                )
+
         assert (tmp_path / "embeddings.npz").exists()
+        assert pairs == {("a", "b"): pytest.approx(1.0)}
 
     def test_topk_state_saved_after_run(self, tmp_path: Path) -> None:
         nodes = [SemanticNode("a", "ta"), SemanticNode("b", "tb")]
@@ -1236,6 +1268,7 @@ class TestComputeSemanticEdgesIncrementalPath:
         top_k: int = 5,
         min_cosine: float = 0.0,
         affected_out: set[str] | None = None,
+        topk_subset_side_effect: Any | None = None,
     ) -> dict[tuple[str, str], float]:
         _save_topk_state(tmp_path, prior_state)
         embed_vecs.shape[1]
@@ -1257,7 +1290,23 @@ class TestComputeSemanticEdgesIncrementalPath:
             from ctx.core.graph import semantic_edges as se_mod
             importlib.reload(se_mod)
 
-            with patch.object(se_mod, "_embed_missing", side_effect=_fake_embed_missing):
+            topk_patch = (
+                patch.object(
+                    se_mod,
+                    "_topk_pairs_subset_with_optional_index",
+                    side_effect=topk_subset_side_effect,
+                )
+                if topk_subset_side_effect is not None
+                else patch.object(
+                    se_mod,
+                    "_topk_pairs_subset_with_optional_index",
+                    wraps=se_mod._topk_pairs_subset_with_optional_index,
+                )
+            )
+            with (
+                patch.object(se_mod, "_embed_missing", side_effect=_fake_embed_missing),
+                topk_patch,
+            ):
                 return se_mod.compute_semantic_edges(
                     nodes,
                     top_k=top_k,
@@ -1287,9 +1336,33 @@ class TestComputeSemanticEdgesIncrementalPath:
             },
         )
         vecs = np.array([[1.0, 0.0], [1.0, 0.0]], dtype="float32")
-        pairs = self._run_with_prior_state(nodes, prior, tmp_path=tmp_path, embed_vecs=vecs)
+        affected: set[str] = set()
+        recompute_indices_seen: list[list[int]] = []
+
+        def _no_recompute(
+            vecs,
+            node_ids,
+            content_hashes,
+            subset_indices,
+            **kwargs,
+        ):
+            recompute_indices_seen.append(list(subset_indices))
+            return {}
+
+        pairs = self._run_with_prior_state(
+            nodes,
+            prior,
+            tmp_path=tmp_path,
+            embed_vecs=vecs,
+            affected_out=affected,
+            topk_subset_side_effect=_no_recompute,
+        )
         # Pair should be present (reused from prior OR recomputed — either is valid)
         assert ("a", "b") in pairs
+
+        assert recompute_indices_seen == [[]]
+        assert affected == set()
+        assert pairs == {("a", "b"): pytest.approx(0.75)}
 
     def test_incremental_reports_changed_nodes_to_patch_caller(
         self,

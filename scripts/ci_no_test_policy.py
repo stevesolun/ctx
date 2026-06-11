@@ -18,6 +18,7 @@ RELEASE_METADATA_FILES = {
 RELEASE_GENERATED_STATS_FILES = {
     "README.md",
     "docs/index.md",
+    "docs/knowledge-graph.md",
 }
 VERSION_LINE_RE = re.compile(r'version = "\d+\.\d+\.\d+(?:[-+._a-zA-Z0-9]*)?"')
 INIT_VERSION_LINE_RE = re.compile(
@@ -27,6 +28,21 @@ TEST_COUNT_STATS_RE = re.compile(
     r".*(Tests-\d+_collected|[\d,]+ tests collected).*"
 )
 RELEASE_DOCS_LINE_RE = re.compile(r"\*\*v\d+\.\d+\.\d+(?:[-+._a-zA-Z0-9]*)?\*\*.*")
+KNOWLEDGE_GRAPH_STATS_LINE_RE = re.compile(
+    r"(?:"
+    r"\| (?:Total nodes|Curated core nodes|Body-backed skill nodes|Total edges|"
+    r"Hydrated skill incident edges|Hydrated skill semantic incident edges|"
+    r"Edge sources \(overlap-deduped\)|Cross-type edges \(skill <-> agent\)|"
+    r"Cross-type edges \(skill <-> MCP\)|Cross-type edges \(agent <-> MCP\)|"
+    r"Harness edges|Shipped skill index) \| .+ \|"
+    r"|is \*\*[\d,]+ nodes\*\* \([\d,]+ curated skills \+ [\d,]+ agents "
+    r"\+ [\d,]+ MCP servers \+ [\d,]+ harnesses\).*"
+    r"|tarball also carries \*\*[\d,]+ skill pages\*\*; \*\*[\d,]+\*\*.*"
+    r"|# [\d,]+ nodes, [\d,]+ edges"
+    r"|The shipped artifact currently records \*\*[\d,]+ nodes\*\*, "
+    r"\*\*[\d,]+ edges\*\*,.*"
+    r")"
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +91,9 @@ def is_release_metadata_only(
                 text = line[1:].strip()
                 if not TEST_COUNT_STATS_RE.fullmatch(text) and not (
                     path == "docs/index.md" and RELEASE_DOCS_LINE_RE.fullmatch(text)
+                ) and not (
+                    path == "docs/knowledge-graph.md"
+                    and KNOWLEDGE_GRAPH_STATS_LINE_RE.fullmatch(text)
                 ):
                     return False
             continue

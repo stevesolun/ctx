@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
@@ -61,6 +63,50 @@ def _patch_side_effects(monkeypatch: Any) -> MagicMock:
     monkeypatch.setattr(agent_add, "append_log", MagicMock())
     monkeypatch.setattr(agent_add, "ensure_wiki", MagicMock())
     return check
+
+
+def _symlink_to(target: Path, link: Path, *, target_is_directory: bool) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+
+
+def test_add_agent_rejects_symlinked_source_before_intake(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    wiki, agents_dir, source = _setup_paths(tmp_path)
+    target = tmp_path / "real-agent.md"
+    target.write_text(_agent_text(), encoding="utf-8")
+    _symlink_to(target, source, target_is_directory=False)
+    check = _patch_side_effects(monkeypatch)
+
+    with pytest.raises(ValueError, match="symlinked path"):
+        agent_add.add_agent(
+            source_path=source,
+            name="reviewer-agent",
+            wiki_path=wiki,
+            agents_dir=agents_dir,
+        )
+
+    check.assert_not_called()
+    assert not (agents_dir / "reviewer-agent.md").exists()
+
+
+def test_install_agent_rejects_symlinked_destination(tmp_path: Path) -> None:
+    source = tmp_path / "agent.md"
+    outside = tmp_path / "outside.md"
+    agents_dir = tmp_path / "agents"
+    source.write_text("# agent\n", encoding="utf-8")
+    outside.write_text("outside\n", encoding="utf-8")
+    agents_dir.mkdir()
+    _symlink_to(outside, agents_dir / "agent.md", target_is_directory=False)
+
+    with pytest.raises(ValueError, match="symlinked destination file"):
+        agent_add.install_agent(source, agents_dir, "agent")
+
+    assert outside.read_text(encoding="utf-8") == "outside\n"
 
 
 def test_existing_agent_review_skips_without_mutating_files(

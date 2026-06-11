@@ -7,6 +7,7 @@ script covers initialize + tools/list + tools/call + failure modes.
 
 Env vars (all optional):
   FAKE_MCP_FAIL_INIT=1          - respond with an error to initialize
+  FAKE_MCP_IGNORE_INIT=1        - accept initialize but never answer
   FAKE_MCP_CRASH_ON_TOOL=1      - crash (exit 1) on any tools/call
   FAKE_MCP_TOOL_ERROR=1         - return isError=True on any tools/call
   FAKE_MCP_IGNORE_TOOL=1        - accept tools/call but never answer
@@ -14,6 +15,12 @@ Env vars (all optional):
   FAKE_MCP_STDERR_LINE=<text>   - write this exact line to stderr on startup
   FAKE_MCP_EMIT_NOTIFICATION=1  - emit a progress notification before each
                                   tools/call response
+  FAKE_MCP_EMIT_STALE_RESPONSE=1
+                                - emit a wrong-id response before each
+                                  tools/call response
+  FAKE_MCP_ONLY_STALE_RESPONSE=1
+                                - emit a wrong-id response and never emit
+                                  the matching tools/call response
   FAKE_MCP_EXTRA_TOOL=<name>    - add a second tool with this name (for
                                   testing multi-tool list_tools)
 
@@ -138,6 +145,8 @@ def main() -> None:
         params = req.get("params") or {}
 
         if method == "initialize":
+            if os.environ.get("FAKE_MCP_IGNORE_INIT") == "1":
+                continue
             if os.environ.get("FAKE_MCP_FAIL_INIT") == "1":
                 _emit({
                     "jsonrpc": "2.0",
@@ -182,6 +191,29 @@ def main() -> None:
                     "method": "notifications/progress",
                     "params": {"progress": 0.5},
                 })
+            if os.environ.get("FAKE_MCP_EMIT_STALE_RESPONSE") == "1":
+                _emit({
+                    "jsonrpc": "2.0",
+                    "id": "stale-response-id",
+                    "result": {
+                        "content": [
+                            {"type": "text", "text": "stale response"}
+                        ],
+                        "isError": False,
+                    },
+                })
+            if os.environ.get("FAKE_MCP_ONLY_STALE_RESPONSE") == "1":
+                _emit({
+                    "jsonrpc": "2.0",
+                    "id": "stale-response-id",
+                    "result": {
+                        "content": [
+                            {"type": "text", "text": "stale response"}
+                        ],
+                        "isError": False,
+                    },
+                })
+                continue
 
             if os.environ.get("FAKE_MCP_TOOL_ERROR") == "1":
                 _emit({

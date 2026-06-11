@@ -104,6 +104,7 @@ def add_agent(
     Returns a result dict with keys: name, installed, is_new_page.
     """
     validate_skill_name(name)
+    reject_symlink_path(source_path)
 
     file_size = source_path.stat().st_size
     if file_size > _MAX_AGENT_BYTES:

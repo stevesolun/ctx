@@ -21,17 +21,20 @@ STATS_TIMEOUT="${CTX_REPO_STATS_TIMEOUT:-240s}"
 STAGED_CHANGES=$(git diff --cached --name-only)
 log() { echo "[pre-commit] $*" >&2; }
 
-if echo "$STAGED_CHANGES" | grep -qE '^(README\.md|docs/index\.md|graph/(wiki-graph\.tar\.gz|communities\.json|skills-sh-catalog\.json\.gz)|src/update_repo_stats\.py)$' ; then
+if echo "$STAGED_CHANGES" | grep -qE '^(README\.md|docs/(index|knowledge-graph|catalog)\.md|graph/(wiki-graph\.tar\.gz|communities\.json|skills-sh-catalog\.json\.gz)|src/update_repo_stats\.py|src/tests/.*\.py)$' ; then
   if [[ -f "$UPDATER" ]]; then
     STATS_CMD=("$PYTHON" "$UPDATER")
+    if echo "$STAGED_CHANGES" | grep -qE '^src/tests/.*\.py$' ; then
+      STATS_CMD=(env CTX_UPDATE_REPO_STATS_LIVE_TESTS=1 "${STATS_CMD[@]}")
+    fi
     if command -v timeout >/dev/null 2>&1; then
       STATS_CMD=(timeout "$STATS_TIMEOUT" "${STATS_CMD[@]}")
     fi
     if ! "${STATS_CMD[@]}" 2> >(sed 's/^/[pre-commit stats] /' >&2); then
       log "stats updater failed or timed out; continuing without README refresh"
-    elif ! git diff --quiet -- README.md docs/index.md; then
-      git add README.md docs/index.md
-      log "README.md and docs/index.md refreshed and re-staged"
+    elif ! git diff --quiet -- README.md docs/index.md docs/knowledge-graph.md docs/catalog.md; then
+      git add README.md docs/index.md docs/knowledge-graph.md docs/catalog.md
+      log "README.md, docs/index.md, docs/knowledge-graph.md, and docs/catalog.md refreshed and re-staged"
     fi
   fi
 fi

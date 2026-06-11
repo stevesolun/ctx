@@ -120,7 +120,13 @@ class TestLoadGraph:
         # The file may parse as valid JSON if utf-8 happens to decode it,
         # OR it triggers UnicodeDecodeError — either way we get an empty
         # or a valid (zero-node) graph. Just assert no crash.
-        assert isinstance(G, nx.Graph)
+        assert G.number_of_nodes() == 0
+
+    def test_null_json_returns_empty_graph(self, tmp_path: Path) -> None:
+        p = tmp_path / "graph.json"
+        p.write_text("null", encoding="utf-8")
+        G = resolve_graph.load_graph(p)
+        assert G.number_of_nodes() == 0
 
     def test_valid_edges_key_round_trips(self, tmp_path: Path) -> None:
         """Networkx >= 3.0 writes 'edges' key — load_graph must handle it."""

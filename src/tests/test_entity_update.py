@@ -11,10 +11,17 @@ def _page(
     description: str = "Useful entity.",
     tags: list[str] | None = None,
     setup_commands: list[str] | None = None,
+    quality_score: float | None = None,
+    quality_grade: str | None = None,
     body: str = "Body text.",
 ) -> str:
     tags = tags or ["python", "api"]
     setup_commands = setup_commands or ["pytest"]
+    quality_lines: list[str] = []
+    if quality_score is not None:
+        quality_lines.append(f"quality_score: {quality_score:g}")
+    if quality_grade is not None:
+        quality_lines.append(f"quality_grade: {quality_grade}")
     lines = [
         "---",
         f"title: {title}",
@@ -23,6 +30,7 @@ def _page(
         *[f"  - {tag}" for tag in tags],
         "setup_commands:",
         *[f"  - {cmd}" for cmd in setup_commands],
+        *quality_lines,
         "---",
         "",
         body,
@@ -97,6 +105,65 @@ def test_review_detects_same_line_body_changes() -> None:
     assert review.existing_body_lines == review.proposed_body_lines
     assert review.recommendation == "apply-update"
     assert "body content changes without changing length" in review.benefits
+
+
+def test_review_flags_quality_downgrade() -> None:
+    review = build_update_review(
+        entity_type="skill",
+        slug="risky-quality",
+        existing_text=_page(quality_score=0.95, quality_grade="A"),
+        proposed_text=_page(quality_score=0.2, quality_grade="D"),
+    )
+
+    assert review.recommendation == "review-before-update"
+    assert "quality_score" in review.changed_fields
+    assert "quality_grade" in review.changed_fields
+    assert "quality score drops from 0.95 to 0.2" in review.risks
+    assert "quality grade drops from A to D" in review.risks
+
+
+def test_review_flags_quality_metadata_removal() -> None:
+    review = build_update_review(
+        entity_type="skill",
+        slug="quality-removed",
+        existing_text=_page(quality_score=0.95, quality_grade="A"),
+        proposed_text=_page(),
+    )
+
+    assert review.recommendation == "review-before-update"
+    assert "quality_score" in review.changed_fields
+    assert "quality_grade" in review.changed_fields
+    assert "removes quality score 0.95" in review.risks
+    assert "removes quality grade A" in review.risks
+
+
+def test_review_flags_status_removal() -> None:
+    existing = _page().replace("description: Useful entity.", "status: installed")
+    proposed = _page()
+
+    review = build_update_review(
+        entity_type="mcp-server",
+        slug="status-removed",
+        existing_text=existing,
+        proposed_text=proposed,
+    )
+
+    assert review.recommendation == "review-before-update"
+    assert "status" in review.changed_fields
+    assert "removes status installed" in review.risks
+
+
+def test_review_treats_quality_improvement_as_benefit() -> None:
+    review = build_update_review(
+        entity_type="agent",
+        slug="better-quality",
+        existing_text=_page(quality_score=0.4, quality_grade="C"),
+        proposed_text=_page(quality_score=0.8, quality_grade="A"),
+    )
+
+    assert review.recommendation == "apply-update"
+    assert "quality score improves from 0.4 to 0.8" in review.benefits
+    assert "quality grade improves from C to A" in review.benefits
 
 
 def test_render_update_review_is_human_readable() -> None:

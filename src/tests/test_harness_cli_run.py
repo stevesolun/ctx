@@ -1,8 +1,8 @@
 """
 test_harness_cli_run.py -- `ctx run` / `ctx resume` / `ctx sessions` CLI.
 
-Every test mocks LiteLLM and (when needed) the MCP router so no real
-subprocess or network happens. The goal is pinning:
+Tests mock LiteLLM and use fake or controlled MCP routers so no real provider
+network happens. The goal is pinning:
 
   * argv parsing for all 3 subcommands
   * provider key-env auto-detection
@@ -21,6 +21,7 @@ from __future__ import annotations
 import io
 import json
 import sys
+import time
 import types
 from pathlib import Path
 from typing import Any
@@ -37,7 +38,7 @@ from ctx.cli.run import (
     _split_mcp_invocation,
     main,
 )
-from ctx.adapters.generic.providers import ToolCall
+from ctx.adapters.generic.providers import ToolCall, Usage
 
 
 # ── Fixture: fake litellm so --provider ollama (no key) works ───────────────
@@ -480,6 +481,106 @@ class TestRunCommand:
         assert exit_code == 2
         assert payload["stop_reason"] == "tool_denied"
         assert "matched deny pattern" in payload["detail"]
+
+    @pytest.mark.parametrize(
+        "stop_reason,final_message,detail",
+        [
+            ("length", "partial", "provider truncated response"),
+            ("empty_response", "", "empty content with no tool calls"),
+            ("provider_other", "partial", "unexpected finish_reason='other'"),
+            ("content_filter", "", "provider reported content_filter finish"),
+        ],
+    )
+    def test_abnormal_stop_reasons_exit_nonzero_in_json_mode(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+        stop_reason: str,
+        final_message: str,
+        detail: str,
+    ) -> None:
+        def fake_run_loop(**_kwargs: Any) -> types.SimpleNamespace:
+            return types.SimpleNamespace(
+                stop_reason=stop_reason,
+                final_message=final_message,
+                iterations=1,
+                usage=Usage(input_tokens=5, output_tokens=1),
+                messages=(),
+                detail=detail,
+            )
+
+        monkeypatch.setattr(run_cli, "run_loop", fake_run_loop)
+
+        exit_code = main(
+            [
+                "run",
+                "--model", "ollama/x",
+                "--task", "abnormal stop",
+                "--sessions-dir", str(tmp_path),
+                "--no-ctx-tools",
+                "--json",
+                "--quiet",
+            ]
+        )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert exit_code == 2
+        assert payload["stop_reason"] == stop_reason
+        assert payload["final_message"] == final_message
+        assert payload["detail"] == detail
+        assert payload["usage"] == {
+            "input_tokens": 5,
+            "output_tokens": 1,
+            "cost_usd": None,
+        }
+
+    def test_provider_timeout_reaches_real_run_loop(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            fake_litellm._calls.append(kwargs)
+            time.sleep(0.2)
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "late", "tool_calls": None},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            }
+
+        fake_litellm.completion = completion
+        started = time.perf_counter()
+        exit_code = main(
+            [
+                "run",
+                "--model", "ollama/x",
+                "--task", "timeout",
+                "--sessions-dir", str(tmp_path),
+                "--provider-timeout", "0.01",
+                "--no-ctx-tools",
+                "--json",
+                "--quiet",
+            ]
+        )
+        elapsed = time.perf_counter() - started
+
+        payload = json.loads(capsys.readouterr().out)
+        assert exit_code == 2
+        assert elapsed < 1.0
+        assert payload["stop_reason"] == "provider_timeout"
+        assert payload["detail"] == "provider call timed out after 0.010s"
+        assert payload["usage"] == {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": None,
+        }
 
     def test_json_output(
         self, fake_litellm: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str],
@@ -1113,18 +1214,25 @@ class TestResumeCommand:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         restored: list[Any] = []
+        calls: list[str] = []
 
         class FakeRouter:
+            started = False
+
             def __init__(self, configs: list[Any]) -> None:
                 restored.extend(configs)
 
             def start(self) -> None:
-                pass
+                calls.append("start")
+                self.started = True
 
             def stop(self) -> None:
-                pass
+                calls.append("stop")
+                self.started = False
 
             def list_tools(self) -> list[Any]:
+                assert self.started
+                calls.append("list_tools")
                 return []
 
             def call(self, name: str, arguments: dict[str, Any]) -> str:
@@ -1146,6 +1254,7 @@ class TestResumeCommand:
         assert restored[0].command == "definitely-not-a-real-mcp-command"
         assert restored[0].credential_env == ("DANGER_TOKEN",)
         assert "restoring MCP server danger" in captured.err
+        assert calls == ["start", "list_tools", "stop"]
 
     def test_resume_without_model_in_session_requires_flag(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str],

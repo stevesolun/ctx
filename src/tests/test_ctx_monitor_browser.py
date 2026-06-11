@@ -167,6 +167,108 @@ def test_graph_page_uses_builtin_svg_renderer(
         harness.close()
 
 
+def test_docs_page_search_jumps_to_cross_tab_result(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    page: Any,
+) -> None:
+    del fake_claude
+    entries = [
+        {
+            "title": "Install Guide",
+            "path": "docs/install.md",
+            "summary": "Install ctx locally.",
+            "body": "# Install Guide\n\n## Setup\n\nInstall ctx locally.\n",
+        },
+        {
+            "title": "Graph Guide",
+            "path": "graph/README.md",
+            "summary": "Runtime graph reference.",
+            "body": "# Graph Guide\n\n## Runtime Graph\n\nSearch the runtime graph.\n",
+        },
+    ]
+    monkeypatch.setattr(cm, "_docs_index_entries", lambda: entries)
+    monkeypatch.setattr(
+        cm,
+        "_docs_tabs",
+        lambda _entries: [
+            {"label": "Home", "slug": "home", "pages": [entries[0]]},
+            {"label": "Repo", "slug": "repo", "pages": [entries[1]]},
+        ],
+    )
+
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        page.goto(f"{harness.base_url}/docs")
+        page.wait_for_selector("#docs-search", timeout=5000)
+        assert page.locator(".docs-tab-button.active").inner_text() == "Home"
+
+        page.fill("#docs-search", "runtime graph")
+        page.wait_for_selector(".docs-search-result", timeout=5000)
+        assert "Graph Guide" in page.locator(".docs-search-result").first.inner_text()
+        page.locator(".docs-search-result").first.click()
+
+        _wait_for_browser_state(
+            page,
+            "() => document.querySelector('.docs-tab-button.active')?.dataset.docTab === 'repo'",
+            timeout=5.0,
+        )
+        assert "runtime-graph" in page.evaluate("() => location.hash")
+        assert page.locator("[data-doc-panel='repo']").evaluate("node => !node.hidden")
+        assert not page.locator("[data-doc-panel='home']").evaluate("node => !node.hidden")
+    finally:
+        harness.close()
+
+
+def test_wiki_page_autocomplete_and_type_filters_update_visible_tiles(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    page: Any,
+) -> None:
+    _write_wiki_entity(
+        fake_claude,
+        "skill",
+        "python-patterns",
+        "---\ntype: skill\ndescription: Python patterns\ntags: [python]\n---\n# body\n",
+    )
+    _write_wiki_entity(
+        fake_claude,
+        "agent",
+        "code-reviewer",
+        "---\ntype: agent\ndescription: Review code\ntags: [review]\n---\n# body\n",
+    )
+
+    harness = _start_monitor(monkeypatch, fake_load=False)
+    try:
+        page.goto(f"{harness.base_url}/wiki")
+        page.wait_for_selector("#wiki-search", timeout=5000)
+        suggestions = page.locator("#wiki-entity-suggestions option")
+        assert suggestions.count() == 2
+        suggestion_values = suggestions.evaluate_all(
+            "options => options.map(option => option.getAttribute('value'))",
+        )
+        assert "code-reviewer" in suggestion_values
+
+        page.fill("#wiki-search", "review")
+        _wait_for_browser_state(
+            page,
+            "() => document.getElementById('wiki-match-count').textContent === '1 of 2 match'",
+            timeout=5.0,
+        )
+        assert page.locator(".wiki-card:visible").count() == 1
+        assert "code-reviewer" in page.locator(".wiki-card:visible").inner_text()
+
+        page.locator(".wiki-type-filter[value='agent']").uncheck()
+        _wait_for_browser_state(
+            page,
+            "() => document.getElementById('wiki-match-count').textContent === '0 of 2 match'",
+            timeout=5.0,
+        )
+        assert page.locator(".wiki-card:visible").count() == 0
+    finally:
+        harness.close()
+
+
 def test_events_page_shows_backlog_and_appends_live_events(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,

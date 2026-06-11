@@ -119,11 +119,11 @@ def _validate_env_name(name: str) -> None:
 
 def _redact_sensitive_text(text: str) -> str:
     """Remove likely credential values from diagnostics before retention."""
+    text = _BEARER_RE.sub("Bearer [REDACTED]", text)
     text = _SENSITIVE_ASSIGNMENT_RE.sub(
         lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]",
         text,
     )
-    text = _BEARER_RE.sub("Bearer [REDACTED]", text)
     return _TOKEN_VALUE_RE.sub("[REDACTED]", text)
 
 

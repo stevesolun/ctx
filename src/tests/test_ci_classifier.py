@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 from scripts.ci_classifier import classify_paths, main
 from scripts.ci_no_test_policy import evaluate_policy, is_release_metadata_only
 from scripts.ci_required import REQUIRED_JOBS, failed_required_jobs
+
+
+def _workflow_paths() -> tuple[Path, ...]:
+    return tuple(sorted(Path(".github/workflows").glob("*.yml")))
 
 
 def _required_needs(
@@ -153,12 +158,7 @@ def test_no_test_policy_covers_ci_package_contract_files() -> None:
 
 
 def test_no_test_policy_treats_all_workflows_as_contract_files() -> None:
-    for workflow in (
-        ".github/workflows/test.yml",
-        ".github/workflows/publish.yml",
-        ".github/workflows/docs.yml",
-        ".github/workflows/clean-host-contract.yml",
-    ):
+    for workflow in (path.as_posix() for path in _workflow_paths()):
         result = evaluate_policy([workflow], (), {workflow: "+name: changed\n"})
 
         assert result.passed is False
@@ -166,10 +166,7 @@ def test_no_test_policy_treats_all_workflows_as_contract_files() -> None:
 
 
 def test_ci_workflows_default_to_read_only_token_permissions() -> None:
-    for workflow_path in (
-        Path(".github/workflows/test.yml"),
-        Path(".github/workflows/clean-host-contract.yml"),
-    ):
+    for workflow_path in _workflow_paths():
         workflow = workflow_path.read_text(encoding="utf-8")
 
         assert "\npermissions:\n  contents: read\n" in workflow
@@ -229,18 +226,26 @@ def test_publish_workflow_validates_and_uploads_graph_assets() -> None:
 
 
 def test_changelog_defines_current_release_link() -> None:
+    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+    version_match = re.search(r'^version = "([^"]+)"', pyproject, re.MULTILINE)
+    assert version_match is not None
+    version = version_match.group(1)
     changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert "## [1.0.0] - 2026-05-10" in changelog
-    assert "[1.0.0]: https://github.com/stevesolun/ctx/releases/tag/v1.0.0" in changelog
+    assert f"## [{version}]" in changelog
+    assert f"[{version}]: https://github.com/stevesolun/ctx/releases/tag/v{version}" in changelog
 
 
 def test_pre_commit_refreshes_all_repo_stats_outputs() -> None:
     hook = Path(".githooks/pre-commit").read_text(encoding="utf-8")
 
     assert "skills-sh-catalog\\.json\\.gz" in hook
-    assert "git add README.md docs/index.md" in hook
-    assert "README.md and docs/index.md refreshed and re-staged" in hook
+    assert "docs/(index|knowledge-graph|catalog)\\.md" in hook
+    assert "git add README.md docs/index.md docs/knowledge-graph.md docs/catalog.md" in hook
+    assert (
+        "README.md, docs/index.md, docs/knowledge-graph.md, and docs/catalog.md "
+        "refreshed"
+    ) in hook
     assert "CTX_REPO_STATS_TIMEOUT:-240s" in hook
     assert 'timeout "$STATS_TIMEOUT"' in hook
 
@@ -264,6 +269,7 @@ def test_no_test_policy_exempts_release_metadata_with_generated_stats() -> None:
         "CHANGELOG.md",
         "README.md",
         "docs/index.md",
+        "docs/knowledge-graph.md",
         "pyproject.toml",
         "src/ctx/__init__.py",
     ]
@@ -278,6 +284,16 @@ def test_no_test_policy_exempts_release_metadata_with_generated_stats() -> None:
         "docs/index.md": (
             "-    3,693 tests collected. Ships console scripts.\n"
             "+    3,696 tests collected. Ships console scripts.\n"
+        ),
+        "docs/knowledge-graph.md": (
+            "-| Total nodes | **102,927** |\n"
+            "+| Total nodes | **102,928** |\n"
+            "-The shipped artifact currently records **102,927 nodes**, "
+            "**2,913,959 edges**, **52 Louvain communities**, "
+            "**1,683,192 semantic edges**, **897,784 tag edges**,\n"
+            "+The shipped artifact currently records **102,928 nodes**, "
+            "**2,913,960 edges**, **52 Louvain communities**, "
+            "**1,683,193 semantic edges**, **897,784 tag edges**,\n"
         ),
         "pyproject.toml": '-version = "0.7.16"\n+version = "0.7.17"\n',
         "src/ctx/__init__.py": '-__version__ = "0.7.16"\n+__version__ = "0.7.17"\n',

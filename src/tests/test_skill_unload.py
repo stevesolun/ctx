@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import importlib
 import json
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -125,6 +127,73 @@ def test_atomic_write_preserves_original_on_caller_crash(fake_home, monkeypatch)
 
     # Original must survive.
     assert page.read_text(encoding="utf-8") == original
+
+
+def test_unload_from_session_writes_manifest_event_and_audit(
+    fake_home,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unload, home = fake_home
+    audit_calls: list[tuple[str, str, dict[str, object]]] = []
+    fake_audit = types.SimpleNamespace(
+        log_skill_event=lambda event, slug, **kwargs: audit_calls.append(
+            (event, slug, kwargs)
+        )
+    )
+    monkeypatch.setitem(sys.modules, "ctx_audit_log", fake_audit)
+    monkeypatch.setenv("CTX_SESSION_ID", "session-123")
+    manifest_path = home / ".claude" / "skill-manifest.json"
+    manifest_path.write_text(
+        json.dumps({
+            "load": [{
+                "skill": "real-skill",
+                "entity_type": "skill",
+                "source": "test",
+            }, {
+                "skill": "kept-skill",
+                "entity_type": "skill",
+                "source": "test",
+            }],
+            "unload": [],
+            "warnings": [],
+        }),
+        encoding="utf-8",
+    )
+
+    removed = unload.unload_from_session(["real-skill"], entity_type="skill")
+
+    assert removed == ["real-skill"]
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["load"] == [{
+        "skill": "kept-skill",
+        "entity_type": "skill",
+        "source": "test",
+    }]
+    assert manifest["unload"] == [{
+        "skill": "real-skill",
+        "entity_type": "skill",
+        "source": "test",
+    }]
+    events = [
+        json.loads(line)
+        for line in (home / ".claude" / "skill-events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert len(events) == 1
+    assert events[0]["event"] == "unload"
+    assert events[0]["skill"] == "real-skill"
+    assert events[0]["session_id"] == "session-123"
+    assert events[0]["meta"] == {"source": "skill_unload"}
+    assert audit_calls == [(
+        "skill.unloaded",
+        "real-skill",
+        {
+            "actor": "cli",
+            "session_id": "session-123",
+            "meta": {"via": "skill_unload"},
+        },
+    )]
 
 
 def test_permanent_suppression_updates_graph_node(fake_home):

@@ -21,6 +21,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.ci_classifier import classify_paths  # noqa: E402
+from scripts.ci_no_test_policy import evaluate_policy  # noqa: E402
 
 
 GRAPH_VALIDATE_ARGS = (
@@ -118,6 +119,15 @@ def select_checks(
     source_required = profile == "full" or (
         not flags["docs_only"] and not flags["graph_only"]
     )
+    policy_required = not flags["docs_only"] and not flags["graph_only"]
+    if policy_required:
+        checks.append(
+            Check(
+                "no-test policy",
+                (python, __file__, "--base", base_ref, "--internal-no-test-policy"),
+            )
+        )
+
     if source_required:
         checks.extend(
             [
@@ -243,6 +253,22 @@ def select_checks(
     return checks, notes
 
 
+def _run_no_test_policy_for_files(files: list[str]) -> int:
+    result = evaluate_policy(files, (), {})
+    print(result.message)
+    if result.contract_files:
+        print("Contract files:")
+        print("\n".join(result.contract_files))
+    if result.test_files:
+        print("Test files:")
+        print("\n".join(result.test_files))
+    if not result.passed:
+        print("::error::Policy violation - contract files changed but no tests changed.")
+        print("Fix: add/update tests, or use release metadata-only changes.")
+        return 1
+    return 0
+
+
 def run_checks(checks: list[Check], *, dry_run: bool) -> int:
     for index, check in enumerate(checks, start=1):
         print(f"[{index}/{len(checks)}] {check.name}: {' '.join(check.argv)}", flush=True)
@@ -287,12 +313,20 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print selected checks without running them",
     )
+    parser.add_argument(
+        "--internal-no-test-policy",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args(argv)
 
     if not shutil.which("git"):
         raise SystemExit("git is required for ci_preflight")
 
     files = changed_files(args.base)
+    if args.internal_no_test_policy:
+        return _run_no_test_policy_for_files(files)
+
     checks, notes = select_checks(
         base_ref=args.base,
         files=files,

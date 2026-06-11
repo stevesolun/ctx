@@ -113,6 +113,28 @@ class _Exploding(ModelProvider):
         raise RuntimeError("provider network down")
 
 
+class _ProviderNativeTimeoutError(Exception):
+    """Timeout-shaped exception like LiteLLM/OpenAI/httpx timeout classes."""
+
+
+@dataclass
+class _NativeTimeout(ModelProvider):
+    """Provider that raises its own timeout exception immediately."""
+
+    name: str = "native-timeout"
+
+    def complete(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition] | None = None,
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+    ) -> CompletionResponse:
+        raise _ProviderNativeTimeoutError("socket timed out")
+
+
 def _stop_response(
     content: str = "done",
     usage: Usage | None = None,
@@ -291,7 +313,8 @@ class TestBudgets:
 
     def test_cost_budget_trips(self) -> None:
         tc = ToolCall(id="c1", name="srv__noop", arguments={})
-        # Each turn: $0.10 cost. Budget $0.25 → trips after second turn.
+        # Each turn: $0.10 cost. Budget $0.25 trips on the third
+        # provider response because the check is strictly ">".
         expensive = CompletionResponse(
             content="",
             tool_calls=(tc,),
@@ -311,8 +334,10 @@ class TestBudgets:
         )
         assert result.stop_reason == "cost_budget"
         # Cost accumulated up to and including the trip-point call.
+        assert result.iterations == 3
         assert result.usage.cost_usd is not None
-        assert result.usage.cost_usd > 0.25
+        assert result.usage.cost_usd == pytest.approx(0.30)
+        assert len([m for m in result.messages if m.role == "tool"]) == 2
 
     def test_token_budget_trips(self) -> None:
         tc = ToolCall(id="c1", name="srv__noop", arguments={})
@@ -327,7 +352,9 @@ class TestBudgets:
             max_iterations=20,
         )
         assert result.stop_reason == "token_budget"
-        assert result.usage.input_tokens + result.usage.output_tokens > 250
+        assert result.iterations == 2
+        assert result.usage.input_tokens + result.usage.output_tokens == 300
+        assert len([m for m in result.messages if m.role == "tool"]) == 1
 
     def test_cost_budget_trips_on_terminal_response(self) -> None:
         provider = _Scripted(
@@ -895,9 +922,33 @@ class TestObserver:
         assert len(obs.stops) == 1
         assert obs.stops[0].stop_reason == "provider_timeout"
 
+    def test_provider_native_timeout_returns_terminal_observation(self) -> None:
+        obs = _RecordingObserver()
+
+        result = run_loop(
+            provider=_NativeTimeout(),
+            system_prompt="",
+            task="task",
+            observer=obs,
+            provider_timeout=10.0,
+        )
+
+        assert result.stop_reason == "provider_timeout"
+        assert "socket timed out" in result.detail
+        assert len(obs.stops) == 1
+        assert obs.stops[0].stop_reason == "provider_timeout"
+
+    def test_provider_native_timeout_without_outer_timeout_is_terminal(self) -> None:
+        result = run_loop(
+            provider=_NativeTimeout(),
+            system_prompt="",
+            task="task",
+        )
+
+        assert result.stop_reason == "provider_timeout"
+
 
 # ── State seeding (resume path) ─────────────────────────────────────────────
-
 
 class TestResumePath:
     def test_prior_messages_appended_after_task(self) -> None:

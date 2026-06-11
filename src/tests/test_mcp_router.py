@@ -11,9 +11,11 @@ so there's no cross-test state.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -50,6 +52,35 @@ def _make_config(
         request_timeout=request_timeout,
         inherit_env=inherit_env,
     )
+
+
+def _capture_popen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[subprocess.Popen[bytes]]:
+    procs: list[subprocess.Popen[bytes]] = []
+    real_popen = mcp_router.subprocess.Popen
+
+    def capturing_popen(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+        proc = real_popen(*args, **kwargs)
+        procs.append(proc)
+        return proc
+
+    monkeypatch.setattr(mcp_router.subprocess, "Popen", capturing_popen)
+    return procs
+
+
+def _assert_exited(proc: subprocess.Popen[bytes]) -> None:
+    proc.wait(timeout=2.0)
+    assert proc.poll() is not None
+
+
+def _wait_until(predicate: Any, *, timeout: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.02)
+    raise AssertionError("condition did not become true before timeout")
 
 
 # ── McpClient basics ─────────────────────────────────────────────────────────
@@ -146,13 +177,65 @@ class TestClientToolOperations:
 
 
 class TestClientRobustness:
-    def test_init_failure_surfaces_and_reaps_child(self) -> None:
+    @pytest.mark.parametrize(
+        ("raw", "forbidden"),
+        [
+            (
+                "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
+                ("abcdefghijklmnopqrstuvwxyz",),
+            ),
+            ("HF_TOKEN=hf_abcdefghijklmnop", ("hf_abcdefghijklmnop",)),
+            ("OPENAI_API_KEY=sk-proj-abcdefghijklmnop", ("sk-proj-abcdefghijklmnop",)),
+            ("SLACK_BOT_TOKEN=xoxb-1234567890-secret", ("xoxb-1234567890-secret",)),
+            ("db_password: supersecretpassword", ("supersecretpassword",)),
+        ],
+    )
+    def test_redact_sensitive_text_matrix(
+        self,
+        raw: str,
+        forbidden: tuple[str, ...],
+    ) -> None:
+        redacted = mcp_router._redact_sensitive_text(raw)
+
+        assert "[REDACTED]" in redacted
+        for value in forbidden:
+            assert value not in redacted
+
+    def test_init_failure_surfaces_and_reaps_child(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """When initialize errors, start() must clean up — no zombie child."""
+        procs = _capture_popen(monkeypatch)
         client = McpClient(_make_config(extra_env={"FAKE_MCP_FAIL_INIT": "1"}))
         with pytest.raises(McpServerError, match="init-forbidden"):
             client.start()
-        # After failed start, _proc is reset to None so a follow-up stop()
-        # is a safe no-op and no resource leaks.
+        assert len(procs) == 1
+        _assert_exited(procs[0])
+        assert client._proc is None
+        client.stop()
+
+    def test_startup_timeout_when_initialize_stays_silent(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        procs = _capture_popen(monkeypatch)
+        client = McpClient(
+            _make_config(
+                extra_env={"FAKE_MCP_IGNORE_INIT": "1"},
+                startup_timeout=0.2,
+            )
+        )
+        started = time.monotonic()
+        with pytest.raises(
+            McpServerError,
+            match="fake.initialize: timed out after 0.2s",
+        ):
+            client.start()
+        assert time.monotonic() - started < 1.5
+        assert len(procs) == 1
+        _assert_exited(procs[0])
+        assert client._proc is None
         client.stop()
 
     def test_server_crash_during_call(self) -> None:
@@ -192,13 +275,40 @@ class TestClientRobustness:
             result = client.call_tool("echo", {"text": "hi"})
             assert result == "hi"
 
+    def test_stale_response_id_is_ignored_until_matching_response(self) -> None:
+        cfg = _make_config(extra_env={"FAKE_MCP_EMIT_STALE_RESPONSE": "1"})
+        with McpClient(cfg) as client:
+            result = client.call_tool("echo", {"text": "fresh"})
+            assert result == "fresh"
+
+    def test_only_stale_response_id_times_out(self) -> None:
+        cfg = _make_config(
+            extra_env={"FAKE_MCP_ONLY_STALE_RESPONSE": "1"},
+            request_timeout=0.2,
+        )
+        with McpClient(cfg) as client:
+            started = time.monotonic()
+            with pytest.raises(McpServerError, match="timed out after 0.2s"):
+                client.call_tool("echo", {"text": "x"})
+            assert time.monotonic() - started < 1.5
+
     def test_stderr_captured_on_startup(self) -> None:
-        cfg = _make_config(extra_env={"FAKE_MCP_NOISY_STDERR": "1"})
+        secret = "Authorization: Bearer abcdefghijklmnopqrstuvwxyz"
+        cfg = _make_config(
+            extra_env={
+                "FAKE_MCP_NOISY_STDERR": "1",
+                "FAKE_MCP_STDERR_LINE": secret,
+            }
+        )
         with McpClient(cfg) as client:
             client.list_tools()  # let the server run
-        # Can't poke at internal state much — just confirm no hang.
-        # The drain thread is a daemon; if it deadlocked the pipe,
-        # list_tools above would have timed out.
+            _wait_until(lambda: "fake-mcp-server: starting up" in client._stderr_tail())
+            _wait_until(lambda: "[REDACTED]" in client._stderr_tail())
+            stderr_tail = client._stderr_tail()
+        assert "fake-mcp-server: starting up" in stderr_tail
+        assert "abcdefghijklmnopqrstuvwxyz" not in stderr_tail
+        assert "Authorization:" in stderr_tail
+        assert "[REDACTED]" in stderr_tail
 
     def test_request_before_start_raises(self) -> None:
         client = McpClient(_make_config())
@@ -295,12 +405,18 @@ class TestRouter:
             with pytest.raises(ValueError, match="expected"):
                 router.call("no_separator_here", {})
 
-    def test_duplicate_server_name_rejected(self) -> None:
+    def test_duplicate_server_name_rejected(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        procs = _capture_popen(monkeypatch)
         router = McpRouter([_make_config("dup"), _make_config("dup")])
         with pytest.raises(ValueError, match="duplicate MCP server"):
             router.start()
         # Atomic rollback — the first (already-started) server must be
         # reaped so we don't leak child processes.
+        assert len(procs) == 1
+        _assert_exited(procs[0])
         assert router.server_names == []
 
     def test_server_name_cannot_contain_router_separator(self) -> None:
@@ -343,8 +459,12 @@ class TestRouter:
         with running_router(cfgs) as router:
             assert router.server_names == ["alpha", "beta", "gamma"]
 
-    def test_atomic_startup_on_second_config_failure(self) -> None:
+    def test_atomic_startup_on_second_config_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """If one server fails to start, already-spawned ones must be reaped."""
+        procs = _capture_popen(monkeypatch)
         cfgs = [
             _make_config("ok"),
             _make_config("bad", extra_env={"FAKE_MCP_FAIL_INIT": "1"}),
@@ -352,6 +472,9 @@ class TestRouter:
         router = McpRouter(cfgs)
         with pytest.raises(McpServerError):
             router.start()
+        assert len(procs) == 2
+        for proc in procs:
+            _assert_exited(proc)
         assert router.server_names == []
 
 

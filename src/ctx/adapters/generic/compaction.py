@@ -217,10 +217,38 @@ class TokenBudgetCompactor:
                 usage=Usage(),
             )
 
-        head = messages[: self._keep_head]
-        tail = messages[-self._keep_tail :] if self._keep_tail else []
-        middle_end = -self._keep_tail if self._keep_tail else None
-        middle = messages[self._keep_head : middle_end]
+        head_end = _head_end_preserving_tool_pairs(messages, self._keep_head)
+        tail_start = _tail_start_preserving_tool_pairs(messages, self._keep_tail)
+        if tail_start <= head_end:
+            _logger.debug(
+                "compact: skipping, tool-call tail expansion left no middle "
+                "(head=%d, tail_start=%d)",
+                head_end,
+                tail_start,
+            )
+            return CompactionResult(
+                new_messages=list(messages),
+                compacted_count=0,
+                summary="",
+                usage=Usage(),
+            )
+
+        head = messages[:head_end]
+        tail = messages[tail_start:] if self._keep_tail else []
+        middle = messages[head_end:tail_start]
+        if len(middle) < self._min_middle:
+            _logger.debug(
+                "compact: skipping, expanded middle only %d messages "
+                "(need >= %d)",
+                len(middle),
+                self._min_middle,
+            )
+            return CompactionResult(
+                new_messages=list(messages),
+                compacted_count=0,
+                summary="",
+                usage=Usage(),
+            )
 
         summary_text, summary_usage = self._summarise_middle_with_usage(middle, provider)
         notice_count = len(middle)
@@ -307,6 +335,84 @@ def _char_count(messages: list[Message]) -> int:
         if msg.name:
             total += len(msg.name)
     return total
+
+
+def _tail_start_preserving_tool_pairs(messages: list[Message], keep_tail: int) -> int:
+    """Return a tail boundary that never keeps orphaned tool results.
+
+    Provider APIs expect a ``role="tool"`` message to be paired with an
+    earlier retained assistant message containing the matching tool-call
+    id. If a raw ``keep_tail`` slice starts at a tool result, expand the
+    slice backward to the assistant that created it. Expanding from that
+    assistant also preserves sibling tool results for multi-call turns.
+    """
+    if keep_tail <= 0:
+        return len(messages)
+    tail_start = max(0, len(messages) - keep_tail)
+    needed = {
+        msg.tool_call_id
+        for msg in messages[tail_start:]
+        if msg.role == "tool" and msg.tool_call_id
+    }
+    if not needed:
+        return tail_start
+
+    seen = {
+        call.id
+        for msg in messages[tail_start:]
+        if msg.role == "assistant"
+        for call in msg.tool_calls
+    }
+    missing = set(needed - seen)
+    if not missing:
+        return tail_start
+
+    for index in range(tail_start - 1, -1, -1):
+        msg = messages[index]
+        if msg.role != "assistant" or not msg.tool_calls:
+            continue
+        call_ids = {call.id for call in msg.tool_calls}
+        if call_ids & missing:
+            tail_start = index
+            missing -= call_ids
+            if not missing:
+                break
+    return tail_start
+
+
+def _head_end_preserving_tool_pairs(messages: list[Message], keep_head: int) -> int:
+    """Return a head boundary that never keeps dangling assistant tool calls."""
+    if keep_head <= 0:
+        return 0
+    head_end = min(len(messages), keep_head)
+    pending = {
+        call.id
+        for msg in messages[:head_end]
+        if msg.role == "assistant"
+        for call in msg.tool_calls
+    }
+    if not pending:
+        return head_end
+
+    seen = {
+        msg.tool_call_id
+        for msg in messages[:head_end]
+        if msg.role == "tool" and msg.tool_call_id
+    }
+    missing = set(pending - seen)
+    if not missing:
+        return head_end
+
+    for index in range(head_end, len(messages)):
+        msg = messages[index]
+        head_end = index + 1
+        if msg.role == "assistant":
+            missing.update(call.id for call in msg.tool_calls)
+        if msg.role == "tool" and msg.tool_call_id in missing:
+            missing.remove(msg.tool_call_id)
+            if not missing:
+                break
+    return head_end
 
 
 def _render_messages_for_summary(messages: list[Message]) -> str:

@@ -434,6 +434,9 @@ jobs:
             --line-threshold 180 \
             --max-stage-lines 40
 
+      - name: Validate README and docs stats
+        run: python src/update_repo_stats.py --check
+
   browser-security:
     name: "Browser monitor security"
     needs: classify

@@ -807,6 +807,51 @@ def test_monitor_post_accepts_valid_token(
         thread.join(timeout=2)
 
 
+def test_monitor_load_forwards_mcp_command_and_json_config(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str, dict[str, str]]] = []
+
+    def fake_load(
+        slug: str,
+        entity_type: str = "skill",
+        **kwargs: str,
+    ) -> tuple[bool, str]:
+        calls.append((slug, entity_type, kwargs))
+        return True, "loaded mcp"
+
+    monkeypatch.setattr(cm, "_perform_load", fake_load)
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        status, body = _post_json(
+            port,
+            "/api/load",
+            {
+                "slug": "github",
+                "entity_type": "mcp-server",
+                "command": "npx -y @modelcontextprotocol/server-github",
+                "json_config": '{"env":{"GITHUB_TOKEN":"${GITHUB_TOKEN}"}}',
+            },
+            token="test-token",
+        )
+        assert status == 200
+        assert body == {"ok": True, "detail": "loaded mcp"}
+        assert calls == [
+            (
+                "github",
+                "mcp-server",
+                {
+                    "command": "npx -y @modelcontextprotocol/server-github",
+                    "json_config": '{"env":{"GITHUB_TOKEN":"${GITHUB_TOKEN}"}}',
+                },
+            )
+        ]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
 def test_monitor_post_rejects_cross_origin_with_valid_token(
     fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2599,6 +2644,65 @@ def test_sidecar_page_payload_reuses_cached_search_records(
     assert reads > reads_after_first_search
 
 
+def test_sidecars_api_applies_route_filters_and_limit_bounds(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_sidecar(fake_claude, "review-agent-a", {
+        "slug": "review-agent-a",
+        "grade": "A",
+        "raw_score": 0.9,
+        "subject_type": "agent",
+    })
+    _write_sidecar(fake_claude, "review-agent-floored", {
+        "slug": "review-agent-floored",
+        "grade": "A",
+        "raw_score": 0.8,
+        "subject_type": "agent",
+        "hard_floor": "never_load_stale",
+    })
+    _write_sidecar(fake_claude, "review-skill", {
+        "slug": "review-skill",
+        "grade": "A",
+        "raw_score": 0.7,
+        "subject_type": "skill",
+    })
+    _write_sidecar(fake_claude, "review-agent-b", {
+        "slug": "review-agent-b",
+        "grade": "B",
+        "raw_score": 0.95,
+        "subject_type": "agent",
+    })
+
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        status, payload = _get_json(
+            port,
+            "/api/sidecars.json?q=review&type=agent&grade=A&hide_floor=1&limit=1",
+        )
+        assert status == 200
+        assert payload["total"] == 1
+        assert payload["limit"] == 1
+        assert payload["filtered"] is True
+        assert payload["types"] == ["agent"]
+        assert payload["grades"] == ["A"]
+        assert payload["hide_floor"] is True
+        assert [item["slug"] for item in payload["items"]] == ["review-agent-a"]
+
+        status, floor_payload = _get_json(port, "/api/sidecars.json?limit=0")
+        assert status == 200
+        assert floor_payload["limit"] == 1
+        assert len(floor_payload["items"]) == 1
+
+        status, capped_payload = _get_json(port, "/api/sidecars.json?limit=9999")
+        assert status == 200
+        assert capped_payload["limit"] == 500
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
 def test_render_wiki_index_lists_entities(fake_claude: Path) -> None:
     skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
     agents_dir = fake_claude / "skill-wiki" / "entities" / "agents"
@@ -2771,6 +2875,54 @@ def test_entity_search_and_detail_apis_support_edit_flow(
         assert detail["slug"] == "python-patterns"
         assert detail["frontmatter"]["description"] == "Idiomatic Python patterns"
         assert "Use dataclasses" in detail["body"]
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+def test_entity_search_api_rejects_bad_type_and_clamps_limit(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
+    skills_dir.mkdir(parents=True)
+    for i in range(205):
+        (skills_dir / f"bulk-{i:03d}.md").write_text(
+            "---\n"
+            "type: skill\n"
+            "description: Bulk search boundary entity\n"
+            "tags: [bulk]\n"
+            "---\n"
+            "# Bulk\n",
+            encoding="utf-8",
+        )
+
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        status, bad_type = _get_json(
+            port,
+            "/api/entities/search.json?q=bulk&type=bad",
+        )
+        assert status == 400
+        assert "unsupported entity_type" in bad_type["detail"]
+
+        status, capped = _get_json(
+            port,
+            "/api/entities/search.json?q=bulk&type=skill&limit=9999",
+        )
+        assert status == 200
+        assert capped["total"] == 200
+        assert len(capped["results"]) == 200
+        assert capped["results"][0]["slug"] == "bulk-000"
+
+        status, floored = _get_json(
+            port,
+            "/api/entities/search.json?q=bulk&type=skill&limit=0",
+        )
+        assert status == 200
+        assert floored["total"] == 1
+        assert [item["slug"] for item in floored["results"]] == ["bulk-000"]
     finally:
         server.shutdown()
         thread.join(timeout=5)
@@ -3211,6 +3363,7 @@ def test_render_docs_lists_repo_docs(
     assert 'data-doc-tab="other"' in html_out
     assert "id='docs-search-results'" in html_out
     assert "jumpToDocTarget" in html_out
+    assert "nested docs body" in html_out
     assert '<div class="grid cards">' in html_out
     assert "<strong>Knowledge graph</strong>" in html_out
     assert "-&gt; Knowledge graph" in html_out
@@ -3234,6 +3387,7 @@ def test_render_docs_sanitizes_active_html(
     (tmp_path / "docs" / "index.md").write_text(
         "# Home\n\n"
         "<script>alert('x')</script>\n\n"
+        "<input type=\"text\" value=\"bad\">\n\n"
         "<a href=\"javascript:alert('x')\" onclick=\"alert('x')\">bad</a>\n",
         encoding="utf-8",
     )
@@ -3243,8 +3397,28 @@ def test_render_docs_sanitizes_active_html(
 
     assert "<script>alert('x')</script>" not in html_out
     assert "&lt;script" in html_out
+    assert "&lt;input" in html_out
+    assert "<input type=\"text\"" not in html_out
     assert "onclick=" not in html_out
     assert "href=\"javascript:" not in html_out
+
+
+def test_render_docs_markdown_preserves_mkdocs_tab_controls() -> None:
+    markdown_text = (
+        '=== "One"\n\n'
+        "    First body\n\n"
+        '=== "Two"\n\n'
+        "    Second body\n"
+    )
+
+    html_out = cm._render_docs_markdown(markdown_text, "doc-home")
+
+    assert "&lt;input" not in html_out
+    assert 'type="radio"' in html_out
+    assert 'name="__tabbed_' in html_out
+    assert '<label for="__tabbed_' in html_out
+    assert "First body" in html_out
+    assert "Second body" in html_out
 
 
 def test_render_docs_falls_back_to_public_docs(
@@ -3464,6 +3638,24 @@ def test_render_graph_landing_auto_loads_top_seed(monkeypatch: pytest.MonkeyPatc
     assert "const initialType = \"skill\";" in html_out
     assert "value='python-patterns'" in html_out
     assert "deg 10,000" in html_out
+
+
+def test_render_graph_landing_uses_default_focus_when_seed_index_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cm, "_graph_stats", lambda: {
+        "nodes": 102928,
+        "edges": 2900834,
+        "available": True,
+    })
+    monkeypatch.setattr(cm, "_top_degree_seeds", lambda **_kwargs: [])
+
+    html_out = cm._render_graph(None)
+
+    assert "const initial = \"github\";" in html_out
+    assert "const initialType = \"\";" in html_out
+    assert "value='github'" in html_out
+    assert "Popular seed slugs" not in html_out
 
 
 def test_render_graph_landing_does_not_cold_load_graph_for_seed_chips(

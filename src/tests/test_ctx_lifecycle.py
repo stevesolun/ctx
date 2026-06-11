@@ -237,6 +237,29 @@ class TestStateSidecar:
         p.write_text("{ not valid", encoding="utf-8")
         assert lc.load_lifecycle_state("broken", sidecar_dir=tmp_path) is None
 
+    def test_save_rejects_symlinked_sidecar_dir(self, tmp_path: Path) -> None:
+        real = tmp_path / "real-quality"
+        real.mkdir()
+        link = tmp_path / "quality-link"
+        _symlink_to(real, link, target_is_directory=True)
+        state = lc.LifecycleState(slug="demo", subject_type="skill")
+
+        with pytest.raises(ValueError, match="symlinked path"):
+            lc.save_lifecycle_state(state, sidecar_dir=link)
+
+        assert not (real / "demo.lifecycle.json").exists()
+
+    def test_load_rejects_symlinked_lifecycle_sidecar_file(
+        self, tmp_path: Path
+    ) -> None:
+        real = tmp_path / "real.lifecycle.json"
+        real.write_text(json.dumps({"slug": "demo"}), encoding="utf-8")
+        link = tmp_path / "demo.lifecycle.json"
+        _symlink_to(real, link, target_is_directory=False)
+
+        with pytest.raises(ValueError, match="symlinked path"):
+            lc.load_lifecycle_state("demo", sidecar_dir=tmp_path)
+
     def test_invalid_slug_rejected(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError):
             lc.lifecycle_sidecar_path("../escape", sidecar_dir=tmp_path)
@@ -271,6 +294,13 @@ def _make_fake_skill(root: Path, slug: str) -> Path:
     return d
 
 
+def _symlink_to(target: Path, link: Path, *, target_is_directory: bool) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+
+
 class TestApplyProposal:
     def test_demote_moves_skill_dir(self, tmp_path: Path) -> None:
         skills = tmp_path / "skills"
@@ -293,6 +323,32 @@ class TestApplyProposal:
         assert new_state.state == lc.STATE_DEMOTE
         assert not (skills / "demo").exists()
         assert (skills / cfg.demoted_subdir / "demo" / "SKILL.md").is_file()
+
+    def test_demote_rejects_symlinked_skill_source(self, tmp_path: Path) -> None:
+        skills = tmp_path / "skills"
+        sidecar_dir = tmp_path / "quality"
+        outside = _make_fake_skill(tmp_path / "outside", "demo")
+        skills.mkdir()
+        link = skills / "demo"
+        _symlink_to(outside, link, target_is_directory=True)
+        sources = lc.LifecycleSources(
+            skills_dir=skills, agents_dir=tmp_path / "agents",
+            sidecar_dir=sidecar_dir,
+        )
+        cfg = lc.LifecycleConfig()
+        state = lc.LifecycleState(slug="demo", subject_type="skill")
+        proposal = lc.Proposal(
+            slug="demo", subject_type="skill",
+            current_state=lc.STATE_ACTIVE, target_state=lc.STATE_DEMOTE,
+            reason="test",
+        )
+
+        with pytest.raises(ValueError, match="symlinked path"):
+            lc.apply_proposal(proposal, state, sources=sources, cfg=cfg, now=NOW)
+
+        assert link.is_symlink()
+        assert (outside / "SKILL.md").is_file()
+        assert not (skills / cfg.demoted_subdir / "demo").exists()
 
     def test_archive_moves_from_demoted_to_archive(self, tmp_path: Path) -> None:
         skills = tmp_path / "skills"
@@ -319,6 +375,36 @@ class TestApplyProposal:
         assert new_state.state == lc.STATE_ARCHIVE
         assert not (demoted / "demo").exists()
         assert (skills / cfg.archive_subdir / "demo" / "SKILL.md").is_file()
+
+    def test_archive_rejects_symlinked_demoted_source(self, tmp_path: Path) -> None:
+        skills = tmp_path / "skills"
+        sidecar_dir = tmp_path / "quality"
+        cfg = lc.LifecycleConfig()
+        demoted = skills / cfg.demoted_subdir
+        outside = _make_fake_skill(tmp_path / "outside", "demo")
+        demoted.mkdir(parents=True)
+        link = demoted / "demo"
+        _symlink_to(outside, link, target_is_directory=True)
+        sources = lc.LifecycleSources(
+            skills_dir=skills, agents_dir=tmp_path / "agents",
+            sidecar_dir=sidecar_dir,
+        )
+        state = lc.LifecycleState(
+            slug="demo", subject_type="skill", state=lc.STATE_DEMOTE,
+            state_since=_iso(NOW - timedelta(days=20)),
+        )
+        proposal = lc.Proposal(
+            slug="demo", subject_type="skill",
+            current_state=lc.STATE_DEMOTE, target_state=lc.STATE_ARCHIVE,
+            reason="test",
+        )
+
+        with pytest.raises(ValueError, match="symlinked path"):
+            lc.apply_proposal(proposal, state, sources=sources, cfg=cfg, now=NOW)
+
+        assert link.is_symlink()
+        assert (outside / "SKILL.md").is_file()
+        assert not (skills / cfg.archive_subdir / "demo").exists()
 
     def test_delete_removes_archive_and_sidecars(self, tmp_path: Path) -> None:
         skills = tmp_path / "skills"
@@ -355,6 +441,45 @@ class TestApplyProposal:
         assert not (archive / "demo").exists()
         assert not (sidecar_dir / "demo.json").exists()
         assert not (sidecar_dir / "demo.lifecycle.json").exists()
+
+    def test_delete_rejects_symlinked_archive_source_without_dropping_sidecars(
+        self, tmp_path: Path
+    ) -> None:
+        skills = tmp_path / "skills"
+        sidecar_dir = tmp_path / "quality"
+        cfg = lc.LifecycleConfig()
+        archive = skills / cfg.archive_subdir
+        outside = _make_fake_skill(tmp_path / "outside", "demo")
+        archive.mkdir(parents=True)
+        link = archive / "demo"
+        _symlink_to(outside, link, target_is_directory=True)
+        sidecar_dir.mkdir()
+        quality = sidecar_dir / "demo.json"
+        lifecycle = sidecar_dir / "demo.lifecycle.json"
+        quality.write_text(json.dumps({"slug": "demo"}), encoding="utf-8")
+        lifecycle.write_text(json.dumps({"slug": "demo"}), encoding="utf-8")
+        sources = lc.LifecycleSources(
+            skills_dir=skills, agents_dir=tmp_path / "agents",
+            sidecar_dir=sidecar_dir,
+        )
+        state = lc.LifecycleState(
+            slug="demo", subject_type="skill", state=lc.STATE_ARCHIVE,
+            state_since=_iso(NOW - timedelta(days=90)),
+        )
+        proposal = lc.Proposal(
+            slug="demo", subject_type="skill",
+            current_state=lc.STATE_ARCHIVE, target_state="deleted",
+            reason="past delete threshold",
+            requires_typed_confirmation=True, auto_safe=False,
+        )
+
+        with pytest.raises(ValueError, match="symlinked path"):
+            lc.apply_proposal(proposal, state, sources=sources, cfg=cfg, now=NOW)
+
+        assert link.is_symlink()
+        assert quality.is_file()
+        assert lifecycle.is_file()
+        assert (outside / "SKILL.md").is_file()
 
     def test_demote_missing_source_still_advances_state(
         self, tmp_path: Path
@@ -476,6 +601,27 @@ class TestPromoteArchived:
         )
         with pytest.raises(FileNotFoundError):
             lc.promote_archived("missing", sources=sources)
+
+    def test_restore_rejects_symlinked_archive_source(self, tmp_path: Path) -> None:
+        skills = tmp_path / "skills"
+        sidecar_dir = tmp_path / "quality"
+        cfg = lc.LifecycleConfig()
+        archive = skills / cfg.archive_subdir
+        outside = _make_fake_skill(tmp_path / "outside", "demo")
+        archive.mkdir(parents=True)
+        link = archive / "demo"
+        _symlink_to(outside, link, target_is_directory=True)
+        sources = lc.LifecycleSources(
+            skills_dir=skills, agents_dir=tmp_path / "agents",
+            sidecar_dir=sidecar_dir,
+        )
+
+        with pytest.raises(ValueError, match="symlinked path"):
+            lc.promote_archived("demo", sources=sources, cfg=cfg, now=NOW)
+
+        assert link.is_symlink()
+        assert (outside / "SKILL.md").is_file()
+        assert not (skills / "demo").exists()
 
 
 # ────────────────────────────────────────────────────────────────────

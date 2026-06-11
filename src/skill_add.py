@@ -303,6 +303,7 @@ def add_skill(
     Returns a result dict with keys: name, installed, converted, is_new_page.
     """
     validate_skill_name(name)
+    reject_symlink_path(source_path)
 
     # Reject oversized files before reading into memory
     file_size = source_path.stat().st_size

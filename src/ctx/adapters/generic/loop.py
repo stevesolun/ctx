@@ -315,6 +315,10 @@ def run_loop(
             stop_detail = str(exc)
             break
         except Exception as exc:
+            if _is_provider_timeout_exception(exc):
+                stop_reason = "provider_timeout"
+                stop_detail = f"provider timed out: {exc}"
+                break
             stop_reason = "provider_error"
             stop_detail = f"provider raised {type(exc).__name__}: {exc}"
             result = LoopResult(
@@ -556,6 +560,20 @@ def _complete_provider(
     if isinstance(outcome, BaseException):
         raise outcome
     return outcome
+
+
+def _is_provider_timeout_exception(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    cls = type(exc)
+    class_name = cls.__name__.lower()
+    module_name = cls.__module__.lower()
+    if "timeout" in class_name:
+        return True
+    timeout_modules = ("httpx", "requests", "litellm", "openai", "anthropic")
+    return "timeout" in str(exc).lower() and any(
+        name in module_name for name in timeout_modules
+    )
 
 
 def _collect_tools(

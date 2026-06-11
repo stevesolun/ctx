@@ -110,9 +110,6 @@ for _name in ("wiki_sync", "ctx.core.wiki.wiki_sync",
         else:
             sys.modules[_name] = original
 
-import agent_add as _agent_add  # noqa: E402
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -199,19 +196,6 @@ class TestInstallSkill:
         _symlink_to(real_source, link_source, target_is_directory=False)
         with pytest.raises(ValueError, match="symlinked source"):
             install_skill(link_source, tmp_path / "skills", "linked-source")
-
-    def test_agent_install_rejects_symlinked_destination(self, tmp_path):
-        source = tmp_path / "agent.md"
-        outside = tmp_path / "outside.md"
-        agents_dir = tmp_path / "agents"
-        source.write_text("# agent\n", encoding="utf-8")
-        outside.write_text("outside\n", encoding="utf-8")
-        agents_dir.mkdir()
-        _symlink_to(outside, agents_dir / "agent.md", target_is_directory=False)
-        with pytest.raises(ValueError, match="symlinked destination file"):
-            _agent_add.install_agent(source, agents_dir, "agent")
-        assert outside.read_text(encoding="utf-8") == "outside\n"
-
 
 # ---------------------------------------------------------------------------
 # maybe_convert
@@ -649,6 +633,27 @@ class TestAddSkill:
                 wiki_path=wiki,
                 skills_dir=skills_dir,
             )
+
+    def test_add_skill_rejects_symlinked_source_before_intake(self, tmp_path):
+        wiki = self._setup_wiki(tmp_path)
+        skills_dir = tmp_path / "skills"
+        target = tmp_path / "real" / "SKILL.md"
+        target.parent.mkdir()
+        target.write_text(self._skill_text(), encoding="utf-8")
+        link = tmp_path / "linked-skill.md"
+        _symlink_to(target, link, target_is_directory=False)
+        _fake_intake.check_intake.reset_mock()
+
+        with pytest.raises(ValueError, match="symlinked path"):
+            add_skill(
+                source_path=link,
+                name="linked-skill",
+                wiki_path=wiki,
+                skills_dir=skills_dir,
+            )
+
+        _fake_intake.check_intake.assert_not_called()
+        assert not (skills_dir / "linked-skill").exists()
 
     def test_invalid_name_raises_value_error(self, tmp_path):
         wiki = self._setup_wiki(tmp_path)

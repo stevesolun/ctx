@@ -64,6 +64,46 @@ def test_tarball_stats_only_trust_safe_regular_members(
     }
 
 
+def test_graph_contract_stats_use_preflight_exact_counts() -> None:
+    stats = urs._read_graph_contract_stats()
+
+    assert stats is not None
+    assert stats["nodes"] == 102928
+    assert stats["edges"] == 2913960
+    assert stats["skills"] == 91464
+    assert stats["agents"] == 467
+    assert stats["mcps"] == 10790
+    assert stats["harnesses"] == 207
+    assert stats["skills_sh_entries"] == 89465
+    assert stats["skills_sh_bodies"] == 89465
+    assert stats["semantic_edges"] == 1683193
+    assert stats["tag_edges"] == 897784
+    assert stats["token_edges"] == 433245
+    assert stats["harness_edges"] == 6576
+
+
+def test_read_graph_stats_prefers_preflight_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract = {
+        "nodes": 10,
+        "edges": 20,
+        "skills": 3,
+        "agents": 4,
+        "mcps": 5,
+        "harnesses": 6,
+        "communities": 7,
+    }
+    monkeypatch.setattr(urs, "_read_graph_contract_stats", lambda: contract)
+    monkeypatch.setattr(
+        urs,
+        "_read_graph_from_tarball",
+        lambda: pytest.fail("tarball should not be read when contract exists"),
+    )
+
+    assert urs.read_graph_stats() is contract
+
+
 def test_tarball_stats_reject_suffix_impersonation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -198,51 +238,51 @@ def test_docs_landing_test_count_is_updated() -> None:
 
 def test_knowledge_graph_counts_are_updated() -> None:
     text = "\n".join([
-        "| Total nodes | **102,925** |",
-        "| Curated core nodes | **13,460** (1,998 skills + 467 agents + 10,788 MCP servers + 207 harnesses) |",
-        "| Body-backed skill nodes | **89,463** hydrated installable skill entries |",
-        "| Total edges | **2,913,930** |",
-        "| Hydrated skill incident edges | **2,605,000** |",
-        "| Hydrated skill semantic incident edges | **1,500,000** |",
-        "| Edge sources (overlap-deduped) | semantic 1,683,163 - tag 897,754 - token 433,245 |",
-        "| Cross-type edges (skill <-> agent) | ~67K |",
-        "| Cross-type edges (skill <-> MCP) | ~41K |",
-        "| Cross-type edges (agent <-> MCP) | ~223 |",
-        "| Harness edges | **6,571** |",
+        "| Total nodes | **1,111** |",
+        "| Curated core nodes | **222** (11 skills + 22 agents + 33 MCP servers + 4 harnesses) |",
+        "| Body-backed skill nodes | **889** hydrated installable skill entries |",
+        "| Total edges | **2,222** |",
+        "| Hydrated skill incident edges | **1,234** |",
+        "| Hydrated skill semantic incident edges | **567** |",
+        "| Edge sources (overlap-deduped) | semantic 123 - tag 456 - token 789 |",
+        "| Cross-type edges (skill <-> agent) | ~12 |",
+        "| Cross-type edges (skill <-> MCP) | ~34 |",
+        "| Cross-type edges (agent <-> MCP) | ~5 |",
+        "| Harness edges | **6** |",
     ])
     stats = {
-        "nodes": 102928,
-        "edges": 2913960,
-        "skills": 91464,
-        "agents": 467,
-        "mcps": 10790,
-        "harnesses": 207,
-        "communities": 52,
-        "skills_sh_entries": 89465,
-        "skills_sh_bodies": 89465,
-        "semantic_edges": 1683193,
-        "tag_edges": 897784,
-        "token_edges": 433245,
-        "hydrated_incident_edges": 2605721,
-        "hydrated_semantic_incident_edges": 1500648,
-        "cross_skill_agent_edges": 66799,
-        "cross_skill_mcp_edges": 41521,
-        "cross_agent_mcp_edges": 229,
-        "harness_edges": 6576,
+        "nodes": 12345,
+        "edges": 67890,
+        "skills": 4000,
+        "agents": 50,
+        "mcps": 600,
+        "harnesses": 7,
+        "communities": 8,
+        "skills_sh_entries": 3000,
+        "skills_sh_bodies": 3000,
+        "semantic_edges": 23456,
+        "tag_edges": 12345,
+        "token_edges": 6789,
+        "hydrated_incident_edges": 45678,
+        "hydrated_semantic_incident_edges": 2345,
+        "cross_skill_agent_edges": 321,
+        "cross_skill_mcp_edges": 654,
+        "cross_agent_mcp_edges": 87,
+        "harness_edges": 98,
     }
     patched = text
     for pattern, replacement in urs.build_replacements(stats, tests=None, converted=None):
         patched = pattern.sub(replacement, patched)
 
-    assert "| Total nodes | **102,928** |" in patched
-    assert "| Curated core nodes | **13,463** (1,999 skills + 467 agents + 10,790 MCP servers + 207 harnesses) |" in patched
-    assert "| Body-backed skill nodes | **89,465** hydrated installable skill entries |" in patched
-    assert "| Total edges | **2,913,960** |" in patched
-    assert "semantic 1,683,193 - tag 897,784 - token 433,245" in patched
-    assert "| Cross-type edges (skill <-> agent) | ~66,799 |" in patched
-    assert "| Cross-type edges (skill <-> MCP) | ~41,521 |" in patched
-    assert "| Cross-type edges (agent <-> MCP) | ~229 |" in patched
-    assert "| Harness edges | **6,576** |" in patched
+    assert "| Total nodes | **12,345** |" in patched
+    assert "| Curated core nodes | **9,345** (1,000 skills + 50 agents + 600 MCP servers + 7 harnesses) |" in patched
+    assert "| Body-backed skill nodes | **3,000** hydrated installable skill entries |" in patched
+    assert "| Total edges | **67,890** |" in patched
+    assert "semantic 23,456 - tag 12,345 - token 6,789" in patched
+    assert "| Cross-type edges (skill <-> agent) | ~321 |" in patched
+    assert "| Cross-type edges (skill <-> MCP) | ~654 |" in patched
+    assert "| Cross-type edges (agent <-> MCP) | ~87 |" in patched
+    assert "| Harness edges | **98** |" in patched
 
 
 def test_harness_aware_readme_prose_is_updated() -> None:
@@ -277,20 +317,20 @@ def test_readme_entity_badges_are_updated() -> None:
     stats = {
         "nodes": None,
         "edges": None,
-        "skills": 91464,
-        "agents": 467,
-        "mcps": 10790,
-        "harnesses": 207,
+        "skills": 12345,
+        "agents": 6789,
+        "mcps": 9012,
+        "harnesses": 1234,
         "communities": None,
     }
     patched = text
     for pattern, replacement in urs.build_replacements(stats, tests=None, converted=None):
         patched = pattern.sub(replacement, patched)
 
-    assert "badge/Skills-91%2C464-blue" in patched
-    assert "badge/Agents-467-purple" in patched
-    assert "badge/MCPs-10%2C790-pink" in patched
-    assert "badge/Harnesses-207-orange" in patched
+    assert "badge/Skills-12%2C345-blue" in patched
+    assert "badge/Agents-6%2C789-purple" in patched
+    assert "badge/MCPs-9%2C012-pink" in patched
+    assert "badge/Harnesses-1%2C234-orange" in patched
     assert "](https://stevesolun.github.io/ctx/knowledge-graph/)" in patched
     assert "](https://stevesolun.github.io/ctx/catalog/?type=skill)" in patched
     assert "](https://stevesolun.github.io/ctx/catalog/?type=agent)" in patched
@@ -299,27 +339,27 @@ def test_readme_entity_badges_are_updated() -> None:
     assert "127.0.0.1" not in patched
 
 
-def test_github_about_description_uses_current_entity_counts() -> None:
+def test_github_about_description_uses_entity_counts() -> None:
     stats = {
-        "nodes": 102928,
-        "edges": 2_900_000,
-        "skills": 91464,
-        "agents": 467,
-        "mcps": 10790,
-        "harnesses": 207,
+        "nodes": 123456,
+        "edges": 789000,
+        "skills": 4321,
+        "agents": 56,
+        "mcps": 789,
+        "harnesses": 10,
         "communities": 52,
     }
 
     description = urs.build_github_about_description(stats)
 
-    assert "102,928-node LLM-wiki graph" in description
-    assert "91,464 skills" in description
-    assert "467 agents" in description
-    assert "10,790 MCPs" in description
-    assert "207 harnesses" in description
+    assert "123,456-node LLM-wiki graph" in description
+    assert "4,321 skills" in description
+    assert "56 agents" in description
+    assert "789 MCPs" in description
+    assert "10 harnesses" in description
 
 
-def test_patch_readme_checks_knowledge_graph_doc(
+def test_patch_readme_checks_docs_and_catalog(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -328,30 +368,56 @@ def test_patch_readme_checks_knowledge_graph_doc(
     docs.mkdir()
     docs_index = docs / "index.md"
     docs_knowledge = docs / "knowledge-graph.md"
+    docs_catalog = docs / "catalog.md"
     readme.write_text("Graph has 10 nodes and 20 edges\n", encoding="utf-8")
     docs_index.write_text("3 tests collected\n", encoding="utf-8")
     docs_knowledge.write_text("| Total nodes | **10** |\n", encoding="utf-8")
+    docs_catalog.write_text(
+        "\n".join([
+            '<article class="ctx-catalog-card" data-type="skill">',
+            '<p class="ctx-catalog-muted">1 entities</p>',
+            "</article>",
+            '<article class="ctx-catalog-card" data-type="agent">',
+            '<p class="ctx-catalog-muted">2 entities</p>',
+            "</article>",
+            '<article class="ctx-catalog-card" data-type="mcp-server">',
+            '<p class="ctx-catalog-muted">3 entities</p>',
+            "</article>",
+            '<article class="ctx-catalog-card" data-type="harness">',
+            '<p class="ctx-catalog-muted">4 entities</p>',
+            "</article>",
+        ]),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(urs, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(urs, "README", readme)
     monkeypatch.setattr(urs, "DOCS_INDEX", docs_index)
     monkeypatch.setattr(urs, "DOCS_KNOWLEDGE_GRAPH", docs_knowledge)
+    monkeypatch.setattr(urs, "DOCS_CATALOG", docs_catalog)
     monkeypatch.setattr(
         urs,
         "read_graph_stats",
         lambda: {
-            "nodes": 11,
-            "edges": 21,
-            "skills": None,
-            "agents": None,
-            "mcps": None,
-            "harnesses": None,
-            "communities": 1,
+            "nodes": 123,
+            "edges": 456,
+            "skills": 1234,
+            "agents": 56,
+            "mcps": 7890,
+            "harnesses": 12,
+            "communities": 3,
         },
     )
-    monkeypatch.setattr(urs, "read_test_count", lambda: None)
+    monkeypatch.setattr(urs, "read_test_count", lambda **_kwargs: None)
     monkeypatch.setattr(urs, "read_converted_count", lambda: None)
 
     assert urs.patch_readme(check_only=True) == 1
+    assert urs.patch_readme(check_only=False) == 0
+
+    patched = docs_catalog.read_text(encoding="utf-8")
+    assert ">1,234 entities</p>" in patched
+    assert ">56 entities</p>" in patched
+    assert ">7,890 entities</p>" in patched
+    assert ">12 entities</p>" in patched
 
 
 def test_read_test_count_prefers_project_python(
@@ -365,9 +431,174 @@ def test_read_test_count_prefers_project_python(
 
     monkeypatch.setattr(urs.sys, "executable", "python3")
     monkeypatch.setattr(urs, "_pytest_collect", _collect)
+    monkeypatch.setenv("CTX_UPDATE_REPO_STATS_LIVE_TESTS", "1")
 
     assert urs.read_test_count() == 34
     assert calls == ["python"]
+
+
+def test_read_test_count_uses_checked_in_count_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    readme = tmp_path / "README.md"
+    docs_index = tmp_path / "docs" / "index.md"
+    docs_index.parent.mkdir()
+    readme.write_text(
+        "[![Tests](https://img.shields.io/badge/Tests-3981_collected-brightgreen.svg)](#)",
+        encoding="utf-8",
+    )
+    docs_index.write_text("3,981 tests collected", encoding="utf-8")
+    monkeypatch.setattr(urs, "README", readme)
+    monkeypatch.setattr(urs, "DOCS_INDEX", docs_index)
+    monkeypatch.setattr(
+        urs,
+        "_pytest_collect",
+        lambda _candidate: pytest.fail("default test count should not collect"),
+    )
+
+    assert urs.read_test_count() == 3981
+
+
+def test_read_test_count_live_mode_ignores_checked_in_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    readme = tmp_path / "README.md"
+    docs_index = tmp_path / "docs" / "index.md"
+    docs_index.parent.mkdir()
+    readme.write_text(
+        "[![Tests](https://img.shields.io/badge/Tests-3981_collected-brightgreen.svg)](#)",
+        encoding="utf-8",
+    )
+    docs_index.write_text("3,981 tests collected", encoding="utf-8")
+    monkeypatch.setattr(urs, "README", readme)
+    monkeypatch.setattr(urs, "DOCS_INDEX", docs_index)
+    monkeypatch.setattr(urs, "_pytest_collect", lambda _candidate: 3982)
+
+    assert urs.read_test_count(live=True) == 3982
+
+
+def test_patch_readme_check_uses_live_test_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    readme = tmp_path / "README.md"
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    docs_index = docs / "index.md"
+    docs_knowledge = docs / "knowledge-graph.md"
+    docs_catalog = docs / "catalog.md"
+    readme.write_text(
+        "[![Tests](https://img.shields.io/badge/Tests-3981_collected-brightgreen.svg)](#)",
+        encoding="utf-8",
+    )
+    docs_index.write_text("3,981 tests collected", encoding="utf-8")
+    docs_knowledge.write_text("", encoding="utf-8")
+    docs_catalog.write_text("", encoding="utf-8")
+    monkeypatch.setattr(urs, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(urs, "README", readme)
+    monkeypatch.setattr(urs, "DOCS_INDEX", docs_index)
+    monkeypatch.setattr(urs, "DOCS_KNOWLEDGE_GRAPH", docs_knowledge)
+    monkeypatch.setattr(urs, "DOCS_CATALOG", docs_catalog)
+    monkeypatch.setattr(
+        urs,
+        "read_graph_stats",
+        lambda: {
+            "nodes": None,
+            "edges": None,
+            "skills": None,
+            "agents": None,
+            "mcps": None,
+            "harnesses": None,
+            "communities": None,
+        },
+    )
+    monkeypatch.setattr(urs, "_pytest_collect", lambda _candidate: 3982)
+    monkeypatch.setattr(urs, "read_converted_count", lambda: None)
+
+    assert urs.patch_readme(check_only=True) == 1
+
+
+def test_patch_readme_update_uses_live_test_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    readme = tmp_path / "README.md"
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    docs_index = docs / "index.md"
+    docs_knowledge = docs / "knowledge-graph.md"
+    docs_catalog = docs / "catalog.md"
+    readme.write_text(
+        "[![Tests](https://img.shields.io/badge/Tests-3981_collected-brightgreen.svg)](#)",
+        encoding="utf-8",
+    )
+    docs_index.write_text("3,981 tests collected", encoding="utf-8")
+    docs_knowledge.write_text("", encoding="utf-8")
+    docs_catalog.write_text("", encoding="utf-8")
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(urs, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(urs, "README", readme)
+    monkeypatch.setattr(urs, "DOCS_INDEX", docs_index)
+    monkeypatch.setattr(urs, "DOCS_KNOWLEDGE_GRAPH", docs_knowledge)
+    monkeypatch.setattr(urs, "DOCS_CATALOG", docs_catalog)
+    monkeypatch.setattr(
+        urs,
+        "read_graph_stats",
+        lambda: {
+            "nodes": None,
+            "edges": None,
+            "skills": None,
+            "agents": None,
+            "mcps": None,
+            "harnesses": None,
+            "communities": None,
+        },
+    )
+
+    def fake_read_test_count(**kwargs: object) -> int:
+        calls.append(kwargs)
+        return 3982
+
+    monkeypatch.setattr(urs, "read_test_count", fake_read_test_count)
+    monkeypatch.setattr(urs, "read_converted_count", lambda: None)
+
+    assert urs.patch_readme(check_only=False) == 0
+    assert calls == [{"live": True}]
+    assert "Tests-3982_collected" in readme.read_text(encoding="utf-8")
+    assert "3,982 tests collected" in docs_index.read_text(encoding="utf-8")
+
+
+def test_pytest_collect_uses_inprocess_no_cache_collection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    class FakePytest:
+        @staticmethod
+        def main(args: list[str]) -> int:
+            calls.append(args)
+            print("3980 tests collected")
+            return 0
+
+    monkeypatch.setitem(sys.modules, "pytest", FakePytest)
+    monkeypatch.setattr(urs, "_uncollected_importorskip_test_count", lambda _stdout: 0)
+    monkeypatch.setattr(
+        urs.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("pytest collection should not spawn"),
+    )
+
+    assert urs._pytest_collect("python") == 3980
+    assert calls == [[
+        "tests/",
+        "--collect-only",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+    ]]
 
 
 def test_uncollected_importorskip_tests_are_added_to_collection_count(
