@@ -1840,12 +1840,20 @@ def _sidecar_card_payload(sidecar: dict) -> dict[str, Any]:
 
 
 def _sidecar_filter_signature(files: list[Path]) -> tuple[Any, ...]:
-    roots = (_sidecar_dir(), _sidecar_dir() / "mcp")
-    root_counts = {
-        root.resolve(): sum(1 for path in files if path.parent == root)
-        for root in roots
-    }
     signature: list[tuple[str, int, int]] = []
+    for path in files:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        signature.append((
+            str(path.resolve()),
+            int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
+            int(stat.st_size),
+        ))
+    if signature:
+        return tuple(signature)
+    roots = (_sidecar_dir(), _sidecar_dir() / "mcp")
     for root in roots:
         if not root.is_dir():
             signature.append((str(root.resolve()), 0, 0))
@@ -1854,7 +1862,7 @@ def _sidecar_filter_signature(files: list[Path]) -> tuple[Any, ...]:
         signature.append((
             str(root.resolve()),
             int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
-            root_counts.get(root.resolve(), 0),
+            0,
         ))
     return tuple(signature)
 
@@ -4953,10 +4961,12 @@ def _render_wiki_index(entity_type: str | None = None, query: str = "") -> str:
     total_available = int(wstats.get("total") or len(entries))
     # Join with grade pills where a sidecar exists.
     grade_by_key: dict[tuple[str, str], str] = {}
-    for sc in _all_sidecars():
-        slug = sc.get("slug")
-        if slug:
-            grade_by_key[(str(slug), _sidecar_entity_type(sc))] = sc.get("grade", "")
+    for entry in entries:
+        slug = str(entry["slug"])
+        row_type = str(entry["type"])
+        sidecar = _load_sidecar(slug, entity_type=row_type)
+        if sidecar:
+            grade_by_key[(slug, row_type)] = str(sidecar.get("grade") or "")
 
     type_counts = {
         "skill": int(wstats.get("skills") or 0),

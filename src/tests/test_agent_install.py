@@ -126,7 +126,7 @@ class TestInstallAgent:
         r = agent_install.install_agent(
             "a", wiki_dir=wiki_dir, agents_dir=agents_dir, dry_run=True,
         )
-        assert r.status == "installed"
+        assert r.status == "would-install"
         assert not (agents_dir / "a.md").exists()
         assert install_utils.load_manifest()["load"] == []
 

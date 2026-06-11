@@ -2658,6 +2658,38 @@ def test_sidecar_page_payload_reuses_cached_search_records(
     assert reads > reads_after_first_search
 
 
+def test_sidecar_page_payload_cache_invalidates_on_file_rewrite(
+    fake_claude: Path,
+) -> None:
+    path = fake_claude / "skill-quality" / "alpha-review.json"
+    path.write_text(
+        json.dumps({
+            "slug": "alpha-review",
+            "grade": "A",
+            "raw_score": 0.9,
+            "subject_type": "skill",
+        }),
+        encoding="utf-8",
+    )
+
+    first = cm._sidecar_page_payload({"q": "review"})
+    assert first["items"][0]["grade"] == "A"
+
+    path.write_text(
+        json.dumps({
+            "slug": "alpha-review",
+            "grade": "F",
+            "raw_score": 0.1,
+            "subject_type": "skill",
+            "notes": "changed content to force a different cache signature size",
+        }),
+        encoding="utf-8",
+    )
+
+    second = cm._sidecar_page_payload({"q": "review"})
+    assert second["items"][0]["grade"] == "F"
+
+
 def test_sidecars_api_applies_route_filters_and_limit_bounds(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2818,6 +2850,34 @@ def test_render_wiki_index_does_not_bleed_grade_across_duplicate_slugs(
     harness_card = html_out[harness_start:html_out.index("</a>", harness_start)]
     assert "grade-D" not in harness_card
     assert "<span class='pill'>harness</span>" in harness_card
+
+
+def test_render_wiki_index_uses_visible_sidecars_without_full_scan(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "python-patterns.md").write_text(
+        "---\nname: python-patterns\ntype: skill\n---\n# body\n",
+        encoding="utf-8",
+    )
+    _write_sidecar(fake_claude, "python-patterns", {
+        "slug": "python-patterns",
+        "subject_type": "skill",
+        "grade": "A",
+        "raw_score": 0.9,
+    })
+
+    def fail_full_sidecar_scan() -> list[dict]:
+        raise AssertionError("_render_wiki_index should not scan every sidecar")
+
+    monkeypatch.setattr(cm, "_all_sidecars", fail_full_sidecar_scan)
+
+    html_out = cm._render_wiki_index()
+
+    assert "href='/wiki/python-patterns?type=skill'" in html_out
+    assert "grade-A" in html_out
 
 
 def test_render_wiki_index_empty_when_no_entities(fake_claude: Path) -> None:

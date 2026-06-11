@@ -50,7 +50,7 @@ _SESSION_ID: str = uuid.uuid4().hex
 @dataclass(frozen=True)
 class InstallResult:
     slug: str
-    status: str  # "installed" | "skipped-existing" | "not-in-wiki" | "failed"
+    status: str  # "installed" | "would-install" | "skipped-existing" | "not-in-wiki" | "failed"
     installed_path: str | None
     message: str = ""
 
@@ -110,7 +110,7 @@ def install_agent(
 
     if dry_run:
         return InstallResult(
-            slug=slug, status="installed", installed_path=str(dest),
+            slug=slug, status="would-install", installed_path=str(dest),
             message="dry-run: no files written",
         )
 
