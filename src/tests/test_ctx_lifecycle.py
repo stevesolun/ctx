@@ -717,6 +717,43 @@ class TestPlanReview:
 # ────────────────────────────────────────────────────────────────────
 
 
+def test_apply_one_reports_symlink_failure_without_aborting(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    skills = tmp_path / "skills"
+    sidecar_dir = tmp_path / "quality"
+    outside = _make_fake_skill(tmp_path / "outside", "demo")
+    skills.mkdir()
+    link = skills / "demo"
+    _symlink_to(outside, link, target_is_directory=True)
+    sources = lc.LifecycleSources(
+        skills_dir=skills,
+        agents_dir=tmp_path / "agents",
+        sidecar_dir=sidecar_dir,
+    )
+    proposal = lc.Proposal(
+        slug="demo",
+        subject_type="skill",
+        current_state=lc.STATE_ACTIVE,
+        target_state=lc.STATE_DEMOTE,
+        reason="test",
+    )
+    states = {"demo": lc.LifecycleState(slug="demo", subject_type="skill")}
+
+    applied = lc._apply_one(
+        proposal,
+        states,
+        sources=sources,
+        cfg=lc.LifecycleConfig(),
+    )
+
+    assert applied == 0
+    assert "symlinked path" in capsys.readouterr().err
+    assert link.is_symlink()
+    assert (outside / "SKILL.md").is_file()
+
+
 @pytest.fixture
 def cli_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect default_sidecar_dir + ctx_config.cfg to tmp."""

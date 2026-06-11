@@ -820,6 +820,34 @@ class TestAddSkill:
         assert entity.read_text(encoding="utf-8") == entity_text
         _fake_intake.check_intake.assert_not_called()
 
+    @pytest.mark.parametrize("existing_kind", ["installed", "entity"])
+    def test_existing_skill_review_rejects_symlinked_existing_paths(
+        self, tmp_path, existing_kind
+    ):
+        wiki = self._setup_wiki(tmp_path)
+        skills_dir = tmp_path / "skills"
+        outside = tmp_path / "outside.md"
+        outside.write_text("# outside\n", encoding="utf-8")
+        if existing_kind == "installed":
+            installed = skills_dir / "myskill" / "SKILL.md"
+            installed.parent.mkdir(parents=True)
+            _symlink_to(outside, installed, target_is_directory=False)
+        else:
+            entity = wiki / "entities" / "skills" / "myskill.md"
+            entity.parent.mkdir(parents=True, exist_ok=True)
+            _symlink_to(outside, entity, target_is_directory=False)
+        source = tmp_path / "SKILL.md"
+        source.write_text(self._skill_text(), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="symlinked path"):
+            add_skill(
+                source_path=source,
+                name="myskill",
+                wiki_path=wiki,
+                skills_dir=skills_dir,
+                review_existing=True,
+            )
+
     def test_existing_skill_update_existing_applies_change(
         self, tmp_path, monkeypatch
     ):

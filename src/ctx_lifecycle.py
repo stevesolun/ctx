@@ -844,7 +844,7 @@ def _apply_one(
         )
     try:
         new_state = apply_proposal(proposal, state, sources=sources, cfg=cfg)
-    except (FileNotFoundError, FileExistsError, OSError) as exc:
+    except (FileNotFoundError, FileExistsError, ValueError, OSError) as exc:
         print(f"  ! failed: {proposal.slug}: {exc}", file=sys.stderr)
         return 0
     save_lifecycle_state(new_state, sidecar_dir=sources.sidecar_dir)

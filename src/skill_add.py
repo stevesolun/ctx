@@ -195,11 +195,14 @@ def _tag_set_from_frontmatter(raw: object) -> set[str]:
 
 def _existing_skill_review_text(entity_page: Path, installed_path: Path) -> str:
     if entity_page.exists():
+        reject_symlink_path(entity_page)
         existing = entity_page.read_text(encoding="utf-8", errors="replace")
         if installed_path.exists():
+            reject_symlink_path(installed_path)
             installed = installed_path.read_text(encoding="utf-8", errors="replace")
             existing += f"\n\n## Installed SKILL.md\n\n{installed}"
         return existing
+    reject_symlink_path(installed_path)
     return installed_path.read_text(encoding="utf-8", errors="replace")
 
 
