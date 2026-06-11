@@ -310,11 +310,12 @@ def _materialize_source(
                 "local harness repo_url requires --allow-local-source; "
             "cataloged harnesses should normally use https:// repositories"
             )
-        local_source = local_source.expanduser().resolve()
-        if not local_source.is_dir():
-            raise ValueError(f"local harness source is not a directory: {local_source}")
-        _reject_symlink_tree(local_source)
-        shutil.copytree(local_source, target)
+        raw_local_source = local_source.expanduser()
+        _reject_symlink_tree(raw_local_source)
+        resolved_local_source = raw_local_source.resolve()
+        if not resolved_local_source.is_dir():
+            raise ValueError(f"local harness source is not a directory: {resolved_local_source}")
+        shutil.copytree(resolved_local_source, target)
         return {"source_type": "local"}
 
     _validate_remote_repo_url(record.repo_url)

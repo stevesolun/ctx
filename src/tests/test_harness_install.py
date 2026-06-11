@@ -397,6 +397,33 @@ def test_install_refuses_symlink_inside_local_source(tmp_path: Path) -> None:
     assert "symlink inside harness source" in result.message
 
 
+@pytest.mark.parametrize("use_file_uri", [False, True])
+def test_install_refuses_symlinked_local_source_root(
+    tmp_path: Path,
+    use_file_uri: bool,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "README.md").write_text("harness", encoding="utf-8")
+    link = tmp_path / "source-link"
+    _symlink_to(source, link, target_is_directory=True)
+    repo_url = link.as_uri() if use_file_uri else str(link)
+    wiki = tmp_path / "wiki"
+    _write_harness_page(wiki, repo_url=repo_url)
+
+    result = harness_install.install_harness(
+        "text-to-cad",
+        wiki_path=wiki,
+        installs_root=tmp_path / "installs",
+        manifest_dir=tmp_path / "manifests",
+        allow_local_sources=True,
+    )
+
+    assert result.status == "install-failed"
+    assert "symlinked harness source" in result.message
+    assert not (tmp_path / "installs" / "text-to-cad").exists()
+
+
 def test_setup_and_verify_commands_require_explicit_flags(
     tmp_path: Path,
     monkeypatch: Any,

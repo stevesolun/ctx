@@ -66,7 +66,7 @@ _QUALITY_GRADE_RANK: dict[str, int] = {
 
 
 _SECURITY_PATTERNS: tuple[tuple[str, str], ...] = (
-    (r"\b(curl|wget)\b[^\n|;]*(\||;)\s*(sh|bash|zsh|pwsh|powershell)\b", "network-fetched shell code"),
+    (r"\b(curl|wget)\b[^\n]*(\||;|&&)\s*(sh|bash|zsh|pwsh|powershell)\b", "network-fetched shell code"),
     (r"\bInvoke-Expression\b|\biex\b", "PowerShell dynamic execution"),
     (r"\brm\s+-rf\s+(/|\$HOME|~|\*)", "broad destructive deletion"),
     (r"\bgit\s+reset\s+--hard\b|\bgit\s+clean\s+-[fdx]+", "destructive git cleanup"),
