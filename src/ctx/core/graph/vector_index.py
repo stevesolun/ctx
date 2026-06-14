@@ -73,9 +73,9 @@ class NumpyFlatVectorIndex:
         min_score: float,
         exclude_node_ids: set[str] | None = None,
     ) -> list[list[Neighbor]]:
+        queries = _normalize_query_vectors(vectors, expected_dim=self.meta.dim)
         if top_k <= 0 or self.vectors.size == 0:
-            return [[] for _ in range(len(vectors))]
-        queries = _normalize(vectors)
+            return [[] for _ in range(len(queries))]
         scores = queries @ self.vectors.T
         if exclude_node_ids:
             for node_id in exclude_node_ids:
@@ -132,9 +132,9 @@ class HnswlibVectorIndex(NumpyFlatVectorIndex):
         min_score: float,
         exclude_node_ids: set[str] | None = None,
     ) -> list[list[Neighbor]]:
+        queries = _normalize_query_vectors(vectors, expected_dim=self.meta.dim)
         if top_k <= 0 or self.vectors.size == 0:
-            return [[] for _ in range(len(vectors))]
-        queries = _normalize(vectors)
+            return [[] for _ in range(len(queries))]
         extra = len(exclude_node_ids or ())
         k = min(len(self.node_ids), top_k + extra)
         labels, distances = self._hnsw_index.knn_query(queries, k=k)
@@ -224,6 +224,7 @@ def load_vector_index(
             node_ids, content_hashes, vectors = _load_numpy_data(cache_dir / _NUMPY_NAME)
             if (
                 meta.node_count != len(node_ids)
+                or vectors.ndim != 2
                 or meta.dim != int(vectors.shape[1])
                 or meta.node_ids_sha256 != _hash_list(node_ids)
                 or meta.content_hashes_sha256 != _hash_list(content_hashes)
@@ -386,6 +387,16 @@ def _normalize(vectors: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
     norms[norms == 0.0] = 1.0
     return (matrix / norms).astype(np.float32)
+
+
+def _normalize_query_vectors(vectors: np.ndarray, *, expected_dim: int) -> np.ndarray:
+    queries = _normalize(vectors)
+    actual_dim = int(queries.shape[1])
+    if actual_dim != expected_dim:
+        raise ValueError(
+            f"query vector dim {actual_dim} does not match index dim {expected_dim}"
+        )
+    return queries
 
 
 def _hash_list(values: list[str]) -> str:

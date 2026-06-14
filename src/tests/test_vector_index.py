@@ -65,6 +65,23 @@ def test_numpy_flat_query_excludes_node_ids_and_applies_min_score() -> None:
     assert [n.node_id for n in rows[0]] == ["b"]
 
 
+def test_numpy_flat_query_rejects_wrong_dimension() -> None:
+    index = build_vector_index(
+        kind="numpy-flat",
+        model_id="model-a",
+        node_ids=["a", "b"],
+        content_hashes=["ha", "hb"],
+        vectors=_vectors()[:2],
+    )
+
+    with pytest.raises(ValueError, match="query vector dim 3 does not match index dim 2"):
+        index.query(
+            np.asarray([[1.0, 0.0, 0.0]], dtype=np.float32),
+            top_k=1,
+            min_score=0.0,
+        )
+
+
 def test_numpy_flat_round_trip_validates_model_and_fingerprint(tmp_path) -> None:
     index = build_vector_index(
         kind="numpy-flat",
@@ -99,6 +116,32 @@ def test_numpy_flat_round_trip_validates_model_and_fingerprint(tmp_path) -> None
         content_hashes=np.asarray(["ha", "hb"], dtype="U"),
         vecs=_vectors()[:2],
     )
+    assert (
+        load_vector_index(
+            tmp_path,
+            expected_model_id="model-a",
+            expected_content_fingerprint=index.meta.content_fingerprint,
+        )
+        is None
+    )
+
+
+def test_load_vector_index_rejects_corrupt_vector_shape(tmp_path) -> None:
+    index = build_vector_index(
+        kind="numpy-flat",
+        model_id="model-a",
+        node_ids=["a", "b"],
+        content_hashes=["ha", "hb"],
+        vectors=_vectors()[:2],
+    )
+    index.save(tmp_path)
+    np.savez_compressed(
+        tmp_path / "vector-index.numpy.npz",
+        node_ids=np.asarray(["a", "b"], dtype="U"),
+        content_hashes=np.asarray(["ha", "hb"], dtype="U"),
+        vecs=np.asarray([1.0, 0.0], dtype=np.float32),
+    )
+
     assert (
         load_vector_index(
             tmp_path,
