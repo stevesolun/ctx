@@ -149,6 +149,33 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[dev,embeddings]"
 
+      - name: Cache MiniLM model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-sentence-transformers-all-MiniLM-L6-v2-v1
+
+      - name: Pre-download MiniLM model
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          import time
+          from sentence_transformers import SentenceTransformer
+
+          model = "sentence-transformers/all-MiniLM-L6-v2"
+          for attempt in range(1, 5):
+              try:
+                  SentenceTransformer(model)
+                  print(f"ready: {model}")
+                  break
+              except Exception as exc:
+                  print(f"attempt {attempt} failed: {exc}", flush=True)
+                  if attempt == 4:
+                      raise
+                  time.sleep(15 * attempt)
+          PY
+
       - name: Run similarity precision/recall gate
         env:
           CTX_REQUIRE_SIMILARITY_EVAL: "1"
