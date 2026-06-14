@@ -21,10 +21,12 @@ jobs:
   sync:
     name: Sync dataset
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
+          fetch-depth: 0
           lfs: false
 
       - name: Skip when HF_TOKEN is not configured
@@ -32,8 +34,44 @@ jobs:
         run: |
           echo "::notice title=Hugging Face sync skipped::Set the HF_TOKEN repository secret to publish Stevesolun/ctx automatically."
 
-      - name: Hydrate required graph artifacts from release assets
+      - name: Classify sync scope
+        id: scope
         if: ${{ env.HF_TOKEN != '' }}
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "sync_mode=full" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BASE="$BEFORE_SHA"
+          if [[ -z "$BASE" || "$BASE" =~ ^0+$ ]] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            BASE="$(git rev-parse "$HEAD_SHA^")"
+          fi
+          git diff --name-only "$BASE" "$HEAD_SHA" > changed-files.txt
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          from pathlib import Path
+
+          files = [
+              line.strip().replace("\\", "/")
+              for line in Path("changed-files.txt").read_text(encoding="utf-8").splitlines()
+              if line.strip()
+          ]
+          card_only_prefixes = (".github/", "docs/", "src/tests/")
+          card_only_files = {"README.md", "CHANGELOG.md"}
+          card_only = bool(files) and all(
+              path in card_only_files or path.startswith(card_only_prefixes)
+              for path in files
+          )
+          print(f"sync_mode={'card' if card_only else 'full'}")
+          PY
+
+      - name: Hydrate required graph artifacts from release assets
+        if: ${{ env.HF_TOKEN != '' && steps.scope.outputs.sync_mode == 'full' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -60,5 +98,11 @@ jobs:
 
       - name: Sync Hugging Face dataset
         if: ${{ env.HF_TOKEN != '' }}
+        env:
+          SYNC_MODE: ${{ steps.scope.outputs.sync_mode }}
         run: |
-          python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type dataset
+          if [[ "$SYNC_MODE" == "card" ]]; then
+            python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type dataset --card-only
+          else
+            python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type dataset
+          fi

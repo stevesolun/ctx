@@ -379,6 +379,33 @@ def _upload_export(
     return str(getattr(info, "commit_url", info))
 
 
+def _upload_readme_card(
+    *,
+    api: Any,
+    repo: Path,
+    repo_id: str,
+    repo_type: str,
+    head: str,
+) -> str:
+    readme = repo / "README.md"
+    rendered = with_hf_repo_card_metadata(readme.read_text(encoding="utf-8"))
+    workspace = Path(tempfile.mkdtemp(prefix="ctx-hf-card-"))
+    try:
+        card = workspace / "README.md"
+        card.write_text(rendered, encoding="utf-8", newline="\n")
+        info = api.upload_file(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            path_or_fileobj=str(card),
+            path_in_repo="README.md",
+            commit_message=f"Sync ctx card {head[:7]}",
+            commit_description=f"GitHub commit: {head}",
+        )
+        return str(getattr(info, "commit_url", info))
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
 def sync_to_huggingface(
     *,
     repo: Path,
@@ -410,6 +437,28 @@ def sync_to_huggingface(
         shutil.rmtree(workspace, ignore_errors=True)
 
 
+def sync_card_to_huggingface(
+    *,
+    repo: Path,
+    repo_id: str,
+    repo_type: str,
+    token: str,
+) -> str:
+    """Upload only the Hugging Face repo card README."""
+    from huggingface_hub import HfApi
+
+    head = _git(repo, "rev-parse", "HEAD")
+    api = HfApi(token=token)
+    _ensure_hf_repo_exists(api=api, repo_id=repo_id, repo_type=repo_type)
+    return _upload_readme_card(
+        api=api,
+        repo=repo,
+        repo_id=repo_id,
+        repo_type=repo_type,
+        head=head,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Upload this git checkout to Hugging Face with repo-card metadata"
@@ -425,12 +474,18 @@ def main() -> None:
         default=os.environ.get("HF_REPO_TYPE", DEFAULT_REPO_TYPE),
         help="Hugging Face repo type",
     )
+    parser.add_argument(
+        "--card-only",
+        action="store_true",
+        help="Only refresh README.md repo-card metadata without uploading artifacts",
+    )
     args = parser.parse_args()
     token = os.environ.get("HF_TOKEN")
     if not token:
         raise SystemExit("HF_TOKEN is required")
+    sync = sync_card_to_huggingface if args.card_only else sync_to_huggingface
     print(
-        sync_to_huggingface(
+        sync(
             repo=Path(args.repo).resolve(),
             repo_id=args.repo_id,
             repo_type=args.repo_type,

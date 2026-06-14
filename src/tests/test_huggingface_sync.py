@@ -80,6 +80,13 @@ class _FakeHfApi:
         self.calls.append(("upload_folder", kwargs))
         return _FakeCommitInfo()
 
+    def upload_file(self, **kwargs: object) -> _FakeCommitInfo:
+        path = kwargs.get("path_or_fileobj")
+        if isinstance(path, str):
+            kwargs = {**kwargs, "content": Path(path).read_text(encoding="utf-8")}
+        self.calls.append(("upload_file", kwargs))
+        return _FakeCommitInfo()
+
     def repo_info(self, **kwargs: object) -> _FakeRepoInfo:
         self.calls.append(("repo_info", kwargs))
         return _FakeRepoInfo()
@@ -161,6 +168,11 @@ def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:
         assert artifact.as_posix() in text
         assert f"--pattern {artifact.name}" in text
     assert "scripts/sync_huggingface.py" in text
+    assert "Classify sync scope" in text
+    assert "card_only_files" in text
+    assert 'SYNC_MODE" == "card"' in text
+    assert "--card-only" in text
+    assert "timeout-minutes: 60" in text
     assert "Set the HF_TOKEN repository secret" in text
     assert "hf_" not in text
 
@@ -247,6 +259,32 @@ def test_hf_upload_falls_back_to_clean_upload_when_remote_has_stale_paths(
     clean_upload = api.calls[1][1]
     assert clean_upload["delete_patterns"] == "*"
     assert clean_upload["commit_message"] == "Sync ctx abcdef1"
+
+
+def test_hf_card_upload_only_patches_readme(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# ctx\n\nbody\n", encoding="utf-8")
+    api = _FakeHfApi(remote_files=[])
+
+    url = sync_huggingface._upload_readme_card(
+        api=api,
+        repo=repo,
+        repo_id="Stevesolun/ctx",
+        repo_type="dataset",
+        head="abcdef1234567890",
+    )
+
+    assert url == "https://huggingface.co/datasets/Stevesolun/ctx/commit/fallback"
+    assert [call[0] for call in api.calls] == ["upload_file"]
+    upload = api.calls[0][1]
+    assert upload["repo_id"] == "Stevesolun/ctx"
+    assert upload["repo_type"] == "dataset"
+    assert upload["path_in_repo"] == "README.md"
+    assert upload["commit_message"] == "Sync ctx card abcdef1"
+    rendered = str(upload["content"])
+    assert rendered.startswith("---\nlicense: mit\n")
+    assert rendered.endswith("# ctx\n\nbody\n")
 
 
 def test_hf_export_copies_hydrated_artifacts_even_when_untracked(
