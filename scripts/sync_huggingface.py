@@ -140,9 +140,10 @@ def _parse_lfs_pointer(text: str) -> tuple[str, int] | None:
 
 def _assert_matches_lfs_pointer(repo: Path, rel: Path, artifact: Path) -> None:
     try:
-        pointer = _git(repo, "show", f"HEAD:{rel.as_posix()}")
+        raw_pointer = _git_bytes(repo, "show", f"HEAD:{rel.as_posix()}")
     except subprocess.CalledProcessError:
         return
+    pointer = raw_pointer.decode("utf-8", errors="replace")
     contract = _parse_lfs_pointer(pointer)
     if contract is None:
         return

@@ -427,12 +427,12 @@ def test_hf_export_requires_hydrated_artifacts_to_match_lfs_pointer(
         "HYDRATED_ARTIFACT_MIN_BYTES",
         _tiny_hydrated_min_bytes(),
     )
-    def fake_git(_repo: Path, *_args: str) -> str:
+    def fake_git_bytes(_repo: Path, *_args: str) -> bytes:
         if _args[-1] == "HEAD:graph/wiki-graph.tar.gz":
-            return pointer
+            return pointer.encode("utf-8")
         raise sync_huggingface.subprocess.CalledProcessError(1, list(_args))
 
-    monkeypatch.setattr(sync_huggingface, "_git", fake_git)
+    monkeypatch.setattr(sync_huggingface, "_git_bytes", fake_git_bytes)
     monkeypatch.setattr(
         sync_huggingface,
         "_validate_graph_artifact_integrity",
@@ -448,6 +448,38 @@ def test_hf_export_requires_hydrated_artifacts_to_match_lfs_pointer(
         assert "does not match HEAD LFS pointer" in str(exc)
     else:
         raise AssertionError("expected stale LFS asset rejection")
+
+
+def test_hf_export_skips_lfs_pointer_check_for_binary_git_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    graph_dir = repo / "graph"
+    graph_dir.mkdir()
+    _write_small_hydrated_artifacts(repo)
+    artifact = graph_dir / "wiki-graph.tar.gz"
+    artifact.write_bytes(b"\x1f\x8bcurrent-full-graph")
+
+    def fake_git_bytes(_repo: Path, *_args: str) -> bytes:
+        if _args[-1] == "HEAD:graph/wiki-graph.tar.gz":
+            return b"\x1f\x8bcommitted-binary-graph"
+        raise sync_huggingface.subprocess.CalledProcessError(1, list(_args))
+
+    monkeypatch.setattr(
+        sync_huggingface,
+        "HYDRATED_ARTIFACT_MIN_BYTES",
+        _tiny_hydrated_min_bytes(),
+    )
+    monkeypatch.setattr(sync_huggingface, "_git_bytes", fake_git_bytes)
+    monkeypatch.setattr(
+        sync_huggingface,
+        "_validate_graph_artifact_integrity",
+        lambda _repo: None,
+    )
+
+    sync_huggingface._assert_hydrated_artifacts(repo)
 
 
 def test_hf_export_rejects_corrupt_large_graph_artifact(
