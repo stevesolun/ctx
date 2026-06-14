@@ -73,9 +73,6 @@ class _FakeHfApi:
         self.calls.append(("list_repo_files", kwargs))
         return self.remote_files
 
-    def upload_large_folder(self, **kwargs: object) -> None:
-        self.calls.append(("upload_large_folder", kwargs))
-
     def upload_folder(self, **kwargs: object) -> _FakeCommitInfo:
         self.calls.append(("upload_folder", kwargs))
         return _FakeCommitInfo()
@@ -205,7 +202,7 @@ def test_hf_sync_tolerates_create_rate_limit_when_repo_exists_after_retry() -> N
     ]
 
 
-def test_hf_upload_prefers_large_folder_when_remote_has_no_stale_paths(
+def test_hf_upload_uses_clean_folder_commit(
     tmp_path: Path,
 ) -> None:
     export_dir = tmp_path / "export"
@@ -221,20 +218,16 @@ def test_hf_upload_prefers_large_folder_when_remote_has_no_stale_paths(
         repo_id="Stevesolun/ctx",
         repo_type="dataset",
         head="abcdef1234567890",
-        prefer_large_upload=True,
     )
 
-    assert url == "https://huggingface.co/datasets/Stevesolun/ctx/commit/abc1234"
-    assert [call[0] for call in api.calls] == [
-        "list_repo_files",
-        "upload_large_folder",
-        "repo_info",
-    ]
-    large_upload = api.calls[1][1]
-    assert large_upload["repo_id"] == "Stevesolun/ctx"
-    assert large_upload["repo_type"] == "dataset"
-    assert large_upload["folder_path"] == str(export_dir)
-    assert large_upload["print_report"] is True
+    assert url == "https://huggingface.co/datasets/Stevesolun/ctx/commit/fallback"
+    assert [call[0] for call in api.calls] == ["upload_folder"]
+    upload = api.calls[0][1]
+    assert upload["repo_id"] == "Stevesolun/ctx"
+    assert upload["repo_type"] == "dataset"
+    assert upload["folder_path"] == str(export_dir)
+    assert upload["delete_patterns"] == "*"
+    assert upload["commit_message"] == "Sync ctx abcdef1"
 
 
 def test_hf_upload_falls_back_to_clean_upload_when_remote_has_stale_paths(
@@ -251,12 +244,11 @@ def test_hf_upload_falls_back_to_clean_upload_when_remote_has_stale_paths(
         repo_id="Stevesolun/ctx",
         repo_type="dataset",
         head="abcdef1234567890",
-        prefer_large_upload=True,
     )
 
     assert url == "https://huggingface.co/datasets/Stevesolun/ctx/commit/fallback"
-    assert [call[0] for call in api.calls] == ["list_repo_files", "upload_folder"]
-    clean_upload = api.calls[1][1]
+    assert [call[0] for call in api.calls] == ["upload_folder"]
+    clean_upload = api.calls[0][1]
     assert clean_upload["delete_patterns"] == "*"
     assert clean_upload["commit_message"] == "Sync ctx abcdef1"
 
