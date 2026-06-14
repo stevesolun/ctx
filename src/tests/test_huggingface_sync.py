@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import sys
 from pathlib import Path
+
+import pytest
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
@@ -399,6 +402,53 @@ def test_hf_graph_validation_rejects_stale_exact_counts(
         assert "graph_nodes exact count mismatch" in str(exc)
     else:
         raise AssertionError("expected stale graph artifact rejection")
+
+
+def test_hf_export_requires_hydrated_artifacts_to_match_lfs_pointer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    graph_dir = repo / "graph"
+    graph_dir.mkdir()
+    _write_small_hydrated_artifacts(repo)
+    artifact = graph_dir / "wiki-graph.tar.gz"
+    expected = b"\x1f\x8bcurrent-full-graph"
+    artifact.write_bytes(expected)
+    expected_oid = hashlib.sha256(expected).hexdigest()
+    pointer = (
+        "version https://git-lfs.github.com/spec/v1\n"
+        f"oid sha256:{expected_oid}\n"
+        f"size {len(expected)}\n"
+    )
+
+    monkeypatch.setattr(
+        sync_huggingface,
+        "HYDRATED_ARTIFACT_MIN_BYTES",
+        _tiny_hydrated_min_bytes(),
+    )
+    def fake_git(_repo: Path, *_args: str) -> str:
+        if _args[-1] == "HEAD:graph/wiki-graph.tar.gz":
+            return pointer
+        raise sync_huggingface.subprocess.CalledProcessError(1, list(_args))
+
+    monkeypatch.setattr(sync_huggingface, "_git", fake_git)
+    monkeypatch.setattr(
+        sync_huggingface,
+        "_validate_graph_artifact_integrity",
+        lambda _repo: None,
+    )
+
+    sync_huggingface._assert_hydrated_artifacts(repo)
+
+    artifact.write_bytes(b"\x1f\x8bstale-full-graph")
+    try:
+        sync_huggingface._assert_hydrated_artifacts(repo)
+    except RuntimeError as exc:
+        assert "does not match HEAD LFS pointer" in str(exc)
+    else:
+        raise AssertionError("expected stale LFS asset rejection")
 
 
 def test_hf_export_rejects_corrupt_large_graph_artifact(

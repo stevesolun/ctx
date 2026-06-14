@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import shutil
@@ -115,7 +116,49 @@ def _assert_hydrated_artifacts(repo: Path) -> None:
             raise RuntimeError(
                 f"{rel.as_posix()} is a Git LFS pointer, not the hydrated artifact"
             )
+        _assert_matches_lfs_pointer(repo, rel, artifact)
     _validate_graph_artifact_integrity(repo)
+
+
+def _parse_lfs_pointer(text: str) -> tuple[str, int] | None:
+    if not text.startswith(LFS_POINTER_PREFIX.decode("ascii")):
+        return None
+    oid: str | None = None
+    size: int | None = None
+    for line in text.splitlines():
+        if line.startswith("oid sha256:"):
+            oid = line.split(":", 1)[1].strip()
+        elif line.startswith("size "):
+            try:
+                size = int(line.split(" ", 1)[1].strip())
+            except ValueError:
+                size = None
+    if not oid or size is None:
+        return None
+    return oid, size
+
+
+def _assert_matches_lfs_pointer(repo: Path, rel: Path, artifact: Path) -> None:
+    try:
+        pointer = _git(repo, "show", f"HEAD:{rel.as_posix()}")
+    except subprocess.CalledProcessError:
+        return
+    contract = _parse_lfs_pointer(pointer)
+    if contract is None:
+        return
+    expected_oid, expected_size = contract
+    actual_size = artifact.stat().st_size
+    sha = hashlib.sha256()
+    with artifact.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            sha.update(chunk)
+    actual_oid = sha.hexdigest()
+    if actual_oid != expected_oid or actual_size != expected_size:
+        raise RuntimeError(
+            f"{rel.as_posix()} does not match HEAD LFS pointer: "
+            f"sha256:{actual_oid} size:{actual_size}; expected "
+            f"sha256:{expected_oid} size:{expected_size}"
+        )
 
 
 def _validate_graph_artifact_integrity(repo: Path) -> None:
