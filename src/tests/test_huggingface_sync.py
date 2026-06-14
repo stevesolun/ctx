@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import gzip
 import hashlib
-import json
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -460,18 +459,36 @@ def test_hf_export_rejects_corrupt_large_graph_artifact(
     graph_dir.mkdir()
     _write_small_hydrated_artifacts(repo)
     (graph_dir / "wiki-graph.tar.gz").write_bytes(b"\x1f\x8bnot-a-valid-tar")
-    with gzip.open(graph_dir / "skills-sh-catalog.json.gz", "wt", encoding="utf-8") as f:
-        json.dump({"skills": []}, f)
-    (graph_dir / "communities.json").write_text("{}", encoding="utf-8")
+
+    def fake_validator(graph_path: Path, **_kwargs: object) -> object:
+        try:
+            with tarfile.open(graph_path / "wiki-graph.tar.gz", "r:gz"):
+                return object()
+        except tarfile.TarError as exc:
+            raise ValueError(f"wiki-graph.tar.gz corrupt: {exc}") from exc
+
     monkeypatch.setattr(
         sync_huggingface,
         "HYDRATED_ARTIFACT_MIN_BYTES",
         _tiny_hydrated_min_bytes(),
+    )
+    monkeypatch.setattr(
+        sync_huggingface,
+        "_load_graph_artifact_validator",
+        lambda _repo: fake_validator,
+    )
+    monkeypatch.setattr(
+        sync_huggingface,
+        "_git",
+        lambda *_args: (_ for _ in ()).throw(
+            sync_huggingface.subprocess.CalledProcessError(1, list(_args))
+        ),
     )
 
     try:
         sync_huggingface._assert_hydrated_artifacts(repo)
     except RuntimeError as exc:
         assert "graph artifact integrity validation failed" in str(exc)
+        assert "wiki-graph.tar.gz" in str(exc)
     else:
         raise AssertionError("expected corrupt graph artifact rejection")
