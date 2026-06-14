@@ -1,8 +1,8 @@
 # Hugging Face Publish
 
-ctx publishes the GitHub repository as the public Hugging Face dataset
-[`Stevesolun/ctx`](https://huggingface.co/datasets/Stevesolun/ctx). The
-dataset is a clean `git ls-files` snapshot, including the shipped graph
+ctx publishes the GitHub repository as the public Hugging Face model repo
+[`Stevesolun/ctx`](https://huggingface.co/Stevesolun/ctx). The
+model repo is a clean `git ls-files` snapshot, including the shipped graph
 tarball and catalog artifacts, not local review reports or ignored caches.
 
 ## What gets uploaded
@@ -54,7 +54,7 @@ $secureToken = Read-Host "HF write token" -AsSecureString
 $tokenPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
 try {
   $env:HF_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPtr)
-  python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type dataset
+  python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type model
 } finally {
   if ($tokenPtr -ne [IntPtr]::Zero) {
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPtr)
@@ -70,10 +70,10 @@ try {
 from huggingface_hub import HfApi
 
 api = HfApi()
-info = api.repo_info(repo_id="Stevesolun/ctx", repo_type="dataset")
+info = api.repo_info(repo_id="Stevesolun/ctx", repo_type="model")
 print(info.id, info.sha)
 '@ | python -
 ```
 
-The dataset page should show the MIT license and the tags from the metadata
+The model page should show the MIT license and the tags from the metadata
 wrapper.

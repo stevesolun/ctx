@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 DEFAULT_REPO_ID = "Stevesolun/ctx"
-DEFAULT_REPO_TYPE = "dataset"
+DEFAULT_REPO_TYPE = "model"
 
 HF_CARD_METADATA = """---
 license: mit

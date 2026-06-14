@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   sync:
-    name: Sync dataset
+    name: Sync model repo
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -96,13 +96,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]" huggingface_hub
 
-      - name: Sync Hugging Face dataset
+      - name: Sync Hugging Face model repo
         if: ${{ env.HF_TOKEN != '' }}
         env:
           SYNC_MODE: ${{ steps.scope.outputs.sync_mode }}
         run: |
           if [[ "$SYNC_MODE" == "card" ]]; then
-            python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type dataset --card-only
+            python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type model --card-only
           else
-            python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type dataset
+            python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type model
           fi

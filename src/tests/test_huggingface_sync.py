@@ -61,7 +61,7 @@ class _FakeRepoInfo:
 
 
 class _FakeCommitInfo:
-    commit_url = "https://huggingface.co/datasets/Stevesolun/ctx/commit/fallback"
+    commit_url = "https://huggingface.co/Stevesolun/ctx/commit/fallback"
 
 
 class _FakeHfApi:
@@ -180,7 +180,7 @@ def test_hf_sync_skips_repo_create_when_repo_exists() -> None:
     sync_huggingface._ensure_hf_repo_exists(
         api=api,
         repo_id="Stevesolun/ctx",
-        repo_type="dataset",
+        repo_type="model",
     )
 
     assert [call[0] for call in api.calls] == ["repo_info"]
@@ -192,7 +192,7 @@ def test_hf_sync_tolerates_create_rate_limit_when_repo_exists_after_retry() -> N
     sync_huggingface._ensure_hf_repo_exists(
         api=api,
         repo_id="Stevesolun/ctx",
-        repo_type="dataset",
+        repo_type="model",
     )
 
     assert [call[0] for call in api.calls] == [
@@ -216,15 +216,15 @@ def test_hf_upload_uses_clean_folder_commit(
         api=api,
         export_dir=export_dir,
         repo_id="Stevesolun/ctx",
-        repo_type="dataset",
+        repo_type="model",
         head="abcdef1234567890",
     )
 
-    assert url == "https://huggingface.co/datasets/Stevesolun/ctx/commit/fallback"
+    assert url == "https://huggingface.co/Stevesolun/ctx/commit/fallback"
     assert [call[0] for call in api.calls] == ["upload_folder"]
     upload = api.calls[0][1]
     assert upload["repo_id"] == "Stevesolun/ctx"
-    assert upload["repo_type"] == "dataset"
+    assert upload["repo_type"] == "model"
     assert upload["folder_path"] == str(export_dir)
     assert upload["delete_patterns"] == "*"
     assert upload["commit_message"] == "Sync ctx abcdef1"
@@ -242,11 +242,11 @@ def test_hf_upload_falls_back_to_clean_upload_when_remote_has_stale_paths(
         api=api,
         export_dir=export_dir,
         repo_id="Stevesolun/ctx",
-        repo_type="dataset",
+        repo_type="model",
         head="abcdef1234567890",
     )
 
-    assert url == "https://huggingface.co/datasets/Stevesolun/ctx/commit/fallback"
+    assert url == "https://huggingface.co/Stevesolun/ctx/commit/fallback"
     assert [call[0] for call in api.calls] == ["upload_folder"]
     clean_upload = api.calls[0][1]
     assert clean_upload["delete_patterns"] == "*"
@@ -263,15 +263,15 @@ def test_hf_card_upload_only_patches_readme(tmp_path: Path) -> None:
         api=api,
         repo=repo,
         repo_id="Stevesolun/ctx",
-        repo_type="dataset",
+        repo_type="model",
         head="abcdef1234567890",
     )
 
-    assert url == "https://huggingface.co/datasets/Stevesolun/ctx/commit/fallback"
+    assert url == "https://huggingface.co/Stevesolun/ctx/commit/fallback"
     assert [call[0] for call in api.calls] == ["upload_file"]
     upload = api.calls[0][1]
     assert upload["repo_id"] == "Stevesolun/ctx"
-    assert upload["repo_type"] == "dataset"
+    assert upload["repo_type"] == "model"
     assert upload["path_in_repo"] == "README.md"
     assert upload["commit_message"] == "Sync ctx card abcdef1"
     rendered = str(upload["content"])
