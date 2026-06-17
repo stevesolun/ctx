@@ -56,6 +56,15 @@ from ctx.core.entity_types import (
 _logger = logging.getLogger(__name__)
 
 
+def _encode_response(data: Any) -> str:
+    """Encode tool response as GCF (Graph Compact Format) with JSON fallback."""
+    try:
+        from gcf import encode_generic
+        return encode_generic(data)
+    except Exception:  # noqa: BLE001
+        return json.dumps(data, indent=2)
+
+
 # Tool names all live under the "ctx" namespace, consistent with the
 # MCP router's <server>__<tool> convention. The harness dispatches
 # calls with names starting "ctx{TOOL_SEPARATOR}" to CtxCoreToolbox,
@@ -365,7 +374,7 @@ class CtxCoreToolbox:
             if model_provider or model
             else []
         )
-        return json.dumps({
+        return _encode_response({
             "query": query,
             "tags": tags,
             "results": results,
@@ -403,7 +412,7 @@ class CtxCoreToolbox:
             }
             for r in raw
         ]
-        return json.dumps({"seeds": seeds, "results": results})
+        return _encode_response({"seeds": seeds, "results": results})
 
     def _dispatch_wiki_search(self, args: dict[str, Any]) -> str:
         query = str(args.get("query", "")).strip()
@@ -435,7 +444,7 @@ class CtxCoreToolbox:
             }
             for p in hits
         ]
-        return json.dumps({"query": query, "results": results})
+        return _encode_response({"query": query, "results": results})
 
     def _dispatch_wiki_get(self, args: dict[str, Any]) -> str:
         slug = str(args.get("slug", "")).strip()
@@ -569,7 +578,7 @@ class CtxCoreToolbox:
         except OSError as exc:
             return json.dumps({"error": f"could not read {path}: {exc}"})
         fm, body = parse_frontmatter_and_body(text)
-        return json.dumps({
+        return _encode_response({
             "slug": path.stem,
             "entity_type": entity_type,
             "wikilink": wikilink,
