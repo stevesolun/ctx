@@ -12,7 +12,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 
 dependencies = [
-    "gcf-python>=2.1.0",
     "markdown>=3.6,<4",
     "networkx>=3,<4",
     "numpy>=1.24,<3",
@@ -98,6 +97,9 @@ browser = [
 ]
 viz = [
     "plotly>=5,<7",
+]
+gcf = [
+    "gcf-python>=2.1.0",
 ]
 embeddings = [
     "sentence-transformers>=2,<4",

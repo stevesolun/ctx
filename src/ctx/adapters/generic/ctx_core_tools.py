@@ -56,13 +56,20 @@ from ctx.core.entity_types import (
 _logger = logging.getLogger(__name__)
 
 
-def _encode_response(data: Any) -> str:
-    """Encode tool response as GCF (Graph Compact Format) with JSON fallback."""
-    try:
-        from gcf import encode_generic
-        return encode_generic(data)
-    except Exception:  # noqa: BLE001
-        return json.dumps(data, indent=2)
+def _encode_response(data: Any, output_format: str = "json") -> str:
+    """Encode tool response as JSON (default) or GCF (Graph Compact Format).
+
+    GCF encoding is opt-in: callers pass output_format="gcf" (from the tool
+    call's arguments) to get 51% fewer tokens. JSON remains the default to
+    preserve the existing wire contract with api.py and mcp_server.
+    """
+    if output_format == "gcf":
+        try:
+            from gcf import encode_generic  # noqa: PLC0415
+            return encode_generic(data)
+        except Exception:  # noqa: BLE001
+            pass
+    return json.dumps(data, indent=2)
 
 
 # Tool names all live under the "ctx" namespace, consistent with the
@@ -374,12 +381,13 @@ class CtxCoreToolbox:
             if model_provider or model
             else []
         )
+        fmt = str(args.get("output_format", "json")).lower()
         return _encode_response({
             "query": query,
             "tags": tags,
             "results": results,
             "companion_harnesses": companion_harnesses,
-        })
+        }, output_format=fmt)
 
     def _dispatch_graph_query(self, args: dict[str, Any]) -> str:
         seeds_raw = args.get("seeds") or []
@@ -412,7 +420,8 @@ class CtxCoreToolbox:
             }
             for r in raw
         ]
-        return _encode_response({"seeds": seeds, "results": results})
+        fmt = str(args.get("output_format", "json")).lower()
+        return _encode_response({"seeds": seeds, "results": results}, output_format=fmt)
 
     def _dispatch_wiki_search(self, args: dict[str, Any]) -> str:
         query = str(args.get("query", "")).strip()
@@ -444,7 +453,8 @@ class CtxCoreToolbox:
             }
             for p in hits
         ]
-        return _encode_response({"query": query, "results": results})
+        fmt = str(args.get("output_format", "json")).lower()
+        return _encode_response({"query": query, "results": results}, output_format=fmt)
 
     def _dispatch_wiki_get(self, args: dict[str, Any]) -> str:
         slug = str(args.get("slug", "")).strip()
@@ -473,9 +483,10 @@ class CtxCoreToolbox:
 
         candidates = _wiki_get_candidates(wiki, slug, entity_type or None)
 
+        fmt = str(args.get("output_format", "json")).lower()
         for candidate_type, path, wikilink in candidates:
             if path.is_file():
-                return self._serialise_page(path, candidate_type, wikilink)
+                return self._serialise_page(path, candidate_type, wikilink, output_format=fmt)
 
         return json.dumps({
             "error": f"no entity page found for slug {slug!r}",
@@ -570,7 +581,7 @@ class CtxCoreToolbox:
             raise ValueError("session_id is required")
         return supplied
 
-    def _serialise_page(self, path: Path, entity_type: str, wikilink: str) -> str:
+    def _serialise_page(self, path: Path, entity_type: str, wikilink: str, output_format: str = "json") -> str:
         from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body  # noqa: PLC0415
 
         try:
@@ -585,7 +596,7 @@ class CtxCoreToolbox:
             "path": str(path),
             "frontmatter": fm,
             "body": body,
-        })
+        }, output_format=output_format)
 
     # ── Lazy caches ─────────────────────────────────────────────────────
 
