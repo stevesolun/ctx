@@ -77,7 +77,6 @@ import zlib
 from collections import defaultdict, deque
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from importlib.resources import files
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
@@ -86,6 +85,9 @@ from ctx import dashboard_docs, dashboard_entities, dashboard_graph
 from ctx.core import entity_types as core_entity_types
 from ctx.core.wiki import wiki_queue
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
+from ctx.monitor.layout import layout as _layout
+from ctx.monitor.layout import monitor_asset_text as _monitor_asset_text
+from ctx.monitor.layout import monitor_inline_script as _monitor_inline_script
 from ctx.utils._file_lock import file_lock
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 from ctx.utils._fs_utils import safe_atomic_write_text as _safe_atomic_write_text
@@ -2147,74 +2149,6 @@ def _session_detail(session_id: str) -> dict:
 
 
 # ─── HTML rendering ──────────────────────────────────────────────────────────
-
-
-def _monitor_asset_text(name: str) -> str:
-    """Read a packaged dashboard asset."""
-    return files("ctx").joinpath("assets", name).read_text(encoding="utf-8")
-
-
-def _monitor_inline_script(name: str) -> str:
-    return f"<script>\n{_monitor_asset_text(name).rstrip()}\n</script>"
-
-
-_CSS = _monitor_asset_text("monitor.css")
-
-
-def _layout(title: str, body: str) -> str:
-    """Wrap body HTML in the standard page chrome."""
-    nav_items = (
-        ("home", "Home", "/"),
-        ("loaded", "Loaded", "/loaded"),
-        ("skills", "Skills", "/skills"),
-        ("skillspector", "SkillSpector", "/skillspector"),
-        ("wiki", "Wiki", "/wiki"),
-        ("graph", "Graph", "/graph"),
-        ("manage", "Manage", "/manage"),
-        ("harness", "Harness Setup", "/harness"),
-        ("docs", "Docs", "/docs"),
-        ("config", "Config", "/config"),
-        ("status", "Status", "/status"),
-        ("kpi", "KPIs", "/kpi"),
-        ("runtime", "Runtime", "/runtime"),
-        ("sessions", "Sessions", "/sessions"),
-        ("logs", "Logs", "/logs"),
-        ("events", "Live", "/events"),
-    )
-    nav_html = "".join(
-        f"<a href='{html.escape(href)}' data-nav-key='{html.escape(key)}' "
-        "draggable='true' title='Drag to reorder dashboard tabs'>"
-        f"{html.escape(label)}</a>"
-        for key, label, href in nav_items
-    )
-    nav_default_keys = html.escape(
-        json.dumps([key for key, _label, _href in nav_items]),
-        quote=True,
-    )
-    return (
-        "<!doctype html><html><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        f"<title>{html.escape(title)} — ctx monitor</title>"
-        f"<style>{_CSS}</style></head><body>"
-        "<div class='app-shell'>"
-        "<header class='app-header'>"
-        "<a class='app-brand' href='/' aria-label='ctx monitor home'>"
-        "<span class='app-brand-mark'>ctx</span><span>monitor</span></a>"
-        "<div class='app-header-meta'>local graph, wiki, skills, agents, MCPs, and harnesses</div>"
-        "</header>"
-        "<div class='nav' id='dashboard-nav' "
-        "data-nav-storage-key='ctx-monitor-nav-order' "
-        f"data-nav-default-keys='{nav_default_keys}' "
-        "aria-label='Dashboard navigation'>"
-        + nav_html
-        + "<button type='button' id='nav-reset' class='nav-reset' "
-          "title='Reset dashboard tab order'>reset</button>"
-        "</div>"
-        + _monitor_inline_script("monitor-nav.js")
-        + "<main class='app-main'>"
-        + body
-        + "</main></div></body></html>"
-    )
 
 
 # ─── Graph neighborhood (for /graph) ────────────────────────────────────────
