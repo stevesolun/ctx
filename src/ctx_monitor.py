@@ -230,10 +230,6 @@ def _load_dashboard_graph() -> Any:
     return graph
 
 
-def _mcp_shard(slug: str) -> str:
-    return core_entity_types.mcp_shard(slug)
-
-
 _DASHBOARD_ENTITY_SOURCES: tuple[tuple[str, str, bool], ...] = core_entity_types.entity_source_specs()
 _DASHBOARD_ENTITY_TYPES: tuple[str, ...] = tuple(
     entity_type for _, entity_type, _ in _DASHBOARD_ENTITY_SOURCES
