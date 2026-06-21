@@ -5,11 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import tarfile
 import zlib
 from pathlib import Path
 from typing import Any, Callable
+
+from ctx.core import entity_types as core_entity_types
+from ctx.utils._safe_name import is_safe_source_name
 
 
 _GRAPH_CACHE_KEY: tuple[Any, ...] | None = None
@@ -17,6 +21,9 @@ _GRAPH_CACHE_VALUE: Any | None = None
 _OVERLAY_INDEX_COVERAGE_CACHE_KEY: tuple[Any, ...] | None = None
 _OVERLAY_INDEX_COVERAGE_CACHE_VALUE: bool | None = None
 _PACKAGED_GRAPH_EXPORT_ID_CACHE: str | None | bool = None
+_DASHBOARD_ENTITY_TYPES: tuple[str, ...] = tuple(
+    entity_type for _, entity_type, _ in core_entity_types.entity_source_specs()
+)
 
 
 def reset_caches() -> None:
@@ -78,6 +85,117 @@ def dashboard_graph_source_cache_key(
 
 def dashboard_graph_index_path(wiki_dir: Path) -> Path:
     return wiki_dir / "graphify-out" / "dashboard-neighborhoods.sqlite3"
+
+
+def _slugish(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+
+def _display_slug(slug: str) -> str:
+    return str(slug or "").removeprefix("skills-sh-")
+
+
+def _display_label(value: Any, *, fallback_slug: str = "") -> str:
+    return _display_slug(str(value or fallback_slug or ""))
+
+
+def graph_slug_from_node_id(node_id: str) -> str:
+    return node_id.split(":", 1)[-1]
+
+
+def resolve_index_center(
+    conn: sqlite3.Connection,
+    raw_query: str,
+    entity_type: str | None,
+) -> tuple[str | None, dict[str, str] | None, list[str]]:
+    raw_query = str(raw_query or "").strip()
+    if not raw_query or "/" in raw_query or "\\" in raw_query or ".." in raw_query:
+        return None, None, []
+    normalized_query = _slugish(raw_query)
+    if not normalized_query or not is_safe_source_name(normalized_query):
+        return None, None, []
+
+    normalized_type = core_entity_types.normalize_entity_type(
+        entity_type,
+        allowed=_DASHBOARD_ENTITY_TYPES,
+    )
+    if entity_type is not None and normalized_type is None:
+        return None, None, []
+    entity_types = (normalized_type,) if normalized_type is not None else _DASHBOARD_ENTITY_TYPES
+
+    candidates: list[str] = []
+    for candidate in (raw_query, normalized_query):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+    for current_type in entity_types:
+        for candidate_slug in candidates:
+            row = conn.execute(
+                "SELECT node_id FROM slug_index WHERE slug=? AND type=? LIMIT 1",
+                (candidate_slug, current_type),
+            ).fetchone()
+            if row is not None:
+                return str(row["node_id"]), None, [candidate_slug]
+
+    where = ""
+    params: list[Any] = []
+    if normalized_type is not None:
+        where = "WHERE s.type=?"
+        params.append(normalized_type)
+    rows = conn.execute(
+        "SELECT s.slug,s.type,s.node_id,n.label,n.tags,n.degree "
+        "FROM slug_index s JOIN nodes n ON n.id=s.node_id "
+        f"{where}",
+        params,
+    )
+    matches: list[tuple[tuple[int, int, int], str, str]] = []
+    query_tokens = set(normalized_query.split("-"))
+    for row in rows:
+        node_slug = str(row["slug"] or "")
+        label = _display_label(row["label"], fallback_slug=node_slug)
+        haystacks = {
+            _slugish(node_slug),
+            _slugish(_display_slug(node_slug)),
+            _slugish(label),
+        }
+        try:
+            tags = json.loads(row["tags"] or "[]")
+        except (TypeError, json.JSONDecodeError):
+            tags = []
+        if isinstance(tags, list):
+            haystacks.update(_slugish(str(tag)) for tag in tags[:12])
+        rank = None
+        if normalized_query in haystacks:
+            rank = 0
+        elif any(h.startswith(normalized_query) for h in haystacks):
+            rank = 1
+        elif any(normalized_query in h for h in haystacks):
+            rank = 2
+        elif query_tokens and all(
+            any(token in h for h in haystacks) for token in query_tokens
+        ):
+            rank = 3
+        if rank is None:
+            continue
+        try:
+            degree = int(row["degree"] or 0)
+        except (TypeError, ValueError):
+            degree = 0
+        matches.append(((rank, len(node_slug), -degree), str(row["node_id"]), node_slug))
+
+    matches.sort(key=lambda item: item[0])
+    suggestions: list[str] = []
+    for _, _node_id, suggestion in matches[:8]:
+        display_suggestion = _display_slug(suggestion)
+        if display_suggestion not in suggestions:
+            suggestions.append(display_suggestion)
+    if not matches:
+        return None, None, suggestions
+    center = matches[0][1]
+    return (
+        center,
+        {"query": raw_query, "slug": graph_slug_from_node_id(center), "id": center},
+        suggestions,
+    )
 
 
 def dashboard_graph_manifest_export_id(wiki_dir: Path) -> str | None:

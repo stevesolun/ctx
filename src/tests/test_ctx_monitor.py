@@ -2361,6 +2361,87 @@ def test_graph_neighborhood_uses_dashboard_index_without_full_graph_load(
     }
 
 
+def test_graph_service_resolves_dashboard_index_center() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute(
+            "CREATE TABLE nodes(id TEXT PRIMARY KEY,label TEXT,type TEXT,tags TEXT,"
+            "description TEXT,quality_score REAL,usage_score REAL,degree INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE slug_index(slug TEXT,type TEXT,node_id TEXT,"
+            "PRIMARY KEY(slug,type,node_id))"
+        )
+        conn.executemany(
+            "INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?)",
+            [
+                (
+                    "skill:brainstorming",
+                    "Brainstorming",
+                    "skill",
+                    '["creative","planning"]',
+                    "",
+                    0.9,
+                    0.1,
+                    12,
+                ),
+                (
+                    "skill:multi-agent-brainstorming",
+                    "Multi Agent Brainstorming",
+                    "skill",
+                    '["creative","agents"]',
+                    "",
+                    0.8,
+                    0.0,
+                    4,
+                ),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO slug_index VALUES(?,?,?)",
+            [
+                ("brainstorming", "skill", "skill:brainstorming"),
+                (
+                    "multi-agent-brainstorming",
+                    "skill",
+                    "skill:multi-agent-brainstorming",
+                ),
+            ],
+        )
+        conn.commit()
+
+        center, resolved, suggestions = graph_service.resolve_index_center(
+            conn,
+            "brainstorming",
+            "skill",
+        )
+        assert center == "skill:brainstorming"
+        assert resolved is None
+        assert suggestions == ["brainstorming"]
+
+        center, resolved, suggestions = graph_service.resolve_index_center(
+            conn,
+            "multi brainstorm",
+            "skill",
+        )
+        assert center == "skill:multi-agent-brainstorming"
+        assert resolved == {
+            "query": "multi brainstorm",
+            "slug": "multi-agent-brainstorming",
+            "id": "skill:multi-agent-brainstorming",
+        }
+        assert suggestions == ["multi-agent-brainstorming"]
+
+        assert graph_service.resolve_index_center(conn, "../brainstorming", "skill") == (
+            None,
+            None,
+            [],
+        )
+    finally:
+        conn.close()
+
+
 def test_graph_neighborhood_uses_fresh_graph_store_without_full_graph_load(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,
