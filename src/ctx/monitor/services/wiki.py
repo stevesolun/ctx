@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import re
+import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+from urllib.parse import quote
 
 from ctx.core import entity_types as core_entity_types
 from ctx.core.wiki.wiki_packs import load_merged_wiki_pages
@@ -208,3 +212,108 @@ def read_entity_text(
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
+
+
+def search_entities_from_index(
+    index_path: Path,
+    query: str = "",
+    entity_type: str | None = None,
+    *,
+    limit: int = 80,
+    index_matches_manifest: Callable[[Path], bool],
+) -> list[dict[str, Any]] | None:
+    terms = [term for term in re.split(r"\s+", query.lower().strip()) if term]
+    if not terms:
+        return None
+    normalized = normalize_entity_type(entity_type) if entity_type else None
+    if entity_type is not None and normalized is None:
+        raise ValueError(f"unsupported entity_type: {entity_type!r}")
+    if not index_path.is_file() or not index_matches_manifest(index_path):
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{index_path.as_posix()}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        where: list[str] = []
+        params: list[object] = []
+        if normalized is not None:
+            where.append("type = ?")
+            params.append(normalized)
+        for term in terms:
+            where.append(
+                "lower(id || ' ' || coalesce(label,'') || ' ' || "
+                "coalesce(type,'') || ' ' || coalesce(tags,'') || ' ' || "
+                "coalesce(description,'')) LIKE ?"
+            )
+            params.append(f"%{term}%")
+        sql = (
+            "SELECT id,label,type,tags,description,quality_score,usage_score,degree "
+            f"FROM nodes WHERE {' AND '.join(where)} "
+            "ORDER BY CASE "
+            "WHEN lower(label) = ? THEN 0 "
+            "WHEN lower(id) = ? THEN 1 "
+            "WHEN lower(label) LIKE ? THEN 2 "
+            "WHEN lower(id) LIKE ? THEN 3 "
+            "ELSE 4 END, degree DESC, label COLLATE NOCASE "
+            "LIMIT ?"
+        )
+        first = terms[0]
+        params.extend([first, first, f"{first}%", f"%:{first}%", max(1, limit)])
+        rows = conn.execute(sql, params).fetchall()
+    except (sqlite3.Error, TypeError):
+        return None
+    finally:
+        conn.close()
+
+    results: list[dict[str, Any]] = []
+    for node_id, label, row_type, raw_tags, description, quality, usage, degree in rows:
+        current_type = normalize_entity_type(row_type) or graph_type_from_node_id(str(node_id))
+        slug = graph_slug_from_node_id(str(node_id))
+        try:
+            tags = json.loads(raw_tags or "[]")
+        except json.JSONDecodeError:
+            tags = []
+        if not isinstance(tags, list):
+            tags = []
+        results.append({
+            "slug": slug,
+            "display_slug": display_slug(slug),
+            "type": current_type,
+            "title": display_label(label, fallback_slug=slug),
+            "description": str(description or ""),
+            "tags": [str(tag) for tag in tags[:12]],
+            "path": "",
+            "href": entity_wiki_href(slug, current_type),
+            "quality_score": quality,
+            "usage_score": usage,
+            "degree": int(degree or 0),
+        })
+    return results
+
+
+def graph_slug_from_node_id(node_id: str) -> str:
+    return node_id.split(":", 1)[-1]
+
+
+def graph_type_from_node_id(node_id: str, fallback: str = "skill") -> str:
+    prefix = node_id.split(":", 1)[0] if ":" in node_id else ""
+    return {
+        "skill": "skill",
+        "agent": "agent",
+        "mcp-server": "mcp-server",
+        "harness": "harness",
+    }.get(prefix, fallback)
+
+
+def display_slug(slug: str) -> str:
+    return str(slug or "").removeprefix("skills-sh-")
+
+
+def display_label(value: Any, *, fallback_slug: str = "") -> str:
+    return display_slug(str(value or fallback_slug or ""))
+
+
+def entity_wiki_href(slug: str, entity_type: str | None = None) -> str:
+    suffix = f"?type={quote(entity_type)}" if entity_type in _DASHBOARD_ENTITY_TYPES else ""
+    return f"/wiki/{quote(slug)}{suffix}"

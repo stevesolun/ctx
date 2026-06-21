@@ -38,6 +38,7 @@ from ctx.monitor.services import config as config_service
 from ctx.monitor.services import graph as graph_service
 from ctx.monitor.services import sidecars as sidecar_service
 from ctx.monitor.services import skillspector as skillspector_service
+from ctx.monitor.services import wiki as wiki_service
 from ctx.core.wiki import wiki_queue
 
 
@@ -3997,6 +3998,25 @@ def test_wiki_index_entries_use_dashboard_index_without_markdown_pages(
 
     assert slugs == {"python-patterns", "code-reviewer"}
     assert entries[0]["description"] == "Idiomatic Python patterns"
+    assert wiki_service.search_entities_from_index(
+        index_path,
+        "python",
+        "skill",
+        limit=5,
+        index_matches_manifest=lambda path: path == index_path,
+    ) == [{
+        "slug": "python-patterns",
+        "display_slug": "python-patterns",
+        "type": "skill",
+        "title": "python-patterns",
+        "description": "Idiomatic Python patterns",
+        "tags": ["python", "patterns"],
+        "path": "",
+        "href": "/wiki/python-patterns?type=skill",
+        "quality_score": 0.9,
+        "usage_score": 0.1,
+        "degree": 5,
+    }]
 
     def fail_sidecar_probe(*args: object, **kwargs: object) -> object:
         raise AssertionError("index-backed wiki catalog should not probe sidecars")
