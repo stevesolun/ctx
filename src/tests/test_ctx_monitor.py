@@ -3219,6 +3219,46 @@ def test_entity_subgraph_script_json_escapes_script_end_tag() -> None:
     assert "<\\/script>" in graph_html
 
 
+def test_entity_subgraph_wrapper_matches_extracted_wiki_renderer() -> None:
+    node_by_id = {
+        "skill:github": {"label": "GitHub", "type": "skill", "degree": 7},
+        "mcp-server:github-api": {"label": "GitHub API", "type": "mcp-server", "degree": 3},
+    }
+    edges = [
+        {
+            "data": {
+                "source": "skill:github",
+                "target": "mcp-server:github-api",
+                "weight": 0.82,
+                "shared": ["github"],
+            },
+        },
+    ]
+
+    wrapper_html = cm._render_entity_subgraph_svg(
+        node_by_id=node_by_id,
+        edges=edges,
+        center="skill:github",
+        sidecar_by_id={},
+    )
+    direct_html = wiki_page.render_entity_subgraph_svg(
+        node_by_id=node_by_id,
+        edges=edges,
+        center="skill:github",
+        sidecar_by_id={},
+        graph_type_from_node_id=cm._graph_type_from_node_id,
+        graph_slug_from_node_id=cm._graph_slug_from_node_id,
+        display_label=cm._display_label,
+        display_slug=cm._display_slug,
+        entity_wiki_href=cm._entity_wiki_href,
+        json_for_script=cm._json_for_script,
+    )
+
+    assert wrapper_html == direct_html
+    assert "/wiki/github-api?type=mcp-server" in wrapper_html
+    assert "mcp-server" in wrapper_html
+
+
 def test_graph_page_initial_query_escapes_script_end_tag() -> None:
     html_out = cm._render_graph("</script><script>alert(1)</script>")
 
