@@ -108,6 +108,7 @@ from ctx.monitor.services import config as _config_service
 from ctx.monitor.services import graph as _graph_service
 from ctx.monitor.services import sidecars as _sidecar_service
 from ctx.monitor.services import skillspector as _skillspector_service
+from ctx.monitor.services import wiki as _wiki_service
 from ctx.utils._file_lock import file_lock
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 from ctx.utils._fs_utils import safe_atomic_write_text as _safe_atomic_write_text
@@ -122,8 +123,6 @@ _OVERLAY_INDEX_COVERAGE_CACHE_VALUE: bool | None = None
 _KPI_SUMMARY_CACHE_KEY: tuple[Any, ...] | None = None
 _KPI_SUMMARY_CACHE_VALUE: Any | None = None
 _KPI_SUMMARY_CACHE_AT = 0.0
-_WIKI_PACK_CACHE_KEY: tuple[tuple[str, float, int], ...] | None = None
-_WIKI_PACK_CACHE_VALUE: dict[str, str] | None = None
 _WIKI_RENDER_CACHE_KEY: tuple[Any, ...] | None = None
 _WIKI_RENDER_CACHE_VALUE: str | None = None
 _WIKI_INDEX_LIMIT_PER_TYPE = 500
@@ -214,34 +213,7 @@ def _user_config_path() -> Path:
 
 
 def _wiki_pack_pages() -> dict[str, str] | None:
-    """Return merged wiki-pack pages, or None when packs are not installed."""
-    global _WIKI_PACK_CACHE_KEY, _WIKI_PACK_CACHE_VALUE
-
-    packs_dir = _wiki_dir() / "wiki-packs"
-    if not packs_dir.is_dir():
-        _WIKI_PACK_CACHE_KEY = None
-        _WIKI_PACK_CACHE_VALUE = None
-        return None
-    key: list[tuple[str, float, int]] = []
-    for path in sorted(packs_dir.rglob("*")):
-        if not path.is_file() or path.name not in {
-            "wiki-pack-manifest.json",
-            "pages.jsonl",
-            "tombstones.jsonl",
-        }:
-            continue
-        stat = path.stat()
-        key.append((path.relative_to(packs_dir).as_posix(), stat.st_mtime, stat.st_size))
-    cache_key = tuple(key)
-    if _WIKI_PACK_CACHE_KEY == cache_key and _WIKI_PACK_CACHE_VALUE is not None:
-        return _WIKI_PACK_CACHE_VALUE
-
-    from ctx.core.wiki.wiki_packs import load_merged_wiki_pages  # noqa: PLC0415
-
-    pages = load_merged_wiki_pages(packs_dir)
-    _WIKI_PACK_CACHE_KEY = cache_key
-    _WIKI_PACK_CACHE_VALUE = pages
-    return pages
+    return _wiki_service.wiki_pack_pages(_wiki_dir())
 
 
 def _load_dashboard_graph() -> Any:
@@ -308,115 +280,26 @@ def _wiki_entity_path(slug: str, entity_type: str | None = None) -> Path | None:
     ``entities/mcp-servers/<first-char>/<slug>.md``. Returns the first match
     unless ``entity_type`` disambiguates duplicate slugs.
     """
-    # Validate slug so a crafted request can't escape the wiki tree.
-    if not _is_safe_slug(slug):
-        return None
-    pack_pages = _wiki_pack_pages()
-    for _sub, current_type, _recursive in _DASHBOARD_ENTITY_SOURCES:
-        if entity_type is not None and entity_type != current_type:
-            continue
-        p = core_entity_types.entity_page_path(_wiki_dir(), current_type, slug)
-        if p is None:
-            continue
-        if pack_pages is not None:
-            relpath = core_entity_types.entity_relpath(current_type, slug)
-            if relpath is not None and relpath.as_posix() in pack_pages:
-                return p
-            continue
-        if p.exists():
-            return p
-    return None
+    return _wiki_service.entity_path(_wiki_dir(), slug, entity_type)
 
 
 def _wiki_entity_target_path(slug: str, entity_type: str) -> Path:
     """Return the canonical wiki entity path for a new/updated entity."""
-    if not _is_safe_slug(slug):
-        raise ValueError(f"invalid slug: {slug!r}")
-    normalized = _normalize_dashboard_entity_type(entity_type)
-    if normalized is None:
-        raise ValueError(f"unsupported entity_type: {entity_type!r}")
-    path = core_entity_types.entity_page_path(_wiki_dir(), normalized, slug)
-    if path is None:
-        raise ValueError(f"unsupported entity_type: {entity_type!r}")
-    return path
+    return _wiki_service.entity_target_path(_wiki_dir(), slug, entity_type)
 
 
 def _iter_wiki_entity_paths(
     entity_type: str | None = None,
 ) -> list[tuple[str, str, Path]]:
-    normalized = _normalize_dashboard_entity_type(entity_type) if entity_type else None
-    if entity_type is not None and normalized is None:
-        raise ValueError(f"unsupported entity_type: {entity_type!r}")
-    pack_pages = _wiki_pack_pages()
-    if pack_pages is not None:
-        pack_rows: list[tuple[str, str, Path]] = []
-        for relpath in sorted(pack_pages):
-            parsed = _wiki_pack_entity_from_relpath(relpath)
-            if parsed is None:
-                continue
-            slug, current_type = parsed
-            if normalized is not None and normalized != current_type:
-                continue
-            path = core_entity_types.entity_page_path(_wiki_dir(), current_type, slug)
-            if path is not None:
-                pack_rows.append((slug, current_type, path))
-        return sorted(pack_rows, key=lambda row: (row[1], row[0].lower(), row[2].as_posix()))
-    base = _wiki_dir() / "entities"
-    if not base.is_dir():
-        return []
-    file_rows: list[tuple[str, str, Path]] = []
-    for sub, current_type, recursive in _DASHBOARD_ENTITY_SOURCES:
-        if normalized is not None and normalized != current_type:
-            continue
-        root = base / sub
-        if not root.is_dir():
-            continue
-        paths = root.rglob("*.md") if recursive else root.glob("*.md")
-        for path in paths:
-            slug = path.stem
-            if _is_safe_slug(slug):
-                file_rows.append((slug, current_type, path))
-    return sorted(file_rows, key=lambda row: (row[1], row[0].lower(), row[2].as_posix()))
+    return _wiki_service.iter_entity_paths(_wiki_dir(), entity_type)
 
 
 def _wiki_entity_detail(slug: str, entity_type: str | None = None) -> dict[str, Any] | None:
-    normalized = _normalize_dashboard_entity_type(entity_type) if entity_type else None
-    if entity_type is not None and normalized is None:
-        raise ValueError(f"unsupported entity_type: {entity_type!r}")
-    path = _wiki_entity_path(slug, entity_type=normalized)
-    if path is None:
-        return None
-    text = _read_wiki_entity_text(slug, normalized, path)
-    if text is None:
-        return None
-    frontmatter, body = _parse_frontmatter(text)
-    detected_type = normalized or _normalize_dashboard_entity_type(frontmatter.get("type")) or "skill"
-    return {
-        "slug": slug,
-        "type": detected_type,
-        "path": str(path),
-        "frontmatter": frontmatter,
-        "body": body,
-    }
+    return _wiki_service.entity_detail(_wiki_dir(), slug, entity_type)
 
 
 def _wiki_pack_entity_from_relpath(relpath: str) -> tuple[str, str] | None:
-    path = Path(relpath)
-    parts = path.parts
-    if len(parts) < 3 or parts[0] != "entities" or path.suffix != ".md":
-        return None
-    entity_type = core_entity_types.ENTITY_TYPE_FOR_SUBJECT_TYPE.get(parts[1])
-    if entity_type not in _DASHBOARD_ENTITY_TYPES:
-        return None
-    slug = path.stem
-    if not _is_safe_slug(slug):
-        return None
-    if entity_type == "mcp-server":
-        if len(parts) != 4 or parts[2] != core_entity_types.mcp_shard(slug):
-            return None
-    elif len(parts) != 3:
-        return None
-    return slug, entity_type
+    return _wiki_service.pack_entity_from_relpath(relpath)
 
 
 def _read_wiki_entity_text(
@@ -424,18 +307,7 @@ def _read_wiki_entity_text(
     entity_type: str | None,
     path: Path,
 ) -> str | None:
-    pack_pages = _wiki_pack_pages()
-    if pack_pages is not None:
-        entity_types = [entity_type] if entity_type is not None else list(_DASHBOARD_ENTITY_TYPES)
-        for current_type in entity_types:
-            relpath = core_entity_types.entity_relpath(current_type, slug)
-            if relpath is not None and relpath.as_posix() in pack_pages:
-                return pack_pages[relpath.as_posix()]
-        return None
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
+    return _wiki_service.read_entity_text(_wiki_dir(), slug, entity_type, path)
 
 
 def _search_wiki_entities(

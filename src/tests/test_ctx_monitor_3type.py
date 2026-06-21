@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 import ctx_monitor as _cm
 from ctx.core import entity_types as _entity_types
 from ctx.core.wiki.wiki_packs import write_wiki_base_pack
+from ctx.monitor.services import wiki as _wiki_service
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -43,6 +44,7 @@ from ctx.core.wiki.wiki_packs import write_wiki_base_pack
 @pytest.fixture()
 def wiki_3type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Build a minimal wiki and point ctx_monitor at it via ``_wiki_dir``."""
+    _wiki_service.reset_caches()
     wiki = tmp_path / "skill-wiki"
     for sub in ("skills", "agents", "harnesses"):
         (wiki / "entities" / sub).mkdir(parents=True)
@@ -179,8 +181,7 @@ class TestWikiIndexEntries:
         wiki_3type: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(_cm, "_WIKI_PACK_CACHE_KEY", None)
-        monkeypatch.setattr(_cm, "_WIKI_PACK_CACHE_VALUE", None)
+        _wiki_service.reset_caches()
         monkeypatch.setattr(_cm, "_render_entity_subgraph", lambda *_, **__: "")
         (wiki_3type / "entities" / "skills" / "python-patterns.md").write_text(
             "---\n"
@@ -221,12 +222,20 @@ class TestWikiIndexEntries:
 
         entries = _cm._wiki_index_entries(limit_per_type=None)
         slugs = {entry["slug"] for entry in entries}
+        service_detail = _wiki_service.entity_detail(
+            wiki_3type,
+            "python-patterns",
+            entity_type="skill",
+        )
         detail = _cm._wiki_entity_detail("python-patterns", entity_type="skill")
         search = _cm._search_wiki_entities("merged body", entity_type="skill")
         html = _cm._render_wiki_entity("python-patterns", entity_type="skill")
         stats = _cm._wiki_stats()
 
         assert slugs == {"python-patterns", "github"}
+        assert service_detail is not None
+        assert service_detail["frontmatter"]["title"] == "Fresh Pack Page"
+        assert "Merged wiki pack body" in service_detail["body"]
         assert detail is not None
         assert detail["frontmatter"]["title"] == "Fresh Pack Page"
         assert "Merged wiki pack body" in detail["body"]
