@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import sqlite3
 from pathlib import Path
 from typing import Any, Callable
 
@@ -60,6 +62,49 @@ def dashboard_graph_source_cache_key(
     if graph_key is None and not pack_key:
         return None
     return (graph_key, overlay_key, pack_key)
+
+
+def dashboard_graph_index_path(wiki_dir: Path) -> Path:
+    return wiki_dir / "graphify-out" / "dashboard-neighborhoods.sqlite3"
+
+
+def dashboard_graph_manifest_export_id(wiki_dir: Path) -> str | None:
+    manifest_path = wiki_dir / "graphify-out" / "graph-export-manifest.json"
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    export_id = data.get("export_id") if isinstance(data, dict) else None
+    if not isinstance(export_id, str) or not export_id.strip():
+        return None
+    return export_id.strip()
+
+
+def dashboard_index_meta(index_path: Path) -> dict[str, Any] | None:
+    try:
+        conn = sqlite3.connect(f"file:{index_path.as_posix()}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        rows = conn.execute("SELECT key,value FROM meta").fetchall()
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+    try:
+        return {str(key): json.loads(str(value)) for key, value in rows}
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def dashboard_index_matches_manifest(index_path: Path, wiki_dir: Path) -> bool:
+    manifest_export_id = dashboard_graph_manifest_export_id(wiki_dir)
+    if manifest_export_id is None:
+        return False
+    meta = dashboard_index_meta(index_path)
+    if meta is None:
+        return False
+    return meta.get("export_id") == manifest_export_id
 
 
 def load_dashboard_graph(

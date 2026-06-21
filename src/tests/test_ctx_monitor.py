@@ -3122,6 +3122,13 @@ def test_dashboard_index_extraction_works_with_installed_graph_report(
     monkeypatch.setattr(cm, "_dashboard_graph_index_archives", lambda: [archive])
     monkeypatch.setattr(cm, "_packaged_graph_export_id", lambda: "local-export")
 
+    wiki_dir = fake_claude / "skill-wiki"
+    assert graph_service.dashboard_graph_index_path(wiki_dir) == (
+        graph_dir / "dashboard-neighborhoods.sqlite3"
+    )
+    assert graph_service.dashboard_graph_manifest_export_id(wiki_dir) == "local-export"
+    assert graph_service.dashboard_index_matches_manifest(seed, wiki_dir)
+
     assert cm._ensure_dashboard_graph_index() == graph_dir / "dashboard-neighborhoods.sqlite3"
 
 

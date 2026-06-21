@@ -1964,46 +1964,19 @@ def _graph_node_size(
 
 
 def _dashboard_graph_index_path() -> Path:
-    return _wiki_dir() / "graphify-out" / "dashboard-neighborhoods.sqlite3"
+    return _graph_service.dashboard_graph_index_path(_wiki_dir())
 
 
 def _dashboard_graph_manifest_export_id() -> str | None:
-    manifest_path = _wiki_dir() / "graphify-out" / "graph-export-manifest.json"
-    try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    export_id = data.get("export_id") if isinstance(data, dict) else None
-    if not isinstance(export_id, str) or not export_id.strip():
-        return None
-    return export_id.strip()
+    return _graph_service.dashboard_graph_manifest_export_id(_wiki_dir())
 
 
 def _dashboard_index_meta(index_path: Path) -> dict[str, Any] | None:
-    try:
-        conn = sqlite3.connect(f"file:{index_path.as_posix()}?mode=ro", uri=True)
-    except sqlite3.Error:
-        return None
-    try:
-        rows = conn.execute("SELECT key,value FROM meta").fetchall()
-    except sqlite3.Error:
-        return None
-    finally:
-        conn.close()
-    try:
-        return {str(key): json.loads(str(value)) for key, value in rows}
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
+    return _graph_service.dashboard_index_meta(index_path)
 
 
 def _dashboard_index_matches_manifest(index_path: Path) -> bool:
-    manifest_export_id = _dashboard_graph_manifest_export_id()
-    if manifest_export_id is None:
-        return False
-    meta = _dashboard_index_meta(index_path)
-    if meta is None:
-        return False
-    return meta.get("export_id") == manifest_export_id
+    return _graph_service.dashboard_index_matches_manifest(index_path, _wiki_dir())
 
 
 def _dashboard_graph_has_runtime_overlays() -> bool:
