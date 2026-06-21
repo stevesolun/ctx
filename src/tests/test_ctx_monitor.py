@@ -32,6 +32,7 @@ from ctx.monitor.pages import skills as skills_page
 from ctx.monitor.pages import skillspector as skillspector_page
 from ctx.monitor.pages import wiki as wiki_page
 from ctx.monitor import routes as monitor_routes
+from ctx.monitor.services import config as config_service
 from ctx.core.wiki import wiki_queue
 
 
@@ -4755,6 +4756,14 @@ def test_save_config_updates_casts_values_and_blank_removes_override(
     assert raw["skill_transformer"]["line_threshold"] == 240
     assert raw["intake"]["enabled"] is False
     assert raw["graph"]["edge_weights"]["semantic"] == 0.65
+
+    direct = config_service.save_config_updates(
+        {"skill_transformer.line_threshold": "260"},
+        config_path,
+    )
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    assert direct["ok"] is True
+    assert raw["skill_transformer"]["line_threshold"] == 260
 
 
 def test_render_config_posts_only_dirty_fields_and_can_clear_overrides(
