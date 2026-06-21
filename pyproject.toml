@@ -225,6 +225,7 @@ packages = [
     "ctx.adapters.generic.tools",
     "ctx.cli",
     "ctx.monitor",
+    "ctx.monitor.api",
     "ctx.monitor.pages",
     "ctx.monitor.services",
     "ctx.mcp_server",

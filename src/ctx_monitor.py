@@ -87,6 +87,7 @@ from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
 from ctx.monitor.layout import layout as _layout
 from ctx.monitor.layout import monitor_asset_text as _monitor_asset_text
 from ctx.monitor.layout import monitor_inline_script as _monitor_inline_script
+from ctx.monitor.api import readonly as _readonly_api
 from ctx.monitor import routes as _monitor_routes
 from ctx.monitor import state as _monitor_state
 from ctx.monitor.pages import activity as _activity_page
@@ -4165,7 +4166,38 @@ def _render_logs() -> str:
     )
 
 
-# ─── Mutation endpoints ──────────────────────────────────────────────────────
+# ─── API adapters and mutation endpoints ─────────────────────────────────────
+
+
+def _readonly_api_deps() -> _readonly_api.ReadOnlyApiDeps:
+    return _readonly_api.ReadOnlyApiDeps(
+        summarize_sessions=_summarize_sessions,
+        read_manifest=_read_manifest,
+        status_payload=_status_payload,
+        kpi_summary=_kpi_summary,
+        grade_distribution_payload=_grade_distribution_payload,
+        sidecar_page_payload=_sidecar_page_payload,
+        runtime_lifecycle_summary=_runtime_lifecycle_summary,
+        skillspector_audit_payload=_skillspector_audit_payload,
+        effective_config_payload=_effective_config_payload,
+        search_wiki_entities=lambda query, entity_type, limit: _search_wiki_entities(
+            query,
+            entity_type,
+            limit=limit,
+        ),
+        wiki_entity_detail=_wiki_entity_detail,
+        load_sidecar=lambda slug, entity_type: _load_sidecar(
+            slug,
+            entity_type=entity_type,
+        ),
+        graph_neighborhood=lambda slug, hops, limit, entity_type: _graph_neighborhood(
+            slug,
+            hops=hops,
+            limit=limit,
+            entity_type=entity_type,
+        ),
+        normalize_dashboard_entity_type=_normalize_dashboard_entity_type,
+    )
 
 
 def _is_safe_slug(slug: str) -> bool:
@@ -4363,83 +4395,23 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             self._send_html(_render_runtime_lifecycle())
         elif name == "events":
             self._send_html(_render_events())
-        elif name == "api_sessions":
-            self._send_json(_summarize_sessions())
-        elif name == "api_manifest":
-            self._send_json(_read_manifest())
-        elif name == "api_status":
-            self._send_json(_status_payload())
-        elif name == "api_kpi":
-            summary = _kpi_summary()
-            self._send_json(summary.to_dict() if summary is not None else {
-                "total": 0, "detail": "no sidecars yet",
-            })
-        elif name == "api_grades":
-            self._send_json(_grade_distribution_payload())
-        elif name == "api_sidecars":
-            self._send_json(_sidecar_page_payload(qs))
-        elif name == "api_runtime":
-            self._send_json(_runtime_lifecycle_summary())
-        elif name == "api_skillspector":
-            self._send_json(_skillspector_audit_payload(qs))
-        elif name == "api_config":
-            self._send_json(_effective_config_payload())
-        elif name == "api_entities_search":
-            try:
-                limit = max(1, min(int(qs.get("limit", 80)), 200))
-                results = _search_wiki_entities(
-                    qs.get("q", ""),
-                    qs.get("type") or None,
-                    limit=limit,
-                )
-            except ValueError as exc:
-                self._send_json_status(400, {"detail": str(exc)})
-                return
-            self._send_json({"results": results, "total": len(results)})
-        elif name == "api_entity":
-            slug = params["slug"]
-            try:
-                detail = _wiki_entity_detail(slug, qs.get("type"))
-            except ValueError as exc:
-                self._send_json_status(400, {"detail": str(exc)})
-                return
-            if detail is None:
-                self._send_json_status(404, {"detail": f"no wiki entity for {slug}"})
-            else:
-                self._send_json(detail)
-        elif name == "api_skill":
-            slug = params["slug"]
-            sidecar = _load_sidecar(slug, entity_type=qs.get("type"))
-            if sidecar is None:
-                self._send_404(f"no sidecar for {slug}")
-            else:
-                self._send_json(sidecar)
-        elif name == "api_graph":
-            slug = params["slug"]
-            requested_type = qs.get("type")
-            graph_entity_type = _normalize_dashboard_entity_type(requested_type)
-            if requested_type is not None and graph_entity_type is None:
-                self._send_json_status(
-                    400,
-                    {"detail": f"unsupported entity_type: {requested_type!r}"},
-                )
-                return
-            try:
-                hops = max(1, min(int(qs.get("hops", 1)), 3))
-                limit = max(5, min(int(qs.get("limit", 40)), 150))
-            except ValueError:
-                self._send_json_status(
-                    400,
-                    {"detail": "hops and limit must be integers"},
-                )
-                return
-            self._send_json(_graph_neighborhood(
-                slug, hops=hops, limit=limit, entity_type=graph_entity_type,
-            ))
         elif name == "api_events_stream":
             self._stream_audit_log()
         else:
-            self._send_404(name)
+            api_response = _readonly_api.handle_readonly_route(
+                name,
+                params,
+                qs,
+                _readonly_api_deps(),
+            )
+            if api_response is None:
+                self._send_404(name)
+            elif api_response.not_found_detail is not None:
+                self._send_404(api_response.not_found_detail)
+            elif api_response.status == 200:
+                self._send_json(api_response.payload)
+            else:
+                self._send_json_status(api_response.status, api_response.payload)
 
     def do_GET(self) -> None:  # noqa: N802 — stdlib signature
         target = _monitor_routes.parse_request_target(self.path)

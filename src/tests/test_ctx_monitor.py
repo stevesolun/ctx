@@ -31,6 +31,7 @@ from ctx.monitor.pages import manage as manage_page
 from ctx.monitor.pages import skills as skills_page
 from ctx.monitor.pages import skillspector as skillspector_page
 from ctx.monitor.pages import wiki as wiki_page
+from ctx.monitor.api import readonly as readonly_api
 from ctx.monitor import routes as monitor_routes
 from ctx.monitor.services import config as config_service
 from ctx.monitor.services import graph as graph_service
@@ -3522,6 +3523,32 @@ def test_sidecars_api_applies_route_filters_and_limit_bounds(
         "raw_score": 0.95,
         "subject_type": "agent",
     })
+
+    direct = readonly_api.handle_readonly_route(
+        "api_sidecars",
+        {},
+        {"q": "review", "type": "agent", "grade": "A", "hide_floor": "1", "limit": "1"},
+        readonly_api.ReadOnlyApiDeps(
+            summarize_sessions=lambda: {},
+            read_manifest=lambda: {},
+            status_payload=lambda: {},
+            kpi_summary=lambda: None,
+            grade_distribution_payload=lambda: {},
+            sidecar_page_payload=cm._sidecar_page_payload,
+            runtime_lifecycle_summary=lambda: {},
+            skillspector_audit_payload=lambda _qs: {},
+            effective_config_payload=lambda: {},
+            search_wiki_entities=lambda _q, _type, _limit: [],
+            wiki_entity_detail=lambda _slug, _type: None,
+            load_sidecar=lambda _slug, _type: None,
+            graph_neighborhood=lambda _slug, _hops, _limit, _type: {},
+            normalize_dashboard_entity_type=lambda raw: raw,
+        ),
+    )
+    assert direct is not None
+    assert direct.status == 200
+    assert direct.payload["limit"] == 1
+    assert [item["slug"] for item in direct.payload["items"]] == ["review-agent-a"]
 
     server, thread, port = _serve_monitor(monkeypatch)
     try:
