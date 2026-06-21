@@ -105,6 +105,7 @@ from ctx.monitor.server import MonitorServer as _MonitorServer
 from ctx.monitor.server import make_monitor_server as _make_server
 from ctx.monitor.server import server_shutdown_requested as _server_shutdown_requested
 from ctx.monitor.services import config as _config_service
+from ctx.monitor.services import sidecars as _sidecar_service
 from ctx.utils._file_lock import file_lock
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 from ctx.utils._fs_utils import safe_atomic_write_text as _safe_atomic_write_text
@@ -118,10 +119,6 @@ _GRAPH_CACHE_VALUE: Any | None = None
 _PACKAGED_GRAPH_EXPORT_ID_CACHE: str | None | bool = None
 _OVERLAY_INDEX_COVERAGE_CACHE_KEY: tuple[Any, ...] | None = None
 _OVERLAY_INDEX_COVERAGE_CACHE_VALUE: bool | None = None
-_SIDECAR_INDEX_CACHE_KEY: tuple[tuple[Path, float, int], ...] | None = None
-_SIDECAR_INDEX_CACHE_VALUE: dict[tuple[str, str], dict] | None = None
-_SIDECAR_FILTER_CACHE_SIGNATURE: tuple[Any, ...] | None = None
-_SIDECAR_FILTER_CACHE_VALUE: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
 _KPI_SUMMARY_CACHE_KEY: tuple[Any, ...] | None = None
 _KPI_SUMMARY_CACHE_VALUE: Any | None = None
 _KPI_SUMMARY_CACHE_AT = 0.0
@@ -1741,119 +1738,35 @@ def _runtime_lifecycle_summary(limit: int = 200) -> dict[str, Any]:
 
 
 def _sidecar_entity_type(sidecar: dict, fallback: str = "skill") -> str:
-    raw = str(
-        sidecar.get("entity_type")
-        or sidecar.get("subject_type")
-        or sidecar.get("type")
-        or fallback
-    )
-    return {
-        "skills": "skill",
-        "skill": "skill",
-        "agents": "agent",
-        "agent": "agent",
-        "mcp": "mcp-server",
-        "mcp-server": "mcp-server",
-        "mcp-servers": "mcp-server",
-        "harness": "harness",
-        "harnesses": "harness",
-    }.get(raw, raw)
+    return _sidecar_service.sidecar_entity_type(sidecar, fallback)
 
 
 def _sidecar_fallback_type(path: Path) -> str:
-    return "mcp-server" if path.parent.name == "mcp" else "skill"
+    return _sidecar_service.sidecar_fallback_type(path)
 
 
 def _read_sidecar_file(path: Path) -> dict | None:
-    try:
-        sidecar = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(sidecar, dict):
-        return None
-    etype = _sidecar_entity_type(sidecar, _sidecar_fallback_type(path))
-    sidecar.setdefault("slug", path.stem)
-    sidecar["subject_type"] = etype
-    return sidecar
+    return _sidecar_service.read_sidecar_file(path)
 
 
 def _load_sidecar(slug: str, entity_type: str | None = None) -> dict | None:
-    if not _is_safe_slug(slug):
-        return None
-    paths = [
-        _sidecar_dir() / f"{slug}.json",
-        _sidecar_dir() / "mcp" / f"{slug}.json",
-    ]
-    if entity_type is not None:
-        suffixes = [entity_type]
-        if entity_type == "mcp-server":
-            suffixes.append("mcp")
-        for suffix in suffixes:
-            paths.append(_sidecar_dir() / f"{slug}-{suffix}.json")
-
-    for path in paths:
-        if not path.exists():
-            continue
-        sidecar = _read_sidecar_file(path)
-        if sidecar is None:
-            continue
-        if entity_type is None or _sidecar_entity_type(sidecar) == entity_type:
-            return sidecar
-    if entity_type is not None and _SIDECAR_INDEX_CACHE_VALUE is not None:
-        return _sidecar_index().get((slug, entity_type))
-    return None
+    return _sidecar_service.load_sidecar(_sidecar_dir(), slug, entity_type=entity_type)
 
 
 def _sidecar_files() -> list[Path]:
-    files: list[Path] = []
-    for root in (_sidecar_dir(), _sidecar_dir() / "mcp"):
-        if not root.is_dir():
-            continue
-        files.extend(
-            p for p in sorted(root.glob("*.json"))
-            if not p.name.startswith(".")
-            and not p.name.endswith(".lifecycle.json")
-        )
-    return files
+    return _sidecar_service.sidecar_files(_sidecar_dir())
 
 
 def _sidecar_index_cache_key() -> tuple[tuple[Path, float, int], ...]:
-    keys: list[tuple[Path, float, int]] = []
-    for path in _sidecar_files():
-        stat = path.stat()
-        keys.append((path.resolve(), stat.st_mtime, stat.st_size))
-    if keys:
-        return tuple(keys)
-    for root in (_sidecar_dir(), _sidecar_dir() / "mcp"):
-        if not root.is_dir():
-            continue
-        stat = root.stat()
-        keys.append((root.resolve(), stat.st_mtime, stat.st_size))
-    return tuple(keys)
+    return _sidecar_service.sidecar_index_cache_key(_sidecar_dir())
 
 
 def _sidecar_index() -> dict[tuple[str, str], dict]:
-    global _SIDECAR_INDEX_CACHE_KEY, _SIDECAR_INDEX_CACHE_VALUE
-
-    cache_key = _sidecar_index_cache_key()
-    if _SIDECAR_INDEX_CACHE_KEY == cache_key and _SIDECAR_INDEX_CACHE_VALUE is not None:
-        return _SIDECAR_INDEX_CACHE_VALUE
-
-    index: dict[tuple[str, str], dict] = {}
-    for path in _sidecar_files():
-        sidecar = _read_sidecar_file(path)
-        if sidecar is None:
-            continue
-        slug = str(sidecar.get("slug") or path.stem)
-        entity_type = _sidecar_entity_type(sidecar)
-        index.setdefault((slug, entity_type), sidecar)
-    _SIDECAR_INDEX_CACHE_KEY = cache_key
-    _SIDECAR_INDEX_CACHE_VALUE = index
-    return index
+    return _sidecar_service.sidecar_index(_sidecar_dir())
 
 
 def _all_sidecars() -> list[dict]:
-    return list(_sidecar_index().values())
+    return _sidecar_service.all_sidecars(_sidecar_dir())
 
 
 def _skills_page_int(
@@ -1863,74 +1776,28 @@ def _skills_page_int(
     minimum: int = 1,
     maximum: int | None = None,
 ) -> int:
-    try:
-        parsed = int(str(value or "").strip())
-    except ValueError:
-        parsed = default
-    parsed = max(minimum, parsed)
-    if maximum is not None:
-        parsed = min(maximum, parsed)
-    return parsed
-
-
-def _skills_query_values(raw: str | None, allowed: set[str]) -> set[str]:
-    values = {
-        item.strip()
-        for item in str(raw or "").split(",")
-        if item.strip()
-    }
-    return {item for item in values if item in allowed}
-
-
-def _sidecar_sort_key(sidecar: dict) -> tuple[str, float, str]:
-    return (
-        str(sidecar.get("grade") or "F"),
-        -float(sidecar.get("raw_score") or sidecar.get("score") or 0.0),
-        str(sidecar.get("slug") or ""),
+    return _sidecar_service.skills_page_int(
+        value,
+        default=default,
+        minimum=minimum,
+        maximum=maximum,
     )
 
 
+def _skills_query_values(raw: str | None, allowed: set[str]) -> set[str]:
+    return _sidecar_service.skills_query_values(raw, allowed)
+
+
+def _sidecar_sort_key(sidecar: dict) -> tuple[str, float, str]:
+    return _sidecar_service.sidecar_sort_key(sidecar)
+
+
 def _sidecar_card_payload(sidecar: dict) -> dict[str, Any]:
-    slug = str(sidecar.get("slug") or "")
-    entity_type = _sidecar_entity_type(sidecar)
-    return {
-        "slug": slug,
-        "grade": str(sidecar.get("grade") or "F"),
-        "type": entity_type,
-        "hard_floor": str(sidecar.get("hard_floor") or ""),
-        "raw_score": float(sidecar.get("raw_score") or sidecar.get("score") or 0.0),
-        "sidecar_href": f"/skill/{quote(slug)}?type={quote(entity_type)}",
-        "wiki_href": f"/wiki/{quote(slug)}?type={quote(entity_type)}",
-        "graph_href": f"/graph?slug={quote(slug)}&type={quote(entity_type)}",
-    }
+    return _sidecar_service.sidecar_card_payload(sidecar)
 
 
 def _sidecar_filter_signature(files: list[Path]) -> tuple[Any, ...]:
-    signature: list[tuple[str, int, int]] = []
-    for path in files:
-        try:
-            stat = path.stat()
-        except OSError:
-            continue
-        signature.append((
-            str(path.resolve()),
-            int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
-            int(stat.st_size),
-        ))
-    if signature:
-        return tuple(signature)
-    roots = (_sidecar_dir(), _sidecar_dir() / "mcp")
-    for root in roots:
-        if not root.is_dir():
-            signature.append((str(root.resolve()), 0, 0))
-            continue
-        stat = root.stat()
-        signature.append((
-            str(root.resolve()),
-            int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
-            0,
-        ))
-    return tuple(signature)
+    return _sidecar_service.sidecar_filter_signature(_sidecar_dir(), files)
 
 
 def _sidecar_candidate_files(
@@ -1939,18 +1806,7 @@ def _sidecar_candidate_files(
     q: str,
     types: set[str],
 ) -> list[Path]:
-    q_lower = q.lower()
-    candidates = [
-        path for path in files
-        if not q_lower or q_lower in path.stem.lower()
-    ]
-    if not types:
-        return candidates
-    if types == {"mcp-server"}:
-        return [path for path in candidates if path.parent.name == "mcp"]
-    if "mcp-server" not in types:
-        return [path for path in candidates if path.parent.name != "mcp"]
-    return candidates
+    return _sidecar_service.sidecar_candidate_files(files, q=q, types=types)
 
 
 def _filtered_sidecar_records(
@@ -1961,42 +1817,14 @@ def _filtered_sidecar_records(
     grades: set[str],
     hide_floor: bool,
 ) -> list[dict[str, Any]]:
-    """Return cached filtered sidecar card records for /skills search."""
-    global _SIDECAR_FILTER_CACHE_SIGNATURE, _SIDECAR_FILTER_CACHE_VALUE
-
-    signature = _sidecar_filter_signature(files)
-    if _SIDECAR_FILTER_CACHE_SIGNATURE != signature:
-        _SIDECAR_FILTER_CACHE_SIGNATURE = signature
-        _SIDECAR_FILTER_CACHE_VALUE = {}
-    cache_key = (
-        q.lower(),
-        tuple(sorted(types)),
-        tuple(sorted(grades)),
-        hide_floor,
+    return _sidecar_service.filtered_sidecar_records(
+        _sidecar_dir(),
+        files,
+        q=q,
+        types=types,
+        grades=grades,
+        hide_floor=hide_floor,
     )
-    cached = _SIDECAR_FILTER_CACHE_VALUE.get(cache_key)
-    if cached is not None:
-        return cached
-
-    records: list[dict[str, Any]] = []
-    for path in _sidecar_candidate_files(files, q=q, types=types):
-        sidecar = _read_sidecar_file(path)
-        if sidecar is None:
-            continue
-        if not _sidecar_matches_filters(
-            sidecar,
-            q=q,
-            types=types,
-            grades=grades,
-            hide_floor=hide_floor,
-        ):
-            continue
-        records.append(_sidecar_card_payload(sidecar))
-    records.sort(key=_sidecar_sort_key)
-    if len(_SIDECAR_FILTER_CACHE_VALUE) >= 32:
-        _SIDECAR_FILTER_CACHE_VALUE.clear()
-    _SIDECAR_FILTER_CACHE_VALUE[cache_key] = records
-    return records
 
 
 def _sidecar_matches_filters(
@@ -2007,86 +1835,23 @@ def _sidecar_matches_filters(
     grades: set[str],
     hide_floor: bool,
 ) -> bool:
-    entity_type = _sidecar_entity_type(sidecar)
-    grade = str(sidecar.get("grade") or "F")
-    floor = str(sidecar.get("hard_floor") or "")
-    if types and entity_type not in types:
-        return False
-    if grades and grade not in grades:
-        return False
-    if hide_floor and floor:
-        return False
-    if q:
-        return q.lower() in str(sidecar.get("slug") or "").lower()
-    return True
+    return _sidecar_service.sidecar_matches_filters(
+        sidecar,
+        q=q,
+        types=types,
+        grades=grades,
+        hide_floor=hide_floor,
+    )
 
 
 def _sidecar_page_payload(qs: dict[str, str] | None = None) -> dict[str, Any]:
-    """Return a paginated sidecar payload for /skills and its JSON API."""
-    qs = qs or {}
-    page = _skills_page_int(qs.get("page"), default=1)
-    limit = _skills_page_int(
-        qs.get("limit"),
-        default=_SKILLS_PAGE_DEFAULT_LIMIT,
-        maximum=_SKILLS_PAGE_MAX_LIMIT,
+    return _sidecar_service.sidecar_page_payload(
+        _sidecar_dir(),
+        qs,
+        entity_types=_DASHBOARD_ENTITY_TYPES,
+        default_limit=_SKILLS_PAGE_DEFAULT_LIMIT,
+        max_limit=_SKILLS_PAGE_MAX_LIMIT,
     )
-    q = str(qs.get("q") or "").strip()
-    types = _skills_query_values(qs.get("type"), set(_DASHBOARD_ENTITY_TYPES))
-    grades = _skills_query_values(qs.get("grade"), {"A", "B", "C", "D", "F"})
-    hide_floor = str(qs.get("hide_floor") or "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
-
-    files = _sidecar_files()
-    catalog_total = len(files)
-    has_filters = bool(q or types or grades or hide_floor)
-    if has_filters:
-        sidecars = _filtered_sidecar_records(
-            files,
-            q=q,
-            types=types,
-            grades=grades,
-            hide_floor=hide_floor,
-        )
-        total = len(sidecars)
-        start = (page - 1) * limit
-        page_sidecars = sidecars[start:start + limit]
-    else:
-        total = catalog_total
-        start = (page - 1) * limit
-        selected_files = files[start:start + limit]
-        page_sidecars = [
-            sidecar
-            for path in selected_files
-            if (sidecar := _read_sidecar_file(path)) is not None
-        ]
-        if catalog_total <= limit:
-            page_sidecars.sort(key=_sidecar_sort_key)
-
-    pages = max(1, math.ceil(total / limit)) if total else 1
-    if page > pages:
-        page = pages
-        return _sidecar_page_payload({
-            **qs,
-            "page": str(page),
-            "limit": str(limit),
-        })
-
-    return {
-        "items": [_sidecar_card_payload(sidecar) for sidecar in page_sidecars],
-        "total": total,
-        "catalog_total": catalog_total,
-        "page": page,
-        "limit": limit,
-        "pages": pages,
-        "has_next": page < pages,
-        "has_prev": page > 1,
-        "filtered": has_filters,
-        "q": q,
-        "types": sorted(types),
-        "grades": sorted(grades),
-        "hide_floor": hide_floor,
-    }
 
 
 # ─── Aggregations ────────────────────────────────────────────────────────────
@@ -2204,17 +1969,11 @@ def _summarize_sessions() -> list[dict]:
 
 
 def _grade_distribution() -> dict[str, int]:
-    dist = {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
-    for s in _all_sidecars():
-        g = s.get("grade")
-        if g in dist:
-            dist[g] += 1
-    return dist
+    return _sidecar_service.grade_distribution(_sidecar_dir())
 
 
 def _grade_distribution_payload() -> dict[str, Any]:
-    grades = _grade_distribution()
-    return {"grades": grades, "total": sum(grades.values())}
+    return _sidecar_service.grade_distribution_payload(_sidecar_dir())
 
 
 def _session_detail(session_id: str) -> dict:

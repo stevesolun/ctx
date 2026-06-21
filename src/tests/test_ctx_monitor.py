@@ -33,6 +33,7 @@ from ctx.monitor.pages import skillspector as skillspector_page
 from ctx.monitor.pages import wiki as wiki_page
 from ctx.monitor import routes as monitor_routes
 from ctx.monitor.services import config as config_service
+from ctx.monitor.services import sidecars as sidecar_service
 from ctx.core.wiki import wiki_queue
 
 
@@ -43,10 +44,7 @@ def fake_claude(tmp_path: Path, monkeypatch) -> Path:
     (claude / "skill-quality").mkdir(parents=True)
     monkeypatch.setattr(cm, "_claude_dir", lambda: claude)
     monkeypatch.setattr(cm, "_dashboard_graph_index_archives", lambda: [])
-    monkeypatch.setattr(cm, "_SIDECAR_INDEX_CACHE_KEY", None)
-    monkeypatch.setattr(cm, "_SIDECAR_INDEX_CACHE_VALUE", None)
-    monkeypatch.setattr(cm, "_SIDECAR_FILTER_CACHE_SIGNATURE", None)
-    monkeypatch.setattr(cm, "_SIDECAR_FILTER_CACHE_VALUE", {})
+    sidecar_service.reset_caches()
     monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_KEY", None)
     monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_VALUE", None)
     monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_AT", 0.0)
@@ -965,9 +963,11 @@ def test_load_sidecar_typed_miss_does_not_build_global_index(
 ) -> None:
     _write_sidecar(fake_claude, "unrelated", {"slug": "unrelated"})
     monkeypatch.setattr(
-        cm,
-        "_sidecar_index",
-        lambda: (_ for _ in ()).throw(AssertionError("cold full sidecar scan")),
+        sidecar_service,
+        "sidecar_index",
+        lambda *args, **kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("cold full sidecar scan")),
     )
 
     assert cm._load_sidecar("missing", entity_type="skill") is None
@@ -2057,8 +2057,7 @@ def test_graph_neighborhood_uses_direct_sidecar_scores_without_global_index(
 ) -> None:
     import networkx as nx
 
-    monkeypatch.setattr(cm, "_SIDECAR_INDEX_CACHE_KEY", None)
-    monkeypatch.setattr(cm, "_SIDECAR_INDEX_CACHE_VALUE", None)
+    sidecar_service.reset_caches()
     sidecar_dir = fake_claude / "skill-quality"
     for i in range(6):
         (sidecar_dir / f"node-{i}.json").write_text(
@@ -2078,10 +2077,10 @@ def test_graph_neighborhood_uses_direct_sidecar_scores_without_global_index(
         G.add_edge("skill:center", f"skill:node-{i}", weight=1.0)
     monkeypatch.setattr(cm, "_load_dashboard_graph", lambda: G)
 
-    def fail_index() -> dict:
+    def fail_index(*args: object, **kwargs: object) -> dict:
         raise AssertionError("graph rendering should not build the global sidecar index")
 
-    monkeypatch.setattr(cm, "_sidecar_index", fail_index)
+    monkeypatch.setattr(sidecar_service, "sidecar_index", fail_index)
 
     result = cm._graph_neighborhood("center", entity_type="skill")
 
@@ -3316,7 +3315,7 @@ def test_sidecar_page_payload_reuses_cached_search_records(
             "raw_score": 0.9,
             "subject_type": "skill",
         })
-    original_read = cm._read_sidecar_file
+    original_read = sidecar_service.read_sidecar_file
     reads = 0
 
     def counting_read(path: Path) -> dict | None:
@@ -3324,7 +3323,7 @@ def test_sidecar_page_payload_reuses_cached_search_records(
         reads += 1
         return original_read(path)
 
-    monkeypatch.setattr(cm, "_read_sidecar_file", counting_read)
+    monkeypatch.setattr(sidecar_service, "read_sidecar_file", counting_read)
 
     first = cm._sidecar_page_payload({"q": "review"})
     reads_after_first_search = reads
@@ -4077,8 +4076,7 @@ def test_entity_delete_keeps_page_when_live_unload_fails(
 
 
 def test_sidecar_cache_invalidates_on_file_rewrite(fake_claude: Path) -> None:
-    cm._SIDECAR_INDEX_CACHE_KEY = None
-    cm._SIDECAR_INDEX_CACHE_VALUE = None
+    sidecar_service.reset_caches()
     path = fake_claude / "skill-quality" / "alpha.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
