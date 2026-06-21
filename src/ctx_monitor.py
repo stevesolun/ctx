@@ -68,10 +68,9 @@ import secrets
 import sqlite3
 import socket
 import sys
-import time
 from collections import defaultdict
+from collections.abc import Mapping
 from http.cookies import CookieError, SimpleCookie
-from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -99,9 +98,10 @@ from ctx.monitor.pages import ops as _ops_page
 from ctx.monitor.pages import skills as _skills_page
 from ctx.monitor.pages import skillspector as _skillspector_page
 from ctx.monitor.pages import wiki as _wiki_page
+from ctx.monitor.server import MonitorHandlerDeps as _MonitorHandlerDeps
 from ctx.monitor.server import MonitorServer as _MonitorServer
+from ctx.monitor.server import build_monitor_handler as _build_monitor_handler
 from ctx.monitor.server import make_monitor_server as _make_server
-from ctx.monitor.server import server_shutdown_requested as _server_shutdown_requested
 from ctx.monitor.services import cache as _cache_service
 from ctx.monitor.services import config as _config_service
 from ctx.monitor.services import graph as _graph_service
@@ -2712,368 +2712,113 @@ def _perform_unload(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
 # ─── HTTP handler ────────────────────────────────────────────────────────────
 
 
-class _MonitorHandler(BaseHTTPRequestHandler):
-    # Silence the per-request access log spam. Users running
-    # ctx-monitor get a clean stdout; errors still surface via
-    # log_error() below.
-    def log_message(self, fmt: str, *args: Any) -> None:
-        return
-
-    # CSRF defense. Dashboard mutation endpoints (/api/load, /api/unload)
-    # require same-origin POSTs plus a per-process token injected into the
-    # served dashboard page.
-    def _same_origin(self) -> bool:
-        request_host = _request_host_name(self.headers.get("Host", ""))
-        if not _host_allows_mutations(request_host):
-            return False
-        origin = self.headers.get("Origin") or ""
-        if origin:
-            return _origin_host_name(origin) == request_host
-        # No Origin header (curl, direct tool calls) is acceptable only
-        # when the mutation token below is also present.
-        return True
-
-    def _mutations_enabled(self) -> bool:
-        return bool(
-            getattr(self.server, "_ctx_mutations_enabled", _MONITOR_MUTATIONS_ENABLED),
+def _handle_monitor_get_route(
+    handler: Any,
+    route: _monitor_routes.RouteMatch,
+    qs: dict[str, str],
+) -> None:
+    name = route.name
+    params = route.params
+    if name == "home":
+        handler._send_html(_render_home())
+    elif name == "sessions_index":
+        handler._send_html(_render_sessions_index())
+    elif name == "session_detail":
+        handler._send_html(_render_session_detail(params["session_id"]))
+    elif name == "skills":
+        handler._send_html(_render_skills(qs))
+    elif name == "skillspector":
+        handler._send_html(_render_skillspector(qs))
+    elif name == "skill_detail":
+        handler._send_html(_render_skill_detail(params["slug"], qs.get("type")))
+    elif name == "loaded":
+        handler._send_html(_render_loaded(handler._mutations_enabled()))
+    elif name == "logs":
+        handler._send_html(_render_logs())
+    elif name == "graph":
+        handler._send_html(_render_graph(qs.get("slug"), qs.get("type")))
+    elif name == "manage":
+        handler._send_html(_render_manage(handler._mutations_enabled()))
+    elif name == "harness":
+        handler._send_html(_render_harness_wizard())
+    elif name == "docs":
+        handler._send_html(_render_docs())
+    elif name == "config":
+        handler._send_html(_render_config())
+    elif name == "status":
+        handler._send_html(_render_status())
+    elif name == "wiki_index":
+        handler._send_html(_render_wiki_index(qs.get("type"), qs.get("q", "")))
+    elif name == "wiki_entity":
+        handler._send_html(
+            _render_wiki_entity(
+                params["slug"],
+                qs.get("type"),
+                mutations_enabled=handler._mutations_enabled(),
+            ),
         )
-
-    def _mutation_authorized(self) -> bool:
-        token = self.headers.get("X-CTX-Monitor-Token") or ""
-        return (
-            self._mutations_enabled()
-            and bool(_MONITOR_TOKEN)
-            and secrets.compare_digest(token, _MONITOR_TOKEN)
+    elif name == "kpi":
+        handler._send_html(_render_kpi())
+    elif name == "runtime":
+        handler._send_html(_render_runtime_lifecycle())
+    elif name == "events":
+        handler._send_html(_render_events())
+    elif name == "api_events_stream":
+        handler._stream_audit_log()
+    else:
+        api_response = _readonly_api.handle_readonly_route(
+            name,
+            params,
+            qs,
+            _readonly_api_deps(),
         )
-
-    def _api_reads_enabled(self) -> bool:
-        return self._mutations_enabled()
-
-    def _read_authorized(self, qs: dict[str, str]) -> bool:
-        request_host = _request_host_name(self.headers.get("Host", ""))
-        if self._mutations_enabled():
-            return _host_allows_mutations(request_host)
-        token = (
-            self.headers.get("X-CTX-Monitor-Token")
-            or qs.get("token", "")
-            or _read_token_cookie(self.headers.get("Cookie", ""))
-        )
-        return bool(_MONITOR_TOKEN) and secrets.compare_digest(token, _MONITOR_TOKEN)
-
-    def _send_security_headers(self, *, html_response: bool = False) -> None:
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("X-Frame-Options", "DENY")
-        if getattr(self, "_ctx_set_read_cookie", False):
-            self.send_header(
-                "Set-Cookie",
-                f"{_READ_TOKEN_COOKIE}={_MONITOR_TOKEN}; Path=/; "
-                "HttpOnly; SameSite=Strict",
-            )
-        if html_response:
-            self.send_header(
-                "Content-Security-Policy",
-                "default-src 'self'; script-src 'self' 'unsafe-inline'; "
-                "style-src 'self' 'unsafe-inline'; connect-src 'self'; "
-                "object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
-            )
-
-    def _content_length(self) -> int | None:
-        raw = self.headers.get("Content-Length")
-        if raw is None:
-            return 0
-        try:
-            length = int(raw)
-        except ValueError:
-            self._send_json_status(400, {"detail": "invalid Content-Length"})
-            return None
-        if length < 0:
-            self._send_json_status(400, {"detail": "invalid Content-Length"})
-            return None
-        if length > _MAX_POST_BODY_BYTES:
-            self._send_json_status(413, {"detail": "JSON body too large"})
-            return None
-        return length
-
-    def _read_json_body(self) -> dict[str, Any] | None:
-        content_type = self.headers.get("Content-Type", "").split(";", 1)[0]
-        if content_type.lower() != "application/json":
-            self._send_json_status(415, {"detail": "JSON body required"})
-            return None
-        length = self._content_length()
-        if length is None:
-            return None
-        raw = self.rfile.read(length) if length else b""
-        try:
-            body = json.loads(raw.decode("utf-8")) if raw else {}
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            self._send_json_status(400, {"detail": "invalid JSON body"})
-            return None
-        if not isinstance(body, dict):
-            self._send_json_status(400, {"detail": "JSON object body required"})
-            return None
-        return body
-
-    def _discard_small_body(self) -> None:
-        raw = self.headers.get("Content-Length")
-        if raw is None:
-            return
-        try:
-            length = int(raw)
-        except ValueError:
-            return
-        if 0 < length <= _MAX_POST_BODY_BYTES:
-            self.rfile.read(length)
-
-    def _handle_get_route(
-        self,
-        route: _monitor_routes.RouteMatch,
-        qs: dict[str, str],
-    ) -> None:
-        name = route.name
-        params = route.params
-        if name == "home":
-            self._send_html(_render_home())
-        elif name == "sessions_index":
-            self._send_html(_render_sessions_index())
-        elif name == "session_detail":
-            self._send_html(_render_session_detail(params["session_id"]))
-        elif name == "skills":
-            self._send_html(_render_skills(qs))
-        elif name == "skillspector":
-            self._send_html(_render_skillspector(qs))
-        elif name == "skill_detail":
-            self._send_html(_render_skill_detail(params["slug"], qs.get("type")))
-        elif name == "loaded":
-            self._send_html(_render_loaded(self._mutations_enabled()))
-        elif name == "logs":
-            self._send_html(_render_logs())
-        elif name == "graph":
-            self._send_html(_render_graph(qs.get("slug"), qs.get("type")))
-        elif name == "manage":
-            self._send_html(_render_manage(self._mutations_enabled()))
-        elif name == "harness":
-            self._send_html(_render_harness_wizard())
-        elif name == "docs":
-            self._send_html(_render_docs())
-        elif name == "config":
-            self._send_html(_render_config())
-        elif name == "status":
-            self._send_html(_render_status())
-        elif name == "wiki_index":
-            self._send_html(_render_wiki_index(qs.get("type"), qs.get("q", "")))
-        elif name == "wiki_entity":
-            self._send_html(
-                _render_wiki_entity(
-                    params["slug"],
-                    qs.get("type"),
-                    mutations_enabled=self._mutations_enabled(),
-                ),
-            )
-        elif name == "kpi":
-            self._send_html(_render_kpi())
-        elif name == "runtime":
-            self._send_html(_render_runtime_lifecycle())
-        elif name == "events":
-            self._send_html(_render_events())
-        elif name == "api_events_stream":
-            self._stream_audit_log()
+        if api_response is None:
+            handler._send_404(name)
+        elif api_response.not_found_detail is not None:
+            handler._send_404(api_response.not_found_detail)
+        elif api_response.status == 200:
+            handler._send_json(api_response.payload)
         else:
-            api_response = _readonly_api.handle_readonly_route(
-                name,
-                params,
-                qs,
-                _readonly_api_deps(),
-            )
-            if api_response is None:
-                self._send_404(name)
-            elif api_response.not_found_detail is not None:
-                self._send_404(api_response.not_found_detail)
-            elif api_response.status == 200:
-                self._send_json(api_response.payload)
-            else:
-                self._send_json_status(api_response.status, api_response.payload)
-
-    def do_GET(self) -> None:  # noqa: N802 — stdlib signature
-        target = _monitor_routes.parse_request_target(self.path)
-        path = target.path
-        qs = target.query
-        try:
-            self._ctx_set_read_cookie = False
-            read_authorized = getattr(self, "_read_authorized", lambda _qs: True)
-            if not read_authorized(qs):
-                if path.startswith("/api/"):
-                    self._send_json_status(
-                        403,
-                        {"detail": "monitor read token required on non-loopback bind"},
-                    )
-                else:
-                    self._send_html_status(
-                        403,
-                        "<h1>403</h1>"
-                        "<p>monitor read token required on non-loopback bind</p>",
-                    )
-                return
-            query_token = qs.get("token", "")
-            self._ctx_set_read_cookie = (
-                not self._mutations_enabled()
-                and bool(query_token)
-                and bool(_MONITOR_TOKEN)
-                and secrets.compare_digest(query_token, _MONITOR_TOKEN)
-            )
-            route = _monitor_routes.match_get_route(path)
-            if route is None:
-                self._send_404(path)
-                return
-            self._handle_get_route(route, qs)
-        except (BrokenPipeError, ConnectionAbortedError):
-            # Browser disconnected mid-response — benign for a local
-            # dashboard; nothing to do.
-            return
-        except Exception as exc:  # noqa: BLE001 — last-resort handler
-            self._send_500(exc)
-
-    def do_POST(self) -> None:  # noqa: N802 — stdlib signature
-        """Mutation endpoints. Same-origin only; JSON body required."""
-        path = _monitor_routes.parse_request_target(self.path).path
-        try:
-            if not self._mutations_enabled():
-                self._discard_small_body()
-                self._send_json_status(
-                    403, {"detail": "monitor mutations disabled on non-loopback bind"},
-                )
-                return
-            if not self._same_origin():
-                self._discard_small_body()
-                self._send_json_status(
-                    403, {"detail": "cross-origin POST denied"},
-                )
-                return
-            if not self._mutation_authorized():
-                self._discard_small_body()
-                self._send_json_status(
-                    403, {"detail": "monitor token required"},
-                )
-                return
-            body = self._read_json_body()
-            if body is None:
-                return
-
-            route = _monitor_routes.match_post_route(path)
-            if route is None:
-                self._send_404(path)
-                return
-
-            mutation_response = _mutation_api.handle_mutation_route(
-                route.name,
-                body,
-                _mutation_api_deps(),
-            )
-            if mutation_response is None:
-                self._send_404(path)
-            else:
-                self._send_json_status(
-                    mutation_response.status,
-                    mutation_response.payload,
-                )
-        except (BrokenPipeError, ConnectionAbortedError):
-            return
-        except Exception as exc:  # noqa: BLE001
-            self._send_500(exc)
-
-    def _send_json_status(self, status: int, obj: Any) -> None:
-        raw = json.dumps(obj, default=str).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(raw)))
-        self._send_security_headers()
-        self.end_headers()
-        self.wfile.write(raw)
-
-    def _send_html(self, body: str) -> None:
-        raw = body.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(raw)))
-        self._send_security_headers(html_response=True)
-        self.end_headers()
-        self.wfile.write(raw)
-
-    def _send_html_status(self, status: int, body: str) -> None:
-        raw = body.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(raw)))
-        self._send_security_headers(html_response=True)
-        self.end_headers()
-        self.wfile.write(raw)
-
-    def _send_json(self, obj: Any) -> None:
-        raw = json.dumps(obj, default=str).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(raw)))
-        self._send_security_headers()
-        self.end_headers()
-        self.wfile.write(raw)
-
-    def _send_404(self, detail: str) -> None:
-        body = f"<h1>404</h1><p>{html.escape(detail)}</p>".encode()
-        self.send_response(404)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self._send_security_headers(html_response=True)
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_500(self, exc: BaseException) -> None:
-        self.log_error("render error: %s", exc)
-        body = f"<h1>500</h1><pre>{html.escape(repr(exc))}</pre>".encode()
-        self.send_response(500)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self._send_security_headers(html_response=True)
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _stream_audit_log(self) -> None:
-        """Server-sent events: tail the audit log line-by-line."""
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "keep-alive")
-        self._send_security_headers()
-        self.end_headers()
-
-        path = _audit_log_path()
-        position = path.stat().st_size if path.exists() else 0
-        last_heartbeat = time.monotonic()
-        try:
-            while not _server_shutdown_requested(self.server):
-                if path.exists() and path.stat().st_size > position:
-                    with path.open("r", encoding="utf-8") as f:
-                        f.seek(position)
-                        for line in f:
-                            if not line.strip():
-                                continue
-                            self.wfile.write(f"data: {line.rstrip()}\n\n".encode())
-                            self.wfile.flush()
-                        position = f.tell()
-                    last_heartbeat = time.monotonic()
-                elif time.monotonic() - last_heartbeat > 25:
-                    # SSE heartbeat comment — keeps proxies from timing out
-                    # on idle streams. Also detects dead clients (write
-                    # will raise BrokenPipeError).
-                    self.wfile.write(b": heartbeat\n\n")
-                    self.wfile.flush()
-                    last_heartbeat = time.monotonic()
-                time.sleep(0.5)
-        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
-            return
+            handler._send_json_status(api_response.status, api_response.payload)
 
 
-# ─── CLI ─────────────────────────────────────────────────────────────────────
+def _handle_monitor_post_route(
+    handler: Any,
+    route_name: str,
+    body: Mapping[str, Any],
+    path: str,
+) -> None:
+    mutation_response = _mutation_api.handle_mutation_route(
+        route_name,
+        body,
+        _mutation_api_deps(),
+    )
+    if mutation_response is None:
+        handler._send_404(path)
+    else:
+        handler._send_json_status(
+            mutation_response.status,
+            mutation_response.payload,
+        )
 
+
+def _monitor_handler_deps() -> _MonitorHandlerDeps:
+    return _MonitorHandlerDeps(
+        monitor_token=lambda: _MONITOR_TOKEN,
+        mutations_enabled_default=lambda: _MONITOR_MUTATIONS_ENABLED,
+        host_allows_mutations=_host_allows_mutations,
+        request_host_name=_request_host_name,
+        origin_host_name=_origin_host_name,
+        read_token_cookie=_read_token_cookie,
+        read_token_cookie_name=_READ_TOKEN_COOKIE,
+        max_post_body_bytes=_MAX_POST_BODY_BYTES,
+        audit_log_path=_audit_log_path,
+        handle_get_route=_handle_monitor_get_route,
+        handle_post_route=_handle_monitor_post_route,
+    )
+
+
+_MonitorHandler = _build_monitor_handler(_monitor_handler_deps())
 
 def _make_monitor_server(host: str, port: int) -> _MonitorServer:
     global _MONITOR_MUTATIONS_ENABLED

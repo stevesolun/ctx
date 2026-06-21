@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import networkx as nx
 import pytest
@@ -1010,7 +1011,8 @@ class TestMonitorRoutesPreserveEntityType:
         handler._send_500 = lambda exc: sent.setdefault("500", exc)
         handler._api_reads_enabled = lambda: True
         handler._mutations_enabled = lambda: True
-        handler._handle_get_route = _cm._MonitorHandler._handle_get_route.__get__(
+        monitor_handler = cast(Any, _cm._MonitorHandler)
+        handler._handle_get_route = monitor_handler._handle_get_route.__get__(
             handler,
             type(handler),
         )
@@ -1018,7 +1020,7 @@ class TestMonitorRoutesPreserveEntityType:
             handler._send_html = html_fn
         if json_fn is not None:
             handler._send_json = json_fn
-        _cm._MonitorHandler.do_GET(handler)
+        monitor_handler.do_GET(handler)
         return sent
 
     def test_graph_route_passes_type_query(self, monkeypatch):
