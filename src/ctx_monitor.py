@@ -4040,55 +4040,6 @@ def _render_runtime_graph_entity(
     degree = data.get("degree")
     mutations = _MONITOR_MUTATIONS_ENABLED if mutations_enabled is None else mutations_enabled
 
-    tag_html = (
-        "".join(f"<span class='pill'>{html.escape(tag)}</span> " for tag in tags)
-        if tags
-        else "<span class='muted'>no tags in runtime graph</span>"
-    )
-    description_html = (
-        f"<p>{html.escape(description)}</p>"
-        if description
-        else "<p class='muted'>No description is present in the runtime graph metadata.</p>"
-    )
-    quality_summary = (
-        "<div class='card'>"
-        "<strong>Runtime graph entity</strong> "
-        f"<span class='pill entity-type-{html.escape(resolved_type)}'>{html.escape(resolved_type)}</span> "
-        f"<span class='muted'>node <code>{html.escape(node_id)}</code></span>"
-        "<div style='margin-top:0.4rem;'>"
-        "<a href='#subgraph' data-open-entity-tab='subgraph'>graph neighborhood &rarr;</a> &middot; "
-        "<a href='#quality' data-open-entity-tab='quality'>quality drilldown &rarr;</a>"
-        "</div></div>"
-    )
-    overview_html = (
-        "<div class='wiki-entity-grid'>"
-        "<div class='card wiki-body'>"
-        "<h2>Runtime graph entity</h2>"
-        + description_html
-        + "<h3>Tags</h3>"
-        + f"<p>{tag_html}</p>"
-        + "<h3>Full wiki page</h3>"
-        + "<p class='muted'>This entity exists in the installed runtime graph, but its full "
-        "Markdown wiki page is not expanded locally. The graph and recommendation paths still "
-        "work. Install the full wiki when you want the complete body/docs in this dashboard.</p>"
-        + "<pre><code>ctx-init --graph --graph-install-mode full</code></pre>"
-        + "</div>"
-        "<div class='card'><strong>Runtime metadata</strong>"
-        "<table class='frontmatter-table'><tr><th>Field</th><th>Value</th></tr>"
-        + _runtime_graph_metric_row("slug", display_slug)
-        + _runtime_graph_metric_row("type", resolved_type)
-        + _runtime_graph_metric_row("node_id", node_id)
-        + _runtime_graph_metric_row("quality_score", quality_score)
-        + _runtime_graph_metric_row("usage_score", usage_score)
-        + _runtime_graph_metric_row("degree", degree)
-        + "</table></div>"
-        "</div>"
-        + _render_runtime_entity_action(
-            resolved_slug,
-            resolved_type,
-            mutations_enabled=mutations,
-        )
-    )
     quality_html = (
         _render_quality_drilldown(sidecar)
         if isinstance(sidecar, dict)
@@ -4104,21 +4055,33 @@ def _render_runtime_graph_entity(
             + "</table></div>"
         )
     )
-    body = (
-        f"<h1>{html.escape(label)}</h1>"
-        + quality_summary
-        + _render_entity_tabs(
-            overview_html=overview_html,
-            subgraph_html=_render_entity_subgraph(resolved_slug, entity_type=resolved_type),
-            quality_html=quality_html,
-        )
-        + _render_runtime_entity_load_script(
+    return _wiki_page.render_runtime_graph_entity_page(
+        label=label,
+        node_id=node_id,
+        resolved_slug=resolved_slug,
+        resolved_type=resolved_type,
+        display_slug=display_slug,
+        description=description,
+        tags=tags,
+        quality_score=quality_score,
+        usage_score=usage_score,
+        degree=degree,
+        quality_html=quality_html,
+        subgraph_html=_render_entity_subgraph(resolved_slug, entity_type=resolved_type),
+        action_html=_render_runtime_entity_action(
             resolved_slug,
             resolved_type,
             mutations_enabled=mutations,
-        )
+        ),
+        load_script_html=_render_runtime_entity_load_script(
+            resolved_slug,
+            resolved_type,
+            mutations_enabled=mutations,
+        ),
+        runtime_graph_metric_row=_runtime_graph_metric_row,
+        render_entity_tabs=_render_entity_tabs,
+        layout=_layout,
     )
-    return _layout(label, body)
 
 
 def _render_wiki_entity(
@@ -4151,70 +4114,24 @@ def _render_wiki_entity(
         )
     meta, md_body = _parse_frontmatter(raw)
     sidecar = _load_sidecar(slug, entity_type=entity_type)
-    display_slug = _display_slug(slug)
-    type_suffix = (
-        f"&amp;type={html.escape(entity_type)}"
-        if entity_type in _DASHBOARD_ENTITY_TYPES
-        else ""
+    return _wiki_page.render_wiki_entity_page(
+        slug=slug,
+        entity_type=entity_type,
+        meta=meta,
+        md_body=md_body,
+        sidecar=sidecar if isinstance(sidecar, dict) else None,
+        dashboard_entity_types=_DASHBOARD_ENTITY_TYPES,
+        display_slug=_display_slug,
+        frontmatter_text=_frontmatter_text,
+        truncate_text=_truncate_text,
+        extract_embedded_quality_block=_extract_embedded_quality_block,
+        strip_duplicate_wiki_heading=_strip_duplicate_wiki_heading,
+        render_entity_subgraph=_render_entity_subgraph,
+        render_entity_tabs=_render_entity_tabs,
+        render_quality_drilldown=_render_quality_drilldown,
+        render_wiki_markdown=_render_wiki_markdown,
+        layout=_layout,
     )
-
-    fm_row_parts = []
-    for k, v in sorted(meta.items()):
-        value, truncated = _truncate_text(_frontmatter_text(v), 120)
-        marker = " <span class='muted'>(truncated)</span>" if truncated else ""
-        fm_row_parts.append(
-            f"<tr><td class='muted'>{html.escape(k)}</td>"
-            f"<td><code>{html.escape(value)}</code>{marker}</td></tr>"
-        )
-    fm_rows = "".join(fm_row_parts)
-
-    quality_summary_html = ""
-    if sidecar is not None:
-        quality_summary_html = (
-            "<div class='card'>"
-            f"<strong>Quality</strong> <span class='pill grade-{html.escape(sidecar.get('grade', 'F'))}'>"
-            f"{html.escape(sidecar.get('grade', 'F'))}</span> "
-            f"score <strong>{sidecar.get('raw_score', 0.0):.3f}</strong>"
-            f"{' &middot; floor ' + html.escape(sidecar.get('hard_floor','')) if sidecar.get('hard_floor') else ''}"
-            f"<div style='margin-top:0.4rem;'>"
-            "<a href='#quality' data-open-entity-tab='quality'>quality drilldown &rarr;</a> &middot; "
-            f"<a href='/skill/{html.escape(slug)}?type={html.escape(entity_type or '')}'>sidecar detail &rarr;</a> &middot; "
-            f"<a href='/graph?slug={html.escape(slug)}{type_suffix}'>graph neighborhood &rarr;</a>"
-            "</div></div>"
-        )
-
-    md_body_without_quality, embedded_quality_markdown = _extract_embedded_quality_block(md_body)
-    display_body = _strip_duplicate_wiki_heading(md_body_without_quality, slug)
-    body_preview, body_truncated = _truncate_text(display_body, 12000)
-    body_html = _render_wiki_markdown(body_preview)
-    body_truncated_html = (
-        "<p class='muted'>Body preview truncated at 12,000 characters.</p>"
-        if body_truncated
-        else ""
-    )
-    overview_html = (
-        "<div class='wiki-entity-grid'>"
-        f"<div class='card wiki-body'>{body_html}"
-        f"{body_truncated_html}</div>"
-        f"<div class='card'><strong>Frontmatter</strong>"
-        "<table class='frontmatter-table'>"
-        "<tr><th>Field</th><th>Value</th></tr>"
-        + (fm_rows or "<tr><td class='muted' colspan='2'>none</td></tr>")
-        + "</table></div>"
-        "</div>"
-    )
-    subgraph_html = _render_entity_subgraph(slug, entity_type=entity_type)
-    quality_html = _render_quality_drilldown(sidecar, embedded_quality_markdown)
-    body = (
-        f"<h1>{html.escape(display_slug)}</h1>"
-        + quality_summary_html
-        + _render_entity_tabs(
-            overview_html=overview_html,
-            subgraph_html=subgraph_html,
-            quality_html=quality_html,
-        )
-    )
-    return _layout(display_slug, body)
 
 
 def _wiki_index_entries(

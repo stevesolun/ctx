@@ -12,6 +12,7 @@ from urllib.parse import quote
 
 WikiLinkFn = Callable[[str], tuple[str, str]]
 TruncateFn = Callable[[str, int], tuple[str, bool]]
+MetricRowFn = Callable[[str, Any], str]
 
 _WIKI_INLINE_RE = re.compile(
     r"(`[^`\n]+`|\[\[[^\]\n]+\]\]|(?<!!)\[[^\]\n]+\]\([^\s()\n]+(?:\s+\"[^\"]*\")?\))",
@@ -391,3 +392,174 @@ def render_wiki_index_page(
         "</script>"
     )
     return layout("Wiki", body)
+
+
+def render_runtime_graph_entity_page(
+    *,
+    label: str,
+    node_id: str,
+    resolved_slug: str,
+    resolved_type: str,
+    display_slug: str,
+    description: str,
+    tags: list[str],
+    quality_score: Any,
+    usage_score: Any,
+    degree: Any,
+    quality_html: str,
+    subgraph_html: str,
+    action_html: str,
+    load_script_html: str,
+    runtime_graph_metric_row: MetricRowFn,
+    render_entity_tabs: Callable[..., str],
+    layout: Callable[[str, str], str],
+) -> str:
+    """Render graph metadata when the fast runtime graph lacks a full wiki page."""
+    tag_html = (
+        "".join(f"<span class='pill'>{html.escape(tag)}</span> " for tag in tags)
+        if tags
+        else "<span class='muted'>no tags in runtime graph</span>"
+    )
+    description_html = (
+        f"<p>{html.escape(description)}</p>"
+        if description
+        else "<p class='muted'>No description is present in the runtime graph metadata.</p>"
+    )
+    quality_summary = (
+        "<div class='card'>"
+        "<strong>Runtime graph entity</strong> "
+        f"<span class='pill entity-type-{html.escape(resolved_type)}'>{html.escape(resolved_type)}</span> "
+        f"<span class='muted'>node <code>{html.escape(node_id)}</code></span>"
+        "<div style='margin-top:0.4rem;'>"
+        "<a href='#subgraph' data-open-entity-tab='subgraph'>graph neighborhood &rarr;</a> &middot; "
+        "<a href='#quality' data-open-entity-tab='quality'>quality drilldown &rarr;</a>"
+        "</div></div>"
+    )
+    overview_html = (
+        "<div class='wiki-entity-grid'>"
+        "<div class='card wiki-body'>"
+        "<h2>Runtime graph entity</h2>"
+        + description_html
+        + "<h3>Tags</h3>"
+        + f"<p>{tag_html}</p>"
+        + "<h3>Full wiki page</h3>"
+        + "<p class='muted'>This entity exists in the installed runtime graph, but its full "
+        "Markdown wiki page is not expanded locally. The graph and recommendation paths still "
+        "work. Install the full wiki when you want the complete body/docs in this dashboard.</p>"
+        + "<pre><code>ctx-init --graph --graph-install-mode full</code></pre>"
+        + "</div>"
+        "<div class='card'><strong>Runtime metadata</strong>"
+        "<table class='frontmatter-table'><tr><th>Field</th><th>Value</th></tr>"
+        + runtime_graph_metric_row("slug", display_slug)
+        + runtime_graph_metric_row("type", resolved_type)
+        + runtime_graph_metric_row("node_id", node_id)
+        + runtime_graph_metric_row("quality_score", quality_score)
+        + runtime_graph_metric_row("usage_score", usage_score)
+        + runtime_graph_metric_row("degree", degree)
+        + "</table></div>"
+        "</div>"
+        + action_html
+    )
+    body = (
+        f"<h1>{html.escape(label)}</h1>"
+        + quality_summary
+        + render_entity_tabs(
+            overview_html=overview_html,
+            subgraph_html=subgraph_html,
+            quality_html=quality_html,
+        )
+        + load_script_html
+    )
+    return layout(label, body)
+
+
+def render_wiki_entity_page(
+    *,
+    slug: str,
+    entity_type: str | None,
+    meta: dict[str, Any],
+    md_body: str,
+    sidecar: dict[str, Any] | None,
+    dashboard_entity_types: tuple[str, ...],
+    display_slug: Callable[[str], str],
+    frontmatter_text: Callable[[Any], str],
+    truncate_text: TruncateFn,
+    extract_embedded_quality_block: Callable[[str], tuple[str, str | None]],
+    strip_duplicate_wiki_heading: Callable[[str, str], str],
+    render_entity_subgraph: Callable[[str, str | None], str],
+    render_entity_tabs: Callable[..., str],
+    render_quality_drilldown: Callable[[dict[str, Any] | None, str | None], str],
+    render_wiki_markdown: Callable[[str], str],
+    layout: Callable[[str, str], str],
+) -> str:
+    """Render one expanded wiki entity page from already-loaded Markdown."""
+    display = display_slug(slug)
+    type_suffix = (
+        f"&amp;type={html.escape(entity_type)}"
+        if entity_type in dashboard_entity_types
+        else ""
+    )
+
+    fm_row_parts = []
+    for key, value_raw in sorted(meta.items()):
+        value, truncated = truncate_text(frontmatter_text(value_raw), 120)
+        marker = " <span class='muted'>(truncated)</span>" if truncated else ""
+        fm_row_parts.append(
+            f"<tr><td class='muted'>{html.escape(key)}</td>"
+            f"<td><code>{html.escape(value)}</code>{marker}</td></tr>"
+        )
+    fm_rows = "".join(fm_row_parts)
+
+    quality_summary_html = ""
+    if sidecar is not None:
+        grade = str(sidecar.get("grade", "F"))
+        score = float(sidecar.get("raw_score", 0.0) or 0.0)
+        hard_floor = str(sidecar.get("hard_floor") or "")
+        floor_html = (
+            " &middot; floor " + html.escape(hard_floor)
+            if hard_floor
+            else ""
+        )
+        quality_summary_html = (
+            "<div class='card'>"
+            f"<strong>Quality</strong> <span class='pill grade-{html.escape(grade)}'>"
+            f"{html.escape(grade)}</span> "
+            f"score <strong>{score:.3f}</strong>"
+            f"{floor_html}"
+            f"<div style='margin-top:0.4rem;'>"
+            "<a href='#quality' data-open-entity-tab='quality'>quality drilldown &rarr;</a> &middot; "
+            f"<a href='/skill/{html.escape(slug)}?type={html.escape(entity_type or '')}'>sidecar detail &rarr;</a> &middot; "
+            f"<a href='/graph?slug={html.escape(slug)}{type_suffix}'>graph neighborhood &rarr;</a>"
+            "</div></div>"
+        )
+
+    md_body_without_quality, embedded_quality_markdown = extract_embedded_quality_block(md_body)
+    display_body = strip_duplicate_wiki_heading(md_body_without_quality, slug)
+    body_preview, body_truncated = truncate_text(display_body, 12000)
+    body_html = render_wiki_markdown(body_preview)
+    body_truncated_html = (
+        "<p class='muted'>Body preview truncated at 12,000 characters.</p>"
+        if body_truncated
+        else ""
+    )
+    overview_html = (
+        "<div class='wiki-entity-grid'>"
+        f"<div class='card wiki-body'>{body_html}"
+        f"{body_truncated_html}</div>"
+        f"<div class='card'><strong>Frontmatter</strong>"
+        "<table class='frontmatter-table'>"
+        "<tr><th>Field</th><th>Value</th></tr>"
+        + (fm_rows or "<tr><td class='muted' colspan='2'>none</td></tr>")
+        + "</table></div>"
+        "</div>"
+    )
+    body = (
+        f"<h1>{html.escape(display)}</h1>"
+        + quality_summary_html
+        + render_entity_tabs(
+            overview_html=overview_html,
+            subgraph_html=render_entity_subgraph(slug, entity_type),
+            quality_html=render_quality_drilldown(sidecar, embedded_quality_markdown),
+        )
+    )
+    return layout(display, body)
