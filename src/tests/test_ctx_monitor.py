@@ -39,6 +39,7 @@ from ctx.monitor.services import graph as graph_service
 from ctx.monitor.services import runtime as runtime_service
 from ctx.monitor.services import sidecars as sidecar_service
 from ctx.monitor.services import skillspector as skillspector_service
+from ctx.monitor.services import status as status_service
 from ctx.monitor.services import wiki as wiki_service
 from ctx.core.wiki import wiki_queue
 
@@ -498,6 +499,7 @@ def test_queue_status_summarizes_worker_jobs(fake_claude: Path) -> None:
     wiki_queue.cancel_job(db_path, third.id, reason="operator skipped", now=14.0)
 
     status = cm._queue_status()
+    direct_status = status_service.queue_status(wiki)
     html_out = cm._render_status()
 
     assert status["available"] is True
@@ -511,6 +513,7 @@ def test_queue_status_summarizes_worker_jobs(fake_claude: Path) -> None:
     assert status["total"] == 3
     assert [job["id"] for job in status["recent_jobs"]] == [third.id, second.id, first.id]
     assert status["recent_jobs"][0]["status"] == wiki_queue.STATUS_CANCELLED
+    assert direct_status == status
     assert "cancelled: 1" in html_out
 
 
@@ -586,6 +589,11 @@ def test_artifact_status_reads_promotion_metadata(
     )
 
     status = cm._artifact_status()
+    direct_status = status_service.artifact_status(
+        wiki_dir=fake_claude / "skill-wiki",
+        claude_dir=fake_claude,
+        repo_graph_dir=repo_graph,
+    )
 
     assert status["graph_json"]["exists"] is True
     assert status["graph_json"]["size"] == graph.stat().st_size
@@ -609,6 +617,7 @@ def test_artifact_status_reads_promotion_metadata(
     assert status["promotion_count"] == 1
     assert status["promotions"][0]["status"] == "promoted"
     assert status["promotions"][0]["current_sha256"] == "new"
+    assert direct_status == status
 
 
 def test_status_page_and_api_show_queue_and_artifacts(

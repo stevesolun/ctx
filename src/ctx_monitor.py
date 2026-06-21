@@ -109,6 +109,7 @@ from ctx.monitor.services import graph as _graph_service
 from ctx.monitor.services import runtime as _runtime_service
 from ctx.monitor.services import sidecars as _sidecar_service
 from ctx.monitor.services import skillspector as _skillspector_service
+from ctx.monitor.services import status as _status_service
 from ctx.monitor.services import wiki as _wiki_service
 from ctx.utils._file_lock import file_lock
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
@@ -1036,238 +1037,12 @@ def _read_harness_install_rows() -> list[dict]:
     return rows
 
 
-def _queue_job_summary(job: wiki_queue.QueueJob) -> dict[str, Any]:
-    return {
-        "id": job.id,
-        "kind": job.kind,
-        "status": job.status,
-        "attempts": job.attempts,
-        "max_attempts": job.max_attempts,
-        "worker_id": job.worker_id,
-        "leased_until": job.leased_until,
-        "available_at": job.available_at,
-        "last_error": job.last_error,
-        "created_at": job.created_at,
-        "updated_at": job.updated_at,
-        "source": job.payload.get("source"),
-        "payload_keys": sorted(str(key) for key in job.payload),
-    }
-
-
 def _queue_status() -> dict[str, Any]:
-    """Return durable wiki/graph queue state without creating the DB."""
-    db_path = wiki_queue.queue_db_path(_wiki_dir())
-    counts = {
-        wiki_queue.STATUS_PENDING: 0,
-        wiki_queue.STATUS_RUNNING: 0,
-        wiki_queue.STATUS_SUCCEEDED: 0,
-        wiki_queue.STATUS_FAILED: 0,
-        wiki_queue.STATUS_CANCELLED: 0,
-    }
-    if not db_path.exists():
-        return {
-            "available": False,
-            "db_path": str(db_path),
-            "total": 0,
-            "counts": counts,
-            "recent_jobs": [],
-        }
-    try:
-        raw_counts = wiki_queue.count_jobs_by_status(db_path)
-        recent = wiki_queue.list_recent_jobs(db_path, limit=20)
-    except Exception as exc:  # noqa: BLE001
-        return {
-            "available": False,
-            "db_path": str(db_path),
-            "total": 0,
-            "counts": counts,
-            "recent_jobs": [],
-            "error": str(exc),
-        }
-    for status, count in raw_counts.items():
-        counts[status] = count
-    return {
-        "available": True,
-        "db_path": str(db_path),
-        "total": sum(raw_counts.values()),
-        "counts": counts,
-        "recent_jobs": [_queue_job_summary(job) for job in recent],
-    }
-
-
-def _file_status(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {"path": str(path), "exists": False, "size": 0, "mtime": None}
-    try:
-        stat = path.stat()
-    except OSError as exc:
-        return {
-            "path": str(path),
-            "exists": False,
-            "size": 0,
-            "mtime": None,
-            "error": str(exc),
-        }
-    return {
-        "path": str(path),
-        "exists": path.is_file(),
-        "size": stat.st_size,
-        "mtime": stat.st_mtime,
-    }
-
-
-def _pack_dir_status(packs_dir: Path, *, manifest_name: str) -> dict[str, Any]:
-    """Return summary state for a modular base/overlay pack directory."""
-    if not packs_dir.exists():
-        return {
-            "path": str(packs_dir),
-            "exists": False,
-            "size": 0,
-            "mtime": None,
-            "pack_count": 0,
-            "base_count": 0,
-            "overlay_count": 0,
-            "pack_ids": [],
-        }
-    if not packs_dir.is_dir():
-        return {
-            "path": str(packs_dir),
-            "exists": False,
-            "size": 0,
-            "mtime": None,
-            "pack_count": 0,
-            "base_count": 0,
-            "overlay_count": 0,
-            "pack_ids": [],
-            "error": "pack path is not a directory",
-        }
-    total_size = 0
-    newest = 0.0
-    pack_ids: list[str] = []
-    base_count = 0
-    overlay_count = 0
-    errors: list[str] = []
-    try:
-        files = [path for path in packs_dir.rglob("*") if path.is_file()]
-    except OSError as exc:
-        return {
-            "path": str(packs_dir),
-            "exists": False,
-            "size": 0,
-            "mtime": None,
-            "pack_count": 0,
-            "base_count": 0,
-            "overlay_count": 0,
-            "pack_ids": [],
-            "error": str(exc),
-        }
-    for path in files:
-        try:
-            stat = path.stat()
-        except OSError as exc:
-            errors.append(f"{path.name}: {exc}")
-            continue
-        total_size += stat.st_size
-        newest = max(newest, stat.st_mtime)
-        if path.name != manifest_name:
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            errors.append(f"{path.name}: {exc}")
-            continue
-        if not isinstance(payload, dict):
-            errors.append(f"{path.name}: manifest is not an object")
-            continue
-        pack_id = str(payload.get("pack_id") or path.parent.name)
-        pack_ids.append(pack_id)
-        pack_type = payload.get("pack_type")
-        if pack_type == "base":
-            base_count += 1
-        elif pack_type == "overlay":
-            overlay_count += 1
-        else:
-            errors.append(f"{pack_id}: unknown pack_type {pack_type!r}")
-    status: dict[str, Any] = {
-        "path": str(packs_dir),
-        "exists": True,
-        "size": total_size,
-        "mtime": newest or None,
-        "pack_count": len(pack_ids),
-        "base_count": base_count,
-        "overlay_count": overlay_count,
-        "pack_ids": sorted(pack_ids)[:25],
-    }
-    if errors:
-        status["error"] = "; ".join(errors[:5])
-    return status
-
-
-def _graph_store_status(graph_dir: Path) -> dict[str, Any]:
-    """Return SQLite operational-store state for the active graph directory."""
-    db_path = graph_dir / "graph-store.sqlite3"
-    status = _file_status(db_path)
-    try:
-        from ctx.core.graph.graph_store import validate_graph_store  # noqa: PLC0415
-
-        validation = validate_graph_store(db_path, graph_dir)
-    except (OSError, ValueError) as exc:
-        validation = {
-            "ok": False,
-            "fresh": False,
-            "nodes": 0,
-            "edges": 0,
-            "errors": [str(exc)],
-        }
-    node_count = validation.get("nodes")
-    edge_count = validation.get("edges")
-    status.update({
-        "ok": bool(validation.get("ok")),
-        "fresh": bool(validation.get("fresh")),
-        "nodes": node_count if isinstance(node_count, int) else 0,
-        "edges": edge_count if isinstance(edge_count, int) else 0,
-        "errors": validation.get("errors") if isinstance(validation.get("errors"), list) else [],
-    })
-    return status
-
-
-def _pack_compaction_artifact_status(wiki: Path) -> dict[str, Any]:
-    """Return coordinated graph/wiki pack compaction state for /status."""
-    try:
-        from ctx.core.wiki.pack_compaction import pack_compaction_status  # noqa: PLC0415
-
-        status = pack_compaction_status(wiki_path=wiki, validate=False)
-    except Exception as exc:  # noqa: BLE001 - status should render degraded state.
-        return {
-            "path": str(wiki),
-            "exists": False,
-            "size": 0,
-            "mtime": None,
-            "error": str(exc),
-        }
-    graph_pack_count = status.get("graph_pack_count")
-    wiki_pack_count = status.get("wiki_pack_count")
-    return {
-        "path": str(wiki),
-        "exists": bool(
-            (graph_pack_count if isinstance(graph_pack_count, int) else 0)
-            or (wiki_pack_count if isinstance(wiki_pack_count, int) else 0)
-        ),
-        "size": 0,
-        "mtime": None,
-        **status,
-    }
+    return _status_service.queue_status(_wiki_dir())
 
 
 def _repo_graph_dir() -> Path:
     return Path(__file__).resolve().parents[1] / "graph"
-
-
-def _first_existing_file_status(*paths: Path) -> dict[str, Any]:
-    for path in paths:
-        if path.exists():
-            return _file_status(path)
-    return _file_status(paths[0])
 
 
 def _skillspector_audit_path() -> Path:
@@ -1299,87 +1074,20 @@ def _skillspector_audit_payload(qs: dict[str, str] | None = None) -> dict[str, A
     )
 
 
-def _promotion_status(path: Path) -> dict[str, Any] | None:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    previous = _dict_or_empty(data.get("previous"))
-    candidate = _dict_or_empty(data.get("candidate"))
-    current = _dict_or_empty(data.get("current"))
-    return {
-        "path": str(path),
-        "status": data.get("status"),
-        "target": data.get("target"),
-        "started_at": data.get("started_at"),
-        "promoted_at": data.get("promoted_at"),
-        "previous_sha256": previous.get("sha256"),
-        "previous_size": previous.get("size"),
-        "candidate_sha256": candidate.get("sha256"),
-        "candidate_size": candidate.get("size"),
-        "current_sha256": current.get("sha256"),
-        "current_size": current.get("size"),
-    }
-
-
-def _dict_or_empty(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
 def _artifact_status() -> dict[str, Any]:
-    """Return shipped graph/wiki artifact file state and promotion metadata."""
-    wiki = _wiki_dir()
-    graph_dir = wiki / "graphify-out"
-    claude_graph_dir = _claude_dir() / "graph"
-    repo_graph_dir = _repo_graph_dir()
-    promotion_paths = sorted(
-        {
-            *graph_dir.glob("*.promotion.json"),
-            *wiki.glob("*.promotion.json"),
-            *claude_graph_dir.glob("*.promotion.json"),
-        },
-        key=lambda path: str(path),
+    return _status_service.artifact_status(
+        wiki_dir=_wiki_dir(),
+        claude_dir=_claude_dir(),
+        repo_graph_dir=_repo_graph_dir(),
     )
-    promotions = [
-        promotion
-        for promotion in (_promotion_status(path) for path in promotion_paths)
-        if promotion is not None
-    ]
-    return {
-        "graph_json": _file_status(graph_dir / "graph.json"),
-        "graph_packs": _pack_dir_status(
-            graph_dir / "packs",
-            manifest_name="graph-pack-manifest.json",
-        ),
-        "graph_delta_json": _file_status(graph_dir / "graph-delta.json"),
-        "communities_json": _file_status(graph_dir / "communities.json"),
-        "graph_store": _graph_store_status(graph_dir),
-        "wiki_packs": _pack_dir_status(
-            wiki / "wiki-packs",
-            manifest_name="wiki-pack-manifest.json",
-        ),
-        "pack_compaction": _pack_compaction_artifact_status(wiki),
-        "wiki_graph_tar": _first_existing_file_status(
-            claude_graph_dir / "wiki-graph.tar.gz",
-            repo_graph_dir / "wiki-graph.tar.gz",
-        ),
-        "skills_sh_catalog": _first_existing_file_status(
-            wiki / "external-catalogs" / "skills-sh" / "catalog.json",
-            claude_graph_dir / "skills-sh-catalog.json.gz",
-            repo_graph_dir / "skills-sh-catalog.json.gz",
-        ),
-        "promotion_count": len(promotions),
-        "promotions": promotions,
-    }
 
 
 def _status_payload() -> dict[str, Any]:
-    return {
-        "queue": _queue_status(),
-        "artifacts": _artifact_status(),
-    }
+    return _status_service.status_payload(
+        wiki_dir=_wiki_dir(),
+        claude_dir=_claude_dir(),
+        repo_graph_dir=_repo_graph_dir(),
+    )
 
 
 def _read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
