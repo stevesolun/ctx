@@ -2,21 +2,28 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
+import zlib
 from pathlib import Path
 from typing import Any, Callable
 
 
 _GRAPH_CACHE_KEY: tuple[Any, ...] | None = None
 _GRAPH_CACHE_VALUE: Any | None = None
+_OVERLAY_INDEX_COVERAGE_CACHE_KEY: tuple[Any, ...] | None = None
+_OVERLAY_INDEX_COVERAGE_CACHE_VALUE: bool | None = None
 
 
 def reset_caches() -> None:
     global _GRAPH_CACHE_KEY, _GRAPH_CACHE_VALUE
+    global _OVERLAY_INDEX_COVERAGE_CACHE_KEY, _OVERLAY_INDEX_COVERAGE_CACHE_VALUE
 
     _GRAPH_CACHE_KEY = None
     _GRAPH_CACHE_VALUE = None
+    _OVERLAY_INDEX_COVERAGE_CACHE_KEY = None
+    _OVERLAY_INDEX_COVERAGE_CACHE_VALUE = None
 
 
 def cached_dashboard_graph() -> Any | None:
@@ -105,6 +112,219 @@ def dashboard_index_matches_manifest(index_path: Path, wiki_dir: Path) -> bool:
     if meta is None:
         return False
     return meta.get("export_id") == manifest_export_id
+
+
+def dashboard_graph_has_runtime_overlays(wiki_dir: Path) -> bool:
+    overlay = wiki_dir / "graphify-out" / "entity-overlays.jsonl"
+    try:
+        return overlay.is_file() and overlay.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def dashboard_overlay_index_coverage_key(
+    index_path: Path,
+    overlay: Path,
+    manifest_export_id: str | None,
+) -> tuple[Any, ...] | None:
+    try:
+        index_stat = index_path.stat()
+        overlay_stat = overlay.stat()
+    except OSError:
+        return None
+    return (
+        index_path.resolve(),
+        index_stat.st_mtime,
+        index_stat.st_size,
+        overlay.resolve(),
+        overlay_stat.st_mtime,
+        overlay_stat.st_size,
+        manifest_export_id,
+    )
+
+
+def active_dashboard_overlay_records(overlay: Path) -> list[dict[str, Any]] | None:
+    try:
+        from ctx.core.graph.entity_overlays import active_overlay_records
+
+        rows = []
+        for line in overlay.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            payload = json.loads(line)
+            if not isinstance(payload, dict):
+                return None
+            rows.append(payload)
+        return [dict(row) for row in active_overlay_records(rows)]
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
+def dashboard_overlay_matches_known_release(overlay: Path) -> bool:
+    try:
+        from ctx_init import _GRAPH_ENTITY_OVERLAY_SHA256
+    except (ImportError, AttributeError):
+        return False
+    if not isinstance(_GRAPH_ENTITY_OVERLAY_SHA256, str) or not _GRAPH_ENTITY_OVERLAY_SHA256:
+        return False
+    try:
+        data = overlay.read_bytes().replace(b"\r\n", b"\n")
+        return hashlib.sha256(data).hexdigest() == _GRAPH_ENTITY_OVERLAY_SHA256
+    except OSError:
+        return False
+
+
+def dashboard_index_uncovered_overlay_nodes(
+    conn: sqlite3.Connection,
+    records: list[dict[str, Any]],
+    *,
+    require_edges: bool,
+) -> set[str] | None:
+    uncovered: set[str] = set()
+    neighbor_targets: dict[str, set[str]] = {}
+
+    def node_exists(node_id: str) -> bool:
+        return bool(conn.execute(
+            "SELECT 1 FROM nodes WHERE id=? LIMIT 1",
+            (node_id,),
+        ).fetchone())
+
+    def indexed_neighbors(node_id: str) -> set[str]:
+        cached = neighbor_targets.get(node_id)
+        if cached is not None:
+            return cached
+        row = conn.execute(
+            "SELECT payload FROM neighbors WHERE source=?",
+            (node_id,),
+        ).fetchone()
+        targets: set[str] = set()
+        if row is not None:
+            try:
+                payload = json.loads(zlib.decompress(row["payload"]).decode("utf-8"))
+            except (TypeError, json.JSONDecodeError, zlib.error):
+                payload = []
+            if isinstance(payload, list):
+                targets = {
+                    str(edge.get("target"))
+                    for edge in payload
+                    if isinstance(edge, dict) and isinstance(edge.get("target"), str)
+                }
+        neighbor_targets[node_id] = targets
+        return targets
+
+    for record in records:
+        nodes = record.get("nodes", [])
+        edges = record.get("edges", [])
+        if not isinstance(nodes, list) or not isinstance(edges, list):
+            return None
+        if not nodes and edges:
+            return None
+        for node in nodes:
+            if not isinstance(node, dict):
+                return None
+            node_id = node.get("id")
+            if not isinstance(node_id, str):
+                return None
+            if not node_exists(node_id):
+                uncovered.add(node_id)
+        if not require_edges:
+            continue
+        for edge in edges:
+            if not isinstance(edge, dict):
+                return None
+            source = edge.get("source")
+            target = edge.get("target")
+            if not isinstance(source, str) or not isinstance(target, str):
+                return None
+            source_exists = node_exists(source)
+            target_exists = node_exists(target)
+            if not source_exists:
+                uncovered.add(source)
+            if not target_exists:
+                uncovered.add(target)
+            if not source_exists or not target_exists:
+                uncovered.update((source, target))
+                continue
+            if target not in indexed_neighbors(source) and source not in indexed_neighbors(target):
+                uncovered.update((source, target))
+    return uncovered
+
+
+def dashboard_uncovered_runtime_overlay_nodes(
+    index_path: Path,
+    wiki_dir: Path,
+    *,
+    require_edges: bool,
+) -> set[str] | None:
+    overlay = wiki_dir / "graphify-out" / "entity-overlays.jsonl"
+    try:
+        if not overlay.is_file() or overlay.stat().st_size == 0:
+            return set()
+    except OSError:
+        return set()
+    if not index_path.is_file() or not dashboard_index_matches_manifest(index_path, wiki_dir):
+        return None
+    records = active_dashboard_overlay_records(overlay)
+    if records is None:
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{index_path.as_posix()}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            return dashboard_index_uncovered_overlay_nodes(
+                conn,
+                records,
+                require_edges=require_edges,
+            )
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error, KeyError, TypeError):
+        return None
+
+
+def dashboard_index_covers_runtime_overlays(
+    index_path: Path,
+    wiki_dir: Path,
+    *,
+    require_edges: bool,
+) -> bool:
+    """Return True when the SQLite dashboard index already includes overlays."""
+    overlay = wiki_dir / "graphify-out" / "entity-overlays.jsonl"
+    try:
+        if not overlay.is_file() or overlay.stat().st_size == 0:
+            return True
+    except OSError:
+        return True
+    if not index_path.is_file() or not dashboard_index_matches_manifest(index_path, wiki_dir):
+        return False
+
+    global _OVERLAY_INDEX_COVERAGE_CACHE_KEY, _OVERLAY_INDEX_COVERAGE_CACHE_VALUE
+    cache_key = dashboard_overlay_index_coverage_key(
+        index_path,
+        overlay,
+        dashboard_graph_manifest_export_id(wiki_dir),
+    )
+    if cache_key is not None:
+        cache_key = (*cache_key, require_edges)
+    if (
+        cache_key is not None
+        and _OVERLAY_INDEX_COVERAGE_CACHE_KEY == cache_key
+        and _OVERLAY_INDEX_COVERAGE_CACHE_VALUE is not None
+    ):
+        return _OVERLAY_INDEX_COVERAGE_CACHE_VALUE
+
+    uncovered = dashboard_uncovered_runtime_overlay_nodes(
+        index_path,
+        wiki_dir,
+        require_edges=require_edges,
+    )
+    coverage = uncovered == set()
+
+    if cache_key is not None:
+        _OVERLAY_INDEX_COVERAGE_CACHE_KEY = cache_key
+        _OVERLAY_INDEX_COVERAGE_CACHE_VALUE = coverage
+    return coverage
 
 
 def load_dashboard_graph(

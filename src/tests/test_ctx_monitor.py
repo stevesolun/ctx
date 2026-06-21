@@ -2745,6 +2745,7 @@ def test_dashboard_overlay_release_hash_normalizes_crlf(
     expected = hashlib.sha256(b'{"overlay_id":"release"}\n').hexdigest()
     monkeypatch.setattr(ci, "_GRAPH_ENTITY_OVERLAY_SHA256", expected)
 
+    assert graph_service.dashboard_overlay_matches_known_release(overlay)
     assert cm._dashboard_overlay_matches_known_release(overlay)
 
 
