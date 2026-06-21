@@ -276,6 +276,220 @@ def render_quality_drilldown(
     )
 
 
+def subgraph_quality_cell(sidecar: dict[str, Any] | None) -> str:
+    if sidecar is None:
+        return "<span class='muted'>no sidecar</span>"
+    grade = html.escape(str(sidecar.get("grade", "F")))
+    score = float(sidecar.get("raw_score", sidecar.get("score", 0.0)) or 0.0)
+    floor = str(sidecar.get("hard_floor") or "").strip()
+    floor_html = (
+        f" <span class='muted'>floor {html.escape(floor)}</span>"
+        if floor
+        else ""
+    )
+    return (
+        f"<span class='pill grade-{grade}'>{grade}</span> "
+        f"<code>{score:.3f}</code>{floor_html}"
+    )
+
+
+def _subgraph_node_title(
+    label: str,
+    entity_type: str,
+    sidecar: dict[str, Any] | None,
+) -> str:
+    if sidecar is None:
+        return f"{label} ({entity_type}) - no sidecar"
+    grade = str(sidecar.get("grade", "F"))
+    score = float(sidecar.get("raw_score", sidecar.get("score", 0.0)) or 0.0)
+    floor = str(sidecar.get("hard_floor") or "").strip()
+    floor_text = f" - floor {floor}" if floor else ""
+    return f"{label} ({entity_type}) - grade {grade} - score {score:.3f}{floor_text}"
+
+
+def _subgraph_node_fill(entity_type: str) -> str:
+    return {
+        "agent": "#f59e0b",
+        "mcp-server": "#ef4444",
+        "harness": "#22c55e",
+        "skill": "#6366f1",
+    }.get(entity_type, "#64748b")
+
+
+def _subgraph_grade_stroke(sidecar: dict[str, Any] | None) -> str:
+    grade = str((sidecar or {}).get("grade") or "")
+    return {
+        "A": "#059669",
+        "B": "#2563eb",
+        "C": "#d97706",
+        "D": "#ea580c",
+        "F": "#dc2626",
+    }.get(grade, "#ffffff")
+
+
+def render_entity_subgraph_svg(
+    *,
+    node_by_id: dict[str, dict[str, Any]],
+    edges: list[dict[str, Any]],
+    center: str,
+    sidecar_by_id: dict[str, dict[str, Any] | None],
+    graph_type_from_node_id: Callable[[str, str], str],
+    graph_slug_from_node_id: Callable[[str], str],
+    display_label: Callable[..., str],
+    display_slug: Callable[[str], str],
+    entity_wiki_href: Callable[[str, str | None], str],
+    json_for_script: Callable[[Any], str],
+) -> str:
+    """Render an embedded, interactive 3D graph for wiki entity pages."""
+    width = 980
+    height = 380
+    node_payload: list[dict[str, Any]] = []
+    for node_id, node in sorted(
+        node_by_id.items(),
+        key=lambda item: (
+            0 if item[0] == center else 1,
+            str(item[1].get("label") or item[0]),
+        ),
+    ):
+        node_type = graph_type_from_node_id(
+            node_id, str(node.get("type") or "skill"),
+        )
+        node_slug = graph_slug_from_node_id(node_id)
+        label = display_label(node.get("label"), fallback_slug=node_slug)
+        sidecar = sidecar_by_id.get(node_id)
+        node_payload.append({
+            "id": node_id,
+            "slug": node_slug,
+            "label": label,
+            "type": node_type,
+            "href": entity_wiki_href(node_slug, node_type),
+            "title": _subgraph_node_title(label, node_type, sidecar),
+            "fill": _subgraph_node_fill(node_type),
+            "stroke": _subgraph_grade_stroke(sidecar),
+            "is_center": node_id == center,
+        })
+
+    edge_payload: list[dict[str, Any]] = []
+    for edge in edges:
+        data = edge.get("data", {})
+        source = str(data.get("source", ""))
+        target = str(data.get("target", ""))
+        if source not in node_by_id or target not in node_by_id:
+            continue
+        shared = ", ".join(str(tag) for tag in data.get("shared_tags", [])[:6]) or "none"
+        weight = float(data.get("weight", 0.0) or 0.0)
+        edge_payload.append({
+            "source": source,
+            "target": target,
+            "weight": weight,
+            "title": (
+                f"{display_slug(graph_slug_from_node_id(source))} -> "
+                f"{display_slug(graph_slug_from_node_id(target))} - weight {weight:.3f} "
+                f"- shared {shared}"
+            ),
+        })
+
+    nodes_json = json_for_script(node_payload)
+    edges_json = json_for_script(edge_payload)
+
+    return (
+        "<div data-testid='entity-subgraph-graph' "
+        "style='border:1px solid #e5e7eb; border-radius:8px; "
+        "background:#f8fafc; margin:1rem 0; overflow:hidden;'>"
+        "<div style='display:flex; align-items:center; gap:0.5rem; "
+        "padding:0.45rem 0.6rem; border-bottom:1px solid #e5e7eb; background:#fff;'>"
+        "<button id='entity-subgraph-zoom-in' type='button'>zoom in</button>"
+        "<button id='entity-subgraph-zoom-out' type='button'>zoom out</button>"
+        "<span class='muted'>drag to rotate - wheel to zoom - hover nodes or edges</span>"
+        "</div>"
+        f"<svg data-testid='entity-subgraph-3d' viewBox='0 0 {width} {height}' "
+        "width='100%' height='380' role='img' aria-label='Embedded 3D entity subgraph' "
+        "style='display:block; background:#f8fafc; touch-action:none;'></svg>"
+        "<div style='display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; "
+        "padding:0.45rem 0.6rem; border-top:1px solid #e5e7eb; background:#fff;'>"
+        "<div data-testid='entity-subgraph-node-detail' class='muted'>"
+        "Hover a node for sidecar grade/score/floor.</div>"
+        "<div data-testid='entity-subgraph-edge-detail' class='muted'>"
+        "Hover an edge for weight and shared signals.</div></div>"
+        "<script>\n"
+        "(function () {\n"
+        f"  const nodes = {nodes_json};\n"
+        f"  const edges = {edges_json};\n"
+        f"  const width = {width};\n"
+        f"  const height = {height};\n"
+        "  const svg = document.querySelector('[data-testid=\"entity-subgraph-3d\"]');\n"
+        "  const nodeDetail = document.querySelector('[data-testid=\"entity-subgraph-node-detail\"]');\n"
+        "  const edgeDetail = document.querySelector('[data-testid=\"entity-subgraph-edge-detail\"]');\n"
+        "  if (!svg) return;\n"
+        "  const points = new Map();\n"
+        "  const center = nodes.find(n => n.is_center) || nodes[0];\n"
+        "  if (!center) return;\n"
+        "  points.set(center.id, {x: 0, y: 0, z: 0});\n"
+        "  nodes.filter(n => n.id !== center.id).forEach((n, idx) => {\n"
+        "    const i = idx + 1;\n"
+        "    const phi = Math.acos(1 - 2 * i / Math.max(2, nodes.length));\n"
+        "    const theta = Math.PI * (3 - Math.sqrt(5)) * i;\n"
+        "    const radius = 250;\n"
+        "    points.set(n.id, {x: radius * Math.cos(theta) * Math.sin(phi), y: radius * Math.sin(theta) * Math.sin(phi), z: radius * Math.cos(phi)});\n"
+        "  });\n"
+        "  let yaw = -0.4;\n"
+        "  let pitch = 0.55;\n"
+        "  let zoom = 1;\n"
+        "  function escapeHtml(s) { return String(s).replace(/[&<>\"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[ch])); }\n"
+        "  function project(p) {\n"
+        "    const cyaw = Math.cos(yaw), syaw = Math.sin(yaw);\n"
+        "    const cp = Math.cos(pitch), sp = Math.sin(pitch);\n"
+        "    const x1 = p.x * cyaw - p.z * syaw;\n"
+        "    const z1 = p.x * syaw + p.z * cyaw;\n"
+        "    const y1 = p.y * cp - z1 * sp;\n"
+        "    const z2 = p.y * sp + z1 * cp;\n"
+        "    const scale = zoom * 620 / (760 + z2);\n"
+        "    return {x: width / 2 + x1 * scale, y: height / 2 + y1 * scale, z: z2, scale};\n"
+        "  }\n"
+        "  function attachHover() {\n"
+        "    svg.querySelectorAll('[data-node-detail]').forEach(n => n.addEventListener('mouseenter', () => { nodeDetail.textContent = n.dataset.nodeDetail || ''; }));\n"
+        "    svg.querySelectorAll('[data-edge-detail]').forEach(e => e.addEventListener('mouseenter', () => { edgeDetail.textContent = e.dataset.edgeDetail || ''; }));\n"
+        "  }\n"
+        "  function draw() {\n"
+        "    const projected = new Map();\n"
+        "    points.forEach((p, id) => projected.set(id, project(p)));\n"
+        "    const edgeLines = edges.map(e => {\n"
+        "      const s = projected.get(e.source);\n"
+        "      const t = projected.get(e.target);\n"
+        "      if (!s || !t) return '';\n"
+        "      const w = Math.max(1, Math.min(4, 1 + Math.sqrt(Math.max(0, Number(e.weight || 1)))));\n"
+        "      return '<line x1=\"' + s.x.toFixed(1) + '\" y1=\"' + s.y.toFixed(1) + '\" x2=\"' + t.x.toFixed(1) + '\" y2=\"' + t.y.toFixed(1) + '\" stroke=\"#64748b\" stroke-opacity=\"0.55\" stroke-width=\"' + w.toFixed(2) + '\" />';\n"
+        "    }).join('');\n"
+        "    const nodeEls = nodes.slice().sort((a, b) => (projected.get(a.id)?.z || 0) - (projected.get(b.id)?.z || 0)).map(n => {\n"
+        "      const p = projected.get(n.id) || {x: width / 2, y: height / 2, z: 0, scale: 1};\n"
+        "      const r = Math.max(7, (n.is_center ? 18 : 12) * Math.max(0.7, p.scale));\n"
+        "      return '<a href=\"' + escapeHtml(n.href) + '\"><g data-testid=\"entity-subgraph-node\" data-node-detail=\"' + escapeHtml(n.title) + '\"><title>' + escapeHtml(n.title) + '</title><circle cx=\"' + p.x.toFixed(1) + '\" cy=\"' + p.y.toFixed(1) + '\" r=\"' + r + '\" fill=\"' + escapeHtml(n.fill) + '\" stroke=\"' + escapeHtml(n.stroke) + '\" stroke-width=\"3\" /><text x=\"' + p.x.toFixed(1) + '\" y=\"' + (p.y + r + 14).toFixed(1) + '\" text-anchor=\"middle\" font-size=\"11\" fill=\"#111827\" style=\"pointer-events:none;\">' + escapeHtml(String(n.label).slice(0, 28)) + '</text></g></a>';\n"
+        "    }).join('');\n"
+        "    const edgeHits = edges.map(e => {\n"
+        "      const s = projected.get(e.source);\n"
+        "      const t = projected.get(e.target);\n"
+        "      if (!s || !t) return '';\n"
+        "      const hx1 = s.x + (t.x - s.x) * 0.18, hy1 = s.y + (t.y - s.y) * 0.18;\n"
+        "      const hx2 = s.x + (t.x - s.x) * 0.82, hy2 = s.y + (t.y - s.y) * 0.82;\n"
+        "      return '<line data-testid=\"entity-subgraph-edge\" data-edge-detail=\"' + escapeHtml(e.title) + '\" x1=\"' + hx1.toFixed(1) + '\" y1=\"' + hy1.toFixed(1) + '\" x2=\"' + hx2.toFixed(1) + '\" y2=\"' + hy2.toFixed(1) + '\" stroke=\"transparent\" stroke-width=\"12\" style=\"pointer-events:stroke;\"><title>' + escapeHtml(e.title) + '</title></line>';\n"
+        "    }).join('');\n"
+        "    svg.innerHTML = '<rect width=\"100%\" height=\"100%\" fill=\"#f8fafc\" />' + edgeLines + nodeEls + edgeHits;\n"
+        "    attachHover();\n"
+        "  }\n"
+        "  document.getElementById('entity-subgraph-zoom-in')?.addEventListener('click', () => { zoom = Math.min(2.5, zoom * 1.18); draw(); });\n"
+        "  document.getElementById('entity-subgraph-zoom-out')?.addEventListener('click', () => { zoom = Math.max(0.35, zoom / 1.18); draw(); });\n"
+        "  let dragging = false, lastX = 0, lastY = 0;\n"
+        "  svg.addEventListener('pointerdown', ev => { if (ev.target.closest('[data-3d-node-id]') || ev.target.closest('[data-edge-detail]')) return; dragging = true; lastX = ev.clientX; lastY = ev.clientY; svg.setPointerCapture(ev.pointerId); });\n"
+        "  svg.addEventListener('pointerup', ev => { dragging = false; try { svg.releasePointerCapture(ev.pointerId); } catch (_) {} });\n"
+        "  svg.addEventListener('pointermove', ev => { if (!dragging) return; yaw += (ev.clientX - lastX) * 0.01; pitch += (ev.clientY - lastY) * 0.01; pitch = Math.max(-1.35, Math.min(1.35, pitch)); lastX = ev.clientX; lastY = ev.clientY; draw(); });\n"
+        "  svg.addEventListener('wheel', ev => { ev.preventDefault(); zoom = Math.max(0.35, Math.min(2.5, zoom * (ev.deltaY < 0 ? 1.08 : 0.92))); draw(); }, {passive:false});\n"
+        "  draw();\n"
+        "})();\n"
+        "</script>"
+        "</div>"
+    )
+
+
 def render_wiki_index_page(
     *,
     entries: list[dict[str, Any]],
