@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
+import tarfile
 import zlib
 from pathlib import Path
 from typing import Any, Callable
@@ -14,16 +16,19 @@ _GRAPH_CACHE_KEY: tuple[Any, ...] | None = None
 _GRAPH_CACHE_VALUE: Any | None = None
 _OVERLAY_INDEX_COVERAGE_CACHE_KEY: tuple[Any, ...] | None = None
 _OVERLAY_INDEX_COVERAGE_CACHE_VALUE: bool | None = None
+_PACKAGED_GRAPH_EXPORT_ID_CACHE: str | None | bool = None
 
 
 def reset_caches() -> None:
     global _GRAPH_CACHE_KEY, _GRAPH_CACHE_VALUE
     global _OVERLAY_INDEX_COVERAGE_CACHE_KEY, _OVERLAY_INDEX_COVERAGE_CACHE_VALUE
+    global _PACKAGED_GRAPH_EXPORT_ID_CACHE
 
     _GRAPH_CACHE_KEY = None
     _GRAPH_CACHE_VALUE = None
     _OVERLAY_INDEX_COVERAGE_CACHE_KEY = None
     _OVERLAY_INDEX_COVERAGE_CACHE_VALUE = None
+    _PACKAGED_GRAPH_EXPORT_ID_CACHE = None
 
 
 def cached_dashboard_graph() -> Any | None:
@@ -325,6 +330,145 @@ def dashboard_index_covers_runtime_overlays(
         _OVERLAY_INDEX_COVERAGE_CACHE_KEY = cache_key
         _OVERLAY_INDEX_COVERAGE_CACHE_VALUE = coverage
     return coverage
+
+
+def dashboard_graph_index_archives(module_root: Path) -> list[Path]:
+    roots = (module_root,)
+    names = ("wiki-graph-runtime.tar.gz", "wiki-graph.tar.gz")
+    seen: set[Path] = set()
+    archives: list[Path] = []
+    for root in roots:
+        for name in names:
+            candidate = (root / "graph" / name).resolve()
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            if candidate.is_file():
+                archives.append(candidate)
+    return archives
+
+
+def packaged_graph_export_id(module_root: Path) -> str | None:
+    global _PACKAGED_GRAPH_EXPORT_ID_CACHE
+    if isinstance(_PACKAGED_GRAPH_EXPORT_ID_CACHE, bool):
+        return None
+    if isinstance(_PACKAGED_GRAPH_EXPORT_ID_CACHE, str):
+        return _PACKAGED_GRAPH_EXPORT_ID_CACHE
+    try:
+        data = json.loads(
+            (module_root / "graph" / "communities.json").read_text(
+                encoding="utf-8",
+            )
+        )
+    except (OSError, json.JSONDecodeError):
+        _PACKAGED_GRAPH_EXPORT_ID_CACHE = False
+        return None
+    export_id = data.get("export_id") if isinstance(data, dict) else None
+    if isinstance(export_id, str) and export_id.strip():
+        _PACKAGED_GRAPH_EXPORT_ID_CACHE = export_id.strip()
+        return export_id.strip()
+    _PACKAGED_GRAPH_EXPORT_ID_CACHE = False
+    return None
+
+
+def archive_graph_export_id(archive: Path) -> str | None:
+    try:
+        with tarfile.open(archive, "r:gz") as tar:
+            try:
+                member = tar.getmember("./graphify-out/graph-export-manifest.json")
+            except KeyError:
+                member = tar.getmember("graphify-out/graph-export-manifest.json")
+            source = tar.extractfile(member)
+            if source is None:
+                return None
+            try:
+                data = json.loads(source.read().decode("utf-8", errors="replace"))
+            finally:
+                source.close()
+    except (KeyError, OSError, tarfile.TarError, json.JSONDecodeError):
+        return None
+    export_id = data.get("export_id") if isinstance(data, dict) else None
+    return export_id.strip() if isinstance(export_id, str) and export_id.strip() else None
+
+
+def ensure_dashboard_graph_index(
+    *,
+    target: Path,
+    manifest_export_id: Callable[[], str | None],
+    packaged_export_id: Callable[[], str | None],
+    archives: Callable[[], list[Path]],
+    archive_export_id: Callable[[Path], str | None],
+    index_matches_manifest: Callable[[Path], bool],
+    index_member: str,
+) -> Path | None:
+    if target.is_file():
+        if index_matches_manifest(target):
+            return target
+        try:
+            target.unlink()
+        except OSError:
+            return None
+
+    manifest_id = manifest_export_id()
+    packaged_id = packaged_export_id()
+    if (
+        manifest_id is not None
+        and packaged_id is not None
+        and manifest_id != packaged_id
+    ):
+        return None
+
+    archive_paths = archives()
+    if not archive_paths:
+        return None
+    if manifest_id is None:
+        return None
+
+    from ctx.utils._file_lock import file_lock
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with file_lock(target):
+            if target.is_file():
+                if index_matches_manifest(target):
+                    return target
+                try:
+                    target.unlink()
+                except OSError:
+                    return None
+            for archive in archive_paths:
+                archive_id = packaged_id or archive_export_id(archive)
+                if manifest_id and archive_id and archive_id != manifest_id:
+                    continue
+                try:
+                    with tarfile.open(archive, "r:gz") as tar:
+                        try:
+                            member = tar.getmember(f"./{index_member}")
+                        except KeyError:
+                            member = tar.getmember(index_member)
+                        if not member.isfile():
+                            continue
+                        source = tar.extractfile(member)
+                        if source is None:
+                            continue
+                        tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+                        try:
+                            with tmp.open("wb") as out:
+                                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                                    out.write(chunk)
+                            if not index_matches_manifest(tmp):
+                                continue
+                            os.replace(tmp, target)
+                            return target
+                        finally:
+                            source.close()
+                            if tmp.exists():
+                                tmp.unlink()
+                except (KeyError, OSError, tarfile.TarError):
+                    continue
+    except TimeoutError:
+        return None
+    return target if target.is_file() else None
 
 
 def load_dashboard_graph(

@@ -70,7 +70,6 @@ import secrets
 import sqlite3
 import socket
 import sys
-import tarfile
 import time
 import zlib
 from collections import defaultdict, deque
@@ -119,7 +118,6 @@ from ctx.utils._safe_name import is_safe_source_name
 
 _MONITOR_TOKEN = ""
 _MONITOR_MUTATIONS_ENABLED = True
-_PACKAGED_GRAPH_EXPORT_ID_CACHE: str | None | bool = None
 _KPI_SUMMARY_CACHE_KEY: tuple[Any, ...] | None = None
 _KPI_SUMMARY_CACHE_VALUE: Any | None = None
 _KPI_SUMMARY_CACHE_AT = 0.0
@@ -2042,133 +2040,28 @@ def _dashboard_index_covers_runtime_overlays(index_path: Path) -> bool:
 
 def _dashboard_graph_index_archives() -> list[Path]:
     module_root = Path(__file__).resolve().parent.parent
-    roots = (module_root,)
-    names = ("wiki-graph-runtime.tar.gz", "wiki-graph.tar.gz")
-    seen: set[Path] = set()
-    archives: list[Path] = []
-    for root in roots:
-        for name in names:
-            candidate = (root / "graph" / name).resolve()
-            if candidate in seen:
-                continue
-            seen.add(candidate)
-            if candidate.is_file():
-                archives.append(candidate)
-    return archives
+    return _graph_service.dashboard_graph_index_archives(module_root)
 
 
 def _packaged_graph_export_id() -> str | None:
-    global _PACKAGED_GRAPH_EXPORT_ID_CACHE
-    if isinstance(_PACKAGED_GRAPH_EXPORT_ID_CACHE, bool):
-        return None
-    if isinstance(_PACKAGED_GRAPH_EXPORT_ID_CACHE, str):
-        return _PACKAGED_GRAPH_EXPORT_ID_CACHE
     module_root = Path(__file__).resolve().parent.parent
-    try:
-        data = json.loads(
-            (module_root / "graph" / "communities.json").read_text(
-                encoding="utf-8",
-            )
-        )
-    except (OSError, json.JSONDecodeError):
-        _PACKAGED_GRAPH_EXPORT_ID_CACHE = False
-        return None
-    export_id = data.get("export_id") if isinstance(data, dict) else None
-    if isinstance(export_id, str) and export_id.strip():
-        _PACKAGED_GRAPH_EXPORT_ID_CACHE = export_id.strip()
-        return export_id.strip()
-    _PACKAGED_GRAPH_EXPORT_ID_CACHE = False
-    return None
+    return _graph_service.packaged_graph_export_id(module_root)
 
 
 def _archive_graph_export_id(archive: Path) -> str | None:
-    try:
-        with tarfile.open(archive, "r:gz") as tar:
-            try:
-                member = tar.getmember("./graphify-out/graph-export-manifest.json")
-            except KeyError:
-                member = tar.getmember("graphify-out/graph-export-manifest.json")
-            source = tar.extractfile(member)
-            if source is None:
-                return None
-            try:
-                data = json.loads(source.read().decode("utf-8", errors="replace"))
-            finally:
-                source.close()
-    except (KeyError, OSError, tarfile.TarError, json.JSONDecodeError):
-        return None
-    export_id = data.get("export_id") if isinstance(data, dict) else None
-    return export_id.strip() if isinstance(export_id, str) and export_id.strip() else None
+    return _graph_service.archive_graph_export_id(archive)
 
 
 def _ensure_dashboard_graph_index() -> Path | None:
-    target = _dashboard_graph_index_path()
-    if target.is_file():
-        if _dashboard_index_matches_manifest(target):
-            return target
-        try:
-            target.unlink()
-        except OSError:
-            return None
-
-    manifest_export_id = _dashboard_graph_manifest_export_id()
-    packaged_export_id = _packaged_graph_export_id()
-    if (
-        manifest_export_id is not None
-        and packaged_export_id is not None
-        and manifest_export_id != packaged_export_id
-    ):
-        return None
-
-    archives = _dashboard_graph_index_archives()
-    if not archives:
-        return None
-    if manifest_export_id is None:
-        return None
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with file_lock(target):
-            if target.is_file():
-                if _dashboard_index_matches_manifest(target):
-                    return target
-                try:
-                    target.unlink()
-                except OSError:
-                    return None
-            for archive in archives:
-                archive_export_id = packaged_export_id or _archive_graph_export_id(archive)
-                if manifest_export_id and archive_export_id and archive_export_id != manifest_export_id:
-                    continue
-                try:
-                    with tarfile.open(archive, "r:gz") as tar:
-                        try:
-                            member = tar.getmember(f"./{_DASHBOARD_INDEX_MEMBER}")
-                        except KeyError:
-                            member = tar.getmember(_DASHBOARD_INDEX_MEMBER)
-                        if not member.isfile():
-                            continue
-                        source = tar.extractfile(member)
-                        if source is None:
-                            continue
-                        tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-                        try:
-                            with tmp.open("wb") as out:
-                                for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                                    out.write(chunk)
-                            if not _dashboard_index_matches_manifest(tmp):
-                                continue
-                            os.replace(tmp, target)
-                            return target
-                        finally:
-                            source.close()
-                            if tmp.exists():
-                                tmp.unlink()
-                except (KeyError, OSError, tarfile.TarError):
-                    continue
-    except TimeoutError:
-        return None
-    return target if target.is_file() else None
+    return _graph_service.ensure_dashboard_graph_index(
+        target=_dashboard_graph_index_path(),
+        manifest_export_id=_dashboard_graph_manifest_export_id,
+        packaged_export_id=_packaged_graph_export_id,
+        archives=_dashboard_graph_index_archives,
+        archive_export_id=_archive_graph_export_id,
+        index_matches_manifest=_dashboard_index_matches_manifest,
+        index_member=_DASHBOARD_INDEX_MEMBER,
+    )
 
 
 def _index_node_size(

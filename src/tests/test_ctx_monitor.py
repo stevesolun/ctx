@@ -3032,6 +3032,8 @@ def test_dashboard_index_extraction_skips_archive_export_mismatch(
         tar.add(manifest, arcname="./graphify-out/graph-export-manifest.json")
         tar.add(seed, arcname="./graphify-out/dashboard-neighborhoods.sqlite3")
 
+    assert graph_service.archive_graph_export_id(archive) == "archive-export"
+
     monkeypatch.setattr(cm, "_dashboard_graph_index_archives", lambda: [archive])
     monkeypatch.setattr(cm, "_packaged_graph_export_id", lambda: None)
     monkeypatch.setattr(
