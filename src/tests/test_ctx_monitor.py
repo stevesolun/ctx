@@ -30,6 +30,7 @@ from ctx.monitor.pages import loaded as loaded_page
 from ctx.monitor.pages import manage as manage_page
 from ctx.monitor.pages import skills as skills_page
 from ctx.monitor.pages import skillspector as skillspector_page
+from ctx.monitor.pages import wiki as wiki_page
 from ctx.monitor import routes as monitor_routes
 from ctx.core.wiki import wiki_queue
 
@@ -1514,9 +1515,16 @@ def test_render_wiki_entity_renders_markdown_and_wikilinks(fake_claude: Path) ->
     )
 
     html_out = cm._render_wiki_entity("markdown-page", entity_type="skill")
+    markdown_out = wiki_page.render_wiki_markdown(
+        "Use `pytest` with [[entities/skills/find-skills]].\n\n"
+        "Source: [Homepage](https://example.com/docs).",
+        wiki_link_href=cm._wiki_link_href,
+    )
 
     assert "<h1>Markdown Page</h1>" not in html_out
     assert "<code>pytest</code>" in html_out
+    assert "<code>pytest</code>" in markdown_out
+    assert "href='/wiki/find-skills?type=skill'" in markdown_out
     assert "href='/wiki/find-skills?type=skill'" in html_out
     assert "href='/wiki/reviewer?type=agent'" in html_out
     assert "<a href='https://example.com/docs'>Homepage</a>" in html_out
@@ -1577,8 +1585,23 @@ def test_render_mcp_wiki_entity_has_tabs_subgraph_and_quality(
     monkeypatch.setattr(cm, "_load_dashboard_graph", lambda: graph)
 
     html_out = cm._render_wiki_entity("github", entity_type="mcp-server")
+    direct_tabs = wiki_page.render_entity_tabs(
+        overview_html="overview",
+        subgraph_html="subgraph",
+        quality_html="quality",
+    )
+    direct_quality = wiki_page.render_quality_drilldown(
+        {
+            "grade": "B",
+            "raw_score": 0.7106,
+            "signals": {},
+        },
+        wiki_link_href=cm._wiki_link_href,
+        truncate_text=cm._truncate_text,
+    )
 
     assert "data-entity-tab='overview'" in html_out
+    assert "data-entity-tab='overview'" in direct_tabs
     assert "data-entity-tab='subgraph'" in html_out
     assert "data-entity-tab='quality'" in html_out
     assert "<h2>Subgraph</h2>" in html_out
@@ -1600,6 +1623,7 @@ def test_render_mcp_wiki_entity_has_tabs_subgraph_and_quality(
     assert "needs-usage" in html_out
     assert "<h2>Quality</h2>" in html_out
     assert "freshness" in html_out
+    assert "No signal breakdown was recorded" in direct_quality
     assert "has_install" in html_out
     assert "missing-license" in html_out
     assert "<pre style=" not in html_out
