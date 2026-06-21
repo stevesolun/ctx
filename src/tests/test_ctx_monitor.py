@@ -36,6 +36,7 @@ from ctx.monitor.api import readonly as readonly_api
 from ctx.monitor import routes as monitor_routes
 from ctx.monitor.services import config as config_service
 from ctx.monitor.services import graph as graph_service
+from ctx.monitor.services import runtime as runtime_service
 from ctx.monitor.services import sidecars as sidecar_service
 from ctx.monitor.services import skillspector as skillspector_service
 from ctx.monitor.services import wiki as wiki_service
@@ -128,6 +129,7 @@ def test_read_jsonl_skips_non_object_lines(tmp_path: Path) -> None:
     )
 
     assert cm._read_jsonl(path) == [{"event": "ok"}]
+    assert runtime_service.read_jsonl(path) == [{"event": "ok"}]
 
 
 def test_read_jsonl_limit_keeps_tail_without_full_slice(tmp_path: Path) -> None:
@@ -138,6 +140,7 @@ def test_read_jsonl_limit_keeps_tail_without_full_slice(tmp_path: Path) -> None:
     )
 
     assert cm._read_jsonl(path, limit=2) == [{"i": 3}, {"i": 4}]
+    assert runtime_service.read_jsonl(path, limit=2) == [{"i": 3}, {"i": 4}]
 
 
 def _post_json(port: int, path: str, body: dict, token: str | None = None) -> tuple[int, dict]:
@@ -771,12 +774,14 @@ def test_runtime_lifecycle_summary_reads_validation_and_escalation_events(
     ])
 
     summary = cm._runtime_lifecycle_summary()
+    direct_summary = runtime_service.lifecycle_summary(events)
 
     assert summary["validations_total"] == 2
     assert summary["validation_failures"] == 1
     assert summary["open_escalations_total"] == 1
     assert summary["latest_validation"]["check_name"] == "mypy"
     assert summary["open_escalations"][0]["trigger"] == "validation-failed"
+    assert direct_summary == summary
 
 
 def test_runtime_lifecycle_summary_uses_full_history_for_open_state(
