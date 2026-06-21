@@ -3998,6 +3998,12 @@ def test_wiki_index_entries_use_dashboard_index_without_markdown_pages(
 
     assert slugs == {"python-patterns", "code-reviewer"}
     assert entries[0]["description"] == "Idiomatic Python patterns"
+    assert wiki_service.index_entries(
+        fake_claude / "skill-wiki",
+        index_path,
+        limit_per_type=10,
+        index_matches_manifest=lambda path: path == index_path,
+    ) == entries
     assert wiki_service.search_entities_from_index(
         index_path,
         "python",

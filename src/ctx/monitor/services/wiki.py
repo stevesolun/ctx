@@ -292,6 +292,123 @@ def search_entities_from_index(
     return results
 
 
+def index_entries(
+    wiki_dir: Path,
+    index_path: Path,
+    *,
+    limit_per_type: int | None,
+    index_matches_manifest: Callable[[Path], bool],
+) -> list[dict[str, Any]]:
+    """Return sampled wiki catalog rows for the dashboard index page."""
+    indexed = index_entries_from_dashboard_index(
+        index_path,
+        limit_per_type=limit_per_type,
+        index_matches_manifest=index_matches_manifest,
+    )
+    if indexed is not None:
+        return indexed
+
+    paths = iter_entity_paths(wiki_dir)
+    if not paths:
+        return []
+    out: list[dict[str, Any]] = []
+    for _sub, entity_type, _recursive in _DASHBOARD_ENTITY_SOURCES:
+        seen_for_type = 0
+        for slug, current_type, path in paths:
+            if current_type != entity_type:
+                continue
+            if limit_per_type is not None and seen_for_type >= limit_per_type:
+                break
+            text = read_entity_text(wiki_dir, slug, current_type, path)
+            if text is None:
+                continue
+            head = text[:2048]
+            meta, _ = parse_frontmatter_and_body(head)
+            all_tags = frontmatter_tags(meta.get("tags", ""), limit=None)
+            description, _truncated = truncate_text(
+                frontmatter_text(meta.get("description", "")),
+                200,
+            )
+            out.append({
+                "slug": slug,
+                "display_slug": display_slug(slug),
+                "type": entity_type,
+                "tags": all_tags[:6],
+                "search_tags": all_tags,
+                "description": description,
+            })
+            seen_for_type += 1
+    return out
+
+
+def index_entries_from_dashboard_index(
+    index_path: Path,
+    *,
+    limit_per_type: int | None,
+    index_matches_manifest: Callable[[Path], bool],
+) -> list[dict[str, Any]] | None:
+    if not index_path.is_file() or not index_matches_manifest(index_path):
+        return None
+
+    out: list[dict[str, Any]] = []
+    try:
+        conn = sqlite3.connect(f"file:{index_path.as_posix()}?mode=ro", uri=True)
+        try:
+            for _sub, entity_type, _recursive in _DASHBOARD_ENTITY_SOURCES:
+                params: list[Any] = [entity_type]
+                limit_sql = ""
+                if limit_per_type is not None:
+                    limit_sql = " LIMIT ?"
+                    params.append(max(0, int(limit_per_type)))
+                rows = conn.execute(
+                    "SELECT id,label,type,tags,description,quality_score FROM nodes "
+                    "WHERE type=? ORDER BY lower(label), id" + limit_sql,
+                    params,
+                )
+                for (
+                    node_id,
+                    label,
+                    row_type,
+                    tags_raw,
+                    description_raw,
+                    quality_score,
+                ) in rows:
+                    node_id_text = str(node_id)
+                    slug = (
+                        node_id_text.split(":", 1)[1]
+                        if ":" in node_id_text
+                        else str(label)
+                    )
+                    if not is_safe_slug(slug):
+                        continue
+                    try:
+                        parsed_tags = json.loads(str(tags_raw or "[]"))
+                    except json.JSONDecodeError:
+                        parsed_tags = []
+                    all_tags = [
+                        str(tag) for tag in parsed_tags
+                        if isinstance(tag, str)
+                    ]
+                    description, _truncated = truncate_text(
+                        frontmatter_text(description_raw),
+                        200,
+                    )
+                    out.append({
+                        "slug": slug,
+                        "display_slug": display_slug(str(label or slug)),
+                        "type": str(row_type or entity_type),
+                        "tags": all_tags[:6],
+                        "search_tags": all_tags,
+                        "description": description,
+                        "grade": grade_from_quality_score(quality_score),
+                    })
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        return None
+    return out
+
+
 def graph_slug_from_node_id(node_id: str) -> str:
     return node_id.split(":", 1)[-1]
 
@@ -317,3 +434,53 @@ def display_label(value: Any, *, fallback_slug: str = "") -> str:
 def entity_wiki_href(slug: str, entity_type: str | None = None) -> str:
     suffix = f"?type={quote(entity_type)}" if entity_type in _DASHBOARD_ENTITY_TYPES else ""
     return f"/wiki/{quote(slug)}{suffix}"
+
+
+def frontmatter_text(value: Any) -> str:
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, default=str)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def truncate_text(value: str, limit: int) -> tuple[str, bool]:
+    if limit <= 0 or len(value) <= limit:
+        return value, False
+    if limit <= 3:
+        return value[:limit], True
+    return value[: limit - 3].rstrip() + "...", True
+
+
+def frontmatter_tags(value: Any, *, limit: int | None = 6) -> list[str]:
+    if isinstance(value, list):
+        raw_items = value
+    else:
+        raw = frontmatter_text(value)
+        raw_items = raw.replace("[", "").replace("]", "").split(",")
+    out: list[str] = []
+    for item in raw_items:
+        tok = str(item).strip().strip("'\"")
+        if tok:
+            out.append(tok)
+        if limit is not None and len(out) >= limit:
+            break
+    return out
+
+
+def grade_from_quality_score(value: Any) -> str:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if score >= 0.80:
+        return "A"
+    if score >= 0.60:
+        return "B"
+    if score >= 0.40:
+        return "C"
+    if score >= 0.0:
+        return "D"
+    return ""
