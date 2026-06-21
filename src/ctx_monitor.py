@@ -105,6 +105,7 @@ from ctx.monitor.server import MonitorServer as _MonitorServer
 from ctx.monitor.server import make_monitor_server as _make_server
 from ctx.monitor.server import server_shutdown_requested as _server_shutdown_requested
 from ctx.monitor.services import config as _config_service
+from ctx.monitor.services import graph as _graph_service
 from ctx.monitor.services import sidecars as _sidecar_service
 from ctx.utils._file_lock import file_lock
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
@@ -114,8 +115,6 @@ from ctx.utils._safe_name import is_safe_source_name
 
 _MONITOR_TOKEN = ""
 _MONITOR_MUTATIONS_ENABLED = True
-_GRAPH_CACHE_KEY: tuple[Any, ...] | None = None
-_GRAPH_CACHE_VALUE: Any | None = None
 _PACKAGED_GRAPH_EXPORT_ID_CACHE: str | None | bool = None
 _OVERLAY_INDEX_COVERAGE_CACHE_KEY: tuple[Any, ...] | None = None
 _OVERLAY_INDEX_COVERAGE_CACHE_VALUE: bool | None = None
@@ -245,69 +244,24 @@ def _wiki_pack_pages() -> dict[str, str] | None:
 
 
 def _load_dashboard_graph() -> Any:
-    """Load the wiki graph once per graph artifact version."""
-    global _GRAPH_CACHE_KEY, _GRAPH_CACHE_VALUE
-
-    graph_path = _wiki_dir() / "graphify-out" / "graph.json"
-    overlay_path = graph_path.with_name("entity-overlays.jsonl")
     from ctx.core.graph.resolve_graph import load_graph as _lg  # type: ignore
 
-    source_key = _dashboard_graph_source_cache_key(graph_path, overlay_path)
-    if source_key is None:
-        _GRAPH_CACHE_KEY = None
-        _GRAPH_CACHE_VALUE = None
-        return _lg(graph_path)
-
-    cache_key = (id(_lg), source_key)
-    if _GRAPH_CACHE_KEY == cache_key and _GRAPH_CACHE_VALUE is not None:
-        return _GRAPH_CACHE_VALUE
-
-    try:
-        graph = _lg(graph_path, apply_runtime_filter=False)
-    except TypeError:
-        graph = _lg(graph_path)
-    _GRAPH_CACHE_KEY = cache_key
-    _GRAPH_CACHE_VALUE = graph
-    return graph
+    return _graph_service.load_dashboard_graph(_wiki_dir(), _lg)
 
 
 def _dashboard_graph_source_cache_key(
     graph_path: Path,
     overlay_path: Path,
 ) -> tuple[Any, ...] | None:
-    graph_key = _dashboard_file_cache_key(graph_path)
-    overlay_key = _dashboard_file_cache_key(overlay_path)
-    pack_key = _dashboard_graph_pack_cache_key(graph_path.parent / "packs")
-    if graph_key is None and not pack_key:
-        return None
-    return (graph_key, overlay_key, pack_key)
+    return _graph_service.dashboard_graph_source_cache_key(graph_path, overlay_path)
 
 
 def _dashboard_file_cache_key(path: Path) -> tuple[str, float, int] | None:
-    try:
-        stat = path.stat()
-    except OSError:
-        return None
-    return (str(path.resolve()), stat.st_mtime, stat.st_size)
+    return _graph_service.dashboard_file_cache_key(path)
 
 
 def _dashboard_graph_pack_cache_key(packs_dir: Path) -> tuple[tuple[str, float, int], ...]:
-    if not packs_dir.is_dir():
-        return ()
-    try:
-        files = sorted(path for path in packs_dir.rglob("*") if path.is_file())
-    except OSError:
-        return (("<unreadable>", 0.0, 0),)
-    rows: list[tuple[str, float, int]] = []
-    for path in files:
-        try:
-            stat = path.stat()
-            relpath = path.relative_to(packs_dir).as_posix()
-        except OSError:
-            rows.append((path.name, 0.0, 0))
-            continue
-        rows.append((relpath, stat.st_mtime, stat.st_size))
-    return tuple(rows)
+    return _graph_service.dashboard_graph_pack_cache_key(packs_dir)
 
 
 def _mcp_shard(slug: str) -> str:
@@ -3421,7 +3375,7 @@ def _top_degree_seeds(limit: int = 18, *, allow_load: bool = True) -> list[dict]
     something to click. Falls back to empty on any graph-load failure.
     """
     try:
-        G = _load_dashboard_graph() if allow_load else _GRAPH_CACHE_VALUE
+        G = _load_dashboard_graph() if allow_load else _graph_service.cached_dashboard_graph()
     except Exception:  # noqa: BLE001
         return []
     if G is None:

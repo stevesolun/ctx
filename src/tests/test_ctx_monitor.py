@@ -33,6 +33,7 @@ from ctx.monitor.pages import skillspector as skillspector_page
 from ctx.monitor.pages import wiki as wiki_page
 from ctx.monitor import routes as monitor_routes
 from ctx.monitor.services import config as config_service
+from ctx.monitor.services import graph as graph_service
 from ctx.monitor.services import sidecars as sidecar_service
 from ctx.core.wiki import wiki_queue
 
@@ -44,6 +45,7 @@ def fake_claude(tmp_path: Path, monkeypatch) -> Path:
     (claude / "skill-quality").mkdir(parents=True)
     monkeypatch.setattr(cm, "_claude_dir", lambda: claude)
     monkeypatch.setattr(cm, "_dashboard_graph_index_archives", lambda: [])
+    graph_service.reset_caches()
     sidecar_service.reset_caches()
     monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_KEY", None)
     monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_VALUE", None)
@@ -2113,8 +2115,7 @@ def test_graph_helpers_reuse_graph_loaded_from_same_file(
 
     fake = type("M", (), {"load_graph": staticmethod(_load_graph)})
     monkeypatch.setitem(sys.modules, "ctx.core.graph.resolve_graph", fake)
-    monkeypatch.setattr(cm, "_GRAPH_CACHE_KEY", None)
-    monkeypatch.setattr(cm, "_GRAPH_CACHE_VALUE", None)
+    graph_service.reset_caches()
 
     assert cm._graph_stats()["nodes"] == 2
     assert cm._top_degree_seeds(limit=1)[0]["slug"] == "python-patterns"
@@ -2155,8 +2156,7 @@ def test_dashboard_graph_cache_reuses_pack_only_graph(
 
     fake = type("M", (), {"load_graph": staticmethod(_load_graph)})
     monkeypatch.setitem(sys.modules, "ctx.core.graph.resolve_graph", fake)
-    monkeypatch.setattr(cm, "_GRAPH_CACHE_KEY", None)
-    monkeypatch.setattr(cm, "_GRAPH_CACHE_VALUE", None)
+    graph_service.reset_caches()
 
     assert cm._load_dashboard_graph() is G
     assert cm._load_dashboard_graph() is G
@@ -2179,6 +2179,54 @@ def test_dashboard_graph_cache_reuses_pack_only_graph(
         (graph_file, {"apply_runtime_filter": False}),
         (graph_file, {"apply_runtime_filter": False}),
     ]
+
+
+def test_graph_service_cache_invalidates_when_pack_overlay_changes(fake_claude: Path) -> None:
+    import networkx as nx
+
+    from ctx.core.graph.graph_packs import write_base_pack, write_overlay_pack
+
+    graph_out = fake_claude / "skill-wiki" / "graphify-out"
+    graph_file = graph_out / "graph.json"
+    base_graph = nx.Graph()
+    base_graph.add_node("skill:python-patterns", label="python-patterns", type="skill")
+    write_base_pack(
+        pack_dir=graph_out / "packs" / "base-export-1",
+        pack_id="base-export-1",
+        base_export_id="export-1",
+        config_hash="config-1",
+        model_id="model-1",
+        graph=base_graph,
+    )
+
+    loaded = [nx.Graph(), nx.Graph()]
+    calls: list[Path | None] = []
+
+    def load_graph(path: Path | None = None, **_kwargs: object):
+        calls.append(path)
+        return loaded[min(len(calls) - 1, len(loaded) - 1)]
+
+    graph_service.reset_caches()
+    first = graph_service.load_dashboard_graph(fake_claude / "skill-wiki", load_graph)
+    second = graph_service.load_dashboard_graph(fake_claude / "skill-wiki", load_graph)
+    assert first is second
+    assert calls == [graph_file]
+
+    write_overlay_pack(
+        pack_dir=graph_out / "packs" / "overlay-pack-target",
+        pack_id="overlay-pack-target",
+        base_export_id="export-1",
+        parent_export_id="export-1",
+        config_hash="config-1",
+        model_id="model-1",
+        nodes=[{"id": "skill:pack-target", "label": "pack-target", "type": "skill"}],
+        edges=[],
+        tombstones=[],
+    )
+
+    refreshed = graph_service.load_dashboard_graph(fake_claude / "skill-wiki", load_graph)
+    assert refreshed is loaded[1]
+    assert calls == [graph_file, graph_file]
 
 
 def test_graph_neighborhood_uses_dashboard_index_without_full_graph_load(
@@ -4802,7 +4850,7 @@ def test_render_graph_landing_shows_seeds_when_available(monkeypatch) -> None:
         "edges": G.number_of_edges(),
         "available": True,
     })
-    monkeypatch.setattr(cm, "_GRAPH_CACHE_VALUE", G)
+    monkeypatch.setattr(graph_service, "cached_dashboard_graph", lambda: G)
 
     html_out = cm._render_graph(None)
     # Landing page shows the seeds block.
@@ -4869,7 +4917,7 @@ def test_render_graph_landing_does_not_cold_load_graph_for_seed_chips(
     })
     monkeypatch.setattr(cm, "_load_dashboard_graph", fake_load_graph)
     monkeypatch.setattr(cm, "_top_degree_seeds_from_index", lambda _limit=18: [])
-    monkeypatch.setattr(cm, "_GRAPH_CACHE_VALUE", None)
+    monkeypatch.setattr(graph_service, "cached_dashboard_graph", lambda: None)
 
     html_out = cm._render_graph(None)
 
@@ -4892,8 +4940,7 @@ def test_render_graph_landing_hides_seeds_when_graph_absent(monkeypatch) -> None
     monkeypatch.setitem(sys.modules, "ctx.core.graph.resolve_graph", fake)
     monkeypatch.setitem(sys.modules, "resolve_graph", fake)
     monkeypatch.setattr(cm, "_graph_stats", lambda: {"available": False})
-    monkeypatch.setattr(cm, "_GRAPH_CACHE_VALUE", None)
-    monkeypatch.setattr(cm, "_GRAPH_CACHE_KEY", None)
+    graph_service.reset_caches()
     html_out = cm._render_graph(None)
     # No seeds section when graph isn't available.
     assert "Popular seed slugs" not in html_out
