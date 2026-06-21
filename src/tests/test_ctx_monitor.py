@@ -31,6 +31,7 @@ from ctx.monitor.pages import manage as manage_page
 from ctx.monitor.pages import skills as skills_page
 from ctx.monitor.pages import skillspector as skillspector_page
 from ctx.monitor.pages import wiki as wiki_page
+from ctx.monitor.api import mutations as mutations_api
 from ctx.monitor.api import readonly as readonly_api
 from ctx.monitor import routes as monitor_routes
 from ctx.monitor.services import config as config_service
@@ -994,6 +995,32 @@ def test_monitor_post_requires_token(
 def test_monitor_post_accepts_valid_token(
     fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    direct_calls: list[tuple[str, str, dict[str, str]]] = []
+
+    def direct_load(
+        slug: str,
+        entity_type: str,
+        kwargs: dict[str, str],
+    ) -> tuple[bool, str]:
+        direct_calls.append((slug, entity_type, kwargs))
+        return True, "loaded"
+
+    direct = mutations_api.handle_mutation_route(
+        "api_load",
+        {"slug": "python-patterns", "entity_type": "agent"},
+        mutations_api.MutationApiDeps(
+            perform_load=direct_load,
+            perform_unload=lambda _slug, _type: (False, "unused"),
+            save_config_updates=lambda _updates: {"ok": False, "detail": "unused"},
+            upsert_wiki_entity=lambda _body: (False, "unused"),
+            delete_wiki_entity=lambda _slug, _type: (False, "unused"),
+        ),
+    )
+    assert direct is not None
+    assert direct.status == 200
+    assert direct.payload == {"ok": True, "detail": "loaded"}
+    assert direct_calls == [("python-patterns", "agent", {})]
+
     calls: list[tuple[str, str]] = []
 
     def fake_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:

@@ -87,6 +87,7 @@ from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
 from ctx.monitor.layout import layout as _layout
 from ctx.monitor.layout import monitor_asset_text as _monitor_asset_text
 from ctx.monitor.layout import monitor_inline_script as _monitor_inline_script
+from ctx.monitor.api import mutations as _mutation_api
 from ctx.monitor.api import readonly as _readonly_api
 from ctx.monitor import routes as _monitor_routes
 from ctx.monitor import state as _monitor_state
@@ -4200,6 +4201,23 @@ def _readonly_api_deps() -> _readonly_api.ReadOnlyApiDeps:
     )
 
 
+def _mutation_api_deps() -> _mutation_api.MutationApiDeps:
+    return _mutation_api.MutationApiDeps(
+        perform_load=lambda slug, entity_type, kwargs: _perform_load(
+            slug,
+            entity_type=entity_type,
+            **kwargs,
+        ),
+        perform_unload=lambda slug, entity_type: _perform_unload(
+            slug,
+            entity_type=entity_type,
+        ),
+        save_config_updates=_save_config_updates,
+        upsert_wiki_entity=_upsert_wiki_entity,
+        delete_wiki_entity=_delete_wiki_entity,
+    )
+
+
 def _is_safe_slug(slug: str) -> bool:
     return is_safe_source_name(slug)
 
@@ -4483,54 +4501,18 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 self._send_404(path)
                 return
 
-            if route.name == "api_load":
-                slug = str(body.get("slug", "")).strip()
-                etype = str(body.get("entity_type", "skill")).strip() or "skill"
-                command = body.get("command")
-                json_config = body.get("json_config")
-                kwargs: dict[str, str] = {}
-                if isinstance(command, str) and command:
-                    kwargs["command"] = command
-                if isinstance(json_config, str) and json_config:
-                    kwargs["json_config"] = json_config
-                ok, msg = _perform_load(slug, entity_type=etype, **kwargs)
-                self._send_json_status(
-                    200 if ok else 400, {"ok": ok, "detail": msg},
-                )
-            elif route.name == "api_unload":
-                slug = str(body.get("slug", "")).strip()
-                # entity_type defaults to "skill" for backward compat with
-                # existing JS that only sends {slug}. New /loaded page
-                # sends {slug, entity_type} so MCPs flow through the
-                # subprocess unload path.
-                etype = str(body.get("entity_type", "skill")).strip() or "skill"
-                ok, msg = _perform_unload(slug, entity_type=etype)
-                self._send_json_status(
-                    200 if ok else 400, {"ok": ok, "detail": msg},
-                )
-            elif route.name == "api_config":
-                updates = body.get("updates", {})
-                if not isinstance(updates, dict):
-                    self._send_json_status(
-                        400, {"ok": False, "detail": "updates must be an object"},
-                    )
-                    return
-                result = _save_config_updates(updates)
-                self._send_json_status(200 if result.get("ok") else 400, result)
-            elif route.name == "api_entity_upsert":
-                ok, msg = _upsert_wiki_entity(body)
-                self._send_json_status(
-                    200 if ok else 400, {"ok": ok, "detail": msg},
-                )
-            elif route.name == "api_entity_delete":
-                slug = str(body.get("slug", "")).strip()
-                etype = str(body.get("entity_type", "skill")).strip() or "skill"
-                ok, msg = _delete_wiki_entity(slug, etype)
-                self._send_json_status(
-                    200 if ok else 400, {"ok": ok, "detail": msg},
-                )
-            else:
+            mutation_response = _mutation_api.handle_mutation_route(
+                route.name,
+                body,
+                _mutation_api_deps(),
+            )
+            if mutation_response is None:
                 self._send_404(path)
+            else:
+                self._send_json_status(
+                    mutation_response.status,
+                    mutation_response.payload,
+                )
         except (BrokenPipeError, ConnectionAbortedError):
             return
         except Exception as exc:  # noqa: BLE001
