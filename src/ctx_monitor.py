@@ -126,7 +126,6 @@ _WIKI_INDEX_LIMIT_PER_TYPE = 500
 _SKILLS_PAGE_DEFAULT_LIMIT = 100
 _SKILLS_PAGE_MAX_LIMIT = 500
 _KPI_SUMMARY_CACHE_SECONDS = 30
-_GRAPH_REPORT_RE = re.compile(r"Nodes:\s*([\d,]+)\s*\|\s*Edges:\s*([\d,]+)")
 _MAX_POST_BODY_BYTES = 64 * 1024
 _DASHBOARD_INDEX_MEMBER = "graphify-out/dashboard-neighborhoods.sqlite3"
 _READ_TOKEN_COOKIE = "ctx_monitor_read_token"
@@ -2514,38 +2513,17 @@ def _graph_neighborhood(
 
 def _graph_stats() -> dict:
     """Top-line graph stats for the home page."""
-    report = _wiki_dir() / "graphify-out" / "graph-report.md"
-    try:
-        match = _GRAPH_REPORT_RE.search(
-            report.read_text(encoding="utf-8", errors="replace"),
-        )
-        if match:
-            return {
-                "nodes": int(match.group(1).replace(",", "")),
-                "edges": int(match.group(2).replace(",", "")),
-                "available": True,
-            }
-    except OSError:
-        pass
+    report_stats = _graph_service.graph_report_stats(
+        _wiki_dir() / "graphify-out" / "graph-report.md",
+    )
+    if report_stats is not None:
+        return report_stats
 
     index_path = _ensure_dashboard_graph_index()
     if index_path is not None and index_path.is_file():
-        try:
-            conn = sqlite3.connect(f"file:{index_path.as_posix()}?mode=ro", uri=True)
-            try:
-                meta = {
-                    row[0]: json.loads(row[1])
-                    for row in conn.execute("SELECT key,value FROM meta")
-                }
-                return {
-                    "nodes": int(meta.get("nodes_count") or 0),
-                    "edges": int(meta.get("edges_count") or 0),
-                    "available": int(meta.get("nodes_count") or 0) > 0,
-                }
-            finally:
-                conn.close()
-        except (OSError, sqlite3.Error, ValueError, TypeError, json.JSONDecodeError):
-            pass
+        index_stats = _graph_service.dashboard_index_graph_stats(index_path)
+        if index_stats is not None:
+            return index_stats
     try:
         G = _load_dashboard_graph()
     except Exception:  # noqa: BLE001
@@ -2557,31 +2535,11 @@ def _graph_stats() -> dict:
     }
 
 
-def _wiki_stats_from_dashboard_index() -> dict[str, int] | None:
-    index_path = _dashboard_graph_index_path()
-    if not index_path.is_file() or not _dashboard_index_matches_manifest(index_path):
-        return None
-    try:
-        conn = sqlite3.connect(f"file:{index_path.as_posix()}?mode=ro", uri=True)
-        try:
-            rows = {
-                str(row[0]): int(row[1])
-                for row in conn.execute("SELECT type,COUNT(*) FROM nodes GROUP BY type")
-            }
-        finally:
-            conn.close()
-    except (OSError, sqlite3.Error, ValueError, TypeError):
-        return None
-
-    stats = {
-        "skills": rows.get("skill", 0),
-        "agents": rows.get("agent", 0),
-        "mcps": rows.get("mcp-server", 0),
-        "harnesses": rows.get("harness", 0),
-    }
-    stats["total"] = sum(stats.values())
-    stats["split_known"] = True
-    return stats
+def _wiki_stats_from_dashboard_index() -> dict[str, int | bool] | None:
+    return _graph_service.dashboard_index_wiki_stats(
+        _dashboard_graph_index_path(),
+        index_matches_manifest=_dashboard_index_matches_manifest,
+    )
 
 
 def _wiki_stats() -> dict:

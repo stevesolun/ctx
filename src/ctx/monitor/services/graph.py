@@ -25,6 +25,7 @@ _PACKAGED_GRAPH_EXPORT_ID_CACHE: str | None | bool = None
 _DASHBOARD_ENTITY_TYPES: tuple[str, ...] = tuple(
     entity_type for _, entity_type, _ in core_entity_types.entity_source_specs()
 )
+_GRAPH_REPORT_RE = re.compile(r"Nodes:\s*([\d,]+)\s*\|\s*Edges:\s*([\d,]+)")
 
 
 def reset_caches() -> None:
@@ -86,6 +87,77 @@ def dashboard_graph_source_cache_key(
 
 def dashboard_graph_index_path(wiki_dir: Path) -> Path:
     return wiki_dir / "graphify-out" / "dashboard-neighborhoods.sqlite3"
+
+
+def graph_report_stats(report: Path) -> dict[str, Any] | None:
+    try:
+        match = _GRAPH_REPORT_RE.search(
+            report.read_text(encoding="utf-8", errors="replace"),
+        )
+    except OSError:
+        return None
+    if not match:
+        return None
+    return {
+        "nodes": int(match.group(1).replace(",", "")),
+        "edges": int(match.group(2).replace(",", "")),
+        "available": True,
+    }
+
+
+def dashboard_index_graph_stats(index_path: Path) -> dict[str, Any] | None:
+    try:
+        conn = sqlite3.connect(f"file:{index_path.as_posix()}?mode=ro", uri=True)
+        try:
+            meta = {
+                row[0]: json.loads(row[1])
+                for row in conn.execute("SELECT key,value FROM meta")
+            }
+            nodes = int(meta.get("nodes_count") or 0)
+            return {
+                "nodes": nodes,
+                "edges": int(meta.get("edges_count") or 0),
+                "available": nodes > 0,
+            }
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def dashboard_index_wiki_stats(
+    index_path: Path,
+    *,
+    index_matches_manifest: Callable[[Path], bool],
+) -> dict[str, int | bool] | None:
+    if not index_path.is_file() or not index_matches_manifest(index_path):
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{index_path.as_posix()}?mode=ro", uri=True)
+        try:
+            rows = {
+                str(row[0]): int(row[1])
+                for row in conn.execute("SELECT type,COUNT(*) FROM nodes GROUP BY type")
+            }
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        return None
+
+    stats: dict[str, int | bool] = {
+        "skills": rows.get("skill", 0),
+        "agents": rows.get("agent", 0),
+        "mcps": rows.get("mcp-server", 0),
+        "harnesses": rows.get("harness", 0),
+    }
+    stats["total"] = (
+        int(stats["skills"])
+        + int(stats["agents"])
+        + int(stats["mcps"])
+        + int(stats["harnesses"])
+    )
+    stats["split_known"] = True
+    return stats
 
 
 def _slugish(value: str) -> str:

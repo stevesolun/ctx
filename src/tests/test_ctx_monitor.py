@@ -2510,6 +2510,57 @@ def test_graph_service_builds_dashboard_index_neighborhood() -> None:
     assert result["insights"]["source"] == "dashboard-index"
 
 
+def test_graph_service_reads_dashboard_index_stats(tmp_path: Path) -> None:
+    report = tmp_path / "graph-report.md"
+    report.write_text("> Nodes: 1,234 | Edges: 5,678 | Communities: 9\n", encoding="utf-8")
+    assert graph_service.graph_report_stats(report) == {
+        "nodes": 1234,
+        "edges": 5678,
+        "available": True,
+    }
+
+    index_path = tmp_path / "dashboard-neighborhoods.sqlite3"
+    conn = sqlite3.connect(index_path)
+    try:
+        conn.execute("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute(
+            "CREATE TABLE nodes(id TEXT PRIMARY KEY,label TEXT,type TEXT,tags TEXT,"
+            "description TEXT,quality_score REAL,usage_score REAL,degree INTEGER)"
+        )
+        conn.executemany(
+            "INSERT INTO meta VALUES(?,?)",
+            [("nodes_count", "3"), ("edges_count", "2")],
+        )
+        conn.executemany(
+            "INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?)",
+            [
+                ("skill:python-patterns", "python-patterns", "skill", "[]", "", 1.0, 0.0, 2),
+                ("agent:reviewer", "reviewer", "agent", "[]", "", 0.7, 0.0, 1),
+                ("mcp-server:github", "github", "mcp-server", "[]", "", 0.8, 0.0, 1),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert graph_service.dashboard_index_graph_stats(index_path) == {
+        "nodes": 3,
+        "edges": 2,
+        "available": True,
+    }
+    assert graph_service.dashboard_index_wiki_stats(
+        index_path,
+        index_matches_manifest=lambda path: path == index_path,
+    ) == {
+        "skills": 1,
+        "agents": 1,
+        "mcps": 1,
+        "harnesses": 0,
+        "total": 3,
+        "split_known": True,
+    }
+
+
 def test_graph_neighborhood_uses_fresh_graph_store_without_full_graph_load(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,
