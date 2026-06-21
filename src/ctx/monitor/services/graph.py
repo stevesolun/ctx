@@ -160,6 +160,54 @@ def dashboard_index_wiki_stats(
     return stats
 
 
+def top_degree_seeds_from_index(index_path: Path, limit: int = 18) -> list[dict[str, Any]]:
+    if not index_path.is_file():
+        return []
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(f"file:{index_path.as_posix()}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT id,label,type,degree FROM nodes ORDER BY degree DESC,id LIMIT ?",
+            (max(1, limit),),
+        ).fetchall()
+    except (OSError, sqlite3.Error, TimeoutError):
+        return []
+    finally:
+        if conn is not None:
+            conn.close()
+    return [
+        {
+            "slug": graph_slug_from_node_id(str(row["id"])),
+            "type": graph_type_from_node_id(str(row["id"]), str(row["type"] or "skill")),
+            "degree": int(row["degree"] or 0),
+            "label": row["label"] or graph_slug_from_node_id(str(row["id"])),
+        }
+        for row in rows
+    ]
+
+
+def top_degree_seeds_from_graph(graph: Any, limit: int = 18) -> list[dict[str, Any]]:
+    if graph is None or graph.number_of_nodes() == 0:
+        return []
+    ranked = sorted(graph.degree, key=lambda kv: -kv[1])[:limit]
+    out: list[dict[str, Any]] = []
+    for node_id, degree in ranked:
+        prefix, _, slug = str(node_id).partition(":")
+        seed_type = {
+            "mcp-server": "mcp-server",
+            "harness": "harness",
+            "agent": "agent",
+        }.get(prefix, "skill")
+        out.append({
+            "slug": slug,
+            "type": seed_type,
+            "degree": int(degree),
+            "label": graph.nodes[node_id].get("label", slug),
+        })
+    return out
+
+
 def _slugish(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
 

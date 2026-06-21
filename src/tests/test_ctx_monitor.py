@@ -2559,6 +2559,20 @@ def test_graph_service_reads_dashboard_index_stats(tmp_path: Path) -> None:
         "total": 3,
         "split_known": True,
     }
+    assert graph_service.top_degree_seeds_from_index(index_path, limit=2) == [
+        {
+            "slug": "python-patterns",
+            "type": "skill",
+            "degree": 2,
+            "label": "python-patterns",
+        },
+        {
+            "slug": "reviewer",
+            "type": "agent",
+            "degree": 1,
+            "label": "reviewer",
+        },
+    ]
 
 
 def test_graph_service_reads_graph_store_neighborhood(tmp_path: Path) -> None:

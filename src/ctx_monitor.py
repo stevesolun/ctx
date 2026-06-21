@@ -2486,28 +2486,7 @@ def _top_degree_seeds_from_index(limit: int = 18) -> list[dict]:
     ensured_index_path = _ensure_dashboard_graph_index()
     if ensured_index_path is None or not ensured_index_path.is_file():
         return []
-    conn: sqlite3.Connection | None = None
-    try:
-        conn = sqlite3.connect(f"file:{ensured_index_path.as_posix()}?mode=ro", uri=True)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT id,label,type,degree FROM nodes ORDER BY degree DESC,id LIMIT ?",
-            (max(1, limit),),
-        ).fetchall()
-    except (OSError, sqlite3.Error, TimeoutError):
-        return []
-    finally:
-        if conn is not None:
-            conn.close()
-    return [
-        {
-            "slug": _graph_slug_from_node_id(str(row["id"])),
-            "type": _graph_type_from_node_id(str(row["id"]), str(row["type"] or "skill")),
-            "degree": int(row["degree"] or 0),
-            "label": row["label"] or _graph_slug_from_node_id(str(row["id"])),
-        }
-        for row in rows
-    ]
+    return _graph_service.top_degree_seeds_from_index(ensured_index_path, limit)
 
 
 def _top_degree_seeds(limit: int = 18, *, allow_load: bool = True) -> list[dict]:
@@ -2522,25 +2501,7 @@ def _top_degree_seeds(limit: int = 18, *, allow_load: bool = True) -> list[dict]
         return []
     if G is None:
         return _top_degree_seeds_from_index(limit)
-    if G.number_of_nodes() == 0:
-        return []
-    ranked = sorted(G.degree, key=lambda kv: -kv[1])[:limit]
-    out: list[dict] = []
-    for node_id, degree in ranked:
-        prefix, _, slug = node_id.partition(":")
-        seed_type = (
-            "mcp-server" if prefix == "mcp-server"
-            else "harness" if prefix == "harness"
-            else "agent" if prefix == "agent"
-            else "skill"
-        )
-        out.append({
-            "slug": slug,
-            "type": seed_type,
-            "degree": int(degree),
-            "label": G.nodes[node_id].get("label", slug),
-        })
-    return out
+    return _graph_service.top_degree_seeds_from_graph(G, limit)
 
 
 def _read_default_config_raw() -> dict[str, Any]:
