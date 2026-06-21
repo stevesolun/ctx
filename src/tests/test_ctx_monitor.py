@@ -1495,6 +1495,27 @@ def test_render_wiki_entity_with_real_page(fake_claude: Path) -> None:
     assert "use_count" in html_out  # frontmatter table
     assert "class='card wiki-body'" in html_out
 
+    direct_html = wiki_page.render_wiki_entity_page(
+        slug="python-patterns",
+        entity_type="skill",
+        meta={"name": "python-patterns", "use_count": 2},
+        md_body="# Python patterns\n\nBody text.",
+        sidecar={"grade": "A", "raw_score": 0.9},
+        dashboard_entity_types=cm._DASHBOARD_ENTITY_TYPES,
+        display_slug=cm._display_slug,
+        frontmatter_text=cm._frontmatter_text,
+        truncate_text=cm._truncate_text,
+        extract_embedded_quality_block=cm._extract_embedded_quality_block,
+        strip_duplicate_wiki_heading=cm._strip_duplicate_wiki_heading,
+        render_entity_subgraph=lambda _slug, _entity_type: "<div>subgraph</div>",
+        render_entity_tabs=cm._render_entity_tabs,
+        render_quality_drilldown=cm._render_quality_drilldown,
+        render_wiki_markdown=cm._render_wiki_markdown,
+        layout=lambda _title, body: body,
+    )
+    assert "Python patterns" in direct_html or "Body text" in direct_html
+    assert "grade-A" in direct_html
+
 
 def test_render_wiki_entity_renders_markdown_and_wikilinks(fake_claude: Path) -> None:
     skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
