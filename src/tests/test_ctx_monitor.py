@@ -2442,6 +2442,74 @@ def test_graph_service_resolves_dashboard_index_center() -> None:
         conn.close()
 
 
+def test_graph_service_builds_dashboard_index_neighborhood() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute(
+            "CREATE TABLE nodes(id TEXT PRIMARY KEY,label TEXT,type TEXT,tags TEXT,"
+            "description TEXT,quality_score REAL,usage_score REAL,degree INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE slug_index(slug TEXT,type TEXT,node_id TEXT,"
+            "PRIMARY KEY(slug,type,node_id))"
+        )
+        conn.execute("CREATE TABLE neighbors(source TEXT PRIMARY KEY, payload BLOB NOT NULL)")
+        conn.executemany(
+            "INSERT INTO meta VALUES(?,?)",
+            [("max_degree", "10"), ("top_k", "40")],
+        )
+        conn.executemany(
+            "INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?)",
+            [
+                ("skill:python-patterns", "python-patterns", "skill", '["python"]', "", 0.9, 0.1, 10),
+                ("skill:fastapi-pro", "fastapi-pro", "skill", '["python","api"]', "", 0.8, 0.0, 4),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO slug_index VALUES(?,?,?)",
+            [
+                ("python-patterns", "skill", "skill:python-patterns"),
+                ("fastapi-pro", "skill", "skill:fastapi-pro"),
+            ],
+        )
+        payload = zlib.compress(json.dumps([{
+            "target": "skill:fastapi-pro",
+            "weight": 0.8,
+            "shared_tags": ["python"],
+            "reasons": ["semantic"],
+        }]).encode("utf-8"))
+        conn.execute("INSERT INTO neighbors VALUES(?,?)", ("skill:python-patterns", payload))
+        conn.commit()
+
+        result = graph_service.dashboard_index_neighborhood(
+            conn,
+            "python-patterns",
+            hops=1,
+            limit=40,
+            entity_type="skill",
+            node_size=lambda **_: {
+                "node_size": 12.0,
+                "size_signal": 0.25,
+                "size_reason": "test",
+            },
+            score_payload=lambda field, value: {field: value},
+        )
+    finally:
+        conn.close()
+
+    assert result is not None
+    assert result["center"] == "skill:python-patterns"
+    assert [node["data"]["id"] for node in result["nodes"]] == [
+        "skill:python-patterns",
+        "skill:fastapi-pro",
+    ]
+    assert result["edges"][0]["data"]["shared_tags"] == ["python"]
+    assert result["schema"]["name"] == "ctx.dashboard.graph.neighborhood"
+    assert result["insights"]["source"] == "dashboard-index"
+
+
 def test_graph_neighborhood_uses_fresh_graph_store_without_full_graph_load(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,

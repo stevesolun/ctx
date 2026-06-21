@@ -12,6 +12,7 @@ import zlib
 from pathlib import Path
 from typing import Any, Callable
 
+from ctx import dashboard_graph
 from ctx.core import entity_types as core_entity_types
 from ctx.utils._safe_name import is_safe_source_name
 
@@ -101,6 +102,16 @@ def _display_label(value: Any, *, fallback_slug: str = "") -> str:
 
 def graph_slug_from_node_id(node_id: str) -> str:
     return node_id.split(":", 1)[-1]
+
+
+def graph_type_from_node_id(node_id: str, fallback: str = "skill") -> str:
+    prefix = node_id.split(":", 1)[0] if ":" in node_id else ""
+    return {
+        "skill": "skill",
+        "agent": "agent",
+        "mcp-server": "mcp-server",
+        "harness": "harness",
+    }.get(prefix, fallback)
 
 
 def resolve_index_center(
@@ -196,6 +207,140 @@ def resolve_index_center(
         {"query": raw_query, "slug": graph_slug_from_node_id(center), "id": center},
         suggestions,
     )
+
+
+def dashboard_index_neighborhood(
+    conn: sqlite3.Connection,
+    slug: str,
+    *,
+    hops: int,
+    limit: int,
+    entity_type: str | None,
+    node_size: Callable[..., dict[str, Any]],
+    score_payload: Callable[[str, Any], dict[str, float | None]],
+) -> dict[str, Any] | None:
+    try:
+        meta = {
+            row["key"]: json.loads(row["value"])
+            for row in conn.execute("SELECT key,value FROM meta")
+        }
+        max_degree = int(meta.get("max_degree") or 1)
+        top_k = int(meta.get("top_k") or 0)
+        if hops > 1 or (top_k > 0 and limit > top_k):
+            return None
+
+        center, resolved, suggestions = resolve_index_center(conn, slug, entity_type)
+        if center is None:
+            return {"nodes": [], "edges": [], "center": None, "suggestions": suggestions}
+
+        nodes_out: dict[str, dict[str, Any]] = {}
+        edges_out: list[dict[str, Any]] = []
+        emitted_edges: set[tuple[str, str]] = set()
+        frontier = [center]
+        seen = {center}
+
+        def add_node(node_id: str, depth: int) -> None:
+            if node_id in nodes_out:
+                return
+            row = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+            if row is None:
+                return
+            tags = json.loads(row["tags"] or "[]")
+            degree = int(row["degree"] or 0)
+            node_type = str(row["type"] or graph_type_from_node_id(node_id))
+            node_slug = graph_slug_from_node_id(node_id)
+            size_data = node_size(
+                slug=node_slug,
+                entity_type=node_type,
+                quality=row["quality_score"],
+                usage=row["usage_score"],
+                degree=degree,
+                max_degree=max_degree,
+            )
+            label = _display_label(row["label"], fallback_slug=node_slug)
+            nodes_out[node_id] = {
+                "data": {
+                    "id": node_id,
+                    "label": label,
+                    "type": node_type,
+                    "depth": depth,
+                    "degree": degree,
+                    "tags": tags[:6],
+                    "description": row["description"] or "",
+                    **score_payload("quality_score", row["quality_score"]),
+                    **score_payload("usage_score", row["usage_score"]),
+                    "filter_tokens": [
+                        node_id,
+                        row["label"],
+                        node_slug,
+                        _display_slug(node_slug),
+                        label,
+                        *tags,
+                    ],
+                    **size_data,
+                },
+            }
+
+        add_node(center, 0)
+        for depth in range(1, hops + 1):
+            next_frontier: list[str] = []
+            for node_id in frontier:
+                row = conn.execute(
+                    "SELECT payload FROM neighbors WHERE source=?",
+                    (node_id,),
+                ).fetchone()
+                if row is None:
+                    continue
+                neighbors = json.loads(zlib.decompress(row["payload"]).decode("utf-8"))
+                for edge in neighbors:
+                    if len(nodes_out) >= limit:
+                        break
+                    other = str(edge.get("target") or "")
+                    if not other:
+                        continue
+                    add_node(other, depth)
+                    edge_a, edge_b = sorted((node_id, other))
+                    edge_key = (edge_a, edge_b)
+                    if edge_key not in emitted_edges and other in nodes_out:
+                        emitted_edges.add(edge_key)
+                        shared_tags = list(edge.get("shared_tags") or [])[:4]
+                        for current in (node_id, other):
+                            tokens = nodes_out[current]["data"].setdefault(
+                                "filter_tokens",
+                                [],
+                            )
+                            tokens.extend(shared_tags)
+                        edges_out.append({
+                            "data": {
+                                "id": f"{edge_key[0]}__{edge_key[1]}",
+                                "source": node_id,
+                                "target": other,
+                                "weight": edge.get("weight", 1),
+                                "shared_tags": shared_tags,
+                                "reasons": edge.get("reasons", []),
+                                "semantic": edge.get("semantic"),
+                                "tag_sim": edge.get("tag_sim"),
+                                "slug_token_sim": edge.get("slug_token_sim"),
+                                "source_overlap": edge.get("source_overlap"),
+                            },
+                        })
+                    if other not in seen:
+                        seen.add(other)
+                        next_frontier.append(other)
+                if len(nodes_out) >= limit:
+                    break
+            frontier = next_frontier
+            if len(nodes_out) >= limit:
+                break
+        return dashboard_graph.enrich_neighborhood({
+            "nodes": list(nodes_out.values()),
+            "edges": edges_out,
+            "center": center,
+            "resolved": resolved or {"source": "dashboard-index"},
+            "suggestions": [],
+        }, source="dashboard-index")
+    except (OSError, sqlite3.Error, json.JSONDecodeError, zlib.error, KeyError, TypeError):
+        return None
 
 
 def dashboard_graph_manifest_export_id(wiki_dir: Path) -> str | None:
