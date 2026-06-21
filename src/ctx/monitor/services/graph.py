@@ -415,6 +415,217 @@ def dashboard_index_neighborhood(
         return None
 
 
+def graph_store_neighborhood(
+    graph_dir: Path,
+    slug: str,
+    *,
+    hops: int,
+    limit: int,
+    entity_type: str | None,
+    node_size: Callable[..., dict[str, Any]],
+    score_payload: Callable[[str, Any], dict[str, float | None]],
+) -> dict[str, Any] | None:
+    if hops > 1:
+        return None
+    store_path = graph_dir / "graph-store.sqlite3"
+    if not store_path.is_file():
+        return None
+    try:
+        from ctx.core.graph.graph_store import (  # noqa: PLC0415
+            graph_store_is_fresh,
+            load_neighborhood,
+            search_nodes,
+        )
+    except ImportError:
+        return None
+    try:
+        if not graph_store_is_fresh(store_path, graph_dir):
+            return None
+        center, resolved, suggestions = resolve_graph_store_center(
+            store_path,
+            slug,
+            entity_type,
+            search_nodes,
+        )
+        if center is None:
+            return {"nodes": [], "edges": [], "center": None, "suggestions": suggestions}
+        neighborhood = load_neighborhood(store_path, center, limit=max(1, limit - 1))
+    except (OSError, sqlite3.DatabaseError, ValueError, TypeError):
+        return None
+    return dashboard_payload_from_graph_store(
+        center=center,
+        resolved=resolved or {"source": "graph-store"},
+        suggestions=suggestions,
+        neighborhood=neighborhood,
+        node_size=node_size,
+        score_payload=score_payload,
+    )
+
+
+def resolve_graph_store_center(
+    store_path: Path,
+    raw_query: str,
+    entity_type: str | None,
+    search_nodes: Callable[..., list[dict[str, Any]]],
+) -> tuple[str | None, dict[str, str] | None, list[str]]:
+    raw_query = str(raw_query or "").strip()
+    if not raw_query or "/" in raw_query or "\\" in raw_query or ".." in raw_query:
+        return None, None, []
+    normalized_query = _slugish(raw_query)
+    if not normalized_query or not is_safe_source_name(normalized_query):
+        return None, None, []
+
+    entity_types = (entity_type,) if entity_type is not None else _DASHBOARD_ENTITY_TYPES
+    rows: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for query in (raw_query, normalized_query):
+        for row in search_nodes(store_path, query, limit=25):
+            node_id = str(row.get("id") or "")
+            if not node_id or node_id in seen_ids:
+                continue
+            seen_ids.add(node_id)
+            rows.append(row)
+
+    suggestions: list[str] = []
+    for row in rows[:8]:
+        node_id = str(row.get("id") or "")
+        node_slug = graph_slug_from_node_id(node_id)
+        display_suggestion = _display_slug(node_slug)
+        if display_suggestion not in suggestions:
+            suggestions.append(display_suggestion)
+
+    matches: list[tuple[tuple[int, int], str, str]] = []
+    for row in rows:
+        node_id = str(row.get("id") or "")
+        node_type = str(row.get("type") or graph_type_from_node_id(node_id))
+        if node_type not in entity_types:
+            continue
+        node_slug = graph_slug_from_node_id(node_id)
+        label = _display_label(row.get("label"), fallback_slug=node_slug)
+        haystacks = {
+            _slugish(node_slug),
+            _slugish(_display_slug(node_slug)),
+            _slugish(label),
+        }
+        for tag in row.get("tags") or []:
+            haystacks.add(_slugish(str(tag)))
+        if normalized_query in haystacks:
+            rank = 0
+        elif any(h.startswith(normalized_query) for h in haystacks):
+            rank = 1
+        elif any(normalized_query in h for h in haystacks):
+            rank = 2
+        else:
+            continue
+        matches.append(((rank, len(node_slug)), node_id, node_slug))
+
+    matches.sort(key=lambda item: item[0])
+    if not matches:
+        return None, None, suggestions
+    center = matches[0][1]
+    resolved_slug = graph_slug_from_node_id(center)
+    return center, {"query": raw_query, "slug": resolved_slug, "id": center}, suggestions
+
+
+def dashboard_payload_from_graph_store(
+    *,
+    center: str,
+    resolved: dict[str, str],
+    suggestions: list[str],
+    neighborhood: dict[str, list[dict[str, Any]]],
+    node_size: Callable[..., dict[str, Any]],
+    score_payload: Callable[[str, Any], dict[str, float | None]],
+) -> dict[str, Any]:
+    raw_nodes = neighborhood.get("nodes", [])
+    raw_edges = neighborhood.get("edges", [])
+    degree_by_node: dict[str, int] = {str(node.get("id") or ""): 0 for node in raw_nodes}
+    for edge in raw_edges:
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if source in degree_by_node:
+            degree_by_node[source] += 1
+        if target in degree_by_node:
+            degree_by_node[target] += 1
+    max_degree = max(degree_by_node.values(), default=1)
+
+    nodes_out: list[dict[str, Any]] = []
+    for node in raw_nodes:
+        node_id = str(node.get("id") or "")
+        if not node_id:
+            continue
+        node_slug = graph_slug_from_node_id(node_id)
+        node_type = str(node.get("type") or graph_type_from_node_id(node_id))
+        tags = [str(tag) for tag in node.get("tags", []) if isinstance(tag, str)]
+        label = _display_label(node.get("label"), fallback_slug=node_slug)
+        degree = degree_by_node.get(node_id, 0)
+        size_data = node_size(
+            node_id,
+            {},
+            entity_type=node_type,
+            degree=degree,
+            max_degree=max_degree,
+        )
+        nodes_out.append({
+            "data": {
+                "id": node_id,
+                "label": label,
+                "type": node_type,
+                "depth": 0 if node_id == center else 1,
+                "degree": degree,
+                "tags": tags[:6],
+                "description": "",
+                **score_payload("quality_score", None),
+                **score_payload("usage_score", None),
+                "filter_tokens": [
+                    node_id,
+                    label,
+                    node_slug,
+                    _display_slug(node_slug),
+                    *tags,
+                ],
+                **size_data,
+            },
+        })
+
+    edges_out: list[dict[str, Any]] = []
+    for edge in raw_edges:
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        raw_attrs = edge.get("attrs")
+        attrs: dict[str, Any] = raw_attrs if isinstance(raw_attrs, dict) else {}
+        edge_key = tuple(sorted((source, target)))
+        raw_shared_tags = attrs.get("shared_tags")
+        shared_tags = (
+            [str(tag) for tag in raw_shared_tags[:4]]
+            if isinstance(raw_shared_tags, list)
+            else []
+        )
+        raw_reasons = attrs.get("reasons")
+        reasons = [str(reason) for reason in raw_reasons] if isinstance(raw_reasons, list) else []
+        edges_out.append({
+            "data": {
+                "id": f"{edge_key[0]}__{edge_key[1]}",
+                "source": source,
+                "target": target,
+                "weight": edge.get("weight", attrs.get("weight", 1)),
+                "shared_tags": shared_tags,
+                "reasons": reasons,
+                "semantic": attrs.get("semantic", attrs.get("semantic_sim")),
+                "tag_sim": attrs.get("tag_sim"),
+                "slug_token_sim": attrs.get("slug_token_sim"),
+                "source_overlap": attrs.get("source_overlap"),
+            },
+        })
+
+    return dashboard_graph.enrich_neighborhood({
+        "nodes": nodes_out,
+        "edges": edges_out,
+        "center": center,
+        "resolved": resolved,
+        "suggestions": suggestions,
+    }, source="graph-store")
+
+
 def dashboard_graph_manifest_export_id(wiki_dir: Path) -> str | None:
     manifest_path = wiki_dir / "graphify-out" / "graph-export-manifest.json"
     try:
