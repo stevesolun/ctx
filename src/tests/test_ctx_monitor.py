@@ -1825,6 +1825,59 @@ def test_render_wiki_entity_falls_back_to_runtime_graph_metadata(
     assert "payload.detail || payload.msg || response.status" in html_out
 
 
+def test_runtime_graph_entity_wrapper_matches_extracted_wiki_renderer(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cm, "_MONITOR_MUTATIONS_ENABLED", True)
+    monkeypatch.setattr(cm, "_MONITOR_TOKEN", "runtime-token")
+
+    def fake_graph(slug: str, **_kwargs) -> dict:
+        assert slug == "github"
+        return {
+            "center": "mcp-server:github",
+            "nodes": [{
+                "data": {
+                    "id": "mcp-server:github",
+                    "label": "GitHub",
+                    "type": "mcp-server",
+                    "tags": ["git"],
+                    "description": "Manage GitHub.",
+                    "quality_score": 0.81,
+                    "usage_score": 0.42,
+                    "degree": 27,
+                },
+            }],
+            "edges": [],
+        }
+
+    monkeypatch.setattr(cm, "_graph_neighborhood", fake_graph)
+
+    wrapper_html = cm._render_runtime_graph_entity("github", entity_type="mcp-server")
+    direct_html = wiki_page.render_runtime_graph_entity(
+        "github",
+        entity_type="mcp-server",
+        monitor_mutations_enabled=cm._MONITOR_MUTATIONS_ENABLED,
+        monitor_token=cm._MONITOR_TOKEN,
+        normalize_dashboard_entity_type=cm._normalize_dashboard_entity_type,
+        graph_neighborhood=cm._graph_neighborhood,
+        graph_slug_from_node_id=cm._graph_slug_from_node_id,
+        graph_type_from_node_id=cm._graph_type_from_node_id,
+        display_label=cm._display_label,
+        display_slug=cm._display_slug,
+        load_sidecar=cm._load_sidecar,
+        render_quality_drilldown=cm._render_quality_drilldown,
+        render_entity_subgraph=cm._render_entity_subgraph,
+        render_entity_tabs=cm._render_entity_tabs,
+        layout=cm._layout,
+    )
+
+    assert wrapper_html == direct_html
+    assert wrapper_html is not None
+    assert "Runtime graph entity" in wrapper_html
+    assert "runtime-token" in wrapper_html
+
+
 def test_render_runtime_harness_entity_shows_install_commands(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,

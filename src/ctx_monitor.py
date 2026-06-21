@@ -1925,26 +1925,11 @@ def _render_graph(focus: str | None = None, focus_type: str | None = None) -> st
 
 
 def _runtime_graph_center_data(graph: dict) -> dict[str, Any] | None:
-    center = str(graph.get("center") or "")
-    if not center:
-        return None
-    for node in graph.get("nodes", []):
-        if not isinstance(node, dict):
-            continue
-        data = node.get("data", {})
-        if isinstance(data, dict) and str(data.get("id") or "") == center:
-            return data
-    return None
+    return _wiki_page.runtime_graph_center_data(graph)
 
 
 def _runtime_graph_metric_row(label: str, value: object) -> str:
-    if value is None or value == "":
-        value_html = "<span class='muted'>unknown</span>"
-    elif isinstance(value, float):
-        value_html = f"<code>{value:.3f}</code>"
-    else:
-        value_html = f"<code>{html.escape(str(value))}</code>"
-    return f"<tr><td class='muted'>{html.escape(label)}</td><td>{value_html}</td></tr>"
+    return _wiki_page.runtime_graph_metric_row(label, value)
 
 
 def _render_runtime_entity_action(
@@ -1953,37 +1938,10 @@ def _render_runtime_entity_action(
     *,
     mutations_enabled: bool,
 ) -> str:
-    escaped_slug = html.escape(slug)
-    escaped_type = html.escape(entity_type)
-    if entity_type == "harness":
-        return (
-            "<div class='card'>"
-            "<h2>Install harness</h2>"
-            "<p class='muted'>Harnesses are installed through the harness CLI so ctx can "
-            "collect the model, goal, and verification details before wiring recommendations.</p>"
-            f"<pre><code>ctx-harness-install {escaped_slug} --dry-run\n"
-            f"ctx-harness-install {escaped_slug}</code></pre>"
-            "</div>"
-        )
-
-    disabled = " disabled" if not mutations_enabled else ""
-    disabled_note = (
-        "<p class='muted'>Load/install actions are disabled because this dashboard is not "
-        "bound to loopback.</p>"
-        if not mutations_enabled
-        else ""
-    )
-    return (
-        "<div class='card'>"
-        "<h2>Load or install</h2>"
-        "<p class='muted'>Use this when the backing wiki contains the installable entity. "
-        "If runtime mode only installed graph metadata, install the full wiki first.</p>"
-        f"<button type='button' class='action-btn' data-testid='runtime-entity-load' "
-        f"data-runtime-slug='{escaped_slug}' data-runtime-type='{escaped_type}'{disabled}>"
-        "Load / install from current wiki</button>"
-        f"{disabled_note}"
-        "<p id='runtime-entity-load-result' class='muted'></p>"
-        "</div>"
+    return _wiki_page.render_runtime_entity_action(
+        slug,
+        entity_type,
+        mutations_enabled=mutations_enabled,
     )
 
 
@@ -1993,38 +1951,11 @@ def _render_runtime_entity_load_script(
     *,
     mutations_enabled: bool,
 ) -> str:
-    return (
-        "<script>\n"
-        f"const CTX_RUNTIME_ENTITY_MUTATIONS_ENABLED = {json.dumps(mutations_enabled)};\n"
-        f"const CTX_RUNTIME_ENTITY_TOKEN = {json.dumps(_MONITOR_TOKEN if mutations_enabled else '')};\n"
-        f"const CTX_RUNTIME_ENTITY_SLUG = {json.dumps(slug)};\n"
-        f"const CTX_RUNTIME_ENTITY_TYPE = {json.dumps(entity_type)};\n"
-        "document.querySelectorAll('[data-testid=\"runtime-entity-load\"]').forEach(function (button) {\n"
-        "  button.addEventListener('click', async function () {\n"
-        "    const result = document.getElementById('runtime-entity-load-result');\n"
-        "    if (!CTX_RUNTIME_ENTITY_MUTATIONS_ENABLED) {\n"
-        "      if (result) result.textContent = 'mutations disabled on non-loopback bind';\n"
-        "      return;\n"
-        "    }\n"
-        "    button.disabled = true;\n"
-        "    if (result) result.textContent = 'loading...';\n"
-        "    try {\n"
-        "      const response = await fetch('/api/load', {\n"
-        "        method: 'POST',\n"
-        "        headers: {'Content-Type': 'application/json', 'X-CTX-Monitor-Token': CTX_RUNTIME_ENTITY_TOKEN},\n"
-        "        body: JSON.stringify({slug: CTX_RUNTIME_ENTITY_SLUG, entity_type: CTX_RUNTIME_ENTITY_TYPE})\n"
-        "      });\n"
-        "      const payload = await response.json();\n"
-        "      const message = payload.detail || payload.msg || response.status;\n"
-        "      if (result) result.textContent = (payload.ok ? 'loaded: ' : 'not loaded: ') + message;\n"
-        "    } catch (error) {\n"
-        "      if (result) result.textContent = 'load failed: ' + error;\n"
-        "    } finally {\n"
-        "      button.disabled = false;\n"
-        "    }\n"
-        "  });\n"
-        "});\n"
-        "</script>"
+    return _wiki_page.render_runtime_entity_load_script(
+        slug,
+        entity_type,
+        mutations_enabled=mutations_enabled,
+        monitor_token=_MONITOR_TOKEN,
     )
 
 
@@ -2034,70 +1965,21 @@ def _render_runtime_graph_entity(
     *,
     mutations_enabled: bool | None = None,
 ) -> str | None:
-    """Render graph metadata when the fast runtime graph lacks a full wiki page."""
-    normalized_type = _normalize_dashboard_entity_type(entity_type) if entity_type else None
-    if entity_type is not None and normalized_type is None:
-        return None
-    graph = _graph_neighborhood(slug, hops=1, limit=32, entity_type=normalized_type)
-    data = _runtime_graph_center_data(graph)
-    if data is None:
-        return None
-
-    node_id = str(data.get("id") or graph.get("center") or "")
-    resolved_slug = _graph_slug_from_node_id(node_id) or slug
-    resolved_type = _graph_type_from_node_id(
-        node_id,
-        str(data.get("type") or normalized_type or "skill"),
-    )
-    label = _display_label(data.get("label"), fallback_slug=resolved_slug)
-    display_slug = _display_slug(resolved_slug)
-    description = str(data.get("description") or "").strip()
-    tags = [str(tag) for tag in data.get("tags", []) if str(tag).strip()][:12]
-    sidecar = _load_sidecar(resolved_slug, entity_type=resolved_type)
-    quality_score = data.get("quality_score")
-    usage_score = data.get("usage_score")
-    degree = data.get("degree")
-    mutations = _MONITOR_MUTATIONS_ENABLED if mutations_enabled is None else mutations_enabled
-
-    quality_html = (
-        _render_quality_drilldown(sidecar)
-        if isinstance(sidecar, dict)
-        else (
-            "<div class='card'>"
-            "<h2>Runtime graph quality</h2>"
-            "<p class='muted'>No full quality sidecar is installed for this entity. "
-            "The runtime graph still exposes the ranking signals available at graph build time.</p>"
-            "<table class='frontmatter-table'><tr><th>Signal</th><th>Value</th></tr>"
-            + _runtime_graph_metric_row("quality_score", quality_score)
-            + _runtime_graph_metric_row("usage_score", usage_score)
-            + _runtime_graph_metric_row("degree", degree)
-            + "</table></div>"
-        )
-    )
-    return _wiki_page.render_runtime_graph_entity_page(
-        label=label,
-        node_id=node_id,
-        resolved_slug=resolved_slug,
-        resolved_type=resolved_type,
-        display_slug=display_slug,
-        description=description,
-        tags=tags,
-        quality_score=quality_score,
-        usage_score=usage_score,
-        degree=degree,
-        quality_html=quality_html,
-        subgraph_html=_render_entity_subgraph(resolved_slug, entity_type=resolved_type),
-        action_html=_render_runtime_entity_action(
-            resolved_slug,
-            resolved_type,
-            mutations_enabled=mutations,
-        ),
-        load_script_html=_render_runtime_entity_load_script(
-            resolved_slug,
-            resolved_type,
-            mutations_enabled=mutations,
-        ),
-        runtime_graph_metric_row=_runtime_graph_metric_row,
+    return _wiki_page.render_runtime_graph_entity(
+        slug,
+        entity_type=entity_type,
+        mutations_enabled=mutations_enabled,
+        monitor_mutations_enabled=_MONITOR_MUTATIONS_ENABLED,
+        monitor_token=_MONITOR_TOKEN,
+        normalize_dashboard_entity_type=_normalize_dashboard_entity_type,
+        graph_neighborhood=_graph_neighborhood,
+        graph_slug_from_node_id=_graph_slug_from_node_id,
+        graph_type_from_node_id=_graph_type_from_node_id,
+        display_label=_display_label,
+        display_slug=_display_slug,
+        load_sidecar=_load_sidecar,
+        render_quality_drilldown=_render_quality_drilldown,
+        render_entity_subgraph=_render_entity_subgraph,
         render_entity_tabs=_render_entity_tabs,
         layout=_layout,
     )
