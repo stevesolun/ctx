@@ -14,6 +14,7 @@ import networkx as nx
 import pytest
 
 import ctx_monitor as cm
+from ctx.monitor.services import kpi as kpi_service
 from ctx.monitor.services import sidecars as sidecar_service
 
 playwright_sync: Any = pytest.importorskip("playwright.sync_api")
@@ -42,9 +43,7 @@ def fake_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(cm, "_claude_dir", lambda: claude)
     monkeypatch.setattr(cm, "_dashboard_graph_index_archives", lambda: [])
     sidecar_service.reset_caches()
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_KEY", None)
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_VALUE", None)
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_AT", 0.0)
+    kpi_service.reset_cache()
     return claude
 
 

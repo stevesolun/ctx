@@ -36,6 +36,7 @@ from ctx.monitor.api import readonly as readonly_api
 from ctx.monitor import routes as monitor_routes
 from ctx.monitor.services import config as config_service
 from ctx.monitor.services import graph as graph_service
+from ctx.monitor.services import kpi as kpi_service
 from ctx.monitor.services import runtime as runtime_service
 from ctx.monitor.services import sidecars as sidecar_service
 from ctx.monitor.services import skillspector as skillspector_service
@@ -53,9 +54,7 @@ def fake_claude(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.setattr(cm, "_dashboard_graph_index_archives", lambda: [])
     graph_service.reset_caches()
     sidecar_service.reset_caches()
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_KEY", None)
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_VALUE", None)
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_AT", 0.0)
+    kpi_service.reset_cache()
     monkeypatch.setattr(cm, "_WIKI_RENDER_CACHE_KEY", None)
     monkeypatch.setattr(cm, "_WIKI_RENDER_CACHE_VALUE", None)
     dashboard_docs.reset_docs_render_cache()
@@ -4638,7 +4637,10 @@ def test_api_kpi_summary_shape(fake_claude: Path) -> None:
         "hard_floor": None, "computed_at": "2026-04-19T10:00:00+00:00",
     })
     summary = cm._kpi_summary()
+    direct_summary = kpi_service.kpi_summary(fake_claude / "skill-quality")
     assert summary is not None
+    assert direct_summary is not None
+    assert direct_summary.to_dict() == summary.to_dict()
     d = summary.to_dict()
     for key in ("total", "grade_counts", "lifecycle_counts",
                 "category_breakdown", "hard_floor_counts",
@@ -4658,8 +4660,7 @@ def test_kpi_summary_cache_reuses_recent_summary(
         "grade": "A", "raw_score": 0.9, "score": 0.9,
         "hard_floor": None, "computed_at": "2026-04-19T10:00:00+00:00",
     })
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_KEY", None)
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_VALUE", None)
+    kpi_service.reset_cache()
     real_generate = kd.generate
     calls = 0
 
@@ -4685,15 +4686,13 @@ def test_kpi_summary_reuses_disk_cache_after_process_cache_reset(
         "grade": "A", "raw_score": 0.9, "score": 0.9,
         "hard_floor": None, "computed_at": "2026-04-19T10:00:00+00:00",
     })
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_KEY", None)
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_VALUE", None)
+    kpi_service.reset_cache()
 
     first = cm._kpi_summary()
     assert first is not None
-    assert cm._kpi_summary_disk_cache_path(fake_claude / "skill-quality").is_file()
+    assert kpi_service.summary_disk_cache_path(fake_claude / "skill-quality").is_file()
 
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_KEY", None)
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_VALUE", None)
+    kpi_service.reset_cache()
 
     def fail_generate(*args: object, **kwargs: object) -> object:
         raise AssertionError("fresh process should read the KPI disk cache")
@@ -4717,8 +4716,7 @@ def test_kpi_summary_disk_cache_invalidates_on_sidecar_rewrite(
         "hard_floor": None, "computed_at": "2026-04-19T10:00:00+00:00",
     })
     sidecar = fake_claude / "skill-quality" / "alpha.json"
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_KEY", None)
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_VALUE", None)
+    kpi_service.reset_cache()
     assert cm._kpi_summary() is not None
 
     sidecar.write_text(
@@ -4731,8 +4729,7 @@ def test_kpi_summary_disk_cache_invalidates_on_sidecar_rewrite(
         encoding="utf-8",
     )
     os.utime(sidecar, (time.time() + 2.0, time.time() + 2.0))
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_KEY", None)
-    monkeypatch.setattr(cm, "_KPI_SUMMARY_CACHE_VALUE", None)
+    kpi_service.reset_cache()
 
     real_generate = kd.generate
     calls = 0

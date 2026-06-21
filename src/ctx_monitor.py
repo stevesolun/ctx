@@ -64,7 +64,6 @@ import html
 import ipaddress
 import json
 import math
-import os
 import re
 import secrets
 import sqlite3
@@ -104,8 +103,10 @@ from ctx.monitor.pages import wiki as _wiki_page
 from ctx.monitor.server import MonitorServer as _MonitorServer
 from ctx.monitor.server import make_monitor_server as _make_server
 from ctx.monitor.server import server_shutdown_requested as _server_shutdown_requested
+from ctx.monitor.services import cache as _cache_service
 from ctx.monitor.services import config as _config_service
 from ctx.monitor.services import graph as _graph_service
+from ctx.monitor.services import kpi as _kpi_service
 from ctx.monitor.services import runtime as _runtime_service
 from ctx.monitor.services import sidecars as _sidecar_service
 from ctx.monitor.services import skillspector as _skillspector_service
@@ -119,15 +120,11 @@ from ctx.utils._safe_name import is_safe_source_name
 
 _MONITOR_TOKEN = ""
 _MONITOR_MUTATIONS_ENABLED = True
-_KPI_SUMMARY_CACHE_KEY: tuple[Any, ...] | None = None
-_KPI_SUMMARY_CACHE_VALUE: Any | None = None
-_KPI_SUMMARY_CACHE_AT = 0.0
 _WIKI_RENDER_CACHE_KEY: tuple[Any, ...] | None = None
 _WIKI_RENDER_CACHE_VALUE: str | None = None
 _WIKI_INDEX_LIMIT_PER_TYPE = 500
 _SKILLS_PAGE_DEFAULT_LIMIT = 100
 _SKILLS_PAGE_MAX_LIMIT = 500
-_KPI_SUMMARY_CACHE_SECONDS = 30
 _MAX_POST_BODY_BYTES = 64 * 1024
 _DASHBOARD_INDEX_MEMBER = "graphify-out/dashboard-neighborhoods.sqlite3"
 _READ_TOKEN_COOKIE = "ctx_monitor_read_token"
@@ -2439,59 +2436,6 @@ def _wiki_render_cache_key(
     )
 
 
-def _disk_cache_token(cache_key: tuple[Any, ...]) -> str:
-    return json.dumps(cache_key, separators=(",", ":"), sort_keys=True)
-
-
-def _read_disk_cache_payload(path: Path, cache_token: str) -> dict[str, Any] | None:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    if data.get("schema_version") != 1 or data.get("cache_token") != cache_token:
-        return None
-    return data
-
-
-def _write_disk_cache_payload(
-    path: Path,
-    cache_token: str,
-    payload: dict[str, Any],
-    *,
-    sort_keys: bool = False,
-) -> None:
-    try:
-        _atomic_write_text(
-            path,
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "cache_token": cache_token,
-                    **payload,
-                },
-                ensure_ascii=False,
-                sort_keys=sort_keys,
-            ) + "\n",
-            encoding="utf-8",
-        )
-    except (OSError, TypeError, ValueError):
-        return
-
-
-def _read_html_disk_cache(path: Path, cache_token: str) -> str | None:
-    data = _read_disk_cache_payload(path, cache_token)
-    if data is None:
-        return None
-    html_text = data.get("html")
-    return html_text if isinstance(html_text, str) else None
-
-
-def _write_html_disk_cache(path: Path, cache_token: str, html_text: str) -> None:
-    _write_disk_cache_payload(path, cache_token, {"html": html_text})
-
-
 def _wiki_render_disk_cache_path() -> Path:
     return _claude_dir() / ".ctx-monitor-wiki-cache.json"
 
@@ -2510,8 +2454,11 @@ def _render_wiki_index(entity_type: str | None = None, query: str = "") -> str:
     if cache_key is not None:
         if _WIKI_RENDER_CACHE_KEY == cache_key and _WIKI_RENDER_CACHE_VALUE is not None:
             return _WIKI_RENDER_CACHE_VALUE
-        cache_token = _disk_cache_token(cache_key)
-        cached = _read_html_disk_cache(_wiki_render_disk_cache_path(), cache_token)
+        cache_token = _cache_service.disk_cache_token(cache_key)
+        cached = _cache_service.read_html_disk_cache(
+            _wiki_render_disk_cache_path(),
+            cache_token,
+        )
         if cached is not None:
             _WIKI_RENDER_CACHE_KEY = cache_key
             _WIKI_RENDER_CACHE_VALUE = cached
@@ -2552,7 +2499,11 @@ def _render_wiki_index(entity_type: str | None = None, query: str = "") -> str:
         layout=_layout,
     )
     if cache_key is not None:
-        _write_html_disk_cache(_wiki_render_disk_cache_path(), cache_token, html_out)
+        _cache_service.write_html_disk_cache(
+            _wiki_render_disk_cache_path(),
+            cache_token,
+            html_out,
+        )
         _WIKI_RENDER_CACHE_KEY = cache_key
         _WIKI_RENDER_CACHE_VALUE = html_out
     return html_out
@@ -2682,159 +2633,8 @@ def _render_harness_wizard() -> str:
     )
 
 
-def _kpi_summary_cache_key(sidecar_dir: Path) -> tuple[Any, ...]:
-    parts: list[tuple[str, str, int, int, int, int]] = []
-    for root in (sidecar_dir, sidecar_dir / "mcp"):
-        try:
-            root_name = str(root.resolve())
-        except OSError:
-            root_name = str(root)
-        buckets = {
-            "quality": [0, 0, 0, 0],
-            "lifecycle": [0, 0, 0, 0],
-        }
-        try:
-            with os.scandir(root) as entries:
-                for entry in entries:
-                    name = entry.name
-                    if (
-                        name.startswith(".")
-                        or not name.endswith(".json")
-                        or not entry.is_file(follow_symlinks=False)
-                    ):
-                        continue
-                    bucket = (
-                        "lifecycle"
-                        if name.endswith(".lifecycle.json")
-                        else "quality"
-                    )
-                    try:
-                        stat = entry.stat(follow_symlinks=False)
-                    except OSError:
-                        continue
-                    data = buckets[bucket]
-                    data[0] += 1
-                    data[1] += int(stat.st_size)
-                    data[2] = max(data[2], int(stat.st_mtime_ns))
-                    data[3] = (data[3] + int(stat.st_mtime_ns)) & ((1 << 63) - 1)
-        except OSError:
-            pass
-        for bucket, values in buckets.items():
-            parts.append((root_name, bucket, values[0], values[1], values[2], values[3]))
-    return tuple(parts)
-
-
-def _kpi_summary_disk_cache_path(sidecar_dir: Path) -> Path:
-    return sidecar_dir / ".dashboard-kpi-summary.json"
-
-
-def _dashboard_summary_from_dict(summary_cls: Any, data: Any) -> Any | None:
-    if not isinstance(data, dict):
-        return None
-
-    def dict_field(name: str) -> dict[str, Any]:
-        value = data.get(name)
-        return dict(value) if isinstance(value, dict) else {}
-
-    def list_field(name: str) -> list[dict[str, Any]]:
-        value = data.get(name)
-        if not isinstance(value, list):
-            return []
-        return [dict(item) for item in value if isinstance(item, dict)]
-
-    try:
-        return summary_cls(
-            generated_at=str(data.get("generated_at") or ""),
-            total=int(data.get("total") or 0),
-            by_subject=dict_field("by_subject"),
-            grade_counts=dict_field("grade_counts"),
-            lifecycle_counts=dict_field("lifecycle_counts"),
-            category_breakdown=list_field("category_breakdown"),
-            hard_floor_counts=dict_field("hard_floor_counts"),
-            low_quality_candidates=list_field("low_quality_candidates"),
-            archived=list_field("archived"),
-        )
-    except (TypeError, ValueError):
-        return None
-
-
-def _read_kpi_summary_disk_cache(
-    sidecar_dir: Path,
-    cache_token: str,
-    summary_cls: Any,
-) -> Any | None:
-    data = _read_disk_cache_payload(_kpi_summary_disk_cache_path(sidecar_dir), cache_token)
-    if data is None:
-        return None
-    return _dashboard_summary_from_dict(summary_cls, data.get("summary"))
-
-
-def _write_kpi_summary_disk_cache(
-    sidecar_dir: Path,
-    cache_token: str,
-    summary: Any,
-) -> None:
-    _write_disk_cache_payload(
-        _kpi_summary_disk_cache_path(sidecar_dir),
-        cache_token,
-        {"summary": summary.to_dict()},
-        sort_keys=True,
-    )
-
-
 def _kpi_summary():
-    """Compute the KPI DashboardSummary using the default source layout.
-
-    Returns ``None`` if the kpi_dashboard module can't be imported or
-    the required directories don't exist — the caller renders an
-    explanatory empty state instead of failing.
-    """
-    try:
-        from kpi_dashboard import DashboardSummary  # type: ignore
-        from kpi_dashboard import generate  # type: ignore
-        from ctx_lifecycle import LifecycleSources  # type: ignore
-    except Exception:  # noqa: BLE001 — KPIs are advisory
-        return None
-    sidecar_dir = _sidecar_dir()
-    if not sidecar_dir.is_dir():
-        return None
-    cache_key = _kpi_summary_cache_key(sidecar_dir)
-    global _KPI_SUMMARY_CACHE_AT, _KPI_SUMMARY_CACHE_KEY, _KPI_SUMMARY_CACHE_VALUE
-    if (
-        _KPI_SUMMARY_CACHE_KEY == cache_key
-        and _KPI_SUMMARY_CACHE_VALUE is not None
-        and time.monotonic() - _KPI_SUMMARY_CACHE_AT < _KPI_SUMMARY_CACHE_SECONDS
-    ):
-        return _KPI_SUMMARY_CACHE_VALUE
-    cache_token = _disk_cache_token(cache_key)
-    summary = _read_kpi_summary_disk_cache(sidecar_dir, cache_token, DashboardSummary)
-    if summary is not None:
-        _KPI_SUMMARY_CACHE_KEY = cache_key
-        _KPI_SUMMARY_CACHE_VALUE = summary
-        _KPI_SUMMARY_CACHE_AT = time.monotonic()
-        return summary
-    try:
-        from ctx_config import cfg  # type: ignore
-        sources = LifecycleSources(
-            skills_dir=cfg.skills_dir,
-            agents_dir=cfg.agents_dir,
-            sidecar_dir=sidecar_dir,
-        )
-    except Exception:  # noqa: BLE001 — fallback: sidecar-only
-        sources = LifecycleSources(
-            skills_dir=sidecar_dir,
-            agents_dir=sidecar_dir,
-            sidecar_dir=sidecar_dir,
-        )
-    try:
-        summary = generate(sources=sources, top_n=25)
-    except Exception:  # noqa: BLE001
-        return None
-    _write_kpi_summary_disk_cache(sidecar_dir, cache_token, summary)
-    _KPI_SUMMARY_CACHE_KEY = cache_key
-    _KPI_SUMMARY_CACHE_VALUE = summary
-    _KPI_SUMMARY_CACHE_AT = time.monotonic()
-    return summary
+    return _kpi_service.kpi_summary(_sidecar_dir())
 
 
 def _render_kpi() -> str:
