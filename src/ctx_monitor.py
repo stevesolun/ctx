@@ -1991,36 +1991,15 @@ def _render_wiki_entity(
     *,
     mutations_enabled: bool | None = None,
 ) -> str:
-    """Render one wiki entity page (frontmatter + body)."""
-    path = _wiki_entity_path(slug, entity_type=entity_type)
-    if path is None:
-        runtime_html = _render_runtime_graph_entity(
-            slug,
-            entity_type=entity_type,
-            mutations_enabled=mutations_enabled,
-        )
-        if runtime_html is not None:
-            return runtime_html
-        return _layout(
-            slug,
-            f"<h1>{html.escape(slug)}</h1>"
-            f"<p class='muted'>No wiki page found for <code>{html.escape(slug)}</code>. "
-            f"Try <a href='/skills'>the skills index</a>.</p>",
-        )
-    raw = _read_wiki_entity_text(slug, entity_type, path)
-    if raw is None:
-        return _layout(
-            slug,
-            f"<h1>{html.escape(slug)}</h1><p class='muted'>read error: page unavailable</p>",
-        )
-    meta, md_body = _parse_frontmatter(raw)
-    sidecar = _load_sidecar(slug, entity_type=entity_type)
-    return _wiki_page.render_wiki_entity_page(
-        slug=slug,
+    return _wiki_page.render_wiki_entity(
+        slug,
         entity_type=entity_type,
-        meta=meta,
-        md_body=md_body,
-        sidecar=sidecar if isinstance(sidecar, dict) else None,
+        mutations_enabled=mutations_enabled,
+        entity_path=_wiki_entity_path,
+        read_entity_text=_read_wiki_entity_text,
+        parse_frontmatter=_parse_frontmatter,
+        load_sidecar=_load_sidecar,
+        render_runtime_graph_entity=_render_runtime_graph_entity,
         dashboard_entity_types=_DASHBOARD_ENTITY_TYPES,
         display_slug=_display_slug,
         frontmatter_text=_frontmatter_text,

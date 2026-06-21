@@ -802,6 +802,72 @@ def render_runtime_graph_entity(
     )
 
 
+def render_wiki_entity(
+    slug: str,
+    entity_type: str | None = None,
+    *,
+    mutations_enabled: bool | None = None,
+    entity_path: Callable[[str, str | None], Any | None],
+    read_entity_text: Callable[[str, str | None, Any], str | None],
+    parse_frontmatter: Callable[[str], tuple[dict[str, Any], str]],
+    load_sidecar: Callable[..., dict | None],
+    render_runtime_graph_entity: Callable[..., str | None],
+    dashboard_entity_types: tuple[str, ...],
+    display_slug: Callable[[str], str],
+    frontmatter_text: Callable[[Any], str],
+    truncate_text: TruncateFn,
+    extract_embedded_quality_block: Callable[[str], tuple[str, str | None]],
+    strip_duplicate_wiki_heading: Callable[[str, str], str],
+    render_entity_subgraph: Callable[[str, str | None], str],
+    render_entity_tabs: Callable[..., str],
+    render_quality_drilldown: Callable[[dict[str, Any] | None, str | None], str],
+    render_wiki_markdown: Callable[[str], str],
+    layout: Callable[[str, str], str],
+) -> str:
+    """Render one wiki entity page, falling back to runtime graph metadata."""
+    path = entity_path(slug, entity_type)
+    if path is None:
+        runtime_html = render_runtime_graph_entity(
+            slug,
+            entity_type=entity_type,
+            mutations_enabled=mutations_enabled,
+        )
+        if runtime_html is not None:
+            return runtime_html
+        return layout(
+            slug,
+            f"<h1>{html.escape(slug)}</h1>"
+            f"<p class='muted'>No wiki page found for <code>{html.escape(slug)}</code>. "
+            f"Try <a href='/skills'>the skills index</a>.</p>",
+        )
+    raw = read_entity_text(slug, entity_type, path)
+    if raw is None:
+        return layout(
+            slug,
+            f"<h1>{html.escape(slug)}</h1><p class='muted'>read error: page unavailable</p>",
+        )
+    meta, md_body = parse_frontmatter(raw)
+    sidecar = load_sidecar(slug, entity_type=entity_type)
+    return render_wiki_entity_page(
+        slug=slug,
+        entity_type=entity_type,
+        meta=meta,
+        md_body=md_body,
+        sidecar=sidecar if isinstance(sidecar, dict) else None,
+        dashboard_entity_types=dashboard_entity_types,
+        display_slug=display_slug,
+        frontmatter_text=frontmatter_text,
+        truncate_text=truncate_text,
+        extract_embedded_quality_block=extract_embedded_quality_block,
+        strip_duplicate_wiki_heading=strip_duplicate_wiki_heading,
+        render_entity_subgraph=render_entity_subgraph,
+        render_entity_tabs=render_entity_tabs,
+        render_quality_drilldown=render_quality_drilldown,
+        render_wiki_markdown=render_wiki_markdown,
+        layout=layout,
+    )
+
+
 def render_runtime_graph_entity_page(
     *,
     label: str,

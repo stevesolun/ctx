@@ -1586,6 +1586,43 @@ def test_render_wiki_entity_with_real_page(fake_claude: Path) -> None:
     assert "grade-A" in direct_html
 
 
+def test_render_wiki_entity_wrapper_matches_extracted_orchestration(
+    fake_claude: Path,
+) -> None:
+    skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "python-patterns.md").write_text(
+        "---\nname: python-patterns\ntype: skill\nuse_count: 2\n---\n"
+        "# Python patterns\n\nBody text.",
+        encoding="utf-8",
+    )
+
+    wrapper_html = cm._render_wiki_entity("python-patterns", entity_type="skill")
+    direct_html = wiki_page.render_wiki_entity(
+        "python-patterns",
+        entity_type="skill",
+        entity_path=cm._wiki_entity_path,
+        read_entity_text=cm._read_wiki_entity_text,
+        parse_frontmatter=cm._parse_frontmatter,
+        load_sidecar=cm._load_sidecar,
+        render_runtime_graph_entity=cm._render_runtime_graph_entity,
+        dashboard_entity_types=cm._DASHBOARD_ENTITY_TYPES,
+        display_slug=cm._display_slug,
+        frontmatter_text=cm._frontmatter_text,
+        truncate_text=cm._truncate_text,
+        extract_embedded_quality_block=cm._extract_embedded_quality_block,
+        strip_duplicate_wiki_heading=cm._strip_duplicate_wiki_heading,
+        render_entity_subgraph=cm._render_entity_subgraph,
+        render_entity_tabs=cm._render_entity_tabs,
+        render_quality_drilldown=cm._render_quality_drilldown,
+        render_wiki_markdown=cm._render_wiki_markdown,
+        layout=cm._layout,
+    )
+
+    assert wrapper_html == direct_html
+    assert "Body text" in wrapper_html
+
+
 def test_render_wiki_entity_renders_markdown_and_wikilinks(fake_claude: Path) -> None:
     skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
     skills_dir.mkdir(parents=True)
