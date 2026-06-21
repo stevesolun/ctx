@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import hashlib
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import quote
@@ -12,6 +13,7 @@ from urllib.parse import quote
 from ctx.core import entity_types as core_entity_types
 from ctx.core.wiki.wiki_packs import load_merged_wiki_pages
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
+from ctx.monitor.services import graph as graph_service
 from ctx.utils._safe_name import is_safe_source_name
 
 
@@ -212,6 +214,112 @@ def read_entity_text(
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
+
+
+def wiki_stats_from_dashboard_index(
+    index_path: Path,
+    *,
+    index_matches_manifest: Callable[[Path], bool],
+) -> dict[str, int | bool] | None:
+    return graph_service.dashboard_index_wiki_stats(
+        index_path,
+        index_matches_manifest=index_matches_manifest,
+    )
+
+
+def wiki_stats(
+    wiki_dir: Path,
+    index_path: Path,
+    *,
+    index_matches_manifest: Callable[[Path], bool],
+    graph_node_total: int | None = None,
+) -> dict[str, int | bool]:
+    """Return entity counts across all dashboard-supported entity types."""
+    indexed = wiki_stats_from_dashboard_index(
+        index_path,
+        index_matches_manifest=index_matches_manifest,
+    )
+    if indexed is not None:
+        return indexed
+
+    if wiki_pack_pages(wiki_dir) is not None:
+        stats = {"skills": 0, "agents": 0, "mcps": 0, "harnesses": 0}
+        for _slug, entity_type, _path in iter_entity_paths(wiki_dir):
+            if entity_type == "skill":
+                stats["skills"] += 1
+            elif entity_type == "agent":
+                stats["agents"] += 1
+            elif entity_type == "mcp-server":
+                stats["mcps"] += 1
+            elif entity_type == "harness":
+                stats["harnesses"] += 1
+        stats["total"] = sum(stats.values())
+        stats["split_known"] = True
+        return stats
+
+    base = wiki_dir / "entities"
+    graph_out = wiki_dir / "graphify-out"
+    if graph_out.is_dir() and (graph_out / "graph-report.md").is_file():
+        return {
+            "skills": 0,
+            "agents": 0,
+            "mcps": 0,
+            "harnesses": 0,
+            "total": int(graph_node_total or 0),
+            "split_known": False,
+        }
+    skills = len(list((base / "skills").glob("*.md"))) if (base / "skills").is_dir() else 0
+    agents = len(list((base / "agents").glob("*.md"))) if (base / "agents").is_dir() else 0
+    mcp_dir = base / "mcp-servers"
+    mcps = len(list(mcp_dir.rglob("*.md"))) if mcp_dir.is_dir() else 0
+    harnesses = len(list((base / "harnesses").glob("*.md"))) if (base / "harnesses").is_dir() else 0
+    return {
+        "skills": skills,
+        "agents": agents,
+        "mcps": mcps,
+        "harnesses": harnesses,
+        "total": skills + agents + mcps + harnesses,
+        "split_known": True,
+    }
+
+
+def wiki_render_cache_key(
+    index_path: Path,
+    selected_type: str | None,
+    query: str,
+    *,
+    source_path: Path,
+    css_text: str,
+    manifest_export_id: str,
+    index_matches_manifest: Callable[[Path], bool],
+) -> tuple[Any, ...] | None:
+    if not index_path.is_file() or not index_matches_manifest(index_path):
+        return None
+    try:
+        index_stat = index_path.stat()
+        source_stat = source_path.stat()
+    except OSError:
+        return None
+    try:
+        css_hash = hashlib.sha256(css_text.encode("utf-8")).hexdigest()
+    except Exception:
+        css_hash = ""
+    return (
+        "wiki-index-v1",
+        selected_type or "",
+        query,
+        str(index_path.resolve()),
+        index_stat.st_mtime_ns,
+        index_stat.st_size,
+        manifest_export_id,
+        source_stat.st_mtime_ns,
+        source_stat.st_size,
+        css_hash,
+    )
+
+
+def wiki_render_disk_cache_path(claude_dir: Path) -> Path:
+    return claude_dir / ".ctx-monitor-wiki-cache.json"
 
 
 def search_entities_from_index(

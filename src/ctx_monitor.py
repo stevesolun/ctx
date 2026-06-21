@@ -59,7 +59,6 @@ starting point.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import html
 import ipaddress
 import json
@@ -1918,65 +1917,20 @@ def _graph_stats() -> dict:
 
 
 def _wiki_stats_from_dashboard_index() -> dict[str, int | bool] | None:
-    return _graph_service.dashboard_index_wiki_stats(
+    return _wiki_service.wiki_stats_from_dashboard_index(
         _dashboard_graph_index_path(),
         index_matches_manifest=_dashboard_index_matches_manifest,
     )
 
 
 def _wiki_stats() -> dict:
-    """Entity counts across all dashboard-supported entity types.
-
-    MCPs are sharded by first-char under ``entities/mcp-servers/<shard>/``
-    so we recurse rather than the flat glob used for skills + agents.
-    Home page consumes ``total`` for the headline number and the
-    individual counts for the dashboard entity-type detail
-    line.
-    """
-    indexed = _wiki_stats_from_dashboard_index()
-    if indexed is not None:
-        return indexed
-
-    if _wiki_pack_pages() is not None:
-        stats = {"skills": 0, "agents": 0, "mcps": 0, "harnesses": 0}
-        for _slug, entity_type, _path in _iter_wiki_entity_paths():
-            if entity_type == "skill":
-                stats["skills"] += 1
-            elif entity_type == "agent":
-                stats["agents"] += 1
-            elif entity_type == "mcp-server":
-                stats["mcps"] += 1
-            elif entity_type == "harness":
-                stats["harnesses"] += 1
-        stats["total"] = sum(stats.values())
-        stats["split_known"] = True
-        return stats
-
-    base = _wiki_dir() / "entities"
-    graph_out = _wiki_dir() / "graphify-out"
-    if graph_out.is_dir() and (graph_out / "graph-report.md").is_file():
-        graph_stats = _graph_stats()
-        return {
-            "skills": 0,
-            "agents": 0,
-            "mcps": 0,
-            "harnesses": 0,
-            "total": int(graph_stats.get("nodes") or 0),
-            "split_known": False,
-        }
-    skills = len(list((base / "skills").glob("*.md"))) if (base / "skills").is_dir() else 0
-    agents = len(list((base / "agents").glob("*.md"))) if (base / "agents").is_dir() else 0
-    mcp_dir = base / "mcp-servers"
-    mcps = len(list(mcp_dir.rglob("*.md"))) if mcp_dir.is_dir() else 0
-    harnesses = len(list((base / "harnesses").glob("*.md"))) if (base / "harnesses").is_dir() else 0
-    return {
-        "skills": skills,
-        "agents": agents,
-        "mcps": mcps,
-        "harnesses": harnesses,
-        "total": skills + agents + mcps + harnesses,
-        "split_known": True,
-    }
+    graph_stats = _graph_stats()
+    return _wiki_service.wiki_stats(
+        _wiki_dir(),
+        _dashboard_graph_index_path(),
+        index_matches_manifest=_dashboard_index_matches_manifest,
+        graph_node_total=int(graph_stats.get("nodes") or 0),
+    )
 
 
 def _count_audit_lines(path: Path) -> int:
@@ -2408,36 +2362,19 @@ def _wiki_render_cache_key(
     selected_type: str | None,
     query: str,
 ) -> tuple[Any, ...] | None:
-    index_path = _dashboard_graph_index_path()
-    if not index_path.is_file() or not _dashboard_index_matches_manifest(index_path):
-        return None
-    try:
-        index_stat = index_path.stat()
-        source_stat = Path(__file__).stat()
-    except OSError:
-        return None
-    try:
-        css_hash = hashlib.sha256(
-            _monitor_asset_text("monitor.css").encode("utf-8")
-        ).hexdigest()
-    except Exception:
-        css_hash = ""
-    return (
-        "wiki-index-v1",
-        selected_type or "",
+    return _wiki_service.wiki_render_cache_key(
+        _dashboard_graph_index_path(),
+        selected_type,
         query,
-        str(index_path.resolve()),
-        index_stat.st_mtime_ns,
-        index_stat.st_size,
-        _dashboard_graph_manifest_export_id() or "",
-        source_stat.st_mtime_ns,
-        source_stat.st_size,
-        css_hash,
+        source_path=Path(__file__),
+        css_text=_monitor_asset_text("monitor.css"),
+        manifest_export_id=_dashboard_graph_manifest_export_id() or "",
+        index_matches_manifest=_dashboard_index_matches_manifest,
     )
 
 
 def _wiki_render_disk_cache_path() -> Path:
-    return _claude_dir() / ".ctx-monitor-wiki-cache.json"
+    return _wiki_service.wiki_render_disk_cache_path(_claude_dir())
 
 
 def _render_wiki_index(entity_type: str | None = None, query: str = "") -> str:

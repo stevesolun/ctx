@@ -95,11 +95,18 @@ def wiki_3type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 class TestWikiStats:
     def test_counts_include_mcps(self, wiki_3type):
         s = _cm._wiki_stats()
+        direct = _wiki_service.wiki_stats(
+            wiki_3type,
+            _cm._dashboard_graph_index_path(),
+            index_matches_manifest=_cm._dashboard_index_matches_manifest,
+            graph_node_total=0,
+        )
         assert s["skills"] == 2
         assert s["agents"] == 1
         assert s["mcps"] == 3
         assert s["harnesses"] == 1
         assert s["total"] == 7
+        assert direct == s
 
     def test_mcps_sharded_dirs_scanned_recursively(self, wiki_3type):
         """MCPs live under entities/mcp-servers/<first-char>/<slug>.md —
