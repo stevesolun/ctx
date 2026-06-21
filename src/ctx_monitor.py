@@ -4482,104 +4482,16 @@ def _render_wiki_index(entity_type: str | None = None, query: str = "") -> str:
         "harness": int(wstats.get("harnesses") or 0),
     }
 
-    suggestions = "".join(
-        f"<option value='{html.escape(e['slug'])}' "
-        f"label='{html.escape(e.get('display_slug') or e['slug'])}'>"
-        for e in entries[:1000]
+    html_out = _wiki_page.render_wiki_index_page(
+        entries=entries,
+        selected_type=selected_type,
+        initial_query=initial_query,
+        total_available=total_available,
+        type_counts=type_counts,
+        grade_by_key=grade_by_key,
+        dashboard_entity_types=_DASHBOARD_ENTITY_TYPES,
+        layout=_layout,
     )
-
-    cards = "".join(
-        "<a class='wiki-card' "
-        f"data-slug='{html.escape(e['slug'])}' "
-        f"data-display-slug='{html.escape(e.get('display_slug') or e['slug'])}' "
-        f"data-type='{html.escape(e['type'])}' "
-        f"data-tags='{html.escape(' '.join(e.get('search_tags', e['tags'])).lower())}' "
-        f"href='/wiki/{html.escape(e['slug'])}?type={html.escape(e['type'])}' "
-        "style='border:1px solid #e5e7eb; border-radius:6px; "
-        "padding:0.6rem 0.8rem; text-decoration:none; color:inherit; "
-        "display:flex; flex-direction:column; gap:0.25rem;'>"
-        "<div style='display:flex; justify-content:space-between; align-items:center; gap:0.4rem;'>"
-        f"<code style='font-size:0.84rem;'>{html.escape(e.get('display_slug') or e['slug'])}</code>"
-        + (f"<span class='pill grade-{html.escape(grade_by_key[(e['slug'], e['type'])])}'>"
-           f"{html.escape(grade_by_key[(e['slug'], e['type'])])}</span>"
-           if grade_by_key.get((e['slug'], e['type'])) else
-           f"<span class='pill'>{html.escape(e['type'])}</span>")
-        + "</div>"
-        f"<div class='muted' style='font-size:0.78rem; line-height:1.3;'>"
-        f"{html.escape(e['description'] or '(no description)')}"
-        "</div>"
-        + (f"<div class='muted' style='font-size:0.72rem;'>"
-           f"{' · '.join(html.escape(t) for t in e['tags'][:5])}</div>"
-           if e["tags"] else "")
-        + "</a>"
-        for e in entries
-    )
-
-    type_checkboxes = "".join(
-        f"<label style='display:flex; justify-content:space-between; padding:0.25rem 0;'>"
-        f"<span><input type='checkbox' class='wiki-type-filter' value='{t}' "
-        f"{'checked' if selected_type is None or selected_type == t else ''}> {t}</span>"
-        f"<span class='muted' style='font-size:0.78rem;'>{type_counts.get(t, 0):,}</span>"
-        f"</label>"
-        for t in _DASHBOARD_ENTITY_TYPES
-    )
-    badge_links = "".join(
-        f"<a class='pill entity-type-{html.escape(t)}' href='/wiki?type={quote(t)}'>"
-        f"{html.escape(t)}</a>"
-        for t in _DASHBOARD_ENTITY_TYPES
-    )
-
-    body = (
-        "<h1>Wiki</h1>"
-        f"<p class='muted'>{len(entries):,} shown of {total_available:,} entity pages under "
-        f"<code>~/.claude/skill-wiki/entities/</code> · "
-        "search by slug / description / tag, pick a suggestion, "
-        "or click a tile to read the full page.</p>"
-        "<div class='card' style='display:flex; gap:0.45rem; flex-wrap:wrap; align-items:center;'>"
-        f"<strong>Catalog shortcuts</strong>{badge_links}</div>"
-        "<div style='display:grid; grid-template-columns:220px 1fr; gap:1.25rem; align-items:start;'>"
-        # Left sidebar
-        "<aside style='position:sticky; top:1rem;'>"
-        "<div class='card'><strong>Search</strong>"
-        f"<datalist id='wiki-entity-suggestions'>{suggestions}</datalist>"
-        "<input type='text' id='wiki-search' placeholder='slug / tag / text…' "
-        "style='width:100%; margin-top:0.4rem; padding:0.35rem 0.5rem; "
-        "border:1px solid #ccc; border-radius:4px;'></div>"
-        "<div class='card'><strong>Type</strong>" + type_checkboxes + "</div>"
-        "<div class='card'><span id='wiki-match-count' class='muted'>—</span></div>"
-        "</aside>"
-        # Card grid
-        "<div id='wiki-grid' style='display:grid; "
-        "grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:0.6rem;'>"
-        + (cards or "<p class='muted'>No wiki entities found. "
-           "Extract <code>graph/wiki-graph.tar.gz</code> into "
-           "<code>~/.claude/skill-wiki/</code> to populate.</p>")
-        + "</div>"
-        "</div>"
-        "<script>\n"
-        "const wcards = document.querySelectorAll('.wiki-card');\n"
-        "const wsearch = document.getElementById('wiki-search');\n"
-        "wsearch.setAttribute('list', 'wiki-entity-suggestions');\n"
-        f"wsearch.value = {json.dumps(initial_query)};\n"
-        "function wActiveTypes() { return Array.from(document.querySelectorAll('.wiki-type-filter:checked')).map(x => x.value); }\n"
-        "function wApply() {\n"
-        "  const q = wsearch.value.trim().toLowerCase();\n"
-        "  const types = new Set(wActiveTypes());\n"
-        "  let shown = 0;\n"
-        "  wcards.forEach(c => {\n"
-        "    const hay = (c.dataset.slug + ' ' + c.dataset.displaySlug + ' ' + (c.textContent||'') + ' ' + c.dataset.tags).toLowerCase();\n"
-        "    const ok = types.has(c.dataset.type) && (!q || hay.includes(q));\n"
-        "    c.style.display = ok ? '' : 'none';\n"
-        "    if (ok) shown++;\n"
-        "  });\n"
-        "  document.getElementById('wiki-match-count').textContent = shown + ' of ' + wcards.length + ' match';\n"
-        "}\n"
-        "wsearch.addEventListener('input', wApply);\n"
-        "document.querySelectorAll('.wiki-type-filter').forEach(el => el.addEventListener('change', wApply));\n"
-        "wApply();\n"
-        "</script>"
-    )
-    html_out = _layout("Wiki", body)
     if cache_key is not None:
         _write_html_disk_cache(_wiki_render_disk_cache_path(), cache_token, html_out)
         _WIKI_RENDER_CACHE_KEY = cache_key

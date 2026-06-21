@@ -7,6 +7,7 @@ import json
 import re
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import quote
 
 
 WikiLinkFn = Callable[[str], tuple[str, str]]
@@ -272,3 +273,121 @@ def render_quality_drilldown(
         "</details>"
         "</div>"
     )
+
+
+def render_wiki_index_page(
+    *,
+    entries: list[dict[str, Any]],
+    selected_type: str | None,
+    initial_query: str,
+    total_available: int,
+    type_counts: dict[str, int],
+    grade_by_key: dict[tuple[str, str], str],
+    dashboard_entity_types: tuple[str, ...],
+    layout: Callable[[str, str], str],
+) -> str:
+    """Render the searchable wiki catalog page from already-loaded entries."""
+    suggestions = "".join(
+        f"<option value='{html.escape(str(e['slug']))}' "
+        f"label='{html.escape(str(e.get('display_slug') or e['slug']))}'>"
+        for e in entries[:1000]
+    )
+
+    cards = "".join(
+        "<a class='wiki-card' "
+        f"data-slug='{html.escape(str(e['slug']))}' "
+        f"data-display-slug='{html.escape(str(e.get('display_slug') or e['slug']))}' "
+        f"data-type='{html.escape(str(e['type']))}' "
+        f"data-tags='{html.escape(' '.join(e.get('search_tags', e['tags'])).lower())}' "
+        f"href='/wiki/{html.escape(str(e['slug']))}?type={html.escape(str(e['type']))}' "
+        "style='border:1px solid #e5e7eb; border-radius:6px; "
+        "padding:0.6rem 0.8rem; text-decoration:none; color:inherit; "
+        "display:flex; flex-direction:column; gap:0.25rem;'>"
+        "<div style='display:flex; justify-content:space-between; align-items:center; gap:0.4rem;'>"
+        f"<code style='font-size:0.84rem;'>{html.escape(str(e.get('display_slug') or e['slug']))}</code>"
+        + (
+            f"<span class='pill grade-{html.escape(grade_by_key[(str(e['slug']), str(e['type']))])}'>"
+            f"{html.escape(grade_by_key[(str(e['slug']), str(e['type']))])}</span>"
+            if grade_by_key.get((str(e["slug"]), str(e["type"])))
+            else f"<span class='pill'>{html.escape(str(e['type']))}</span>"
+        )
+        + "</div>"
+        f"<div class='muted' style='font-size:0.78rem; line-height:1.3;'>"
+        f"{html.escape(str(e['description'] or '(no description)'))}"
+        "</div>"
+        + (
+            f"<div class='muted' style='font-size:0.72rem;'>"
+            f"{' - '.join(html.escape(str(t)) for t in e['tags'][:5])}</div>"
+            if e["tags"]
+            else ""
+        )
+        + "</a>"
+        for e in entries
+    )
+
+    type_checkboxes = "".join(
+        f"<label style='display:flex; justify-content:space-between; padding:0.25rem 0;'>"
+        f"<span><input type='checkbox' class='wiki-type-filter' value='{entity_type}' "
+        f"{'checked' if selected_type is None or selected_type == entity_type else ''}> {entity_type}</span>"
+        f"<span class='muted' style='font-size:0.78rem;'>{type_counts.get(entity_type, 0):,}</span>"
+        f"</label>"
+        for entity_type in dashboard_entity_types
+    )
+    badge_links = "".join(
+        f"<a class='pill entity-type-{html.escape(entity_type)}' href='/wiki?type={quote(entity_type)}'>"
+        f"{html.escape(entity_type)}</a>"
+        for entity_type in dashboard_entity_types
+    )
+
+    body = (
+        "<h1>Wiki</h1>"
+        f"<p class='muted'>{len(entries):,} shown of {total_available:,} entity pages under "
+        f"<code>~/.claude/skill-wiki/entities/</code> - "
+        "search by slug / description / tag, pick a suggestion, "
+        "or click a tile to read the full page.</p>"
+        "<div class='card' style='display:flex; gap:0.45rem; flex-wrap:wrap; align-items:center;'>"
+        f"<strong>Catalog shortcuts</strong>{badge_links}</div>"
+        "<div style='display:grid; grid-template-columns:220px 1fr; gap:1.25rem; align-items:start;'>"
+        "<aside style='position:sticky; top:1rem;'>"
+        "<div class='card'><strong>Search</strong>"
+        f"<datalist id='wiki-entity-suggestions'>{suggestions}</datalist>"
+        "<input type='text' id='wiki-search' placeholder='slug / tag / text...' "
+        "style='width:100%; margin-top:0.4rem; padding:0.35rem 0.5rem; "
+        "border:1px solid #ccc; border-radius:4px;'></div>"
+        "<div class='card'><strong>Type</strong>" + type_checkboxes + "</div>"
+        "<div class='card'><span id='wiki-match-count' class='muted'>-</span></div>"
+        "</aside>"
+        "<div id='wiki-grid' style='display:grid; "
+        "grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:0.6rem;'>"
+        + (
+            cards
+            or "<p class='muted'>No wiki entities found. "
+            "Extract <code>graph/wiki-graph.tar.gz</code> into "
+            "<code>~/.claude/skill-wiki/</code> to populate.</p>"
+        )
+        + "</div>"
+        "</div>"
+        "<script>\n"
+        "const wcards = document.querySelectorAll('.wiki-card');\n"
+        "const wsearch = document.getElementById('wiki-search');\n"
+        "wsearch.setAttribute('list', 'wiki-entity-suggestions');\n"
+        f"wsearch.value = {json.dumps(initial_query)};\n"
+        "function wActiveTypes() { return Array.from(document.querySelectorAll('.wiki-type-filter:checked')).map(x => x.value); }\n"
+        "function wApply() {\n"
+        "  const q = wsearch.value.trim().toLowerCase();\n"
+        "  const types = new Set(wActiveTypes());\n"
+        "  let shown = 0;\n"
+        "  wcards.forEach(c => {\n"
+        "    const hay = (c.dataset.slug + ' ' + c.dataset.displaySlug + ' ' + (c.textContent||'') + ' ' + c.dataset.tags).toLowerCase();\n"
+        "    const ok = types.has(c.dataset.type) && (!q || hay.includes(q));\n"
+        "    c.style.display = ok ? '' : 'none';\n"
+        "    if (ok) shown++;\n"
+        "  });\n"
+        "  document.getElementById('wiki-match-count').textContent = shown + ' of ' + wcards.length + ' match';\n"
+        "}\n"
+        "wsearch.addEventListener('input', wApply);\n"
+        "document.querySelectorAll('.wiki-type-filter').forEach(el => el.addEventListener('change', wApply));\n"
+        "wApply();\n"
+        "</script>"
+    )
+    return layout("Wiki", body)

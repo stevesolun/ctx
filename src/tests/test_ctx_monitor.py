@@ -3411,8 +3411,27 @@ def test_render_wiki_index_lists_entities(fake_claude: Path) -> None:
         encoding="utf-8",
     )
     html_out = cm._render_wiki_index()
+    direct_out = wiki_page.render_wiki_index_page(
+        entries=[{
+            "slug": "python-patterns",
+            "display_slug": "python-patterns",
+            "type": "skill",
+            "description": "Idiomatic Python patterns",
+            "tags": ["python", "patterns"],
+            "search_tags": ["python", "patterns"],
+        }],
+        selected_type=None,
+        initial_query="python",
+        total_available=1,
+        type_counts={"skill": 1, "agent": 0, "mcp-server": 0, "harness": 0},
+        grade_by_key={("python-patterns", "skill"): "A"},
+        dashboard_entity_types=cm._DASHBOARD_ENTITY_TYPES,
+        layout=lambda _title, body: body,
+    )
     # Both entities render as cards with their slug.
     assert "python-patterns" in html_out
+    assert "python-patterns" in direct_out
+    assert "grade-A" in direct_out
     assert "code-reviewer" in html_out
     # Descriptions surface on the card.
     assert "Idiomatic Python patterns" in html_out
