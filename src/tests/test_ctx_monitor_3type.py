@@ -994,6 +994,10 @@ class TestMonitorRoutesPreserveEntityType:
         handler._send_500 = lambda exc: sent.setdefault("500", exc)
         handler._api_reads_enabled = lambda: True
         handler._mutations_enabled = lambda: True
+        handler._handle_get_route = _cm._MonitorHandler._handle_get_route.__get__(
+            handler,
+            type(handler),
+        )
         if html_fn is not None:
             handler._send_html = html_fn
         if json_fn is not None:

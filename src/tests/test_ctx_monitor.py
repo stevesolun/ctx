@@ -1338,6 +1338,29 @@ def test_monitor_route_inventory_covers_nav_and_api_routes() -> None:
     assert "/api/entity/upsert" in monitor_routes.POST_API_ROUTES
 
 
+def test_monitor_route_matchers_cover_dynamic_and_mutation_routes() -> None:
+    parsed = monitor_routes.parse_request_target(
+        "/api/graph/github%2Fcli.json?type=mcp-server&limit=20",
+    )
+    assert parsed.path == "/api/graph/github%2Fcli.json"
+    assert parsed.query == {"type": "mcp-server", "limit": "20"}
+
+    home = monitor_routes.match_get_route("/")
+    catalog = monitor_routes.match_get_route("/catalog/")
+    wiki_entity = monitor_routes.match_get_route("/wiki/langgraph")
+    graph_api = monitor_routes.match_get_route("/api/graph/github%2Fcli.json")
+    assert home is not None and home.name == "home"
+    assert catalog is not None and catalog.name == "wiki_index"
+    assert wiki_entity is not None and wiki_entity.params == {"slug": "langgraph"}
+    assert graph_api is not None and graph_api.params == {"slug": "github/cli"}
+    assert monitor_routes.match_get_route("/missing") is None
+    entity_upsert = monitor_routes.match_post_route("/api/entity/upsert")
+    assert entity_upsert is not None and entity_upsert.name == (
+        "api_entity_upsert"
+    )
+    assert monitor_routes.match_post_route("/api/nope") is None
+
+
 def test_graph_api_invalid_params_return_400(
     fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

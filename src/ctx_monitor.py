@@ -78,7 +78,7 @@ from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, urlsplit
 
 from ctx import dashboard_entities, dashboard_graph
 from ctx.core import entity_types as core_entity_types
@@ -87,6 +87,7 @@ from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
 from ctx.monitor.layout import layout as _layout
 from ctx.monitor.layout import monitor_asset_text as _monitor_asset_text
 from ctx.monitor.layout import monitor_inline_script as _monitor_inline_script
+from ctx.monitor import routes as _monitor_routes
 from ctx.monitor import state as _monitor_state
 from ctx.monitor.pages import activity as _activity_page
 from ctx.monitor.pages import config as _config_page
@@ -4898,14 +4899,139 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         if 0 < length <= _MAX_POST_BODY_BYTES:
             self.rfile.read(length)
 
+    def _handle_get_route(
+        self,
+        route: _monitor_routes.RouteMatch,
+        qs: dict[str, str],
+    ) -> None:
+        name = route.name
+        params = route.params
+        if name == "home":
+            self._send_html(_render_home())
+        elif name == "sessions_index":
+            self._send_html(_render_sessions_index())
+        elif name == "session_detail":
+            self._send_html(_render_session_detail(params["session_id"]))
+        elif name == "skills":
+            self._send_html(_render_skills(qs))
+        elif name == "skillspector":
+            self._send_html(_render_skillspector(qs))
+        elif name == "skill_detail":
+            self._send_html(_render_skill_detail(params["slug"], qs.get("type")))
+        elif name == "loaded":
+            self._send_html(_render_loaded(self._mutations_enabled()))
+        elif name == "logs":
+            self._send_html(_render_logs())
+        elif name == "graph":
+            self._send_html(_render_graph(qs.get("slug"), qs.get("type")))
+        elif name == "manage":
+            self._send_html(_render_manage(self._mutations_enabled()))
+        elif name == "harness":
+            self._send_html(_render_harness_wizard())
+        elif name == "docs":
+            self._send_html(_render_docs())
+        elif name == "config":
+            self._send_html(_render_config())
+        elif name == "status":
+            self._send_html(_render_status())
+        elif name == "wiki_index":
+            self._send_html(_render_wiki_index(qs.get("type"), qs.get("q", "")))
+        elif name == "wiki_entity":
+            self._send_html(
+                _render_wiki_entity(
+                    params["slug"],
+                    qs.get("type"),
+                    mutations_enabled=self._mutations_enabled(),
+                ),
+            )
+        elif name == "kpi":
+            self._send_html(_render_kpi())
+        elif name == "runtime":
+            self._send_html(_render_runtime_lifecycle())
+        elif name == "events":
+            self._send_html(_render_events())
+        elif name == "api_sessions":
+            self._send_json(_summarize_sessions())
+        elif name == "api_manifest":
+            self._send_json(_read_manifest())
+        elif name == "api_status":
+            self._send_json(_status_payload())
+        elif name == "api_kpi":
+            summary = _kpi_summary()
+            self._send_json(summary.to_dict() if summary is not None else {
+                "total": 0, "detail": "no sidecars yet",
+            })
+        elif name == "api_grades":
+            self._send_json(_grade_distribution_payload())
+        elif name == "api_sidecars":
+            self._send_json(_sidecar_page_payload(qs))
+        elif name == "api_runtime":
+            self._send_json(_runtime_lifecycle_summary())
+        elif name == "api_skillspector":
+            self._send_json(_skillspector_audit_payload(qs))
+        elif name == "api_config":
+            self._send_json(_effective_config_payload())
+        elif name == "api_entities_search":
+            try:
+                limit = max(1, min(int(qs.get("limit", 80)), 200))
+                results = _search_wiki_entities(
+                    qs.get("q", ""),
+                    qs.get("type") or None,
+                    limit=limit,
+                )
+            except ValueError as exc:
+                self._send_json_status(400, {"detail": str(exc)})
+                return
+            self._send_json({"results": results, "total": len(results)})
+        elif name == "api_entity":
+            slug = params["slug"]
+            try:
+                detail = _wiki_entity_detail(slug, qs.get("type"))
+            except ValueError as exc:
+                self._send_json_status(400, {"detail": str(exc)})
+                return
+            if detail is None:
+                self._send_json_status(404, {"detail": f"no wiki entity for {slug}"})
+            else:
+                self._send_json(detail)
+        elif name == "api_skill":
+            slug = params["slug"]
+            sidecar = _load_sidecar(slug, entity_type=qs.get("type"))
+            if sidecar is None:
+                self._send_404(f"no sidecar for {slug}")
+            else:
+                self._send_json(sidecar)
+        elif name == "api_graph":
+            slug = params["slug"]
+            requested_type = qs.get("type")
+            graph_entity_type = _normalize_dashboard_entity_type(requested_type)
+            if requested_type is not None and graph_entity_type is None:
+                self._send_json_status(
+                    400,
+                    {"detail": f"unsupported entity_type: {requested_type!r}"},
+                )
+                return
+            try:
+                hops = max(1, min(int(qs.get("hops", 1)), 3))
+                limit = max(5, min(int(qs.get("limit", 40)), 150))
+            except ValueError:
+                self._send_json_status(
+                    400,
+                    {"detail": "hops and limit must be integers"},
+                )
+                return
+            self._send_json(_graph_neighborhood(
+                slug, hops=hops, limit=limit, entity_type=graph_entity_type,
+            ))
+        elif name == "api_events_stream":
+            self._stream_audit_log()
+        else:
+            self._send_404(name)
+
     def do_GET(self) -> None:  # noqa: N802 — stdlib signature
-        # Parse once so we can reuse the query string for /graph?slug=…
-        raw_path, _, raw_query = self.path.partition("?")
-        path = raw_path
-        qs = {}
-        if raw_query:
-            from urllib.parse import parse_qs
-            qs = {k: v[0] for k, v in parse_qs(raw_query).items()}
+        target = _monitor_routes.parse_request_target(self.path)
+        path = target.path
+        qs = target.query
         try:
             self._ctx_set_read_cookie = False
             read_authorized = getattr(self, "_read_authorized", lambda _qs: True)
@@ -4929,133 +5055,11 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 and bool(_MONITOR_TOKEN)
                 and secrets.compare_digest(query_token, _MONITOR_TOKEN)
             )
-            if path == "/":
-                self._send_html(_render_home())
-            elif path == "/sessions":
-                self._send_html(_render_sessions_index())
-            elif path.startswith("/session/"):
-                self._send_html(_render_session_detail(path.split("/session/", 1)[1]))
-            elif path == "/skills":
-                self._send_html(_render_skills(qs))
-            elif path == "/skillspector":
-                self._send_html(_render_skillspector(qs))
-            elif path.startswith("/skill/"):
-                self._send_html(_render_skill_detail(
-                    path.split("/skill/", 1)[1],
-                    qs.get("type"),
-                ))
-            elif path == "/loaded":
-                self._send_html(_render_loaded(self._mutations_enabled()))
-            elif path == "/logs":
-                self._send_html(_render_logs())
-            elif path == "/graph":
-                self._send_html(_render_graph(qs.get("slug"), qs.get("type")))
-            elif path == "/manage":
-                self._send_html(_render_manage(self._mutations_enabled()))
-            elif path == "/harness":
-                self._send_html(_render_harness_wizard())
-            elif path == "/docs":
-                self._send_html(_render_docs())
-            elif path == "/config":
-                self._send_html(_render_config())
-            elif path == "/status":
-                self._send_html(_render_status())
-            elif path in {"/catalog", "/catalog/"}:
-                self._send_html(_render_wiki_index(qs.get("type"), qs.get("q", "")))
-            elif path == "/wiki":
-                self._send_html(_render_wiki_index(qs.get("type"), qs.get("q", "")))
-            elif path.startswith("/wiki/"):
-                slug = path.split("/wiki/", 1)[1]
-                self._send_html(
-                    _render_wiki_entity(
-                        slug,
-                        qs.get("type"),
-                        mutations_enabled=self._mutations_enabled(),
-                    ),
-                )
-            elif path == "/kpi":
-                self._send_html(_render_kpi())
-            elif path == "/runtime":
-                self._send_html(_render_runtime_lifecycle())
-            elif path in {"/events", "/live"}:
-                self._send_html(_render_events())
-            elif path == "/api/sessions.json":
-                self._send_json(_summarize_sessions())
-            elif path == "/api/manifest.json":
-                self._send_json(_read_manifest())
-            elif path == "/api/status.json":
-                self._send_json(_status_payload())
-            elif path == "/api/kpi.json":
-                summary = _kpi_summary()
-                self._send_json(summary.to_dict() if summary is not None else {
-                    "total": 0, "detail": "no sidecars yet",
-                })
-            elif path == "/api/grades.json":
-                self._send_json(_grade_distribution_payload())
-            elif path == "/api/sidecars.json":
-                self._send_json(_sidecar_page_payload(qs))
-            elif path == "/api/runtime.json":
-                self._send_json(_runtime_lifecycle_summary())
-            elif path == "/api/skillspector.json":
-                self._send_json(_skillspector_audit_payload(qs))
-            elif path == "/api/config.json":
-                self._send_json(_effective_config_payload())
-            elif path == "/api/entities/search.json":
-                try:
-                    limit = max(1, min(int(qs.get("limit", 80)), 200))
-                    results = _search_wiki_entities(
-                        qs.get("q", ""),
-                        qs.get("type") or None,
-                        limit=limit,
-                    )
-                except ValueError as exc:
-                    self._send_json_status(400, {"detail": str(exc)})
-                    return
-                self._send_json({"results": results, "total": len(results)})
-            elif path.startswith("/api/entity/") and path.endswith(".json"):
-                slug = unquote(path[len("/api/entity/"): -len(".json")])
-                try:
-                    detail = _wiki_entity_detail(slug, qs.get("type"))
-                except ValueError as exc:
-                    self._send_json_status(400, {"detail": str(exc)})
-                    return
-                if detail is None:
-                    self._send_json_status(404, {"detail": f"no wiki entity for {slug}"})
-                else:
-                    self._send_json(detail)
-            elif path.startswith("/api/skill/") and path.endswith(".json"):
-                slug = unquote(path[len("/api/skill/"): -len(".json")])
-                sidecar = _load_sidecar(slug, entity_type=qs.get("type"))
-                if sidecar is None:
-                    self._send_404(f"no sidecar for {slug}")
-                else:
-                    self._send_json(sidecar)
-            elif path.startswith("/api/graph/") and path.endswith(".json"):
-                slug = unquote(path[len("/api/graph/"): -len(".json")])
-                requested_type = qs.get("type")
-                graph_entity_type = _normalize_dashboard_entity_type(requested_type)
-                if requested_type is not None and graph_entity_type is None:
-                    self._send_json_status(
-                        400,
-                        {"detail": f"unsupported entity_type: {requested_type!r}"},
-                    )
-                    return
-                try:
-                    hops = max(1, min(int(qs.get("hops", 1)), 3))
-                    limit = max(5, min(int(qs.get("limit", 40)), 150))
-                except ValueError:
-                    self._send_json_status(
-                        400,
-                        {"detail": "hops and limit must be integers"},
-                    )
-                    return
-                self._send_json(_graph_neighborhood(
-                    slug, hops=hops, limit=limit, entity_type=graph_entity_type,
-                ))
-            elif path == "/api/events.stream":
-                self._stream_audit_log()
-            else:
+            route = _monitor_routes.match_get_route(path)
+            if route is None:
                 self._send_404(path)
+                return
+            self._handle_get_route(route, qs)
         except (BrokenPipeError, ConnectionAbortedError):
             # Browser disconnected mid-response — benign for a local
             # dashboard; nothing to do.
@@ -5065,7 +5069,7 @@ class _MonitorHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 — stdlib signature
         """Mutation endpoints. Same-origin only; JSON body required."""
-        path = self.path.split("?", 1)[0]
+        path = _monitor_routes.parse_request_target(self.path).path
         try:
             if not self._mutations_enabled():
                 self._discard_small_body()
@@ -5089,7 +5093,12 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             if body is None:
                 return
 
-            if path == "/api/load":
+            route = _monitor_routes.match_post_route(path)
+            if route is None:
+                self._send_404(path)
+                return
+
+            if route.name == "api_load":
                 slug = str(body.get("slug", "")).strip()
                 etype = str(body.get("entity_type", "skill")).strip() or "skill"
                 command = body.get("command")
@@ -5103,7 +5112,7 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 self._send_json_status(
                     200 if ok else 400, {"ok": ok, "detail": msg},
                 )
-            elif path == "/api/unload":
+            elif route.name == "api_unload":
                 slug = str(body.get("slug", "")).strip()
                 # entity_type defaults to "skill" for backward compat with
                 # existing JS that only sends {slug}. New /loaded page
@@ -5114,7 +5123,7 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 self._send_json_status(
                     200 if ok else 400, {"ok": ok, "detail": msg},
                 )
-            elif path == "/api/config":
+            elif route.name == "api_config":
                 updates = body.get("updates", {})
                 if not isinstance(updates, dict):
                     self._send_json_status(
@@ -5123,12 +5132,12 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                     return
                 result = _save_config_updates(updates)
                 self._send_json_status(200 if result.get("ok") else 400, result)
-            elif path == "/api/entity/upsert":
+            elif route.name == "api_entity_upsert":
                 ok, msg = _upsert_wiki_entity(body)
                 self._send_json_status(
                     200 if ok else 400, {"ok": ok, "detail": msg},
                 )
-            elif path == "/api/entity/delete":
+            elif route.name == "api_entity_delete":
                 slug = str(body.get("slug", "")).strip()
                 etype = str(body.get("entity_type", "skill")).strip() or "skill"
                 ok, msg = _delete_wiki_entity(slug, etype)
