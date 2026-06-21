@@ -35,6 +35,7 @@ from ctx.monitor import routes as monitor_routes
 from ctx.monitor.services import config as config_service
 from ctx.monitor.services import graph as graph_service
 from ctx.monitor.services import sidecars as sidecar_service
+from ctx.monitor.services import skillspector as skillspector_service
 from ctx.core.wiki import wiki_queue
 
 
@@ -2504,6 +2505,72 @@ def test_skillspector_payload_filters_by_tag_and_graph_family(
     assert payload["records"][0]["tags"] == ["security", "shell"]
     assert {"value": "security", "count": 1} in payload["filters"]["tags"]
     assert {"value": "Security Tools", "count": 1} in payload["filters"]["families"]
+
+
+def test_skillspector_service_payload_uses_dashboard_metadata(
+    fake_claude: Path,
+) -> None:
+    _write_graph_manifest(fake_claude, "service-audit-export")
+    graph_dir = fake_claude / "skill-wiki" / "graphify-out"
+    index_path = graph_dir / "dashboard-neighborhoods.sqlite3"
+    conn = sqlite3.connect(index_path)
+    try:
+        conn.execute("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute(
+            "CREATE TABLE nodes(id TEXT PRIMARY KEY,label TEXT,type TEXT,tags TEXT,"
+            "description TEXT,quality_score REAL,usage_score REAL,degree INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO meta VALUES(?,?)",
+            ("export_id", json.dumps("service-audit-export")),
+        )
+        conn.execute(
+            "INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?)",
+            (
+                "skill:review-skill",
+                "Review Skill",
+                "skill",
+                '["review","python"]',
+                "Reviews Python changes.",
+                0.8,
+                0.2,
+                4,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    _write_skillspector_audit(fake_claude, [{
+        "schema_version": 1,
+        "slug": "review-skill",
+        "status": "findings",
+        "risk_score": 80,
+        "risk_severity": "HIGH",
+        "recommendation": "REVIEW",
+        "issues": 1,
+        "components": 1,
+        "content_sha256": "c" * 64,
+        "scanned_at": "2026-06-18T00:00:00+00:00",
+        "scanner": "NVIDIA SkillSpector",
+        "scanner_repo": "https://github.com/NVIDIA/SkillSpector",
+        "scanner_version": "2.2.3",
+        "mode": "static-no-llm",
+        "llm_requested": False,
+        "issue_rules": ["prompt-injection"],
+    }])
+
+    payload = skillspector_service.audit_payload(
+        fake_claude / "skill-wiki",
+        cm._repo_graph_dir(),
+        index_path,
+        lambda _path: True,
+        {"q": "python", "limit": "1"},
+    )
+
+    assert payload["audit_available"] is True
+    assert payload["records"][0]["slug"] == "review-skill"
+    assert payload["records"][0]["tags"] == ["review", "python"]
+    assert payload["audit_path"].endswith("skillspector-audit.jsonl.gz")
 
 
 def test_skillspector_page_and_api_route_render_audit(

@@ -107,6 +107,7 @@ from ctx.monitor.server import server_shutdown_requested as _server_shutdown_req
 from ctx.monitor.services import config as _config_service
 from ctx.monitor.services import graph as _graph_service
 from ctx.monitor.services import sidecars as _sidecar_service
+from ctx.monitor.services import skillspector as _skillspector_service
 from ctx.utils._file_lock import file_lock
 from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 from ctx.utils._fs_utils import safe_atomic_write_text as _safe_atomic_write_text
@@ -1462,70 +1463,33 @@ def _first_existing_file_status(*paths: Path) -> dict[str, Any]:
     return _file_status(paths[0])
 
 
-def _first_existing_path(*paths: Path) -> Path:
-    for path in paths:
-        if path.exists():
-            return path
-    return paths[0]
-
-
 def _skillspector_audit_path() -> Path:
-    return _first_existing_path(
-        _wiki_dir() / "security" / "skillspector-audit.jsonl.gz",
-        _repo_graph_dir() / "skillspector-audit.jsonl.gz",
-    )
+    return _skillspector_service.audit_path(_wiki_dir(), _repo_graph_dir())
 
 
 def _skillspector_communities_path() -> Path | None:
-    candidates = (
-        _wiki_dir() / "graphify-out" / "communities.json",
-        _repo_graph_dir() / "communities.json",
-    )
-    for path in candidates:
-        if path.is_file():
-            return path
-    return None
+    return _skillspector_service.communities_path(_wiki_dir(), _repo_graph_dir())
 
 
 def _skillspector_index_path() -> Path | None:
-    index_path = _dashboard_graph_index_path()
-    if index_path.is_file() and _dashboard_index_matches_manifest(index_path):
-        return index_path
-    return None
+    return _skillspector_service.index_path(
+        _dashboard_graph_index_path(),
+        _dashboard_index_matches_manifest,
+    )
 
 
 def _skillspector_limit(qs: dict[str, str]) -> int:
-    try:
-        return max(1, min(int(qs.get("limit", 100)), 500))
-    except ValueError:
-        return 100
+    return _skillspector_service.limit(qs)
 
 
 def _skillspector_audit_payload(qs: dict[str, str] | None = None) -> dict[str, Any]:
-    from ctx.core.quality.skillspector_monitor import (  # noqa: PLC0415
-        build_skillspector_audit_payload,
-        load_skill_families_from_communities,
-        load_skill_metadata_from_dashboard_index,
-        load_skillspector_audit_records,
+    return _skillspector_service.audit_payload(
+        _wiki_dir(),
+        _repo_graph_dir(),
+        _dashboard_graph_index_path(),
+        _dashboard_index_matches_manifest,
+        qs,
     )
-
-    qs = qs or {}
-    audit_path = _skillspector_audit_path()
-    records = load_skillspector_audit_records(audit_path)
-    payload = build_skillspector_audit_payload(
-        records,
-        metadata_by_slug=load_skill_metadata_from_dashboard_index(_skillspector_index_path()),
-        families_by_slug=load_skill_families_from_communities(_skillspector_communities_path()),
-        query=qs.get("q", ""),
-        status=qs.get("status", ""),
-        severity=qs.get("severity", ""),
-        tag=qs.get("tag", ""),
-        family=qs.get("family", ""),
-        limit=_skillspector_limit(qs),
-    )
-    payload["audit_path"] = str(audit_path)
-    payload["audit_available"] = audit_path.is_file()
-    return payload
 
 
 def _promotion_status(path: Path) -> dict[str, Any] | None:
