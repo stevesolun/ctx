@@ -44,6 +44,8 @@ DEFAULT_CHECKS = (
     CheckSpec("sessions", "/sessions", "Sessions"),
     CheckSpec("logs", "/logs", "Logs"),
     CheckSpec("events", "/events", "Live events"),
+    CheckSpec("live", "/live", "Live events"),
+    CheckSpec("catalog-page", "/catalog?type=skill&q=code", "Catalog"),
     CheckSpec("graph-api-cold", "/api/graph/github.json?type=mcp-server&limit=20", "nodes"),
     CheckSpec("catalog-search", "/api/entities/search.json?q=code%20review&type=skill&limit=10", "results"),
     CheckSpec("entity-detail", "/api/entity/github.json?type=mcp-server", "frontmatter"),

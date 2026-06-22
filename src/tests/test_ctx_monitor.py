@@ -968,6 +968,28 @@ def test_load_sidecar_reads_mcp_quality_subdir(fake_claude: Path) -> None:
     assert sidecar["subject_type"] == "mcp-server"
 
 
+def test_skill_sidecar_api_reads_typed_sidecar(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_mcp_sidecar(fake_claude, "filesystem", {
+        "slug": "filesystem",
+        "grade": "A",
+        "raw_score": 0.91,
+    })
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        status, payload = _get_json(port, "/api/skill/filesystem.json?type=mcp-server")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert payload["slug"] == "filesystem"
+    assert payload["subject_type"] == "mcp-server"
+
+
 def test_load_sidecar_can_disambiguate_duplicate_slug(fake_claude: Path) -> None:
     _write_sidecar(fake_claude, "langgraph", {
         "slug": "langgraph",
@@ -1074,6 +1096,41 @@ def test_monitor_post_accepts_valid_token(
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_monitor_post_unload_accepts_valid_token_without_mocking_runtime(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path = fake_claude / "skill-manifest.json"
+    manifest_path.write_text(
+        json.dumps({
+            "load": [{"skill": "code-reviewer", "entity_type": "agent", "source": "test"}],
+            "unload": [],
+            "warnings": [],
+        }),
+        encoding="utf-8",
+    )
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        status, body = _post_json(
+            port,
+            "/api/unload",
+            {"slug": "code-reviewer", "entity_type": "agent"},
+            token="test-token",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert status == 200
+    assert body == {"ok": True, "detail": "unloaded code-reviewer"}
+    updated = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert updated["load"] == []
+    assert updated["unload"] == [
+        {"skill": "code-reviewer", "entity_type": "agent", "source": "test"},
+    ]
 
 
 def test_monitor_load_forwards_mcp_command_and_json_config(
