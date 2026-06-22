@@ -7,6 +7,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - No unreleased changes yet.
 
+## [1.0.18] - 2026-06-22
+
+### Fixed
+
+- Fixed the PyPI publish workflow static gate by aligning it with the
+  canonical Python 3.11 mypy target used by main CI. This supersedes the
+  failed `v1.0.17` publish attempt, whose tag used Python 3.12 for the
+  release static gate while mypy parsed the package as Python 3.11.
+- Removed the remaining dashboard-entity test dependency on private
+  `ctx.monitor.compat._*` helpers by routing it through the stable
+  `ctx.monitor.testing` facade.
+
 ## [1.0.17] - 2026-06-22
 
 ### Changed
@@ -1701,6 +1713,7 @@ pass. Full test suite: **1316 passed, 2 skipped**.
 - 5 dead imports removed (`os`, `Mapping`, `timedelta` from
   `ctx_lifecycle`; `Path` from `intake_gate`, `intake_pipeline`).
 
+[1.0.18]: https://github.com/stevesolun/ctx/releases/tag/v1.0.18
 [1.0.17]: https://github.com/stevesolun/ctx/releases/tag/v1.0.17
 [1.0.16]: https://github.com/stevesolun/ctx/releases/tag/v1.0.16
 [1.0.15]: https://github.com/stevesolun/ctx/releases/tag/v1.0.15
