@@ -5,7 +5,7 @@ from typing import Literal
 
 from ctx import dashboard_entities
 from ctx.core.quality.skillspector_service import SkillSpectorResult
-from ctx.monitor import compat as monitor_compat
+from ctx.monitor import testing as monitor_testing
 
 
 class _NoopLock:
@@ -72,9 +72,9 @@ def test_monitor_entity_deps_scan_manual_skill_upserts(monkeypatch) -> None:
             output="prompt injection",
         )
 
-    monkeypatch.setattr(monitor_compat, "run_skillspector_scan_text", fake_scan)
+    monkeypatch.setattr(monitor_testing, "run_skillspector_scan_text", fake_scan)
 
-    ok, detail = monitor_compat._scan_skill_entity_content("unsafe-skill", "# Unsafe\n")
+    ok, detail = monitor_testing.scan_skill_entity_content("unsafe-skill", "# Unsafe\n")
 
     assert ok is False
     assert "SkillSpector security scan did not pass: findings" in detail

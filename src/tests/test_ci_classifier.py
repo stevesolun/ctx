@@ -214,6 +214,21 @@ def test_publish_workflow_rejects_existing_pypi_versions() -> None:
     assert "already exists on PyPI" in workflow
 
 
+def test_publish_static_gate_uses_canonical_python_target() -> None:
+    workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
+    setup_match = re.search(
+        r"- name: Set up Python\n"
+        r"\s+uses: actions/setup-python@v6\n"
+        r"\s+with:\n"
+        r'\s+python-version: "([^"]+)"',
+        workflow,
+    )
+
+    assert setup_match is not None
+    assert setup_match.group(1) == "3.11"
+    assert "python -m mypy src" in workflow
+
+
 def test_publish_workflow_validates_and_uploads_graph_assets() -> None:
     workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
 
