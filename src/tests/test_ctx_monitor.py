@@ -53,13 +53,13 @@ def fake_claude(tmp_path: Path, monkeypatch) -> Path:
     """Point monitor compatibility helpers at a throwaway ~/.claude tree."""
     claude = tmp_path / ".claude"
     (claude / "skill-quality").mkdir(parents=True)
-    monkeypatch.setattr(mt, "_claude_dir", lambda: claude)
-    monkeypatch.setattr(mt, "_dashboard_graph_index_archives", lambda: [])
+    monkeypatch.setattr(mt, "claude_dir", lambda: claude)
+    monkeypatch.setattr(mt, "dashboard_graph_index_archives", lambda: [])
     graph_service.reset_caches()
     sidecar_service.reset_caches()
     kpi_service.reset_cache()
-    monkeypatch.setattr(mt, "_WIKI_RENDER_CACHE_KEY", None)
-    monkeypatch.setattr(mt, "_WIKI_RENDER_CACHE_VALUE", None)
+    monkeypatch.setattr(mt, "WIKI_RENDER_CACHE_KEY", None)
+    monkeypatch.setattr(mt, "WIKI_RENDER_CACHE_VALUE", None)
     dashboard_docs.reset_docs_render_cache()
     return claude
 
@@ -92,6 +92,14 @@ def _write_sidecar(claude: Path, slug: str, body: dict) -> None:
     (claude / "skill-quality" / f"{slug}.json").write_text(
         json.dumps(body), encoding="utf-8",
     )
+
+
+def test_monitor_testing_facade_rejects_private_helper_names() -> None:
+    with pytest.raises(AttributeError):
+        getattr(mt, "_render_graph")
+
+    with pytest.raises(AttributeError):
+        setattr(mt, "_claude_dir", lambda: None)
 
 
 def _write_mcp_sidecar(claude: Path, slug: str, body: dict) -> None:
@@ -219,7 +227,7 @@ def _serve_monitor(
     token: str = "test-token",
     host: str = "127.0.0.1",
 ):
-    monkeypatch.setattr(mt, "_MONITOR_TOKEN", token)
+    monkeypatch.setattr(mt, "MONITOR_TOKEN", token)
     server = mt.make_monitor_server(host, 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -592,7 +600,7 @@ def test_artifact_status_reads_promotion_metadata(
     )
     runtime_catalog.parent.mkdir(parents=True)
     runtime_catalog.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(mt, "_repo_graph_dir", lambda: repo_graph)
+    monkeypatch.setattr(mt, "repo_graph_dir", lambda: repo_graph)
     (graph_dir / "graph.json.promotion.json").write_text(
         json.dumps({
             "status": "promoted",
@@ -761,7 +769,7 @@ def test_runtime_lifecycle_summary_reads_validation_and_escalation_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events = tmp_path / "runtime" / "events.jsonl"
-    monkeypatch.setattr(mt, "_runtime_lifecycle_path", lambda: events)
+    monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: events)
     _write_runtime_events(events, [
         {
             "action": "validation",
@@ -814,7 +822,7 @@ def test_runtime_lifecycle_summary_uses_full_history_for_open_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events = tmp_path / "runtime" / "events.jsonl"
-    monkeypatch.setattr(mt, "_runtime_lifecycle_path", lambda: events)
+    monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: events)
     records = [{
         "action": "escalation",
         "session_id": "s-1",
@@ -860,7 +868,7 @@ def test_render_runtime_lifecycle_surfaces_checks_and_open_escalations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events = tmp_path / "runtime" / "events.jsonl"
-    monkeypatch.setattr(mt, "_runtime_lifecycle_path", lambda: events)
+    monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: events)
     _write_runtime_events(events, [
         {
             "action": "validation",
@@ -1080,7 +1088,7 @@ def test_monitor_post_accepts_valid_token(
         calls.append((slug, entity_type))
         return True, "loaded"
 
-    monkeypatch.setattr(mt, "_perform_load", fake_load)
+    monkeypatch.setattr(mt, "perform_load", fake_load)
     server, thread, port = _serve_monitor(monkeypatch)
     try:
         status, body = _post_json(
@@ -1146,7 +1154,7 @@ def test_monitor_load_forwards_mcp_command_and_json_config(
         calls.append((slug, entity_type, kwargs))
         return True, "loaded mcp"
 
-    monkeypatch.setattr(mt, "_perform_load", fake_load)
+    monkeypatch.setattr(mt, "perform_load", fake_load)
     server, thread, port = _serve_monitor(monkeypatch)
     try:
         status, body = _post_json(
@@ -1187,7 +1195,7 @@ def test_monitor_post_rejects_cross_origin_with_valid_token(
         calls.append(slug)
         return True, f"loaded {entity_type}"
 
-    monkeypatch.setattr(mt, "_perform_load", fake_load)
+    monkeypatch.setattr(mt, "perform_load", fake_load)
     server, thread, port = _serve_monitor(monkeypatch)
     body = json.dumps({"slug": "python-patterns"}).encode("utf-8")
     try:
@@ -1220,7 +1228,7 @@ def test_monitor_post_rejects_rebound_host_with_valid_token(
         calls.append(slug)
         return True, f"loaded {entity_type}"
 
-    monkeypatch.setattr(mt, "_perform_load", fake_load)
+    monkeypatch.setattr(mt, "perform_load", fake_load)
     server, thread, port = _serve_monitor(monkeypatch)
     body = json.dumps({"slug": "python-patterns"}).encode("utf-8")
     try:
@@ -1335,7 +1343,7 @@ def test_monitor_non_loopback_bind_is_read_only(
         json.dumps({"load": [], "unload": [], "warnings": []}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(mt, "_perform_load", fake_load)
+    monkeypatch.setattr(mt, "perform_load", fake_load)
     server, thread, port = _serve_monitor(
         monkeypatch,
         token="browser-token",
@@ -1407,8 +1415,8 @@ def test_serve_generates_read_token_for_non_loopback(
         def server_close(self) -> None:
             return None
 
-    monkeypatch.setattr(mt, "_MONITOR_TOKEN", "")
-    monkeypatch.setattr(mt, "_make_monitor_server", lambda _host, _port: FakeServer())
+    monkeypatch.setattr(mt, "MONITOR_TOKEN", "")
+    monkeypatch.setattr(mt, "make_monitor_server", lambda _host, _port: FakeServer())
     monkeypatch.setattr(monitor_cli.secrets, "token_urlsafe", lambda _size: "lan-token")
     monkeypatch.setattr(monitor_cli.socket, "gethostname", lambda: "devbox")
     monkeypatch.setattr(monitor_cli.socket, "gethostbyname", lambda _name: "192.168.1.50")
@@ -1783,7 +1791,7 @@ def test_render_mcp_wiki_entity_has_tabs_subgraph_and_quality(
     graph.add_node("agent:repo-reviewer", label="repo-reviewer", type="agent", tags=["github", "review"])
     graph.add_edge("mcp-server:github", "skill:github-actions", weight=0.91, shared_tags=["github", "ci"])
     graph.add_edge("mcp-server:github", "agent:repo-reviewer", weight=0.83, shared_tags=["github"])
-    monkeypatch.setattr(mt, "_load_dashboard_graph", lambda: graph)
+    monkeypatch.setattr(mt, "load_dashboard_graph", lambda: graph)
 
     html_out = mt.render_wiki_entity("github", entity_type="mcp-server")
     direct_tabs = wiki_page.render_entity_tabs(
@@ -1896,8 +1904,8 @@ def test_render_wiki_entity_falls_back_to_runtime_graph_metadata(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mt, "_MONITOR_MUTATIONS_ENABLED", True)
-    monkeypatch.setattr(mt, "_MONITOR_TOKEN", "runtime-token")
+    monkeypatch.setattr(mt, "MONITOR_MUTATIONS_ENABLED", True)
+    monkeypatch.setattr(mt, "MONITOR_TOKEN", "runtime-token")
 
     def fake_graph(slug: str, **_kwargs) -> dict:
         assert slug == "github"
@@ -1918,7 +1926,7 @@ def test_render_wiki_entity_falls_back_to_runtime_graph_metadata(
             "edges": [],
         }
 
-    monkeypatch.setattr(mt, "_graph_neighborhood", fake_graph)
+    monkeypatch.setattr(mt, "graph_neighborhood", fake_graph)
 
     html_out = mt.render_wiki_entity("github", entity_type="mcp-server")
 
@@ -1940,8 +1948,8 @@ def test_runtime_graph_entity_wrapper_matches_extracted_wiki_renderer(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mt, "_MONITOR_MUTATIONS_ENABLED", True)
-    monkeypatch.setattr(mt, "_MONITOR_TOKEN", "runtime-token")
+    monkeypatch.setattr(mt, "MONITOR_MUTATIONS_ENABLED", True)
+    monkeypatch.setattr(mt, "MONITOR_TOKEN", "runtime-token")
 
     def fake_graph(slug: str, **_kwargs) -> dict:
         assert slug == "github"
@@ -1962,7 +1970,7 @@ def test_runtime_graph_entity_wrapper_matches_extracted_wiki_renderer(
             "edges": [],
         }
 
-    monkeypatch.setattr(mt, "_graph_neighborhood", fake_graph)
+    monkeypatch.setattr(mt, "graph_neighborhood", fake_graph)
 
     wrapper_html = mt.render_runtime_graph_entity("github", entity_type="mcp-server")
     direct_html = wiki_page.render_runtime_graph_entity(
@@ -2009,7 +2017,7 @@ def test_render_runtime_harness_entity_shows_install_commands(
             "edges": [],
         }
 
-    monkeypatch.setattr(mt, "_graph_neighborhood", fake_graph)
+    monkeypatch.setattr(mt, "graph_neighborhood", fake_graph)
 
     html_out = mt.render_wiki_entity("mirage", entity_type="harness")
 
@@ -2022,10 +2030,10 @@ def test_render_runtime_harness_entity_shows_install_commands(
 def test_render_graph_uses_builtin_3d_mount(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         mt,
-        "_graph_stats",
+        "graph_stats",
         lambda: {"nodes": 0, "edges": 0, "available": False},
     )
-    monkeypatch.setattr(mt, "_graph_match_default_min_percent", lambda: 7)
+    monkeypatch.setattr(mt, "graph_match_default_min_percent", lambda: 7)
     html_out = mt.render_graph("python-patterns")
     direct_html = graph_page.render_graph(
         focus="python-patterns",
@@ -2129,7 +2137,7 @@ def test_render_graph_uses_builtin_3d_mount(monkeypatch: pytest.MonkeyPatch) -> 
 def test_render_graph_focus_controls_preserve_type(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         mt,
-        "_graph_stats",
+        "graph_stats",
         lambda: {"nodes": 0, "edges": 0, "available": False},
     )
     html_out = mt.render_graph("langgraph", focus_type="harness")
@@ -2192,7 +2200,7 @@ def test_graph_neighborhood_resolves_partial_slug(
         weight=0.89,
         shared_tags=["creative"],
     )
-    monkeypatch.setattr(mt, "_load_dashboard_graph", lambda: G)
+    monkeypatch.setattr(mt, "load_dashboard_graph", lambda: G)
 
     result = mt.graph_neighborhood("brainstorm", entity_type="skill")
 
@@ -2235,7 +2243,7 @@ def test_graph_neighborhood_sizes_nodes_by_score_usage_and_popularity(
     )
     G.add_edge("skill:hub", "skill:leaf-low", weight=0.2)
     G.add_edge("skill:hub", "skill:leaf-high", weight=0.9)
-    monkeypatch.setattr(mt, "_load_dashboard_graph", lambda: G)
+    monkeypatch.setattr(mt, "load_dashboard_graph", lambda: G)
 
     result = mt.graph_neighborhood("hub", entity_type="skill")
     sizes = {
@@ -2284,7 +2292,7 @@ def test_graph_neighborhood_uses_direct_sidecar_scores_without_global_index(
     for i in range(6):
         G.add_node(f"skill:node-{i}", label=f"node-{i}", type="skill", tags=["x"])
         G.add_edge("skill:center", f"skill:node-{i}", weight=1.0)
-    monkeypatch.setattr(mt, "_load_dashboard_graph", lambda: G)
+    monkeypatch.setattr(mt, "load_dashboard_graph", lambda: G)
 
     def fail_index(*args: object, **kwargs: object) -> dict:
         raise AssertionError("graph rendering should not build the global sidecar index")
@@ -2493,7 +2501,7 @@ def test_graph_neighborhood_uses_dashboard_index_without_full_graph_load(
 
     monkeypatch.setattr(
         mt,
-        "_load_dashboard_graph",
+        "load_dashboard_graph",
         lambda: (_ for _ in ()).throw(AssertionError("full graph loaded")),
     )
 
@@ -2849,7 +2857,7 @@ def test_graph_neighborhood_uses_fresh_graph_store_without_full_graph_load(
     ensure_graph_store(graph_dir, graph_dir / "graph-store.sqlite3")
     monkeypatch.setattr(
         mt,
-        "_load_dashboard_graph",
+        "load_dashboard_graph",
         lambda: (_ for _ in ()).throw(AssertionError("full graph loaded")),
     )
 
@@ -3170,10 +3178,10 @@ def test_graph_neighborhood_uses_dashboard_index_when_overlay_is_already_indexed
         + "\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(mt, "_dashboard_overlay_matches_known_release", lambda overlay: False)
+    monkeypatch.setattr(mt, "dashboard_overlay_matches_known_release", lambda overlay: False)
     monkeypatch.setattr(
         mt,
-        "_load_dashboard_graph",
+        "load_dashboard_graph",
         lambda: (_ for _ in ()).throw(AssertionError("full graph loaded")),
     )
 
@@ -3265,7 +3273,7 @@ def test_graph_neighborhood_bypasses_index_for_local_overlay_even_when_node_exis
         graph_loads += 1
         return G
 
-    monkeypatch.setattr(mt, "_load_dashboard_graph", load_graph)
+    monkeypatch.setattr(mt, "load_dashboard_graph", load_graph)
 
     result = mt.graph_neighborhood("existing", entity_type="skill")
 
@@ -3534,11 +3542,11 @@ def test_graph_neighborhood_extracts_missing_dashboard_index_from_archive(
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(seed, arcname="./graphify-out/dashboard-neighborhoods.sqlite3")
 
-    monkeypatch.setattr(mt, "_dashboard_graph_index_archives", lambda: [archive])
-    monkeypatch.setattr(mt, "_packaged_graph_export_id", lambda: "archive-export")
+    monkeypatch.setattr(mt, "dashboard_graph_index_archives", lambda: [archive])
+    monkeypatch.setattr(mt, "packaged_graph_export_id", lambda: "archive-export")
     monkeypatch.setattr(
         mt,
-        "_load_dashboard_graph",
+        "load_dashboard_graph",
         lambda: (_ for _ in ()).throw(AssertionError("full graph loaded")),
     )
 
@@ -3573,11 +3581,11 @@ def test_dashboard_index_extraction_skips_archive_export_mismatch(
 
     assert graph_service.archive_graph_export_id(archive) == "archive-export"
 
-    monkeypatch.setattr(mt, "_dashboard_graph_index_archives", lambda: [archive])
-    monkeypatch.setattr(mt, "_packaged_graph_export_id", lambda: None)
+    monkeypatch.setattr(mt, "dashboard_graph_index_archives", lambda: [archive])
+    monkeypatch.setattr(mt, "packaged_graph_export_id", lambda: None)
     monkeypatch.setattr(
         mt,
-        "_dashboard_index_matches_manifest",
+        "dashboard_index_matches_manifest",
         lambda path: (_ for _ in ()).throw(
             AssertionError(f"should not validate extracted index: {path}"),
         ),
@@ -3597,10 +3605,10 @@ def test_dashboard_index_extraction_skips_packaged_export_mismatch(
         json.dumps({"version": 1, "export_id": "old-local-export"}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(mt, "_packaged_graph_export_id", lambda: "new-packaged-export")
+    monkeypatch.setattr(mt, "packaged_graph_export_id", lambda: "new-packaged-export")
     monkeypatch.setattr(
         mt,
-        "_dashboard_graph_index_archives",
+        "dashboard_graph_index_archives",
         lambda: (_ for _ in ()).throw(AssertionError("archive scan should be skipped")),
     )
 
@@ -3619,10 +3627,10 @@ def test_graph_neighborhood_uses_local_graph_on_packaged_export_mismatch(
         json.dumps({"version": 1, "export_id": "old-local-export"}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(mt, "_packaged_graph_export_id", lambda: "new-packaged-export")
+    monkeypatch.setattr(mt, "packaged_graph_export_id", lambda: "new-packaged-export")
     G = nx.Graph()
     G.add_node("mcp-server:github", label="GitHub", type="mcp-server", tags=["git"])
-    monkeypatch.setattr(mt, "_load_dashboard_graph", lambda: G)
+    monkeypatch.setattr(mt, "load_dashboard_graph", lambda: G)
 
     result = mt.graph_neighborhood("github", entity_type="mcp-server")
     assert result["center"] == "mcp-server:github"
@@ -3661,8 +3669,8 @@ def test_dashboard_index_extraction_works_with_installed_graph_report(
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(archive_manifest, arcname="./graphify-out/graph-export-manifest.json")
         tar.add(seed, arcname="./graphify-out/dashboard-neighborhoods.sqlite3")
-    monkeypatch.setattr(mt, "_dashboard_graph_index_archives", lambda: [archive])
-    monkeypatch.setattr(mt, "_packaged_graph_export_id", lambda: "local-export")
+    monkeypatch.setattr(mt, "dashboard_graph_index_archives", lambda: [archive])
+    monkeypatch.setattr(mt, "packaged_graph_export_id", lambda: "local-export")
 
     wiki_dir = fake_claude / "skill-wiki"
     assert graph_service.dashboard_graph_index_path(wiki_dir) == (
@@ -3685,12 +3693,12 @@ def test_graph_neighborhood_bypasses_archive_index_when_runtime_overlays_exist(
     overlay.write_text('{"source":"test"}\n', encoding="utf-8")
     monkeypatch.setattr(
         mt,
-        "_dashboard_graph_index_archives",
+        "dashboard_graph_index_archives",
         lambda: (_ for _ in ()).throw(AssertionError("archive index should be bypassed")),
     )
     G = nx.Graph()
     G.add_node("skill:local-overlay", label="local-overlay", type="skill", tags=["local"])
-    monkeypatch.setattr(mt, "_load_dashboard_graph", lambda: G)
+    monkeypatch.setattr(mt, "load_dashboard_graph", lambda: G)
 
     result = mt.graph_neighborhood("local-overlay", entity_type="skill")
 
@@ -3729,8 +3737,8 @@ def test_graph_neighborhood_rejects_stale_dashboard_index(
 
     G = nx.Graph()
     G.add_node("skill:fallback", label="fallback", type="skill", tags=[])
-    monkeypatch.setattr(mt, "_packaged_graph_export_id", lambda: None)
-    monkeypatch.setattr(mt, "_load_dashboard_graph", lambda: G)
+    monkeypatch.setattr(mt, "packaged_graph_export_id", lambda: None)
+    monkeypatch.setattr(mt, "load_dashboard_graph", lambda: G)
 
     result = mt.graph_neighborhood("fallback", entity_type="skill")
 
@@ -3757,7 +3765,7 @@ def test_graph_neighborhood_rejects_orphan_dashboard_index_without_manifest(
 
     G = nx.Graph()
     G.add_node("skill:fallback", label="fallback", type="skill", tags=[])
-    monkeypatch.setattr(mt, "_load_dashboard_graph", lambda: G)
+    monkeypatch.setattr(mt, "load_dashboard_graph", lambda: G)
 
     result = mt.graph_neighborhood("fallback", entity_type="skill")
 
@@ -3861,15 +3869,15 @@ def test_render_home_formats_large_counts_with_commas(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mt, "_summarize_sessions", lambda: [])
-    monkeypatch.setattr(mt, "_read_manifest", lambda: {"load": [None] * 10000})
-    monkeypatch.setattr(mt, "_read_jsonl", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(mt, "_graph_stats", lambda: {
+    monkeypatch.setattr(mt, "summarize_sessions", lambda: [])
+    monkeypatch.setattr(mt, "read_manifest", lambda: {"load": [None] * 10000})
+    monkeypatch.setattr(mt, "read_jsonl", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(mt, "graph_stats", lambda: {
         "nodes": 79958,
         "edges": 1778069,
         "available": True,
     })
-    monkeypatch.setattr(mt, "_wiki_stats", lambda: {
+    monkeypatch.setattr(mt, "wiki_stats", lambda: {
         "skills": 68494,
         "agents": 467,
         "mcps": 10790,
@@ -3877,7 +3885,7 @@ def test_render_home_formats_large_counts_with_commas(
         "total": 79958,
         "split_known": True,
     })
-    monkeypatch.setattr(mt, "_runtime_lifecycle_summary", lambda: {
+    monkeypatch.setattr(mt, "runtime_lifecycle_summary", lambda: {
         "validations_total": 10000,
         "validation_failures": 1000,
         "open_escalations_total": 100,
@@ -3901,7 +3909,7 @@ def test_render_home_defers_sidecar_grade_scan(
     def fail_scan() -> dict[str, int]:
         raise AssertionError("home page should not synchronously scan sidecars")
 
-    monkeypatch.setattr(mt, "_grade_distribution", fail_scan)
+    monkeypatch.setattr(mt, "grade_distribution", fail_scan)
 
     html_out = mt.render_home()
 
@@ -4217,7 +4225,7 @@ def test_render_wiki_index_wrapper_matches_extracted_orchestration(
         "---\n# body\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(mt, "_wiki_render_cache_key", lambda _type, _query: None)
+    monkeypatch.setattr(mt, "wiki_render_cache_key", lambda _type, _query: None)
 
     wrapper_html = mt.render_wiki_index(query="python")
     direct_html = wiki_page.render_wiki_index(
@@ -4327,7 +4335,7 @@ def test_wiki_index_entries_use_dashboard_index_without_markdown_pages(
     def fail_sidecar_probe(*args: object, **kwargs: object) -> object:
         raise AssertionError("index-backed wiki catalog should not probe sidecars")
 
-    monkeypatch.setattr(mt, "_load_sidecar", fail_sidecar_probe)
+    monkeypatch.setattr(mt, "load_sidecar", fail_sidecar_probe)
 
     html_out = mt.render_wiki_index(query="python")
     assert "href='/wiki/python-patterns?type=skill'" in html_out
@@ -4335,13 +4343,13 @@ def test_wiki_index_entries_use_dashboard_index_without_markdown_pages(
     assert "grade-A" in html_out
     assert (fake_claude / ".ctx-monitor-wiki-cache.json").is_file()
 
-    monkeypatch.setattr(mt, "_WIKI_RENDER_CACHE_KEY", None)
-    monkeypatch.setattr(mt, "_WIKI_RENDER_CACHE_VALUE", None)
+    monkeypatch.setattr(mt, "WIKI_RENDER_CACHE_KEY", None)
+    monkeypatch.setattr(mt, "WIKI_RENDER_CACHE_VALUE", None)
 
     def fail_entry_rebuild(*args: object, **kwargs: object) -> object:
         raise AssertionError("fresh process should read the rendered wiki cache")
 
-    monkeypatch.setattr(mt, "_wiki_index_entries", fail_entry_rebuild)
+    monkeypatch.setattr(mt, "wiki_index_entries", fail_entry_rebuild)
 
     assert mt.render_wiki_index(query="python") == html_out
 
@@ -4465,7 +4473,7 @@ def test_render_wiki_index_uses_visible_sidecars_without_full_scan(
     def fail_full_sidecar_scan() -> list[dict]:
         raise AssertionError("_render_wiki_index should not scan every sidecar")
 
-    monkeypatch.setattr(mt, "_all_sidecars", fail_full_sidecar_scan)
+    monkeypatch.setattr(mt, "all_sidecars", fail_full_sidecar_scan)
 
     html_out = mt.render_wiki_index()
 
@@ -4590,8 +4598,8 @@ def test_entity_search_uses_dashboard_index_for_live_graph_search(
         conn.commit()
     finally:
         conn.close()
-    monkeypatch.setattr(mt, "_dashboard_graph_index_path", lambda: index_path)
-    monkeypatch.setattr(mt, "_dashboard_index_matches_manifest", lambda _path: True)
+    monkeypatch.setattr(mt, "dashboard_graph_index_path", lambda: index_path)
+    monkeypatch.setattr(mt, "dashboard_index_matches_manifest", lambda _path: True)
 
     results = mt.search_wiki_entities("brainstorm", "skill", limit=5)
 
@@ -4805,7 +4813,7 @@ def test_entity_delete_unloads_live_entity_before_removing_page(
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
         mt,
-        "_read_manifest",
+        "read_manifest",
         lambda: {"load": [{"skill": "python-patterns", "entity_type": "skill"}]},
     )
 
@@ -4813,7 +4821,7 @@ def test_entity_delete_unloads_live_entity_before_removing_page(
         calls.append((slug, entity_type))
         return True, "unloaded"
 
-    monkeypatch.setattr(mt, "_perform_unload", fake_unload)
+    monkeypatch.setattr(mt, "perform_unload", fake_unload)
 
     ok, detail = mt.delete_wiki_entity("python-patterns", "skill")
 
@@ -4836,12 +4844,12 @@ def test_entity_delete_keeps_page_when_live_unload_fails(
     )
     monkeypatch.setattr(
         mt,
-        "_read_manifest",
+        "read_manifest",
         lambda: {"load": [{"skill": "local-harness", "entity_type": "harness"}]},
     )
     monkeypatch.setattr(
         mt,
-        "_perform_unload",
+        "perform_unload",
         lambda slug, entity_type="skill": (False, "use ctx-harness-install"),
     )
 
@@ -5060,7 +5068,7 @@ def _use_temp_docs_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     dashboard_docs.reset_docs_render_cache()
     monkeypatch.setattr(
         mt,
-        "_docs_render_disk_cache_path",
+        "docs_render_disk_cache_path",
         lambda: tmp_path / ".ctx-monitor-docs-cache.json",
     )
 
@@ -5137,7 +5145,7 @@ def test_render_docs_lists_repo_docs(
         "# Graph Artifacts\n\nCompressed wiki and knowledge graph artifacts.\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(mt, "_docs_roots", lambda: [tmp_path])
+    monkeypatch.setattr(mt, "docs_roots", lambda: [tmp_path])
 
     html_out = mt.render_docs()
     docs_script = mt.monitor_asset_text("monitor-docs.js")
@@ -5199,7 +5207,7 @@ def test_render_docs_sanitizes_active_html(
         "<a href=\"javascript:alert('x')\" onclick=\"alert('x')\">bad</a>\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(mt, "_docs_roots", lambda: [tmp_path])
+    monkeypatch.setattr(mt, "docs_roots", lambda: [tmp_path])
 
     html_out = mt.render_docs()
 
@@ -5225,7 +5233,7 @@ def test_render_docs_reuses_disk_cache_after_process_cache_reset(
         "# Home\n\nDocs body.\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(mt, "_docs_roots", lambda: [tmp_path])
+    monkeypatch.setattr(mt, "docs_roots", lambda: [tmp_path])
 
     first = mt.render_docs()
     assert (tmp_path / ".ctx-monitor-docs-cache.json").is_file()
@@ -5235,7 +5243,7 @@ def test_render_docs_reuses_disk_cache_after_process_cache_reset(
     def fail_render_markdown(*args: object, **kwargs: object) -> str:
         raise AssertionError("fresh process should read the rendered docs cache")
 
-    monkeypatch.setattr(mt, "_render_docs_markdown", fail_render_markdown)
+    monkeypatch.setattr(mt, "render_docs_markdown", fail_render_markdown)
 
     second = mt.render_docs()
     assert second == first
@@ -5268,7 +5276,7 @@ def test_render_docs_falls_back_to_public_docs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _use_temp_docs_cache(tmp_path, monkeypatch)
-    monkeypatch.setattr(mt, "_docs_roots", lambda: [])
+    monkeypatch.setattr(mt, "docs_roots", lambda: [])
 
     html_out = mt.render_docs()
 
@@ -5339,7 +5347,7 @@ def test_render_config_page_shows_required_defaults_and_examples(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mt, "_claude_dir", lambda: tmp_path / ".claude")
+    monkeypatch.setattr(mt, "claude_dir", lambda: tmp_path / ".claude")
 
     html_out = mt.render_config()
 
@@ -5490,7 +5498,7 @@ def test_harness_wizard_entries_do_not_scan_full_sidecar_tree(
     })
     monkeypatch.setattr(
         mt,
-        "_sidecar_files",
+        "sidecar_files",
         lambda: (_ for _ in ()).throw(AssertionError("full sidecar scan")),
     )
 
@@ -5510,7 +5518,7 @@ def test_save_config_updates_casts_values_and_blank_removes_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     claude = tmp_path / ".claude"
-    monkeypatch.setattr(mt, "_claude_dir", lambda: claude)
+    monkeypatch.setattr(mt, "claude_dir", lambda: claude)
     config_path = claude / "skill-system-config.json"
     config_path.parent.mkdir(parents=True)
     config_path.write_text(
@@ -5549,7 +5557,7 @@ def test_render_config_posts_only_dirty_fields_and_can_clear_overrides(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     claude = tmp_path / ".claude"
-    monkeypatch.setattr(mt, "_claude_dir", lambda: claude)
+    monkeypatch.setattr(mt, "claude_dir", lambda: claude)
     config_path = claude / "skill-system-config.json"
     config_path.parent.mkdir(parents=True)
     config_path.write_text(
@@ -5577,7 +5585,7 @@ def test_render_graph_landing_shows_seeds_when_available(monkeypatch) -> None:
                  "agent:code-reviewer", "skill:pydantic", "skill:sqlalchemy"):
         G.add_edge("skill:python-patterns", peer, weight=2)
     G.nodes["skill:python-patterns"]["label"] = "python-patterns"
-    monkeypatch.setattr(mt, "_graph_stats", lambda: {
+    monkeypatch.setattr(mt, "graph_stats", lambda: {
         "nodes": G.number_of_nodes(),
         "edges": G.number_of_edges(),
         "available": True,
@@ -5594,12 +5602,12 @@ def test_render_graph_landing_shows_seeds_when_available(monkeypatch) -> None:
 
 
 def test_render_graph_landing_auto_loads_top_seed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mt, "_graph_stats", lambda: {
+    monkeypatch.setattr(mt, "graph_stats", lambda: {
         "nodes": 100000,
         "edges": 2900834,
         "available": True,
     })
-    monkeypatch.setattr(mt, "_top_degree_seeds", lambda **_kwargs: [{
+    monkeypatch.setattr(mt, "top_degree_seeds", lambda **_kwargs: [{
         "slug": "python-patterns",
         "type": "skill",
         "degree": 10000,
@@ -5617,12 +5625,12 @@ def test_render_graph_landing_auto_loads_top_seed(monkeypatch: pytest.MonkeyPatc
 def test_render_graph_landing_uses_default_focus_when_seed_index_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mt, "_graph_stats", lambda: {
+    monkeypatch.setattr(mt, "graph_stats", lambda: {
         "nodes": 102928,
         "edges": 2900834,
         "available": True,
     })
-    monkeypatch.setattr(mt, "_top_degree_seeds", lambda **_kwargs: [])
+    monkeypatch.setattr(mt, "top_degree_seeds", lambda **_kwargs: [])
 
     html_out = mt.render_graph(None)
 
@@ -5642,13 +5650,13 @@ def test_render_graph_landing_does_not_cold_load_graph_for_seed_chips(
         calls += 1
         raise AssertionError("graph cold-loaded")
 
-    monkeypatch.setattr(mt, "_graph_stats", lambda: {
+    monkeypatch.setattr(mt, "graph_stats", lambda: {
         "nodes": 102697,
         "edges": 2900910,
         "available": True,
     })
-    monkeypatch.setattr(mt, "_load_dashboard_graph", fake_load_graph)
-    monkeypatch.setattr(mt, "_top_degree_seeds_from_index", lambda _limit=18: [])
+    monkeypatch.setattr(mt, "load_dashboard_graph", fake_load_graph)
+    monkeypatch.setattr(mt, "top_degree_seeds_from_index", lambda _limit=18: [])
     monkeypatch.setattr(graph_service, "cached_dashboard_graph", lambda: None)
 
     html_out = mt.render_graph(None)
@@ -5671,7 +5679,7 @@ def test_render_graph_landing_hides_seeds_when_graph_absent(monkeypatch) -> None
     # braces in case a downstream path still routes through it.
     monkeypatch.setitem(sys.modules, "ctx.core.graph.resolve_graph", fake)
     monkeypatch.setitem(sys.modules, "resolve_graph", fake)
-    monkeypatch.setattr(mt, "_graph_stats", lambda: {"available": False})
+    monkeypatch.setattr(mt, "graph_stats", lambda: {"available": False})
     graph_service.reset_caches()
     html_out = mt.render_graph(None)
     # No seeds section when graph isn't available.

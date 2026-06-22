@@ -15,6 +15,10 @@ from ctx.monitor import compat as _compat
 
 
 def _compat_name(name: str) -> str:
+    if name.startswith("_") and not name.startswith("__"):
+        raise AttributeError(
+            f"ctx.monitor.testing exposes public helper names only: {name}",
+        )
     private_name = f"_{name}"
     if hasattr(_compat, private_name):
         return private_name

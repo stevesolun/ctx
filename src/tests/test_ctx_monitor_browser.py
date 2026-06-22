@@ -40,8 +40,8 @@ class MonitorHarness:
 def fake_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     claude = tmp_path / ".claude"
     (claude / "skill-quality").mkdir(parents=True)
-    monkeypatch.setattr(mt, "_claude_dir", lambda: claude)
-    monkeypatch.setattr(mt, "_dashboard_graph_index_archives", lambda: [])
+    monkeypatch.setattr(mt, "claude_dir", lambda: claude)
+    monkeypatch.setattr(mt, "dashboard_graph_index_archives", lambda: [])
     sidecar_service.reset_caches()
     kpi_service.reset_cache()
     return claude
@@ -68,14 +68,14 @@ def _start_monitor(
     *,
     fake_load: bool,
 ) -> MonitorHarness:
-    monkeypatch.setattr(mt, "_MONITOR_TOKEN", "browser-token")
+    monkeypatch.setattr(mt, "MONITOR_TOKEN", "browser-token")
     calls: list[tuple[str, str]] = []
     if fake_load:
         def perform_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
             calls.append((slug, entity_type))
             return True, "loaded"
 
-        monkeypatch.setattr(mt, "_perform_load", perform_load)
+        monkeypatch.setattr(mt, "perform_load", perform_load)
 
     server = mt.make_monitor_server("127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -130,7 +130,7 @@ def test_graph_page_uses_builtin_svg_renderer(
     monkeypatch: pytest.MonkeyPatch,
     page: Any,
 ) -> None:
-    monkeypatch.setattr(mt, "_graph_match_default_min_percent", lambda: 3)
+    monkeypatch.setattr(mt, "graph_match_default_min_percent", lambda: 3)
     G = nx.Graph()
     G.add_node("skill:python-patterns", label="python-patterns", type="skill", tags=["python"])
     G.add_node(
@@ -169,7 +169,7 @@ def test_graph_page_uses_builtin_svg_renderer(
     G.add_edge("skill:python-patterns", "harness:langgraph", weight=0.7, shared_tags=["agent"])
     G.add_edge("skill:python-patterns", "skill:medium-graph-link", weight=0.43, tag_sim=0.0)
     G.add_edge("agent:code-reviewer", "skill:weak-graph-link", weight=0.05)
-    monkeypatch.setattr(mt, "_load_dashboard_graph", lambda: G)
+    monkeypatch.setattr(mt, "load_dashboard_graph", lambda: G)
     _write_wiki_entity(fake_claude, "skill", "python-patterns", "# python-patterns\n")
     _write_wiki_entity(fake_claude, "agent", "code-reviewer", "# code-reviewer\n")
 
@@ -433,10 +433,10 @@ def test_docs_page_search_jumps_to_cross_tab_result(
             "body": "# Graph Guide\n\n## Runtime Graph\n\nSearch the runtime graph.\n",
         },
     ]
-    monkeypatch.setattr(mt, "_docs_index_entries", lambda: entries)
+    monkeypatch.setattr(mt, "docs_index_entries", lambda: entries)
     monkeypatch.setattr(
         mt,
-        "_docs_tabs",
+        "docs_tabs",
         lambda _entries: [
             {"label": "Home", "slug": "home", "pages": [entries[0]]},
             {"label": "Repo", "slug": "repo", "pages": [entries[1]]},
@@ -677,7 +677,7 @@ def test_sessions_kpi_and_runtime_pages_render_populated_browser_data(
         "computed_at": "2026-06-16T10:00:00Z",
     })
     runtime_path = tmp_path / "runtime" / "events.jsonl"
-    monkeypatch.setattr(mt, "_runtime_lifecycle_path", lambda: runtime_path)
+    monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: runtime_path)
     _write_runtime_events(runtime_path, [
         {
             "action": "validation",
