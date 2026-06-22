@@ -8,8 +8,7 @@ skills/agents/MCP recommendation layer can be used by that host.
 ## Problem
 
 Every loaded skill, agent, and MCP server costs tokens, attention, and tool
-surface area. Most sessions need a small top-scored bundle from the 91K+ skills,
-460+ agents, and 10K+ MCP servers in the shipped graph, not the whole inventory.
+surface area. Most sessions need a small top-scored bundle from the 68,494 skills, 467 agents, and 10,790 MCP servers in the shipped graph, not the whole inventory.
 Loading too much:
 
 - wastes context on irrelevant instructions,

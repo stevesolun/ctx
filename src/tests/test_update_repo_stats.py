@@ -306,6 +306,41 @@ def test_harness_aware_readme_prose_is_updated() -> None:
     assert "**92,815 skills, 464 agents, 10,787 MCP servers, and 13 harnesses**" in patched
 
 
+def test_published_inventory_prose_uses_exact_graph_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    text = "\n".join([
+        "badge/Graph-79%2C958_nodes_/_1.8M_edges-red",
+        "- **2.6M graph edges** across semantic similarity.",
+        "with 91K+ skill pages, 460+ agents, 10K+ MCP servers, and 207 harnesses",
+        "from the 91K+ skills, 460+ agents, and 10K+ MCP servers",
+        "and the full ~439 MiB wiki tarball with **79,958 nodes / 1,778,069 edges / 52 Louvain communities**.",
+    ])
+    stats = {
+        "nodes": 79958,
+        "edges": 1778069,
+        "skills": 68494,
+        "agents": 467,
+        "mcps": 10790,
+        "harnesses": 207,
+        "communities": 52,
+    }
+    monkeypatch.setattr(urs, "_full_wiki_tarball_mib", lambda: 314)
+
+    patched = text
+    for pattern, replacement in urs.build_replacements(stats, tests=None, converted=None):
+        patched = pattern.sub(replacement, patched)
+
+    assert "badge/Graph-79%2C958_nodes_/_1%2C778%2C069_edges-red" in patched
+    assert "**1,778,069 graph edges**" in patched
+    assert "with 68,494 skill pages, 467 agents, 10,790 MCP servers, and 207 harnesses" in patched
+    assert "from the 68,494 skills, 467 agents, and 10,790 MCP servers" in patched
+    assert "full ~314 MiB wiki tarball" in patched
+    assert "1.8M_edges" not in patched
+    assert "2.6M" not in patched
+    assert "91K+" not in patched
+
+
 def test_readme_entity_badges_are_updated() -> None:
     text = "\n".join([
         "[![Graph](https://img.shields.io/badge/Graph-1_nodes_/_2_edges-red.svg)](graph/)",

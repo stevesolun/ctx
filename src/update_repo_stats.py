@@ -38,6 +38,7 @@ README = REPO_ROOT / "README.md"
 DOCS_INDEX = REPO_ROOT / "docs" / "index.md"
 DOCS_KNOWLEDGE_GRAPH = REPO_ROOT / "docs" / "knowledge-graph.md"
 DOCS_CATALOG = REPO_ROOT / "docs" / "catalog.md"
+DOCS_SKILL_ROUTER = REPO_ROOT / "docs" / "skill-router" / "index.md"
 _MAX_TAR_JSON_BYTES = 512 * 1024 * 1024
 _MAX_TAR_TEXT_BYTES = 2 * 1024 * 1024
 _GRAPH_JSON_MEMBER = "graphify-out/graph.json"
@@ -617,6 +618,14 @@ def format_edges(n: int) -> str:
     return str(n)
 
 
+def _full_wiki_tarball_mib() -> int | None:
+    """Return the shipped full wiki tarball size rounded to whole MiB."""
+    tarball = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
+    if not tarball.exists():
+        return None
+    return round(tarball.stat().st_size / (1024 * 1024))
+
+
 Replacement = tuple[re.Pattern[str], str]
 
 _ENTITY_COUNT_REPLACEMENTS: tuple[tuple[str, str, str, str], ...] = (
@@ -830,7 +839,10 @@ def build_replacements(
         # Graph badge introduced in v0.5.0: "Graph-2,211_nodes_/_642K_edges-"
         # where the comma is URL-encoded as %2C and slash is %2F / literal.
         reps.append((re.compile(r"badge/Graph-[\w.%,/_-]+_edges-"),
-                     f"badge/Graph-{n:,}_nodes_/_{e_fmt}_edges-".replace(",", "%2C")))
+                     (
+                         f"badge/Graph-{n:,}_nodes_/"
+                         f"_{e:,}_edges-"
+                     ).replace(",", "%2C")))
         reps.append((
             re.compile(r"\*\*[\d,]+-node\*\*\s+graph"),
             f"**{n:,}-node** graph",
@@ -838,6 +850,10 @@ def build_replacements(
         reps.append((
             re.compile(r"\*\*[\d,]+\s+graph nodes\*\*"),
             f"**{n:,} graph nodes**",
+        ))
+        reps.append((
+            re.compile(r"\*\*[\d,.]+[KM]?\s+graph edges\*\*"),
+            f"**{e:,} graph edges**",
         ))
         # "A pre-built knowledge graph of 2,211 nodes and 642K edges"
         # style phrasing. Caught a stale v0.6.0 README sentence that
@@ -871,6 +887,12 @@ def build_replacements(
                      f"full graph ({n:,} nodes, {e_fmt} edges)"))
         reps.append((re.compile(r"The full graph \(([\d,]+)\s+nodes,\s+[\w.]+\s+edges\)"),
                      f"The full graph ({n:,} nodes, {e_fmt} edges)"))
+        tarball_mib = _full_wiki_tarball_mib()
+        if tarball_mib is not None:
+            reps.append((
+                re.compile(r"full ~[\d,]+\s+MiB wiki tarball"),
+                f"full ~{tarball_mib:,} MiB wiki tarball",
+            ))
         # "all 2,211 entities"
         reps.append((re.compile(r"all\s+[\d,]+\s+entities"), f"all {n:,} entities"))
         # "**2,211 entity pages** (1,768 skills + 443 agents)"
@@ -929,6 +951,32 @@ def build_replacements(
                 f"is **{core_nodes:,} nodes** ({curated_skills:,} curated skills "
                 f"+ {stats['agents']:,} agents + {stats['mcps']:,} MCP servers "
                 f"+ {stats['harnesses']:,} harnesses)",
+            ))
+
+        if stats.get("skills") and stats.get("agents") and stats.get("mcps"):
+            reps.append((
+                re.compile(
+                    r"from the\s+[\d,]+K?\+?\s+skills,\s+[\d,]+\+?\s+agents,\s+"
+                    r"and\s+[\d,]+K?\+?\s+MCP servers"
+                ),
+                f"from the {stats['skills']:,} skills, {stats['agents']:,} "
+                f"agents, and {stats['mcps']:,} MCP servers",
+            ))
+
+        if (
+            stats.get("skills")
+            and stats.get("agents")
+            and stats.get("mcps")
+            and stats.get("harnesses")
+        ):
+            reps.append((
+                re.compile(
+                    r"with\s+[\d,]+K?\+?\s+skill pages,\s+[\d,]+\+?\s+agents,\s+"
+                    r"[\d,]+K?\+?\s+MCP servers,\s+and\s+[\d,]+\s+harnesses"
+                ),
+                f"with {stats['skills']:,} skill pages, "
+                f"{stats['agents']:,} agents, {stats['mcps']:,} MCP servers, "
+                f"and {stats['harnesses']:,} harnesses",
             ))
 
         table_values = {
@@ -1128,6 +1176,21 @@ def sync_github_about(*, check_only: bool = False, repo: str = _GITHUB_REPO) -> 
     return 0
 
 
+def _target_is_under_repo(target: Path) -> bool:
+    try:
+        target.resolve().relative_to(REPO_ROOT.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _target_label(target: Path) -> Path:
+    try:
+        return target.resolve().relative_to(REPO_ROOT.resolve())
+    except ValueError:
+        return target
+
+
 def patch_readme(check_only: bool = False) -> int:
     stats = read_graph_stats()
     tests = read_test_count(live=True)
@@ -1138,8 +1201,14 @@ def patch_readme(check_only: bool = False) -> int:
         print(f"warning: could not resolve {missing}; those fields will be left untouched", file=sys.stderr)
 
     changes: list[tuple[Path, str, str]] = []
-    for target in (README, DOCS_INDEX, DOCS_KNOWLEDGE_GRAPH, DOCS_CATALOG):
-        if not target.exists():
+    for target in (
+        README,
+        DOCS_INDEX,
+        DOCS_KNOWLEDGE_GRAPH,
+        DOCS_CATALOG,
+        DOCS_SKILL_ROUTER,
+    ):
+        if not _target_is_under_repo(target) or not target.exists():
             continue
         replacements = (
             build_replacements(stats, tests, converted)
@@ -1171,7 +1240,7 @@ def patch_readme(check_only: bool = False) -> int:
                 if o != p
             ]
             for lineno, o, p in diff[:10]:
-                rel = target.relative_to(REPO_ROOT)
+                rel = _target_label(target)
                 print(f"  {rel}:{lineno}:\n    - {o}\n    + {p}", file=sys.stderr)
         return 1
 
@@ -1182,7 +1251,7 @@ def patch_readme(check_only: bool = False) -> int:
             1 for o, p in zip(original.splitlines(), patched.splitlines()) if o != p
         )
         total += changed_lines
-        print(f"{target.relative_to(REPO_ROOT)} patched: {changed_lines} lines changed")
+        print(f"{_target_label(target)} patched: {changed_lines} lines changed")
     print(f"Repository stats patched: {total} lines changed")
     return 0
 

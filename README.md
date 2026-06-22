@@ -3,8 +3,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-4286_collected-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
-[![Graph](https://img.shields.io/badge/Graph-79%2C958_nodes_/_1.8M_edges-red.svg)](https://stevesolun.github.io/ctx/knowledge-graph/)
+[![Tests](https://img.shields.io/badge/Tests-4287_collected-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Graph](https://img.shields.io/badge/Graph-79%2C958_nodes_/_1%2C778%2C069_edges-red.svg)](https://stevesolun.github.io/ctx/knowledge-graph/)
 [![Skills](https://img.shields.io/badge/Skills-68%2C494-blue.svg)](https://stevesolun.github.io/ctx/catalog/?type=skill)
 [![Agents](https://img.shields.io/badge/Agents-467-purple.svg)](https://stevesolun.github.io/ctx/catalog/?type=agent)
 [![MCPs](https://img.shields.io/badge/MCPs-10%2C790-pink.svg)](https://stevesolun.github.io/ctx/catalog/?type=mcp-server)
@@ -22,13 +22,13 @@ Current shipped snapshot:
 
 - **68,494 skill entity pages**, with **67,024** hydrated installable `SKILL.md` bodies.
 - **467 agents**, **10,790 MCP servers**, and **207 harnesses**.
-- **2.6M graph edges** across semantic similarity, tags, slug tokens, source overlap, direct links, quality, usage, type affinity, and graph structure.
+- **1,778,069 graph edges** across semantic similarity, tags, slug tokens, source overlap, direct links, quality, usage, type affinity, and graph structure.
 - **28,612 long skill bodies** converted through the micro-skill gate instead of shipping raw long prompts.
 - Entity updates for skills, agents, MCPs, and harnesses print benefits/risks and skip replacement unless you explicitly approve the update.
 
 ## Why it exists
 
-- **Discovery** — with 91K+ skill pages, 460+ agents, 10K+ MCP servers, and 207 harnesses, you can't possibly know which exist or which apply to your current work.
+- **Discovery** — with 68,494 skill pages, 467 agents, 10,790 MCP servers, and 207 harnesses, you can't possibly know which exist or which apply to your current work.
 - **Context budget** — loading everything wastes tokens and degrades quality. You need the right 10–15 per session.
 - **Skill rot** — skills you installed months ago and never used are cluttering context. Stale ones should be flagged automatically.
 
