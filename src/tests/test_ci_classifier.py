@@ -189,6 +189,8 @@ def test_graph_artifact_job_uses_release_asset_fallback_for_lfs_budget() -> None
 def test_similarity_gate_caches_and_predownloads_real_model() -> None:
     workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
 
+    assert "actions/cache@v4" not in workflow
+    assert "actions/cache@v5" in workflow
     assert "Cache MiniLM model" in workflow
     assert "hf-sentence-transformers-all-MiniLM-L6-v2-v1" in workflow
     assert "Pre-download MiniLM model" in workflow

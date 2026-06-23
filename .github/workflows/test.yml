@@ -150,7 +150,7 @@ jobs:
           python -m pip install ".[dev,embeddings]"
 
       - name: Cache MiniLM model
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/huggingface
           key: hf-sentence-transformers-all-MiniLM-L6-v2-v1
@@ -507,7 +507,7 @@ jobs:
           PY
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
