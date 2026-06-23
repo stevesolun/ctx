@@ -1007,6 +1007,34 @@ def test_runtime_graph_install_without_full_entities_is_not_full_install(
     assert ci._graph_full_install_complete(wiki) is False
 
 
+def test_full_graph_install_uses_system_tar_after_validation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    archive = _write_graph_archive(tmp_path)
+    wiki = tmp_path / "installed-wiki"
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **_kwargs: object) -> SimpleNamespace:
+        calls.append(list(cmd))
+        target = Path(cmd[cmd.index("-C") + 1])
+        with tarfile.open(archive, "r:gz") as tf:
+            tf.extractall(target)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(ci.shutil, "which", lambda _name: "tar")
+    monkeypatch.setattr(ci.subprocess, "run", fake_run)
+
+    ci._extract_graph_archive(archive, wiki, install_mode="full")
+
+    assert len(calls) == 1
+    assert calls[0][:3] == ["tar", "-xzf", str(archive)]
+    assert calls[0][3] == "-C"
+    assert Path(calls[0][4]).name.startswith(".installed-wiki-stage-")
+    assert ci._graph_full_install_complete(wiki) is True
+    assert (wiki / "entities" / "skills" / "current.md").is_file()
+
+
 def test_graph_install_force_prunes_stale_generated_files(
     tmp_path: Path,
     monkeypatch,

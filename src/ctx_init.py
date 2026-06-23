@@ -615,6 +615,11 @@ def _extract_graph_archive_to_dir(
 ) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     target_root = target_dir.resolve()
+    if install_mode == "full" and _extract_full_graph_archive_with_system_tar(
+        archive,
+        target_dir,
+    ):
+        return
     extracted_required: set[str] = set()
     with tarfile.open(archive, "r:gz") as tf:
         for member in tf:
@@ -639,6 +644,40 @@ def _extract_graph_archive_to_dir(
                 shutil.copyfileobj(source, fh)
             if safe_name in _GRAPH_REQUIRED_FILES:
                 extracted_required.add(safe_name)
+
+
+def _extract_full_graph_archive_with_system_tar(
+    archive: Path,
+    target_dir: Path,
+) -> bool:
+    tar_path = shutil.which("tar")
+    if tar_path is None:
+        return False
+    _validate_graph_archive_for_system_extract(archive)
+    result = subprocess.run(
+        [tar_path, "-xzf", str(archive), "-C", str(target_dir)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return True
+    _clear_directory(target_dir)
+    return False
+
+
+def _validate_graph_archive_for_system_extract(archive: Path) -> None:
+    with tarfile.open(archive, "r:gz") as tf:
+        for member in tf:
+            _validate_graph_tar_member(member)
+
+
+def _clear_directory(path: Path) -> None:
+    for child in path.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
 
 
 def _graph_install_complete(wiki_dir: Path) -> bool:
