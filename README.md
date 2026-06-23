@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-4302_collected-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-4306_collected-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![Graph](https://img.shields.io/badge/Graph-79%2C958_nodes_/_1%2C778%2C069_edges-red.svg)](https://stevesolun.github.io/ctx/knowledge-graph/)
 [![Skills](https://img.shields.io/badge/Skills-68%2C494-blue.svg)](https://stevesolun.github.io/ctx/catalog/?type=skill)
 [![Agents](https://img.shields.io/badge/Agents-467-purple.svg)](https://stevesolun.github.io/ctx/catalog/?type=agent)
@@ -38,6 +38,18 @@ Current shipped snapshot:
 - **Discovery** — with 68,494 skill pages, 467 agents, 10,790 MCP servers, and 207 harnesses, you can't possibly know which exist or which apply to your current work.
 - **Context budget** — loading everything wastes tokens and degrades quality. You need the right 10–15 per session.
 - **Skill rot** — skills you installed months ago and never used are cluttering context. Stale ones should be flagged automatically.
+
+## Example user stories
+
+The canonical QA tracker is
+[`docs/qa/feature-user-story-status.csv`](docs/qa/feature-user-story-status.csv).
+Examples from that tracker:
+
+| Tracker row | User story | Expected ctx behavior |
+| --- | --- | --- |
+| `CLI-002` | As a user I can ask ctx for current repo recommendations. | `ctx-recommend` returns a capped, graph-scored bundle of relevant skills, agents, and MCP servers from the shared recommendation engine. |
+| `CLI-026` | As a local/API model user I can get harness recommendations and install one. | `ctx-harness-install --dry-run` interviews model/goals/tools/privacy, recommends a fitting harness above threshold, or emits a no-fit custom harness PRD. |
+| `API-011` | As a dashboard user I can manually add, edit, or delete entities. | `/api/entity/upsert` and `/api/entity/delete` validate type, slug, and body, then queue safe graph/wiki updates instead of mutating blindly. |
 
 ## Install
 
