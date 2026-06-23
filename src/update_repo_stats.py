@@ -1137,10 +1137,10 @@ def build_github_about_description(stats: Mapping[str, int | None]) -> str:
     if not all((nodes, skills, agents, mcps, harnesses)):
         raise ValueError("missing graph stats for GitHub About description")
     return (
-        "Skill, agent, MCP, and harness recommendations for Claude Code/custom "
-        f"LLMs: {nodes:,}-node LLM-wiki graph, {skills:,} skills, "
-        f"{agents:,} agents, {mcps:,} MCPs, {harnesses:,} harnesses, "
-        "and capped execution recommendations."
+        "Recommendation layer for loading the right skills, agents, MCPs, "
+        f"and harnesses at the right development moment: {nodes:,}-node "
+        f"LLM-wiki graph, {skills:,} skills, {agents:,} agents, "
+        f"{mcps:,} MCPs, {harnesses:,} harnesses."
     )
 
 

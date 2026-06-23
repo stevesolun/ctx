@@ -12,6 +12,13 @@
 [![Docs](https://img.shields.io/badge/docs-MkDocs_Material-blue.svg)](https://stevesolun.github.io/ctx/)
 [![Repo views](https://hits.sh/github.com/stevesolun/ctx.svg?label=repo%20views)](https://hits.sh/github.com/stevesolun/ctx/)
 
+**ctx is not an Amazon-style catalog of skills, MCPs, agents, tools, or
+harnesses. It is a recommendation layer.** Point it at your organization's own
+tools, or use the pre-built graph, and ctx recommends the smallest useful bundle
+for the current development window. The goal is to load the right skills,
+agents, MCP servers, and optional harness at the right moment so hosted LLMs
+burn fewer tokens and local models waste less CPU/GPU work.
+
 ctx watches what you are building, walks a **79,958-node** graph, and
 recommends a small, top-scored bundle of skills, agents, and MCP servers for
 the current task. If you use your own local/API model instead of Claude Code,

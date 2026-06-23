@@ -7,6 +7,13 @@ hide:
 
 [![Repo views](https://hits.sh/github.com/stevesolun/ctx.svg?label=repo%20views)](https://hits.sh/github.com/stevesolun/ctx/)
 
+**ctx is not an Amazon-style catalog of skills, MCPs, agents, tools, or
+harnesses. It is a recommendation layer.** Point it at your organization's own
+tools, or use the pre-built graph, and ctx recommends the smallest useful bundle
+for the current development window. The goal is to load the right skills,
+agents, MCP servers, and optional harness at the right moment so hosted LLMs
+burn fewer tokens and local models waste less CPU/GPU work.
+
 Watches what you develop, walks a knowledge graph of **68,494 skill pages, 467 agents, 10,790 MCP servers, and 207 cataloged harnesses**, and recommends the
 right execution bundle on the fly. The live execution bundle is skills,
 agents, and MCP servers only; custom/API/local model users get a separate
