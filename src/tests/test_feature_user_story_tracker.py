@@ -13,7 +13,9 @@ from ctx.monitor import routes as monitor_routes  # noqa: E402
 TRACKER = repo_root / "docs" / "qa" / "feature-user-story-status.csv"
 README = repo_root / "README.md"
 PASS_STATUSES = {"Tested Pass", "Retested Pass"}
-ACTIONABLE_STATUSES = PASS_STATUSES | {"Needs Fix"}
+VALIDATION_STATUSES = {"Needs Validation"}
+FIX_STATUSES = {"Needs Fix"}
+ACTIONABLE_STATUSES = PASS_STATUSES | VALIDATION_STATUSES | FIX_STATUSES
 
 
 def _tracker_rows() -> list[dict[str, str]]:
@@ -44,12 +46,17 @@ def test_feature_user_story_tracker_has_no_empty_core_fields() -> None:
         for key in required:
             assert row[key].strip(), f"{row.get('feature_id', '<unknown>')} missing {key}"
         assert row["status"] in ACTIONABLE_STATUSES
-        if row["status"] not in PASS_STATUSES:
+        if row["status"] in FIX_STATUSES:
             for key in ("error_id", "error_summary", "fix_status"):
                 assert row[key].strip(), (
                     f"{row.get('feature_id', '<unknown>')} has "
                     f"{row['status']} without {key}"
                 )
+        if row["status"] in VALIDATION_STATUSES:
+            assert row["notes"].strip(), (
+                f"{row.get('feature_id', '<unknown>')} needs validation "
+                "without a validation note"
+            )
 
 
 def test_feature_user_story_tracker_covers_all_console_scripts() -> None:
@@ -74,6 +81,38 @@ def test_feature_user_story_tracker_covers_monitor_route_inventory() -> None:
 
     assert route_patterns
     assert [route for route in route_patterns if route not in tracker] == []
+
+
+def test_feature_user_story_tracker_covers_distribution_workflows() -> None:
+    workflows = (
+        ".github/workflows/test.yml",
+        ".github/workflows/docs.yml",
+        ".github/workflows/huggingface-sync.yml",
+        ".github/workflows/publish.yml",
+        ".github/workflows/clean-host-contract.yml",
+        ".github/workflows/xdist-experiment.yml",
+    )
+    tracker = _tracker_text()
+
+    assert [workflow for workflow in workflows if workflow not in tracker] == []
+
+
+def test_feature_user_story_tracker_covers_maintainer_scripts() -> None:
+    scripts = sorted((repo_root / "scripts").glob("*.py"))
+    tracker = _tracker_text()
+    script_paths = [script.relative_to(repo_root).as_posix() for script in scripts]
+
+    assert scripts
+    assert [path for path in script_paths if path not in tracker] == []
+
+
+def test_feature_user_story_tracker_covers_public_docs_assets() -> None:
+    assets = sorted((repo_root / "docs" / "assets" / "javascripts").glob("*.js"))
+    tracker = _tracker_text()
+    asset_paths = [asset.relative_to(repo_root).as_posix() for asset in assets]
+
+    assert assets
+    assert [path for path in asset_paths if path not in tracker] == []
 
 
 def test_readme_shows_user_story_examples_from_tracker() -> None:
