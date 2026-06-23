@@ -160,10 +160,12 @@ def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:
     assert "HF_TOKEN: ${{ secrets.HF_TOKEN }}" in text
     assert "lfs: false" in text
     assert "git lfs pull" not in text
-    assert "gh release download" in text
+    assert "Resolving graph artifacts from matching release assets" in text
+    assert 'tag_name.startswith("graph-artifacts-")' in text
+    assert "latest_tag" not in text
     for artifact in _required_hydrated_artifacts():
         assert artifact.as_posix() in text
-        assert f"--pattern {artifact.name}" in text
+        assert f'hydrate_from_release("{artifact.as_posix()}"' in text
     assert "scripts/sync_huggingface.py" in text
     assert "Classify sync scope" in text
     assert "card_only_files" in text

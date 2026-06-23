@@ -75,12 +75,121 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          latest_tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
-          echo "Hydrating graph artifacts from release ${latest_tag}"
-          rm -f graph/wiki-graph.tar.gz graph/wiki-graph-runtime.tar.gz graph/skills-sh-catalog.json.gz
-          gh release download "$latest_tag" --repo "$GITHUB_REPOSITORY" --dir graph --pattern wiki-graph.tar.gz
-          gh release download "$latest_tag" --repo "$GITHUB_REPOSITORY" --dir graph --pattern wiki-graph-runtime.tar.gz
-          gh release download "$latest_tag" --repo "$GITHUB_REPOSITORY" --dir graph --pattern skills-sh-catalog.json.gz
+          set -euo pipefail
+          echo "Resolving graph artifacts from matching release assets to avoid Git LFS bandwidth."
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import time
+          import urllib.request
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          release_asset_wait_seconds = 300
+          release_asset_poll_seconds = 10
+          expected_graph_assets = {
+              "graph/wiki-graph.tar.gz": {
+                  "sha256": "d051d4f21208abe3e73975a9c30650150138d88919c27979d725be936a6ea10a",
+                  "size": 296113770,
+              },
+              "graph/wiki-graph-runtime.tar.gz": {
+                  "sha256": "993fc08377fdb09edcff4414c59b10fc121189b4a161bf796e3f8f6600907bb1",
+                  "size": 122141091,
+              },
+              "graph/skills-sh-catalog.json.gz": {
+                  "sha256": "d1bb927e93d65ef86cdbc6d68c7f57511d64c8f13026e8193287a9c4ca6f5815",
+                  "size": 10763626,
+              },
+          }
+
+          def load_releases() -> list[dict]:
+              return json.loads(subprocess.check_output(
+                  ["gh", "api", f"repos/{repo}/releases?per_page=50"],
+                  text=True,
+              ))
+
+          def hydrate_from_release(path_name: str, hydrated_min_size: int) -> None:
+              artifact = Path(path_name)
+              fallback = expected_graph_assets[path_name]
+              expected_oid = fallback["sha256"]
+              expected_size = int(fallback["size"])
+              if artifact.exists():
+                  pointer = artifact.read_text(encoding="utf-8", errors="replace")
+                  for line in pointer.splitlines():
+                      if line.startswith("oid sha256:"):
+                          expected_oid = line.split(":", 1)[1].strip()
+                      elif line.startswith("size "):
+                          expected_size = int(line.split(" ", 1)[1].strip())
+                  if not pointer.startswith("version https://git-lfs.github.com/spec/v1") and artifact.stat().st_size > hydrated_min_size:
+                      print(f"{artifact} is already hydrated")
+                      return
+
+              deadline = time.monotonic() + release_asset_wait_seconds
+              while True:
+                  candidates = []
+                  for release in load_releases():
+                      tag_name = str(release.get("tag_name") or "")
+                      is_graph_cache = tag_name.startswith("graph-artifacts-")
+                      if release.get("draft") or (
+                          release.get("prerelease") and not is_graph_cache
+                      ):
+                          continue
+                      for asset in release.get("assets", []):
+                          if asset.get("name") != artifact.name:
+                              continue
+                          digest = str(asset.get("digest") or "")
+                          size = int(asset.get("size") or 0)
+                          if size != expected_size:
+                              continue
+                          if digest and digest != f"sha256:{expected_oid}":
+                              continue
+                          candidates.append((tag_name, asset))
+
+                  if candidates:
+                      break
+                  if time.monotonic() >= deadline:
+                      raise SystemExit(
+                          f"No release asset matches {path_name} "
+                          f"sha256:{expected_oid} size:{expected_size}"
+                      )
+                  print(
+                      f"Waiting for matching release asset {artifact.name} "
+                      f"sha256:{expected_oid} size:{expected_size}"
+                  )
+                  time.sleep(release_asset_poll_seconds)
+
+              source_tag, asset = candidates[0]
+              tmp = artifact.with_name(f"{artifact.name}.download")
+              sha = hashlib.sha256()
+              total = 0
+              with urllib.request.urlopen(asset["browser_download_url"], timeout=300) as resp:  # noqa: S310
+                  with tmp.open("wb") as fh:
+                      while True:
+                          chunk = resp.read(1024 * 1024)
+                          if not chunk:
+                              break
+                          sha.update(chunk)
+                          total += len(chunk)
+                          fh.write(chunk)
+              actual_oid = sha.hexdigest()
+              if actual_oid != expected_oid or total != expected_size:
+                  tmp.unlink(missing_ok=True)
+                  raise SystemExit(
+                      f"Downloaded {path_name} does not match expected artifact: "
+                      f"sha256:{actual_oid} size:{total}"
+                  )
+              tmp.replace(artifact)
+              print(
+                  f"Hydrated {path_name} from {source_tag} release asset "
+                  f"sha256:{actual_oid} size:{total}"
+              )
+
+          hydrate_from_release("graph/wiki-graph.tar.gz", 100_000_000)
+          hydrate_from_release("graph/wiki-graph-runtime.tar.gz", 10_000_000)
+          hydrate_from_release("graph/skills-sh-catalog.json.gz", 1_000_000)
+          PY
 
       - name: Set up Python
         if: ${{ env.HF_TOKEN != '' }}
