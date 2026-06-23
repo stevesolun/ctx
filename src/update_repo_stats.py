@@ -44,6 +44,7 @@ _MAX_TAR_TEXT_BYTES = 2 * 1024 * 1024
 _GRAPH_JSON_MEMBER = "graphify-out/graph.json"
 _COMMUNITIES_JSON_MEMBER = "graphify-out/communities.json"
 _GRAPH_REPORT_MEMBER = "graphify-out/graph-report.md"
+_GRAPH_STATS_SIDECAR = "wiki-graph-stats.json"
 _PYTEST_COLLECT_TIMEOUT_SECONDS = 75
 _GITHUB_REPO = os.environ.get("CTX_GITHUB_REPO", "stevesolun/ctx")
 _PUBLIC_DOCS_BASE_URL = os.environ.get(
@@ -121,6 +122,83 @@ def _read_graph_contract_stats() -> dict[str, int | None] | None:
         elif isinstance(data, list):
             stats["communities"] = len(data)
     stats.update(_GRAPH_DERIVED_STATS)
+    return stats
+
+
+def _int_from_json(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def _read_graph_artifact_stats() -> dict[str, int | None] | None:
+    """Read the shipped graph stats sidecar after checking artifact identity.
+
+    A gzip tarball has no central index. Counting its members on every README,
+    docs, or GitHub About check is too slow for normal local/CI feedback, so
+    releases ship a small sidecar tied to the artifact size and promotion hash.
+    """
+    graph_dir = REPO_ROOT / "graph"
+    sidecar = graph_dir / _GRAPH_STATS_SIDECAR
+    tarball = graph_dir / "wiki-graph.tar.gz"
+    promotion = graph_dir / "wiki-graph.tar.gz.promotion.json"
+    if not sidecar.exists() or not tarball.exists():
+        return None
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+        artifact = payload.get("artifact") if isinstance(payload, dict) else None
+        counts = payload.get("counts") if isinstance(payload, dict) else None
+        if not isinstance(artifact, dict) or not isinstance(counts, dict):
+            return None
+        expected_size = _int_from_json(artifact.get("size"))
+        expected_sha = str(artifact.get("sha256") or "").strip().lower()
+        if expected_size is None or len(expected_sha) != 64:
+            return None
+        if tarball.stat().st_size != expected_size:
+            return None
+        if promotion.exists():
+            promotion_payload = json.loads(promotion.read_text(encoding="utf-8"))
+            current = (
+                promotion_payload.get("current")
+                if isinstance(promotion_payload, dict)
+                else None
+            )
+            if not isinstance(current, dict):
+                return None
+            current_size = _int_from_json(current.get("size"))
+            current_sha = str(current.get("sha256") or "").strip().lower()
+            if current_size != expected_size or current_sha != expected_sha:
+                return None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    stats: dict[str, int | None] = {
+        key: _int_from_json(counts.get(key))
+        for key in (
+            "nodes",
+            "edges",
+            "semantic_edges",
+            "skills",
+            "agents",
+            "mcps",
+            "harnesses",
+            "communities",
+            "skills_sh_entries",
+            "skills_sh_bodies",
+            "tag_edges",
+            "token_edges",
+            "hydrated_incident_edges",
+            "hydrated_semantic_incident_edges",
+            "cross_skill_agent_edges",
+            "cross_skill_mcp_edges",
+            "cross_agent_mcp_edges",
+            "harness_edges",
+        )
+    }
+    if not stats["nodes"] or not stats["skills"]:
+        return None
     return stats
 
 
@@ -376,7 +454,7 @@ def _read_graph_from_tarball() -> dict[str, int | None] | None:
                 for key in ("nodes", "edges", "communities"):
                     if key in parsed:
                         stats[key] = parsed[key]
-                stats.update(_read_edge_source_stats(tf))
+                stats.update(_GRAPH_DERIVED_STATS)
 
             if stats["nodes"] is None or stats["edges"] is None:
                 body = _read_json_member(tf, _GRAPH_JSON_MEMBER)
@@ -409,11 +487,14 @@ def read_graph_stats() -> dict:
     """Return {nodes, edges, skills, agents, communities} from authoritative sources.
 
     Priority:
-      1. ``graph/wiki-graph.tar.gz`` — the tarball that ships in
-         releases. Pinned and canonical.
-      2. ``scripts/ci_preflight.py`` graph contract counts — fallback
+      1. ``graph/wiki-graph-stats.json`` — the checked sidecar for the
+         shipped graph artifact. This keeps docs/About updates fast while
+         still tying counts to the promoted tarball hash and size.
+      2. ``graph/wiki-graph.tar.gz`` — the tarball that ships in
+         releases. Pinned and canonical, but slow to enumerate.
+      3. ``scripts/ci_preflight.py`` graph contract counts — fallback
          when a source checkout has not downloaded the release tarball.
-      3. ``~/.claude/skill-wiki/graphify-out/graph.json`` — the user's
+      4. ``~/.claude/skill-wiki/graphify-out/graph.json`` — the user's
          live wiki. Used only when the tarball isn't present (e.g. a
          bare clone without the release asset downloaded).
 
@@ -421,6 +502,10 @@ def read_graph_stats() -> dict:
     contract numbers or whatever the user last re-graphified instead of
     the artifact that users actually receive.
     """
+    artifact_stats = _read_graph_artifact_stats()
+    if artifact_stats is not None:
+        return artifact_stats
+
     tarball_stats = _read_graph_from_tarball()
     if tarball_stats is not None:
         return tarball_stats

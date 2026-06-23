@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "artifact": {
+    "path": "graph/wiki-graph.tar.gz",
+    "size": 329276669,
+    "sha256": "e487ec2109803e3c05cb2ca6906e8a0bae681f32a4fe79f3fb2f168fbea2c947"
+  },
+  "source": "validated graph artifact release contract",
+  "counts": {
+    "nodes": 79958,
+    "edges": 1778069,
+    "semantic_edges": 1088763,
+    "skills": 68494,
+    "agents": 467,
+    "mcps": 10790,
+    "harnesses": 207,
+    "communities": 52,
+    "skills_sh_entries": 67024,
+    "skills_sh_bodies": 67024,
+    "tag_edges": 474837,
+    "token_edges": 280275,
+    "hydrated_incident_edges": 1516298,
+    "hydrated_semantic_incident_edges": 911922,
+    "cross_skill_agent_edges": 52382,
+    "cross_skill_mcp_edges": 30295,
+    "cross_agent_mcp_edges": 229,
+    "harness_edges": 5063
+  }
+}

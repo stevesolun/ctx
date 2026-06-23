@@ -34,6 +34,37 @@ def _write_graph_tarball(root: Path, entries: list[tuple[str, object | bytes]]) 
                 _add_json(tf, name, body)
 
 
+def _write_graph_stats_sidecar(
+    root: Path,
+    counts: dict[str, int],
+    *,
+    file_size: int = 4,
+    artifact_size: int = 4,
+    sha256: str = "a" * 64,
+) -> None:
+    graph_dir = root / "graph"
+    graph_dir.mkdir(exist_ok=True)
+    (graph_dir / "wiki-graph.tar.gz").write_bytes(b"x" * file_size)
+    (graph_dir / "wiki-graph.tar.gz.promotion.json").write_text(
+        json.dumps({"current": {"size": artifact_size, "sha256": sha256}}),
+        encoding="utf-8",
+    )
+    (graph_dir / "wiki-graph-stats.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "artifact": {
+                    "path": "graph/wiki-graph.tar.gz",
+                    "size": artifact_size,
+                    "sha256": sha256,
+                },
+                "counts": counts,
+            },
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_tarball_stats_only_trust_safe_regular_members(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -82,6 +113,85 @@ def test_graph_contract_stats_use_preflight_exact_counts() -> None:
     assert stats["harness_edges"] == 5063
 
 
+def test_graph_artifact_stats_sidecar_uses_promoted_artifact_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(urs, "REPO_ROOT", tmp_path)
+    counts = {
+        "nodes": 100,
+        "edges": 200,
+        "skills": 30,
+        "agents": 40,
+        "mcps": 50,
+        "harnesses": 60,
+        "communities": 70,
+        "semantic_edges": 80,
+    }
+    _write_graph_stats_sidecar(tmp_path, counts)
+
+    assert urs._read_graph_artifact_stats() == {
+        "nodes": 100,
+        "edges": 200,
+        "semantic_edges": 80,
+        "skills": 30,
+        "agents": 40,
+        "mcps": 50,
+        "harnesses": 60,
+        "communities": 70,
+        "skills_sh_entries": None,
+        "skills_sh_bodies": None,
+        "tag_edges": None,
+        "token_edges": None,
+        "hydrated_incident_edges": None,
+        "hydrated_semantic_incident_edges": None,
+        "cross_skill_agent_edges": None,
+        "cross_skill_mcp_edges": None,
+        "cross_agent_mcp_edges": None,
+        "harness_edges": None,
+    }
+
+
+def test_graph_artifact_stats_sidecar_rejects_size_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(urs, "REPO_ROOT", tmp_path)
+    _write_graph_stats_sidecar(
+        tmp_path,
+        {"nodes": 100, "edges": 200, "skills": 30},
+        file_size=3,
+        artifact_size=4,
+    )
+
+    assert urs._read_graph_artifact_stats() is None
+
+
+def test_read_graph_stats_prefers_artifact_sidecar_without_tarball_scan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(urs, "REPO_ROOT", tmp_path)
+    sidecar = {
+        "nodes": 100,
+        "edges": 200,
+        "skills": 30,
+        "agents": 40,
+        "mcps": 50,
+        "harnesses": 60,
+        "communities": 70,
+    }
+    _write_graph_stats_sidecar(tmp_path, sidecar)
+    monkeypatch.setattr(
+        urs,
+        "_read_graph_from_tarball",
+        lambda: pytest.fail("tarball scan should not run with a valid sidecar"),
+    )
+    monkeypatch.setattr(urs, "_read_graph_contract_stats", lambda: {"nodes": 1, "skills": 1})
+
+    assert urs.read_graph_stats()["nodes"] == 100
+
+
 def test_read_graph_stats_prefers_tarball_over_preflight_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -103,6 +213,7 @@ def test_read_graph_stats_prefers_tarball_over_preflight_contract(
         "harnesses": 60,
         "communities": 70,
     }
+    monkeypatch.setattr(urs, "_read_graph_artifact_stats", lambda: None)
     monkeypatch.setattr(urs, "_read_graph_contract_stats", lambda: contract)
     monkeypatch.setattr(urs, "_read_graph_from_tarball", lambda: tarball)
 
@@ -121,6 +232,7 @@ def test_read_graph_stats_falls_back_to_preflight_contract_when_tarball_missing(
         "harnesses": 6,
         "communities": 7,
     }
+    monkeypatch.setattr(urs, "_read_graph_artifact_stats", lambda: None)
     monkeypatch.setattr(urs, "_read_graph_from_tarball", lambda: None)
     monkeypatch.setattr(urs, "_read_graph_contract_stats", lambda: contract)
 
