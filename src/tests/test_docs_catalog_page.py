@@ -54,16 +54,16 @@ def test_public_catalog_page_does_not_link_to_local_dashboard() -> None:
     assert "../dashboard/#catalog-badge-links" in text
 
 
-def test_docs_pages_workflow_uploads_single_overwritable_pages_artifact() -> None:
+def test_docs_pages_workflow_uses_node24_pages_artifact_action() -> None:
     text = (repo_root / ".github" / "workflows" / "docs.yml").read_text(
         encoding="utf-8"
     )
 
-    assert "actions/upload-pages-artifact" not in text
-    assert "actions/upload-artifact@v4" in text
-    assert "name: github-pages" in text
-    assert "artifact.tar" in text
-    assert "overwrite: true" in text
+    assert "actions/upload-pages-artifact@v5" in text
+    assert "actions/upload-artifact@v4" not in text
+    assert "path: site" in text
+    assert "artifact.tar" not in text
+    assert "overwrite: true" not in text
 
 
 def test_public_docs_render_current_graph_contract_totals() -> None:
