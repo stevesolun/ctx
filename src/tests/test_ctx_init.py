@@ -1035,6 +1035,26 @@ def test_full_graph_install_uses_system_tar_after_validation(
     assert (wiki / "entities" / "skills" / "current.md").is_file()
 
 
+def test_full_graph_install_prefers_wiki_packs_over_expanded_entities(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    archive = _write_graph_archive(tmp_path, include_wiki_pack=True)
+    wiki = tmp_path / "installed-wiki"
+
+    def fail_if_system_tar_is_used(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        pytest.fail("packed full install should use filtered extraction")
+
+    monkeypatch.setattr(ci.shutil, "which", lambda _name: "tar")
+    monkeypatch.setattr(ci.subprocess, "run", fail_if_system_tar_is_used)
+
+    ci._extract_graph_archive(archive, wiki, install_mode="full")
+
+    assert (wiki / "wiki-packs" / "base-test-export" / "wiki-pack-manifest.json").is_file()
+    assert not (wiki / "entities" / "skills" / "current.md").exists()
+    assert ci._graph_full_install_complete(wiki) is True
+
+
 def test_graph_install_force_prunes_stale_generated_files(
     tmp_path: Path,
     monkeypatch,

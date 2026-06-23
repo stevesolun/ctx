@@ -615,9 +615,16 @@ def _extract_graph_archive_to_dir(
 ) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     target_root = target_dir.resolve()
-    if install_mode == "full" and _extract_full_graph_archive_with_system_tar(
-        archive,
-        target_dir,
+    prefer_packed_full_wiki = (
+        install_mode == "full" and _archive_has_full_wiki_pack(archive)
+    )
+    if (
+        install_mode == "full"
+        and not prefer_packed_full_wiki
+        and _extract_full_graph_archive_with_system_tar(
+            archive,
+            target_dir,
+        )
     ):
         return
     extracted_required: set[str] = set()
@@ -629,6 +636,7 @@ def _extract_graph_archive_to_dir(
                 safe_name,
                 member,
                 install_mode=install_mode,
+                prefer_packed_full_wiki=prefer_packed_full_wiki,
             ):
                 continue
             destination = _graph_member_destination(target_dir, target_root, member)
@@ -644,6 +652,44 @@ def _extract_graph_archive_to_dir(
                 shutil.copyfileobj(source, fh)
             if safe_name in _GRAPH_REQUIRED_FILES:
                 extracted_required.add(safe_name)
+
+
+def _archive_has_full_wiki_pack(archive: Path) -> bool:
+    has_manifest = False
+    has_full_entity_page = False
+    with tarfile.open(archive, "r:gz") as tf:
+        for member in tf:
+            _validate_graph_tar_member(member)
+            if not member.isfile():
+                continue
+            safe_name = _safe_graph_member_name(member.name)
+            if not safe_name.startswith("wiki-packs/"):
+                continue
+            if safe_name.endswith("/wiki-pack-manifest.json"):
+                has_manifest = True
+                if has_full_entity_page:
+                    return True
+                continue
+            if safe_name.endswith("/pages.jsonl"):
+                source = tf.extractfile(member)
+                if source is None:
+                    raise ValueError(f"graph archive file is unreadable: {member.name}")
+                with source:
+                    for raw_line in source:
+                        if not raw_line.strip():
+                            continue
+                        row = json.loads(raw_line)
+                        if not isinstance(row, dict):
+                            raise ValueError(
+                                f"wiki pack page row must be an object: {member.name}"
+                            )
+                        relpath = row.get("path")
+                        if isinstance(relpath, str) and _is_full_entity_wiki_page(relpath):
+                            has_full_entity_page = True
+                            if has_manifest:
+                                return True
+                            break
+    return has_manifest and has_full_entity_page
 
 
 def _extract_full_graph_archive_with_system_tar(
@@ -999,8 +1045,11 @@ def _should_extract_graph_member(
     member: tarfile.TarInfo,
     *,
     install_mode: str,
+    prefer_packed_full_wiki: bool = False,
 ) -> bool:
     if install_mode == "full":
+        if prefer_packed_full_wiki and _is_full_entity_wiki_page(safe_name):
+            return False
         return True
     if member.isdir():
         return False
@@ -1009,6 +1058,15 @@ def _should_extract_graph_member(
         or safe_name in _GRAPH_REQUIRED_FILES
         or any(safe_name.startswith(prefix) for prefix in _GRAPH_RUNTIME_PREFIXES)
     )
+
+
+def _is_full_entity_wiki_page(safe_name: str) -> bool:
+    full_prefixes = (
+        "entities/skills/",
+        "entities/agents/",
+        "entities/mcp-servers/",
+    )
+    return safe_name.startswith(full_prefixes) and safe_name.endswith(".md")
 
 
 def _ensure_path_under_root(path: Path, root: Path) -> None:
