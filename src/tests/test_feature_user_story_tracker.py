@@ -12,6 +12,8 @@ from ctx.monitor import routes as monitor_routes  # noqa: E402
 
 TRACKER = repo_root / "docs" / "qa" / "feature-user-story-status.csv"
 README = repo_root / "README.md"
+PASS_STATUSES = {"Tested Pass", "Retested Pass"}
+ACTIONABLE_STATUSES = PASS_STATUSES | {"Needs Fix"}
 
 
 def _tracker_rows() -> list[dict[str, str]]:
@@ -41,7 +43,13 @@ def test_feature_user_story_tracker_has_no_empty_core_fields() -> None:
     for row in rows:
         for key in required:
             assert row[key].strip(), f"{row.get('feature_id', '<unknown>')} missing {key}"
-        assert row["status"] in {"Tested Pass", "Retested Pass"}
+        assert row["status"] in ACTIONABLE_STATUSES
+        if row["status"] not in PASS_STATUSES:
+            for key in ("error_id", "error_summary", "fix_status"):
+                assert row[key].strip(), (
+                    f"{row.get('feature_id', '<unknown>')} has "
+                    f"{row['status']} without {key}"
+                )
 
 
 def test_feature_user_story_tracker_covers_all_console_scripts() -> None:

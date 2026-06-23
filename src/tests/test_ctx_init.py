@@ -1010,6 +1010,7 @@ def test_runtime_graph_install_without_full_entities_is_not_full_install(
 def test_graph_install_force_prunes_stale_generated_files(
     tmp_path: Path,
     monkeypatch,
+    capsys,
 ) -> None:
     archive = _write_graph_archive(tmp_path)
     claude = tmp_path / "home"
@@ -1031,6 +1032,9 @@ def test_graph_install_force_prunes_stale_generated_files(
         "--force",
         "--model-mode", "skip",
     ]) == 0
+    out = capsys.readouterr().out
+    assert "full graph install expands the markdown LLM-wiki" in out
+    assert "runtime mode is enough for recommendations" in out
     assert not stale.exists()
     assert (claude / "skill-wiki" / "entities" / "skills" / "current.md").is_file()
 

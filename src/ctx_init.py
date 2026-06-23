@@ -341,6 +341,7 @@ def build_graph(
         else:
             _verify_local_graph_archive(archive, requested_install_mode=install_mode)
             print(f"Installing pre-built graph from {archive}")
+        _print_graph_install_mode_notice(install_mode)
         _extract_graph_archive(archive, wiki_dir, install_mode=install_mode)
         _install_graph_entity_overlay(
             wiki_dir,
@@ -363,6 +364,15 @@ def build_graph(
         print(f"  [error] graph install validation failed: {exc}", file=sys.stderr)
         return 1
     return 0
+
+
+def _print_graph_install_mode_notice(install_mode: str) -> None:
+    if install_mode == "full":
+        print(
+            "  [info] full graph install expands the markdown LLM-wiki and "
+            "can take several minutes on Windows; runtime mode is enough for "
+            "recommendations and harness setup"
+        )
 
 
 def _find_local_graph_archive(install_mode: str = "runtime") -> Path | None:
