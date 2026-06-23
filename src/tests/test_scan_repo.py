@@ -303,6 +303,19 @@ dev = ["black"]
         assert "pytest-cov" in deps
         assert "black" in deps
 
+    def test_can_ignore_optional_deps_for_primary_stack(self, tmp_path: Path) -> None:
+        p = _write(tmp_path / "pyproject.toml", """
+[project]
+dependencies = ["core-dep"]
+
+[project.optional-dependencies]
+embeddings = ["torch>=2"]
+""")
+
+        deps = sr.read_toml_deps(str(p), include_optional=False)
+
+        assert deps == ["core-dep"]
+
     def test_extracts_poetry_deps(self, tmp_path: Path) -> None:
         p = _write(tmp_path / "pyproject.toml", """
 [tool.poetry]
@@ -670,6 +683,20 @@ class TestDetectStackProjectType:
         signals = _make_signals(config_files=[str(py)])
         profile = sr.detect_stack(str(tmp_path), signals)
         assert profile["project_type"] == "ml-project"
+
+    def test_optional_torch_does_not_make_project_ml(self, tmp_path: Path) -> None:
+        py = _write(tmp_path / "pyproject.toml", """
+[project]
+dependencies = ["networkx"]
+
+[project.optional-dependencies]
+embeddings = ["torch>=2"]
+""")
+        signals = _make_signals(config_files=[str(py)])
+        profile = sr.detect_stack(str(tmp_path), signals)
+
+        assert any(f["name"] == "pytorch" for f in profile["frameworks"])
+        assert profile["project_type"] == "unknown"
 
     def test_ai_agent_when_langchain_present(self, tmp_path: Path) -> None:
         py = _write(tmp_path / "requirements.txt", "langchain\n")

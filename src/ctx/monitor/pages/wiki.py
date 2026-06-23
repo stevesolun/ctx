@@ -160,6 +160,7 @@ def render_wiki_index(
     write_html_disk_cache: Callable[[Any, str, str], None],
     wiki_render_disk_cache_path: Callable[[], Any],
     wiki_index_entries: Callable[[], list[dict]],
+    search_wiki_entities: Callable[..., list[dict[str, Any]]] | None,
     wiki_stats: Callable[[], dict[str, Any]],
     load_sidecar: Callable[..., dict | None],
     dashboard_entity_types: tuple[str, ...],
@@ -175,18 +176,24 @@ def render_wiki_index(
     initial_query = query.strip()
     cache_key = wiki_render_cache_key(selected_type, initial_query)
     if cache_key is not None:
-        cached = read_memory_cache(cache_key)
-        if cached is not None:
-            return cached
         cache_token = disk_cache_token(cache_key)
-        cached = read_html_disk_cache(wiki_render_disk_cache_path(), cache_token)
-        if cached is not None:
-            write_memory_cache(cache_key, cached)
-            return cached
+        if not initial_query:
+            cached = read_memory_cache(cache_key)
+            if cached is not None:
+                return cached
+            cached = read_html_disk_cache(wiki_render_disk_cache_path(), cache_token)
+            if cached is not None:
+                write_memory_cache(cache_key, cached)
+                return cached
     else:
         cache_token = ""
 
-    entries = wiki_index_entries()
+    if initial_query and search_wiki_entities is not None:
+        uses_bounded_search = True
+        entries = search_wiki_entities(initial_query, selected_type, limit=120)
+    else:
+        uses_bounded_search = False
+        entries = wiki_index_entries()
     wstats = wiki_stats()
     total_available = int(wstats.get("total") or len(entries))
     grade_by_key: dict[tuple[str, str], str] = {}
@@ -197,9 +204,10 @@ def render_wiki_index(
         if grade:
             grade_by_key[(slug, row_type)] = grade
             continue
-        sidecar = load_sidecar(slug, entity_type=row_type)
-        if sidecar:
-            grade_by_key[(slug, row_type)] = str(sidecar.get("grade") or "")
+        if not uses_bounded_search:
+            sidecar = load_sidecar(slug, entity_type=row_type)
+            if sidecar:
+                grade_by_key[(slug, row_type)] = str(sidecar.get("grade") or "")
 
     type_counts = {
         "skill": int(wstats.get("skills") or 0),

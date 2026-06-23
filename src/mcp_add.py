@@ -719,7 +719,7 @@ def main() -> None:
             print(f"Error: {json_path} does not exist.", file=sys.stderr)
             sys.exit(1)
         try:
-            raw_records = [json.loads(json_path.read_text(encoding="utf-8"))]
+            raw_records = [json.loads(json_path.read_text(encoding="utf-8-sig"))]
         except json.JSONDecodeError as exc:
             print(f"Error: failed to parse JSON: {exc}", file=sys.stderr)
             sys.exit(1)
@@ -730,9 +730,9 @@ def main() -> None:
             print(f"Error: {jsonl_path} does not exist.", file=sys.stderr)
             sys.exit(1)
         for lineno, line in enumerate(
-            jsonl_path.read_text(encoding="utf-8").splitlines(), 1
+            jsonl_path.read_text(encoding="utf-8-sig").splitlines(), 1
         ):
-            line = line.strip()
+            line = line.lstrip("\ufeff").strip()
             if not line:
                 continue
             try:
@@ -742,7 +742,7 @@ def main() -> None:
 
     elif args.from_stdin:
         for lineno, line in enumerate(sys.stdin, 1):
-            line = line.strip()
+            line = line.lstrip("\ufeff").strip()
             if not line:
                 continue
             try:
@@ -767,6 +767,8 @@ def main() -> None:
         f"\nDone{dry_label}: {added} added, {merged} updated, "
         f"{reviewed} reviewed, {rejected} rejected, {errors} errors"
     )
+    if rejected or errors:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

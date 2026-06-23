@@ -140,7 +140,7 @@ def add_agent(
             f"{_MAX_AGENT_BYTES:,}. Trim before ingestion."
         )
 
-    content = source_path.read_text(encoding="utf-8", errors="replace")
+    content = source_path.read_text(encoding="utf-8-sig", errors="replace")
     line_count = len(content.splitlines())
 
     installed_path = agents_dir / f"{name}.md"
@@ -343,6 +343,8 @@ def main() -> None:
         f"\nDone: {added} added, {updated} updated, {skipped} skipped, "
         f"{rejected} rejected, {errors} errors"
     )
+    if rejected or errors:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

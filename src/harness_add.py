@@ -415,7 +415,7 @@ def _record_from_args(args: argparse.Namespace) -> HarnessRecord:
 
 
 def _load_json_record(path: Path) -> HarnessRecord:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     return HarnessRecord.from_dict(data)
 
 

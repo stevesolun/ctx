@@ -633,6 +633,27 @@ class TestAddSkill:
         assert result["converted"] is False
         assert result["is_new_page"] is True
 
+    def test_bom_prefixed_skill_frontmatter_is_accepted(self, tmp_path, monkeypatch):
+        wiki = self._setup_wiki(tmp_path)
+        skills_dir = tmp_path / "skills"
+        self._setup_intake_allow()
+        _fake_batch_convert.convert_skill.return_value = {"status": "error"}
+        monkeypatch.setattr(_sa, "update_index", MagicMock())
+        monkeypatch.setattr(_sa, "append_log", MagicMock())
+
+        source = tmp_path / "SKILL.md"
+        source.write_text("\ufeff" + self._skill_text(), encoding="utf-8")
+
+        result = add_skill(
+            source_path=source,
+            name="myskill",
+            wiki_path=wiki,
+            skills_dir=skills_dir,
+        )
+
+        assert result["name"] == "myskill"
+        assert result["is_new_page"] is True
+
     def test_required_security_scan_blocks_before_install(
         self, tmp_path, monkeypatch
     ):

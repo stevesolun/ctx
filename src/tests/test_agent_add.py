@@ -206,6 +206,25 @@ def test_new_agent_add_writes_converted_agent_mirror(
     assert mirror.read_text(encoding="utf-8") == source_text
 
 
+def test_bom_prefixed_agent_frontmatter_is_accepted(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    wiki, agents_dir, source = _setup_paths(tmp_path)
+    source.write_text("\ufeff" + _agent_text(), encoding="utf-8")
+    _patch_side_effects(monkeypatch)
+
+    result = agent_add.add_agent(
+        source_path=source,
+        name="reviewer-agent",
+        wiki_path=wiki,
+        agents_dir=agents_dir,
+    )
+
+    assert result["is_new_page"] is True
+    assert (wiki / "entities" / "agents" / "reviewer-agent.md").exists()
+
+
 def test_existing_agent_update_refreshes_converted_agent_mirror(
     tmp_path: Path,
     monkeypatch: Any,

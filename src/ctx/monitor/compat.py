@@ -1312,6 +1312,7 @@ def _render_wiki_index(entity_type: str | None = None, query: str = "") -> str:
         write_html_disk_cache=_cache_service.write_html_disk_cache,
         wiki_render_disk_cache_path=_wiki_render_disk_cache_path,
         wiki_index_entries=_wiki_index_entries,
+        search_wiki_entities=_search_wiki_entities,
         wiki_stats=_wiki_stats,
         load_sidecar=_load_sidecar,
         dashboard_entity_types=_DASHBOARD_ENTITY_TYPES,

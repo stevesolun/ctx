@@ -132,12 +132,15 @@ def read_json_safe(path: str) -> dict | None:
         return None
 
 
-def read_toml_deps(path: str) -> list[str]:
+def read_toml_deps(path: str, *, include_optional: bool = True) -> list[str]:
     """Extract dependency names from pyproject.toml.
 
     Covers PEP 621 ``[project].dependencies`` / ``optional-dependencies`` and
     Poetry-style ``[tool.poetry].dependencies`` / ``dev-dependencies``. Version
-    specifiers and extras are stripped via PEP 508 splitting.
+    specifiers and extras are stripped via PEP 508 splitting. Callers can set
+    ``include_optional=False`` when deciding the primary project type; optional
+    extras should remain searchable signals but should not make a docs/tooling
+    repo look like an ML project just because it offers an embeddings extra.
     """
     try:
         data = tomllib.loads(Path(path).read_text(encoding="utf-8-sig"))
@@ -152,15 +155,17 @@ def read_toml_deps(path: str) -> list[str]:
         deps = project.get("dependencies", [])
         if isinstance(deps, list):
             raw.extend(d for d in deps if isinstance(d, str))
-        opt = project.get("optional-dependencies", {})
-        if isinstance(opt, dict):
-            for group in opt.values():
-                if isinstance(group, list):
-                    raw.extend(d for d in group if isinstance(d, str))
+        if include_optional:
+            opt = project.get("optional-dependencies", {})
+            if isinstance(opt, dict):
+                for group in opt.values():
+                    if isinstance(group, list):
+                        raw.extend(d for d in group if isinstance(d, str))
 
     poetry = data.get("tool", {}).get("poetry", {}) if isinstance(data.get("tool"), dict) else {}
     if isinstance(poetry, dict):
-        for key in ("dependencies", "dev-dependencies"):
+        keys = ("dependencies", "dev-dependencies") if include_optional else ("dependencies",)
+        for key in keys:
             deps = poetry.get(key, {})
             if isinstance(deps, dict):
                 raw.extend(k for k in deps.keys() if isinstance(k, str) and k.lower() != "python")
@@ -222,6 +227,7 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
 
     # Collect all deps from Python and JS configs
     all_py_deps: list[str] = []
+    core_py_deps: list[str] = []
     all_js_deps: list[str] = []
     pkg_json = None
 
@@ -229,10 +235,15 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
         base = os.path.basename(cfg)
         if base == "pyproject.toml":
             all_py_deps.extend(read_toml_deps(cfg))
+            core_py_deps.extend(read_toml_deps(cfg, include_optional=False))
         elif base == "requirements.txt":
-            all_py_deps.extend(read_requirements(cfg))
+            deps = read_requirements(cfg)
+            all_py_deps.extend(deps)
+            core_py_deps.extend(deps)
         elif base == "Pipfile":
-            all_py_deps.extend(read_requirements(cfg))
+            deps = read_requirements(cfg)
+            all_py_deps.extend(deps)
+            core_py_deps.extend(deps)
         elif base == "package.json":
             data = read_json_safe(cfg)
             if data:
@@ -242,6 +253,7 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
                         all_js_deps.extend(k.lower() for k in data[section])
 
     py_dep_set = set(all_py_deps)
+    py_core_dep_set = set(core_py_deps)
     js_dep_set = set(all_js_deps)
 
     # --- LANGUAGES ---
@@ -540,6 +552,14 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
 
     # --- PROJECT TYPE ---
     fw_names = {f["name"] for f in profile["frameworks"]}
+    core_ml_deps = py_core_dep_set & {"torch", "pytorch", "tensorflow", "transformers"}
+    core_ai_deps = py_core_dep_set & {
+        "langchain",
+        "langchain-core",
+        "llama-index",
+        "crewai",
+        "dspy-ai",
+    }
     if fw_names & {"react", "vue", "angular", "svelte", "nextjs", "nuxt"}:
         if fw_names & {"fastapi", "django", "flask", "express", "nestjs"}:
             profile["project_type"] = "fullstack"
@@ -547,9 +567,9 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
             profile["project_type"] = "frontend"
     elif fw_names & {"fastapi", "django", "flask", "express", "nestjs", "gin", "actix"}:
         profile["project_type"] = "api-service"
-    elif fw_names & {"pytorch", "tensorflow", "huggingface"}:
+    elif (fw_names & {"pytorch", "tensorflow", "huggingface"}) and core_ml_deps:
         profile["project_type"] = "ml-project"
-    elif fw_names & {"langchain", "llamaindex", "crewai"}:
+    elif (fw_names & {"langchain", "llamaindex", "crewai"}) and core_ai_deps:
         profile["project_type"] = "ai-agent"
     elif profile["infrastructure"]:
         profile["project_type"] = "infrastructure"

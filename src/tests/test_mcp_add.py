@@ -832,3 +832,120 @@ class TestAddMcpFromFixtures:
         record = McpRecord.from_dict(data)
         result = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
         assert result["is_new_page"] is True
+
+
+class TestAddMcpCliInput:
+    def test_from_json_accepts_utf8_bom(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        import mcp_add  # noqa: PLC0415
+
+        record_path = tmp_path / "mcp.json"
+        record_path.write_text(
+            "\ufeff"
+            + json.dumps(
+                {
+                    "name": "bom-json-mcp",
+                    "description": "MCP loaded from a Windows UTF-8 BOM JSON file.",
+                    "sources": ["test"],
+                    "github_url": "https://github.com/example/bom-json-mcp",
+                    "tags": ["testing"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        wiki = tmp_path / "wiki"
+        monkeypatch.setattr(sys, "argv", [
+            "mcp_add.py",
+            "--from-json", str(record_path),
+            "--wiki", str(wiki),
+        ])
+        monkeypatch.setattr("mcp_add.check_intake", _fake_allow)
+        monkeypatch.setattr("mcp_add.record_embedding", _fake_record_embedding)
+        monkeypatch.setattr("mcp_add.update_index", lambda *a, **k: None)
+        monkeypatch.setattr("mcp_add.append_log", lambda *a, **k: None)
+
+        mcp_add.main()
+
+        assert (
+            wiki / "entities" / "mcp-servers" / "b" / "bom-json-mcp.md"
+        ).exists()
+
+    def test_from_stdin_accepts_utf8_bom(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        import io
+        import mcp_add  # noqa: PLC0415
+
+        wiki = tmp_path / "wiki"
+        monkeypatch.setattr(sys, "argv", [
+            "mcp_add.py",
+            "--from-stdin",
+            "--wiki", str(wiki),
+        ])
+        monkeypatch.setattr(
+            sys,
+            "stdin",
+            io.StringIO(
+                "\ufeff"
+                + json.dumps(
+                    {
+                        "name": "bom-stdin-mcp",
+                        "description": (
+                            "MCP loaded from a Windows UTF-8 BOM stdin stream."
+                        ),
+                        "sources": ["test"],
+                        "github_url": "https://github.com/example/bom-stdin-mcp",
+                        "tags": ["testing"],
+                    }
+                )
+                + "\n"
+            ),
+        )
+        monkeypatch.setattr("mcp_add.check_intake", _fake_allow)
+        monkeypatch.setattr("mcp_add.record_embedding", _fake_record_embedding)
+        monkeypatch.setattr("mcp_add.update_index", lambda *a, **k: None)
+        monkeypatch.setattr("mcp_add.append_log", lambda *a, **k: None)
+
+        mcp_add.main()
+
+        assert (
+            wiki / "entities" / "mcp-servers" / "b" / "bom-stdin-mcp.md"
+        ).exists()
+
+    def test_rejected_batch_exits_nonzero(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        import mcp_add  # noqa: PLC0415
+
+        record_path = tmp_path / "mcp.json"
+        record_path.write_text(
+            json.dumps(
+                {
+                    "name": "rejected-cli-mcp",
+                    "description": "Rejected MCP candidate for exit-code regression.",
+                    "sources": ["test"],
+                    "github_url": "https://github.com/example/rejected-cli-mcp",
+                    "tags": ["testing"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(sys, "argv", [
+            "mcp_add.py",
+            "--from-json", str(record_path),
+            "--wiki", str(tmp_path / "wiki"),
+        ])
+        monkeypatch.setattr("mcp_add.check_intake", _fake_reject)
+        monkeypatch.setattr("mcp_add.record_embedding", _fake_record_embedding)
+
+        with pytest.raises(SystemExit) as exc:
+            mcp_add.main()
+
+        assert exc.value.code == 1

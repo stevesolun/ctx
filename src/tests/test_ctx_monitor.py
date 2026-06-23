@@ -3918,6 +3918,43 @@ def test_render_home_defers_sidecar_grade_scan(
     assert "data-home-grade='A'" in html_out
 
 
+def test_api_grades_reuses_kpi_summary_without_sidecar_scan() -> None:
+    class Summary:
+        def to_dict(self) -> dict[str, object]:
+            return {"grade_counts": {"A": 2, "B": 1, "F": 4}}
+
+    def fail_scan() -> dict[str, object]:
+        raise AssertionError("grades API should reuse the cached KPI summary")
+
+    response = readonly_api.handle_readonly_route(
+        "api_grades",
+        {},
+        {},
+        readonly_api.ReadOnlyApiDeps(
+            summarize_sessions=lambda: {},
+            read_manifest=lambda: {},
+            status_payload=lambda: {},
+            kpi_summary=lambda: Summary(),
+            grade_distribution_payload=fail_scan,
+            sidecar_page_payload=lambda _qs: {},
+            runtime_lifecycle_summary=lambda: {},
+            skillspector_audit_payload=lambda _qs: {},
+            effective_config_payload=lambda: {},
+            search_wiki_entities=lambda _q, _type, _limit: [],
+            wiki_entity_detail=lambda _slug, _type: None,
+            load_sidecar=lambda _slug, _type: None,
+            graph_neighborhood=lambda _slug, _hops, _limit, _type: {},
+            normalize_dashboard_entity_type=lambda raw: raw,
+        ),
+    )
+
+    assert response is not None
+    assert response.payload == {
+        "grades": {"A": 2, "B": 1, "C": 0, "D": 0, "F": 4},
+        "total": 7,
+    }
+
+
 def test_render_skills_emits_sidebar_filters(fake_claude: Path) -> None:
     _write_sidecar(fake_claude, "a", {"slug": "a", "grade": "A", "raw_score": 0.9,
                                        "subject_type": "skill"})
@@ -4239,6 +4276,7 @@ def test_render_wiki_index_wrapper_matches_extracted_orchestration(
         write_html_disk_cache=mt.cache_service.write_html_disk_cache,
         wiki_render_disk_cache_path=mt.wiki_render_disk_cache_path,
         wiki_index_entries=mt.wiki_index_entries,
+        search_wiki_entities=mt.search_wiki_entities,
         wiki_stats=mt.wiki_stats,
         load_sidecar=mt.load_sidecar,
         dashboard_entity_types=mt.DASHBOARD_ENTITY_TYPES,
@@ -4352,6 +4390,33 @@ def test_wiki_index_entries_use_dashboard_index_without_markdown_pages(
     monkeypatch.setattr(mt, "wiki_index_entries", fail_entry_rebuild)
 
     assert mt.render_wiki_index(query="python") == html_out
+
+
+def test_render_wiki_index_query_uses_bounded_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_catalog_rebuild(*args: object, **kwargs: object) -> object:
+        raise AssertionError("queried catalog should use bounded search results")
+
+    monkeypatch.setattr(mt, "wiki_index_entries", fail_catalog_rebuild)
+    monkeypatch.setattr(
+        mt,
+        "search_wiki_entities",
+        lambda query, entity_type=None, limit=80: [{
+            "slug": "code-reviewer",
+            "display_slug": "code-reviewer",
+            "type": entity_type or "agent",
+            "description": f"{query} result",
+            "tags": ["review"],
+            "search_tags": ["review"],
+        }],
+    )
+
+    html_out = mt.render_wiki_index(entity_type="agent", query="review")
+
+    assert "code-reviewer" in html_out
+    assert "review result" in html_out
+    assert "href='/wiki/code-reviewer?type=agent'" in html_out
 
 
 def test_render_wiki_index_supports_type_query_and_autocomplete(fake_claude: Path) -> None:

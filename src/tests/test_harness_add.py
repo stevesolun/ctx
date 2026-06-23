@@ -230,3 +230,27 @@ def test_cli_from_json_adds_harness(
 
     assert (wiki / "entities" / "harnesses" / "text-to-cad.md").exists()
     assert "added: text-to-cad" in capsys.readouterr().out
+
+
+def test_cli_from_bom_json_adds_harness(
+    tmp_path: Path,
+    capsys: Any,
+) -> None:
+    record_path = tmp_path / "harness.json"
+    record_path.write_text(
+        "\ufeff"
+        + json.dumps(
+            {
+                "repo_url": "https://github.com/example/bom-harness",
+                "description": "Harness loaded from a Windows UTF-8 BOM JSON file.",
+                "tags": ["llm", "testing"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    wiki = tmp_path / "wiki"
+
+    harness_add.main(["--from-json", str(record_path), "--wiki", str(wiki)])
+
+    assert (wiki / "entities" / "harnesses" / "bom-harness.md").exists()
+    assert "added: bom-harness" in capsys.readouterr().out

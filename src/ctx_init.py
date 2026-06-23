@@ -1073,6 +1073,28 @@ _HARNESS_SOFT_REQUIREMENT_SIGNALS = frozenset({
     "windows",
 })
 
+_HARNESS_DOMAIN_SIGNALS = frozenset({
+    "3d",
+    "build123d",
+    "cad",
+    "dxf",
+    "freecad",
+    "geometry",
+    "glb",
+    "mesh",
+    "modeling",
+    "modelling",
+    "ocp",
+    "robot",
+    "robotics",
+    "rhino",
+    "stl",
+    "urdf",
+    "viewer",
+    "vtk",
+    "wasm",
+})
+
 _DEFAULT_HARNESS_RELIABILITY_WEIGHTS = {
     "context": 0.34,
     "constraints": 0.33,
@@ -1347,8 +1369,11 @@ def _annotate_harness_fit(
     )
     breadth = min(len(all_matched_set) / 3.0, 1.0)
     raw_strength = _clamp_harness_score(float(row.get("score") or 0.0) / 75.0)
+    domain_fit = _harness_domain_fit(relevant_signals, terms)
     fit_score = round(
-        _clamp_harness_score((0.8 * coverage * breadth) + (0.2 * raw_strength)),
+        _clamp_harness_score(
+            ((0.8 * coverage * breadth) + (0.2 * raw_strength)) * domain_fit
+        ),
         4,
     )
     return {
@@ -1358,6 +1383,18 @@ def _annotate_harness_fit(
         "fit_reason": _harness_fit_reason(matched, scored_signals),
         **_harness_reliability_metadata(terms),
     }
+
+
+def _harness_domain_fit(relevant_signals: list[str], terms: set[str]) -> float:
+    """Down-rank narrow-domain harnesses unless the user's goal names that domain."""
+    candidate_domains = terms & _HARNESS_DOMAIN_SIGNALS
+    if not candidate_domains:
+        return 1.0
+    goal_domains: set[str] = set()
+    for signal in relevant_signals:
+        goal_domains.update(_HARNESS_SIGNAL_ALIASES.get(signal, {signal}))
+        goal_domains.update(_harness_tokens(signal))
+    return 1.0 if candidate_domains & goal_domains else 0.7
 
 
 def _harness_fit_reason(matched: list[str], relevant_signals: list[str]) -> str:

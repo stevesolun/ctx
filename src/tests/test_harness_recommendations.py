@@ -273,6 +273,21 @@ def test_ctx_init_keeps_domain_goal_strong_with_install_requirements(
     assert "gpt-5" not in results[0]["fit_signals"]
 
 
+def test_ctx_init_rejects_narrow_domain_harness_for_generic_coding_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ctx_init, "_load_recommendation_graph", _harness_graph)
+
+    results = ctx_init.recommend_harnesses(
+        "build an openai python coding agent with filesystem and test verification",
+        top_k=5,
+        model_provider="openai",
+        model="openai/gpt-4.1",
+    )
+
+    assert "text-to-cad" not in [row["name"] for row in results]
+
+
 def test_ctx_init_recommends_harness_from_wiki_frontmatter_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

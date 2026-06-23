@@ -394,7 +394,7 @@ def add_skill(
             f"Split the skill or trim content before ingestion."
         )
 
-    content = source_path.read_text(encoding="utf-8", errors="replace")
+    content = source_path.read_text(encoding="utf-8-sig", errors="replace")
     line_count = len(content.splitlines())
 
     installed_path = skills_dir / name / "SKILL.md"
@@ -711,6 +711,8 @@ def main() -> None:
         f"\nDone: {added} added, {updated} updated, {converted} converted, "
         f"{skipped} skipped, {errors} errors"
     )
+    if errors:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

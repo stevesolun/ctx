@@ -32,6 +32,26 @@ class ReadOnlyApiDeps:
     normalize_dashboard_entity_type: Callable[[str | None], str | None]
 
 
+def _grade_payload_from_summary(summary: Any) -> dict[str, Any] | None:
+    """Return grade counts from the cached KPI summary when available."""
+    if summary is None:
+        return None
+    to_dict = getattr(summary, "to_dict", None)
+    data = to_dict() if callable(to_dict) else summary
+    if not isinstance(data, Mapping):
+        return None
+    raw_counts = data.get("grade_counts")
+    if not isinstance(raw_counts, Mapping):
+        return None
+    grades: dict[str, int] = {}
+    for grade in ("A", "B", "C", "D", "F"):
+        try:
+            grades[grade] = int(raw_counts.get(grade) or 0)
+        except (TypeError, ValueError):
+            grades[grade] = 0
+    return {"grades": grades, "total": sum(grades.values())}
+
+
 def handle_readonly_route(
     name: str,
     params: Mapping[str, str],
@@ -53,6 +73,9 @@ def handle_readonly_route(
         to_dict = getattr(summary, "to_dict", None)
         return ReadOnlyApiResponse(to_dict() if callable(to_dict) else summary)
     if name == "api_grades":
+        summary_payload = _grade_payload_from_summary(deps.kpi_summary())
+        if summary_payload is not None:
+            return ReadOnlyApiResponse(summary_payload)
         return ReadOnlyApiResponse(deps.grade_distribution_payload())
     if name == "api_sidecars":
         return ReadOnlyApiResponse(deps.sidecar_page_payload(query))
