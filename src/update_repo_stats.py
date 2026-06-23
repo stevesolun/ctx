@@ -1137,10 +1137,11 @@ def build_github_about_description(stats: Mapping[str, int | None]) -> str:
     if not all((nodes, skills, agents, mcps, harnesses)):
         raise ValueError("missing graph stats for GitHub About description")
     return (
-        "Recommendation layer for loading the right skills, agents, MCPs, "
-        f"and harnesses at the right development moment: {nodes:,}-node "
-        f"LLM-wiki graph, {skills:,} skills, {agents:,} agents, "
-        f"{mcps:,} MCPs, {harnesses:,} harnesses."
+        "Not a catalog. ctx is a recommendation layer that loads the right "
+        "skills, agents, MCPs, and harnesses for each development window to "
+        f"cut token and compute waste: {nodes:,}-node LLM-wiki graph, "
+        f"{skills:,} skills, {agents:,} agents, {mcps:,} MCPs, "
+        f"{harnesses:,} harnesses."
     )
 
 

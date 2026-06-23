@@ -410,8 +410,10 @@ def test_github_about_description_uses_entity_counts() -> None:
 
     description = urs.build_github_about_description(stats)
 
-    assert description.startswith("Recommendation layer for loading the right")
-    assert "right development moment" in description
+    assert description.startswith("Not a catalog.")
+    assert "recommendation layer" in description
+    assert "each development window" in description
+    assert "cut token and compute waste" in description
     assert "123,456-node LLM-wiki graph" in description
     assert "4,321 skills" in description
     assert "56 agents" in description
