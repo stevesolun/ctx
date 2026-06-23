@@ -6,8 +6,8 @@ Run by the pre-commit hook so README/docs badges and inline counts never drift
 from reality. Reads only committed files and a live pytest collection.
 
 Sources of truth:
-  - scripts/ci_preflight.py GRAPH_VALIDATE_ARGS -> exact release counts
   - graph/wiki-graph.tar.gz              -> graph/report/entity counts
+  - scripts/ci_preflight.py GRAPH_VALIDATE_ARGS -> exact release fallback
   - graph/wiki-graph-runtime.tar.gz      -> runtime graph/report counts
   - graph/communities.json               -> current community export
   - graph/skills-sh-catalog.json.gz      -> hydrated skill body counts
@@ -411,21 +411,23 @@ def read_graph_stats() -> dict:
     Priority:
       1. ``graph/wiki-graph.tar.gz`` — the tarball that ships in
          releases. Pinned and canonical.
-      2. ``~/.claude/skill-wiki/graphify-out/graph.json`` — the user's
+      2. ``scripts/ci_preflight.py`` graph contract counts — fallback
+         when a source checkout has not downloaded the release tarball.
+      3. ``~/.claude/skill-wiki/graphify-out/graph.json`` — the user's
          live wiki. Used only when the tarball isn't present (e.g. a
          bare clone without the release asset downloaded).
 
-    Without this priority the pre-commit hook silently rewrites README
-    badges from whatever the user last re-graphified — which can be a
-    sparse experimental rebuild, not the published numbers.
+    Without this priority the pre-commit hook can silently publish stale
+    contract numbers or whatever the user last re-graphified instead of
+    the artifact that users actually receive.
     """
-    contract_stats = _read_graph_contract_stats()
-    if contract_stats is not None:
-        return contract_stats
-
     tarball_stats = _read_graph_from_tarball()
     if tarball_stats is not None:
         return tarball_stats
+
+    contract_stats = _read_graph_contract_stats()
+    if contract_stats is not None:
+        return contract_stats
 
     home = Path.home()
     graph_json = home / ".claude/skill-wiki/graphify-out/graph.json"

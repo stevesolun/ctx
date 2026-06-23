@@ -82,7 +82,7 @@ def test_graph_contract_stats_use_preflight_exact_counts() -> None:
     assert stats["harness_edges"] == 5063
 
 
-def test_read_graph_stats_prefers_preflight_contract(
+def test_read_graph_stats_prefers_tarball_over_preflight_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     contract = {
@@ -94,12 +94,35 @@ def test_read_graph_stats_prefers_preflight_contract(
         "harnesses": 6,
         "communities": 7,
     }
+    tarball = {
+        "nodes": 100,
+        "edges": 200,
+        "skills": 30,
+        "agents": 40,
+        "mcps": 50,
+        "harnesses": 60,
+        "communities": 70,
+    }
     monkeypatch.setattr(urs, "_read_graph_contract_stats", lambda: contract)
-    monkeypatch.setattr(
-        urs,
-        "_read_graph_from_tarball",
-        lambda: pytest.fail("tarball should not be read when contract exists"),
-    )
+    monkeypatch.setattr(urs, "_read_graph_from_tarball", lambda: tarball)
+
+    assert urs.read_graph_stats() is tarball
+
+
+def test_read_graph_stats_falls_back_to_preflight_contract_when_tarball_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract = {
+        "nodes": 10,
+        "edges": 20,
+        "skills": 3,
+        "agents": 4,
+        "mcps": 5,
+        "harnesses": 6,
+        "communities": 7,
+    }
+    monkeypatch.setattr(urs, "_read_graph_from_tarball", lambda: None)
+    monkeypatch.setattr(urs, "_read_graph_contract_stats", lambda: contract)
 
     assert urs.read_graph_stats() is contract
 
