@@ -5,8 +5,8 @@
 # Publish:  handled by .github/workflows/docs.yml on push to main.
 site_name: ctx
 site_description: >-
-  Skill, agent, MCP, harness, knowledge-graph, and LLM-wiki router
-  for repo-aware AI development workflows.
+  Not a catalog: a repo-aware recommendation layer that loads the right
+  skills, agents, MCPs, and harnesses from your tools or the shipped graph.
 site_url: https://stevesolun.github.io/ctx/
 repo_url: https://github.com/stevesolun/ctx
 repo_name: stevesolun/ctx
