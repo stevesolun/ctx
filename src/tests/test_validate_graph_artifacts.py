@@ -17,7 +17,11 @@ from ctx.core.graph.graph_packs import build_pack_manifest, write_base_pack, wri
 from ctx.core.wiki.wiki_packs import write_wiki_base_pack
 from scripts.ci_preflight import GRAPH_VALIDATE_ARGS
 from validate_graph_artifacts import (
+    DEFAULT_MIN_EDGES,
     DEFAULT_HARNESSES,
+    DEFAULT_MIN_NODES,
+    DEFAULT_MIN_SEMANTIC_EDGES,
+    DEFAULT_MIN_SKILLS_SH_NODES,
     GraphArtifactError,
     _validate_root_entity_overlay,
     _safe_tar_name,
@@ -1476,6 +1480,24 @@ def test_graph_only_workflow_uses_preflight_graph_contract() -> None:
             i += 2
 
     assert parsed == expected
+
+
+def test_validator_default_floors_match_preflight_contract() -> None:
+    args = GRAPH_VALIDATE_ARGS[1:]
+    values: dict[str, str] = {}
+    i = 0
+    while i < len(args):
+        flag = args[i]
+        if i + 1 >= len(args) or args[i + 1].startswith("--"):
+            i += 1
+            continue
+        values[flag] = args[i + 1]
+        i += 2
+
+    assert values["--min-nodes"] == str(DEFAULT_MIN_NODES)
+    assert values["--min-edges"] == str(DEFAULT_MIN_EDGES)
+    assert values["--min-skills-sh-nodes"] == str(DEFAULT_MIN_SKILLS_SH_NODES)
+    assert values["--min-semantic-edges"] == str(DEFAULT_MIN_SEMANTIC_EDGES)
 
 
 def test_graph_only_workflow_waits_for_release_asset_upload() -> None:

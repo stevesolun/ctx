@@ -28,6 +28,10 @@ from ctx.core.wiki.wiki_packs import (
 )
 
 GIT_LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
+DEFAULT_MIN_NODES = 79_000
+DEFAULT_MIN_EDGES = 1_700_000
+DEFAULT_MIN_SKILLS_SH_NODES = 67_000
+DEFAULT_MIN_SEMANTIC_EDGES = 1_000_000
 DEFAULT_HARNESSES = {
     "agentops",
     "autogen",
@@ -798,10 +802,10 @@ def validate_graph_artifacts(
     graph_dir: Path,
     *,
     deep: bool = False,
-    min_nodes: int = 100_000,
-    min_edges: int = 2_000_000,
-    min_skills_sh_nodes: int = 89_000,
-    min_semantic_edges: int = 1_000_000,
+    min_nodes: int = DEFAULT_MIN_NODES,
+    min_edges: int = DEFAULT_MIN_EDGES,
+    min_skills_sh_nodes: int = DEFAULT_MIN_SKILLS_SH_NODES,
+    min_semantic_edges: int = DEFAULT_MIN_SEMANTIC_EDGES,
     expected_harnesses: set[str] | None = None,
     line_threshold: int = 180,
     max_stage_lines: int = 40,
@@ -1408,10 +1412,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--graph-dir", type=Path, default=Path("graph"))
     parser.add_argument("--deep", action="store_true")
-    parser.add_argument("--min-nodes", type=int, default=100_000)
-    parser.add_argument("--min-edges", type=int, default=2_000_000)
-    parser.add_argument("--min-skills-sh-nodes", type=int, default=89_000)
-    parser.add_argument("--min-semantic-edges", type=int, default=1_000_000)
+    parser.add_argument("--min-nodes", type=int, default=DEFAULT_MIN_NODES)
+    parser.add_argument("--min-edges", type=int, default=DEFAULT_MIN_EDGES)
+    parser.add_argument("--min-skills-sh-nodes", type=int, default=DEFAULT_MIN_SKILLS_SH_NODES)
+    parser.add_argument("--min-semantic-edges", type=int, default=DEFAULT_MIN_SEMANTIC_EDGES)
     parser.add_argument("--line-threshold", type=int, default=180)
     parser.add_argument("--max-stage-lines", type=int, default=40)
     parser.add_argument("--expected-nodes", type=int)
