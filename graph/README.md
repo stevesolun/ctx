@@ -294,8 +294,21 @@ python src/import_skills_sh_catalog.py \
   --update-wiki-tar
 ```
 
-For a full local wiki repack, write the tarball to the sibling staged path,
-then promote that staged candidate after validation:
+For a full local wiki repack from an existing artifact, use the packed-page
+repacker. It writes `wiki-packs/base-<export-id>/`, removes expanded
+skill/agent/MCP entity pages from the tar member list, and leaves harness pages
+directly available for fast runtime setup:
+
+```bash
+python scripts/pack_full_wiki_tar.py \
+  --source graph/wiki-graph.tar.gz \
+  --target graph/wiki-graph.tar.gz.staged
+python -c "from pathlib import Path; from ctx.core.wiki.artifact_promotion import promote_staged_artifact; from import_skills_sh_catalog import _validate_wiki_tarball_candidate; promote_staged_artifact(Path('graph/wiki-graph.tar.gz.staged'), Path('graph/wiki-graph.tar.gz'), validate=_validate_wiki_tarball_candidate)"
+```
+
+For a full local wiki repack from an expanded `~/.claude/skill-wiki` tree, write
+the tarball to the sibling staged path, then promote that staged candidate after
+validation:
 
 ```bash
 cd ~/.claude/skill-wiki
