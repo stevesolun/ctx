@@ -274,10 +274,17 @@ def _artifact_detail(status: dict[str, Any]) -> str:
             f"(base {int(status.get('base_count') or 0)}, "
             f"overlay {int(status.get('overlay_count') or 0)})"
         )
+    elif isinstance(status.get("counts"), dict):
+        counts = status["counts"]
+        detail = (
+            "published graph: "
+            f"{int(counts.get('nodes') or 0):,} nodes, "
+            f"{int(counts.get('edges') or 0):,} edges"
+        )
     elif {"fresh", "nodes", "edges"} <= set(status):
         freshness = "fresh" if status.get("fresh") else "stale or missing"
         detail = (
-            f"store: {freshness}, "
+            f"local store: {freshness}, "
             f"{int(status.get('nodes') or 0)} nodes, "
             f"{int(status.get('edges') or 0)} edges"
         )

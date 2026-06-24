@@ -239,6 +239,28 @@ def first_existing_file_status(*paths: Path) -> dict[str, Any]:
     return file_status(paths[0])
 
 
+def graph_stats_file_status(path: Path) -> dict[str, Any]:
+    status = file_status(path)
+    if not status.get("exists"):
+        return status
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        status["error"] = str(exc)
+        return status
+    counts = payload.get("counts") if isinstance(payload, dict) else None
+    if not isinstance(counts, dict):
+        status["error"] = "missing counts"
+        return status
+    normalized: dict[str, int] = {}
+    for key in ("nodes", "edges", "skills", "agents", "mcps", "harnesses"):
+        value = counts.get(key)
+        if isinstance(value, int):
+            normalized[key] = value
+    status["counts"] = normalized
+    return status
+
+
 def promotion_status(path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -290,6 +312,14 @@ def artifact_status(
         for promotion in (promotion_status(path) for path in promotion_paths)
         if promotion is not None
     ]
+    wiki_graph_tar = first_existing_file_status(
+        claude_graph_dir / "wiki-graph.tar.gz",
+        repo_graph_dir / "wiki-graph.tar.gz",
+    )
+    published_graph_stats = graph_stats_file_status(repo_graph_dir / "wiki-graph-stats.json")
+    if published_graph_stats.get("counts"):
+        wiki_graph_tar["stats_path"] = published_graph_stats.get("path")
+        wiki_graph_tar["counts"] = published_graph_stats["counts"]
     return {
         "graph_json": file_status(graph_dir / "graph.json"),
         "graph_packs": pack_dir_status(
@@ -304,10 +334,8 @@ def artifact_status(
             manifest_name="wiki-pack-manifest.json",
         ),
         "pack_compaction": pack_compaction_artifact_status(wiki_dir),
-        "wiki_graph_tar": first_existing_file_status(
-            claude_graph_dir / "wiki-graph.tar.gz",
-            repo_graph_dir / "wiki-graph.tar.gz",
-        ),
+        "wiki_graph_tar": wiki_graph_tar,
+        "published_graph_stats": published_graph_stats,
         "skills_sh_catalog": first_existing_file_status(
             wiki_dir / "external-catalogs" / "skills-sh" / "catalog.json",
             claude_graph_dir / "skills-sh-catalog.json.gz",

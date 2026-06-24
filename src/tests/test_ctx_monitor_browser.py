@@ -384,7 +384,7 @@ def test_graph_page_uses_builtin_svg_renderer(
             "?.getAttribute('data-depth') === '0'",
             timeout=5.0,
         )
-        page.locator("[data-3d-node-id='agent:code-reviewer']").dispatch_event("dblclick")
+        page.locator("[data-3d-node-id='agent:code-reviewer']").dblclick()
         _wait_for_browser_state(
             page,
             "() => document.getElementById('focus').value === 'python-patterns'",

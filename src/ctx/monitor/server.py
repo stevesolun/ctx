@@ -347,6 +347,8 @@ def build_monitor_handler(deps: MonitorHandlerDeps) -> type[BaseHTTPRequestHandl
             position = path.stat().st_size if path.exists() else 0
             last_heartbeat = time.monotonic()
             try:
+                self.wfile.write(b": connected\n\n")
+                self.wfile.flush()
                 while not server_shutdown_requested(self.server):
                     if path.exists() and path.stat().st_size > position:
                         with path.open("r", encoding="utf-8") as f:
