@@ -20,7 +20,7 @@ def _graph_edges(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def build_dashboard_index(graph_json: Path, output: Path, *, top_k: int = 40) -> None:
-    data = json.loads(graph_json.read_text(encoding="utf-8"))
+    data = json.loads(graph_json.read_text(encoding="utf-8-sig"))
     nodes_raw = [item for item in data.get("nodes", []) if isinstance(item, dict)]
     edges_raw = _graph_edges(data)
     nodes: dict[str, dict[str, Any]] = {}
