@@ -5,6 +5,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+import yaml
+
 repo_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(repo_root / "src"))
 
@@ -14,6 +16,7 @@ from ctx.monitor import routes as monitor_routes  # noqa: E402
 
 TRACKER = repo_root / "docs" / "qa" / "feature-user-story-status.csv"
 DASHBOARD_TRACKER = repo_root / "docs" / "qa" / "dashboard-user-story-status.csv"
+MKDOCS = repo_root / "mkdocs.yml"
 README = repo_root / "README.md"
 PASS_STATUSES = {"Tested Pass", "Retested Pass"}
 VALIDATION_STATUSES = {"Needs Validation"}
@@ -36,6 +39,50 @@ def _row_text(row: dict[str, str]) -> str:
 
 def _rows_for_surface(rows: list[dict[str, str]], surface: str) -> list[dict[str, str]]:
     return [row for row in rows if row["surface"] == surface]
+
+
+class _MkDocsNavLoader(yaml.SafeLoader):
+    pass
+
+
+def _mkdocs_python_name(
+    loader: _MkDocsNavLoader,
+    suffix: str,  # noqa: ARG001
+    node: yaml.Node,
+) -> str:
+    return loader.construct_scalar(node)
+
+
+_MkDocsNavLoader.add_multi_constructor(
+    "tag:yaml.org,2002:python/name:",
+    _mkdocs_python_name,
+)
+
+
+def _nav_markdown_paths(nav_items: list[object]) -> list[str]:
+    paths: list[str] = []
+    for item in nav_items:
+        if isinstance(item, str):
+            paths.append(item)
+        elif isinstance(item, dict):
+            for value in item.values():
+                if isinstance(value, str):
+                    paths.append(value)
+                elif isinstance(value, list):
+                    paths.extend(_nav_markdown_paths(value))
+    return [path for path in paths if path.endswith(".md")]
+
+
+def _mkdocs_nav_markdown_paths() -> list[str]:
+    config = yaml.load(
+        MKDOCS.read_text(encoding="utf-8"),
+        Loader=_MkDocsNavLoader,
+    )
+    docs_dir = config.get("docs_dir", "docs")
+    nav = config["nav"]
+    return list(
+        dict.fromkeys(f"{docs_dir}/{path}" for path in _nav_markdown_paths(nav))
+    )
 
 
 def test_feature_user_story_tracker_has_no_empty_core_fields() -> None:
@@ -119,11 +166,19 @@ def test_feature_user_story_tracker_covers_maintainer_scripts() -> None:
 
 def test_feature_user_story_tracker_covers_public_docs_assets() -> None:
     assets = sorted((repo_root / "docs" / "assets" / "javascripts").glob("*.js"))
-    tracker = _tracker_text()
+    tracker_rows = _tracker_rows()
+    tracker = "\n".join(_row_text(row) for row in tracker_rows)
     asset_paths = [asset.relative_to(repo_root).as_posix() for asset in assets]
+    nav_doc_paths = _mkdocs_nav_markdown_paths()
 
     assert assets
     assert [path for path in asset_paths if path not in tracker] == []
+    assert nav_doc_paths
+    assert [
+        path
+        for path in nav_doc_paths
+        if not any(row["entrypoint_or_route"] == path for row in tracker_rows)
+    ] == []
 
 
 def test_readme_shows_user_story_examples_from_tracker() -> None:
