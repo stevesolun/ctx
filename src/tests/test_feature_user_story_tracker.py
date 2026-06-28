@@ -6,6 +6,7 @@ import tomllib
 from pathlib import Path
 
 import yaml
+from yaml.nodes import ScalarNode
 
 repo_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(repo_root / "src"))
@@ -50,6 +51,8 @@ def _mkdocs_python_name(
     suffix: str,  # noqa: ARG001
     node: yaml.Node,
 ) -> str:
+    if not isinstance(node, ScalarNode):
+        raise TypeError(f"Expected scalar YAML node, got {type(node).__name__}")
     return loader.construct_scalar(node)
 
 
@@ -80,9 +83,7 @@ def _mkdocs_nav_markdown_paths() -> list[str]:
     )
     docs_dir = config.get("docs_dir", "docs")
     nav = config["nav"]
-    return list(
-        dict.fromkeys(f"{docs_dir}/{path}" for path in _nav_markdown_paths(nav))
-    )
+    return list(dict.fromkeys(f"{docs_dir}/{path}" for path in _nav_markdown_paths(nav)))
 
 
 def test_feature_user_story_tracker_has_no_empty_core_fields() -> None:
@@ -107,13 +108,11 @@ def test_feature_user_story_tracker_has_no_empty_core_fields() -> None:
         if row["status"] in FIX_STATUSES:
             for key in ("error_id", "error_summary", "fix_status"):
                 assert row[key].strip(), (
-                    f"{row.get('feature_id', '<unknown>')} has "
-                    f"{row['status']} without {key}"
+                    f"{row.get('feature_id', '<unknown>')} has {row['status']} without {key}"
                 )
         if row["status"] in VALIDATION_STATUSES:
             assert row["notes"].strip(), (
-                f"{row.get('feature_id', '<unknown>')} needs validation "
-                "without a validation note"
+                f"{row.get('feature_id', '<unknown>')} needs validation without a validation note"
             )
 
 
@@ -229,11 +228,8 @@ def test_readme_shows_user_story_examples_from_tracker() -> None:
     mcp_core_rows = _rows_for_surface(tracker_rows, "MCP/Core Tools")
     assert mcp_core_rows
     tool_names = sorted(
-        definition.name
-        for definition in ctx_api.CtxCoreToolbox().tool_definitions()
+        definition.name for definition in ctx_api.CtxCoreToolbox().tool_definitions()
     )
     assert [
-        name
-        for name in tool_names
-        if not any(name in _row_text(row) for row in mcp_core_rows)
+        name for name in tool_names if not any(name in _row_text(row) for row in mcp_core_rows)
     ] == []
