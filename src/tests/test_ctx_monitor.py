@@ -2225,6 +2225,12 @@ def test_render_graph_focus_controls_preserve_type(monkeypatch: pytest.MonkeyPat
     assert "<option value='harness' selected>harness</option>" in html_out
     assert "document.getElementById('go').addEventListener('click', () => load(focus.value.trim(), selectedFocusType()))" in html_out
     assert "focus.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') load(ev.target.value.trim(), selectedFocusType()); })" in html_out
+    assert "const selectedType = selectedFocusType();" in html_out
+    assert (
+        "const suffix = selectedType ? '&type=' + "
+        "encodeURIComponent(selectedType) : '';"
+    ) in html_out
+    assert "encodeURIComponent(query) + suffix + '&limit=12'" in html_out
 
 
 def test_graph_neighborhood_rejects_unsafe_slug() -> None:

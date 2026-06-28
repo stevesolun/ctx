@@ -43,6 +43,10 @@ Current shipped snapshot:
 
 The canonical QA tracker is
 [`docs/qa/feature-user-story-status.csv`](docs/qa/feature-user-story-status.csv).
+The dashboard-specific tracker
+[`docs/qa/dashboard-user-story-status.csv`](docs/qa/dashboard-user-story-status.csv)
+is a supporting detail ledger; canonical status and release readiness stay in the
+feature tracker.
 Examples from that tracker:
 
 | Tracker row | User story | Expected ctx behavior |

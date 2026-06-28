@@ -11,6 +11,7 @@ sys.path.insert(0, str(repo_root / "src"))
 from ctx.monitor import routes as monitor_routes  # noqa: E402
 
 TRACKER = repo_root / "docs" / "qa" / "feature-user-story-status.csv"
+DASHBOARD_TRACKER = repo_root / "docs" / "qa" / "dashboard-user-story-status.csv"
 README = repo_root / "README.md"
 PASS_STATUSES = {"Tested Pass", "Retested Pass"}
 VALIDATION_STATUSES = {"Needs Validation"}
@@ -117,8 +118,29 @@ def test_feature_user_story_tracker_covers_public_docs_assets() -> None:
 
 def test_readme_shows_user_story_examples_from_tracker() -> None:
     readme = README.read_text(encoding="utf-8")
+    tracker_rows = _tracker_rows()
+    with DASHBOARD_TRACKER.open(newline="", encoding="utf-8") as f:
+        dashboard_rows = list(csv.DictReader(f))
+    tracker_ids = {row["feature_id"] for row in tracker_rows}
 
     assert "## Example user stories" in readme
     assert "docs/qa/feature-user-story-status.csv" in readme
+    assert "docs/qa/dashboard-user-story-status.csv" in readme
+    assert "supporting detail ledger" in readme
     for feature_id in ("CLI-002", "CLI-026", "API-011"):
         assert feature_id in readme
+    assert dashboard_rows
+    assert {row["status"] for row in dashboard_rows} <= PASS_STATUSES
+    required_ids = ("DASH-001", "DASH-007", "API-011")
+    assert [row_id for row_id in required_ids if row_id not in tracker_ids] == []
+
+    required_surface_markers = (
+        "ctx.api and ctx top-level re-exports",
+        "ctx__recommend_bundle, ctx__graph_query, ctx__wiki_search, ctx__wiki_get",
+        "ctx__observe_dev_event, ctx__load_entity, ctx__mark_entity_used",
+        "McpClient and McpRouter",
+        "output_format and _response_format",
+    )
+    tracker = _tracker_text()
+
+    assert [marker for marker in required_surface_markers if marker not in tracker] == []
