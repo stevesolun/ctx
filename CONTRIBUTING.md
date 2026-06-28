@@ -26,6 +26,17 @@ pytest -q -m integration           # embedding precision/recall tests
 pytest --cov=src -q                # with coverage report
 ```
 
+## Documentation changes
+
+Public MkDocs nav pages are release-tracked in
+`docs/qa/feature-user-story-status.csv`. If you add, remove, or move a `.md`
+entry under `mkdocs.yml` `nav`, update the canonical feature tracker with the
+exact `docs/...md` `entrypoint_or_route` and run:
+
+```bash
+python -m pytest src/tests/test_feature_user_story_tracker.py -q
+```
+
 ## Code style
 
 Both **ruff** and **mypy** must pass before a PR is merged.

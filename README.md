@@ -47,6 +47,9 @@ The dashboard-specific tracker
 [`docs/qa/dashboard-user-story-status.csv`](docs/qa/dashboard-user-story-status.csv)
 is a supporting detail ledger; canonical status and release readiness stay in the
 feature tracker.
+Rows for public MkDocs pages use the exact `docs/...md` path from `mkdocs.yml`
+as `entrypoint_or_route`, so adding a nav page also means adding or updating
+the matching feature-tracker row.
 Examples from that tracker:
 
 | Tracker row | User story | Expected ctx behavior |

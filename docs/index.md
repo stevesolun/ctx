@@ -55,7 +55,10 @@ memory that gets smarter every session.
     check, unit coverage, canaries, package build, twine, docs, graph
     validation, browser, and similarity checks as needed. Use `--profile full`
     before release work to force the source/package gates even for docs-only or
-    graph-only changes.
+    graph-only changes. Public MkDocs nav pages are release-tracked: when
+    `mkdocs.yml` adds, removes, or moves a `.md` page, update
+    `docs/qa/feature-user-story-status.csv` with the exact `docs/...md`
+    `entrypoint_or_route`.
 
 ## Why this exists
 
