@@ -8,6 +8,8 @@ from pathlib import Path
 repo_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(repo_root / "src"))
 
+import ctx  # noqa: E402
+import ctx.api as ctx_api  # noqa: E402
 from ctx.monitor import routes as monitor_routes  # noqa: E402
 
 TRACKER = repo_root / "docs" / "qa" / "feature-user-story-status.csv"
@@ -26,6 +28,14 @@ def _tracker_rows() -> list[dict[str, str]]:
 
 def _tracker_text() -> str:
     return "\n".join(" ".join(row.values()) for row in _tracker_rows())
+
+
+def _row_text(row: dict[str, str]) -> str:
+    return " ".join(value for value in row.values() if value)
+
+
+def _rows_for_surface(rows: list[dict[str, str]], surface: str) -> list[dict[str, str]]:
+    return [row for row in rows if row["surface"] == surface]
 
 
 def test_feature_user_story_tracker_has_no_empty_core_fields() -> None:
@@ -144,3 +154,31 @@ def test_readme_shows_user_story_examples_from_tracker() -> None:
     tracker = _tracker_text()
 
     assert [marker for marker in required_surface_markers if marker not in tracker] == []
+    python_api_rows = _rows_for_surface(tracker_rows, "Python API")
+    python_api_text = " ".join(_row_text(row) for row in python_api_rows)
+    public_api_names = sorted(
+        set(ctx_api.__all__)
+        | {
+            name
+            for name in ctx.__all__
+            if name != "__version__"
+            and hasattr(ctx_api, name)
+            and getattr(ctx, name) is getattr(ctx_api, name)
+        }
+    )
+    assert python_api_rows
+    assert [name for name in public_api_names if name not in python_api_text] == []
+    for marker in ("src/ctx/api.py", "src/ctx/__init__.py", "src/tests/test_public_api.py"):
+        assert marker in python_api_text
+
+    mcp_core_rows = _rows_for_surface(tracker_rows, "MCP/Core Tools")
+    assert mcp_core_rows
+    tool_names = sorted(
+        definition.name
+        for definition in ctx_api.CtxCoreToolbox().tool_definitions()
+    )
+    assert [
+        name
+        for name in tool_names
+        if not any(name in _row_text(row) for row in mcp_core_rows)
+    ] == []
