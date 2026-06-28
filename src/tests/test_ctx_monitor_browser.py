@@ -391,6 +391,7 @@ def test_graph_page_uses_builtin_svg_renderer(
             timeout=5.0,
         )
 
+        page.select_option("#focus-type", "agent")
         page.fill("#focus", "code")
         page.wait_for_selector("[data-testid='graph-live-results'] [data-live-slug='code-reviewer']", timeout=5000)
         page.locator("[data-live-slug='code-reviewer']").click()
