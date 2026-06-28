@@ -325,7 +325,7 @@ def test_tarball_stats_uses_report_when_graph_json_is_large(
     }
 
 
-def test_test_badge_is_labeled_collected_not_passing() -> None:
+def test_test_badge_is_labeled_inventory_not_passing() -> None:
     text = "[![Tests](https://img.shields.io/badge/Tests-12_passing-brightgreen.svg)](#)"
     stats = {
         "nodes": None,
@@ -340,7 +340,7 @@ def test_test_badge_is_labeled_collected_not_passing() -> None:
     for pattern, replacement in urs.build_replacements(stats, tests=34, converted=None):
         patched = pattern.sub(replacement, patched)
 
-    assert "Tests-34_collected" in patched
+    assert "Tests-34_inventory" in patched
     assert (
         "](https://github.com/stevesolun/ctx/actions/workflows/test.yml)"
         in patched
@@ -367,7 +367,7 @@ def test_docs_landing_test_count_is_updated() -> None:
     ):
         patched = pattern.sub(replacement, patched)
 
-    assert "3,619 tests collected" in patched
+    assert "3,619 test inventory" in patched
     assert "3,617 tests collected" not in patched
 
 
@@ -617,10 +617,10 @@ def test_read_test_count_uses_checked_in_count_by_default(
     docs_index = tmp_path / "docs" / "index.md"
     docs_index.parent.mkdir()
     readme.write_text(
-        "[![Tests](https://img.shields.io/badge/Tests-3981_collected-brightgreen.svg)](#)",
+        "[![Tests](https://img.shields.io/badge/Tests-3981_inventory-brightgreen.svg)](#)",
         encoding="utf-8",
     )
-    docs_index.write_text("3,981 tests collected", encoding="utf-8")
+    docs_index.write_text("3,981 test inventory", encoding="utf-8")
     monkeypatch.setattr(urs, "README", readme)
     monkeypatch.setattr(urs, "DOCS_INDEX", docs_index)
     monkeypatch.setattr(
@@ -640,10 +640,10 @@ def test_read_test_count_live_mode_ignores_checked_in_count(
     docs_index = tmp_path / "docs" / "index.md"
     docs_index.parent.mkdir()
     readme.write_text(
-        "[![Tests](https://img.shields.io/badge/Tests-3981_collected-brightgreen.svg)](#)",
+        "[![Tests](https://img.shields.io/badge/Tests-3981_inventory-brightgreen.svg)](#)",
         encoding="utf-8",
     )
-    docs_index.write_text("3,981 tests collected", encoding="utf-8")
+    docs_index.write_text("3,981 test inventory", encoding="utf-8")
     monkeypatch.setattr(urs, "README", readme)
     monkeypatch.setattr(urs, "DOCS_INDEX", docs_index)
     monkeypatch.setattr(urs, "_pytest_collect", lambda _candidate: 3982)
@@ -739,8 +739,8 @@ def test_patch_readme_update_uses_live_test_count(
 
     assert urs.patch_readme(check_only=False) == 0
     assert calls == [{"live": True}]
-    assert "Tests-3982_collected" in readme.read_text(encoding="utf-8")
-    assert "3,982 tests collected" in docs_index.read_text(encoding="utf-8")
+    assert "Tests-3982_inventory" in readme.read_text(encoding="utf-8")
+    assert "3,982 test inventory" in docs_index.read_text(encoding="utf-8")
 
 
 def test_pytest_collect_uses_inprocess_no_cache_collection(

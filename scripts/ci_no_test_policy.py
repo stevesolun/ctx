@@ -25,7 +25,7 @@ INIT_VERSION_LINE_RE = re.compile(
     r'__version__ = "\d+\.\d+\.\d+(?:[-+._a-zA-Z0-9]*)?"'
 )
 TEST_COUNT_STATS_RE = re.compile(
-    r".*(Tests-\d+_collected|[\d,]+ tests collected).*"
+    r".*(Tests-\d+_(?:collected|inventory)|[\d,]+ (?:tests collected|test inventory)).*"
 )
 RELEASE_DOCS_LINE_RE = re.compile(r"\*\*v\d+\.\d+\.\d+(?:[-+._a-zA-Z0-9]*)?\*\*.*")
 KNOWLEDGE_GRAPH_STATS_LINE_RE = re.compile(

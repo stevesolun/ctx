@@ -619,8 +619,8 @@ def _read_committed_test_count() -> int | None:
         except OSError:
             continue
         for pattern in (
-            r"Tests-([\d,]+)_collected",
-            r"([\d,]+)\s+tests collected",
+            r"Tests-([\d,]+)_(?:collected|inventory)",
+            r"([\d,]+)\s+(?:tests collected|test inventory)",
         ):
             match = re.search(pattern, text)
             if match:
@@ -1184,8 +1184,8 @@ def build_replacements(
 
     if tests is not None:
         reps.append((
-            re.compile(r"badge/Tests-[0-9]+_(?:passing|collected)-"),
-            f"badge/Tests-{tests}_collected-",
+            re.compile(r"badge/Tests-[0-9]+_(?:passing|collected|inventory)-"),
+            f"badge/Tests-{tests}_inventory-",
         ))
         reps.append((re.compile(r"#\s*([\d,]+)\s+pytest tests"), f"# {tests} pytest tests"))
 
@@ -1206,8 +1206,8 @@ def build_docs_replacements(
     if tests is None:
         return reps
     reps.append((
-        re.compile(r"[\d,]+\s+tests collected"),
-        f"{tests:,} tests collected",
+        re.compile(r"[\d,]+\s+(?:tests collected|test inventory)"),
+        f"{tests:,} test inventory",
     ))
     return reps
 

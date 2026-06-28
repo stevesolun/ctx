@@ -211,7 +211,7 @@ ones are flagged. New ones self-ingest.
     ---
 
     **v1.0.20** — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-    4,400 tests collected. Adds enterprise OpenTelemetry-ready telemetry and
+    4,400 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
     ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),
