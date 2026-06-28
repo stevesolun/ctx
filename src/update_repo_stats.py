@@ -11,7 +11,7 @@ Sources of truth:
   - graph/wiki-graph-runtime.tar.gz      -> runtime graph/report counts
   - graph/communities.json               -> current community export
   - graph/skills-sh-catalog.json.gz      -> hydrated skill body counts
-  - pytest --collect-only -q             -> collected test count
+  - pytest --collect-only -q             -> test inventory count
 
 Usage:
   python src/update_repo_stats.py          # patch README/docs in place

@@ -1,6 +1,6 @@
 ---
 name: repo-stats-autoupdate
-description: Keeps README badge + inline counts in sync with the real number of skills, agents, graph nodes/edges, communities, converted pipelines, and pytest tests. Runs automatically on every commit via a git pre-commit hook. Use when the README drifts from reality or before publishing a release.
+description: Keeps README badge + inline counts in sync with the real number of skills, agents, graph nodes/edges, communities, converted pipelines, and test inventory. Runs automatically on every commit via a git pre-commit hook. Use when the README drifts from reality or before publishing a release.
 type: maintenance
 priority: 30
 always_load: false
@@ -20,7 +20,7 @@ Reads the **authoritative sources** for the ctx repo's key numbers and patches `
 | Graph edges | `len(graph["edges"])`, formatted as `642K` / `1.2M` |
 | Communities | `graph/communities.json` → `total_communities` |
 | Converted pipelines | `~/.claude/skill-wiki/converted/` subdir count |
-| Tests | `pytest --collect-only -q` from `src/` |
+| Tests | checked-in README/docs inventory by default; set `CTX_UPDATE_REPO_STATS_LIVE_TESTS=1` to refresh from `pytest --collect-only -q` |
 
 Fields that can't be resolved (e.g. wiki not deployed) are left untouched — the updater never blocks a commit.
 
@@ -37,6 +37,7 @@ After that, every `git commit` runs `.githooks/pre-commit` which calls the updat
 ```bash
 python src/update_repo_stats.py          # patch README
 python src/update_repo_stats.py --check  # exit 1 if stale (for CI)
+CTX_UPDATE_REPO_STATS_LIVE_TESTS=1 python src/update_repo_stats.py  # refresh test inventory
 ```
 
 ## When NOT to use it

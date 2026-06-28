@@ -327,7 +327,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Published the post-0.7.16 hardening fixes with release metadata that matches
-  the CI runner's collected test count.
+  the CI runner's test inventory count.
 
 ## [0.7.17] - 2026-05-09
 
@@ -392,7 +392,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Kept the graph artifact CI check useful when GitHub LFS budget is
   exhausted by validating the committed LFS pointer and running full deep
   artifact validation locally before release.
-- Refreshed README and docs collected-test counts after the CI classifier
+- Refreshed README and docs test inventory counts after the CI classifier
   regression tests were added.
 
 ## [0.7.7] - 2026-05-05
@@ -407,7 +407,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   catalog matches through the same fit/provider gates.
 - Propagated incremental semantic top-K contamination to a fixed point so
   larger catalog updates do not preserve second-order stale neighbors.
-- Synced README and docs collected-test counts with the current suite.
+- Synced README and docs test inventory counts with the current suite.
 
 ## [0.7.6] - 2026-05-05
 
