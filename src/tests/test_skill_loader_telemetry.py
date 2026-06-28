@@ -60,9 +60,13 @@ def test_emit_load_event_writes_one_line(loader_env, tmp_path: Path) -> None:
     record = json.loads(lines[0])
     assert record["skill"] == "myskill"
     assert record["event"] == "load"
+    assert record["schema_version"] == "ctx.skill_telemetry.v1"
     assert "timestamp" in record
     assert "session_id" in record
     assert "event_id" in record
+    assert record["skill_hash"].startswith("sha256:")
+    assert record["session_hash"].startswith("sha256:")
+    assert record["entity_type"] == "skill"
 
 
 def test_emit_load_event_failure_does_not_raise(loader_env, tmp_path: Path) -> None:
@@ -113,3 +117,5 @@ def test_multiple_loads_write_multiple_lines(loader_env, tmp_path: Path) -> None
 
     event_types = {json.loads(ln)["event"] for ln in lines}
     assert event_types == {"load"}
+    assert all(json.loads(ln)["skill_hash"].startswith("sha256:") for ln in lines)
+    assert all(json.loads(ln)["session_hash"].startswith("sha256:") for ln in lines)

@@ -50,12 +50,14 @@ Plan 001 Phase H9.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.providers import ToolCall
 from ctx.core.entity_types import RECOMMENDABLE_ENTITY_TYPES
+from ctx.telemetry import hash_identifier, record_event, record_exception, telemetry_span
 
 
 __all__ = [
@@ -72,6 +74,12 @@ __all__ = [
 # Module-level singleton toolbox — lazy, shared across calls. Saves
 # loading the 13k-node graph on every function call.
 _default_toolbox: CtxCoreToolbox | None = None
+_TOOL_EVENT_NAMES = {
+    "ctx__recommend_bundle": "ctx.api.recommend_bundle",
+    "ctx__graph_query": "ctx.api.graph_query",
+    "ctx__wiki_search": "ctx.api.wiki_search",
+    "ctx__wiki_get": "ctx.api.wiki_get",
+}
 
 
 def _get_toolbox() -> CtxCoreToolbox:
@@ -81,13 +89,124 @@ def _get_toolbox() -> CtxCoreToolbox:
     return _default_toolbox
 
 
+def _duration_ms(started: float) -> float:
+    return (time.perf_counter() - started) * 1000.0
+
+
+def _hash_json_value(value: object) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return hash_identifier(encoded)
+
+
+def _safe_argument_payload(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "ctx.operation": tool_name.removeprefix("ctx__"),
+        "ctx.tool.name": tool_name,
+        "ctx.arguments.keys": sorted(arguments),
+    }
+    for key in ("top_k", "top_n", "max_hops"):
+        value = arguments.get(key)
+        if isinstance(value, (int, float)):
+            payload[f"ctx.arguments.{key}"] = value
+    query = arguments.get("query")
+    if isinstance(query, str):
+        payload["ctx.query.hash"] = hash_identifier(query)
+        payload["ctx.query.length"] = len(query)
+    seeds = arguments.get("seeds")
+    if isinstance(seeds, (list, tuple)):
+        payload["ctx.seeds.count"] = len(seeds)
+        payload["ctx.seeds.hash"] = _hash_json_value(list(seeds))
+    slug = arguments.get("slug")
+    if isinstance(slug, str):
+        payload["ctx.slug.hash"] = hash_identifier(slug)
+    entity_type = arguments.get("entity_type")
+    if isinstance(entity_type, str):
+        payload["ctx.entity.type"] = entity_type
+    return payload
+
+
+def _result_payload(result: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {"ctx.result.has_error_payload": "error" in result}
+    results = result.get("results")
+    if isinstance(results, list):
+        payload["ctx.result.count"] = len(results)
+    elif "error" not in result and result:
+        payload["ctx.result.count"] = 1
+    return payload
+
+
+def _record_api_event(
+    event_name: str,
+    *,
+    payload: dict[str, Any],
+    outcome: str,
+    duration_ms: float,
+    error_kind: str | None = None,
+    exc: BaseException | None = None,
+) -> None:
+    payload["otel.status_code"] = "ERROR" if outcome == "error" else "OK"
+    if error_kind:
+        payload["error.type"] = error_kind
+    try:
+        if exc is not None:
+            record_exception(
+                event_name,
+                source="ctx-api",
+                exc=exc,
+                transport="python-api",
+                outcome=outcome,
+                duration_ms=duration_ms,
+                error_kind=error_kind,
+                payload=payload,
+            )
+        else:
+            record_event(
+                event_name,
+                source="ctx-api",
+                transport="python-api",
+                outcome=outcome,
+                duration_ms=duration_ms,
+                error_kind=error_kind,
+                payload=payload,
+            )
+    except Exception:  # noqa: BLE001 - telemetry must never break the API.
+        pass
+
+
 def _call(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Invoke one CtxCoreToolbox tool, return the parsed JSON result."""
+    started = time.perf_counter()
+    event_name = _TOOL_EVENT_NAMES.get(tool_name, "ctx.api.tool_call")
+    event_payload = _safe_argument_payload(tool_name, arguments)
     toolbox = _get_toolbox()
-    raw = toolbox.dispatch(
-        ToolCall(id="api", name=tool_name, arguments=arguments)
-    )
-    return json.loads(raw)
+    with telemetry_span():
+        try:
+            raw = toolbox.dispatch(
+                ToolCall(id="api", name=tool_name, arguments=arguments)
+            )
+            payload = json.loads(raw)
+        except Exception as exc:  # noqa: BLE001 - preserve existing propagation.
+            _record_api_event(
+                event_name,
+                payload=event_payload,
+                outcome="error",
+                duration_ms=_duration_ms(started),
+                error_kind=type(exc).__name__,
+                exc=exc,
+            )
+            raise
+
+        outcome = "error" if isinstance(payload, dict) and "error" in payload else "ok"
+        if isinstance(payload, dict):
+            event_payload.update(_result_payload(payload))
+        _record_api_event(
+            event_name,
+            payload=event_payload,
+            outcome=outcome,
+            duration_ms=_duration_ms(started),
+            error_kind="structured_error" if outcome == "error" else None,
+        )
+        return payload
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
@@ -188,19 +307,53 @@ def list_all_entities(
     ``'skill'``, ``'agent'``, ``'mcp-server'``, ``'harness'``. Pass
     None (default) to get every entity across all recommendable types.
     """
-    wiki = default_wiki_dir()
-    if wiki is None or not wiki.is_dir():
-        return []
-    if entity_type is not None and entity_type not in RECOMMENDABLE_ENTITY_TYPES:
-        return []
+    started = time.perf_counter()
+    event_payload: dict[str, Any] = {
+        "ctx.operation": "list_all_entities",
+        "ctx.arguments.keys": ["entity_type"] if entity_type is not None else [],
+    }
+    if entity_type is not None:
+        event_payload["ctx.entity.type"] = entity_type
+    try:
+        wiki = default_wiki_dir()
+        event_payload["ctx.wiki.available"] = bool(wiki is not None and wiki.is_dir())
+        if wiki is None or not wiki.is_dir():
+            result: list[str] = []
+            outcome = "error"
+            error_kind = "wiki_unavailable"
+        elif entity_type is not None and entity_type not in RECOMMENDABLE_ENTITY_TYPES:
+            result = []
+            outcome = "error"
+            error_kind = "invalid_entity_type"
+        else:
+            from ctx.core.wiki.wiki_query import load_all_pages  # noqa: PLC0415
 
-    from ctx.core.wiki.wiki_query import load_all_pages  # noqa: PLC0415
+            result = sorted({
+                page.name
+                for page in load_all_pages(wiki)
+                if entity_type is None or page.entity_type == entity_type
+            })
+            outcome = "ok"
+            error_kind = None
+    except Exception as exc:  # noqa: BLE001 - preserve existing propagation.
+        _record_api_event(
+            "ctx.api.list_all_entities",
+            payload=event_payload,
+            outcome="error",
+            duration_ms=_duration_ms(started),
+            error_kind=type(exc).__name__,
+        )
+        raise
 
-    return sorted({
-        page.name
-        for page in load_all_pages(wiki)
-        if entity_type is None or page.entity_type == entity_type
-    })
+    event_payload["ctx.result.count"] = len(result)
+    _record_api_event(
+        "ctx.api.list_all_entities",
+        payload=event_payload,
+        outcome=outcome,
+        duration_ms=_duration_ms(started),
+        error_kind=error_kind,
+    )
+    return result
 
 
 def default_wiki_dir() -> Path | None:

@@ -65,6 +65,35 @@ def project_root() -> Path:
     return _PROJECT_ROOT
 
 
+@pytest.fixture(autouse=True)
+def disable_enterprise_telemetry_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep telemetry-enabled product code from writing to real user paths in tests."""
+
+    def _noop_record_event(*args: object, **kwargs: object) -> None:
+        return None
+
+    import ctx.telemetry as telemetry  # noqa: PLC0415
+
+    monkeypatch.setattr(telemetry, "record_event", _noop_record_event)
+    for module_name in (
+        "ctx.adapters.generic.ctx_core_tools",
+        "ctx.adapters.generic.runtime_lifecycle",
+        "ctx.api",
+        "ctx.cli.run",
+        "ctx.mcp_server.server",
+    ):
+        module = sys.modules.get(module_name)
+        if module is not None:
+            monkeypatch.setattr(
+                module,
+                "record_event",
+                _noop_record_event,
+                raising=False,
+            )
+
+
 @pytest.fixture()
 def tmp_wiki(tmp_path: Path) -> Path:
     """

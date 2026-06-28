@@ -17,6 +17,8 @@ Covers the Phase 1 telemetry contract:
 from __future__ import annotations
 
 import json
+import os
+import stat
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -95,6 +97,11 @@ def test_event_rejects_non_iso_timestamp() -> None:
         _event(timestamp="not-a-time")
 
 
+def test_event_rejects_unknown_schema() -> None:
+    with pytest.raises(ValueError, match="unsupported telemetry schema"):
+        _event(schema_version="ctx.skill_telemetry.v0")
+
+
 # ────────────────────────────────────────────────────────────────────
 # meta validation
 # ────────────────────────────────────────────────────────────────────
@@ -125,6 +132,35 @@ def test_log_event_rejects_oversized_meta_string(tmp_path: Path) -> None:
         )
 
 
+def test_log_event_sanitizes_sensitive_meta(tmp_path: Path) -> None:
+    events_path = tmp_path / "skill-events.jsonl"
+
+    rec = st.log_event(
+        "load",
+        "python-patterns",
+        "sess-1",
+        meta={
+            "source": "unit-test",
+            "token": "sk-" + "a" * 24,
+            "prompt": "summarize private roadmap",
+            "command": "SECRET_TOKEN=abc123 run-tool",
+        },
+        path=events_path,
+        trusted_root=tmp_path,
+    )
+
+    assert rec.meta["source"] == "unit-test"
+    assert rec.meta["token"] == "[redacted]"
+    assert "prompt" not in rec.meta
+    assert str(rec.meta["prompt_hash"]).startswith("sha256:")
+    assert "command" not in rec.meta
+    assert str(rec.meta["command_hash"]).startswith("sha256:")
+    raw = events_path.read_text(encoding="utf-8")
+    assert "summarize private roadmap" not in raw
+    assert "SECRET_TOKEN=abc123 run-tool" not in raw
+    assert "sk-" + "a" * 24 not in raw
+
+
 # ────────────────────────────────────────────────────────────────────
 # Round-trip
 # ────────────────────────────────────────────────────────────────────
@@ -151,8 +187,27 @@ def test_log_event_and_read_events_round_trip(tmp_path: Path) -> None:
     assert got[0].event_id == rec_a.event_id
     assert got[1].event_id == rec_b.event_id
     assert got[2].event_id == rec_c.event_id
+    assert got[0].schema_version == st.SCHEMA_VERSION
+    assert got[0].entity_type == "skill"
+    assert got[0].skill_hash == rec_a.skill_hash
+    assert got[0].session_hash == rec_a.session_hash
+    assert got[0].skill_hash and got[0].skill_hash.startswith("sha256:")
+    assert got[0].session_hash and got[0].session_hash.startswith("sha256:")
     assert got[0].meta == {"source": "unit-test"}
     assert got[2].meta == {"replaced_with": "fastapi"}
+
+
+def test_log_event_creates_owner_only_file(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits are not portable on Windows")
+    events_path = tmp_path / "nested" / "skill-events.jsonl"
+
+    st.log_event(
+        "load", "python-patterns", "sess-1", path=events_path, trusted_root=tmp_path,
+    )
+
+    assert stat.S_IMODE(events_path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(events_path.stat().st_mode) == 0o600
 
 
 def test_read_events_missing_file_yields_nothing(tmp_path: Path) -> None:
@@ -227,6 +282,9 @@ def test_concurrent_appends_produce_wellformed_lines(tmp_path: Path) -> None:
         obj = json.loads(line)
         assert obj["event"] == "load"
         assert obj["session_id"].startswith("sess-")
+        assert obj["skill_hash"].startswith("sha256:")
+        assert obj["session_hash"].startswith("sha256:")
+        assert obj["entity_type"] == "skill"
 
 
 # ────────────────────────────────────────────────────────────────────

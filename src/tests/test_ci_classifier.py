@@ -37,6 +37,7 @@ def test_docs_only_classification() -> None:
         "package_changed": False,
         "similarity_changed": False,
         "source_changed": False,
+        "telemetry_changed": False,
     }
 
 
@@ -147,6 +148,7 @@ def test_workflow_change_fails_open_for_future_gates() -> None:
     assert flags["package_changed"] is True
     assert flags["similarity_changed"] is True
     assert flags["source_changed"] is True
+    assert flags["telemetry_changed"] is True
     assert flags["docs_changed"] is False
     assert flags["docs_only"] is False
 
@@ -251,6 +253,20 @@ def test_publish_workflow_validates_and_uploads_graph_assets() -> None:
     assert "needs.release-assets.result == 'skipped'" not in workflow
     assert "PyPI publish will continue without release asset upload" not in workflow
     assert "graph_assets_available" in workflow
+
+
+def test_publish_workflow_runs_installed_wheel_telemetry_smoke() -> None:
+    workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
+
+    assert "Telemetry release smoke" in workflow
+    assert "record_event(" in workflow
+    assert "record_counter(" in workflow
+    assert "ctx-telemetry-export --dry-run --json" in workflow
+    assert "ctx-telemetry-export \\" in workflow
+    assert "--signal metrics" in workflow
+    assert "ctx-telemetry-retention plan --signal all --json" in workflow
+    assert "raw-release-telemetry-sentinel" in workflow
+    assert "raw telemetry sentinel leaked into exported telemetry" in workflow
 
 
 def test_changelog_defines_current_release_link() -> None:
@@ -432,6 +448,19 @@ def test_similarity_paths_are_classified() -> None:
     assert flags["source_changed"] is True
 
 
+def test_telemetry_paths_are_classified() -> None:
+    for path in (
+        "docs/telemetry.md",
+        "src/config.json",
+        "src/ctx/telemetry/__init__.py",
+        "src/ctx/adapters/generic/runtime_lifecycle.py",
+        "src/tests/test_enterprise_telemetry.py",
+    ):
+        flags = classify_paths([path])
+
+        assert flags["telemetry_changed"] is True
+
+
 def test_embedding_backend_change_runs_similarity_gate() -> None:
     flags = classify_paths(["src/embedding_backend.py"])
 
@@ -450,6 +479,7 @@ def test_main_writes_github_outputs(tmp_path: Path, monkeypatch) -> None:
     written = output.read_text(encoding="utf-8").splitlines()
     assert "package_changed=true" in written
     assert "source_changed=true" in written
+    assert "telemetry_changed=false" in written
     assert "docs_changed=false" in written
     assert "docs_only=false" in written
 
@@ -699,6 +729,29 @@ def test_ci_required_rejects_browser_skip_when_classifier_requests_it() -> None:
     }
 
 
+def test_ci_required_rejects_telemetry_skip_when_classifier_requests_it() -> None:
+    needs = _required_needs(
+        classify={"result": "success", "outputs": {"telemetry_changed": "true"}},
+        **{"telemetry-enterprise": {"result": "skipped"}},
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "telemetry-enterprise": "skipped",
+    }
+
+
+def test_ci_required_allows_telemetry_skip_for_unrelated_pr_only() -> None:
+    needs = _required_needs(
+        classify={"result": "success", "outputs": {"telemetry_changed": "false"}},
+        **{"telemetry-enterprise": {"result": "skipped"}},
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {}
+    assert failed_required_jobs(needs, event_name="push") == {
+        "telemetry-enterprise": "skipped",
+    }
+
+
 def test_ci_required_rejects_missing_docs_check_on_mixed_docs_pr() -> None:
     needs = _required_needs(
         classify={
@@ -725,3 +778,14 @@ def test_ci_required_rejects_missing_graph_check_on_mixed_artifact_pr() -> None:
     assert failed_required_jobs(needs, event_name="pull_request") == {
         "graph-check": "skipped",
     }
+
+
+def test_workflow_runs_focused_telemetry_enterprise_gate() -> None:
+    workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
+
+    assert "telemetry_changed: ${{ steps.classify.outputs.telemetry_changed }}" in workflow
+    assert "telemetry-enterprise:" in workflow
+    assert "needs.classify.outputs.telemetry_changed == 'true'" in workflow
+    assert "src/tests/test_enterprise_telemetry.py" in workflow
+    assert "src/tests/test_harness_cli_run.py" in workflow
+    assert '-k "telemetry or runtime_lifecycle"' in workflow

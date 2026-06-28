@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-ctx"
-version = "1.0.19"
+version = "1.0.20"
 description = "Not an Amazon-style catalog: a recommendation layer for loading the right skills, agents, MCPs, and harnesses at the right development moment"
 authors = [{ name = "Steve Solun" }]
 license = "MIT"
@@ -45,6 +45,8 @@ ctx-skill-unload = "ctx.adapters.claude_code.install.skill_unload:skill_main"
 ctx-skill-mirror = "skill_mirror:main"
 ctx-bundle-suggest = "ctx.adapters.claude_code.hooks.bundle_orchestrator:main"
 ctx-recommend = "ctx.cli.recommend:main"
+ctx-telemetry-export = "ctx.cli.telemetry:main"
+ctx-telemetry-retention = "ctx.cli.telemetry:retention_main"
 ctx-agent-add = "agent_add:main"
 ctx-agent-mirror = "agent_mirror:main"
 ctx-agent-install = "ctx.adapters.claude_code.install.agent_install:main"
@@ -229,6 +231,7 @@ packages = [
     "ctx.monitor.pages",
     "ctx.monitor.services",
     "ctx.mcp_server",
+    "ctx.telemetry",
     "ctx.utils",
 ]
 

@@ -32,6 +32,7 @@ from typing import Any
 
 import pytest
 
+import ctx.mcp_server.server as mcp_server
 from ctx.adapters.generic.tools import (
     McpClient,
     McpServerConfig,
@@ -110,6 +111,19 @@ def _mcp_subprocess_env(wiki: Path, graph_path: Path) -> dict[str, str]:
     }
 
 
+@pytest.fixture()
+def captured_mcp_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+
+    def _capture_record_event(event_name: str, **kwargs: Any) -> None:
+        events.append({"event_name": event_name, **kwargs})
+
+    monkeypatch.setattr(mcp_server, "record_event", _capture_record_event)
+    return events
+
+
 # ── Server-level loop behaviour ─────────────────────────────────────────────
 
 
@@ -129,6 +143,22 @@ class TestRunServerLifecycle:
         assert frames[0]["error"]["code"] == _ErrorCode.PARSE_ERROR
         # id is null when the request couldn't be parsed.
         assert frames[0]["id"] is None
+
+    def test_invalid_json_emits_parse_error_telemetry(
+        self,
+        captured_mcp_events: list[dict[str, Any]],
+    ) -> None:
+        raw_frame = "{not valid json"
+
+        _drive((raw_frame + "\n").encode("utf-8"))
+
+        event = captured_mcp_events[-1]
+        assert event["event_name"] == "ctx.mcp.request"
+        assert event["outcome"] == "error"
+        assert event["error_kind"] == "parse_error"
+        assert event["payload"]["rpc.method"] == "<parse-error>"
+        assert event["payload"]["otel.status_code"] == "ERROR"
+        assert raw_frame not in json.dumps(event["payload"])
 
     def test_non_object_request_rejected(self) -> None:
         frames = _drive(b"[1, 2, 3]\n")
@@ -188,6 +218,20 @@ class TestNotifications:
         frames = _drive(_encode_notification("ping"))
         assert frames == []
 
+    def test_ping_notification_emits_no_response_telemetry(
+        self,
+        captured_mcp_events: list[dict[str, Any]],
+    ) -> None:
+        frames = _drive(_encode_notification("ping"))
+
+        assert frames == []
+        event = captured_mcp_events[-1]
+        assert event["event_name"] == "ctx.mcp.request"
+        assert event["outcome"] == "ok"
+        assert event["payload"]["rpc.method"] == "ping"
+        assert event["payload"]["ctx.notification"] is True
+        assert event["payload"]["ctx.response_emitted"] is False
+
     def test_cancelled_notification_is_silent(self) -> None:
         frames = _drive(_encode_notification("notifications/cancelled", {"requestId": 1}))
         assert frames == []
@@ -233,6 +277,37 @@ class TestToolsCall:
     def test_missing_name_yields_invalid_params(self) -> None:
         frames = _drive(_encode_request(1, "tools/call", {"arguments": {}}))
         assert frames[0]["error"]["code"] == _ErrorCode.INVALID_PARAMS
+
+    def test_tool_call_emits_otel_telemetry_without_raw_arguments(
+        self,
+        captured_mcp_events: list[dict[str, Any]],
+    ) -> None:
+        raw_query = "private acme query"
+        frames = _drive(
+            _encode_request(
+                1,
+                "tools/call",
+                {
+                    "name": "fs__read_file",
+                    "arguments": {"query": raw_query, "top_k": 3},
+                },
+            )
+        )
+
+        assert frames[0]["error"]["code"] == _ErrorCode.METHOD_NOT_FOUND
+        event = captured_mcp_events[-1]
+        assert event["event_name"] == "ctx.mcp.request"
+        assert event["source"] == "ctx-mcp-server"
+        assert event["transport"] == "mcp-jsonrpc"
+        assert event["outcome"] == "error"
+        assert event["payload"]["rpc.method"] == "tools/call"
+        assert event["payload"]["ctx.tool.name"] == "fs__read_file"
+        assert event["payload"]["ctx.arguments.keys"] == ["query", "top_k"]
+        assert event["payload"]["ctx.query.length"] == len(raw_query)
+        assert event["payload"]["ctx.query.hash"].startswith("sha256:")
+        assert event["payload"]["ctx.arguments.top_k"] == 3
+        assert event["payload"]["otel.status_code"] == "ERROR"
+        assert raw_query not in json.dumps(event["payload"])
 
     def test_non_dict_arguments_yields_invalid_params(self) -> None:
         frames = _drive(

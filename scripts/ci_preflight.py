@@ -184,6 +184,24 @@ def select_checks(
             Check("docs strict build", (python, "-m", "mkdocs", "build", "--strict"))
         )
 
+    if profile == "full" or flags["telemetry_changed"]:
+        checks.append(
+            Check(
+                "telemetry enterprise",
+                (
+                    python,
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "--no-cov",
+                    "src/tests/test_enterprise_telemetry.py",
+                    "src/tests/test_harness_cli_run.py",
+                    "-k",
+                    "telemetry or runtime_lifecycle",
+                ),
+            )
+        )
+
     if flags["graph_artifact_changed"]:
         checks.append(Check("graph artifact validation", (python, *GRAPH_VALIDATE_ARGS)))
 

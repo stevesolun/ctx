@@ -18,6 +18,7 @@ from __future__ import annotations
 import inspect
 import json
 from pathlib import Path
+from typing import Any
 
 import networkx as nx
 import pytest
@@ -125,6 +126,19 @@ def synthetic_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return home
 
 
+@pytest.fixture()
+def captured_api_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+
+    def _capture_record_event(event_name: str, **kwargs: Any) -> None:
+        events.append({"event_name": event_name, **kwargs})
+
+    monkeypatch.setattr(ctx.api, "record_event", _capture_record_event)
+    return events
+
+
 # ── __all__ + re-export shape ─────────────────────────────────────────────
 
 
@@ -223,6 +237,63 @@ class TestRecommendBundle:
         bundle = ctx.recommend_bundle("python api harness", top_k=50)
         assert len(bundle) <= 5
         assert {row["type"] for row in bundle} <= {"skill", "agent", "mcp-server"}
+
+
+class TestApiTelemetry:
+    def test_recommend_bundle_emits_otel_style_telemetry_without_raw_query(
+        self,
+        synthetic_home: Path,
+        captured_api_events: list[dict[str, Any]],
+    ) -> None:
+        raw_query = "private acme query"
+
+        bundle = ctx.recommend_bundle(raw_query)
+
+        event = captured_api_events[-1]
+        assert event["event_name"] == "ctx.api.recommend_bundle"
+        assert event["source"] == "ctx-api"
+        assert event["transport"] == "python-api"
+        assert event["outcome"] == "ok"
+        assert event["duration_ms"] >= 0
+
+        payload = event["payload"]
+        assert payload["otel.status_code"] == "OK"
+        assert payload["ctx.operation"] == "recommend_bundle"
+        assert payload["ctx.tool.name"] == "ctx__recommend_bundle"
+        assert payload["ctx.arguments.keys"] == ["query", "top_k"]
+        assert payload["ctx.query.length"] == len(raw_query)
+        assert payload["ctx.query.hash"].startswith("sha256:")
+        assert payload["ctx.result.count"] == len(bundle)
+        assert "query" not in payload
+        assert raw_query not in json.dumps(payload)
+
+    def test_recommend_bundle_error_telemetry_keeps_error_structured(
+        self,
+        synthetic_home: Path,
+        captured_api_events: list[dict[str, Any]],
+    ) -> None:
+        assert ctx.recommend_bundle("") == []
+
+        event = captured_api_events[-1]
+        assert event["event_name"] == "ctx.api.recommend_bundle"
+        assert event["outcome"] == "error"
+        assert event["error_kind"] == "structured_error"
+        assert event["payload"]["otel.status_code"] == "ERROR"
+        assert event["payload"]["error.type"] == "structured_error"
+
+    def test_list_all_entities_emits_result_count_without_slugs(
+        self,
+        synthetic_home: Path,
+        captured_api_events: list[dict[str, Any]],
+    ) -> None:
+        entities = ctx.list_all_entities(entity_type="skill")
+
+        event = captured_api_events[-1]
+        assert event["event_name"] == "ctx.api.list_all_entities"
+        assert event["outcome"] == "ok"
+        assert event["payload"]["ctx.entity.type"] == "skill"
+        assert event["payload"]["ctx.result.count"] == len(entities)
+        assert "python-patterns" not in json.dumps(event["payload"])
 
 
 class TestGraphQuery:

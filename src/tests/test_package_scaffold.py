@@ -82,6 +82,8 @@ _EXPECTED_CONSOLE_SCRIPTS: tuple[str, ...] = (
     "ctx-skillspector-scan",
     "ctx-source-registry",
     "ctx-tag-backfill",
+    "ctx-telemetry-export",
+    "ctx-telemetry-retention",
     "ctx-toolbox",
     "ctx-wiki-graphify",
     "ctx-wiki-worker",

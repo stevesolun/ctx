@@ -12,6 +12,14 @@ from typing import Any
 
 from ctx.core.entity_types import RECOMMENDABLE_ENTITY_TYPES
 from ctx.core.wiki.wiki_utils import validate_skill_name
+from ctx.telemetry import (
+    ensure_private_event_file,
+    hash_identifier,
+    record_event,
+    sanitize_payload,
+    telemetry_span,
+    telemetry_enabled,
+)
 from ctx.utils._fs_utils import reject_symlink_path
 
 
@@ -266,12 +274,20 @@ class RuntimeLifecycleStore:
         event["session_id"] = session_id
         event["created_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         event["created_at_epoch"] = time.time()
+        if not telemetry_enabled():
+            return {
+                "ok": True,
+                "events_path": str(self.events_path),
+                "recorded": False,
+            }
+        event = _sanitize_lifecycle_event(event)
         path = self.events_path
         reject_symlink_path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_event_file(path)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, sort_keys=True) + "\n")
-        return {"ok": True, "event": event, "events_path": str(path)}
+        _record_runtime_lifecycle_telemetry(event)
+        return {"ok": True, "event": event, "events_path": str(path), "recorded": True}
 
     def _events_for_session(self, session_id: str) -> list[dict[str, Any]]:
         path = self.events_path
@@ -298,11 +314,54 @@ class RuntimeLifecycleStore:
         return root / "events.jsonl"
 
 
+def _sanitize_lifecycle_event(event: dict[str, Any]) -> dict[str, Any]:
+    redacted = dict(event)
+    payload = redacted.get("payload")
+    if isinstance(payload, dict):
+        redacted["payload"] = sanitize_payload(payload)
+    cwd = redacted.pop("cwd", None)
+    if isinstance(cwd, str) and cwd:
+        redacted["cwd_hash"] = hash_identifier(cwd)
+    return redacted
+
+
 def _validate_session_id(raw: str) -> str:
     value = raw.strip()
     if not value or not _SESSION_RE.match(value):
         raise ValueError("session_id must be 1-128 safe characters")
     return value
+
+
+def _record_runtime_lifecycle_telemetry(event: dict[str, Any]) -> None:
+    payload: dict[str, Any] = {
+        "ctx.lifecycle.action": str(event.get("action") or ""),
+        "ctx.payload.present": bool(event.get("payload")),
+        "otel.status_code": "OK",
+    }
+    entity_type = event.get("entity_type")
+    if isinstance(entity_type, str) and entity_type:
+        payload["ctx.entity.type"] = entity_type
+    slug = event.get("slug")
+    if isinstance(slug, str) and slug:
+        payload["ctx.slug.hash"] = hash_identifier(slug)
+    status = event.get("status")
+    if isinstance(status, str) and status:
+        payload["ctx.status"] = status
+    security_scan = event.get("security_scan")
+    if isinstance(security_scan, dict):
+        payload["ctx.security_scan.status"] = str(security_scan.get("status") or "")
+    try:
+        with telemetry_span():
+            record_event(
+                "ctx.runtime_lifecycle.record",
+                source="ctx-runtime-lifecycle",
+                transport="local-jsonl",
+                session_id=str(event.get("session_id") or "") or None,
+                outcome="ok",
+                payload=payload,
+            )
+    except Exception:  # noqa: BLE001 - lifecycle writes must not depend on telemetry.
+        pass
 
 
 def _validate_entity_type(raw: str) -> str:

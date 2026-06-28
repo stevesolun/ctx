@@ -102,6 +102,7 @@ nav:
   - Hugging Face publish: huggingface-publish.md
   - Entity onboarding: entity-onboarding.md
   - Dashboard: dashboard.md
+  - Telemetry: telemetry.md
   - Harness:
       - Attach to hosts: harness/attaching-to-hosts.md
       - Clean-host contract: harness/clean-host-contract.md

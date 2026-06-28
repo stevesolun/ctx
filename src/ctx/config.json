@@ -41,6 +41,72 @@
     "keep_log_days": 5
   },
 
+  "telemetry": {
+    "_comment": "Enterprise telemetry spine. Writes a redacted ctx.telemetry.v1 JSONL spool by default. Exporters are ready to use but disabled until explicitly enabled.",
+    "enabled": true,
+    "mode": "local_redacted",
+    "path": "~/.ctx/telemetry/events.jsonl",
+    "export": {
+      "enabled": false,
+      "sink": "otlp_http",
+      "path": "~/.ctx/telemetry/exported-events.jsonl",
+      "otlp": {
+        "endpoint": "http://localhost:4318/v1/logs",
+        "allowed_hosts": [],
+        "headers": {},
+        "timeout_seconds": 5.0,
+        "service_name": "ctx",
+        "service_namespace": "ctx",
+        "deployment_environment": "local"
+      }
+    },
+    "metrics": {
+      "_comment": "OpenTelemetry-style counters and histograms. Writes a separate redacted metric spool by default; metric exporters use independent checkpoint/status files.",
+      "enabled": true,
+      "path": "~/.ctx/telemetry/metrics.jsonl",
+      "histogram_bounds": [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
+      "export": {
+        "enabled": false,
+        "sink": "otlp_http",
+        "path": "~/.ctx/telemetry/exported-metrics.jsonl",
+        "otlp": {
+          "endpoint": "http://localhost:4318/v1/metrics",
+          "allowed_hosts": [],
+          "headers": {},
+          "timeout_seconds": 5.0,
+          "service_name": "ctx",
+          "service_namespace": "ctx",
+          "deployment_environment": "local"
+        }
+      }
+    },
+    "privacy": {
+      "store_raw_inputs": false,
+      "hash_identifiers": true,
+      "hash_salt_env": "CTX_TELEMETRY_HASH_SALT",
+      "hash_salt_path": "~/.ctx/telemetry/hash-salt"
+    },
+    "retention": {
+      "_comment": "Retention is applied only by explicit operator command/API calls. Dry-runs do not write, malformed records are preserved by default, and min_keep_records prevents accidental full deletion.",
+      "enabled": true,
+      "status_path": "~/.ctx/telemetry/retention-status.json",
+      "min_keep_records": 1000,
+      "drop_malformed": false,
+      "events": {
+        "max_age_days": 90,
+        "max_records": 100000
+      },
+      "metrics": {
+        "max_age_days": 30,
+        "max_records": 200000
+      }
+    },
+    "limits": {
+      "max_payload_keys": 40,
+      "max_payload_value_chars": 1024
+    }
+  },
+
   "harness": {
     "_comment": "Harness catalog recommendation tuning for custom/API/local model users. Harnesses are separate from the execution bundle and are only recommended when their absolute fit score is at or above recommendation_min_fit_score. The normalized floor is kept for older user configs and display compatibility.",
     "recommendation_min_normalized_score": 0.85,

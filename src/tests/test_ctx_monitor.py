@@ -46,6 +46,7 @@ from ctx.monitor.services import skillspector as skillspector_service
 from ctx.monitor.services import status as status_service
 from ctx.monitor.services import wiki as wiki_service
 from ctx.core.wiki import wiki_queue
+from ctx.telemetry import EXPORT_STATUS_SCHEMA_VERSION, SCHEMA_VERSION
 
 
 @pytest.fixture
@@ -60,6 +61,12 @@ def fake_claude(tmp_path: Path, monkeypatch) -> Path:
     kpi_service.reset_cache()
     monkeypatch.setattr(mt, "WIKI_RENDER_CACHE_KEY", None)
     monkeypatch.setattr(mt, "WIKI_RENDER_CACHE_VALUE", None)
+    telemetry_path = claude / "telemetry" / "events.jsonl"
+    monkeypatch.setattr(
+        status_service,
+        "_telemetry_config",
+        lambda: {"path": str(telemetry_path), "export": {"sink": "otlp_http"}},
+    )
     dashboard_docs.reset_docs_render_cache()
     return claude
 
@@ -665,6 +672,36 @@ def test_status_page_and_api_show_queue_and_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wiki = fake_claude / "skill-wiki"
+    telemetry_path = fake_claude / "telemetry" / "events.jsonl"
+    telemetry_path.parent.mkdir(parents=True)
+    telemetry_path.write_text(
+        json.dumps({
+            "schema_version": SCHEMA_VERSION,
+            "event_id": "evt-1",
+            "ts": "2026-06-28T00:00:00Z",
+            "event_name": "ctx.mcp.request",
+            "source": "ctx-mcp-server",
+            "outcome": "error",
+            "privacy_mode": "local_redacted",
+            "payload": {},
+        })
+        + "\nnot-json\n",
+        encoding="utf-8",
+    )
+    Path(str(telemetry_path) + ".export-status.json").write_text(
+        json.dumps({
+            "schema_version": EXPORT_STATUS_SCHEMA_VERSION,
+            "status": "degraded",
+            "sink": "otlp_http",
+            "attempted": 1,
+            "exported": 1,
+            "failed": 0,
+            "malformed_records": 1,
+            "malformed_pending_records": 1,
+            "updated_at": "2026-06-28T00:01:00Z",
+        }),
+        encoding="utf-8",
+    )
     wiki_queue.enqueue_maintenance_job(
         wiki,
         kind=wiki_queue.GRAPH_EXPORT_JOB,
@@ -682,6 +719,11 @@ def test_status_page_and_api_show_queue_and_artifacts(
     assert "packs: 0 (base 0, overlay 0)" in html_out
     assert "compaction: not needed, 0 overlays / threshold" in html_out
     assert "local store: stale or missing, 0 nodes, 0 edges" in html_out
+    assert "Telemetry health" in html_out
+    assert "events: 1" in html_out
+    assert "malformed: 1" in html_out
+    assert "ctx.mcp.request" in html_out
+    assert "degraded" in html_out
     assert wiki_queue.GRAPH_EXPORT_JOB in html_out
 
     server, _thread, port = _serve_monitor(monkeypatch)
@@ -692,6 +734,10 @@ def test_status_page_and_api_show_queue_and_artifacts(
         ) as response:
             payload = json.loads(response.read().decode("utf-8"))
         assert payload["queue"]["total"] == 1
+        assert payload["telemetry"]["spool"]["event_count"] == 1
+        assert payload["telemetry"]["spool"]["malformed_records"] == 1
+        assert payload["telemetry"]["spool"]["latest_event"]["event_name"] == "ctx.mcp.request"
+        assert payload["telemetry"]["export_status"]["status"] == "degraded"
         assert payload["artifacts"]["graph_json"]["path"].endswith("graph.json")
     finally:
         server.shutdown()

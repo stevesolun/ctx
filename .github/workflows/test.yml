@@ -31,6 +31,7 @@ jobs:
       package_changed: ${{ steps.classify.outputs.package_changed }}
       similarity_changed: ${{ steps.classify.outputs.similarity_changed }}
       source_changed: ${{ steps.classify.outputs.source_changed }}
+      telemetry_changed: ${{ steps.classify.outputs.telemetry_changed }}
     steps:
       - name: Checkout with full history
         uses: actions/checkout@v5
@@ -520,6 +521,36 @@ jobs:
       - name: Run browser security tests
         run: pytest -q --no-cov -m browser src/tests/test_ctx_monitor_browser.py
 
+  telemetry-enterprise:
+    name: "Telemetry enterprise gate"
+    needs: classify
+    if: ${{ github.event_name == 'push' || needs.classify.outputs.telemetry_changed == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install telemetry test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+
+      - name: Run telemetry privacy and export tests
+        run: |
+          python -m pytest -q --no-cov \
+            src/tests/test_enterprise_telemetry.py \
+            src/tests/test_harness_cli_run.py \
+            -k "telemetry or runtime_lifecycle"
+
   package-build:
     name: "Build wheel package"
     needs: classify
@@ -736,6 +767,7 @@ jobs:
       - package-build
       - clean-host-contract
       - no-test-no-merge
+      - telemetry-enterprise
     if: ${{ always() }}
     steps:
       - name: Checkout

@@ -19,6 +19,7 @@ OUTPUT_NAMES = (
     "package_changed",
     "similarity_changed",
     "source_changed",
+    "telemetry_changed",
 )
 
 DOCS_PATTERNS = (
@@ -76,6 +77,27 @@ SIMILARITY_PATTERNS = (
     "src/intake_gate.py",
     "src/tests/test_similarity_precision_recall.py",
 )
+TELEMETRY_PATTERNS = (
+    ".github/workflows/test.yml",
+    "docs/telemetry.md",
+    "scripts/ci_classifier.py",
+    "scripts/ci_preflight.py",
+    "scripts/ci_required.py",
+    "src/config.json",
+    "src/ctx/config.json",
+    "src/ctx/adapters/generic/ctx_core_tools.py",
+    "src/ctx/adapters/generic/runtime_lifecycle.py",
+    "src/ctx/api.py",
+    "src/ctx/cli/run.py",
+    "src/ctx/cli/telemetry.py",
+    "src/ctx/mcp_server/server.py",
+    "src/ctx/telemetry/**",
+    "src/tests/test_enterprise_telemetry.py",
+    "src/tests/test_harness_cli_run.py",
+    "src/tests/test_harness_ctx_core.py",
+    "src/tests/test_mcp_server.py",
+    "src/tests/test_public_api.py",
+)
 
 
 def _matches(path: str, patterns: Iterable[str]) -> bool:
@@ -117,6 +139,8 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
         or any(_matches(path, SIMILARITY_PATTERNS) for path in files),
         "source_changed": ci_changed
         or any(_matches(path, SOURCE_PATTERNS) for path in files),
+        "telemetry_changed": ci_changed
+        or any(_matches(path, TELEMETRY_PATTERNS) for path in files),
     }
 
 

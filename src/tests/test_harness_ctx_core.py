@@ -547,6 +547,45 @@ class TestDispatchRouting:
 
 
 class TestRuntimeLifecycle:
+    def test_lifecycle_tool_emits_core_and_store_telemetry(
+        self,
+        toolbox: CtxCoreToolbox,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.ctx_core_tools as core_tools
+        import ctx.adapters.generic.runtime_lifecycle as runtime_lifecycle
+
+        events: list[dict[str, Any]] = []
+
+        def capture_record_event(event_name: str, **kwargs: Any) -> None:
+            events.append({"event_name": event_name, **kwargs})
+
+        monkeypatch.setattr(core_tools, "record_event", capture_record_event)
+        monkeypatch.setattr(runtime_lifecycle, "record_event", capture_record_event)
+
+        result = json.loads(
+            toolbox.dispatch(ToolCall(
+                id="c1",
+                name="ctx__load_entity",
+                arguments={
+                    "session_id": "s-1",
+                    "entity_type": "skill",
+                    "slug": "fastapi-pro",
+                },
+            ))
+        )
+
+        assert result["ok"] is True
+        event_names = [event["event_name"] for event in events]
+        assert "ctx.runtime_lifecycle.record" in event_names
+        assert "ctx.core.lifecycle" in event_names
+        for event in events:
+            payload = event["payload"]
+            assert payload["otel.status_code"] == "OK"
+            assert payload["ctx.entity.type"] == "skill"
+            assert payload["ctx.slug.hash"].startswith("sha256:")
+            assert "fastapi-pro" not in json.dumps(payload)
+
     def test_lifecycle_tools_append_events(
         self,
         toolbox: CtxCoreToolbox,
@@ -954,6 +993,42 @@ def test_session_state_suppresses_current_dev_window_unloads(
 
 
 class TestRecommendBundle:
+    def test_recommend_bundle_emits_core_telemetry_without_raw_query(
+        self,
+        toolbox: CtxCoreToolbox,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.ctx_core_tools as core_tools
+
+        events: list[dict[str, Any]] = []
+
+        def capture_record_event(event_name: str, **kwargs: Any) -> None:
+            events.append({"event_name": event_name, **kwargs})
+
+        monkeypatch.setattr(core_tools, "record_event", capture_record_event)
+        raw_query = "private acme python web api"
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__recommend_bundle",
+                    arguments={"query": raw_query, "top_k": 5},
+                )
+            )
+        )
+
+        event = events[-1]
+        payload = event["payload"]
+        assert event["event_name"] == "ctx.core.recommend_bundle"
+        assert event["source"] == "ctx-core"
+        assert event["outcome"] == "ok"
+        assert payload["ctx.operation"] == "recommend_bundle"
+        assert payload["ctx.query.length"] == len(raw_query)
+        assert payload["ctx.query.hash"].startswith("sha256:")
+        assert payload["ctx.result.count"] == len(result["results"])
+        assert raw_query not in json.dumps(payload)
+
     def test_happy_path_ranks_by_tag_overlap(
         self, toolbox: CtxCoreToolbox
     ) -> None:

@@ -348,7 +348,6 @@ def unload_from_session(
     truth log level. Fix both at the single choke point.
     """
     import uuid
-    from datetime import datetime, timezone
 
     names_set = set(names)
     with file_lock(MANIFEST_PATH):
@@ -375,22 +374,20 @@ def unload_from_session(
     if removed:
         events_path = CLAUDE_DIR / "skill-events.jsonl"
         session_id = os.environ.get("CTX_SESSION_ID") or f"unload-{uuid.uuid4().hex[:8]}"
-        now_iso = datetime.now(timezone.utc).isoformat()
         try:
-            events_path.parent.mkdir(parents=True, exist_ok=True)
-            with events_path.open("a", encoding="utf-8") as fh:
-                for entry in removed_entries:
-                    slug = str(entry.get("skill") or "")
-                    fh.write(json.dumps({
-                        "event": "unload",
-                        "event_id": uuid.uuid4().hex,
-                        "meta": {"source": "skill_unload"},
-                        "entity_type": entry.get("entity_type", "skill"),
-                        "session_id": session_id,
-                        "skill": slug,
-                        "timestamp": now_iso,
-                    }) + "\n")
-        except OSError as exc:
+            import skill_telemetry
+            for entry in removed_entries:
+                slug = str(entry.get("skill") or "")
+                skill_telemetry.log_event(
+                    "unload",
+                    slug,
+                    session_id,
+                    meta={"source": "skill_unload"},
+                    entity_type=str(entry.get("entity_type") or "skill"),
+                    path=events_path,
+                    trusted_root=CLAUDE_DIR,
+                )
+        except Exception as exc:  # noqa: BLE001 - event log is best-effort.
             print(f"Warning: failed to log unload events: {exc}", file=sys.stderr)
         try:
             from ctx_audit_log import log_skill_event

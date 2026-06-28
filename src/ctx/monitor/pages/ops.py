@@ -166,6 +166,7 @@ def render_status(
 ) -> str:
     """Render queue and graph/wiki artifact state for operator checks."""
     queue = status["queue"]
+    telemetry = status.get("telemetry", {})
     artifacts = status["artifacts"]
     counts = queue.get("counts", {})
     count_pills = " ".join(
@@ -231,6 +232,7 @@ def render_status(
         if queue_error
         else ""
     )
+    telemetry_html = _telemetry_card(telemetry if isinstance(telemetry, dict) else {})
     body = (
         "<h1>Status</h1>"
         "<div class='card'>"
@@ -241,6 +243,7 @@ def render_status(
         f"{queue_error_html}"
         f"<div>{count_pills}</div>"
         "</div>"
+        f"{telemetry_html}"
         "<div class='card'><strong>Recent queue jobs</strong>"
         "<table><tr><th>ID</th><th>Kind</th><th>Status</th><th>Attempts</th>"
         "<th>Source</th><th>Worker</th><th>Last error</th></tr>"
@@ -256,6 +259,61 @@ def render_status(
         + "</table></div>"
     )
     return layout("Status", body)
+
+
+def _telemetry_card(status: dict[str, Any]) -> str:
+    spool = _dict_or_empty(status.get("spool"))
+    export_status = _dict_or_empty(status.get("export_status"))
+    checkpoint = _dict_or_empty(status.get("checkpoint"))
+    latest = _dict_or_empty(spool.get("latest_event"))
+    latest_text = "none"
+    if latest:
+        latest_text = (
+            f"{html.escape(str(latest.get('event_name') or ''))} "
+            f"<span class='muted'>{html.escape(str(latest.get('outcome') or ''))} "
+            f"{html.escape(str(latest.get('ts') or ''))}</span>"
+        )
+    export_label = str(export_status.get("status") or "unknown")
+    export_error = export_status.get("error_kind") or export_status.get("error")
+    export_error_html = (
+        f"<p class='error'>Export error: {html.escape(str(export_error))}</p>"
+        if export_error
+        else ""
+    )
+    return (
+        "<div class='card'><strong>Telemetry health</strong>"
+        "<table><tr><th>Area</th><th>Status</th><th>Details</th></tr>"
+        "<tr><td>capture</td>"
+        f"<td><span class='pill'>{'enabled' if status.get('enabled') else 'disabled'}</span></td>"
+        f"<td class='muted'>mode {html.escape(str(status.get('mode') or ''))}; "
+        f"events: {int(spool.get('event_count') or 0):,}; "
+        f"malformed: {int(spool.get('malformed_records') or 0):,}; "
+        f"path {html.escape(str(spool.get('path') or ''))}</td></tr>"
+        "<tr><td>latest</td>"
+        f"<td>{latest_text}</td>"
+        f"<td class='muted'>sources: {html.escape(_compact_counts(spool.get('sources')))}</td></tr>"
+        "<tr><td>export</td>"
+        f"<td><span class='pill'>{html.escape(export_label)}</span></td>"
+        f"<td class='muted'>sink {html.escape(str(status.get('export_sink') or ''))}; "
+        f"enabled: {'yes' if status.get('export_enabled') else 'no'}; "
+        f"attempted/exported/failed: {int(export_status.get('attempted') or 0):,}/"
+        f"{int(export_status.get('exported') or 0):,}/"
+        f"{int(export_status.get('failed') or 0):,}; "
+        f"checkpoint: {'yes' if checkpoint.get('exists') else 'no'}</td></tr>"
+        "</table>"
+        f"{export_error_html}"
+        "</div>"
+    )
+
+
+def _compact_counts(value: Any) -> str:
+    if not isinstance(value, dict) or not value:
+        return "none"
+    return ", ".join(f"{key}: {value[key]}" for key in sorted(value))
+
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _artifact_detail(status: dict[str, Any]) -> str:

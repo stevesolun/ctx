@@ -30,6 +30,7 @@ import math
 import os
 import shlex
 import sys
+import time
 from dataclasses import replace
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -52,6 +53,7 @@ from ctx.adapters.generic.state import (
     new_session_id,
 )
 from ctx.adapters.generic.tools import McpRouter, McpServerConfig
+from ctx.telemetry import record_event, record_exception, telemetry_span
 
 
 _logger = logging.getLogger(__name__)
@@ -458,10 +460,143 @@ def _record_lifecycle_safely(
     **kwargs: Any,
 ) -> None:
     method = getattr(lifecycle, method_name)
+    started = time.perf_counter()
     try:
         method(**kwargs)
     except (OSError, ValueError) as exc:
         _logger.warning("ctx runtime lifecycle record failed: %s", exc)
+        _record_cli_telemetry(
+            "ctx.runtime_lifecycle.write",
+            session_id=str(kwargs.get("session_id") or "") or None,
+            phase="failed",
+            payload={"ctx.lifecycle.method": method_name},
+            outcome="error",
+            duration_ms=_duration_ms(started),
+            error_kind=type(exc).__name__,
+        )
+
+
+def _duration_ms(started: float) -> float:
+    return (time.perf_counter() - started) * 1000.0
+
+
+def _record_cli_telemetry(
+    event_name: str,
+    *,
+    session_id: str | None,
+    phase: str,
+    payload: dict[str, Any],
+    outcome: str,
+    duration_ms: float,
+    error_kind: str | None = None,
+    exc: BaseException | None = None,
+) -> None:
+    event_payload = dict(payload)
+    event_payload["ctx.run.phase"] = phase
+    event_payload["otel.status_code"] = "ERROR" if outcome == "error" else "OK"
+    if error_kind:
+        event_payload["error.type"] = error_kind
+    try:
+        if exc is not None:
+            record_exception(
+                event_name,
+                source="ctx-cli",
+                exc=exc,
+                transport="cli",
+                actor="user",
+                session_id=session_id,
+                outcome=outcome,
+                duration_ms=duration_ms,
+                error_kind=error_kind,
+                cwd=str(Path.cwd()),
+                payload=event_payload,
+            )
+        else:
+            record_event(
+                event_name,
+                source="ctx-cli",
+                transport="cli",
+                actor="user",
+                session_id=session_id,
+                outcome=outcome,
+                duration_ms=duration_ms,
+                error_kind=error_kind,
+                cwd=str(Path.cwd()),
+                payload=event_payload,
+            )
+    except Exception:  # noqa: BLE001 - telemetry must never break the CLI.
+        pass
+
+
+def _run_start_payload(
+    args: argparse.Namespace,
+    *,
+    ctx_tools_enabled: bool,
+    mcp_count: int,
+    allow_count: int,
+    deny_count: int,
+    plan_available: bool,
+) -> dict[str, Any]:
+    return {
+        "ctx.model": args.model,
+        "ctx.provider": args.provider or _model_provider_prefix(args.model),
+        "ctx.provider_prefix": _model_provider_prefix(args.model),
+        "ctx.task.length": len(str(args.task or "")),
+        "ctx.ctx_tools.enabled": ctx_tools_enabled,
+        "ctx.mcp.count": mcp_count,
+        "ctx.planner.enabled": bool(args.planner),
+        "ctx.planner.result_available": plan_available,
+        "ctx.evaluator.enabled": bool(args.evaluator),
+        "ctx.contract.enabled": bool(args.contract),
+        "ctx.budget.usd_configured": args.budget_usd is not None,
+        "ctx.budget.tokens_configured": args.budget_tokens is not None,
+        "ctx.tool_policy.allow_count": allow_count,
+        "ctx.tool_policy.deny_count": deny_count,
+    }
+
+
+def _resume_start_payload(
+    args: argparse.Namespace,
+    *,
+    model: str,
+    use_ctx_tools: bool,
+    prior_message_count: int,
+    recorded_mcp_count: int,
+    restored_mcp_count: int,
+    allow_count: int,
+    deny_count: int,
+) -> dict[str, Any]:
+    return {
+        "ctx.model": model,
+        "ctx.task.length": len(str(args.task or "")),
+        "ctx.ctx_tools.enabled": use_ctx_tools,
+        "ctx.messages.prior_count": prior_message_count,
+        "ctx.mcp.recorded_count": recorded_mcp_count,
+        "ctx.mcp.restored_count": restored_mcp_count,
+        "ctx.tool_policy.allow_count": allow_count,
+        "ctx.tool_policy.deny_count": deny_count,
+    }
+
+
+def _loop_result_payload(result: Any) -> dict[str, Any]:
+    stop_reason = str(getattr(result, "stop_reason", "error"))
+    payload: dict[str, Any] = {"ctx.stop_reason": stop_reason}
+    if result is None:
+        return payload
+    payload["ctx.iterations"] = int(getattr(result, "iterations", 0) or 0)
+    usage = getattr(result, "usage", None)
+    if usage is not None:
+        payload["ctx.usage.input_tokens"] = int(getattr(usage, "input_tokens", 0) or 0)
+        payload["ctx.usage.output_tokens"] = int(getattr(usage, "output_tokens", 0) or 0)
+        payload["ctx.usage.cost_present"] = getattr(usage, "cost_usd", None) is not None
+    return payload
+
+
+def _loop_result_outcome(result: Any) -> tuple[str, str | None]:
+    stop_reason = str(getattr(result, "stop_reason", "error"))
+    if result is None or stop_reason in _ERROR_STOP_REASONS:
+        return "error", stop_reason
+    return "ok", None
 
 
 # ── Main entry ─────────────────────────────────────────────────────────────
@@ -781,6 +916,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if profile_error:
         print(profile_error, file=sys.stderr)
         return 2
+    telemetry_started = time.perf_counter()
 
     sdir = Path(args.sessions_dir) if args.sessions_dir else default_sessions_dir()
 
@@ -903,163 +1039,209 @@ def _cmd_run(args: argparse.Namespace) -> int:
         ),
     }
     observer = JsonlObserver(store, session_metadata=metadata)
-    if ctx_tools_enabled:
-        _record_lifecycle_safely(
-            lifecycle,
-            "record_dev_event",
-            session_id=session_id,
-            event_type="task",
-            host="ctx-run",
-            cwd=str(Path.cwd()),
-            payload={
-                "task": args.task,
-                "model": args.model,
-                "provider": args.provider or _model_provider_prefix(args.model),
-            },
-        )
-
-    if not args.quiet:
-        print(f"[ctx] session {session_id}  ({store.path})", file=sys.stderr)
-        print(f"[ctx] model: {args.model}", file=sys.stderr)
-        if args.budget_usd is not None:
-            print(f"[ctx] budget: ${args.budget_usd:.2f}", file=sys.stderr)
-
-    evaluator_rounds: list[dict[str, Any]] | None = None
-    contract_artifact = None  # populated only on P/C/G/E path
-    result = None
-    try:
-        if router is not None:
-            if not args.quiet:
-                print(
-                    f"[ctx] starting MCP servers: {[c.name for c in mcp_configs]}",
-                    file=sys.stderr,
-                )
-            router.start()
-        if args.evaluator:
-            if args.contract and not args.planner:
-                # Contracts refine planner output; without a plan
-                # they'd have no prior spec to refine.
-                raise SystemExit(
-                    "error: --contract requires --planner (the contract "
-                    "refines the planner's success_criteria into "
-                    "testable clauses)."
-                )
-            if not args.quiet:
-                pieces = ["evaluator"]
-                if args.planner:
-                    pieces.insert(0, "planner")
-                if args.contract:
-                    pieces.append("contract")
-                print(
-                    f"[ctx] triad enabled: {' → '.join(pieces)} "
-                    f"(max_rounds={args.evaluator_rounds})",
-                    file=sys.stderr,
-                )
-            planner_agent = (
-                Planner(provider, model=args.planner_model or args.model)
-                if args.planner
-                else None
-            )
-            contract_builder = (
-                ContractBuilder(
-                    provider, model=args.contract_model or args.model,
-                )
-                if args.contract
-                else None
-            )
-            evaluator_agent = Evaluator(
-                provider, model=args.evaluator_model or args.model,
-            )
-            eval_outcome = run_with_evaluation(
-                provider=provider,
-                system_prompt=system_prompt,
-                task=args.task,
-                evaluator=evaluator_agent,
-                max_rounds=args.evaluator_rounds,
-                planner=planner_agent,
-                contract_builder=contract_builder,
-                router=router,
-                extra_tools=extra_tools or None,
-                tool_executor=tool_executor,
-                tool_policy=tool_policy,
-                model=args.model,
-                temperature=args.temperature,
-                max_tokens=args.max_tokens,
-                provider_timeout=args.provider_timeout,
-                max_iterations=args.max_iterations,
-                budget_usd=args.budget_usd,
-                budget_tokens=args.budget_tokens,
-                observer=observer,
-                compactor=compactor,
-            )
-            result = eval_outcome.final
-            plan_artifact = eval_outcome.plan
-            contract_artifact = eval_outcome.contract
-            # session_start metadata was snapshotted BEFORE the planner
-            # and contract ran (they live inside run_with_evaluation),
-            # so plan/contract fields on that event are null. Emit
-            # explicit events here so load_session still surfaces the
-            # refined artifacts for resume + audit.
-            if plan_artifact is not None:
-                store.write_event("plan", plan_artifact.to_dict())
-            if contract_artifact is not None:
-                store.write_event("contract", contract_artifact.to_dict())
-            evaluator_rounds = [
-                {
-                    "index": r.index,
-                    "stop_reason": r.loop_result.stop_reason,
-                    "verdict": r.evaluation.verdict,
-                    "overall_score": r.evaluation.overall_score,
-                    "summary_feedback": r.evaluation.summary_feedback,
-                    "revision_directive": r.evaluation.revision_directive,
-                    "parsed_ok": r.evaluation.parsed_ok,
-                }
-                for r in eval_outcome.rounds
-            ]
-            if not args.quiet:
-                last = eval_outcome.rounds[-1] if eval_outcome.rounds else None
-                if last is not None:
-                    print(
-                        f"[ctx] evaluator: {len(eval_outcome.rounds)} "
-                        f"round(s); final verdict = {last.evaluation.verdict}",
-                        file=sys.stderr,
-                    )
-        else:
-            result = run_loop(
-                provider=provider,
-                system_prompt=system_prompt,
-                task=args.task,
-                router=router,
-                extra_tools=extra_tools or None,
-                tool_executor=tool_executor,
-                tool_policy=tool_policy,
-                model=args.model,
-                temperature=args.temperature,
-                max_tokens=args.max_tokens,
-                provider_timeout=args.provider_timeout,
-                max_iterations=args.max_iterations,
-                budget_usd=args.budget_usd,
-                budget_tokens=args.budget_tokens,
-                observer=observer,
-                compactor=compactor,
-            )
-    finally:
+    with telemetry_span():
         if ctx_tools_enabled:
             _record_lifecycle_safely(
                 lifecycle,
-                "end_session",
+                "record_dev_event",
                 session_id=session_id,
-                status=str(getattr(result, "stop_reason", "error")),
+                event_type="task",
+                host="ctx-run",
+                cwd=str(Path.cwd()),
+                payload={
+                    "task": args.task,
+                    "model": args.model,
+                    "provider": args.provider or _model_provider_prefix(args.model),
+                },
             )
-        store.close()
-        if router is not None:
-            router.stop()
+        _record_cli_telemetry(
+            "ctx.cli.run",
+            session_id=session_id,
+            phase="started",
+            payload=_run_start_payload(
+                args,
+                ctx_tools_enabled=ctx_tools_enabled,
+                mcp_count=len(mcp_configs),
+                allow_count=len(allow_tools),
+                deny_count=len(deny_tools),
+                plan_available=plan_artifact is not None,
+            ),
+            outcome="ok",
+            duration_ms=_duration_ms(telemetry_started),
+        )
 
-    return _emit_result(
-        result, session_id,
-        as_json=args.json, quiet=args.quiet,
-        evaluator_rounds=evaluator_rounds,
-    )
+        if not args.quiet:
+            print(f"[ctx] session {session_id}  ({store.path})", file=sys.stderr)
+            print(f"[ctx] model: {args.model}", file=sys.stderr)
+            if args.budget_usd is not None:
+                print(f"[ctx] budget: ${args.budget_usd:.2f}", file=sys.stderr)
+
+        evaluator_rounds: list[dict[str, Any]] | None = None
+        contract_artifact = None  # populated only on P/C/G/E path
+        result = None
+        try:
+            if router is not None:
+                if not args.quiet:
+                    print(
+                        f"[ctx] starting MCP servers: {[c.name for c in mcp_configs]}",
+                        file=sys.stderr,
+                    )
+                router.start()
+            if args.evaluator:
+                if args.contract and not args.planner:
+                    # Contracts refine planner output; without a plan
+                    # they'd have no prior spec to refine.
+                    raise SystemExit(
+                        "error: --contract requires --planner (the contract "
+                        "refines the planner's success_criteria into "
+                        "testable clauses)."
+                    )
+                if not args.quiet:
+                    pieces = ["evaluator"]
+                    if args.planner:
+                        pieces.insert(0, "planner")
+                    if args.contract:
+                        pieces.append("contract")
+                    print(
+                        f"[ctx] triad enabled: {' → '.join(pieces)} "
+                        f"(max_rounds={args.evaluator_rounds})",
+                        file=sys.stderr,
+                    )
+                planner_agent = (
+                    Planner(provider, model=args.planner_model or args.model)
+                    if args.planner
+                    else None
+                )
+                contract_builder = (
+                    ContractBuilder(
+                        provider, model=args.contract_model or args.model,
+                    )
+                    if args.contract
+                    else None
+                )
+                evaluator_agent = Evaluator(
+                    provider, model=args.evaluator_model or args.model,
+                )
+                eval_outcome = run_with_evaluation(
+                    provider=provider,
+                    system_prompt=system_prompt,
+                    task=args.task,
+                    evaluator=evaluator_agent,
+                    max_rounds=args.evaluator_rounds,
+                    planner=planner_agent,
+                    contract_builder=contract_builder,
+                    router=router,
+                    extra_tools=extra_tools or None,
+                    tool_executor=tool_executor,
+                    tool_policy=tool_policy,
+                    model=args.model,
+                    temperature=args.temperature,
+                    max_tokens=args.max_tokens,
+                    provider_timeout=args.provider_timeout,
+                    max_iterations=args.max_iterations,
+                    budget_usd=args.budget_usd,
+                    budget_tokens=args.budget_tokens,
+                    observer=observer,
+                    compactor=compactor,
+                )
+                result = eval_outcome.final
+                plan_artifact = eval_outcome.plan
+                contract_artifact = eval_outcome.contract
+                # session_start metadata was snapshotted BEFORE the planner
+                # and contract ran (they live inside run_with_evaluation),
+                # so plan/contract fields on that event are null. Emit
+                # explicit events here so load_session still surfaces the
+                # refined artifacts for resume + audit.
+                if plan_artifact is not None:
+                    store.write_event("plan", plan_artifact.to_dict())
+                if contract_artifact is not None:
+                    store.write_event("contract", contract_artifact.to_dict())
+                evaluator_rounds = [
+                    {
+                        "index": r.index,
+                        "stop_reason": r.loop_result.stop_reason,
+                        "verdict": r.evaluation.verdict,
+                        "overall_score": r.evaluation.overall_score,
+                        "summary_feedback": r.evaluation.summary_feedback,
+                        "revision_directive": r.evaluation.revision_directive,
+                        "parsed_ok": r.evaluation.parsed_ok,
+                    }
+                    for r in eval_outcome.rounds
+                ]
+                if not args.quiet:
+                    last = eval_outcome.rounds[-1] if eval_outcome.rounds else None
+                    if last is not None:
+                        print(
+                            f"[ctx] evaluator: {len(eval_outcome.rounds)} "
+                            f"round(s); final verdict = {last.evaluation.verdict}",
+                            file=sys.stderr,
+                        )
+            else:
+                result = run_loop(
+                    provider=provider,
+                    system_prompt=system_prompt,
+                    task=args.task,
+                    router=router,
+                    extra_tools=extra_tools or None,
+                    tool_executor=tool_executor,
+                    tool_policy=tool_policy,
+                    model=args.model,
+                    temperature=args.temperature,
+                    max_tokens=args.max_tokens,
+                    provider_timeout=args.provider_timeout,
+                    max_iterations=args.max_iterations,
+                    budget_usd=args.budget_usd,
+                    budget_tokens=args.budget_tokens,
+                    observer=observer,
+                    compactor=compactor,
+                )
+        except Exception as exc:
+            failure_payload = _loop_result_payload(result)
+            failure_payload["ctx.evaluator.round_count"] = (
+                len(evaluator_rounds) if evaluator_rounds is not None else 0
+            )
+            _record_cli_telemetry(
+                "ctx.cli.run",
+                session_id=session_id,
+                phase="failed",
+                payload=failure_payload,
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind=type(exc).__name__,
+                exc=exc,
+            )
+            raise
+        finally:
+            if ctx_tools_enabled:
+                _record_lifecycle_safely(
+                    lifecycle,
+                    "end_session",
+                    session_id=session_id,
+                    status=str(getattr(result, "stop_reason", "error")),
+                )
+            store.close()
+            if router is not None:
+                router.stop()
+
+        outcome, error_kind = _loop_result_outcome(result)
+        finish_payload = _loop_result_payload(result)
+        finish_payload["ctx.evaluator.round_count"] = (
+            len(evaluator_rounds) if evaluator_rounds is not None else 0
+        )
+        _record_cli_telemetry(
+            "ctx.cli.run",
+            session_id=session_id,
+            phase="finished",
+            payload=finish_payload,
+            outcome=outcome,
+            duration_ms=_duration_ms(telemetry_started),
+            error_kind=error_kind,
+        )
+        return _emit_result(
+            result, session_id,
+            as_json=args.json, quiet=args.quiet,
+            evaluator_rounds=evaluator_rounds,
+        )
 
 
 # ── Command: resume ────────────────────────────────────────────────────────
@@ -1078,6 +1260,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     state = _load_session_for_cli(args.session_id, sdir)
     if state is None:
         return 1
+    telemetry_started = time.perf_counter()
 
     meta = state.metadata
     model = args.model or meta.get("model")
@@ -1151,88 +1334,128 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     allow_tools, deny_tools = _resume_tool_policy_patterns(args, meta)
     tool_policy = _compile_tool_policy(allow_tools, deny_tools)
 
-    if not args.quiet:
-        bits = []
-        if mcp_configs:
-            bits.append(f"{len(mcp_configs)} MCP server(s)")
-        elif recorded_mcp_configs:
-            bits.append(
-                f"{len(recorded_mcp_configs)} recorded MCP server(s) skipped"
-            )
-        if use_ctx_tools:
-            bits.append("ctx-core tools")
-        if allow_tools or deny_tools:
-            bits.append(
-                f"tool policy allow={len(allow_tools)} deny={len(deny_tools)}"
-            )
-        suffix = f" + {', '.join(bits)}" if bits else ""
-        print(
-            f"[ctx] resuming {args.session_id} "
-            f"({len(state.messages)} prior messages{suffix})",
-            file=sys.stderr,
-        )
-        if mcp_configs:
-            for cfg in mcp_configs:
-                argv = " ".join([cfg.command, *cfg.args])
-                print(
-                    f"[ctx] restoring MCP server {cfg.name}: {argv}",
-                    file=sys.stderr,
+    with telemetry_span():
+        if not args.quiet:
+            bits = []
+            if mcp_configs:
+                bits.append(f"{len(mcp_configs)} MCP server(s)")
+            elif recorded_mcp_configs:
+                bits.append(
+                    f"{len(recorded_mcp_configs)} recorded MCP server(s) skipped"
                 )
+            if use_ctx_tools:
+                bits.append("ctx-core tools")
+            if allow_tools or deny_tools:
+                bits.append(
+                    f"tool policy allow={len(allow_tools)} deny={len(deny_tools)}"
+                )
+            suffix = f" + {', '.join(bits)}" if bits else ""
+            print(
+                f"[ctx] resuming {args.session_id} "
+                f"({len(state.messages)} prior messages{suffix})",
+                file=sys.stderr,
+            )
+            if mcp_configs:
+                for cfg in mcp_configs:
+                    argv = " ".join([cfg.command, *cfg.args])
+                    print(
+                        f"[ctx] restoring MCP server {cfg.name}: {argv}",
+                        file=sys.stderr,
+                    )
 
-    if use_ctx_tools:
-        _record_lifecycle_safely(
-            lifecycle,
-            "record_dev_event",
-            session_id=args.session_id,
-            event_type="resume_task",
-            host="ctx-resume",
-            cwd=str(Path.cwd()),
-            payload={"task": args.task, "model": model},
-        )
-
-    result = None
-    try:
-        if router is not None:
-            router.start()
-        result = run_loop(
-            provider=provider,
-            system_prompt=system_prompt,
-            task=args.task,
-            messages=list(state.messages),
-            model=model,
-            observer=observer,
-            compactor=compactor,
-            router=router,
-            extra_tools=extra_tools or None,
-            tool_executor=tool_executor,
-            tool_policy=tool_policy,
-            # Resume must keep the replayed transcript first; the
-            # follow-up task is appended at the end, not shoved before
-            # the prior conversation.
-            append_task_after_messages=True,
-            # Inherit the original run's safety limits when present
-            # so the resume doesn't blow past the original ceiling.
-            max_iterations=int(meta.get("max_iterations") or 25),
-            temperature=float(meta.get("temperature") or 0.7),
-            max_tokens=meta.get("max_tokens"),
-            provider_timeout=provider_timeout,
-            budget_usd=meta.get("budget_usd"),
-            budget_tokens=meta.get("budget_tokens"),
-            initial_usage=state.usage,
-        )
-    finally:
         if use_ctx_tools:
             _record_lifecycle_safely(
                 lifecycle,
-                "end_session",
+                "record_dev_event",
                 session_id=args.session_id,
-                status=str(getattr(result, "stop_reason", "error")),
+                event_type="resume_task",
+                host="ctx-resume",
+                cwd=str(Path.cwd()),
+                payload={"task": args.task, "model": model},
             )
-        store.close()
-        if router is not None:
-            router.stop()
+        _record_cli_telemetry(
+            "ctx.cli.resume",
+            session_id=args.session_id,
+            phase="started",
+            payload=_resume_start_payload(
+                args,
+                model=str(model),
+                use_ctx_tools=use_ctx_tools,
+                prior_message_count=len(state.messages),
+                recorded_mcp_count=len(recorded_mcp_configs),
+                restored_mcp_count=len(mcp_configs),
+                allow_count=len(allow_tools),
+                deny_count=len(deny_tools),
+            ),
+            outcome="ok",
+            duration_ms=_duration_ms(telemetry_started),
+        )
 
-    return _emit_result(result, args.session_id, as_json=args.json, quiet=args.quiet)
+        result = None
+        try:
+            if router is not None:
+                router.start()
+            result = run_loop(
+                provider=provider,
+                system_prompt=system_prompt,
+                task=args.task,
+                messages=list(state.messages),
+                model=model,
+                observer=observer,
+                compactor=compactor,
+                router=router,
+                extra_tools=extra_tools or None,
+                tool_executor=tool_executor,
+                tool_policy=tool_policy,
+                # Resume must keep the replayed transcript first; the
+                # follow-up task is appended at the end, not shoved before
+                # the prior conversation.
+                append_task_after_messages=True,
+                # Inherit the original run's safety limits when present
+                # so the resume doesn't blow past the original ceiling.
+                max_iterations=int(meta.get("max_iterations") or 25),
+                temperature=float(meta.get("temperature") or 0.7),
+                max_tokens=meta.get("max_tokens"),
+                provider_timeout=provider_timeout,
+                budget_usd=meta.get("budget_usd"),
+                budget_tokens=meta.get("budget_tokens"),
+                initial_usage=state.usage,
+            )
+        except Exception as exc:
+            _record_cli_telemetry(
+                "ctx.cli.resume",
+                session_id=args.session_id,
+                phase="failed",
+                payload=_loop_result_payload(result),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind=type(exc).__name__,
+                exc=exc,
+            )
+            raise
+        finally:
+            if use_ctx_tools:
+                _record_lifecycle_safely(
+                    lifecycle,
+                    "end_session",
+                    session_id=args.session_id,
+                    status=str(getattr(result, "stop_reason", "error")),
+                )
+            store.close()
+            if router is not None:
+                router.stop()
+
+        outcome, error_kind = _loop_result_outcome(result)
+        _record_cli_telemetry(
+            "ctx.cli.resume",
+            session_id=args.session_id,
+            phase="finished",
+            payload=_loop_result_payload(result),
+            outcome=outcome,
+            duration_ms=_duration_ms(telemetry_started),
+            error_kind=error_kind,
+        )
+        return _emit_result(result, args.session_id, as_json=args.json, quiet=args.quiet)
 
 
 # ── Command: sessions ─────────────────────────────────────────────────────

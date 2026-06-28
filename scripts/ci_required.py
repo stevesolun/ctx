@@ -30,6 +30,7 @@ REQUIRED_JOBS = {
     "package-smoke",
     "similarity-integration",
     "static",
+    "telemetry-enterprise",
     "test",
     "unit-linux",
 }
@@ -75,6 +76,10 @@ def failed_required_jobs(
         event_name == "pull_request"
         and _job_output(needs, "classify", "similarity_changed") == "true"
     )
+    telemetry_changed_pr = (
+        event_name == "pull_request"
+        and _job_output(needs, "classify", "telemetry_changed") == "true"
+    )
     cheap_pr = docs_only_pr or graph_only_pr
     for name, details in sorted(needs.items()):
         result = details.get("result")
@@ -119,6 +124,13 @@ def failed_required_jobs(
             and name == "similarity-integration"
             and result == "skipped"
             and _job_output(needs, "classify", "similarity_changed") == "false"
+        ):
+            continue
+        if (
+            event_name == "pull_request"
+            and name == "telemetry-enterprise"
+            and result == "skipped"
+            and not telemetry_changed_pr
         ):
             continue
         if event_name == "pull_request" and name == "test" and result == "skipped":

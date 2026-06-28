@@ -40,6 +40,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -52,6 +53,7 @@ from ctx.core.entity_types import (
     entity_page_path,
     entity_wikilink,
 )
+from ctx.telemetry import hash_identifier, record_event, record_exception, telemetry_span
 
 
 _logger = logging.getLogger(__name__)
@@ -119,6 +121,123 @@ def _encode_response(data: Mapping[str, Any], response_format: str) -> str:
             "error": f"GCF response encoding failed: {exc}",
             "response_format": "json",
         })
+
+
+def _duration_ms(started: float) -> float:
+    return (time.perf_counter() - started) * 1000.0
+
+
+def _hash_json_value(value: object) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return hash_identifier(encoded)
+
+
+def _safe_tool_payload(local_name: str, args: Mapping[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "ctx.operation": local_name,
+        "ctx.tool.name": f"{_NAMESPACE}{local_name}",
+        "ctx.arguments.keys": sorted(str(key) for key in args),
+    }
+    for key in ("top_k", "top_n", "max_hops"):
+        value = args.get(key)
+        if isinstance(value, (int, float)):
+            payload[f"ctx.arguments.{key}"] = value
+    query = args.get("query")
+    if isinstance(query, str):
+        payload["ctx.query.hash"] = hash_identifier(query)
+        payload["ctx.query.length"] = len(query)
+    seeds = args.get("seeds")
+    if isinstance(seeds, (list, tuple)):
+        payload["ctx.seeds.count"] = len(seeds)
+        payload["ctx.seeds.hash"] = _hash_json_value(list(seeds))
+    slug = args.get("slug")
+    if isinstance(slug, str):
+        payload["ctx.slug.hash"] = hash_identifier(slug)
+    entity_type = args.get("entity_type")
+    if isinstance(entity_type, str):
+        payload["ctx.entity.type"] = entity_type
+    lifecycle_action = args.get("event_type") or args.get("trigger") or local_name
+    if local_name in _LIFECYCLE_LOCAL_NAMES:
+        payload["ctx.lifecycle.action"] = str(lifecycle_action)
+    return payload
+
+
+def _result_payload(result_json: str) -> tuple[str, str | None, dict[str, Any]]:
+    try:
+        parsed = json.loads(result_json)
+    except json.JSONDecodeError:
+        return "error", "invalid_json", {"ctx.result.has_error_payload": True}
+    if not isinstance(parsed, dict):
+        return "ok", None, {}
+    payload: dict[str, Any] = {"ctx.result.has_error_payload": "error" in parsed}
+    results = parsed.get("results")
+    if isinstance(results, list):
+        payload["ctx.result.count"] = len(results)
+    companion_harnesses = parsed.get("companion_harnesses")
+    if isinstance(companion_harnesses, list):
+        payload["ctx.companion_harness.count"] = len(companion_harnesses)
+    if parsed.get("ok") is False or "error" in parsed:
+        return "error", "structured_error", payload
+    return "ok", None, payload
+
+
+def _record_core_tool_event(
+    event_name: str,
+    *,
+    payload: dict[str, Any],
+    outcome: str,
+    duration_ms: float,
+    session_id: str | None = None,
+    error_kind: str | None = None,
+    exc: BaseException | None = None,
+) -> None:
+    payload["otel.status_code"] = "ERROR" if outcome == "error" else "OK"
+    if error_kind:
+        payload["error.type"] = error_kind
+    try:
+        if exc is not None:
+            record_exception(
+                event_name,
+                source="ctx-core",
+                exc=exc,
+                transport="ctx-core-toolbox",
+                session_id=session_id,
+                outcome=outcome,
+                duration_ms=duration_ms,
+                error_kind=error_kind,
+                payload=payload,
+            )
+        else:
+            record_event(
+                event_name,
+                source="ctx-core",
+                transport="ctx-core-toolbox",
+                session_id=session_id,
+                outcome=outcome,
+                duration_ms=duration_ms,
+                error_kind=error_kind,
+                payload=payload,
+            )
+    except Exception:  # noqa: BLE001 - telemetry must not break tool calls.
+        pass
+
+
+_CORE_EVENT_NAMES = {
+    "recommend_bundle": "ctx.core.recommend_bundle",
+    "graph_query": "ctx.core.graph_query",
+    "wiki_search": "ctx.core.wiki_search",
+    "wiki_get": "ctx.core.wiki_get",
+}
+_LIFECYCLE_LOCAL_NAMES = frozenset({
+    "observe_dev_event",
+    "load_entity",
+    "mark_entity_used",
+    "record_validation",
+    "record_escalation",
+    "unload_entity",
+    "session_end",
+    "session_state",
+})
 
 
 class CtxCoreToolbox:
@@ -315,33 +434,65 @@ class CtxCoreToolbox:
             )
         local_name = call.name[len(_NAMESPACE):]
         args = call.arguments or {}
+        started = time.perf_counter()
+        event_name = _CORE_EVENT_NAMES.get(
+            local_name,
+            "ctx.core.lifecycle" if local_name in _LIFECYCLE_LOCAL_NAMES else "ctx.core.tool_call",
+        )
+        event_payload = _safe_tool_payload(local_name, args)
+        session_id = str(args.get("session_id") or "").strip() or self._bound_session_id
 
-        if local_name == "recommend_bundle":
-            return self._dispatch_recommend(args)
-        if local_name == "graph_query":
-            return self._dispatch_graph_query(args)
-        if local_name == "wiki_search":
-            return self._dispatch_wiki_search(args)
-        if local_name == "wiki_get":
-            return self._dispatch_wiki_get(args)
-        if local_name == "observe_dev_event":
-            return self._dispatch_lifecycle(args, "observe_dev_event")
-        if local_name == "load_entity":
-            return self._dispatch_lifecycle(args, "load_entity")
-        if local_name == "mark_entity_used":
-            return self._dispatch_lifecycle(args, "mark_entity_used")
-        if local_name == "record_validation":
-            return self._dispatch_lifecycle(args, "record_validation")
-        if local_name == "record_escalation":
-            return self._dispatch_lifecycle(args, "record_escalation")
-        if local_name == "unload_entity":
-            return self._dispatch_lifecycle(args, "unload_entity")
-        if local_name == "session_end":
-            return self._dispatch_lifecycle(args, "session_end")
-        if local_name == "session_state":
-            return self._dispatch_lifecycle(args, "session_state")
+        with telemetry_span():
+            try:
+                if local_name == "recommend_bundle":
+                    result = self._dispatch_recommend(args)
+                elif local_name == "graph_query":
+                    result = self._dispatch_graph_query(args)
+                elif local_name == "wiki_search":
+                    result = self._dispatch_wiki_search(args)
+                elif local_name == "wiki_get":
+                    result = self._dispatch_wiki_get(args)
+                elif local_name == "observe_dev_event":
+                    result = self._dispatch_lifecycle(args, "observe_dev_event")
+                elif local_name == "load_entity":
+                    result = self._dispatch_lifecycle(args, "load_entity")
+                elif local_name == "mark_entity_used":
+                    result = self._dispatch_lifecycle(args, "mark_entity_used")
+                elif local_name == "record_validation":
+                    result = self._dispatch_lifecycle(args, "record_validation")
+                elif local_name == "record_escalation":
+                    result = self._dispatch_lifecycle(args, "record_escalation")
+                elif local_name == "unload_entity":
+                    result = self._dispatch_lifecycle(args, "unload_entity")
+                elif local_name == "session_end":
+                    result = self._dispatch_lifecycle(args, "session_end")
+                elif local_name == "session_state":
+                    result = self._dispatch_lifecycle(args, "session_state")
+                else:
+                    raise ValueError(f"unknown ctx-core tool {local_name!r}")
+            except Exception as exc:  # noqa: BLE001 - preserve existing propagation.
+                _record_core_tool_event(
+                    event_name,
+                    payload=event_payload,
+                    outcome="error",
+                    duration_ms=_duration_ms(started),
+                    session_id=session_id,
+                    error_kind=type(exc).__name__,
+                    exc=exc,
+                )
+                raise
 
-        raise ValueError(f"unknown ctx-core tool {local_name!r}")
+            outcome, error_kind, result_payload = _result_payload(result)
+            event_payload.update(result_payload)
+            _record_core_tool_event(
+                event_name,
+                payload=event_payload,
+                outcome=outcome,
+                duration_ms=_duration_ms(started),
+                session_id=session_id,
+                error_kind=error_kind,
+            )
+        return result
 
     def owns(self, tool_name: str) -> bool:
         """True when this toolbox is the dispatcher for the given name."""

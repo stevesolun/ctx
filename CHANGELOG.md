@@ -7,6 +7,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - No unreleased changes yet.
 
+## [1.0.20] - 2026-06-29
+
+### Added
+
+- Added enterprise OpenTelemetry-ready telemetry across API, MCP, CLI/runtime,
+  ctx-core tool, skill lifecycle, and CI classifier boundaries, with local
+  NDJSON collection plus ready-to-use OTLP export configuration.
+- Added telemetry retention, governance, collector, dashboard, alert, and
+  release-gate runbook assets so enterprise installs can operate telemetry
+  without leaking payloads by default.
+
+### Fixed
+
+- Hardened structured exception telemetry with hashed messages/stacks and
+  deterministic nested salt handling for privacy-preserving correlation.
+
 ## [1.0.19] - 2026-06-23
 
 ### Fixed
@@ -1723,6 +1739,7 @@ pass. Full test suite: **1316 passed, 2 skipped**.
 - 5 dead imports removed (`os`, `Mapping`, `timedelta` from
   `ctx_lifecycle`; `Path` from `intake_gate`, `intake_pipeline`).
 
+[1.0.20]: https://github.com/stevesolun/ctx/releases/tag/v1.0.20
 [1.0.19]: https://github.com/stevesolun/ctx/releases/tag/v1.0.19
 [1.0.18]: https://github.com/stevesolun/ctx/releases/tag/v1.0.18
 [1.0.17]: https://github.com/stevesolun/ctx/releases/tag/v1.0.17

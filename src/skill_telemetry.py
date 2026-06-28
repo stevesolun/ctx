@@ -36,11 +36,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
+from ctx.telemetry import hash_identifier
 from ctx.utils._file_lock import file_lock
+from ctx.utils._secret_scan import redact_secret_text, secret_key_like
 
 _logger = logging.getLogger(__name__)
 
+SCHEMA_VERSION = "ctx.skill_telemetry.v1"
 EVENT_TYPES = frozenset({"load", "unload", "override", "switch_away"})
+ENTITY_TYPES = frozenset({"skill", "agent", "mcp-server"})
 
 # Same policy as wiki_utils.SAFE_NAME_RE: alnum start, alnum / _ / - / .
 # inside, bounded length. Dots are allowed intentionally for names like
@@ -56,6 +60,8 @@ _ALLOWED_EVENTS_DIR = DEFAULT_EVENTS_PATH.parent.resolve()
 _TRUSTED_ROOT = DEFAULT_EVENTS_PATH.parent.resolve()
 DEFAULT_SESSION_FRACTION = 0.20
 DEFAULT_MIN_RETENTION_MIN = 20.0
+_PRIVATE_DIR_MODE = 0o700
+_PRIVATE_FILE_MODE = 0o600
 
 # Bounds on caller-supplied meta dicts. Keeps the log line small and
 # prevents inadvertent leakage of large mappings like ``os.environ``
@@ -64,6 +70,26 @@ DEFAULT_MIN_RETENTION_MIN = 20.0
 _MAX_META_KEYS = 20
 _MAX_META_VALUE_LEN = 512
 _META_SCALAR_TYPES: tuple[type, ...] = (str, int, float, bool, type(None))
+_HASHED_META_KEYS = frozenset({
+    "command",
+    "cwd",
+    "goal",
+    "input",
+    "output",
+    "path",
+    "prompt",
+    "query",
+    "raw_input",
+    "raw_prompt",
+    "repo",
+    "response",
+    "stderr",
+    "stdout",
+    "task",
+    "tool_args",
+    "tool_input",
+    "tool_output",
+})
 
 
 @dataclass(frozen=True)
@@ -76,8 +102,14 @@ class TelemetryEvent:
     session_id: str
     event_id: str
     meta: Mapping[str, Any] = field(default_factory=dict)
+    skill_hash: str | None = None
+    session_hash: str | None = None
+    entity_type: str | None = None
+    schema_version: str = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
+        if self.schema_version != SCHEMA_VERSION:
+            raise ValueError(f"unsupported telemetry schema: {self.schema_version!r}")
         if self.event not in EVENT_TYPES:
             raise ValueError(
                 f"invalid event type {self.event!r}; expected one of {sorted(EVENT_TYPES)}"
@@ -88,6 +120,12 @@ class TelemetryEvent:
             raise ValueError("session_id must be a non-empty string")
         if not isinstance(self.event_id, str) or not self.event_id:
             raise ValueError("event_id must be a non-empty string")
+        if self.skill_hash is not None and not str(self.skill_hash).startswith("sha256:"):
+            raise ValueError("skill_hash must be a sha256 identifier")
+        if self.session_hash is not None and not str(self.session_hash).startswith("sha256:"):
+            raise ValueError("session_hash must be a sha256 identifier")
+        if self.entity_type is not None and self.entity_type not in ENTITY_TYPES:
+            raise ValueError(f"entity_type must be one of: {sorted(ENTITY_TYPES)}")
         # timestamp must parse as ISO-8601 so downstream readers don't choke
         try:
             datetime.fromisoformat(self.timestamp)
@@ -128,6 +166,51 @@ def _validate_meta(meta: Mapping[str, Any]) -> None:
             raise ValueError(
                 f"meta value for {k!r} exceeds {_MAX_META_VALUE_LEN} chars"
             )
+
+
+def _sanitize_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
+    """Return bounded metadata without raw secrets, prompts, paths, or command text."""
+
+    safe: dict[str, Any] = {}
+    for key, value in meta.items():
+        if not isinstance(value, str):
+            safe[key] = value
+            continue
+        normalized_key = key.lower()
+        if secret_key_like(key):
+            safe[key] = "[redacted]"
+            continue
+        if normalized_key in _HASHED_META_KEYS:
+            safe[f"{key}_hash"] = hash_identifier(value)
+            continue
+        redacted = redact_secret_text(value)
+        if redacted != value:
+            safe[key] = redacted
+            continue
+        safe[key] = value
+    return safe
+
+
+def ensure_private_events_file(path: Path) -> None:
+    """Create or tighten the legacy local event file to owner read/write only."""
+
+    path.parent.mkdir(parents=True, exist_ok=True, mode=_PRIVATE_DIR_MODE)
+    try:
+        os.chmod(path.parent, _PRIVATE_DIR_MODE)
+    except OSError:
+        pass
+    if path.exists():
+        try:
+            os.chmod(path, _PRIVATE_FILE_MODE)
+        except OSError:
+            pass
+        return
+    fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, _PRIVATE_FILE_MODE)
+    os.close(fd)
+    try:
+        os.chmod(path, _PRIVATE_FILE_MODE)
+    except OSError:
+        pass
 
 
 def _resolve_events_path(
@@ -171,6 +254,7 @@ def log_event(
     session_id: str,
     *,
     meta: Mapping[str, Any] | None = None,
+    entity_type: str | None = None,
     path: Path | None = None,
     trusted_root: Path = _TRUSTED_ROOT,
 ) -> TelemetryEvent:
@@ -183,10 +267,11 @@ def log_event(
     write to ``tmp_path`` should pass ``trusted_root=tmp_path``.
     """
     target = _resolve_events_path(path, trusted_root=trusted_root)
-    target.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_events_file(target)
 
-    safe_meta: dict[str, Any] = dict(meta or {})
+    safe_meta = _sanitize_meta(dict(meta or {}))
     _validate_meta(safe_meta)
+    resolved_entity_type = entity_type or "skill"
 
     record = TelemetryEvent(
         event=event,
@@ -195,6 +280,9 @@ def log_event(
         session_id=session_id,
         event_id=_new_event_id(),
         meta=safe_meta,
+        skill_hash=hash_identifier(skill),
+        session_hash=hash_identifier(session_id),
+        entity_type=resolved_entity_type,
     )
     line = json.dumps(asdict(record), ensure_ascii=False, sort_keys=True) + "\n"
 
@@ -240,6 +328,12 @@ def read_events(
                     session_id=obj["session_id"],
                     event_id=obj["event_id"],
                     meta=obj.get("meta", {}),
+                    skill_hash=obj.get("skill_hash") or hash_identifier(str(obj["skill"])),
+                    session_hash=obj.get("session_hash") or hash_identifier(
+                        str(obj["session_id"])
+                    ),
+                    entity_type=obj.get("entity_type"),
+                    schema_version=obj.get("schema_version", SCHEMA_VERSION),
                 )
             except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
                 msg = (

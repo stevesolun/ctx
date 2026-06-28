@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Mapping
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from ctx.core.wiki import wiki_queue
+from ctx.telemetry import DEFAULT_PRIVACY_MODE, DEFAULT_TELEMETRY_PATH, TelemetryEvent
 
 
 def queue_job_summary(job: wiki_queue.QueueJob) -> dict[str, Any]:
@@ -261,6 +265,128 @@ def graph_stats_file_status(path: Path) -> dict[str, Any]:
     return status
 
 
+def telemetry_status(config: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Return read-only local telemetry health for operator status pages."""
+    raw = config if config is not None else _telemetry_config()
+    export = _mapping_or_empty(raw.get("export"))
+    spool_path = _configured_path(raw.get("path"), DEFAULT_TELEMETRY_PATH)
+    checkpoint_path = _configured_path(
+        export.get("checkpoint_path"),
+        Path(str(spool_path) + ".export-checkpoint.json"),
+    )
+    status_path = _configured_path(
+        export.get("status_path"),
+        Path(str(spool_path) + ".export-status.json"),
+    )
+    return {
+        "enabled": bool(raw.get("enabled", True)),
+        "mode": str(raw.get("mode", DEFAULT_PRIVACY_MODE)),
+        "export_enabled": bool(export.get("enabled", False)),
+        "export_sink": str(export.get("sink", "otlp_http")),
+        "spool": telemetry_spool_status(spool_path),
+        "checkpoint": file_status(checkpoint_path),
+        "export_status": telemetry_export_status(status_path),
+    }
+
+
+def telemetry_spool_status(path: Path) -> dict[str, Any]:
+    status = file_status(path)
+    status.update({
+        "event_count": 0,
+        "malformed_records": 0,
+        "outcomes": {},
+        "sources": {},
+        "latest_event": None,
+    })
+    if not status.get("exists"):
+        return status
+    outcomes: Counter[str] = Counter()
+    sources: Counter[str] = Counter()
+    latest: TelemetryEvent | None = None
+    try:
+        with path.open(encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    event = TelemetryEvent(**json.loads(line))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    status["malformed_records"] += 1
+                    continue
+                status["event_count"] += 1
+                outcomes[event.outcome] += 1
+                sources[event.source] += 1
+                if latest is None or event.ts > latest.ts:
+                    latest = event
+    except OSError as exc:
+        status["error"] = str(exc)
+        return status
+    status["outcomes"] = dict(sorted(outcomes.items()))
+    status["sources"] = dict(sources.most_common(5))
+    if latest is not None:
+        status["latest_event"] = {
+            "ts": latest.ts,
+            "event_name": latest.event_name,
+            "source": latest.source,
+            "outcome": latest.outcome,
+        }
+    return status
+
+
+def telemetry_export_status(path: Path) -> dict[str, Any]:
+    status = file_status(path)
+    if not status.get("exists"):
+        status["status"] = "never_exported"
+        return status
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        status.update({"status": "unreadable", "error": str(exc)})
+        return status
+    if not isinstance(payload, dict):
+        status.update({"status": "unreadable", "error": "status file is not an object"})
+        return status
+    for key in (
+        "schema_version",
+        "status",
+        "sink",
+        "destination_hash",
+        "attempted",
+        "exported",
+        "failed",
+        "error_kind",
+        "checkpoint_advanced",
+        "malformed_records",
+        "malformed_pending_records",
+        "updated_at",
+        "finished_at",
+        "last_success_at",
+    ):
+        if key in payload:
+            status[key] = payload[key]
+    return status
+
+
+def _telemetry_config() -> Mapping[str, Any]:
+    try:
+        from ctx_config import cfg  # noqa: PLC0415
+
+        raw = cfg.get("telemetry", {})
+    except Exception:  # noqa: BLE001 - status rendering must stay best-effort.
+        return {}
+    return raw if isinstance(raw, Mapping) else {}
+
+
+def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _configured_path(value: Any, default: Path) -> Path:
+    raw = str(value or default)
+    return Path(os.path.expandvars(os.path.expanduser(raw)))
+
+
 def promotion_status(path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -354,6 +480,7 @@ def status_payload(
 ) -> dict[str, Any]:
     return {
         "queue": queue_status(wiki_dir),
+        "telemetry": telemetry_status(),
         "artifacts": artifact_status(
             wiki_dir=wiki_dir,
             claude_dir=claude_dir,

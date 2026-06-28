@@ -392,6 +392,38 @@ jobs:
             echo "help smoke: $cmd"
             "$cmd" --help >/dev/null
           done < ctx-console-help.txt
+          echo "Telemetry release smoke"
+          export HOME="$PWD/.telemetry-home"
+          export CTX_TELEMETRY_HASH_SALT="release-smoke-salt"
+          mkdir -p "$HOME"
+          python - <<'PY'
+          from ctx.telemetry import record_counter, record_event
+
+          record_event(
+              "ctx.release.smoke",
+              source="publish-workflow",
+              payload={"query": "raw-release-telemetry-sentinel"},
+          )
+          record_counter(
+              "ctx.release.smoke",
+              attributes={"query": "raw-release-telemetry-sentinel"},
+          )
+          PY
+          ctx-telemetry-export --dry-run --json
+          ctx-telemetry-export \
+            --sink local_jsonl \
+            --output telemetry-events.jsonl \
+            --json
+          ctx-telemetry-export \
+            --signal metrics \
+            --sink local_jsonl \
+            --output telemetry-metrics.jsonl \
+            --json
+          ctx-telemetry-retention plan --signal all --json
+          if grep -R "raw-release-telemetry-sentinel" telemetry-events.jsonl telemetry-metrics.jsonl; then
+            echo "raw telemetry sentinel leaked into exported telemetry" >&2
+            exit 1
+          fi
           python -m pip install "${wheel}[harness]"
           python - <<'PY'
           import litellm

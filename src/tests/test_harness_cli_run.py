@@ -28,7 +28,9 @@ from typing import Any
 
 import pytest
 
+import ctx.adapters.generic.runtime_lifecycle as runtime_lifecycle
 import ctx.cli.run as run_cli
+import ctx.telemetry as telemetry
 from ctx.cli.run import (
     _apply_mcp_env_overlays,
     _compile_tool_policy,
@@ -39,6 +41,7 @@ from ctx.cli.run import (
     main,
 )
 from ctx.adapters.generic.providers import ToolCall, Usage
+from ctx.telemetry import read_events, record_event as real_record_event
 
 
 # ── Fixture: fake litellm so --provider ollama (no key) works ───────────────
@@ -91,6 +94,28 @@ def _tool_call_completion(name: str) -> dict[str, Any]:
         ],
         "usage": {"prompt_tokens": 5, "completion_tokens": 1},
     }
+
+
+def _enable_real_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Path:
+    path = tmp_path / "telemetry" / "events.jsonl"
+    config = {
+        "enabled": True,
+        "mode": "local_redacted",
+        "path": str(path),
+        "export": {"enabled": False},
+    }
+
+    def config_get(key: str, default: Any) -> Any:
+        return config if key == "telemetry" else default
+
+    monkeypatch.setattr(telemetry, "_config_get", config_get)
+    monkeypatch.setattr(telemetry, "record_event", real_record_event)
+    monkeypatch.setattr(run_cli, "record_event", real_record_event)
+    monkeypatch.setattr(runtime_lifecycle, "record_event", real_record_event)
+    return path
 
 
 # ── _model_provider_prefix ─────────────────────────────────────────────────
@@ -751,6 +776,12 @@ class TestRunCommand:
         capsys: pytest.CaptureFixture[str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        telemetry_events: list[dict[str, Any]] = []
+
+        def capture_record_event(event_name: str, **kwargs: Any) -> None:
+            telemetry_events.append({"event_name": event_name, **kwargs})
+
+        monkeypatch.setattr(run_cli, "record_event", capture_record_event)
         lifecycle_dir = tmp_path / "runtime"
         monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_dir))
         exit_code = main(
@@ -777,13 +808,125 @@ class TestRunCommand:
             "session_end",
         ]
         assert events[0]["session_id"] == "lifecycle-run"
-        assert events[0]["payload"]["task"] == "hi"
+        assert "task" not in events[0]["payload"]
+        assert events[0]["payload"]["task_hash"].startswith("sha256:")
+        assert "hi" not in json.dumps(events[0])
+        cli_events = [
+            event for event in telemetry_events
+            if event["event_name"] == "ctx.cli.run"
+        ]
+        assert [event["payload"]["ctx.run.phase"] for event in cli_events] == [
+            "started",
+            "finished",
+        ]
+        assert cli_events[0]["payload"]["ctx.task.length"] == len("hi")
+        assert cli_events[-1]["payload"]["ctx.stop_reason"] == "completed"
+        assert "hi" not in json.dumps([event["payload"] for event in cli_events])
         tool = next(
             item for item in fake_litellm._calls[0]["tools"]
             if item["function"]["name"] == "ctx__load_entity"
         )
         assert "session_id" not in tool["function"]["parameters"]["properties"]
         assert "session_id" not in tool["function"]["parameters"]["required"]
+
+    def test_run_telemetry_correlates_cli_and_runtime_lifecycle(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        telemetry_path = _enable_real_telemetry(monkeypatch, tmp_path)
+        lifecycle_dir = tmp_path / "runtime"
+        monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_dir))
+
+        exit_code = main(
+            [
+                "run",
+                "--model", "ollama/x",
+                "--task", "hi",
+                "--sessions-dir", str(tmp_path / "sessions"),
+                "--session-id", "trace-run",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        capsys.readouterr()
+        events = list(read_events(telemetry_path, trusted_root=tmp_path))
+        cli_events = [event for event in events if event.event_name == "ctx.cli.run"]
+        lifecycle_events = [
+            event for event in events
+            if event.event_name == "ctx.runtime_lifecycle.record"
+        ]
+
+        assert [event.payload["ctx.run.phase"] for event in cli_events] == [
+            "started",
+            "finished",
+        ]
+        assert [event.payload["ctx.lifecycle.action"] for event in lifecycle_events] == [
+            "dev_event",
+            "session_end",
+        ]
+        assert cli_events[0].trace_id is not None
+        assert cli_events[0].span_id is not None
+        assert cli_events[1].trace_id == cli_events[0].trace_id
+        assert cli_events[1].span_id == cli_events[0].span_id
+        assert all(event.trace_id == cli_events[0].trace_id for event in lifecycle_events)
+        assert all(event.parent_span_id == cli_events[0].span_id for event in lifecycle_events)
+        assert {event.span_id for event in lifecycle_events}.isdisjoint(
+            {cli_events[0].span_id}
+        )
+        assert "hi" not in telemetry_path.read_text(encoding="utf-8")
+
+    def test_run_exception_telemetry_hashes_provider_error(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        telemetry_path = _enable_real_telemetry(monkeypatch, tmp_path)
+
+        def fail_run_loop(*_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError(
+                "private provider failure for /Users/example/private-repo"
+            )
+
+        monkeypatch.setattr(run_cli, "run_loop", fail_run_loop)
+
+        with pytest.raises(RuntimeError):
+            main(
+                [
+                    "run",
+                    "--model", "ollama/x",
+                    "--task", "private run task",
+                    "--sessions-dir", str(tmp_path / "sessions"),
+                    "--session-id", "trace-run-error",
+                    "--no-ctx-tools",
+                    "--quiet",
+                ]
+            )
+
+        capsys.readouterr()
+        events = [
+            event for event in read_events(telemetry_path, trusted_root=tmp_path)
+            if event.event_name == "ctx.cli.run"
+        ]
+        assert [event.payload["ctx.run.phase"] for event in events] == [
+            "started",
+            "failed",
+        ]
+        failed = events[-1]
+        assert failed.outcome == "error"
+        assert failed.error_kind == "RuntimeError"
+        assert failed.payload["ctx.exception.message_hash"].startswith("sha256:")
+        assert failed.payload["ctx.exception.stack_hash"].startswith("sha256:")
+        assert failed.payload["ctx.exception.escaped"] is True
+        raw = telemetry_path.read_text(encoding="utf-8")
+        assert "private provider failure" not in raw
+        assert "/Users/example/private-repo" not in raw
+        assert "private run task" not in raw
 
 
 # ── Subcommand: sessions ──────────────────────────────────────────────────
@@ -973,6 +1116,12 @@ class TestResumeCommand:
         capsys: pytest.CaptureFixture[str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        telemetry_events: list[dict[str, Any]] = []
+
+        def capture_record_event(event_name: str, **kwargs: Any) -> None:
+            telemetry_events.append({"event_name": event_name, **kwargs})
+
+        monkeypatch.setattr(run_cli, "record_event", capture_record_event)
         lifecycle_dir = tmp_path / "runtime"
         monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_dir))
         sessions_dir = tmp_path / "sessions"
@@ -1011,7 +1160,23 @@ class TestResumeCommand:
             "session_end",
         ]
         assert events[2]["event_type"] == "resume_task"
-        assert events[2]["payload"]["task"] == "follow-up"
+        assert "task" not in events[2]["payload"]
+        assert events[2]["payload"]["task_hash"].startswith("sha256:")
+        assert "follow-up" not in json.dumps(events[2])
+        resume_events = [
+            event for event in telemetry_events
+            if event["event_name"] == "ctx.cli.resume"
+        ]
+        assert [event["payload"]["ctx.run.phase"] for event in resume_events] == [
+            "started",
+            "finished",
+        ]
+        assert resume_events[0]["payload"]["ctx.messages.prior_count"] > 0
+        assert resume_events[0]["payload"]["ctx.task.length"] == len("follow-up")
+        assert resume_events[-1]["payload"]["ctx.stop_reason"] == "completed"
+        assert "follow-up" not in json.dumps(
+            [event["payload"] for event in resume_events]
+        )
         resume_call = fake_litellm._calls[-1]
         tool = next(
             item for item in resume_call["tools"]
@@ -1019,6 +1184,160 @@ class TestResumeCommand:
         )
         assert "session_id" not in tool["function"]["parameters"]["properties"]
         assert "session_id" not in tool["function"]["parameters"]["required"]
+
+    def test_resume_telemetry_correlates_cli_and_runtime_lifecycle(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        telemetry_path = _enable_real_telemetry(monkeypatch, tmp_path)
+        lifecycle_dir = tmp_path / "runtime"
+        monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_dir))
+        sessions_dir = tmp_path / "sessions"
+        main(
+            [
+                "run",
+                "--model", "ollama/x",
+                "--task", "first",
+                "--sessions-dir", str(sessions_dir),
+                "--session-id", "trace-resume",
+                "--quiet",
+            ]
+        )
+        capsys.readouterr()
+
+        exit_code = main(
+            [
+                "resume", "trace-resume",
+                "--task", "follow-up",
+                "--sessions-dir", str(sessions_dir),
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        capsys.readouterr()
+        events = list(read_events(telemetry_path, trusted_root=tmp_path))
+        run_cli_events = [event for event in events if event.event_name == "ctx.cli.run"]
+        resume_cli_events = [
+            event for event in events if event.event_name == "ctx.cli.resume"
+        ]
+        lifecycle_events = [
+            event for event in events
+            if event.event_name == "ctx.runtime_lifecycle.record"
+        ]
+        resume_trace_id = resume_cli_events[0].trace_id
+        resume_span_id = resume_cli_events[0].span_id
+        resume_lifecycle_events = [
+            event for event in lifecycle_events
+            if event.trace_id == resume_trace_id
+        ]
+
+        assert [event.payload["ctx.run.phase"] for event in resume_cli_events] == [
+            "started",
+            "finished",
+        ]
+        assert [event.payload["ctx.lifecycle.action"] for event in resume_lifecycle_events] == [
+            "dev_event",
+            "session_end",
+        ]
+        assert resume_trace_id is not None
+        assert resume_span_id is not None
+        assert resume_cli_events[1].trace_id == resume_trace_id
+        assert resume_cli_events[1].span_id == resume_span_id
+        assert run_cli_events[0].trace_id != resume_trace_id
+        assert all(event.parent_span_id == resume_span_id for event in resume_lifecycle_events)
+        assert "follow-up" not in telemetry_path.read_text(encoding="utf-8")
+
+    def test_resume_exception_telemetry_hashes_provider_error(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        telemetry_path = _enable_real_telemetry(monkeypatch, tmp_path)
+        sessions_dir = tmp_path / "sessions"
+        main(
+            [
+                "run",
+                "--model", "ollama/x",
+                "--task", "first",
+                "--sessions-dir", str(sessions_dir),
+                "--session-id", "trace-resume-error",
+                "--no-ctx-tools",
+                "--quiet",
+            ]
+        )
+        capsys.readouterr()
+
+        def fail_run_loop(*_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError(
+                "private resume provider failure for /Users/example/private-repo"
+            )
+
+        monkeypatch.setattr(run_cli, "run_loop", fail_run_loop)
+
+        with pytest.raises(RuntimeError):
+            main(
+                [
+                    "resume",
+                    "trace-resume-error",
+                    "--task", "private resume task",
+                    "--sessions-dir", str(sessions_dir),
+                    "--quiet",
+                ]
+            )
+
+        capsys.readouterr()
+        events = [
+            event for event in read_events(telemetry_path, trusted_root=tmp_path)
+            if event.event_name == "ctx.cli.resume"
+        ]
+        assert [event.payload["ctx.run.phase"] for event in events] == [
+            "started",
+            "failed",
+        ]
+        failed = events[-1]
+        assert failed.outcome == "error"
+        assert failed.error_kind == "RuntimeError"
+        assert failed.payload["ctx.exception.message_hash"].startswith("sha256:")
+        assert failed.payload["ctx.exception.stack_hash"].startswith("sha256:")
+        assert failed.payload["ctx.exception.escaped"] is True
+        raw = telemetry_path.read_text(encoding="utf-8")
+        assert "private resume provider failure" not in raw
+        assert "/Users/example/private-repo" not in raw
+        assert "private resume task" not in raw
+
+    def test_runtime_lifecycle_respects_telemetry_disabled(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.runtime_lifecycle as runtime_lifecycle
+
+        lifecycle_dir = tmp_path / "runtime"
+        monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_dir))
+        monkeypatch.setattr(runtime_lifecycle, "telemetry_enabled", lambda: False)
+
+        exit_code = main(
+            [
+                "run",
+                "--model", "ollama/x",
+                "--task", "private task",
+                "--sessions-dir", str(tmp_path / "sessions"),
+                "--session-id", "lifecycle-disabled",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        capsys.readouterr()
+        assert not (lifecycle_dir / "events.jsonl").exists()
 
     def test_resume_reuses_recorded_provider_settings(
         self,
