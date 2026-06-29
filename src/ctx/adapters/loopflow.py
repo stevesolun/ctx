@@ -48,7 +48,7 @@ def _split_csv(values: list[str] | None) -> list[str]:
 
 
 def _parse_permissions(values: list[str] | None) -> set[str]:
-    raw = _split_csv(values) or ["skills", "agents", "mcps"]
+    raw = _split_csv(values) if values is not None else ["skills", "agents", "mcps"]
     permissions: set[str] = set()
     for value in raw:
         normalized = _PERMISSION_ALIASES.get(value.strip().lower())
@@ -248,6 +248,7 @@ def recommend_for_loop(
         use_skills = "use skills: ctx-recommend"
         if skill_names:
             use_skills += ", " + ", ".join(str(name) for name in skill_names)
+    use_tools = 'use tools from the "ctx" server' if "mcps" in granted else None
 
     return {
         "version": "ctx.loop_adapter.v1",
@@ -273,7 +274,7 @@ def recommend_for_loop(
         },
         "capabilities": capability_bundle,
         "loopflow": {
-            "use_tools": 'use tools from the "ctx" server',
+            "use_tools": use_tools,
             "use_skills": use_skills,
             "before_plan": "Call python -m ctx.adapters.loopflow before planning and inject this JSON as read-only context.",
             "harness_rule": "Only load harnesses when the loop runs on a user-owned/API/local LLM.",

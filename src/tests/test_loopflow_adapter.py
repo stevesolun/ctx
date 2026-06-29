@@ -92,6 +92,7 @@ def test_empty_permissions_stay_empty(monkeypatch) -> None:
         "mcps": [],
         "harnesses": [],
     }
+    assert payload["loopflow"]["use_tools"] is None
     assert payload["loopflow"]["use_skills"] is None
 
 
@@ -112,7 +113,31 @@ def test_loopflow_skill_hint_requires_skills_permission(monkeypatch) -> None:
     assert payload["permissions"]["skills"] is False
     assert payload["capabilities"]["skills"] == []
     assert [row["name"] for row in payload["capabilities"]["mcps"]] == ["filesystem"]
+    assert payload["loopflow"]["use_tools"] == 'use tools from the "ctx" server'
     assert payload["loopflow"]["use_skills"] is None
+
+
+def test_loopflow_tool_hint_requires_mcps_permission(monkeypatch) -> None:
+    def fake_recommend_bundle(query: str, *, top_k: int) -> list[dict[str, Any]]:
+        return [
+            {"name": "security-review", "type": "skill"},
+            {"name": "filesystem", "type": "mcp-server"},
+        ]
+
+    monkeypatch.setattr(loopflow, "recommend_bundle", fake_recommend_bundle)
+
+    payload = loopflow.recommend_for_loop(
+        goal="recommend only skills",
+        permissions={"skills"},
+    )
+
+    assert payload["permissions"]["mcps"] is False
+    assert [row["name"] for row in payload["capabilities"]["skills"]] == [
+        "security-review"
+    ]
+    assert payload["capabilities"]["mcps"] == []
+    assert payload["loopflow"]["use_tools"] is None
+    assert payload["loopflow"]["use_skills"].startswith("use skills: ctx-recommend")
 
 
 def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
@@ -231,3 +256,40 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
     assert "python -m ctx.adapters.loopflow" in payload["loopflow"]["before_plan"]
     assert payload["loopflow"]["use_tools"] == 'use tools from the "ctx" server'
     assert payload["loopflow"]["use_skills"].startswith("use skills: ctx-recommend")
+
+
+def test_main_empty_permissions_fail_closed(monkeypatch, capsys) -> None:
+    def fail_recommend_bundle(query: str, *, top_k: int) -> list[dict[str, Any]]:
+        raise AssertionError("recommend_bundle should not run without grants")
+
+    monkeypatch.setattr(loopflow, "recommend_bundle", fail_recommend_bundle)
+    monkeypatch.setattr(loopflow, "recommend_harnesses", lambda *args, **kwargs: [])
+
+    assert (
+        loopflow.main(
+            [
+                "--goal",
+                "deny all recommendations",
+                "--permissions",
+                "",
+                "--compact",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["permissions"] == {
+        "skills": False,
+        "agents": False,
+        "mcps": False,
+        "harnesses": False,
+    }
+    assert payload["capabilities"] == {
+        "skills": [],
+        "agents": [],
+        "mcps": [],
+        "harnesses": [],
+    }
+    assert payload["loopflow"]["use_tools"] is None
+    assert payload["loopflow"]["use_skills"] is None
