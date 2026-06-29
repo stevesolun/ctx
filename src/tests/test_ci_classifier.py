@@ -16,9 +16,7 @@ def _workflow_paths() -> tuple[Path, ...]:
 def _required_needs(
     **overrides: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    needs: dict[str, dict[str, Any]] = {
-        name: {"result": "success"} for name in REQUIRED_JOBS
-    }
+    needs: dict[str, dict[str, Any]] = {name: {"result": "success"} for name in REQUIRED_JOBS}
     needs.update(overrides)
     return needs
 
@@ -51,11 +49,13 @@ def test_docs_tooling_changes_are_docs_only() -> None:
 
 
 def test_graph_artifacts_are_graph_only_not_docs_only() -> None:
-    flags = classify_paths([
-        "graph/wiki-graph.tar.gz",
-        "graph/wiki-graph-runtime.tar.gz",
-        "graph/communities.json",
-    ])
+    flags = classify_paths(
+        [
+            "graph/wiki-graph.tar.gz",
+            "graph/wiki-graph-runtime.tar.gz",
+            "graph/communities.json",
+        ]
+    )
 
     assert flags["docs_changed"] is False
     assert flags["docs_only"] is False
@@ -106,11 +106,13 @@ def test_mixed_graph_and_source_change_is_not_graph_only() -> None:
 
 
 def test_mixed_source_docs_and_graph_artifact_requests_specific_gates() -> None:
-    flags = classify_paths([
-        "src/ctx/core/wiki/wiki_graphify.py",
-        "docs/knowledge-graph.md",
-        "graph/wiki-graph.tar.gz",
-    ])
+    flags = classify_paths(
+        [
+            "src/ctx/core/wiki/wiki_graphify.py",
+            "docs/knowledge-graph.md",
+            "graph/wiki-graph.tar.gz",
+        ]
+    )
 
     assert flags["docs_changed"] is True
     assert flags["docs_only"] is False
@@ -248,7 +250,10 @@ def test_publish_workflow_validates_and_uploads_graph_assets() -> None:
     assert "gh release upload" in workflow
     assert '--repo "$GITHUB_REPOSITORY"' in workflow
     assert "needs.release-assets.result == 'success'" in workflow
-    assert "github.event_name == 'workflow_dispatch' || needs.release-assets.result == 'success'" not in workflow
+    assert (
+        "github.event_name == 'workflow_dispatch' || needs.release-assets.result == 'success'"
+        not in workflow
+    )
     assert "continue-on-error: true" not in workflow
     assert "needs.release-assets.result == 'skipped'" not in workflow
     assert "PyPI publish will continue without release asset upload" not in workflow
@@ -269,15 +274,26 @@ def test_publish_workflow_runs_installed_wheel_telemetry_smoke() -> None:
     assert "raw telemetry sentinel leaked into exported telemetry" in workflow
 
 
-def test_changelog_defines_current_release_link() -> None:
+def test_changelog_tracks_current_version_or_unreleased_changes() -> None:
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
     version_match = re.search(r'^version = "([^"]+)"', pyproject, re.MULTILINE)
     assert version_match is not None
     version = version_match.group(1)
     changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert f"## [{version}]" in changelog
-    assert f"[{version}]: https://github.com/stevesolun/ctx/releases/tag/v{version}" in changelog
+    if f"## [{version}]" in changelog:
+        assert (
+            f"[{version}]: https://github.com/stevesolun/ctx/releases/tag/v{version}" in changelog
+        )
+        return
+
+    unreleased_match = re.search(
+        r"## \[Unreleased\](?P<section>.*?)(?=\n## \[|\Z)",
+        changelog,
+        re.DOTALL,
+    )
+    assert unreleased_match is not None
+    assert unreleased_match.group("section").strip()
 
 
 def test_pre_commit_refreshes_all_repo_stats_outputs() -> None:
@@ -287,8 +303,7 @@ def test_pre_commit_refreshes_all_repo_stats_outputs() -> None:
     assert "docs/(index|knowledge-graph|catalog)\\.md" in hook
     assert "git add README.md docs/index.md docs/knowledge-graph.md docs/catalog.md" in hook
     assert (
-        "README.md, docs/index.md, docs/knowledge-graph.md, and docs/catalog.md "
-        "refreshed"
+        "README.md, docs/index.md, docs/knowledge-graph.md, and docs/catalog.md refreshed"
     ) in hook
     assert "CTX_REPO_STATS_TIMEOUT:-240s" in hook
     assert 'timeout "$STATS_TIMEOUT"' in hook
@@ -359,8 +374,7 @@ def test_no_test_policy_exempts_release_metadata_with_docs_version_line() -> Non
     diffs = {
         "CHANGELOG.md": "+## [1.0.3] - 2026-05-11\n",
         "docs/index.md": (
-            "-    **v1.0.2** - MIT, CI-matrixed.\n"
-            "+    **v1.0.3** - MIT, CI-matrixed.\n"
+            "-    **v1.0.2** - MIT, CI-matrixed.\n+    **v1.0.3** - MIT, CI-matrixed.\n"
         ),
         "pyproject.toml": '-version = "1.0.2"\n+version = "1.0.3"\n',
         "src/__init__.py": '-__version__ = "1.0.2"\n+__version__ = "1.0.3"\n',

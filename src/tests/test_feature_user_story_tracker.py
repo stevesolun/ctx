@@ -14,6 +14,7 @@ sys.path.insert(0, str(repo_root / "src"))
 import ctx  # noqa: E402
 import ctx.api as ctx_api  # noqa: E402
 from ctx.monitor import routes as monitor_routes  # noqa: E402
+from scripts.ci_preflight import select_checks  # noqa: E402
 
 TRACKER = repo_root / "docs" / "qa" / "feature-user-story-status.csv"
 DASHBOARD_TRACKER = repo_root / "docs" / "qa" / "dashboard-user-story-status.csv"
@@ -86,6 +87,14 @@ def _mkdocs_nav_markdown_paths() -> list[str]:
     return list(dict.fromkeys(f"{docs_dir}/{path}" for path in _nav_markdown_paths(nav)))
 
 
+def _relative_file_paths(root: Path, pattern: str) -> list[str]:
+    return [
+        path.relative_to(repo_root).as_posix()
+        for path in sorted(root.glob(pattern))
+        if path.is_file()
+    ]
+
+
 def test_feature_user_story_tracker_has_no_empty_core_fields() -> None:
     rows = _tracker_rows()
     assert rows
@@ -132,7 +141,7 @@ def test_feature_user_story_tracker_covers_monitor_route_inventory() -> None:
     route_patterns.extend(sorted(monitor_routes.GET_API_ROUTES))
     route_patterns.extend(monitor_routes.GET_API_PATTERNS)
     route_patterns.extend(sorted(monitor_routes.POST_API_ROUTES))
-    route_patterns.extend(("/session/<session_id>", "/skill/<slug>"))
+    route_patterns.extend(("/session/<session_id>", "/skill/<slug>", "/wiki/<slug>"))
     route_patterns = list(dict.fromkeys(route_patterns))
     tracker = _tracker_text()
 
@@ -141,16 +150,15 @@ def test_feature_user_story_tracker_covers_monitor_route_inventory() -> None:
 
 
 def test_feature_user_story_tracker_covers_distribution_workflows() -> None:
-    workflows = (
-        ".github/workflows/test.yml",
-        ".github/workflows/docs.yml",
-        ".github/workflows/huggingface-sync.yml",
-        ".github/workflows/publish.yml",
-        ".github/workflows/clean-host-contract.yml",
-        ".github/workflows/xdist-experiment.yml",
+    workflow_dir = repo_root / ".github" / "workflows"
+    workflows = sorted(
+        path.relative_to(repo_root).as_posix()
+        for path in workflow_dir.iterdir()
+        if path.is_file() and path.suffix in {".yml", ".yaml"}
     )
     tracker = _tracker_text()
 
+    assert workflows
     assert [workflow for workflow in workflows if workflow not in tracker] == []
 
 
@@ -164,20 +172,34 @@ def test_feature_user_story_tracker_covers_maintainer_scripts() -> None:
 
 
 def test_feature_user_story_tracker_covers_public_docs_assets() -> None:
-    assets = sorted((repo_root / "docs" / "assets" / "javascripts").glob("*.js"))
+    asset_paths = _relative_file_paths(repo_root / "docs" / "assets" / "javascripts", "*.js")
+    service_paths = _relative_file_paths(repo_root / "docs" / "services", "**/*")
+    toolbox_template_paths = _relative_file_paths(
+        repo_root / "docs" / "toolbox" / "templates",
+        "*.json",
+    )
     tracker_rows = _tracker_rows()
     tracker = "\n".join(_row_text(row) for row in tracker_rows)
-    asset_paths = [asset.relative_to(repo_root).as_posix() for asset in assets]
+    public_asset_paths = asset_paths + service_paths + toolbox_template_paths
     nav_doc_paths = _mkdocs_nav_markdown_paths()
 
-    assert assets
-    assert [path for path in asset_paths if path not in tracker] == []
+    assert asset_paths
+    assert service_paths
+    assert toolbox_template_paths
+    assert [path for path in public_asset_paths if path not in tracker] == []
     assert nav_doc_paths
     assert [
         path
         for path in nav_doc_paths
         if not any(row["entrypoint_or_route"] == path for row in tracker_rows)
     ] == []
+    checks, _notes = select_checks(
+        base_ref="origin/main",
+        files=[toolbox_template_paths[0]],
+        profile="pr",
+        python=sys.executable,
+    )
+    assert "public docs tracker" in [check.name for check in checks]
 
 
 def test_readme_shows_user_story_examples_from_tracker() -> None:

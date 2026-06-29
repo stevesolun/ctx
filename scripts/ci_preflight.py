@@ -93,9 +93,7 @@ def changed_files(base_ref: str) -> list[str]:
     paths = set(_run_git(["diff", "--name-only", base, "HEAD"], allow_failure=True))
     paths.update(_run_git(["diff", "--name-only"], allow_failure=True))
     paths.update(_run_git(["diff", "--cached", "--name-only"], allow_failure=True))
-    paths.update(
-        _run_git(["ls-files", "--others", "--exclude-standard"], allow_failure=True)
-    )
+    paths.update(_run_git(["ls-files", "--others", "--exclude-standard"], allow_failure=True))
     return sorted(path.replace("\\", "/") for path in paths)
 
 
@@ -116,9 +114,7 @@ def select_checks(
         "same contracts on this host."
     ]
 
-    source_required = profile == "full" or (
-        not flags["docs_only"] and not flags["graph_only"]
-    )
+    source_required = profile == "full" or (not flags["docs_only"] and not flags["graph_only"])
     policy_required = not flags["docs_only"] and not flags["graph_only"]
     if policy_required:
         checks.append(
@@ -180,8 +176,22 @@ def select_checks(
         )
 
     if flags["docs_changed"]:
-        checks.append(
-            Check("docs strict build", (python, "-m", "mkdocs", "build", "--strict"))
+        checks.extend(
+            [
+                Check(
+                    "public docs tracker",
+                    (
+                        python,
+                        "-m",
+                        "pytest",
+                        "-q",
+                        "--no-cov",
+                        "src/tests/test_feature_user_story_tracker.py",
+                        "src/tests/test_toolbox_cli.py",
+                    ),
+                ),
+                Check("docs strict build", (python, "-m", "mkdocs", "build", "--strict")),
+            ]
         )
 
     if profile == "full" or flags["telemetry_changed"]:

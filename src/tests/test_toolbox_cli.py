@@ -38,15 +38,46 @@ def _run(argv: list[str]) -> int:
     return cli.main(argv)
 
 
-def test_init_seeds_starter_templates(isolated_global: Path, capsys):
+def _assert_public_template_json_matches_embedded_starters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docs_templates = {
+        path.stem: json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(cli.TEMPLATES_DIR.glob("*.json"))
+    }
+
+    assert docs_templates
+    assert set(docs_templates) == set(cli._EMBEDDED_TEMPLATES)
+
+    missing_templates_dir = cli.TEMPLATES_DIR / "__missing_for_test__"
+    assert not missing_templates_dir.exists()
+    monkeypatch.setattr(cli, "TEMPLATES_DIR", missing_templates_dir)
+
+    embedded_templates = {name: cli._load_template(name) for name in sorted(docs_templates)}
+
+    assert embedded_templates == docs_templates
+
+
+def test_init_seeds_starter_templates(
+    isolated_global: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _assert_public_template_json_matches_embedded_starters(monkeypatch)
+
     rc = _run(["init"])
     assert rc == 0
     assert isolated_global.exists()
     raw = json.loads(isolated_global.read_text(encoding="utf-8"))
     names = set(raw["toolboxes"].keys())
     # All 5 expected starters should be present
-    assert {"ship-it", "security-sweep", "refactor-safety",
-            "docs-review", "fresh-repo-init"}.issubset(names)
+    assert {
+        "ship-it",
+        "security-sweep",
+        "refactor-safety",
+        "docs-review",
+        "fresh-repo-init",
+    }.issubset(names)
 
 
 def test_init_refuses_without_force(isolated_global: Path, capsys):
@@ -67,8 +98,7 @@ def test_list_after_init_shows_all(isolated_global: Path, capsys):
     capsys.readouterr()
     assert _run(["list"]) == 0
     out = capsys.readouterr().out
-    for name in ["ship-it", "security-sweep", "refactor-safety",
-                 "docs-review", "fresh-repo-init"]:
+    for name in ["ship-it", "security-sweep", "refactor-safety", "docs-review", "fresh-repo-init"]:
         assert name in out
 
 
@@ -102,9 +132,9 @@ def test_activate_unknown_errors(isolated_global: Path, capsys):
     assert _run(["activate", "ghost"]) == 1
 
 
-def test_export_then_import_roundtrip(isolated_global: Path,
-                                      tmp_path: Path,
-                                      capsys: pytest.CaptureFixture):
+def test_export_then_import_roundtrip(
+    isolated_global: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+):
     _run(["init"])
     capsys.readouterr()
 
@@ -124,18 +154,23 @@ def test_export_then_import_roundtrip(isolated_global: Path,
     assert "ship-it" in raw["toolboxes"]
 
 
-def test_import_skips_duplicates_without_force(isolated_global: Path,
-                                               tmp_path: Path,
-                                               capsys: pytest.CaptureFixture):
+def test_import_skips_duplicates_without_force(
+    isolated_global: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+):
     _run(["init"])
     capsys.readouterr()
 
     # Create a simple JSON payload matching ship-it
     share = tmp_path / "dup.json"
-    share.write_text(json.dumps({
-        "version": 1,
-        "toolboxes": {"ship-it": {"description": "imported"}},
-    }), encoding="utf-8")
+    share.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "toolboxes": {"ship-it": {"description": "imported"}},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     _run(["import", str(share)])
     err = capsys.readouterr().err

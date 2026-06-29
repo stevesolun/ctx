@@ -306,10 +306,19 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-docs.txt
 
-      - name: Build docs strictly
+      - name: Install docs and tracker test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-docs.txt
+          python -m pip install -r requirements-docs.txt ".[dev]"
+
+      - name: Run public docs tracker checks
+        run: |
+          python -m pytest -q --no-cov \
+            src/tests/test_feature_user_story_tracker.py \
+            src/tests/test_toolbox_cli.py
+
+      - name: Build docs strictly
+        run: |
           python -m mkdocs build --strict
 
   graph-check:
