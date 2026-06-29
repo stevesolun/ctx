@@ -46,7 +46,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Protocol, cast
 
 from ctx.core.wiki.wiki_packs import load_merged_wiki_pages, write_active_wiki_overlay_pack
 from ctx.utils._fs_utils import atomic_write_json, reject_symlink_path, safe_atomic_write_text
@@ -61,6 +61,11 @@ DEFAULT_FLUSH_EVERY = 10
 DEFAULT_SLEEP_SECONDS = 0.5  # polite pacing between live fetches
 
 _MCP_ENTITY_SUBDIR = Path("entities") / "mcp-servers"
+
+
+class _DetailSource(Protocol):
+    def fetch_details(self, slug: str, *, refresh: bool = False) -> dict:
+        ...
 
 # Line-break codepoints that Python's str.splitlines() treats as
 # boundaries. The renderer neutralises all five so that a quoted
@@ -503,6 +508,7 @@ def enrich_entities(
         raise NotImplementedError(
             f"source {source_name!r} does not implement fetch_details()"
         )
+    detail_source = cast(_DetailSource, source)
 
     processed = checkpoint["processed"]
     failures = checkpoint["failures"]
@@ -551,7 +557,7 @@ def enrich_entities(
             continue
 
         try:
-            enrichment = source.fetch_details(source_slug, refresh=refresh)
+            enrichment = detail_source.fetch_details(source_slug, refresh=refresh)
         except Exception as exc:  # noqa: BLE001 — batch must continue
             failed += 1
             failures[wiki_slug] = {

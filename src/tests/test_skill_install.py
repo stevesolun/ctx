@@ -332,7 +332,7 @@ class TestInstallSkill:
         (converted / "scripts").mkdir()
         _symlink_to(outside, converted / "scripts" / "outside", target_is_directory=True)
 
-        def fail_scan(*args: object, **kwargs: object) -> object:
+        def fail_scan(*args: object, **kwargs: object) -> None:
             pytest.fail("scanner should not run before symlink bundle rejection")
 
         monkeypatch.setattr(skill_install, "run_skillspector_scan", fail_scan)
@@ -362,7 +362,7 @@ class TestInstallSkill:
         (converted / "assets").mkdir()
         _symlink_to(outside, converted / "assets" / "outside", target_is_directory=True)
 
-        def fail_scan(*args: object, **kwargs: object) -> object:
+        def fail_scan(*args: object, **kwargs: object) -> None:
             pytest.fail("scanner should not run before symlink bundle rejection")
 
         monkeypatch.setattr(skill_install, "run_skillspector_scan", fail_scan)

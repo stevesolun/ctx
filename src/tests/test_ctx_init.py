@@ -1042,7 +1042,7 @@ def test_full_graph_install_prefers_wiki_packs_over_expanded_entities(
     archive = _write_graph_archive(tmp_path, include_wiki_pack=True)
     wiki = tmp_path / "installed-wiki"
 
-    def fail_if_system_tar_is_used(*_args: object, **_kwargs: object) -> SimpleNamespace:
+    def fail_if_system_tar_is_used(*_args: object, **_kwargs: object) -> None:
         pytest.fail("packed full install should use filtered extraction")
 
     monkeypatch.setattr(ci.shutil, "which", lambda _name: "tar")

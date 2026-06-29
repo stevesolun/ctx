@@ -15,7 +15,10 @@ def read_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
     if limit is not None and limit <= 0:
         return []
     out: deque[dict[str, Any]] | list[dict[str, Any]]
-    out = deque(maxlen=limit) if limit is not None else []
+    if limit is not None:
+        out = deque(maxlen=limit)
+    else:
+        out = []
     with path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
