@@ -1,10 +1,10 @@
 """
-test_quality_hook.py -- Regression tests for root runtime hooks.
+test_quality_hook.py -- Regression tests for runtime hooks.
 
 Focuses on the pure helpers in ``quality_on_session_end.py`` plus the
-root hook runtime contracts that must never block Claude Code tool/session
-lifecycles. Expensive child processes are mocked; the scorer and backup
-mirror have their own dedicated suites.
+root-script and packaged-entrypoint runtime contracts that must never block
+Claude Code tool/session lifecycles. Expensive child processes are mocked;
+the scorer and backup mirror have their own dedicated suites.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -22,6 +23,7 @@ if str(HOOKS) not in sys.path:
 
 import quality_on_session_end as qh  # noqa: E402
 import backup_on_change as backup_hook  # noqa: E402
+from ctx.adapters.claude_code.hooks import lifecycle_hooks  # noqa: E402
 
 
 NOW = datetime(2026, 4, 19, 12, 0, 0, tzinfo=timezone.utc)
@@ -137,7 +139,7 @@ def test_invoke_recompute_noops_on_empty(monkeypatch) -> None:
     assert called["n"] == 0
 
 
-def test_root_hook_mains_exit_zero_and_dispatch_expected_work(
+def test_hook_mains_exit_zero_and_dispatch_expected_work(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     # Point everything at tmp so no real state is touched.
@@ -231,6 +233,124 @@ def test_root_hook_mains_exit_zero_and_dispatch_expected_work(
     monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
     assert backup_hook.main() == 0
     assert snapshot_reasons == ["Write:settings.json"]
+
+    packaged_events = tmp_path / "packaged-skill-events.jsonl"
+    packaged_state = tmp_path / "packaged-state.json"
+    packaged_current = datetime.now(timezone.utc)
+    packaged_state.write_text(
+        json.dumps({"last_run_at": _iso(packaged_current - timedelta(minutes=3))}),
+        encoding="utf-8",
+    )
+    _write_events(
+        packaged_events,
+        [
+            {
+                "event": "load",
+                "skill": "packaged-one",
+                "timestamp": _iso(packaged_current - timedelta(minutes=2)),
+            },
+            {
+                "event": "load",
+                "skill": "packaged-two",
+                "timestamp": _iso(packaged_current - timedelta(minutes=1)),
+            },
+            {
+                "event": "load",
+                "skill": "packaged-one",
+                "timestamp": _iso(packaged_current),
+            },
+        ],
+    )
+    monkeypatch.setattr(lifecycle_hooks, "_EVENTS_PATH", packaged_events, raising=True)
+    monkeypatch.setattr(lifecycle_hooks, "_STATE_PATH", packaged_state, raising=True)
+    monkeypatch.delenv("CTX_SESSION_ID", raising=False)
+
+    quality_calls: list[dict[str, Any]] = []
+
+    def _record_quality_main(argv: list[str]) -> int:
+        quality_calls.append(
+            {"argv": argv, "session_id": lifecycle_hooks.os.environ.get("CTX_SESSION_ID")}
+        )
+        return 0
+
+    audit_events: list[dict[str, Any]] = []
+
+    def _record_session_event(
+        event: str,
+        session_id: str,
+        *,
+        actor: str,
+        meta: dict[str, Any],
+    ) -> None:
+        audit_events.append(
+            {
+                "event": event,
+                "session_id": session_id,
+                "actor": actor,
+                "meta": meta,
+            }
+        )
+
+    def _record_rotate() -> None:
+        audit_events.append({"event": "rotated"})
+
+    monkeypatch.setitem(
+        sys.modules,
+        "skill_quality",
+        SimpleNamespace(main=_record_quality_main),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "ctx_audit_log",
+        SimpleNamespace(
+            log_session_event=_record_session_event,
+            rotate_if_needed=_record_rotate,
+        ),
+    )
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps({"sessionId": "sess-2"})))
+    assert lifecycle_hooks.main(["quality-on-session-end"]) == 0
+    assert quality_calls == [
+        {
+            "argv": ["recompute", "--slugs", "packaged-one,packaged-two"],
+            "session_id": "sess-2",
+        }
+    ]
+    assert "CTX_SESSION_ID" not in lifecycle_hooks.os.environ
+    assert json.loads(packaged_state.read_text(encoding="utf-8"))["last_run_at"]
+    assert audit_events[0]["event"] == "session.ended"
+    assert audit_events[0]["session_id"] == "sess-2"
+    assert audit_events[0]["meta"]["recomputed_slugs"] == 2
+    assert audit_events[1] == {"event": "rotated"}
+
+    packaged_snapshot_reasons: list[str] = []
+    packaged_touched = tmp_path / ".claude" / "packaged-settings.json"
+    packaged_payload = {
+        "tool_name": "MultiEdit",
+        "tool_input": {"file_path": str(packaged_touched)},
+    }
+
+    def _record_packaged_snapshot(*, reason: str) -> None:
+        packaged_snapshot_reasons.append(reason)
+
+    monkeypatch.setattr(
+        lifecycle_hooks,
+        "_is_tracked",
+        lambda path, claude_home: path == packaged_touched and claude_home.name == ".claude",
+        raising=True,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "backup_mirror",
+        SimpleNamespace(snapshot_if_changed=_record_packaged_snapshot),
+    )
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(packaged_payload)))
+    assert lifecycle_hooks.main(["backup-on-change"]) == 0
+    assert packaged_snapshot_reasons == ["MultiEdit:packaged-settings.json"]
+
+    monkeypatch.setattr(lifecycle_hooks, "_is_tracked", lambda path, home: False, raising=True)
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(packaged_payload)))
+    assert lifecycle_hooks.main(["backup-on-change"]) == 0
+    assert packaged_snapshot_reasons == ["MultiEdit:packaged-settings.json"]
 
 
 class _StdinStub:
