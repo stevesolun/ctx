@@ -206,11 +206,11 @@ ones are flagged. New ones self-ingest.
     [Memory anchoring](memory-anchor.md) ·
     [Lifecycle dashboard](skill-lifecycle-and-dashboard.md)
 
--   **Releases**
+-   **Source snapshot**
 
     ---
 
-    **v1.0.20** — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
+    Current main is **v1.0.20** — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
     4,400 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
     ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
