@@ -179,7 +179,14 @@ def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:
     assert 'SYNC_MODE" == "card"' in text
     assert "--card-only" in text
     assert "timeout-minutes: 60" in text
-    assert "Set the HF_TOKEN repository secret" in text
+    assert "Require HF_TOKEN on canonical repository" in text
+    assert "env.HF_TOKEN == '' && github.repository == 'stevesolun/ctx'" in text
+    assert "Missing HF_TOKEN" in text
+    assert "Canonical Hugging Face sync must fail closed" in text
+    assert "Skip non-canonical repository" in text
+    assert "github.repository != 'stevesolun/ctx'" in text
+    assert "Hugging Face sync skipped" in text
+    assert "Only stevesolun/ctx is trusted to publish Stevesolun/ctx." in text
     assert "hf_" not in text
 
 
