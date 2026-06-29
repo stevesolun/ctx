@@ -341,10 +341,7 @@ def test_test_badge_is_labeled_inventory_not_passing() -> None:
         patched = pattern.sub(replacement, patched)
 
     assert "Tests-34_inventory" in patched
-    assert (
-        "](https://github.com/stevesolun/ctx/actions/workflows/test.yml)"
-        in patched
-    )
+    assert "](https://github.com/stevesolun/ctx/actions/workflows/test.yml)" in patched
     assert "_passing" not in patched
 
 
@@ -372,19 +369,21 @@ def test_docs_landing_test_count_is_updated() -> None:
 
 
 def test_knowledge_graph_counts_are_updated() -> None:
-    text = "\n".join([
-        "| Total nodes | **1,111** |",
-        "| Curated core nodes | **222** (11 skills + 22 agents + 33 MCP servers + 4 harnesses) |",
-        "| Body-backed skill nodes | **889** hydrated installable skill entries |",
-        "| Total edges | **2,222** |",
-        "| Hydrated skill incident edges | **1,234** |",
-        "| Hydrated skill semantic incident edges | **567** |",
-        "| Edge sources (overlap-deduped) | semantic 123 - tag 456 - token 789 |",
-        "| Cross-type edges (skill <-> agent) | ~12 |",
-        "| Cross-type edges (skill <-> MCP) | ~34 |",
-        "| Cross-type edges (agent <-> MCP) | ~5 |",
-        "| Harness edges | **6** |",
-    ])
+    text = "\n".join(
+        [
+            "| Total nodes | **1,111** |",
+            "| Curated core nodes | **222** (11 skills + 22 agents + 33 MCP servers + 4 harnesses) |",
+            "| Body-backed skill nodes | **889** hydrated installable skill entries |",
+            "| Total edges | **2,222** |",
+            "| Hydrated skill incident edges | **1,234** |",
+            "| Hydrated skill semantic incident edges | **567** |",
+            "| Edge sources (overlap-deduped) | semantic 123 - tag 456 - token 789 |",
+            "| Cross-type edges (skill <-> agent) | ~12 |",
+            "| Cross-type edges (skill <-> MCP) | ~34 |",
+            "| Cross-type edges (agent <-> MCP) | ~5 |",
+            "| Harness edges | **6** |",
+        ]
+    )
     stats = {
         "nodes": 12345,
         "edges": 67890,
@@ -410,7 +409,10 @@ def test_knowledge_graph_counts_are_updated() -> None:
         patched = pattern.sub(replacement, patched)
 
     assert "| Total nodes | **12,345** |" in patched
-    assert "| Curated core nodes | **9,345** (1,000 skills + 50 agents + 600 MCP servers + 7 harnesses) |" in patched
+    assert (
+        "| Curated core nodes | **9,345** (1,000 skills + 50 agents + 600 MCP servers + 7 harnesses) |"
+        in patched
+    )
     assert "| Body-backed skill nodes | **3,000** hydrated installable skill entries |" in patched
     assert "| Total edges | **67,890** |" in patched
     assert "semantic 23,456 - tag 12,345 - token 6,789" in patched
@@ -421,10 +423,7 @@ def test_knowledge_graph_counts_are_updated() -> None:
 
 
 def test_harness_aware_readme_prose_is_updated() -> None:
-    text = (
-        "walks a **1,000 skills, 20 agents, 30 MCP servers, "
-        "and 4 cataloged harnesses** graph"
-    )
+    text = "walks a **1,000 skills, 20 agents, 30 MCP servers, and 4 cataloged harnesses** graph"
     stats = {
         "nodes": None,
         "edges": None,
@@ -444,13 +443,15 @@ def test_harness_aware_readme_prose_is_updated() -> None:
 def test_published_inventory_prose_uses_exact_graph_counts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    text = "\n".join([
-        "badge/Graph-79%2C958_nodes_/_1.8M_edges-red",
-        "- **2.6M graph edges** across semantic similarity.",
-        "with 91K+ skill pages, 460+ agents, 10K+ MCP servers, and 207 harnesses",
-        "from the 91K+ skills, 460+ agents, and 10K+ MCP servers",
-        "and the full ~439 MiB wiki tarball with **79,958 nodes / 1,778,069 edges / 52 Louvain communities**.",
-    ])
+    text = "\n".join(
+        [
+            "badge/Graph-79%2C958_nodes_/_1.8M_edges-red",
+            "- **2.6M graph edges** across semantic similarity.",
+            "with 91K+ skill pages, 460+ agents, 10K+ MCP servers, and 207 harnesses",
+            "from the 91K+ skills, 460+ agents, and 10K+ MCP servers",
+            "and the full ~439 MiB wiki tarball with **79,958 nodes / 1,778,069 edges / 52 Louvain communities**.",
+        ]
+    )
     stats = {
         "nodes": 79958,
         "edges": 1778069,
@@ -477,13 +478,15 @@ def test_published_inventory_prose_uses_exact_graph_counts(
 
 
 def test_readme_entity_badges_are_updated() -> None:
-    text = "\n".join([
-        "[![Graph](https://img.shields.io/badge/Graph-1_nodes_/_2_edges-red.svg)](graph/)",
-        "[![Skills](https://img.shields.io/badge/Skills-1-blue.svg)](graph/)",
-        "[![Agents](https://img.shields.io/badge/Agents-2-purple.svg)](graph/)",
-        "[![MCPs](https://img.shields.io/badge/MCPs-3-pink.svg)](graph/)",
-        "[![Harnesses](https://img.shields.io/badge/Harnesses-4-orange.svg)](graph/)",
-    ])
+    text = "\n".join(
+        [
+            "[![Graph](https://img.shields.io/badge/Graph-1_nodes_/_2_edges-red.svg)](graph/)",
+            "[![Skills](https://img.shields.io/badge/Skills-1-blue.svg)](graph/)",
+            "[![Agents](https://img.shields.io/badge/Agents-2-purple.svg)](graph/)",
+            "[![MCPs](https://img.shields.io/badge/MCPs-3-pink.svg)](graph/)",
+            "[![Harnesses](https://img.shields.io/badge/Harnesses-4-orange.svg)](graph/)",
+        ]
+    )
     stats = {
         "nodes": None,
         "edges": None,
@@ -549,15 +552,17 @@ def test_patch_readme_checks_docs_and_catalog(
     docs_index.write_text("3 tests collected\n", encoding="utf-8")
     docs_knowledge.write_text("| Total nodes | **10** |\n", encoding="utf-8")
     docs_catalog.write_text(
-        "\n".join([
-            '<div id="ctx-catalog-grid" class="ctx-catalog-grid">',
-            "<!-- ctx-catalog:begin -->",
-            '<article class="ctx-catalog-card" data-type="skill">',
-            '<p class="ctx-catalog-muted">1 entities</p>',
-            "</article>",
-            "<!-- ctx-catalog:end -->",
-            "</div>",
-        ]),
+        "\n".join(
+            [
+                '<div id="ctx-catalog-grid" class="ctx-catalog-grid">',
+                "<!-- ctx-catalog:begin -->",
+                '<article class="ctx-catalog-card" data-type="skill">',
+                '<p class="ctx-catalog-muted">1 entities</p>',
+                "</article>",
+                "<!-- ctx-catalog:end -->",
+                "</div>",
+            ]
+        ),
         encoding="utf-8",
     )
     monkeypatch.setattr(urs, "REPO_ROOT", tmp_path)
@@ -764,13 +769,15 @@ def test_pytest_collect_uses_inprocess_no_cache_collection(
     )
 
     assert urs._pytest_collect("python") == 3980
-    assert calls == [[
-        "tests/",
-        "--collect-only",
-        "-q",
-        "-p",
-        "no:cacheprovider",
-    ]]
+    assert calls == [
+        [
+            "tests/",
+            "--collect-only",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+        ]
+    ]
 
 
 def test_uncollected_importorskip_tests_are_added_to_collection_count(
@@ -788,9 +795,7 @@ def test_uncollected_importorskip_tests_are_added_to_collection_count(
         encoding="utf-8",
     )
     (tests_dir / "test_present.py").write_text(
-        "import pytest\n"
-        "pytest.importorskip('already.available')\n"
-        "def test_present(): pass\n",
+        "import pytest\npytest.importorskip('already.available')\ndef test_present(): pass\n",
         encoding="utf-8",
     )
 

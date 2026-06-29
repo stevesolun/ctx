@@ -21,9 +21,7 @@ RELEASE_GENERATED_STATS_FILES = {
     "docs/knowledge-graph.md",
 }
 VERSION_LINE_RE = re.compile(r'version = "\d+\.\d+\.\d+(?:[-+._a-zA-Z0-9]*)?"')
-INIT_VERSION_LINE_RE = re.compile(
-    r'__version__ = "\d+\.\d+\.\d+(?:[-+._a-zA-Z0-9]*)?"'
-)
+INIT_VERSION_LINE_RE = re.compile(r'__version__ = "\d+\.\d+\.\d+(?:[-+._a-zA-Z0-9]*)?"')
 TEST_COUNT_STATS_RE = re.compile(
     r".*(Tests-\d+_(?:collected|inventory)|[\d,]+ (?:tests collected|test inventory)).*"
 )
@@ -59,10 +57,7 @@ def is_contract_file(path: str) -> bool:
         or path.startswith("scripts/ci_")
         or path == "scripts/clean_host_contract.py"
         or path == "pyproject.toml"
-        or (
-            path.startswith(".github/workflows/")
-            and path.endswith((".yml", ".yaml"))
-        )
+        or (path.startswith(".github/workflows/") and path.endswith((".yml", ".yaml")))
     ) and not path.startswith("src/tests/")
 
 
@@ -89,11 +84,13 @@ def is_release_metadata_only(
                 if not line.startswith(("+", "-")) or line.startswith(("+++", "---")):
                     continue
                 text = line[1:].strip()
-                if not TEST_COUNT_STATS_RE.fullmatch(text) and not (
-                    path == "docs/index.md" and RELEASE_DOCS_LINE_RE.fullmatch(text)
-                ) and not (
-                    path == "docs/knowledge-graph.md"
-                    and KNOWLEDGE_GRAPH_STATS_LINE_RE.fullmatch(text)
+                if (
+                    not TEST_COUNT_STATS_RE.fullmatch(text)
+                    and not (path == "docs/index.md" and RELEASE_DOCS_LINE_RE.fullmatch(text))
+                    and not (
+                        path == "docs/knowledge-graph.md"
+                        and KNOWLEDGE_GRAPH_STATS_LINE_RE.fullmatch(text)
+                    )
                 ):
                     return False
             continue
@@ -150,10 +147,7 @@ def _changed_files(base: str, head: str) -> tuple[str, ...]:
 
 
 def _diffs_by_file(base: str, head: str, files: Iterable[str]) -> dict[str, str]:
-    return {
-        path: _git_text("diff", "--unified=0", base, head, "--", path)
-        for path in files
-    }
+    return {path: _git_text("diff", "--unified=0", base, head, "--", path) for path in files}
 
 
 def _parse_labels(raw: str) -> tuple[str, ...]:

@@ -161,9 +161,7 @@ def _read_graph_artifact_stats() -> dict[str, int | None] | None:
         if promotion.exists():
             promotion_payload = json.loads(promotion.read_text(encoding="utf-8"))
             current = (
-                promotion_payload.get("current")
-                if isinstance(promotion_payload, dict)
-                else None
+                promotion_payload.get("current") if isinstance(promotion_payload, dict) else None
             )
             if not isinstance(current, dict):
                 return None
@@ -222,9 +220,7 @@ def _safe_tar_name(name: str) -> str | None:
 
 
 def _read_json_member(tf: tarfile.TarFile, expected_name: str) -> object | None:
-    matches = [
-        member for member in tf.getmembers() if _safe_tar_name(member.name) == expected_name
-    ]
+    matches = [member for member in tf.getmembers() if _safe_tar_name(member.name) == expected_name]
     if not matches:
         return None
     if len(matches) != 1:
@@ -244,9 +240,7 @@ def _read_json_member(tf: tarfile.TarFile, expected_name: str) -> object | None:
 
 
 def _read_text_member(tf: tarfile.TarFile, expected_name: str) -> str | None:
-    matches = [
-        member for member in tf.getmembers() if _safe_tar_name(member.name) == expected_name
-    ]
+    matches = [member for member in tf.getmembers() if _safe_tar_name(member.name) == expected_name]
     if not matches:
         return None
     if len(matches) != 1:
@@ -368,8 +362,12 @@ def _read_graph_from_tarball_legacy() -> dict[str, int | None] | None:
     if not tarball.exists():
         return None
     stats: dict[str, int | None] = {
-        "nodes": None, "edges": None,
-        "skills": None, "agents": None, "mcps": None, "harnesses": None,
+        "nodes": None,
+        "edges": None,
+        "skills": None,
+        "agents": None,
+        "mcps": None,
+        "harnesses": None,
         "communities": None,
     }
     try:
@@ -405,9 +403,8 @@ def _read_graph_from_tarball_legacy() -> dict[str, int | None] | None:
                         stats["edges"] = len(body[edges_key])
                 else:
                     if isinstance(body, dict):
-                        stats["communities"] = (
-                            body.get("total_communities")
-                            or len(body.get("communities", []))
+                        stats["communities"] = body.get("total_communities") or len(
+                            body.get("communities", [])
                         )
                     elif isinstance(body, list):
                         stats["communities"] = len(body)
@@ -427,8 +424,12 @@ def _read_graph_from_tarball() -> dict[str, int | None] | None:
     if not tarball.exists():
         return None
     stats: dict[str, int | None] = {
-        "nodes": None, "edges": None,
-        "skills": None, "agents": None, "mcps": None, "harnesses": None,
+        "nodes": None,
+        "edges": None,
+        "skills": None,
+        "agents": None,
+        "mcps": None,
+        "harnesses": None,
         "communities": None,
     }
     try:
@@ -469,9 +470,8 @@ def _read_graph_from_tarball() -> dict[str, int | None] | None:
             if stats["communities"] is None:
                 body = _read_json_member(tf, _COMMUNITIES_JSON_MEMBER)
                 if isinstance(body, dict):
-                    stats["communities"] = (
-                        body.get("total_communities")
-                        or len(body.get("communities", []))
+                    stats["communities"] = body.get("total_communities") or len(
+                        body.get("communities", [])
                     )
                 elif isinstance(body, list):
                     stats["communities"] = len(body)
@@ -566,13 +566,15 @@ def _pytest_collect(interpreter: str) -> int | None:
     try:
         os.chdir(REPO_ROOT / "src")
         with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stdout_buffer):
-            exit_code = pytest.main([
-                "tests/",
-                "--collect-only",
-                "-q",
-                "-p",
-                "no:cacheprovider",
-            ])
+            exit_code = pytest.main(
+                [
+                    "tests/",
+                    "--collect-only",
+                    "-q",
+                    "-p",
+                    "no:cacheprovider",
+                ]
+            )
     except OSError:
         return None
     finally:
@@ -724,17 +726,53 @@ _ENTITY_COUNT_REPLACEMENTS: tuple[tuple[str, str, str, str], ...] = (
 _CATALOG_BEGIN = "<!-- ctx-catalog:begin -->"
 _CATALOG_END = "<!-- ctx-catalog:end -->"
 _CATALOG_FILTER_CARDS: tuple[tuple[str, str, str, str, str], ...] = (
-    ("skill", "Skills", "Code review skills", "code review review pr diff quality bug tests", "code+review"),
-    ("skill", "Skills", "Testing skills", "testing pytest unit browser smoke regression", "testing"),
+    (
+        "skill",
+        "Skills",
+        "Code review skills",
+        "code review review pr diff quality bug tests",
+        "code+review",
+    ),
+    (
+        "skill",
+        "Skills",
+        "Testing skills",
+        "testing pytest unit browser smoke regression",
+        "testing",
+    ),
     ("skill", "Skills", "Frontend skills", "frontend ui dashboard css react browser", "frontend"),
-    ("agent", "Agents", "Architecture agents", "architecture design refactor planning", "architecture"),
+    (
+        "agent",
+        "Agents",
+        "Architecture agents",
+        "architecture design refactor planning",
+        "architecture",
+    ),
     ("agent", "Agents", "Security agents", "security audit supply chain secrets", "security"),
     ("mcp-server", "MCPs", "GitHub MCPs", "github repo issues pull requests graphql", "github"),
     ("mcp-server", "MCPs", "Cloud MCPs", "cloud google cloud aws azure deploy", "cloud"),
     ("mcp-server", "MCPs", "Browser MCPs", "browser automation web scraping", "browser"),
-    ("harness", "Harnesses", "Local/API model harnesses", "local api openai ollama vllm model harness", "local+model"),
-    ("harness", "Harnesses", "Verification harnesses", "harness test eval guardrail validate verification", "verification"),
-    ("harness", "Harnesses", "Tool-access harnesses", "harness tools sandbox filesystem cloud tool access", "tool+access"),
+    (
+        "harness",
+        "Harnesses",
+        "Local/API model harnesses",
+        "local api openai ollama vllm model harness",
+        "local+model",
+    ),
+    (
+        "harness",
+        "Harnesses",
+        "Verification harnesses",
+        "harness test eval guardrail validate verification",
+        "verification",
+    ),
+    (
+        "harness",
+        "Harnesses",
+        "Tool-access harnesses",
+        "harness tools sandbox filesystem cloud tool access",
+        "tool+access",
+    ),
 )
 
 
@@ -747,15 +785,17 @@ def _catalog_card(
     query_href: str,
     muted: str,
 ) -> str:
-    return "\n".join([
-        f'    <article class="ctx-catalog-card" data-type="{entity_type}" data-search="{search}">',
-        f"      <span class=\"ctx-catalog-pill\">{pill}</span>",
-        f"      <h3>{title}</h3>",
-        f"      <p class=\"ctx-catalog-muted\">{muted}</p>",
-        f"      <a class=\"md-button\" href=\"{query_href}\">Filter tiles</a>",
-        "      <a class=\"md-button\" href=\"../dashboard/#catalog-badge-links\">Open full catalog locally</a>",
-        "    </article>",
-    ])
+    return "\n".join(
+        [
+            f'    <article class="ctx-catalog-card" data-type="{entity_type}" data-search="{search}">',
+            f'      <span class="ctx-catalog-pill">{pill}</span>',
+            f"      <h3>{title}</h3>",
+            f'      <p class="ctx-catalog-muted">{muted}</p>',
+            f'      <a class="md-button" href="{query_href}">Filter tiles</a>',
+            '      <a class="md-button" href="../dashboard/#catalog-badge-links">Open full catalog locally</a>',
+            "    </article>",
+        ]
+    )
 
 
 def render_catalog_cards(stats: Mapping[str, int | None]) -> str | None:
@@ -769,30 +809,58 @@ def render_catalog_cards(stats: Mapping[str, int | None]) -> str | None:
     if any(value is None for value in required.values()):
         return None
     count_cards = (
-        ("skill", "Skills", "Skills", "skill prompt workflow testing code review frontend backend security research", "skills"),
-        ("agent", "Agents", "Agents", "agent reviewer planner architect debugger security research", "agents"),
-        ("mcp-server", "MCPs", "MCP servers", "mcp server github filesystem browser database api cloud", "mcps"),
-        ("harness", "Harnesses", "Harnesses", "harness local model api model llm orchestration verification", "harnesses"),
+        (
+            "skill",
+            "Skills",
+            "Skills",
+            "skill prompt workflow testing code review frontend backend security research",
+            "skills",
+        ),
+        (
+            "agent",
+            "Agents",
+            "Agents",
+            "agent reviewer planner architect debugger security research",
+            "agents",
+        ),
+        (
+            "mcp-server",
+            "MCPs",
+            "MCP servers",
+            "mcp server github filesystem browser database api cloud",
+            "mcps",
+        ),
+        (
+            "harness",
+            "Harnesses",
+            "Harnesses",
+            "harness local model api model llm orchestration verification",
+            "harnesses",
+        ),
     )
     cards: list[str] = []
     for entity_type, pill, title, search, key in count_cards:
-        cards.append(_catalog_card(
-            entity_type=entity_type,
-            pill=pill,
-            title=title,
-            search=search,
-            query_href=f"./?type={entity_type}",
-            muted=f"{int(required[key] or 0):,} entities",
-        ))
+        cards.append(
+            _catalog_card(
+                entity_type=entity_type,
+                pill=pill,
+                title=title,
+                search=search,
+                query_href=f"./?type={entity_type}",
+                muted=f"{int(required[key] or 0):,} entities",
+            )
+        )
     for entity_type, pill, title, search, query in _CATALOG_FILTER_CARDS:
-        cards.append(_catalog_card(
-            entity_type=entity_type,
-            pill=pill,
-            title=title,
-            search=search,
-            query_href=f"./?type={entity_type}&q={query}",
-            muted="Filtered catalog launcher",
-        ))
+        cards.append(
+            _catalog_card(
+                entity_type=entity_type,
+                pill=pill,
+                title=title,
+                search=search,
+                query_href=f"./?type={entity_type}&q={query}",
+                muted="Filtered catalog launcher",
+            )
+        )
     return _CATALOG_BEGIN + "\n" + "\n".join(cards) + "\n" + _CATALOG_END
 
 
@@ -809,13 +877,15 @@ def _append_badge_target_replacements(reps: list[Replacement]) -> None:
         "Harnesses": f"{_PUBLIC_DOCS_BASE_URL}/catalog/?type=harness",
     }
     for badge, href in badge_targets.items():
-        reps.append((
-            re.compile(
-                rf"(\[!\[{re.escape(badge)}\]\(https://img\.shields\.io/badge/"
-                rf"{re.escape(badge)}-[^)]+\.svg\)\])\([^)]+\)"
-            ),
-            rf"\1({href})",
-        ))
+        reps.append(
+            (
+                re.compile(
+                    rf"(\[!\[{re.escape(badge)}\]\(https://img\.shields\.io/badge/"
+                    rf"{re.escape(badge)}-[^)]+\.svg\)\])\([^)]+\)"
+                ),
+                rf"\1({href})",
+            )
+        )
 
 
 def _append_catalog_card_count(
@@ -824,13 +894,15 @@ def _append_catalog_card_count(
     entity_type: str,
     count: int,
 ) -> None:
-    reps.append((
-        re.compile(
-            rf'(<article class="ctx-catalog-card" data-type="{re.escape(entity_type)}"'
-            r'[\s\S]*?<p class="ctx-catalog-muted">)[\d,]+ entities(</p>)'
-        ),
-        rf"\g<1>{count:,} entities\2",
-    ))
+    reps.append(
+        (
+            re.compile(
+                rf'(<article class="ctx-catalog-card" data-type="{re.escape(entity_type)}"'
+                r'[\s\S]*?<p class="ctx-catalog-muted">)[\d,]+ entities(</p>)'
+            ),
+            rf"\g<1>{count:,} entities\2",
+        )
+    )
 
 
 def _append_entity_count_replacements(
@@ -842,18 +914,22 @@ def _append_entity_count_replacements(
         if not value:
             continue
         count = int(value)
-        reps.append((
-            re.compile(pattern),
-            f"badge/{badge}-{count:,}-".replace(",", "%2C"),
-        ))
+        reps.append(
+            (
+                re.compile(pattern),
+                f"badge/{badge}-{count:,}-".replace(",", "%2C"),
+            )
+        )
         _append_catalog_card_count(reps, entity_type=entity_type, count=count)
 
     catalog_cards = render_catalog_cards(stats)
     if catalog_cards is not None:
-        reps.append((
-            re.compile(rf"{re.escape(_CATALOG_BEGIN)}[\s\S]*?{re.escape(_CATALOG_END)}"),
-            catalog_cards,
-        ))
+        reps.append(
+            (
+                re.compile(rf"{re.escape(_CATALOG_BEGIN)}[\s\S]*?{re.escape(_CATALOG_END)}"),
+                catalog_cards,
+            )
+        )
 
 
 def build_replacements(
@@ -872,122 +948,181 @@ def build_replacements(
         # and 13 harnesses". Keep this before the 3-type fallback
         # so the README's harness-aware lead sentence stays machine-owned.
         if stats["agents"] and stats["mcps"] and stats["harnesses"]:
-            reps.append((
-                re.compile(
-                    r"\*\*[\d,]+\s+skills,\s+[\d,]+\s+agents,\s+"
-                    r"[\d,]+\s+MCP\s+servers,\s+and\s+[\d,]+\s+"
-                    r"(?:cataloged\s+)?harnesses\*\*"
-                ),
-                f"**{s:,} skills, {stats['agents']:,} agents, "
-                f"{stats['mcps']:,} MCP servers, and "
-                f"{stats['harnesses']:,} harnesses**",
-            ))
-            reps.append((
-                re.compile(
-                    r"\*\*[\d,]+\s+skill pages,\s+[\d,]+\s+agents,\s+"
-                    r"[\d,]+\s+MCP\s+servers,\s+and\s+[\d,]+\s+"
-                    r"(?:cataloged\s+)?harnesses\*\*"
-                ),
-                f"**{s:,} skill pages, {stats['agents']:,} agents, "
-                f"{stats['mcps']:,} MCP servers, and "
-                f"{stats['harnesses']:,} cataloged harnesses**",
-            ))
+            reps.append(
+                (
+                    re.compile(
+                        r"\*\*[\d,]+\s+skills,\s+[\d,]+\s+agents,\s+"
+                        r"[\d,]+\s+MCP\s+servers,\s+and\s+[\d,]+\s+"
+                        r"(?:cataloged\s+)?harnesses\*\*"
+                    ),
+                    f"**{s:,} skills, {stats['agents']:,} agents, "
+                    f"{stats['mcps']:,} MCP servers, and "
+                    f"{stats['harnesses']:,} harnesses**",
+                )
+            )
+            reps.append(
+                (
+                    re.compile(
+                        r"\*\*[\d,]+\s+skill pages,\s+[\d,]+\s+agents,\s+"
+                        r"[\d,]+\s+MCP\s+servers,\s+and\s+[\d,]+\s+"
+                        r"(?:cataloged\s+)?harnesses\*\*"
+                    ),
+                    f"**{s:,} skill pages, {stats['agents']:,} agents, "
+                    f"{stats['mcps']:,} MCP servers, and "
+                    f"{stats['harnesses']:,} cataloged harnesses**",
+                )
+            )
         # 3-type pattern: "1,789 skills, 464 agents, and 10,786 MCP servers"
         # Order matters — this regex is more specific than the 2-type one
         # below, so match it first. Handles the MCP-aware tagline that
         # lands in the README after the Phase 7 MCP-first rewrite.
         if stats["agents"] and stats["mcps"]:
-            reps.append((
-                re.compile(
-                    r"\*\*[\d,]+\s+skills,\s+[\d,]+\s+agents,\s+and\s+"
-                    r"[\d,]+\s+MCP\s+servers\*\*"
-                ),
-                f"**{s:,} skills, {stats['agents']:,} agents, "
-                f"and {stats['mcps']:,} MCP servers**",
-            ))
+            reps.append(
+                (
+                    re.compile(
+                        r"\*\*[\d,]+\s+skills,\s+[\d,]+\s+agents,\s+and\s+"
+                        r"[\d,]+\s+MCP\s+servers\*\*"
+                    ),
+                    f"**{s:,} skills, {stats['agents']:,} agents, "
+                    f"and {stats['mcps']:,} MCP servers**",
+                )
+            )
         # 2-type fallback pattern for legacy phrasing. Only fires on
         # READMEs that haven't adopted the 3-type wording yet.
-        reps.append((re.compile(r"\*\*[\d,]+\s+skills\s+and\s+[\d,]+\s+agents\*\*"),
-                     f"**{s:,} skills and {stats['agents']:,} agents**"))
-        reps.append((re.compile(r"#\s*([\d,]+)\s+entity pages\s*\(one per skill\)"),
-                     f"# {s:,} entity pages (one per skill)"))
+        reps.append(
+            (
+                re.compile(r"\*\*[\d,]+\s+skills\s+and\s+[\d,]+\s+agents\*\*"),
+                f"**{s:,} skills and {stats['agents']:,} agents**",
+            )
+        )
+        reps.append(
+            (
+                re.compile(r"#\s*([\d,]+)\s+entity pages\s*\(one per skill\)"),
+                f"# {s:,} entity pages (one per skill)",
+            )
+        )
 
     if stats["agents"]:
         a = stats["agents"]
-        reps.append((re.compile(r"#\s*([\d,]+)\s+entity pages\s*\(one per agent\)"),
-                     f"# {a} entity pages (one per agent)"))
+        reps.append(
+            (
+                re.compile(r"#\s*([\d,]+)\s+entity pages\s*\(one per agent\)"),
+                f"# {a} entity pages (one per agent)",
+            )
+        )
 
     if stats["nodes"] and stats["edges"]:
         n = stats["nodes"]
         e = stats["edges"]
         e_fmt = format_edges(e)
-        reps.append((re.compile(r"badge/Knowledge_Graph-[\w.]+_edges-"),
-                     f"badge/Knowledge_Graph-{e_fmt}_edges-"))
+        reps.append(
+            (
+                re.compile(r"badge/Knowledge_Graph-[\w.]+_edges-"),
+                f"badge/Knowledge_Graph-{e_fmt}_edges-",
+            )
+        )
         # Graph badge introduced in v0.5.0: "Graph-2,211_nodes_/_642K_edges-"
         # where the comma is URL-encoded as %2C and slash is %2F / literal.
-        reps.append((re.compile(r"badge/Graph-[\w.%,/_-]+_edges-"),
-                     (
-                         f"badge/Graph-{n:,}_nodes_/"
-                         f"_{e:,}_edges-"
-                     ).replace(",", "%2C")))
-        reps.append((
-            re.compile(r"\*\*[\d,]+-node\*\*\s+graph"),
-            f"**{n:,}-node** graph",
-        ))
-        reps.append((
-            re.compile(r"\*\*[\d,]+\s+graph nodes\*\*"),
-            f"**{n:,} graph nodes**",
-        ))
-        reps.append((
-            re.compile(r"\*\*[\d,.]+[KM]?\s+graph edges\*\*"),
-            f"**{e:,} graph edges**",
-        ))
+        reps.append(
+            (
+                re.compile(r"badge/Graph-[\w.%,/_-]+_edges-"),
+                (f"badge/Graph-{n:,}_nodes_/_{e:,}_edges-").replace(",", "%2C"),
+            )
+        )
+        reps.append(
+            (
+                re.compile(r"\*\*[\d,]+-node\*\*\s+graph"),
+                f"**{n:,}-node** graph",
+            )
+        )
+        reps.append(
+            (
+                re.compile(r"\*\*[\d,]+\s+graph nodes\*\*"),
+                f"**{n:,} graph nodes**",
+            )
+        )
+        reps.append(
+            (
+                re.compile(r"\*\*[\d,.]+[KM]?\s+graph edges\*\*"),
+                f"**{e:,} graph edges**",
+            )
+        )
         # "A pre-built knowledge graph of 2,211 nodes and 642K edges"
         # style phrasing. Caught a stale v0.6.0 README sentence that
         # the older regex only matched on "nodes, edges, communities".
-        reps.append((
-            re.compile(r"([\d,]+)\s+nodes\s+and\s+[\d,.]+[KM]?\s+edges"),
-            f"{n:,} nodes and {e_fmt} edges",
-        ))
-        reps.append((
-            re.compile(r"\(([\d,]+)\s+nodes,\s+[\d,]+\s+edges\)"),
-            f"({n:,} nodes, {e:,} edges)",
-        ))
-        reps.append((
-            re.compile(r"\*\*[\d,]+\s+nodes\s*/\s*[\d,]+\s+edges\s*/\s*[\d,]+\s+Louvain communities\*\*"),
-            f"**{n:,} nodes / {e:,} edges / {stats['communities']:,} Louvain communities**",
-        ))
+        reps.append(
+            (
+                re.compile(r"([\d,]+)\s+nodes\s+and\s+[\d,.]+[KM]?\s+edges"),
+                f"{n:,} nodes and {e_fmt} edges",
+            )
+        )
+        reps.append(
+            (
+                re.compile(r"\(([\d,]+)\s+nodes,\s+[\d,]+\s+edges\)"),
+                f"({n:,} nodes, {e:,} edges)",
+            )
+        )
+        reps.append(
+            (
+                re.compile(
+                    r"\*\*[\d,]+\s+nodes\s*/\s*[\d,]+\s+edges\s*/\s*[\d,]+\s+Louvain communities\*\*"
+                ),
+                f"**{n:,} nodes / {e:,} edges / {stats['communities']:,} Louvain communities**",
+            )
+        )
         # Graph.json inline Python example: "# 2,211 nodes, 642,468 edges"
-        reps.append((
-            re.compile(r"#\s*([\d,]+)\s+nodes,\s*([\d,]+)\s+edges"),
-            f"# {n:,} nodes, {e:,} edges",
-        ))
-        reps.append((
-            re.compile(r"[\d,]+ weighted edges and [\d,]+ Louvain communities"),
-            f"{e:,} weighted edges and {stats['communities']:,} Louvain communities",
-        ))
+        reps.append(
+            (
+                re.compile(r"#\s*([\d,]+)\s+nodes,\s*([\d,]+)\s+edges"),
+                f"# {n:,} nodes, {e:,} edges",
+            )
+        )
+        reps.append(
+            (
+                re.compile(r"[\d,]+ weighted edges and [\d,]+ Louvain communities"),
+                f"{e:,} weighted edges and {stats['communities']:,} Louvain communities",
+            )
+        )
         # "2,211 nodes, 642K edges, 865 communities"
-        reps.append((re.compile(r"([\d,]+)\s+nodes,\s+[\w.]+\s+edges,\s+([\d,]+)\s+communities"),
-                     f"{n:,} nodes, {e_fmt} edges, {stats['communities']:,} communities"))
+        reps.append(
+            (
+                re.compile(r"([\d,]+)\s+nodes,\s+[\w.]+\s+edges,\s+([\d,]+)\s+communities"),
+                f"{n:,} nodes, {e_fmt} edges, {stats['communities']:,} communities",
+            )
+        )
         # "2,211 nodes, 642K edges" (without communities)
-        reps.append((re.compile(r"full graph \(([\d,]+)\s+nodes,\s+[\w.]+\s+edges\)"),
-                     f"full graph ({n:,} nodes, {e_fmt} edges)"))
-        reps.append((re.compile(r"The full graph \(([\d,]+)\s+nodes,\s+[\w.]+\s+edges\)"),
-                     f"The full graph ({n:,} nodes, {e_fmt} edges)"))
+        reps.append(
+            (
+                re.compile(r"full graph \(([\d,]+)\s+nodes,\s+[\w.]+\s+edges\)"),
+                f"full graph ({n:,} nodes, {e_fmt} edges)",
+            )
+        )
+        reps.append(
+            (
+                re.compile(r"The full graph \(([\d,]+)\s+nodes,\s+[\w.]+\s+edges\)"),
+                f"The full graph ({n:,} nodes, {e_fmt} edges)",
+            )
+        )
         tarball_mib = _full_wiki_tarball_mib()
         if tarball_mib is not None:
-            reps.append((
-                re.compile(r"full ~[\d,]+\s+MiB wiki tarball"),
-                f"full ~{tarball_mib:,} MiB wiki tarball",
-            ))
+            reps.append(
+                (
+                    re.compile(r"full ~[\d,]+\s+MiB wiki tarball"),
+                    f"full ~{tarball_mib:,} MiB wiki tarball",
+                )
+            )
         # "all 2,211 entities"
         reps.append((re.compile(r"all\s+[\d,]+\s+entities"), f"all {n:,} entities"))
         # "**2,211 entity pages** (1,768 skills + 443 agents)"
         if stats["skills"] and stats["agents"]:
-            reps.append((
-                re.compile(r"\*\*[\d,]+\s+entity pages\*\*\s*\([\d,]+\s+skills\s*\+\s*[\d,]+\s+agents\)"),
-                f"**{n:,} entity pages** ({stats['skills']:,} skills + {stats['agents']:,} agents)",
-            ))
+            reps.append(
+                (
+                    re.compile(
+                        r"\*\*[\d,]+\s+entity pages\*\*\s*\([\d,]+\s+skills\s*\+\s*[\d,]+\s+agents\)"
+                    ),
+                    f"**{n:,} entity pages** ({stats['skills']:,} skills + {stats['agents']:,} agents)",
+                )
+            )
 
         bodies_for_core = stats.get("skills_sh_bodies")
         if (
@@ -999,56 +1134,66 @@ def build_replacements(
         ):
             core_nodes = int(n) - int(bodies_for_core)
             curated_skills = int(stats["skills"] or 0) - int(bodies_for_core)
-            reps.append((
-                re.compile(
-                    r"[\d,]+-node core plus [\d,]+ body-backed skill nodes"
-                ),
-                f"{core_nodes:,}-node core plus {int(bodies_for_core):,} "
-                "body-backed skill nodes",
-            ))
-            reps.append((
-                re.compile(
-                    r"[\d,]+ shipped graph nodes: [\d,]+ curated "
-                    r"skill/agent/MCP/harness\s+nodes plus [\d,]+ "
-                    r"body-backed skill nodes"
-                ),
-                f"{n:,} shipped graph nodes: {core_nodes:,} curated "
-                "skill/agent/MCP/harness nodes plus "
-                f"{int(bodies_for_core):,} body-backed skill nodes",
-            ))
-            reps.append((
-                re.compile(
-                    r"\*\*[\d,]+\*\* \([\d,]+ skills \+ [\d,]+ agents "
-                    r"\+ [\d,]+ MCP servers \+ [\d,]+ harnesses\)"
-                ),
-                f"**{core_nodes:,}** ({curated_skills:,} skills + "
-                f"{stats['agents']:,} agents + {stats['mcps']:,} MCP servers "
-                f"+ {stats['harnesses']:,} harnesses)",
-            ))
-            reps.append((
-                re.compile(r"including [\d,]+ skill pages"),
-                f"including {stats['skills']:,} skill pages",
-            ))
-            reps.append((
-                re.compile(
-                    r"is \*\*[\d,]+ nodes\*\* \([\d,]+ curated skills "
-                    r"\+ [\d,]+ agents \+ [\d,]+ MCP servers\s+\+ "
-                    r"[\d,]+ harnesses\)"
-                ),
-                f"is **{core_nodes:,} nodes** ({curated_skills:,} curated skills "
-                f"+ {stats['agents']:,} agents + {stats['mcps']:,} MCP servers "
-                f"+ {stats['harnesses']:,} harnesses)",
-            ))
+            reps.append(
+                (
+                    re.compile(r"[\d,]+-node core plus [\d,]+ body-backed skill nodes"),
+                    f"{core_nodes:,}-node core plus {int(bodies_for_core):,} "
+                    "body-backed skill nodes",
+                )
+            )
+            reps.append(
+                (
+                    re.compile(
+                        r"[\d,]+ shipped graph nodes: [\d,]+ curated "
+                        r"skill/agent/MCP/harness\s+nodes plus [\d,]+ "
+                        r"body-backed skill nodes"
+                    ),
+                    f"{n:,} shipped graph nodes: {core_nodes:,} curated "
+                    "skill/agent/MCP/harness nodes plus "
+                    f"{int(bodies_for_core):,} body-backed skill nodes",
+                )
+            )
+            reps.append(
+                (
+                    re.compile(
+                        r"\*\*[\d,]+\*\* \([\d,]+ skills \+ [\d,]+ agents "
+                        r"\+ [\d,]+ MCP servers \+ [\d,]+ harnesses\)"
+                    ),
+                    f"**{core_nodes:,}** ({curated_skills:,} skills + "
+                    f"{stats['agents']:,} agents + {stats['mcps']:,} MCP servers "
+                    f"+ {stats['harnesses']:,} harnesses)",
+                )
+            )
+            reps.append(
+                (
+                    re.compile(r"including [\d,]+ skill pages"),
+                    f"including {stats['skills']:,} skill pages",
+                )
+            )
+            reps.append(
+                (
+                    re.compile(
+                        r"is \*\*[\d,]+ nodes\*\* \([\d,]+ curated skills "
+                        r"\+ [\d,]+ agents \+ [\d,]+ MCP servers\s+\+ "
+                        r"[\d,]+ harnesses\)"
+                    ),
+                    f"is **{core_nodes:,} nodes** ({curated_skills:,} curated skills "
+                    f"+ {stats['agents']:,} agents + {stats['mcps']:,} MCP servers "
+                    f"+ {stats['harnesses']:,} harnesses)",
+                )
+            )
 
         if stats.get("skills") and stats.get("agents") and stats.get("mcps"):
-            reps.append((
-                re.compile(
-                    r"from the\s+[\d,]+K?\+?\s+skills,\s+[\d,]+\+?\s+agents,\s+"
-                    r"and\s+[\d,]+K?\+?\s+MCP servers"
-                ),
-                f"from the {stats['skills']:,} skills, {stats['agents']:,} "
-                f"agents, and {stats['mcps']:,} MCP servers",
-            ))
+            reps.append(
+                (
+                    re.compile(
+                        r"from the\s+[\d,]+K?\+?\s+skills,\s+[\d,]+\+?\s+agents,\s+"
+                        r"and\s+[\d,]+K?\+?\s+MCP servers"
+                    ),
+                    f"from the {stats['skills']:,} skills, {stats['agents']:,} "
+                    f"agents, and {stats['mcps']:,} MCP servers",
+                )
+            )
 
         if (
             stats.get("skills")
@@ -1056,15 +1201,17 @@ def build_replacements(
             and stats.get("mcps")
             and stats.get("harnesses")
         ):
-            reps.append((
-                re.compile(
-                    r"with\s+[\d,]+K?\+?\s+skill pages,\s+[\d,]+\+?\s+agents,\s+"
-                    r"[\d,]+K?\+?\s+MCP servers,\s+and\s+[\d,]+\s+harnesses"
-                ),
-                f"with {stats['skills']:,} skill pages, "
-                f"{stats['agents']:,} agents, {stats['mcps']:,} MCP servers, "
-                f"and {stats['harnesses']:,} harnesses",
-            ))
+            reps.append(
+                (
+                    re.compile(
+                        r"with\s+[\d,]+K?\+?\s+skill pages,\s+[\d,]+\+?\s+agents,\s+"
+                        r"[\d,]+K?\+?\s+MCP servers,\s+and\s+[\d,]+\s+harnesses"
+                    ),
+                    f"with {stats['skills']:,} skill pages, "
+                    f"{stats['agents']:,} agents, {stats['mcps']:,} MCP servers, "
+                    f"and {stats['harnesses']:,} harnesses",
+                )
+            )
 
         table_values = {
             "Total nodes": n,
@@ -1073,19 +1220,21 @@ def build_replacements(
         }
         for label, value in table_values.items():
             if value is not None:
-                reps.append((
-                    re.compile(rf"\| {re.escape(label)} \| \*\*[\d,]+\*\* \|"),
-                    f"| {label} | **{int(value):,}** |",
-                ))
+                reps.append(
+                    (
+                        re.compile(rf"\| {re.escape(label)} \| \*\*[\d,]+\*\* \|"),
+                        f"| {label} | **{int(value):,}** |",
+                    )
+                )
 
         if stats.get("semantic_edges") and stats.get("tag_edges") and stats.get("token_edges"):
-            reps.append((
-                re.compile(
-                    r"semantic [\d,]+ - tag [\d,]+ - token [\d,]+"
-                ),
-                f"semantic {stats['semantic_edges']:,} - "
-                f"tag {stats['tag_edges']:,} - token {stats['token_edges']:,}",
-            ))
+            reps.append(
+                (
+                    re.compile(r"semantic [\d,]+ - tag [\d,]+ - token [\d,]+"),
+                    f"semantic {stats['semantic_edges']:,} - "
+                    f"tag {stats['tag_edges']:,} - token {stats['token_edges']:,}",
+                )
+            )
 
         for label, key in (
             ("Hydrated skill incident edges", "hydrated_incident_edges"),
@@ -1093,10 +1242,12 @@ def build_replacements(
         ):
             value = stats.get(key)
             if value is not None:
-                reps.append((
-                    re.compile(rf"\| {re.escape(label)} \| \*\*?[\d,]+\*?\*? \|"),
-                    f"| {label} | **{int(value):,}** |",
-                ))
+                reps.append(
+                    (
+                        re.compile(rf"\| {re.escape(label)} \| \*\*?[\d,]+\*?\*? \|"),
+                        f"| {label} | **{int(value):,}** |",
+                    )
+                )
 
         for label, key in (
             ("Cross-type edges \\(skill <-> agent\\)", "cross_skill_agent_edges"),
@@ -1106,10 +1257,12 @@ def build_replacements(
             value = stats.get(key)
             if value is not None:
                 display_label = label.replace("\\", "")
-                reps.append((
-                    re.compile(rf"\| {label} \| ~?[\d,.]+[KM]? \|"),
-                    f"| {display_label} | ~{int(value):,} |",
-                ))
+                reps.append(
+                    (
+                        re.compile(rf"\| {label} \| ~?[\d,.]+[KM]? \|"),
+                        f"| {display_label} | ~{int(value):,} |",
+                    )
+                )
 
     skills_sh_entries = stats.get("skills_sh_entries")
     skills_sh_bodies = stats.get("skills_sh_bodies")
@@ -1117,82 +1270,108 @@ def build_replacements(
         entries = int(skills_sh_entries)
         bodies = int(skills_sh_bodies)
         skill_pages = int(stats.get("skills") or entries)
-        reps.append((
-            re.compile(
-                r"\*\*[\d,]+\s+(?:skills|skill entity pages)\*\*"
-                r"(?:,\s+with\s+\*\*[\d,]+\*\*)?\s+hydrated installable "
-                r"`SKILL\.md` bodies\."
-            ),
-            f"**{skill_pages:,} skill entity pages**, with **{bodies:,}** "
-            "hydrated installable `SKILL.md` bodies.",
-        ))
-        reps.append((
-            re.compile(
-                r"[\d,]+ skill entity pages under `entities/skills/`, "
-                r"[\d,]+ hydrated"
-            ),
-            f"{skill_pages:,} skill entity pages under `entities/skills/`, "
-            f"{bodies:,} hydrated",
-        ))
-        reps.append((
-            re.compile(r"\*\*[\d,]+ skill pages\*\*; \*\*[\d,]+\*\*"),
-            f"**{skill_pages:,} skill pages**; **{bodies:,}**",
-        ))
-        reps.append((
-            re.compile(
-                r"\*\*[\d,]+\*\*\s+hydrated installable skill entries"
-            ),
-            f"**{bodies:,}** hydrated installable skill entries",
-        ))
-        reps.append((
-            re.compile(
-                r"\| Body-backed skill nodes \| \*\*[\d,]+\*\* "
-                r"hydrated installable skill entries \|"
-            ),
-            f"| Body-backed skill nodes | **{bodies:,}** "
-            "hydrated installable skill entries |",
-        ))
-        reps.append((
-            re.compile(r"\*\*[\d,]+\*\*\s+observed body-backed skill entries"),
-            f"**{bodies:,}** observed body-backed skill entries",
-        ))
-        reps.append((
-            re.compile(r"\*\*[\d,]+\*\*\s+have hydrated catalog bodies"),
-            f"**{bodies:,}** have hydrated catalog bodies",
-        ))
-        reps.append((
-            re.compile(
-                r"The shipped wiki includes [\d,]+(?: Skills\.sh)? entries, "
-                r"[\d,]+ hydrated installable `SKILL\.md` bodies"
-            ),
-            "The shipped wiki includes "
-            f"{entries:,} skill entries, {bodies:,} hydrated installable "
-            "`SKILL.md` bodies",
-        ))
-        reps.append((
-            re.compile(
-                r"includes `external-catalogs/skills-sh/catalog\.json`, "
-                r"[\d,]+ (?:remote-cataloged|body-backed|skill) "
-                r"(?:Skills\.sh )?skill pages under "
-                r"`entities/skills/skills-sh-\*\.md`, "
-                r"[\d,]+ hydrated installable (?:Skills\.sh )?`SKILL\.md` files"
-            ),
-            "includes the shipped skill index, "
-            f"{entries:,} skill pages, "
-            f"{bodies:,} hydrated installable `SKILL.md` files",
-        ))
+        reps.append(
+            (
+                re.compile(
+                    r"\*\*[\d,]+\s+(?:skills|skill entity pages)\*\*"
+                    r"(?:,\s+with\s+\*\*[\d,]+\*\*)?\s+hydrated installable "
+                    r"`SKILL\.md` bodies\."
+                ),
+                f"**{skill_pages:,} skill entity pages**, with **{bodies:,}** "
+                "hydrated installable `SKILL.md` bodies.",
+            )
+        )
+        reps.append(
+            (
+                re.compile(
+                    r"[\d,]+ skill entity pages under `entities/skills/`, "
+                    r"[\d,]+ hydrated"
+                ),
+                f"{skill_pages:,} skill entity pages under `entities/skills/`, {bodies:,} hydrated",
+            )
+        )
+        reps.append(
+            (
+                re.compile(r"\*\*[\d,]+ skill pages\*\*; \*\*[\d,]+\*\*"),
+                f"**{skill_pages:,} skill pages**; **{bodies:,}**",
+            )
+        )
+        reps.append(
+            (
+                re.compile(r"\*\*[\d,]+\*\*\s+hydrated installable skill entries"),
+                f"**{bodies:,}** hydrated installable skill entries",
+            )
+        )
+        reps.append(
+            (
+                re.compile(
+                    r"\| Body-backed skill nodes \| \*\*[\d,]+\*\* "
+                    r"hydrated installable skill entries \|"
+                ),
+                f"| Body-backed skill nodes | **{bodies:,}** hydrated installable skill entries |",
+            )
+        )
+        reps.append(
+            (
+                re.compile(r"\*\*[\d,]+\*\*\s+observed body-backed skill entries"),
+                f"**{bodies:,}** observed body-backed skill entries",
+            )
+        )
+        reps.append(
+            (
+                re.compile(r"\*\*[\d,]+\*\*\s+have hydrated catalog bodies"),
+                f"**{bodies:,}** have hydrated catalog bodies",
+            )
+        )
+        reps.append(
+            (
+                re.compile(
+                    r"The shipped wiki includes [\d,]+(?: Skills\.sh)? entries, "
+                    r"[\d,]+ hydrated installable `SKILL\.md` bodies"
+                ),
+                "The shipped wiki includes "
+                f"{entries:,} skill entries, {bodies:,} hydrated installable "
+                "`SKILL.md` bodies",
+            )
+        )
+        reps.append(
+            (
+                re.compile(
+                    r"includes `external-catalogs/skills-sh/catalog\.json`, "
+                    r"[\d,]+ (?:remote-cataloged|body-backed|skill) "
+                    r"(?:Skills\.sh )?skill pages under "
+                    r"`entities/skills/skills-sh-\*\.md`, "
+                    r"[\d,]+ hydrated installable (?:Skills\.sh )?`SKILL\.md` files"
+                ),
+                "includes the shipped skill index, "
+                f"{entries:,} skill pages, "
+                f"{bodies:,} hydrated installable `SKILL.md` files",
+            )
+        )
 
     if tests is not None:
-        reps.append((
-            re.compile(r"badge/Tests-[0-9]+_(?:passing|collected|inventory)-"),
-            f"badge/Tests-{tests}_inventory-",
-        ))
+        reps.append(
+            (
+                re.compile(r"badge/Tests-[0-9]+_(?:passing|collected|inventory)-"),
+                f"badge/Tests-{tests}_inventory-",
+            )
+        )
         reps.append((re.compile(r"#\s*([\d,]+)\s+pytest tests"), f"# {tests} pytest tests"))
 
     if converted is not None:
         reps.append((re.compile(r"\(([\d,]+)\s+converted\)"), f"({converted:,} converted)"))
-        reps.append((re.compile(r"#\s*([\d,]+)\s+dual-version skills"), f"# {converted:,} dual-version skills"))
-        reps.append((re.compile(r"#\s*([\d,]+)\s+micro-skill pipelines"), f"# {converted:,} micro-skill pipelines"))
+        reps.append(
+            (
+                re.compile(r"#\s*([\d,]+)\s+dual-version skills"),
+                f"# {converted:,} dual-version skills",
+            )
+        )
+        reps.append(
+            (
+                re.compile(r"#\s*([\d,]+)\s+micro-skill pipelines"),
+                f"# {converted:,} micro-skill pipelines",
+            )
+        )
 
     return reps
 
@@ -1205,10 +1384,12 @@ def build_docs_replacements(
     reps = build_replacements(stats, tests, converted)
     if tests is None:
         return reps
-    reps.append((
-        re.compile(r"[\d,]+\s+(?:tests collected|test inventory)"),
-        f"{tests:,} test inventory",
-    ))
+    reps.append(
+        (
+            re.compile(r"[\d,]+\s+(?:tests collected|test inventory)"),
+            f"{tests:,} test inventory",
+        )
+    )
     return reps
 
 
@@ -1287,7 +1468,10 @@ def patch_readme(check_only: bool = False) -> int:
 
     missing = [k for k, v in stats.items() if v is None] + (["tests"] if tests is None else [])
     if missing:
-        print(f"warning: could not resolve {missing}; those fields will be left untouched", file=sys.stderr)
+        print(
+            f"warning: could not resolve {missing}; those fields will be left untouched",
+            file=sys.stderr,
+        )
 
     changes: list[tuple[Path, str, str]] = []
     for target in (
@@ -1301,7 +1485,8 @@ def patch_readme(check_only: bool = False) -> int:
             continue
         replacements = (
             build_replacements(stats, tests, converted)
-            if target == README else build_docs_replacements(stats, tests, converted)
+            if target == README
+            else build_docs_replacements(stats, tests, converted)
         )
         original = target.read_text(encoding="utf-8")
         patched = original
@@ -1316,16 +1501,13 @@ def patch_readme(check_only: bool = False) -> int:
 
     if check_only:
         print(
-            "README/docs stats are STALE -- run `python src/update_repo_stats.py` "
-            "to refresh.",
+            "README/docs stats are STALE -- run `python src/update_repo_stats.py` to refresh.",
             file=sys.stderr,
         )
         for target, original, patched in changes:
             diff = [
                 (i + 1, o, p)
-                for i, (o, p) in enumerate(
-                    zip(original.splitlines(), patched.splitlines())
-                )
+                for i, (o, p) in enumerate(zip(original.splitlines(), patched.splitlines()))
                 if o != p
             ]
             for lineno, o, p in diff[:10]:
@@ -1343,6 +1525,7 @@ def patch_readme(check_only: bool = False) -> int:
         print(f"{_target_label(target)} patched: {changed_lines} lines changed")
     print(f"Repository stats patched: {total} lines changed")
     return 0
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
