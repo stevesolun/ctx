@@ -222,7 +222,7 @@ per-process monitor token injected into the rendered page.
 | `/harness` | Harness Setup wizard for non-Claude/custom API/local model users: collects model, goals, tool needs, safety constraints, and shows the harness recommendation/install path. |
 | `/docs` | Local repo docs rendered inside the dashboard with MkDocs-like tabs, sidebar table of contents, in-dashboard search, and source links. |
 | `/config` | Effective ctx config with defaults, required markers, field explanations, and editable user overrides where supported. |
-| `/status` | Durable queue and artifact status: job counts by state, recent queue jobs, graph/wiki artifact sizes, and crash-safe promotion metadata. |
+| `/status` | Durable queue, artifact, and telemetry status: job counts by state, recent queue jobs, graph/wiki artifact sizes, crash-safe promotion metadata, local spool counts, and exporter degradation details. |
 | `/kpi` | **KPI dashboard** — total entity count with subject breakdown, grade distribution pills, two-column tables for grade counts and lifecycle tiers (active · watch · demote · archive), hard-floor reasons with counts, **By category** table (count · avg score · A/B/C/D/F mix per category), **Top demotion candidates** (active/watch entries graded D or F, sorted by consecutive-D streak desc then score asc), and the **Archived** list. Same shape as `python -m kpi_dashboard render` but HTML |
 | `/runtime` | Generic harness runtime ledger from `CTX_RUNTIME_LIFECYCLE_DIR` or `~/.ctx/runtime/events.jsonl`: validation totals, failed/error checks, recent validation rows, and open escalations. |
 | `/sessions` | Index of every session (audit + skill-events), first/last seen, counts of skills loaded/unloaded, agents loaded/unloaded, MCPs loaded/unloaded, and lifecycle transitions |
@@ -236,7 +236,7 @@ per-process monitor token injected into the rendered page.
 |---|---|
 | `GET /api/sessions.json` | All sessions with aggregated counts |
 | `GET /api/manifest.json` | Raw `skill-manifest.json` passthrough |
-| `GET /api/status.json` | `{queue, artifacts}` payload: durable queue counts/recent jobs plus graph/wiki artifact file status and promotion metadata |
+| `GET /api/status.json` | `{queue, artifacts, telemetry}` payload: durable queue counts/recent jobs, graph/wiki artifact file status and promotion metadata, plus telemetry spool/export health including malformed records and exporter errors |
 | `GET /api/skill/<slug>.json` | Raw sidecar for one slug |
 | `GET /api/graph/<slug>.json?type=<entity>&hops=1&limit=40` | Dashboard-shaped skill/agent/MCP/harness `{nodes, edges, center}`; `type` is optional but recommended for duplicate slugs, `hops` is [1, 3], `limit` is [5, 150]. |
 | `GET /api/kpi.json` | `DashboardSummary` passthrough — `{total, by_subject, grade_counts, lifecycle_counts, category_breakdown, hard_floor_counts, low_quality_candidates, archived, generated_at}`. Returns `{total: 0, detail: "no sidecars yet"}` when the quality directory is empty |

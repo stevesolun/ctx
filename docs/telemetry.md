@@ -390,15 +390,15 @@ raw message text:
 | Exception fingerprints | count logs grouped by `ctx.exception.fingerprint`, `ctx.exception.type` |
 | API latency | histogram metric `ctx.api.duration` by `ctx.operation` |
 | CLI/runtime usage | count logs for `ctx.cli.run`, `ctx.cli.resume`, `ctx.runtime_lifecycle.record` |
-| Exporter health | status JSON fields `status`, `malformed_pending_count`, `last_error_kind` |
-| Spool growth | `event_count`, `malformed_count`, and checkpoint age from `/api/status.json` |
+| Exporter health | status JSON fields `status`, `attempted`, `exported`, `failed`, `malformed_pending_records`, `error_kind` |
+| Spool growth | `event_count`, `malformed_records`, and checkpoint age from `/api/status.json` |
 
 Recommended enterprise alerts:
 
 | Alert | Condition |
 |---|---|
 | `CtxTelemetryExporterFailed` | latest export status is `failed` for 2 consecutive runs |
-| `CtxTelemetryExporterDegraded` | latest export status is `degraded` or `malformed_pending_count > 0` |
+| `CtxTelemetryExporterDegraded` | latest export status is `degraded` or `malformed_pending_records > 0` |
 | `CtxTelemetrySilent` | telemetry is enabled but no new event appears during an expected active window |
 | `CtxTelemetrySpoolGrowing` | local spool count grows while checkpoint id stays unchanged |
 | `CtxTelemetryUnhandledExceptions` | new `ctx.exception.fingerprint` appears in prod |
@@ -411,7 +411,8 @@ curl -fsS http://127.0.0.1:8765/api/status.json
 ```
 
 The monitor surfaces telemetry health, spool counts, malformed counts,
-checkpoint presence, and exporter status without rendering event payloads.
+checkpoint presence, exporter attempted/exported/failed counts, and exporter
+`error_kind` without rendering event payloads.
 
 ## Operator Runbook
 
@@ -450,5 +451,6 @@ cat ~/.ctx/telemetry/events.jsonl.export-status.json
 
 The ctx monitor also surfaces the same local health summary on `/status` and
 `/api/status.json`: capture enabled/mode, spool event and malformed counts, the
-latest event name/outcome, checkpoint presence, and the last exporter status.
+latest event name/outcome, checkpoint presence, exporter
+attempted/exported/failed counts, and exporter `error_kind`.
 The monitor does not render telemetry payloads.
