@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +69,52 @@ def test_recommend_for_loop_respects_capability_permissions(
     assert payload["mcp_server"]["command"] == "ctx-mcp-server"
 
 
+def test_empty_permissions_stay_empty(monkeypatch) -> None:
+    def fail_recommend_bundle(query: str, *, top_k: int) -> list[dict[str, Any]]:
+        raise AssertionError("recommend_bundle should not run without grants")
+
+    monkeypatch.setattr(loopflow, "recommend_bundle", fail_recommend_bundle)
+
+    payload = loopflow.recommend_for_loop(
+        goal="deny all recommendations",
+        permissions=set(),
+    )
+
+    assert payload["permissions"] == {
+        "skills": False,
+        "agents": False,
+        "mcps": False,
+        "harnesses": False,
+    }
+    assert payload["capabilities"] == {
+        "skills": [],
+        "agents": [],
+        "mcps": [],
+        "harnesses": [],
+    }
+    assert payload["loopflow"]["use_skills"] is None
+
+
+def test_loopflow_skill_hint_requires_skills_permission(monkeypatch) -> None:
+    def fake_recommend_bundle(query: str, *, top_k: int) -> list[dict[str, Any]]:
+        return [
+            {"name": "security-review", "type": "skill"},
+            {"name": "filesystem", "type": "mcp-server"},
+        ]
+
+    monkeypatch.setattr(loopflow, "recommend_bundle", fake_recommend_bundle)
+
+    payload = loopflow.recommend_for_loop(
+        goal="recommend only tools",
+        permissions={"mcps"},
+    )
+
+    assert payload["permissions"]["skills"] is False
+    assert payload["capabilities"]["skills"] == []
+    assert [row["name"] for row in payload["capabilities"]["mcps"]] == ["filesystem"]
+    assert payload["loopflow"]["use_skills"] is None
+
+
 def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
     calls: list[str] = []
 
@@ -102,6 +149,41 @@ def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
         "harness_install"
     ]
     assert "--model-provider" in allowed["agent_loop"]["harness_install"]
+
+
+def test_harness_install_command_is_shell_quoted(monkeypatch) -> None:
+    def fake_recommend_harnesses(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return [{"name": "local $(touch bad)", "type": "harness", "fit_score": 0.9}]
+
+    monkeypatch.setattr(loopflow, "recommend_bundle", lambda query, *, top_k: [])
+    monkeypatch.setattr(loopflow, "recommend_harnesses", fake_recommend_harnesses)
+
+    payload = loopflow.recommend_for_loop(
+        goal="run $(touch bad)",
+        permissions={"harnesses"},
+        own_llm=True,
+        model_provider="open`whoami`",
+        model="llama; rm -rf .",
+        harness_requirements={"runtime": "local $(touch bad)"},
+    )
+
+    command = payload["agent_loop"]["harness_install"]
+
+    assert command.startswith("ctx-harness-install 'local $(touch bad)' --dry-run")
+    assert "'run $(touch bad)'" in command
+    assert shlex.split(command) == [
+        "ctx-harness-install",
+        "local $(touch bad)",
+        "--dry-run",
+        "--goal",
+        "run $(touch bad)",
+        "--model-provider",
+        "open`whoami`",
+        "--model",
+        "llama; rm -rf .",
+        "--harness-runtime",
+        "local $(touch bad)",
+    ]
 
 
 def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> None:

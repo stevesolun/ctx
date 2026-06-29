@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 import re
+import shlex
 import sys
 from typing import Any
 
@@ -169,15 +170,15 @@ def _harness_command(
         return None
     parts = ["ctx-harness-install", str(harnesses[0]["name"]), "--dry-run"]
     if goal:
-        parts.extend(["--goal", json.dumps(goal)])
+        parts.extend(["--goal", goal])
     if model_provider:
-        parts.extend(["--model-provider", json.dumps(model_provider)])
+        parts.extend(["--model-provider", model_provider])
     if model:
-        parts.extend(["--model", json.dumps(model)])
+        parts.extend(["--model", model])
     for key, value in requirements.items():
         if value:
-            parts.extend([_HARNESS_REQUIREMENT_FLAGS[key], json.dumps(value)])
-    return " ".join(parts)
+            parts.extend([_HARNESS_REQUIREMENT_FLAGS[key], value])
+    return shlex.join(parts)
 
 
 def recommend_for_loop(
@@ -196,7 +197,7 @@ def recommend_for_loop(
 ) -> dict[str, Any]:
     """Return a permissioned ctx adapter payload for a DSL or agent loop."""
     safe_top_k = max(1, min(int(top_k), 20))
-    granted = permissions or {"skills", "agents", "mcps"}
+    granted = permissions if permissions is not None else {"skills", "agents", "mcps"}
     context_paths = look_at or []
     requirements = harness_requirements or {}
     query = _build_query(
@@ -241,10 +242,12 @@ def recommend_for_loop(
             )
         ]
 
-    skill_names = [row["name"] for row in capability_bundle["skills"][:3]]
-    use_skills = "use skills: ctx-recommend"
-    if skill_names:
-        use_skills += ", " + ", ".join(str(name) for name in skill_names)
+    use_skills = None
+    if "skills" in granted:
+        skill_names = [row["name"] for row in capability_bundle["skills"][:3]]
+        use_skills = "use skills: ctx-recommend"
+        if skill_names:
+            use_skills += ", " + ", ".join(str(name) for name in skill_names)
 
     return {
         "version": "ctx.loop_adapter.v1",
