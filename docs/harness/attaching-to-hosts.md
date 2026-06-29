@@ -242,6 +242,75 @@ process environment; secret values are not stored in the session log.
 
 ---
 
+## LoopFlow and agent-loop adapter
+
+DSL runners such as [LoopFlow](https://loopflow.live/) and custom agent loops
+already own the control flow: plan, act, observe, reflect, and stop when their
+gate passes. Use `python -m ctx.adapters.loopflow` when that loop should ask
+ctx which capabilities it may load before planning.
+
+The adapter emits a JSON contract with:
+
+- explicit permission grants for `skills`, `agents`, `mcps`, and `harnesses`;
+- the `ctx-mcp-server` command and ctx tool names for MCP-aware loops;
+- ranked skill, agent, and MCP recommendations from `ctx-recommend`;
+- optional harness recommendations only when the loop declares a user-owned,
+  API, or local model.
+
+For LoopFlow, keep the `.loop` file in charge and call ctx before the plan:
+
+```bash
+python -m ctx.adapters.loopflow \
+  --loop-file rate-limit.loop \
+  --permissions skills,agents,mcps \
+  --last-failure-file .loopflow/last-failure.txt
+```
+
+The returned payload includes LoopFlow-ready hints such as:
+
+```loop
+use tools from the "ctx" server
+use skills: ctx-recommend, security-review, code-review
+```
+
+When the LoopFlow run uses its own LLM rather than a hosted Claude Code
+session, grant harnesses and pass the model profile:
+
+```bash
+python -m ctx.adapters.loopflow \
+  --loop-file private-agent.loop \
+  --permissions skills,agents,mcps,harnesses \
+  --own-llm \
+  --model-provider ollama \
+  --model ollama/llama3.1 \
+  --harness-runtime "local workstation" \
+  --harness-tools "filesystem, shell, browser" \
+  --harness-privacy "no cloud prompts"
+```
+
+Generic agent loops can import the same adapter directly:
+
+```python
+from ctx.adapters.loopflow import recommend_for_loop
+
+plan_context = recommend_for_loop(
+    goal="fix checkout e2e flake",
+    loop_kind="agent-loop",
+    look_at=["tests/e2e", "playwright config"],
+    last_failure=last_failure_text,
+    permissions={"skills", "agents", "mcps", "harnesses"},
+    own_llm=True,
+    model_provider="openrouter",
+    model="anthropic/claude-opus-4.7",
+)
+```
+
+Load only the groups that are explicitly granted in `permissions`. If
+`harnesses` is granted without `--own-llm`, `--model-provider`, or `--model`,
+the adapter returns a warning and no harness recommendations.
+
+---
+
 ## Installed harness attachment
 
 `ctx-harness-install <slug>` creates `.ctx/attach/` inside the installed
@@ -280,6 +349,7 @@ ctx-harness-install --recommend \
 | You're comparing models and need a harness | 3 (CLI) |
 | No catalog harness fits your model/goal | generated custom harness plan |
 | You're building an IDE extension | 1 if the IDE speaks MCP (most do), else 2 |
+| You're building a DSL runner or agent loop | `python -m ctx.adapters.loopflow` before plan |
 
 All three paths share `~/.claude/skill-wiki/` as the source-of-truth
 corpus, so your recommendations are consistent regardless of the
