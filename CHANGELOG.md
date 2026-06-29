@@ -5,6 +5,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.20] - 2026-06-29
+
 ### Added
 
 - Added enterprise OpenTelemetry-ready telemetry across API, MCP, CLI/runtime,
@@ -1738,6 +1740,7 @@ pass. Full test suite: **1316 passed, 2 skipped**.
 - 5 dead imports removed (`os`, `Mapping`, `timedelta` from
   `ctx_lifecycle`; `Path` from `intake_gate`, `intake_pipeline`).
 
+[1.0.20]: https://github.com/stevesolun/ctx/releases/tag/v1.0.20
 [1.0.19]: https://github.com/stevesolun/ctx/releases/tag/v1.0.19
 [1.0.18]: https://github.com/stevesolun/ctx/releases/tag/v1.0.18
 [1.0.17]: https://github.com/stevesolun/ctx/releases/tag/v1.0.17
