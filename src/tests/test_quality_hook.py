@@ -1,10 +1,10 @@
 """
-test_quality_hook.py -- Regression tests for hooks/quality_on_session_end.py.
+test_quality_hook.py -- Regression tests for root runtime hooks.
 
-Focuses on the pure helpers: ``_touched_slugs_since`` and the cutoff/state
-roundtrip. The subprocess call to ``skill_quality.py recompute`` is
-mocked — we're testing the hook's *decision* logic, not the scorer,
-which has its own dedicated suite in ``test_skill_quality.py``.
+Focuses on the pure helpers in ``quality_on_session_end.py`` plus the
+root hook runtime contracts that must never block Claude Code tool/session
+lifecycles. Expensive child processes are mocked; the scorer and backup
+mirror have their own dedicated suites.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ if str(HOOKS) not in sys.path:
     sys.path.insert(0, str(HOOKS))
 
 import quality_on_session_end as qh  # noqa: E402
+import backup_on_change as backup_hook  # noqa: E402
 
 
 NOW = datetime(2026, 4, 19, 12, 0, 0, tzinfo=timezone.utc)
@@ -136,10 +137,11 @@ def test_invoke_recompute_noops_on_empty(monkeypatch) -> None:
     assert called["n"] == 0
 
 
-def test_main_exits_zero_even_when_subprocess_fails(
+def test_root_hook_mains_exit_zero_and_dispatch_expected_work(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     # Point everything at tmp so no real state is touched.
+    monkeypatch.setenv("HOME", str(tmp_path))
     events = tmp_path / "skill-events.jsonl"
     _write_events(events, [{"event": "load", "skill": "demo",
                             "timestamp": _iso(NOW)}])
@@ -155,6 +157,80 @@ def test_main_exits_zero_even_when_subprocess_fails(
     monkeypatch.setattr("sys.stdin", _StdinStub(""))
     rc = qh.main()
     assert rc == 0  # hook never propagates errors
+
+    current = datetime.now(timezone.utc)
+    (tmp_path / "state.json").write_text(
+        json.dumps({"last_run_at": _iso(current - timedelta(minutes=3))}),
+        encoding="utf-8",
+    )
+    _write_events(
+        events,
+        [
+            {
+                "event": "load",
+                "skill": "fresh-one",
+                "timestamp": _iso(current - timedelta(minutes=2)),
+            },
+            {
+                "event": "load",
+                "skill": "fresh-two",
+                "timestamp": _iso(current - timedelta(minutes=1)),
+            },
+            {
+                "event": "load",
+                "skill": "fresh-one",
+                "timestamp": _iso(current),
+            },
+        ],
+    )
+    calls: list[dict[str, Any]] = []
+
+    class _Result:
+        returncode = 0
+        stderr = ""
+
+    def _capture_run(cmd, **kwargs):
+        calls.append({"cmd": cmd, "env": kwargs.get("env")})
+        return _Result()
+
+    monkeypatch.setattr(qh.subprocess, "run", _capture_run, raising=True)
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps({"session_id": "sess-1"})))
+    assert qh.main() == 0
+    assert calls
+    assert calls[0]["cmd"][-3:] == ["recompute", "--slugs", "fresh-one,fresh-two"]
+    assert calls[0]["env"]["CTX_SESSION_ID"] == "sess-1"
+
+    snapshot_reasons: list[str] = []
+    touched = tmp_path / ".claude" / "settings.json"
+    payload = {
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(touched)},
+    }
+
+    def _record_snapshot(reason: str) -> int:
+        snapshot_reasons.append(reason)
+        return 2
+
+    monkeypatch.setattr(
+        backup_hook,
+        "_is_tracked",
+        lambda path, claude_home: path == touched and claude_home.name == ".claude",
+        raising=True,
+    )
+    monkeypatch.setattr(
+        backup_hook,
+        "_invoke_snapshot",
+        _record_snapshot,
+        raising=True,
+    )
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
+    assert backup_hook.main() == 0
+    assert snapshot_reasons == ["Write:settings.json"]
+
+    monkeypatch.setattr(backup_hook, "_is_tracked", lambda path, home: False, raising=True)
+    monkeypatch.setattr("sys.stdin", _StdinStub(json.dumps(payload)))
+    assert backup_hook.main() == 0
+    assert snapshot_reasons == ["Write:settings.json"]
 
 
 class _StdinStub:

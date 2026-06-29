@@ -695,7 +695,8 @@ def test_status_page_and_api_show_queue_and_artifacts(
             "sink": "otlp_http",
             "attempted": 1,
             "exported": 1,
-            "failed": 0,
+            "failed": 1,
+            "error_kind": "collector_timeout",
             "malformed_records": 1,
             "malformed_pending_records": 1,
             "updated_at": "2026-06-28T00:01:00Z",
@@ -724,6 +725,9 @@ def test_status_page_and_api_show_queue_and_artifacts(
     assert "malformed: 1" in html_out
     assert "ctx.mcp.request" in html_out
     assert "degraded" in html_out
+    assert "sink otlp_http" in html_out
+    assert "attempted/exported/failed: 1/1/1" in html_out
+    assert "Export error: collector_timeout" in html_out
     assert wiki_queue.GRAPH_EXPORT_JOB in html_out
 
     server, _thread, port = _serve_monitor(monkeypatch)
@@ -738,6 +742,8 @@ def test_status_page_and_api_show_queue_and_artifacts(
         assert payload["telemetry"]["spool"]["malformed_records"] == 1
         assert payload["telemetry"]["spool"]["latest_event"]["event_name"] == "ctx.mcp.request"
         assert payload["telemetry"]["export_status"]["status"] == "degraded"
+        assert payload["telemetry"]["export_status"]["error_kind"] == "collector_timeout"
+        assert payload["telemetry"]["export_status"]["failed"] == 1
         assert payload["artifacts"]["graph_json"]["path"].endswith("graph.json")
     finally:
         server.shutdown()
