@@ -237,8 +237,9 @@ def test_hook_mains_exit_zero_and_dispatch_expected_work(
     packaged_events = tmp_path / "packaged-skill-events.jsonl"
     packaged_state = tmp_path / "packaged-state.json"
     packaged_current = datetime.now(timezone.utc)
+    packaged_seeded_last_run = _iso(packaged_current - timedelta(minutes=3))
     packaged_state.write_text(
-        json.dumps({"last_run_at": _iso(packaged_current - timedelta(minutes=3))}),
+        json.dumps({"last_run_at": packaged_seeded_last_run}),
         encoding="utf-8",
     )
     _write_events(
@@ -316,7 +317,12 @@ def test_hook_mains_exit_zero_and_dispatch_expected_work(
         }
     ]
     assert "CTX_SESSION_ID" not in lifecycle_hooks.os.environ
-    assert json.loads(packaged_state.read_text(encoding="utf-8"))["last_run_at"]
+    packaged_last_run = json.loads(
+        packaged_state.read_text(encoding="utf-8")
+    )["last_run_at"]
+    assert datetime.fromisoformat(packaged_last_run) > datetime.fromisoformat(
+        packaged_seeded_last_run
+    )
     assert audit_events[0]["event"] == "session.ended"
     assert audit_events[0]["session_id"] == "sess-2"
     assert audit_events[0]["meta"]["recomputed_slugs"] == 2

@@ -35,14 +35,14 @@ jobs:
           echo "::error title=Missing HF_TOKEN::Canonical Hugging Face sync must fail closed when the HF_TOKEN repository secret is absent."
           exit 1
 
-      - name: Skip when HF_TOKEN is not configured on forks
-        if: ${{ env.HF_TOKEN == '' && github.repository != 'stevesolun/ctx' }}
+      - name: Skip non-canonical repository
+        if: ${{ github.repository != 'stevesolun/ctx' }}
         run: |
-          echo "::notice title=Hugging Face sync skipped::Set the HF_TOKEN repository secret to publish Stevesolun/ctx automatically from a trusted repository."
+          echo "::notice title=Hugging Face sync skipped::Only stevesolun/ctx is trusted to publish Stevesolun/ctx."
 
       - name: Classify sync scope
         id: scope
-        if: ${{ env.HF_TOKEN != '' }}
+        if: ${{ env.HF_TOKEN != '' && github.repository == 'stevesolun/ctx' }}
         shell: bash
         env:
           BEFORE_SHA: ${{ github.event.before }}
@@ -77,7 +77,7 @@ jobs:
           PY
 
       - name: Hydrate required graph artifacts from release assets
-        if: ${{ env.HF_TOKEN != '' && steps.scope.outputs.sync_mode == 'full' }}
+        if: ${{ env.HF_TOKEN != '' && github.repository == 'stevesolun/ctx' && steps.scope.outputs.sync_mode == 'full' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -198,7 +198,7 @@ jobs:
           PY
 
       - name: Set up Python
-        if: ${{ env.HF_TOKEN != '' }}
+        if: ${{ env.HF_TOKEN != '' && github.repository == 'stevesolun/ctx' }}
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -206,13 +206,13 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install sync dependencies
-        if: ${{ env.HF_TOKEN != '' }}
+        if: ${{ env.HF_TOKEN != '' && github.repository == 'stevesolun/ctx' }}
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]" huggingface_hub
 
       - name: Sync Hugging Face dataset repo
-        if: ${{ env.HF_TOKEN != '' }}
+        if: ${{ env.HF_TOKEN != '' && github.repository == 'stevesolun/ctx' }}
         env:
           SYNC_MODE: ${{ steps.scope.outputs.sync_mode }}
         run: |
