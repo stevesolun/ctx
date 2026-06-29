@@ -214,6 +214,32 @@ ctx run \
 See `ctx run --help` for the full flag set (budgets, compaction,
 system prompt overrides, session resume, JSON output, ...).
 
+Planning and review modes are opt-in flags on `ctx run`. Use `--planner` to
+produce a structured spec before generation, `--evaluator` to grade and revise
+the result, and `--contract` with both `--planner` and `--evaluator` to refine
+testable success criteria before the generator starts:
+
+```bash
+ctx run \
+    --model openrouter/anthropic/claude-opus-4.7 \
+    --task "implement the checkout retry policy" \
+    --planner \
+    --evaluator \
+    --contract
+```
+
+Resume keeps executable MCP metadata disabled by default. To replay the saved
+messages and recreate ctx-core tools for a new task, run:
+
+```bash
+ctx resume <session-id> --task "..."
+```
+
+It skips recorded MCP command metadata unless you pass
+`--restore-session-mcp`. When MCP restoration is enabled, session metadata
+stores only `credential_env` names and reads those variables from the current
+process environment; secret values are not stored in the session log.
+
 ---
 
 ## Installed harness attachment

@@ -23,8 +23,10 @@ Every push to `main` runs `.github/workflows/huggingface-sync.yml`. The job
 checks out source without spending Git LFS bandwidth, hydrates the required
 graph artifacts from the latest GitHub release assets, installs the sync
 dependencies, and calls `scripts/sync_huggingface.py`. It publishes only when
-the repository secret `HF_TOKEN` is configured; otherwise it exits successfully
-with a notice so public forks and dry repos do not fail.
+the repository secret `HF_TOKEN` is configured. On the canonical
+`stevesolun/ctx` repository, a missing token is a hard failure so main cannot
+silently drift from the dataset repo. On forks, a missing token still exits
+successfully with a notice because forks are not trusted publishing sources.
 
 The sync script is still the contract: it exports the tracked git snapshot,
 adds Hugging Face repo-card metadata, validates README/docs stats, verifies the

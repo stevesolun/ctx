@@ -38,6 +38,7 @@ update the canonical feature tracker with the exact path in
 ```bash
 python -m pytest -q --no-cov \
   src/tests/test_feature_user_story_tracker.py \
+  src/tests/test_dashboard_user_story_tracker.py \
   src/tests/test_toolbox_cli.py
 ```
 

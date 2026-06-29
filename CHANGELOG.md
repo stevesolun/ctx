@@ -5,6 +5,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Hardened docs deploy and release publish gates so feature and dashboard
+  tracker suites run before site deployment or package publishing.
+- Made canonical Hugging Face sync fail when `HF_TOKEN` is missing while forks
+  still skip safely without publishing.
+
 ## [1.0.20] - 2026-06-29
 
 ### Added
