@@ -13,6 +13,12 @@ def _workflow_paths() -> tuple[Path, ...]:
     return tuple(sorted(Path(".github/workflows").glob("*.yml")))
 
 
+def _release_version_tuple(version: str) -> tuple[int, int, int]:
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+    assert match is not None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
 def _required_needs(
     **overrides: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
@@ -286,6 +292,23 @@ def test_changelog_tracks_current_version_or_unreleased_changes() -> None:
             f"[{version}]: https://github.com/stevesolun/ctx/releases/tag/v{version}" in changelog
         )
         return
+
+    release_versions = [
+        _release_version_tuple(match.group("version"))
+        for match in re.finditer(
+            r"^\[(?P<version>\d+\.\d+\.\d+)\]: "
+            r"https://github\.com/stevesolun/ctx/releases/tag/v(?P=version)$",
+            changelog,
+            re.MULTILINE,
+        )
+    ]
+    assert release_versions
+    latest_release = max(release_versions)
+    assert _release_version_tuple(version) == (
+        latest_release[0],
+        latest_release[1],
+        latest_release[2] + 1,
+    )
 
     unreleased_match = re.search(
         r"## \[Unreleased\](?P<section>.*?)(?=\n## \[|\Z)",

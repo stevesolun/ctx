@@ -24,6 +24,9 @@ import pytest
 import toolbox as cli
 import toolbox_config as tc
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+PUBLIC_TEMPLATES_DIR = REPO_ROOT / "docs" / "toolbox" / "templates"
+
 
 @pytest.fixture()
 def isolated_global(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -43,13 +46,13 @@ def _assert_public_template_json_matches_embedded_starters(
 ) -> None:
     docs_templates = {
         path.stem: json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(cli.TEMPLATES_DIR.glob("*.json"))
+        for path in sorted(PUBLIC_TEMPLATES_DIR.glob("*.json"))
     }
 
     assert docs_templates
     assert set(docs_templates) == set(cli._EMBEDDED_TEMPLATES)
 
-    missing_templates_dir = cli.TEMPLATES_DIR / "__missing_for_test__"
+    missing_templates_dir = PUBLIC_TEMPLATES_DIR / "__missing_for_test__"
     assert not missing_templates_dir.exists()
     monkeypatch.setattr(cli, "TEMPLATES_DIR", missing_templates_dir)
 
