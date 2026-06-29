@@ -101,7 +101,9 @@ class _FakeHttpError(Exception):
 
 
 class _FakeRepoCreateApi:
-    def __init__(self, repo_info_statuses: list[int | None], create_status: int | None = None) -> None:
+    def __init__(
+        self, repo_info_statuses: list[int | None], create_status: int | None = None
+    ) -> None:
         self.repo_info_statuses = repo_info_statuses
         self.create_status = create_status
         self.calls: list[tuple[str, dict[str, object]]] = []
@@ -134,9 +136,7 @@ def test_hf_metadata_is_added_to_exported_readme() -> None:
 
 
 def test_hf_metadata_replaces_existing_leading_frontmatter() -> None:
-    rendered = sync_huggingface.with_hf_repo_card_metadata(
-        "---\nold: value\n---\n\n# ctx\n"
-    )
+    rendered = sync_huggingface.with_hf_repo_card_metadata("---\nold: value\n---\n\n# ctx\n")
 
     assert "old: value" not in rendered
     assert rendered.count("license: mit") == 1
@@ -144,21 +144,18 @@ def test_hf_metadata_replaces_existing_leading_frontmatter() -> None:
 
 
 def test_hf_publish_docs_use_hardened_sync_script_without_inline_token() -> None:
-    docs = (Path(__file__).resolve().parents[2] / "docs" / "huggingface-publish.md")
+    docs = Path(__file__).resolve().parents[2] / "docs" / "huggingface-publish.md"
     text = docs.read_text(encoding="utf-8")
 
     assert "scripts/sync_huggingface.py" in text
     assert '$env:HF_TOKEN = "<' not in text
     assert "api.upload_folder" not in text
-    assert "Read-Host \"HF write token\"" in text
+    assert 'Read-Host "HF write token"' in text
 
 
 def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:
     workflow = (
-        Path(__file__).resolve().parents[2]
-        / ".github"
-        / "workflows"
-        / "huggingface-sync.yml"
+        Path(__file__).resolve().parents[2] / ".github" / "workflows" / "huggingface-sync.yml"
     )
     text = workflow.read_text(encoding="utf-8")
 
@@ -325,15 +322,9 @@ def test_hf_export_copies_hydrated_artifacts_even_when_untracked(
     sync_huggingface._export_tracked_tree(repo, export_dir)
 
     assert (export_dir / "README.md").read_text(encoding="utf-8") == "# ctx\n"
-    assert (export_dir / "graph" / "wiki-graph.tar.gz").read_bytes().startswith(
-        b"\x1f\x8b"
-    )
-    assert (
-        export_dir / "graph" / "wiki-graph-runtime.tar.gz"
-    ).read_bytes().startswith(b"\x1f\x8b")
-    assert (
-        export_dir / "graph" / "skills-sh-catalog.json.gz"
-    ).read_bytes().startswith(b"\x1f\x8b")
+    assert (export_dir / "graph" / "wiki-graph.tar.gz").read_bytes().startswith(b"\x1f\x8b")
+    assert (export_dir / "graph" / "wiki-graph-runtime.tar.gz").read_bytes().startswith(b"\x1f\x8b")
+    assert (export_dir / "graph" / "skills-sh-catalog.json.gz").read_bytes().startswith(b"\x1f\x8b")
     assert not (export_dir / "ignored-report.md").exists()
 
 
@@ -382,9 +373,7 @@ def test_hf_export_checks_repo_stats_before_upload(tmp_path: Path, monkeypatch) 
     assert calls == [([sys.executable, str(updater), "--check"], repo)]
 
 
-def test_hf_graph_validation_uses_ci_exact_count_contract(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_hf_graph_validation_uses_ci_exact_count_contract(tmp_path: Path, monkeypatch) -> None:
     from ci_preflight import GRAPH_VALIDATE_ARGS
 
     repo = tmp_path / "repo"
@@ -419,9 +408,7 @@ def test_hf_graph_validation_uses_ci_exact_count_contract(
         assert kwargs[field_name] == int(flags[flag])
 
 
-def test_hf_graph_validation_rejects_stale_exact_counts(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_hf_graph_validation_rejects_stale_exact_counts(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _write_small_hydrated_artifacts(repo)
@@ -473,6 +460,7 @@ def test_hf_export_requires_hydrated_artifacts_to_match_lfs_pointer(
         "HYDRATED_ARTIFACT_MIN_BYTES",
         _tiny_hydrated_min_bytes(),
     )
+
     def fake_git_bytes(_repo: Path, *_args: str) -> bytes:
         if _args[-1] == "HEAD:graph/wiki-graph.tar.gz":
             return pointer.encode("utf-8")
@@ -528,9 +516,7 @@ def test_hf_export_skips_lfs_pointer_check_for_binary_git_artifact(
     sync_huggingface._assert_hydrated_artifacts(repo)
 
 
-def test_hf_export_rejects_corrupt_large_graph_artifact(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_hf_export_rejects_corrupt_large_graph_artifact(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     graph_dir = repo / "graph"

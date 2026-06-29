@@ -97,7 +97,8 @@ def _write_runtime_events(path: Path, records: list[dict]) -> None:
 
 def _write_sidecar(claude: Path, slug: str, body: dict) -> None:
     (claude / "skill-quality" / f"{slug}.json").write_text(
-        json.dumps(body), encoding="utf-8",
+        json.dumps(body),
+        encoding="utf-8",
     )
 
 
@@ -137,12 +138,14 @@ def _write_skillspector_audit(claude: Path, records: list[dict]) -> Path:
 def test_read_jsonl_skips_non_object_lines(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     path.write_text(
-        "\n".join([
-            json.dumps({"event": "ok"}),
-            json.dumps(["not", "an", "object"]),
-            "not-json",
-            json.dumps("scalar"),
-        ]),
+        "\n".join(
+            [
+                json.dumps({"event": "ok"}),
+                json.dumps(["not", "an", "object"]),
+                "not-json",
+                json.dumps("scalar"),
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -242,23 +245,52 @@ def _serve_monitor(
 
 
 def test_summarize_sessions_merges_audit_and_events(fake_claude: Path) -> None:
-    _write_audit(fake_claude, [
-        {"ts": "2026-04-19T10:00:00Z", "event": "skill.loaded",
-         "subject_type": "skill", "subject": "python-patterns",
-         "actor": "hook", "session_id": "S1"},
-        {"ts": "2026-04-19T10:05:00Z", "event": "skill.score_updated",
-         "subject_type": "skill", "subject": "python-patterns",
-         "actor": "hook", "session_id": "S1"},
-        {"ts": "2026-04-19T10:10:00Z", "event": "agent.loaded",
-         "subject_type": "agent", "subject": "code-reviewer",
-         "actor": "hook", "session_id": "S2"},
-    ])
-    _write_events(fake_claude, [
-        {"timestamp": "2026-04-19T10:01:00Z", "event": "load",
-         "skill": "fastapi-pro", "session_id": "S1"},
-        {"timestamp": "2026-04-19T10:02:00Z", "event": "unload",
-         "skill": "fastapi-pro", "session_id": "S1"},
-    ])
+    _write_audit(
+        fake_claude,
+        [
+            {
+                "ts": "2026-04-19T10:00:00Z",
+                "event": "skill.loaded",
+                "subject_type": "skill",
+                "subject": "python-patterns",
+                "actor": "hook",
+                "session_id": "S1",
+            },
+            {
+                "ts": "2026-04-19T10:05:00Z",
+                "event": "skill.score_updated",
+                "subject_type": "skill",
+                "subject": "python-patterns",
+                "actor": "hook",
+                "session_id": "S1",
+            },
+            {
+                "ts": "2026-04-19T10:10:00Z",
+                "event": "agent.loaded",
+                "subject_type": "agent",
+                "subject": "code-reviewer",
+                "actor": "hook",
+                "session_id": "S2",
+            },
+        ],
+    )
+    _write_events(
+        fake_claude,
+        [
+            {
+                "timestamp": "2026-04-19T10:01:00Z",
+                "event": "load",
+                "skill": "fastapi-pro",
+                "session_id": "S1",
+            },
+            {
+                "timestamp": "2026-04-19T10:02:00Z",
+                "event": "unload",
+                "skill": "fastapi-pro",
+                "session_id": "S1",
+            },
+        ],
+    )
     sessions = mt.summarize_sessions()
     by_id = {s["session_id"]: s for s in sessions}
     assert "S1" in by_id
@@ -275,10 +307,16 @@ def test_grade_distribution(fake_claude: Path) -> None:
     _write_sidecar(fake_claude, "b1", {"slug": "b1", "grade": "B", "raw_score": 0.7})
     _write_sidecar(fake_claude, "b2", {"slug": "b2", "grade": "B", "raw_score": 0.6})
     _write_sidecar(fake_claude, "f", {"slug": "f", "grade": "F", "raw_score": 0.1})
-    _write_mcp_sidecar(fake_claude, "mcp-one", {
-        "slug": "mcp-one", "subject_type": "mcp-server",
-        "grade": "C", "raw_score": 0.5,
-    })
+    _write_mcp_sidecar(
+        fake_claude,
+        "mcp-one",
+        {
+            "slug": "mcp-one",
+            "subject_type": "mcp-server",
+            "grade": "C",
+            "raw_score": 0.5,
+        },
+    )
     dist = mt.grade_distribution()
     assert dist["A"] == 1
     assert dist["B"] == 2
@@ -288,26 +326,40 @@ def test_grade_distribution(fake_claude: Path) -> None:
 
 def test_grade_distribution_skips_dotfiles_and_lifecycle(fake_claude: Path) -> None:
     _write_sidecar(fake_claude, "real", {"slug": "real", "grade": "C", "raw_score": 0.4})
-    (fake_claude / "skill-quality" / ".hook-state.json").write_text("{}",
-                                                                     encoding="utf-8")
-    (fake_claude / "skill-quality" / "real.lifecycle.json").write_text("{}",
-                                                                        encoding="utf-8")
+    (fake_claude / "skill-quality" / ".hook-state.json").write_text("{}", encoding="utf-8")
+    (fake_claude / "skill-quality" / "real.lifecycle.json").write_text("{}", encoding="utf-8")
     dist = mt.grade_distribution()
     assert sum(dist.values()) == 1  # only "real.json"
 
 
 def test_session_detail_filters_by_session_id(fake_claude: Path) -> None:
-    _write_audit(fake_claude, [
-        {"ts": "t1", "event": "skill.loaded",
-         "subject_type": "skill", "subject": "x",
-         "actor": "hook", "session_id": "A"},
-        {"ts": "t2", "event": "skill.loaded",
-         "subject_type": "skill", "subject": "y",
-         "actor": "hook", "session_id": "B"},
-    ])
-    _write_events(fake_claude, [
-        {"timestamp": "t3", "event": "load", "skill": "z", "session_id": "A"},
-    ])
+    _write_audit(
+        fake_claude,
+        [
+            {
+                "ts": "t1",
+                "event": "skill.loaded",
+                "subject_type": "skill",
+                "subject": "x",
+                "actor": "hook",
+                "session_id": "A",
+            },
+            {
+                "ts": "t2",
+                "event": "skill.loaded",
+                "subject_type": "skill",
+                "subject": "y",
+                "actor": "hook",
+                "session_id": "B",
+            },
+        ],
+    )
+    _write_events(
+        fake_claude,
+        [
+            {"timestamp": "t3", "event": "load", "skill": "z", "session_id": "A"},
+        ],
+    )
     detail = mt.session_detail("A")
     assert detail["session_id"] == "A"
     assert len(detail["audit_entries"]) == 1
@@ -327,14 +379,16 @@ def test_render_home_has_grade_pills(fake_claude: Path) -> None:
 def test_home_page_module_renders_stats_and_recent_activity() -> None:
     html = home_page.render_home(
         manifest={"load": [{"skill": "reviewer"}]},
-        sessions=[{
-            "session_id": "sess-1234567890",
-            "last_seen": "2026-06-21T00:00:00Z",
-            "skills_loaded": ["python"],
-            "skills_unloaded": [],
-            "agents_loaded": ["reviewer"],
-            "score_updates": 2,
-        }],
+        sessions=[
+            {
+                "session_id": "sess-1234567890",
+                "last_seen": "2026-06-21T00:00:00Z",
+                "skills_loaded": ["python"],
+                "skills_unloaded": [],
+                "agents_loaded": ["reviewer"],
+                "score_updates": 2,
+            }
+        ],
         wiki_stats={
             "skills": 1000,
             "agents": 2,
@@ -365,11 +419,19 @@ def test_home_page_module_renders_stats_and_recent_activity() -> None:
 
 def test_render_session_detail_escapes_html(fake_claude: Path) -> None:
     hostile = "evil</script><script>alert(1)</script>"
-    _write_audit(fake_claude, [
-        {"ts": "t", "event": "skill.loaded",
-         "subject_type": "skill", "subject": hostile,
-         "actor": "hook", "session_id": "sess"},
-    ])
+    _write_audit(
+        fake_claude,
+        [
+            {
+                "ts": "t",
+                "event": "skill.loaded",
+                "subject_type": "skill",
+                "subject": hostile,
+                "actor": "hook",
+                "session_id": "sess",
+            },
+        ],
+    )
     html = mt.render_session_detail("sess")
     assert "<script>alert(1)</script>" not in html
     # HTML-escaped form must appear
@@ -389,12 +451,16 @@ def test_render_skills_sorts_grade_then_score(fake_claude: Path) -> None:
 
 
 def test_render_skills_includes_harness_filter_and_typed_links(fake_claude: Path) -> None:
-    _write_sidecar(fake_claude, "langgraph-harness", {
-        "slug": "langgraph",
-        "subject_type": "harness",
-        "grade": "A",
-        "raw_score": 0.95,
-    })
+    _write_sidecar(
+        fake_claude,
+        "langgraph-harness",
+        {
+            "slug": "langgraph",
+            "subject_type": "harness",
+            "grade": "A",
+            "raw_score": 0.95,
+        },
+    )
 
     html = mt.render_skills()
 
@@ -408,13 +474,15 @@ def test_render_skills_includes_harness_filter_and_typed_links(fake_claude: Path
 def test_skills_page_module_renders_filters_cards_and_pagination() -> None:
     html_out = skills_page.render_skills(
         payload={
-            "items": [{
-                "slug": "reviewer",
-                "grade": "A",
-                "raw_score": 0.91,
-                "subject_type": "agent",
-                "hard_floor": "",
-            }],
+            "items": [
+                {
+                    "slug": "reviewer",
+                    "grade": "A",
+                    "raw_score": 0.91,
+                    "subject_type": "agent",
+                    "hard_floor": "",
+                }
+            ],
             "page": 2,
             "limit": 50,
             "total": 75,
@@ -447,16 +515,18 @@ def test_skills_page_module_renders_filters_cards_and_pagination() -> None:
 def test_read_manifest_empty_when_missing(fake_claude: Path) -> None:
     m = mt.read_manifest()
     assert m == {"load": [], "unload": [], "warnings": []}
-    assert manifest_service.read_manifest(
-        fake_claude / "skill-manifest.json",
-        fake_claude,
-    ) == m
+    assert (
+        manifest_service.read_manifest(
+            fake_claude / "skill-manifest.json",
+            fake_claude,
+        )
+        == m
+    )
 
 
 def test_read_manifest_reads_real_manifest(fake_claude: Path) -> None:
     (fake_claude / "skill-manifest.json").write_text(
-        json.dumps({"load": [{"skill": "a"}], "unload": [{"skill": "b"}],
-                    "warnings": []}),
+        json.dumps({"load": [{"skill": "a"}], "unload": [{"skill": "b"}], "warnings": []}),
         encoding="utf-8",
     )
     m = mt.read_manifest()
@@ -473,13 +543,15 @@ def test_read_manifest_includes_installed_harness_records(fake_claude: Path) -> 
     harness_dir = fake_claude / "harness-installs"
     harness_dir.mkdir()
     (harness_dir / "langgraph.json").write_text(
-        json.dumps({
-            "slug": "langgraph",
-            "status": "installed",
-            "repo_url": "https://github.com/langchain-ai/langgraph",
-            "target": str(fake_claude / "harnesses" / "langgraph"),
-            "installed_at": "2026-05-01T00:00:00Z",
-        }),
+        json.dumps(
+            {
+                "slug": "langgraph",
+                "status": "installed",
+                "repo_url": "https://github.com/langchain-ai/langgraph",
+                "target": str(fake_claude / "harnesses" / "langgraph"),
+                "installed_at": "2026-05-01T00:00:00Z",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -489,14 +561,16 @@ def test_read_manifest_includes_installed_harness_records(fake_claude: Path) -> 
         fake_claude,
     )
 
-    assert m["load"] == [{
-        "skill": "langgraph",
-        "entity_type": "harness",
-        "source": "ctx-harness-install",
-        "command": str(fake_claude / "harnesses" / "langgraph"),
-        "installed_at": "2026-05-01T00:00:00Z",
-        "status": "installed",
-    }]
+    assert m["load"] == [
+        {
+            "skill": "langgraph",
+            "entity_type": "harness",
+            "source": "ctx-harness-install",
+            "command": str(fake_claude / "harnesses" / "langgraph"),
+            "installed_at": "2026-05-01T00:00:00Z",
+            "status": "installed",
+        }
+    ]
     assert direct == m
 
 
@@ -608,27 +682,31 @@ def test_artifact_status_reads_promotion_metadata(
     runtime_catalog.parent.mkdir(parents=True)
     runtime_catalog.write_text("{}", encoding="utf-8")
     (repo_graph / "wiki-graph-stats.json").write_text(
-        json.dumps({
-            "counts": {
-                "nodes": 79_958,
-                "edges": 1_778_069,
-                "skills": 68_494,
-                "agents": 467,
-                "mcps": 10_790,
-                "harnesses": 207,
+        json.dumps(
+            {
+                "counts": {
+                    "nodes": 79_958,
+                    "edges": 1_778_069,
+                    "skills": 68_494,
+                    "agents": 467,
+                    "mcps": 10_790,
+                    "harnesses": 207,
+                }
             }
-        }),
+        ),
         encoding="utf-8",
     )
     monkeypatch.setattr(mt, "repo_graph_dir", lambda: repo_graph)
     (graph_dir / "graph.json.promotion.json").write_text(
-        json.dumps({
-            "status": "promoted",
-            "target": str(graph),
-            "previous": {"sha256": "old", "size": 10},
-            "current": {"sha256": "new", "size": 22},
-            "promoted_at": "2026-05-04T00:00:00+00:00",
-        }),
+        json.dumps(
+            {
+                "status": "promoted",
+                "target": str(graph),
+                "previous": {"sha256": "old", "size": 10},
+                "current": {"sha256": "new", "size": 22},
+                "promoted_at": "2026-05-04T00:00:00+00:00",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -675,32 +753,36 @@ def test_status_page_and_api_show_queue_and_artifacts(
     telemetry_path = fake_claude / "telemetry" / "events.jsonl"
     telemetry_path.parent.mkdir(parents=True)
     telemetry_path.write_text(
-        json.dumps({
-            "schema_version": SCHEMA_VERSION,
-            "event_id": "evt-1",
-            "ts": "2026-06-28T00:00:00Z",
-            "event_name": "ctx.mcp.request",
-            "source": "ctx-mcp-server",
-            "outcome": "error",
-            "privacy_mode": "local_redacted",
-            "payload": {},
-        })
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "event_id": "evt-1",
+                "ts": "2026-06-28T00:00:00Z",
+                "event_name": "ctx.mcp.request",
+                "source": "ctx-mcp-server",
+                "outcome": "error",
+                "privacy_mode": "local_redacted",
+                "payload": {},
+            }
+        )
         + "\nnot-json\n",
         encoding="utf-8",
     )
     Path(str(telemetry_path) + ".export-status.json").write_text(
-        json.dumps({
-            "schema_version": EXPORT_STATUS_SCHEMA_VERSION,
-            "status": "degraded",
-            "sink": "otlp_http",
-            "attempted": 1,
-            "exported": 1,
-            "failed": 1,
-            "error_kind": "collector_timeout",
-            "malformed_records": 1,
-            "malformed_pending_records": 1,
-            "updated_at": "2026-06-28T00:01:00Z",
-        }),
+        json.dumps(
+            {
+                "schema_version": EXPORT_STATUS_SCHEMA_VERSION,
+                "status": "degraded",
+                "sink": "otlp_http",
+                "attempted": 1,
+                "exported": 1,
+                "failed": 1,
+                "error_kind": "collector_timeout",
+                "malformed_records": 1,
+                "malformed_pending_records": 1,
+                "updated_at": "2026-06-28T00:01:00Z",
+            }
+        ),
         encoding="utf-8",
     )
     wiki_queue.enqueue_maintenance_job(
@@ -779,12 +861,20 @@ def test_status_page_shows_queue_db_errors(
 
 def test_render_loaded_shows_manifest_entries(fake_claude: Path) -> None:
     (fake_claude / "skill-manifest.json").write_text(
-        json.dumps({
-            "load": [{"skill": "python-patterns", "source": "user-approved",
-                      "priority": 7, "reason": "fuzzy match"}],
-            "unload": [{"skill": "old-skill", "source": "stale"}],
-            "warnings": [],
-        }),
+        json.dumps(
+            {
+                "load": [
+                    {
+                        "skill": "python-patterns",
+                        "source": "user-approved",
+                        "priority": 7,
+                        "reason": "fuzzy match",
+                    }
+                ],
+                "unload": [{"skill": "old-skill", "source": "stale"}],
+                "warnings": [],
+            }
+        ),
         encoding="utf-8",
     )
     html = mt.render_loaded()
@@ -838,41 +928,44 @@ def test_runtime_lifecycle_summary_reads_validation_and_escalation_events(
 ) -> None:
     events = tmp_path / "runtime" / "events.jsonl"
     monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: events)
-    _write_runtime_events(events, [
-        {
-            "action": "validation",
-            "session_id": "s-1",
-            "check_name": "pytest",
-            "status": "passed",
-            "created_at": "2026-05-08T01:00:00Z",
-        },
-        {
-            "action": "validation",
-            "session_id": "s-1",
-            "check_name": "mypy",
-            "status": "failed",
-            "summary": "type gate failed",
-            "created_at": "2026-05-08T01:05:00Z",
-        },
-        {
-            "action": "escalation",
-            "session_id": "s-1",
-            "trigger": "validation-failed",
-            "reason": "mypy failed after retry",
-            "status": "open",
-            "severity": "blocking",
-            "created_at": "2026-05-08T01:06:00Z",
-        },
-        {
-            "action": "escalation",
-            "session_id": "s-2",
-            "trigger": "user-review",
-            "reason": "review completed",
-            "status": "resolved",
-            "severity": "info",
-            "created_at": "2026-05-08T01:07:00Z",
-        },
-    ])
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "validation",
+                "session_id": "s-1",
+                "check_name": "pytest",
+                "status": "passed",
+                "created_at": "2026-05-08T01:00:00Z",
+            },
+            {
+                "action": "validation",
+                "session_id": "s-1",
+                "check_name": "mypy",
+                "status": "failed",
+                "summary": "type gate failed",
+                "created_at": "2026-05-08T01:05:00Z",
+            },
+            {
+                "action": "escalation",
+                "session_id": "s-1",
+                "trigger": "validation-failed",
+                "reason": "mypy failed after retry",
+                "status": "open",
+                "severity": "blocking",
+                "created_at": "2026-05-08T01:06:00Z",
+            },
+            {
+                "action": "escalation",
+                "session_id": "s-2",
+                "trigger": "user-review",
+                "reason": "review completed",
+                "status": "resolved",
+                "severity": "info",
+                "created_at": "2026-05-08T01:07:00Z",
+            },
+        ],
+    )
 
     summary = mt.runtime_lifecycle_summary()
     direct_summary = runtime_service.lifecycle_summary(events)
@@ -891,22 +984,27 @@ def test_runtime_lifecycle_summary_uses_full_history_for_open_state(
 ) -> None:
     events = tmp_path / "runtime" / "events.jsonl"
     monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: events)
-    records = [{
-        "action": "escalation",
-        "session_id": "s-1",
-        "trigger": "validation-failed",
-        "reason": "pytest failed",
-        "status": "open",
-        "severity": "blocking",
-        "created_at": "2026-05-08T00:00:00Z",
-    }]
-    records.extend({
-        "action": "validation",
-        "session_id": "s-1",
-        "check_name": f"check-{idx}",
-        "status": "passed",
-        "created_at": f"2026-05-08T01:{idx % 60:02d}:00Z",
-    } for idx in range(201))
+    records = [
+        {
+            "action": "escalation",
+            "session_id": "s-1",
+            "trigger": "validation-failed",
+            "reason": "pytest failed",
+            "status": "open",
+            "severity": "blocking",
+            "created_at": "2026-05-08T00:00:00Z",
+        }
+    ]
+    records.extend(
+        {
+            "action": "validation",
+            "session_id": "s-1",
+            "check_name": f"check-{idx}",
+            "status": "passed",
+            "created_at": f"2026-05-08T01:{idx % 60:02d}:00Z",
+        }
+        for idx in range(201)
+    )
     _write_runtime_events(events, records)
 
     summary = mt.runtime_lifecycle_summary()
@@ -915,15 +1013,17 @@ def test_runtime_lifecycle_summary_uses_full_history_for_open_state(
     assert summary["open_escalations_total"] == 1
     assert summary["open_escalations"][0]["trigger"] == "validation-failed"
 
-    records.append({
-        "action": "escalation",
-        "session_id": "s-1",
-        "trigger": "validation-failed",
-        "reason": "pytest failed",
-        "status": "resolved",
-        "severity": "blocking",
-        "created_at": "2026-05-08T02:00:00Z",
-    })
+    records.append(
+        {
+            "action": "escalation",
+            "session_id": "s-1",
+            "trigger": "validation-failed",
+            "reason": "pytest failed",
+            "status": "resolved",
+            "severity": "blocking",
+            "created_at": "2026-05-08T02:00:00Z",
+        }
+    )
     _write_runtime_events(events, records)
 
     summary = mt.runtime_lifecycle_summary()
@@ -937,25 +1037,28 @@ def test_render_runtime_lifecycle_surfaces_checks_and_open_escalations(
 ) -> None:
     events = tmp_path / "runtime" / "events.jsonl"
     monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: events)
-    _write_runtime_events(events, [
-        {
-            "action": "validation",
-            "session_id": "s-1",
-            "check_name": "mypy",
-            "status": "failed",
-            "summary": "<type gate failed>",
-            "created_at": "2026-05-08T01:05:00Z",
-        },
-        {
-            "action": "escalation",
-            "session_id": "s-1",
-            "trigger": "validation-failed",
-            "reason": "<mypy failed>",
-            "status": "open",
-            "severity": "blocking",
-            "created_at": "2026-05-08T01:06:00Z",
-        },
-    ])
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "validation",
+                "session_id": "s-1",
+                "check_name": "mypy",
+                "status": "failed",
+                "summary": "<type gate failed>",
+                "created_at": "2026-05-08T01:05:00Z",
+            },
+            {
+                "action": "escalation",
+                "session_id": "s-1",
+                "trigger": "validation-failed",
+                "reason": "<mypy failed>",
+                "status": "open",
+                "severity": "blocking",
+                "created_at": "2026-05-08T01:06:00Z",
+            },
+        ],
+    )
 
     html = mt.render_runtime_lifecycle()
 
@@ -967,12 +1070,27 @@ def test_render_runtime_lifecycle_surfaces_checks_and_open_escalations(
 
 
 def test_render_logs_filters_and_renders(fake_claude: Path) -> None:
-    _write_audit(fake_claude, [
-        {"ts": "t1", "event": "skill.loaded", "subject_type": "skill",
-         "subject": "s1", "actor": "hook", "session_id": "sess"},
-        {"ts": "t2", "event": "skill.score_updated", "subject_type": "skill",
-         "subject": "s1", "actor": "hook", "session_id": "sess"},
-    ])
+    _write_audit(
+        fake_claude,
+        [
+            {
+                "ts": "t1",
+                "event": "skill.loaded",
+                "subject_type": "skill",
+                "subject": "s1",
+                "actor": "hook",
+                "session_id": "sess",
+            },
+            {
+                "ts": "t2",
+                "event": "skill.score_updated",
+                "subject_type": "skill",
+                "subject": "s1",
+                "actor": "hook",
+                "session_id": "sess",
+            },
+        ],
+    )
     html = mt.render_logs()
     assert "skill.loaded" in html
     assert "skill.score_updated" in html
@@ -1034,11 +1152,15 @@ def test_load_sidecar_rejects_unsafe_slug(fake_claude: Path) -> None:
 
 
 def test_load_sidecar_reads_mcp_quality_subdir(fake_claude: Path) -> None:
-    _write_mcp_sidecar(fake_claude, "filesystem", {
-        "slug": "filesystem",
-        "grade": "A",
-        "raw_score": 0.91,
-    })
+    _write_mcp_sidecar(
+        fake_claude,
+        "filesystem",
+        {
+            "slug": "filesystem",
+            "grade": "A",
+            "raw_score": 0.91,
+        },
+    )
     sidecar = mt.load_sidecar("filesystem")
     assert sidecar is not None
     assert sidecar["subject_type"] == "mcp-server"
@@ -1048,11 +1170,15 @@ def test_skill_sidecar_api_reads_typed_sidecar(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _write_mcp_sidecar(fake_claude, "filesystem", {
-        "slug": "filesystem",
-        "grade": "A",
-        "raw_score": 0.91,
-    })
+    _write_mcp_sidecar(
+        fake_claude,
+        "filesystem",
+        {
+            "slug": "filesystem",
+            "grade": "A",
+            "raw_score": 0.91,
+        },
+    )
     server, thread, port = _serve_monitor(monkeypatch)
     try:
         status, payload = _get_json(port, "/api/skill/filesystem.json?type=mcp-server")
@@ -1067,11 +1193,15 @@ def test_skill_sidecar_api_reads_typed_sidecar(
 
 
 def test_load_sidecar_can_disambiguate_duplicate_slug(fake_claude: Path) -> None:
-    _write_sidecar(fake_claude, "langgraph", {
-        "slug": "langgraph",
-        "subject_type": "skill",
-        "grade": "D",
-    })
+    _write_sidecar(
+        fake_claude,
+        "langgraph",
+        {
+            "slug": "langgraph",
+            "subject_type": "skill",
+            "grade": "D",
+        },
+    )
     harness_sidecar = {
         "slug": "langgraph",
         "subject_type": "harness",
@@ -1080,7 +1210,8 @@ def test_load_sidecar_can_disambiguate_duplicate_slug(fake_claude: Path) -> None
     # Dashboard sidecars are flat for non-MCP entity types; duplicate slugs
     # are disambiguated by the subject_type inside the sidecar.
     (fake_claude / "skill-quality" / "langgraph-harness.json").write_text(
-        json.dumps(harness_sidecar), encoding="utf-8",
+        json.dumps(harness_sidecar),
+        encoding="utf-8",
     )
 
     skill_sidecar = mt.load_sidecar("langgraph", entity_type="skill")
@@ -1099,16 +1230,15 @@ def test_load_sidecar_typed_miss_does_not_build_global_index(
     monkeypatch.setattr(
         sidecar_service,
         "sidecar_index",
-        lambda *args, **kwargs: (
-            _ for _ in ()
-        ).throw(AssertionError("cold full sidecar scan")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("cold full sidecar scan")),
     )
 
     assert mt.load_sidecar("missing", entity_type="skill") is None
 
 
 def test_monitor_post_requires_token(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     server, thread, port = _serve_monitor(monkeypatch)
     try:
@@ -1122,7 +1252,8 @@ def test_monitor_post_requires_token(
 
 
 def test_monitor_post_accepts_valid_token(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     direct_calls: list[tuple[str, str, dict[str, str]]] = []
 
@@ -1180,11 +1311,13 @@ def test_monitor_post_unload_accepts_valid_token_without_mocking_runtime(
 ) -> None:
     manifest_path = fake_claude / "skill-manifest.json"
     manifest_path.write_text(
-        json.dumps({
-            "load": [{"skill": "code-reviewer", "entity_type": "agent", "source": "test"}],
-            "unload": [],
-            "warnings": [],
-        }),
+        json.dumps(
+            {
+                "load": [{"skill": "code-reviewer", "entity_type": "agent", "source": "test"}],
+                "unload": [],
+                "warnings": [],
+            }
+        ),
         encoding="utf-8",
     )
     server, thread, port = _serve_monitor(monkeypatch)
@@ -1210,7 +1343,8 @@ def test_monitor_post_unload_accepts_valid_token_without_mocking_runtime(
 
 
 def test_monitor_load_forwards_mcp_command_and_json_config(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, str, dict[str, str]]] = []
 
@@ -1255,7 +1389,8 @@ def test_monitor_load_forwards_mcp_command_and_json_config(
 
 
 def test_monitor_post_rejects_cross_origin_with_valid_token(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
 
@@ -1288,7 +1423,8 @@ def test_monitor_post_rejects_cross_origin_with_valid_token(
 
 
 def test_monitor_post_rejects_rebound_host_with_valid_token(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
 
@@ -1375,7 +1511,8 @@ def test_monitor_post_rejects_bad_content_length_before_body_read(
 
 
 def test_monitor_post_rejects_non_object_json_body(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     server, thread, port = _serve_monitor(monkeypatch)
     body = b"[]"
@@ -1399,7 +1536,8 @@ def test_monitor_post_rejects_non_object_json_body(
 
 
 def test_monitor_non_loopback_bind_is_read_only(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
 
@@ -1551,14 +1689,13 @@ def test_monitor_route_matchers_cover_dynamic_and_mutation_routes() -> None:
     assert graph_api is not None and graph_api.params == {"slug": "github/cli"}
     assert monitor_routes.match_get_route("/missing") is None
     entity_upsert = monitor_routes.match_post_route("/api/entity/upsert")
-    assert entity_upsert is not None and entity_upsert.name == (
-        "api_entity_upsert"
-    )
+    assert entity_upsert is not None and entity_upsert.name == ("api_entity_upsert")
     assert monitor_routes.match_post_route("/api/nope") is None
 
 
 def test_graph_api_invalid_params_return_400(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     server, thread, port = _serve_monitor(monkeypatch)
     try:
@@ -1616,19 +1753,21 @@ def test_monitor_slug_validator_rejects_windows_reserved_names(slug: str) -> Non
 
 
 def test_monitor_sse_stream_does_not_block_json_requests(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _write_audit(fake_claude, [
-        {"ts": "t", "event": "skill.loaded", "subject": "python-patterns",
-         "session_id": "s1"},
-    ])
-    server, thread, port = _serve_monitor(monkeypatch)
-    stream = urllib.request.urlopen(
-        f"http://127.0.0.1:{port}/api/events.stream", timeout=2
+    _write_audit(
+        fake_claude,
+        [
+            {"ts": "t", "event": "skill.loaded", "subject": "python-patterns", "session_id": "s1"},
+        ],
     )
+    server, thread, port = _serve_monitor(monkeypatch)
+    stream = urllib.request.urlopen(f"http://127.0.0.1:{port}/api/events.stream", timeout=2)
     try:
         with urllib.request.urlopen(
-            f"http://127.0.0.1:{port}/api/sessions.json", timeout=2,
+            f"http://127.0.0.1:{port}/api/sessions.json",
+            timeout=2,
         ) as response:
             assert response.status == 200
             body = json.loads(response.read().decode("utf-8"))
@@ -1641,12 +1780,11 @@ def test_monitor_sse_stream_does_not_block_json_requests(
 
 
 def test_monitor_sse_stream_sends_initial_comment(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     server, thread, port = _serve_monitor(monkeypatch)
-    stream = urllib.request.urlopen(
-        f"http://127.0.0.1:{port}/api/events.stream", timeout=2
-    )
+    stream = urllib.request.urlopen(f"http://127.0.0.1:{port}/api/events.stream", timeout=2)
     try:
         assert stream.read(len(b": connected\n\n")) == b": connected\n\n"
     finally:
@@ -1657,12 +1795,11 @@ def test_monitor_sse_stream_sends_initial_comment(
 
 
 def test_monitor_shutdown_signals_open_sse_workers(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     server, thread, port = _serve_monitor(monkeypatch)
-    stream = urllib.request.urlopen(
-        f"http://127.0.0.1:{port}/api/events.stream", timeout=2
-    )
+    stream = urllib.request.urlopen(f"http://127.0.0.1:{port}/api/events.stream", timeout=2)
     try:
         server.shutdown()
         thread.join(timeout=2)
@@ -1674,10 +1811,13 @@ def test_monitor_shutdown_signals_open_sse_workers(
 
 
 def test_render_events_shows_recent_audit_backlog(fake_claude: Path) -> None:
-    _write_audit(fake_claude, [
-        {"ts": "t1", "event": "skill.loaded", "subject": "python-patterns"},
-        {"ts": "t2", "event": "agent.loaded", "subject": "repo-reviewer"},
-    ])
+    _write_audit(
+        fake_claude,
+        [
+            {"ts": "t1", "event": "skill.loaded", "subject": "python-patterns"},
+            {"ts": "t2", "event": "agent.loaded", "subject": "repo-reviewer"},
+        ],
+    )
 
     html_out = mt.render_events()
 
@@ -1690,11 +1830,15 @@ def test_render_events_shows_recent_audit_backlog(fake_claude: Path) -> None:
 
 
 def test_live_alias_renders_events_page(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _write_audit(fake_claude, [
-        {"ts": "t1", "event": "skill.loaded", "subject": "python-patterns"},
-    ])
+    _write_audit(
+        fake_claude,
+        [
+            {"ts": "t1", "event": "skill.loaded", "subject": "python-patterns"},
+        ],
+    )
     server, thread, port = _serve_monitor(monkeypatch)
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/live", timeout=5) as response:
@@ -1712,8 +1856,7 @@ def test_wiki_entity_path_finds_skill_page(fake_claude: Path) -> None:
     skills_dir = fake_claude / "skill-wiki" / "entities" / "skills"
     skills_dir.mkdir(parents=True)
     target = skills_dir / "python-patterns.md"
-    target.write_text("---\nname: python-patterns\n---\n# body\n",
-                      encoding="utf-8")
+    target.write_text("---\nname: python-patterns\n---\n# body\n", encoding="utf-8")
     assert mt.wiki_entity_path("python-patterns") == target
 
 
@@ -1844,36 +1987,54 @@ def test_render_mcp_wiki_entity_has_tabs_subgraph_and_quality(
         "Manage repositories, issues, and search code via GitHub API.\n",
         encoding="utf-8",
     )
-    _write_mcp_sidecar(fake_claude, "github", {
-        "slug": "github",
-        "subject_type": "mcp-server",
-        "grade": "B",
-        "raw_score": 0.7106,
-        "hard_floor": "missing-license",
-        "weights": {"freshness": 0.25, "docs": 0.75},
-        "signals": {
-            "docs": {"score": 0.9, "evidence": {"has_install": True}},
-            "freshness": {"score": 0.2, "evidence": {"last_commit_at": None}},
+    _write_mcp_sidecar(
+        fake_claude,
+        "github",
+        {
+            "slug": "github",
+            "subject_type": "mcp-server",
+            "grade": "B",
+            "raw_score": 0.7106,
+            "hard_floor": "missing-license",
+            "weights": {"freshness": 0.25, "docs": 0.75},
+            "signals": {
+                "docs": {"score": 0.9, "evidence": {"has_install": True}},
+                "freshness": {"score": 0.2, "evidence": {"last_commit_at": None}},
+            },
         },
-    })
-    _write_sidecar(fake_claude, "github-actions", {
-        "slug": "github-actions",
-        "subject_type": "skill",
-        "grade": "A",
-        "raw_score": 0.91,
-    })
-    _write_sidecar(fake_claude, "repo-reviewer", {
-        "slug": "repo-reviewer",
-        "subject_type": "agent",
-        "grade": "C",
-        "raw_score": 0.43,
-        "hard_floor": "needs-usage",
-    })
+    )
+    _write_sidecar(
+        fake_claude,
+        "github-actions",
+        {
+            "slug": "github-actions",
+            "subject_type": "skill",
+            "grade": "A",
+            "raw_score": 0.91,
+        },
+    )
+    _write_sidecar(
+        fake_claude,
+        "repo-reviewer",
+        {
+            "slug": "repo-reviewer",
+            "subject_type": "agent",
+            "grade": "C",
+            "raw_score": 0.43,
+            "hard_floor": "needs-usage",
+        },
+    )
     graph = nx.Graph()
     graph.add_node("mcp-server:github", label="github", type="mcp-server", tags=["reference"])
-    graph.add_node("skill:github-actions", label="github-actions", type="skill", tags=["github", "ci"])
-    graph.add_node("agent:repo-reviewer", label="repo-reviewer", type="agent", tags=["github", "review"])
-    graph.add_edge("mcp-server:github", "skill:github-actions", weight=0.91, shared_tags=["github", "ci"])
+    graph.add_node(
+        "skill:github-actions", label="github-actions", type="skill", tags=["github", "ci"]
+    )
+    graph.add_node(
+        "agent:repo-reviewer", label="repo-reviewer", type="agent", tags=["github", "review"]
+    )
+    graph.add_edge(
+        "mcp-server:github", "skill:github-actions", weight=0.91, shared_tags=["github", "ci"]
+    )
     graph.add_edge("mcp-server:github", "agent:repo-reviewer", weight=0.83, shared_tags=["github"])
     monkeypatch.setattr(mt, "load_dashboard_graph", lambda: graph)
 
@@ -1900,8 +2061,8 @@ def test_render_mcp_wiki_entity_has_tabs_subgraph_and_quality(
     assert "<h2>Subgraph</h2>" in html_out
     assert "data-testid='entity-subgraph-graph'" in html_out
     assert "data-testid='entity-subgraph-3d'" in html_out
-    assert "data-testid=\"entity-subgraph-node\"" in html_out
-    assert "data-testid=\"entity-subgraph-edge\"" in html_out
+    assert 'data-testid="entity-subgraph-node"' in html_out
+    assert 'data-testid="entity-subgraph-edge"' in html_out
     assert "id='entity-subgraph-zoom-in'" in html_out
     assert "id='entity-subgraph-zoom-out'" in html_out
     assert "drag to rotate" in html_out
@@ -1995,18 +2156,20 @@ def test_render_wiki_entity_falls_back_to_runtime_graph_metadata(
         assert slug == "github"
         return {
             "center": "mcp-server:github",
-            "nodes": [{
-                "data": {
-                    "id": "mcp-server:github",
-                    "label": "GitHub",
-                    "type": "mcp-server",
-                    "tags": ["git", "issues", "pull-requests"],
-                    "description": "Manage repositories, issues, and pull requests.",
-                    "quality_score": 0.81,
-                    "usage_score": 0.42,
-                    "degree": 27,
-                },
-            }],
+            "nodes": [
+                {
+                    "data": {
+                        "id": "mcp-server:github",
+                        "label": "GitHub",
+                        "type": "mcp-server",
+                        "tags": ["git", "issues", "pull-requests"],
+                        "description": "Manage repositories, issues, and pull requests.",
+                        "quality_score": 0.81,
+                        "usage_score": 0.42,
+                        "degree": 27,
+                    },
+                }
+            ],
             "edges": [],
         }
 
@@ -2039,18 +2202,20 @@ def test_runtime_graph_entity_wrapper_matches_extracted_wiki_renderer(
         assert slug == "github"
         return {
             "center": "mcp-server:github",
-            "nodes": [{
-                "data": {
-                    "id": "mcp-server:github",
-                    "label": "GitHub",
-                    "type": "mcp-server",
-                    "tags": ["git"],
-                    "description": "Manage GitHub.",
-                    "quality_score": 0.81,
-                    "usage_score": 0.42,
-                    "degree": 27,
-                },
-            }],
+            "nodes": [
+                {
+                    "data": {
+                        "id": "mcp-server:github",
+                        "label": "GitHub",
+                        "type": "mcp-server",
+                        "tags": ["git"],
+                        "description": "Manage GitHub.",
+                        "quality_score": 0.81,
+                        "usage_score": 0.42,
+                        "degree": 27,
+                    },
+                }
+            ],
             "edges": [],
         }
 
@@ -2089,15 +2254,17 @@ def test_render_runtime_harness_entity_shows_install_commands(
         assert slug == "mirage"
         return {
             "center": "harness:mirage",
-            "nodes": [{
-                "data": {
-                    "id": "harness:mirage",
-                    "label": "Mirage",
-                    "type": "harness",
-                    "tags": ["harness", "sandbox"],
-                    "description": "Virtual filesystem harness for agent tools.",
-                },
-            }],
+            "nodes": [
+                {
+                    "data": {
+                        "id": "harness:mirage",
+                        "label": "Mirage",
+                        "type": "harness",
+                        "tags": ["harness", "sandbox"],
+                        "description": "Virtual filesystem harness for agent tools.",
+                    },
+                }
+            ],
             "edges": [],
         }
 
@@ -2132,20 +2299,20 @@ def test_render_graph_uses_builtin_3d_mount(monkeypatch: pytest.MonkeyPatch) -> 
     assert "id='cy'" in html_out
     assert "id='cy'" in direct_html
     assert "https://unpkg.com" not in html_out
-    assert "data-testid=\"graph-renderer\"" in html_out
-    assert "data-testid=\"graph-3d\"" in html_out
-    assert "button id=\"graph-zoom-in\"" in html_out
-    assert "button id=\"graph-zoom-out\"" in html_out
+    assert 'data-testid="graph-renderer"' in html_out
+    assert 'data-testid="graph-3d"' in html_out
+    assert 'button id="graph-zoom-in"' in html_out
+    assert 'button id="graph-zoom-out"' in html_out
     assert "id='cy' class='graph-stage'" in html_out
     assert "height:75vh" not in html_out
-    assert "data-testid=\"graph-edge-detail\"" in html_out
-    assert "data-testid=\"graph-live-results\"" in html_out
-    assert "data-testid=\"graph-inspector-resize\"" in html_out
+    assert 'data-testid="graph-edge-detail"' in html_out
+    assert 'data-testid="graph-live-results"' in html_out
+    assert 'data-testid="graph-inspector-resize"' in html_out
     assert "id='match-filter-min'" in html_out
     assert "id='match-filter-max'" in html_out
     assert "class='card graph-match-card'" in html_out
-    assert "data-testid=\"match-histogram\"" in html_out
-    assert "data-testid=\"match-range-control\"" in html_out
+    assert 'data-testid="match-histogram"' in html_out
+    assert 'data-testid="match-range-control"' in html_out
     assert "id='match-filter-min-value'" in html_out
     assert "id='match-filter-max-value'" in html_out
     assert "id='match-filter-value'" not in html_out
@@ -2157,7 +2324,7 @@ def test_render_graph_uses_builtin_3d_mount(monkeypatch: pytest.MonkeyPatch) -> 
     assert "ctx-monitor-graph-inspector-height" in html_out
     assert "ArrowUp" in html_out
     assert "ArrowDown" in html_out
-    assert "data-testid=\"graph-node-detail-tree\"" in html_out
+    assert 'data-testid="graph-node-detail-tree"' in html_out
     assert "function renderNodeTree" in html_out
     assert "function scheduleLiveSearch" in html_out
     assert "function qualityText" in html_out
@@ -2179,11 +2346,11 @@ def test_render_graph_uses_builtin_3d_mount(monkeypatch: pytest.MonkeyPatch) -> 
     assert "if (loadSeq !== graphLoadSeq) return;" in html_out
     assert "svg.addEventListener('click', ev => {" not in html_out
     assert "graph-fallback-label" in html_out
-    assert "class=\"graph-toolbar\"" in html_out
-    assert "class=\"graph-inspector-grid\"" in html_out
+    assert 'class="graph-toolbar"' in html_out
+    assert 'class="graph-inspector-grid"' in html_out
     assert "graph-edge-detail-inline" in html_out
     assert "background:transparent" in html_out
-    assert "fill=\"transparent\" pointer-events=\"all\"" in html_out
+    assert 'fill="transparent" pointer-events="all"' in html_out
     assert "onmouseup=" not in html_out
     assert "onpointerup=" not in html_out
     assert "querySelectorAll('[data-testid=\"graph-svg-edge\"]')" in html_out
@@ -2194,13 +2361,19 @@ def test_render_graph_uses_builtin_3d_mount(monkeypatch: pytest.MonkeyPatch) -> 
     assert "function renderMatchHistogram" in html_out
     assert "function setMatchWindow" in html_out
     assert "data-match-bin-min" in html_out
-    assert "aria-label=\"Filter match " in html_out
+    assert 'aria-label="Filter match ' in html_out
     assert "bar.addEventListener('click', useBin)" in html_out
     assert "function edgeInMatchWindow" in html_out
     assert "highPct >= 99 ? 1" not in html_out
     assert "max: highPct / 100" in html_out
-    assert "document.getElementById('match-filter-min').addEventListener('input', applyFilters)" in html_out
-    assert "document.getElementById('match-filter-max').addEventListener('input', applyFilters)" in html_out
+    assert (
+        "document.getElementById('match-filter-min').addEventListener('input', applyFilters)"
+        in html_out
+    )
+    assert (
+        "document.getElementById('match-filter-max').addEventListener('input', applyFilters)"
+        in html_out
+    )
     assert "No neighbors in this view." in html_out
     assert "graph neighbor" in html_out
     assert "<strong>match</strong>" in html_out
@@ -2211,13 +2384,13 @@ def test_render_graph_uses_builtin_3d_mount(monkeypatch: pytest.MonkeyPatch) -> 
     assert "graph score" not in html_out
     assert "renderFallback(g); return;" in html_out
     assert "renderFallback(g);\n  const list" not in html_out
-    assert "data-testid=\"graph-list\" class=\"graph-list-panel\" hidden" in html_out
+    assert 'data-testid="graph-list" class="graph-list-panel" hidden' in html_out
     assert "id='graph-explanation'" in html_out
     assert "g.explanations" in html_out
     assert "Graph renderer unavailable" not in html_out
     assert "Enter a slug to render the graph" in html_out
     # Initial slug must be embedded as JSON literal so the JS picks it up.
-    assert "\"python-patterns\"" in html_out
+    assert '"python-patterns"' in html_out
 
 
 def test_render_graph_focus_controls_preserve_type(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2229,12 +2402,17 @@ def test_render_graph_focus_controls_preserve_type(monkeypatch: pytest.MonkeyPat
     html_out = mt.render_graph("langgraph", focus_type="harness")
     assert "id='focus-type'" in html_out
     assert "<option value='harness' selected>harness</option>" in html_out
-    assert "document.getElementById('go').addEventListener('click', () => load(focus.value.trim(), selectedFocusType()))" in html_out
-    assert "focus.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') load(ev.target.value.trim(), selectedFocusType()); })" in html_out
+    assert (
+        "document.getElementById('go').addEventListener('click', () => load(focus.value.trim(), selectedFocusType()))"
+        in html_out
+    )
+    assert (
+        "focus.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') load(ev.target.value.trim(), selectedFocusType()); })"
+        in html_out
+    )
     assert "const selectedType = selectedFocusType();" in html_out
     assert (
-        "const suffix = selectedType ? '&type=' + "
-        "encodeURIComponent(selectedType) : '';"
+        "const suffix = selectedType ? '&type=' + encodeURIComponent(selectedType) : '';"
     ) in html_out
     assert "encodeURIComponent(query) + suffix + '&limit=12'" in html_out
 
@@ -2338,10 +2516,7 @@ def test_graph_neighborhood_sizes_nodes_by_score_usage_and_popularity(
     monkeypatch.setattr(mt, "load_dashboard_graph", lambda: G)
 
     result = mt.graph_neighborhood("hub", entity_type="skill")
-    sizes = {
-        node["data"]["id"]: node["data"]["node_size"]
-        for node in result["nodes"]
-    }
+    sizes = {node["data"]["id"]: node["data"]["node_size"] for node in result["nodes"]}
 
     assert sizes["skill:hub"] > sizes["skill:leaf-high"] > sizes["skill:leaf-low"]
     assert 8 <= sizes["skill:leaf-low"] <= 24
@@ -2370,12 +2545,14 @@ def test_graph_neighborhood_uses_direct_sidecar_scores_without_global_index(
     sidecar_dir = fake_claude / "skill-quality"
     for i in range(6):
         (sidecar_dir / f"node-{i}.json").write_text(
-            json.dumps({
-                "slug": f"node-{i}",
-                "subject_type": "skill",
-                "score": 0.5,
-                "signals": {"telemetry": {"score": 0.1}},
-            }),
+            json.dumps(
+                {
+                    "slug": f"node-{i}",
+                    "subject_type": "skill",
+                    "score": 0.5,
+                    "signals": {"telemetry": {"score": 0.1}},
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -2394,10 +2571,7 @@ def test_graph_neighborhood_uses_direct_sidecar_scores_without_global_index(
     result = mt.graph_neighborhood("center", entity_type="skill")
 
     assert result["center"] == "skill:center"
-    assert all(
-        node["data"]["size_reason"].startswith("quality ")
-        for node in result["nodes"]
-    )
+    assert all(node["data"]["size_reason"].startswith("quality ") for node in result["nodes"])
 
 
 def test_graph_helpers_reuse_graph_loaded_from_same_file(
@@ -2567,7 +2741,16 @@ def test_graph_neighborhood_uses_dashboard_index_without_full_graph_load(
         conn.executemany(
             "INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?)",
             [
-                ("skill:python-patterns", "python-patterns", "skill", '["python"]', "", 0.9, 0.1, 10),
+                (
+                    "skill:python-patterns",
+                    "python-patterns",
+                    "skill",
+                    '["python"]',
+                    "",
+                    0.9,
+                    0.1,
+                    10,
+                ),
                 ("skill:fastapi-pro", "fastapi-pro", "skill", '["python","api"]', "", 0.8, 0.0, 4),
             ],
         )
@@ -2578,14 +2761,18 @@ def test_graph_neighborhood_uses_dashboard_index_without_full_graph_load(
                 ("fastapi-pro", "skill", "skill:fastapi-pro"),
             ],
         )
-        payload = zlib.compress(json.dumps([
-            {
-                "target": "skill:fastapi-pro",
-                "weight": 0.8,
-                "shared_tags": ["python"],
-                "reasons": ["semantic"],
-            }
-        ]).encode("utf-8"))
+        payload = zlib.compress(
+            json.dumps(
+                [
+                    {
+                        "target": "skill:fastapi-pro",
+                        "weight": 0.8,
+                        "shared_tags": ["python"],
+                        "reasons": ["semantic"],
+                    }
+                ]
+            ).encode("utf-8")
+        )
         conn.execute("INSERT INTO neighbors VALUES(?,?)", ("skill:python-patterns", payload))
         conn.commit()
     finally:
@@ -2741,7 +2928,16 @@ def test_graph_service_builds_dashboard_index_neighborhood() -> None:
         conn.executemany(
             "INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?)",
             [
-                ("skill:python-patterns", "python-patterns", "skill", '["python"]', "", 0.9, 0.1, 10),
+                (
+                    "skill:python-patterns",
+                    "python-patterns",
+                    "skill",
+                    '["python"]',
+                    "",
+                    0.9,
+                    0.1,
+                    10,
+                ),
                 ("skill:fastapi-pro", "fastapi-pro", "skill", '["python","api"]', "", 0.8, 0.0, 4),
             ],
         )
@@ -2752,12 +2948,18 @@ def test_graph_service_builds_dashboard_index_neighborhood() -> None:
                 ("fastapi-pro", "skill", "skill:fastapi-pro"),
             ],
         )
-        payload = zlib.compress(json.dumps([{
-            "target": "skill:fastapi-pro",
-            "weight": 0.8,
-            "shared_tags": ["python"],
-            "reasons": ["semantic"],
-        }]).encode("utf-8"))
+        payload = zlib.compress(
+            json.dumps(
+                [
+                    {
+                        "target": "skill:fastapi-pro",
+                        "weight": 0.8,
+                        "shared_tags": ["python"],
+                        "reasons": ["semantic"],
+                    }
+                ]
+            ).encode("utf-8")
+        )
         conn.execute("INSERT INTO neighbors VALUES(?,?)", ("skill:python-patterns", payload))
         conn.commit()
 
@@ -3013,67 +3215,74 @@ def test_skillspector_payload_filters_by_tag_and_graph_family(
     finally:
         conn.close()
     (graph_dir / "communities.json").write_text(
-        json.dumps({
-            "communities": {
-                "7": {
-                    "label": "Security Tools",
-                    "members": ["skill:danger-skill"],
+        json.dumps(
+            {
+                "communities": {
+                    "7": {
+                        "label": "Security Tools",
+                        "members": ["skill:danger-skill"],
+                    },
+                    "8": {
+                        "label": "Python Tools",
+                        "members": ["skill:safe-skill"],
+                    },
                 },
-                "8": {
-                    "label": "Python Tools",
-                    "members": ["skill:safe-skill"],
-                },
-            },
-        }),
+            }
+        ),
         encoding="utf-8",
     )
-    _write_skillspector_audit(fake_claude, [
-        {
-            "schema_version": 1,
-            "slug": "danger-skill",
-            "status": "blocked",
-            "risk_score": 99,
-            "risk_severity": "CRITICAL",
-            "recommendation": "BLOCK",
-            "issues": 2,
-            "components": 1,
-            "content_sha256": "a" * 64,
-            "scanned_at": "2026-06-18T00:00:00+00:00",
-            "scanner": "NVIDIA SkillSpector",
-            "scanner_repo": "https://github.com/NVIDIA/SkillSpector",
-            "scanner_version": "2.2.3",
-            "mode": "static-no-llm",
-            "llm_requested": False,
-            "issue_rules": ["exfiltration-risk"],
-        },
-        {
-            "schema_version": 1,
-            "slug": "safe-skill",
-            "status": "passed",
-            "risk_score": 0,
-            "risk_severity": "LOW",
-            "recommendation": "SAFE",
-            "issues": 0,
-            "components": 1,
-            "content_sha256": "b" * 64,
-            "scanned_at": "2026-06-18T00:00:00+00:00",
-            "scanner": "NVIDIA SkillSpector",
-            "scanner_repo": "https://github.com/NVIDIA/SkillSpector",
-            "scanner_version": "2.2.3",
-            "mode": "static-no-llm",
-            "llm_requested": False,
-            "issue_rules": [],
-        },
-    ])
+    _write_skillspector_audit(
+        fake_claude,
+        [
+            {
+                "schema_version": 1,
+                "slug": "danger-skill",
+                "status": "blocked",
+                "risk_score": 99,
+                "risk_severity": "CRITICAL",
+                "recommendation": "BLOCK",
+                "issues": 2,
+                "components": 1,
+                "content_sha256": "a" * 64,
+                "scanned_at": "2026-06-18T00:00:00+00:00",
+                "scanner": "NVIDIA SkillSpector",
+                "scanner_repo": "https://github.com/NVIDIA/SkillSpector",
+                "scanner_version": "2.2.3",
+                "mode": "static-no-llm",
+                "llm_requested": False,
+                "issue_rules": ["exfiltration-risk"],
+            },
+            {
+                "schema_version": 1,
+                "slug": "safe-skill",
+                "status": "passed",
+                "risk_score": 0,
+                "risk_severity": "LOW",
+                "recommendation": "SAFE",
+                "issues": 0,
+                "components": 1,
+                "content_sha256": "b" * 64,
+                "scanned_at": "2026-06-18T00:00:00+00:00",
+                "scanner": "NVIDIA SkillSpector",
+                "scanner_repo": "https://github.com/NVIDIA/SkillSpector",
+                "scanner_version": "2.2.3",
+                "mode": "static-no-llm",
+                "llm_requested": False,
+                "issue_rules": [],
+            },
+        ],
+    )
 
-    payload = mt.skillspector_audit_payload({
-        "q": "exfiltration",
-        "status": "blocked",
-        "severity": "CRITICAL",
-        "tag": "security",
-        "family": "Security Tools",
-        "limit": "10",
-    })
+    payload = mt.skillspector_audit_payload(
+        {
+            "q": "exfiltration",
+            "status": "blocked",
+            "severity": "CRITICAL",
+            "tag": "security",
+            "family": "Security Tools",
+            "limit": "10",
+        }
+    )
 
     assert payload["summary"]["total"] == 2
     assert payload["summary"]["problematic"] == 1
@@ -3118,24 +3327,29 @@ def test_skillspector_service_payload_uses_dashboard_metadata(
         conn.commit()
     finally:
         conn.close()
-    _write_skillspector_audit(fake_claude, [{
-        "schema_version": 1,
-        "slug": "review-skill",
-        "status": "findings",
-        "risk_score": 80,
-        "risk_severity": "HIGH",
-        "recommendation": "REVIEW",
-        "issues": 1,
-        "components": 1,
-        "content_sha256": "c" * 64,
-        "scanned_at": "2026-06-18T00:00:00+00:00",
-        "scanner": "NVIDIA SkillSpector",
-        "scanner_repo": "https://github.com/NVIDIA/SkillSpector",
-        "scanner_version": "2.2.3",
-        "mode": "static-no-llm",
-        "llm_requested": False,
-        "issue_rules": ["prompt-injection"],
-    }])
+    _write_skillspector_audit(
+        fake_claude,
+        [
+            {
+                "schema_version": 1,
+                "slug": "review-skill",
+                "status": "findings",
+                "risk_score": 80,
+                "risk_severity": "HIGH",
+                "recommendation": "REVIEW",
+                "issues": 1,
+                "components": 1,
+                "content_sha256": "c" * 64,
+                "scanned_at": "2026-06-18T00:00:00+00:00",
+                "scanner": "NVIDIA SkillSpector",
+                "scanner_repo": "https://github.com/NVIDIA/SkillSpector",
+                "scanner_version": "2.2.3",
+                "mode": "static-no-llm",
+                "llm_requested": False,
+                "issue_rules": ["prompt-injection"],
+            }
+        ],
+    )
 
     payload = skillspector_service.audit_payload(
         fake_claude / "skill-wiki",
@@ -3155,24 +3369,29 @@ def test_skillspector_page_and_api_route_render_audit(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _write_skillspector_audit(fake_claude, [{
-        "schema_version": 1,
-        "slug": "review-skill",
-        "status": "findings",
-        "risk_score": 80,
-        "risk_severity": "HIGH",
-        "recommendation": "REVIEW",
-        "issues": 1,
-        "components": 1,
-        "content_sha256": "c" * 64,
-        "scanned_at": "2026-06-18T00:00:00+00:00",
-        "scanner": "NVIDIA SkillSpector",
-        "scanner_repo": "https://github.com/NVIDIA/SkillSpector",
-        "scanner_version": "2.2.3",
-        "mode": "static-no-llm",
-        "llm_requested": False,
-        "issue_rules": ["prompt-injection"],
-    }])
+    _write_skillspector_audit(
+        fake_claude,
+        [
+            {
+                "schema_version": 1,
+                "slug": "review-skill",
+                "status": "findings",
+                "risk_score": 80,
+                "risk_severity": "HIGH",
+                "recommendation": "REVIEW",
+                "issues": 1,
+                "components": 1,
+                "content_sha256": "c" * 64,
+                "scanned_at": "2026-06-18T00:00:00+00:00",
+                "scanner": "NVIDIA SkillSpector",
+                "scanner_repo": "https://github.com/NVIDIA/SkillSpector",
+                "scanner_version": "2.2.3",
+                "mode": "static-no-llm",
+                "llm_requested": False,
+                "issue_rules": ["prompt-injection"],
+            }
+        ],
+    )
 
     html_out = mt.render_skillspector({"q": "prompt", "severity": "HIGH"})
     direct_html = skillspector_page.render_skillspector(
@@ -3249,24 +3468,30 @@ def test_graph_neighborhood_uses_dashboard_index_when_overlay_is_already_indexed
             "INSERT INTO neighbors VALUES(?,?)",
             (
                 "harness:mirage",
-                zlib.compress(json.dumps([
-                    {
-                        "target": "skill:codex-review",
-                        "weight": 0.18,
-                        "shared_tags": ["sandbox"],
-                    },
-                ]).encode("utf-8")),
+                zlib.compress(
+                    json.dumps(
+                        [
+                            {
+                                "target": "skill:codex-review",
+                                "weight": 0.18,
+                                "shared_tags": ["sandbox"],
+                            },
+                        ]
+                    ).encode("utf-8")
+                ),
             ),
         )
         conn.commit()
     finally:
         conn.close()
     overlay_path.write_text(
-        json.dumps({
-            "overlay_id": "mirage-overlay",
-            "nodes": [{"id": "harness:mirage", "type": "harness"}],
-            "edges": [{"source": "harness:mirage", "target": "skill:codex-review"}],
-        })
+        json.dumps(
+            {
+                "overlay_id": "mirage-overlay",
+                "nodes": [{"id": "harness:mirage", "type": "harness"}],
+                "edges": [{"source": "harness:mirage", "target": "skill:codex-review"}],
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -3348,11 +3573,13 @@ def test_graph_neighborhood_bypasses_index_for_local_overlay_even_when_node_exis
     finally:
         conn.close()
     overlay_path.write_text(
-        json.dumps({
-            "kind": "ann_attach",
-            "nodes": [{"id": "skill:existing", "type": "skill"}],
-            "edges": [{"source": "skill:existing", "target": "skill:new-runtime-edge"}],
-        })
+        json.dumps(
+            {
+                "kind": "ann_attach",
+                "nodes": [{"id": "skill:existing", "type": "skill"}],
+                "edges": [{"source": "skill:existing", "target": "skill:new-runtime-edge"}],
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -3455,7 +3682,9 @@ def test_graph_index_matches_fuzzy_slug_resolution(
             "INSERT INTO slug_index VALUES(?,?,?)",
             ("github-actions", "skill", "skill:github-actions"),
         )
-        conn.execute("INSERT INTO neighbors VALUES(?,?)", ("skill:github-actions", zlib.compress(b"[]")))
+        conn.execute(
+            "INSERT INTO neighbors VALUES(?,?)", ("skill:github-actions", zlib.compress(b"[]"))
+        )
         conn.commit()
     finally:
         conn.close()
@@ -3554,12 +3783,14 @@ def test_entity_subgraph_page_renderer_uses_injected_graph_dependencies() -> Non
         graph_neighborhood=lambda *_args, **_kwargs: graph,
         graph_type_from_node_id=mt.graph_type_from_node_id,
         graph_slug_from_node_id=mt.graph_slug_from_node_id,
-        subgraph_sidecar=lambda slug, _entity_type: {
-            "grade": "A",
-            "raw_score": 0.91,
-        }
-        if slug == "github-api"
-        else None,
+        subgraph_sidecar=lambda slug, _entity_type: (
+            {
+                "grade": "A",
+                "raw_score": 0.91,
+            }
+            if slug == "github-api"
+            else None
+        ),
         display_label=mt.display_label,
         display_slug=mt.display_slug,
         entity_wiki_href=mt.entity_wiki_href,
@@ -3575,8 +3806,8 @@ def test_entity_subgraph_page_renderer_uses_injected_graph_dependencies() -> Non
 def test_graph_page_initial_query_escapes_script_end_tag() -> None:
     html_out = mt.render_graph("</script><script>alert(1)</script>")
 
-    assert "const initial = \"<\\/script>" in html_out
-    assert "const initial = \"</script>" not in html_out
+    assert 'const initial = "<\\/script>' in html_out
+    assert 'const initial = "</script>' not in html_out
 
 
 def test_graph_neighborhood_extracts_missing_dashboard_index_from_archive(
@@ -3645,7 +3876,9 @@ def test_graph_neighborhood_extracts_missing_dashboard_index_from_archive(
     result = mt.graph_neighborhood("python-patterns", entity_type="skill")
 
     assert result["center"] == "skill:python-patterns"
-    assert (fake_claude / "skill-wiki" / "graphify-out" / "dashboard-neighborhoods.sqlite3").is_file()
+    assert (
+        fake_claude / "skill-wiki" / "graphify-out" / "dashboard-neighborhoods.sqlite3"
+    ).is_file()
 
 
 def test_dashboard_index_extraction_skips_archive_export_mismatch(
@@ -3869,13 +4102,17 @@ def test_graph_index_node_size_uses_live_sidecar_when_scores_missing(
     fake_claude: Path,
 ) -> None:
     _write_graph_manifest(fake_claude, "test-export")
-    _write_sidecar(fake_claude, "python-patterns", {
-        "slug": "python-patterns",
-        "subject_type": "skill",
-        "grade": "A",
-        "score": 1.0,
-        "signals": {"telemetry": {"score": 1.0}},
-    })
+    _write_sidecar(
+        fake_claude,
+        "python-patterns",
+        {
+            "slug": "python-patterns",
+            "subject_type": "skill",
+            "grade": "A",
+            "score": 1.0,
+            "signals": {"telemetry": {"score": 1.0}},
+        },
+    )
     index_path = fake_claude / "skill-wiki" / "graphify-out" / "dashboard-neighborhoods.sqlite3"
     index_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(index_path)
@@ -3902,7 +4139,9 @@ def test_graph_index_node_size_uses_live_sidecar_when_scores_missing(
             "INSERT INTO slug_index VALUES(?,?,?)",
             ("python-patterns", "skill", "skill:python-patterns"),
         )
-        conn.execute("INSERT INTO neighbors VALUES(?,?)", ("skill:python-patterns", zlib.compress(b"[]")))
+        conn.execute(
+            "INSERT INTO neighbors VALUES(?,?)", ("skill:python-patterns", zlib.compress(b"[]"))
+        )
         conn.commit()
     finally:
         conn.close()
@@ -3927,6 +4166,7 @@ def test_graph_neighborhood_empty_when_graph_absent(
     # resolve_graph may be imported lazily inside _graph_neighborhood — force
     # the import to yield a stub that raises.
     import sys
+
     fake = type("M", (), {"load_graph": _bad})
     # ctx.monitor.compat lazy-imports 'from ctx.core.graph.resolve_graph import load_graph'
     # at call time; inject at the canonical dotted path so the lazy import
@@ -3944,8 +4184,14 @@ def test_render_home_shows_stat_grid_even_with_no_sessions(fake_claude: Path) ->
     messages so the page never feels empty."""
     html_out = mt.render_home()
     # Six stat-card titles must all be present regardless of data volume.
-    for label in ("Currently loaded", "Sidecars", "Wiki entities",
-                  "Knowledge graph", "Audit events", "Sessions"):
+    for label in (
+        "Currently loaded",
+        "Sidecars",
+        "Wiki entities",
+        "Knowledge graph",
+        "Audit events",
+        "Sessions",
+    ):
         assert label in html_out
     # Links into each section.
     for href in ("/loaded", "/skills", "/graph", "/logs", "/events", "/sessions"):
@@ -3964,24 +4210,36 @@ def test_render_home_formats_large_counts_with_commas(
     monkeypatch.setattr(mt, "summarize_sessions", lambda: [])
     monkeypatch.setattr(mt, "read_manifest", lambda: {"load": [None] * 10000})
     monkeypatch.setattr(mt, "read_jsonl", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(mt, "graph_stats", lambda: {
-        "nodes": 79958,
-        "edges": 1778069,
-        "available": True,
-    })
-    monkeypatch.setattr(mt, "wiki_stats", lambda: {
-        "skills": 68494,
-        "agents": 467,
-        "mcps": 10790,
-        "harnesses": 207,
-        "total": 79958,
-        "split_known": True,
-    })
-    monkeypatch.setattr(mt, "runtime_lifecycle_summary", lambda: {
-        "validations_total": 10000,
-        "validation_failures": 1000,
-        "open_escalations_total": 100,
-    })
+    monkeypatch.setattr(
+        mt,
+        "graph_stats",
+        lambda: {
+            "nodes": 79958,
+            "edges": 1778069,
+            "available": True,
+        },
+    )
+    monkeypatch.setattr(
+        mt,
+        "wiki_stats",
+        lambda: {
+            "skills": 68494,
+            "agents": 467,
+            "mcps": 10790,
+            "harnesses": 207,
+            "total": 79958,
+            "split_known": True,
+        },
+    )
+    monkeypatch.setattr(
+        mt,
+        "runtime_lifecycle_summary",
+        lambda: {
+            "validations_total": 10000,
+            "validation_failures": 1000,
+            "open_escalations_total": 100,
+        },
+    )
 
     html_out = mt.render_home()
 
@@ -4048,11 +4306,20 @@ def test_api_grades_reuses_kpi_summary_without_sidecar_scan() -> None:
 
 
 def test_render_skills_emits_sidebar_filters(fake_claude: Path) -> None:
-    _write_sidecar(fake_claude, "a", {"slug": "a", "grade": "A", "raw_score": 0.9,
-                                       "subject_type": "skill"})
-    _write_sidecar(fake_claude, "b", {"slug": "b", "grade": "F", "raw_score": 0.1,
-                                       "subject_type": "agent",
-                                       "hard_floor": "intake_fail"})
+    _write_sidecar(
+        fake_claude, "a", {"slug": "a", "grade": "A", "raw_score": 0.9, "subject_type": "skill"}
+    )
+    _write_sidecar(
+        fake_claude,
+        "b",
+        {
+            "slug": "b",
+            "grade": "F",
+            "raw_score": 0.1,
+            "subject_type": "agent",
+            "hard_floor": "intake_fail",
+        },
+    )
     html_out = mt.render_skills()
     # Sidebar must expose text search plus grade/type filters.
     assert "id='skill-search'" in html_out
@@ -4068,12 +4335,16 @@ def test_render_skills_emits_sidebar_filters(fake_claude: Path) -> None:
 
 def test_render_skills_paginates_sidecar_page(fake_claude: Path) -> None:
     for slug in ("a", "b", "c"):
-        _write_sidecar(fake_claude, slug, {
-            "slug": slug,
-            "grade": "A",
-            "raw_score": 0.9,
-            "subject_type": "skill",
-        })
+        _write_sidecar(
+            fake_claude,
+            slug,
+            {
+                "slug": slug,
+                "grade": "A",
+                "raw_score": 0.9,
+                "subject_type": "skill",
+            },
+        )
 
     html_out = mt.render_skills({"limit": "2"})
 
@@ -4086,12 +4357,16 @@ def test_render_skills_paginates_sidecar_page(fake_claude: Path) -> None:
 
 def test_sidecar_page_payload_searches_full_catalog(fake_claude: Path) -> None:
     for slug in ("alpha-review", "beta-build", "gamma-review"):
-        _write_sidecar(fake_claude, slug, {
-            "slug": slug,
-            "grade": "A",
-            "raw_score": 0.9,
-            "subject_type": "skill",
-        })
+        _write_sidecar(
+            fake_claude,
+            slug,
+            {
+                "slug": slug,
+                "grade": "A",
+                "raw_score": 0.9,
+                "subject_type": "skill",
+            },
+        )
 
     payload = mt.sidecar_page_payload({"q": "review", "limit": "1"})
 
@@ -4101,31 +4376,45 @@ def test_sidecar_page_payload_searches_full_catalog(fake_claude: Path) -> None:
 
 
 def test_sidecar_page_payload_filters_type_grade_and_floor(fake_claude: Path) -> None:
-    _write_sidecar(fake_claude, "agent-a", {
-        "slug": "agent-a",
-        "grade": "A",
-        "raw_score": 0.9,
-        "subject_type": "agent",
-    })
-    _write_sidecar(fake_claude, "skill-a", {
-        "slug": "skill-a",
-        "grade": "A",
-        "raw_score": 0.9,
-        "subject_type": "skill",
-    })
-    _write_sidecar(fake_claude, "agent-floored", {
-        "slug": "agent-floored",
-        "grade": "A",
-        "raw_score": 0.9,
-        "subject_type": "agent",
-        "hard_floor": "intake_fail",
-    })
+    _write_sidecar(
+        fake_claude,
+        "agent-a",
+        {
+            "slug": "agent-a",
+            "grade": "A",
+            "raw_score": 0.9,
+            "subject_type": "agent",
+        },
+    )
+    _write_sidecar(
+        fake_claude,
+        "skill-a",
+        {
+            "slug": "skill-a",
+            "grade": "A",
+            "raw_score": 0.9,
+            "subject_type": "skill",
+        },
+    )
+    _write_sidecar(
+        fake_claude,
+        "agent-floored",
+        {
+            "slug": "agent-floored",
+            "grade": "A",
+            "raw_score": 0.9,
+            "subject_type": "agent",
+            "hard_floor": "intake_fail",
+        },
+    )
 
-    payload = mt.sidecar_page_payload({
-        "type": "agent",
-        "grade": "A",
-        "hide_floor": "1",
-    })
+    payload = mt.sidecar_page_payload(
+        {
+            "type": "agent",
+            "grade": "A",
+            "hide_floor": "1",
+        }
+    )
 
     assert payload["total"] == 1
     assert payload["items"][0]["slug"] == "agent-a"
@@ -4136,12 +4425,16 @@ def test_sidecar_page_payload_reuses_cached_search_records(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for slug in ("alpha-review", "beta-review"):
-        _write_sidecar(fake_claude, slug, {
-            "slug": slug,
-            "grade": "A",
-            "raw_score": 0.9,
-            "subject_type": "skill",
-        })
+        _write_sidecar(
+            fake_claude,
+            slug,
+            {
+                "slug": slug,
+                "grade": "A",
+                "raw_score": 0.9,
+                "subject_type": "skill",
+            },
+        )
     original_read = sidecar_service.read_sidecar_file
     reads = 0
 
@@ -4161,12 +4454,16 @@ def test_sidecar_page_payload_reuses_cached_search_records(
     assert reads_after_first_search == 2
     assert reads == reads_after_first_search
 
-    _write_sidecar(fake_claude, "delta-review", {
-        "slug": "delta-review",
-        "grade": "A",
-        "raw_score": 0.8,
-        "subject_type": "skill",
-    })
+    _write_sidecar(
+        fake_claude,
+        "delta-review",
+        {
+            "slug": "delta-review",
+            "grade": "A",
+            "raw_score": 0.8,
+            "subject_type": "skill",
+        },
+    )
     refreshed = mt.sidecar_page_payload({"q": "delta"})
 
     assert [item["slug"] for item in refreshed["items"]] == ["delta-review"]
@@ -4178,12 +4475,14 @@ def test_sidecar_page_payload_cache_invalidates_on_file_rewrite(
 ) -> None:
     path = fake_claude / "skill-quality" / "alpha-review.json"
     path.write_text(
-        json.dumps({
-            "slug": "alpha-review",
-            "grade": "A",
-            "raw_score": 0.9,
-            "subject_type": "skill",
-        }),
+        json.dumps(
+            {
+                "slug": "alpha-review",
+                "grade": "A",
+                "raw_score": 0.9,
+                "subject_type": "skill",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -4191,13 +4490,15 @@ def test_sidecar_page_payload_cache_invalidates_on_file_rewrite(
     assert first["items"][0]["grade"] == "A"
 
     path.write_text(
-        json.dumps({
-            "slug": "alpha-review",
-            "grade": "F",
-            "raw_score": 0.1,
-            "subject_type": "skill",
-            "notes": "changed content to force a different cache signature size",
-        }),
+        json.dumps(
+            {
+                "slug": "alpha-review",
+                "grade": "F",
+                "raw_score": 0.1,
+                "subject_type": "skill",
+                "notes": "changed content to force a different cache signature size",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -4209,31 +4510,47 @@ def test_sidecars_api_applies_route_filters_and_limit_bounds(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _write_sidecar(fake_claude, "review-agent-a", {
-        "slug": "review-agent-a",
-        "grade": "A",
-        "raw_score": 0.9,
-        "subject_type": "agent",
-    })
-    _write_sidecar(fake_claude, "review-agent-floored", {
-        "slug": "review-agent-floored",
-        "grade": "A",
-        "raw_score": 0.8,
-        "subject_type": "agent",
-        "hard_floor": "never_load_stale",
-    })
-    _write_sidecar(fake_claude, "review-skill", {
-        "slug": "review-skill",
-        "grade": "A",
-        "raw_score": 0.7,
-        "subject_type": "skill",
-    })
-    _write_sidecar(fake_claude, "review-agent-b", {
-        "slug": "review-agent-b",
-        "grade": "B",
-        "raw_score": 0.95,
-        "subject_type": "agent",
-    })
+    _write_sidecar(
+        fake_claude,
+        "review-agent-a",
+        {
+            "slug": "review-agent-a",
+            "grade": "A",
+            "raw_score": 0.9,
+            "subject_type": "agent",
+        },
+    )
+    _write_sidecar(
+        fake_claude,
+        "review-agent-floored",
+        {
+            "slug": "review-agent-floored",
+            "grade": "A",
+            "raw_score": 0.8,
+            "subject_type": "agent",
+            "hard_floor": "never_load_stale",
+        },
+    )
+    _write_sidecar(
+        fake_claude,
+        "review-skill",
+        {
+            "slug": "review-skill",
+            "grade": "A",
+            "raw_score": 0.7,
+            "subject_type": "skill",
+        },
+    )
+    _write_sidecar(
+        fake_claude,
+        "review-agent-b",
+        {
+            "slug": "review-agent-b",
+            "grade": "B",
+            "raw_score": 0.95,
+            "subject_type": "agent",
+        },
+    )
 
     direct = readonly_api.handle_readonly_route(
         "api_sidecars",
@@ -4309,14 +4626,16 @@ def test_render_wiki_index_lists_entities(fake_claude: Path) -> None:
     )
     html_out = mt.render_wiki_index()
     direct_out = wiki_page.render_wiki_index_page(
-        entries=[{
-            "slug": "python-patterns",
-            "display_slug": "python-patterns",
-            "type": "skill",
-            "description": "Idiomatic Python patterns",
-            "tags": ["python", "patterns"],
-            "search_tags": ["python", "patterns"],
-        }],
+        entries=[
+            {
+                "slug": "python-patterns",
+                "display_slug": "python-patterns",
+                "type": "skill",
+                "description": "Idiomatic Python patterns",
+                "tags": ["python", "patterns"],
+                "search_tags": ["python", "patterns"],
+            }
+        ],
         selected_type=None,
         initial_query="python",
         total_available=1,
@@ -4436,31 +4755,36 @@ def test_wiki_index_entries_use_dashboard_index_without_markdown_pages(
 
     assert slugs == {"python-patterns", "code-reviewer"}
     assert entries[0]["description"] == "Idiomatic Python patterns"
-    assert wiki_service.index_entries(
-        fake_claude / "skill-wiki",
-        index_path,
-        limit_per_type=10,
-        index_matches_manifest=lambda path: path == index_path,
-    ) == entries
+    assert (
+        wiki_service.index_entries(
+            fake_claude / "skill-wiki",
+            index_path,
+            limit_per_type=10,
+            index_matches_manifest=lambda path: path == index_path,
+        )
+        == entries
+    )
     assert wiki_service.search_entities_from_index(
         index_path,
         "python",
         "skill",
         limit=5,
         index_matches_manifest=lambda path: path == index_path,
-    ) == [{
-        "slug": "python-patterns",
-        "display_slug": "python-patterns",
-        "type": "skill",
-        "title": "python-patterns",
-        "description": "Idiomatic Python patterns",
-        "tags": ["python", "patterns"],
-        "path": "",
-        "href": "/wiki/python-patterns?type=skill",
-        "quality_score": 0.9,
-        "usage_score": 0.1,
-        "degree": 5,
-    }]
+    ) == [
+        {
+            "slug": "python-patterns",
+            "display_slug": "python-patterns",
+            "type": "skill",
+            "title": "python-patterns",
+            "description": "Idiomatic Python patterns",
+            "tags": ["python", "patterns"],
+            "path": "",
+            "href": "/wiki/python-patterns?type=skill",
+            "quality_score": 0.9,
+            "usage_score": 0.1,
+            "degree": 5,
+        }
+    ]
 
     def fail_sidecar_probe(*args: object, **kwargs: object) -> object:
         raise AssertionError("index-backed wiki catalog should not probe sidecars")
@@ -4494,14 +4818,16 @@ def test_render_wiki_index_query_uses_bounded_search(
     monkeypatch.setattr(
         mt,
         "search_wiki_entities",
-        lambda query, entity_type=None, limit=80: [{
-            "slug": "code-reviewer",
-            "display_slug": "code-reviewer",
-            "type": entity_type or "agent",
-            "description": f"{query} result",
-            "tags": ["review"],
-            "search_tags": ["review"],
-        }],
+        lambda query, entity_type=None, limit=80: [
+            {
+                "slug": "code-reviewer",
+                "display_slug": "code-reviewer",
+                "type": entity_type or "agent",
+                "description": f"{query} result",
+                "tags": ["review"],
+                "search_tags": ["review"],
+            }
+        ],
     )
 
     html_out = mt.render_wiki_index(entity_type="agent", query="review")
@@ -4595,17 +4921,21 @@ def test_render_wiki_index_does_not_bleed_grade_across_duplicate_slugs(
         "---\nname: langgraph\ntype: harness\n---\n# body\n",
         encoding="utf-8",
     )
-    _write_sidecar(fake_claude, "langgraph", {
-        "slug": "langgraph",
-        "subject_type": "skill",
-        "grade": "D",
-        "raw_score": 0.2,
-    })
+    _write_sidecar(
+        fake_claude,
+        "langgraph",
+        {
+            "slug": "langgraph",
+            "subject_type": "skill",
+            "grade": "D",
+            "raw_score": 0.2,
+        },
+    )
 
     html_out = mt.render_wiki_index()
 
     harness_start = html_out.index("href='/wiki/langgraph?type=harness'")
-    harness_card = html_out[harness_start:html_out.index("</a>", harness_start)]
+    harness_card = html_out[harness_start : html_out.index("</a>", harness_start)]
     assert "grade-D" not in harness_card
     assert "<span class='pill'>harness</span>" in harness_card
 
@@ -4620,12 +4950,16 @@ def test_render_wiki_index_uses_visible_sidecars_without_full_scan(
         "---\nname: python-patterns\ntype: skill\n---\n# body\n",
         encoding="utf-8",
     )
-    _write_sidecar(fake_claude, "python-patterns", {
-        "slug": "python-patterns",
-        "subject_type": "skill",
-        "grade": "A",
-        "raw_score": 0.9,
-    })
+    _write_sidecar(
+        fake_claude,
+        "python-patterns",
+        {
+            "slug": "python-patterns",
+            "subject_type": "skill",
+            "grade": "A",
+            "raw_score": 0.9,
+        },
+    )
 
     def fail_full_sidecar_scan() -> list[dict]:
         raise AssertionError("_render_wiki_index should not scan every sidecar")
@@ -4652,10 +4986,12 @@ def test_render_wiki_index_rejects_unsafe_filenames(fake_claude: Path) -> None:
     skills_dir.mkdir(parents=True)
     # Valid entry alongside an uppercase-first filename (fails ^[a-z0-9]).
     (skills_dir / "python-patterns.md").write_text(
-        "---\nname: python-patterns\n---\n", encoding="utf-8",
+        "---\nname: python-patterns\n---\n",
+        encoding="utf-8",
     )
     (skills_dir / "Bad-Start.md").write_text(
-        "---\nname: Bad-Start\n---\n", encoding="utf-8",
+        "---\nname: Bad-Start\n---\n",
+        encoding="utf-8",
     )
     entries = mt.wiki_index_entries()
     slugs = {e["slug"] for e in entries}
@@ -4837,13 +5173,7 @@ def test_entity_upsert_api_writes_wiki_page_and_queues_graph_refresh(
         assert payload["ok"] is True
         assert payload["detail"].startswith("saved agent:custom-reviewer")
 
-        entity_path = (
-            fake_claude
-            / "skill-wiki"
-            / "entities"
-            / "agents"
-            / "custom-reviewer.md"
-        )
+        entity_path = fake_claude / "skill-wiki" / "entities" / "agents" / "custom-reviewer.md"
         text = entity_path.read_text(encoding="utf-8")
         assert "title: Custom Reviewer" in text
         assert "type: agent" in text
@@ -4868,9 +5198,7 @@ def test_entity_upsert_api_requires_confirmation_for_existing_page(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    entity_path = (
-        fake_claude / "skill-wiki" / "entities" / "agents" / "custom-reviewer.md"
-    )
+    entity_path = fake_claude / "skill-wiki" / "entities" / "agents" / "custom-reviewer.md"
     entity_path.parent.mkdir(parents=True)
     entity_path.write_text(
         "---\ntitle: Custom Reviewer\ntype: agent\ntags: [python]\n"
@@ -4924,8 +5252,7 @@ def test_entity_delete_api_removes_wiki_page_and_queues_graph_refresh(
     harness_dir.mkdir(parents=True)
     entity_path = harness_dir / "local-harness.md"
     entity_path.write_text(
-        "---\ntitle: Local Harness\ntype: harness\ntags: [local, llm]\n"
-        "---\n# Local Harness\n",
+        "---\ntitle: Local Harness\ntype: harness\ntags: [local, llm]\n---\n# Local Harness\n",
         encoding="utf-8",
     )
     server, thread, port = _serve_monitor(monkeypatch)
@@ -5049,23 +5376,45 @@ def test_render_kpi_with_sidecars(fake_claude: Path) -> None:
     """With real sidecars + lifecycle files, /kpi must surface the four
     main tables: grade distribution, lifecycle tiers, categories,
     demotion candidates. Mirrors kpi_dashboard.render_markdown sections."""
-    _write_sidecar(fake_claude, "alpha", {
-        "slug": "alpha", "subject_type": "skill",
-        "grade": "A", "raw_score": 0.92, "score": 0.92,
-        "hard_floor": None, "computed_at": "2026-04-19T10:00:00+00:00",
-    })
-    _write_sidecar(fake_claude, "foxtrot", {
-        "slug": "foxtrot", "subject_type": "skill",
-        "grade": "F", "raw_score": 0.08, "score": 0.08,
-        "hard_floor": "intake_fail",
-        "computed_at": "2026-04-19T10:00:00+00:00",
-    })
-    _write_sidecar(fake_claude, "reviewer", {
-        "slug": "reviewer", "subject_type": "agent",
-        "grade": "F", "raw_score": 0.06, "score": 0.06,
-        "hard_floor": None,
-        "computed_at": "2026-04-19T10:00:00+00:00",
-    })
+    _write_sidecar(
+        fake_claude,
+        "alpha",
+        {
+            "slug": "alpha",
+            "subject_type": "skill",
+            "grade": "A",
+            "raw_score": 0.92,
+            "score": 0.92,
+            "hard_floor": None,
+            "computed_at": "2026-04-19T10:00:00+00:00",
+        },
+    )
+    _write_sidecar(
+        fake_claude,
+        "foxtrot",
+        {
+            "slug": "foxtrot",
+            "subject_type": "skill",
+            "grade": "F",
+            "raw_score": 0.08,
+            "score": 0.08,
+            "hard_floor": "intake_fail",
+            "computed_at": "2026-04-19T10:00:00+00:00",
+        },
+    )
+    _write_sidecar(
+        fake_claude,
+        "reviewer",
+        {
+            "slug": "reviewer",
+            "subject_type": "agent",
+            "grade": "F",
+            "raw_score": 0.06,
+            "score": 0.06,
+            "hard_floor": None,
+            "computed_at": "2026-04-19T10:00:00+00:00",
+        },
+    )
     html_out = mt.render_kpi()
     # The five section headings must all be present.
     assert "Grade distribution" in html_out
@@ -5083,35 +5432,59 @@ def test_render_kpi_with_sidecars(fake_claude: Path) -> None:
 
 def test_api_kpi_summary_shape(fake_claude: Path) -> None:
     """The JSON endpoint must return a DashboardSummary-shaped dict."""
-    _write_sidecar(fake_claude, "alpha", {
-        "slug": "alpha", "subject_type": "skill",
-        "grade": "A", "raw_score": 0.9, "score": 0.9,
-        "hard_floor": None, "computed_at": "2026-04-19T10:00:00+00:00",
-    })
+    _write_sidecar(
+        fake_claude,
+        "alpha",
+        {
+            "slug": "alpha",
+            "subject_type": "skill",
+            "grade": "A",
+            "raw_score": 0.9,
+            "score": 0.9,
+            "hard_floor": None,
+            "computed_at": "2026-04-19T10:00:00+00:00",
+        },
+    )
     summary = mt.kpi_summary()
     direct_summary = kpi_service.kpi_summary(fake_claude / "skill-quality")
     assert summary is not None
     assert direct_summary is not None
     assert direct_summary.to_dict() == summary.to_dict()
     d = summary.to_dict()
-    for key in ("total", "grade_counts", "lifecycle_counts",
-                "category_breakdown", "hard_floor_counts",
-                "low_quality_candidates", "archived", "generated_at"):
+    for key in (
+        "total",
+        "grade_counts",
+        "lifecycle_counts",
+        "category_breakdown",
+        "hard_floor_counts",
+        "low_quality_candidates",
+        "archived",
+        "generated_at",
+    ):
         assert key in d, f"missing {key}"
     assert d["total"] == 1
     assert d["grade_counts"].get("A", 0) == 1
 
 
 def test_kpi_summary_cache_reuses_recent_summary(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import kpi_dashboard as kd
 
-    _write_sidecar(fake_claude, "alpha", {
-        "slug": "alpha", "subject_type": "skill",
-        "grade": "A", "raw_score": 0.9, "score": 0.9,
-        "hard_floor": None, "computed_at": "2026-04-19T10:00:00+00:00",
-    })
+    _write_sidecar(
+        fake_claude,
+        "alpha",
+        {
+            "slug": "alpha",
+            "subject_type": "skill",
+            "grade": "A",
+            "raw_score": 0.9,
+            "score": 0.9,
+            "hard_floor": None,
+            "computed_at": "2026-04-19T10:00:00+00:00",
+        },
+    )
     kpi_service.reset_cache()
     real_generate = kd.generate
     calls = 0
@@ -5129,15 +5502,24 @@ def test_kpi_summary_cache_reuses_recent_summary(
 
 
 def test_kpi_summary_reuses_disk_cache_after_process_cache_reset(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import kpi_dashboard as kd
 
-    _write_sidecar(fake_claude, "alpha", {
-        "slug": "alpha", "subject_type": "skill",
-        "grade": "A", "raw_score": 0.9, "score": 0.9,
-        "hard_floor": None, "computed_at": "2026-04-19T10:00:00+00:00",
-    })
+    _write_sidecar(
+        fake_claude,
+        "alpha",
+        {
+            "slug": "alpha",
+            "subject_type": "skill",
+            "grade": "A",
+            "raw_score": 0.9,
+            "score": 0.9,
+            "hard_floor": None,
+            "computed_at": "2026-04-19T10:00:00+00:00",
+        },
+    )
     kpi_service.reset_cache()
 
     first = mt.kpi_summary()
@@ -5158,26 +5540,40 @@ def test_kpi_summary_reuses_disk_cache_after_process_cache_reset(
 
 
 def test_kpi_summary_disk_cache_invalidates_on_sidecar_rewrite(
-    fake_claude: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import kpi_dashboard as kd
 
-    _write_sidecar(fake_claude, "alpha", {
-        "slug": "alpha", "subject_type": "skill",
-        "grade": "A", "raw_score": 0.9, "score": 0.9,
-        "hard_floor": None, "computed_at": "2026-04-19T10:00:00+00:00",
-    })
+    _write_sidecar(
+        fake_claude,
+        "alpha",
+        {
+            "slug": "alpha",
+            "subject_type": "skill",
+            "grade": "A",
+            "raw_score": 0.9,
+            "score": 0.9,
+            "hard_floor": None,
+            "computed_at": "2026-04-19T10:00:00+00:00",
+        },
+    )
     sidecar = fake_claude / "skill-quality" / "alpha.json"
     kpi_service.reset_cache()
     assert mt.kpi_summary() is not None
 
     sidecar.write_text(
-        json.dumps({
-            "slug": "alpha", "subject_type": "skill",
-            "grade": "F", "raw_score": 0.1, "score": 0.1,
-            "hard_floor": None,
-            "computed_at": "2026-04-19T10:00:00+00:00",
-        }),
+        json.dumps(
+            {
+                "slug": "alpha",
+                "subject_type": "skill",
+                "grade": "F",
+                "raw_score": 0.1,
+                "score": 0.1,
+                "hard_floor": None,
+                "computed_at": "2026-04-19T10:00:00+00:00",
+            }
+        ),
         encoding="utf-8",
     )
     os.utime(sidecar, (time.time() + 2.0, time.time() + 2.0))
@@ -5239,15 +5635,17 @@ def test_render_docs_lists_repo_docs(
     (tmp_path / "docs" / "harness").mkdir()
     (tmp_path / "graph").mkdir()
     (tmp_path / "mkdocs.yml").write_text(
-        "\n".join([
-            "nav:",
-            "  - Home: index.md",
-            "  - Dashboard: dashboard.md",
-            "  - Harness:",
-            "      - Attach to hosts: harness/attaching-to-hosts.md",
-            "extra:",
-            "  custom: !!python/name:material.extensions.emoji.twemoji",
-        ]),
+        "\n".join(
+            [
+                "nav:",
+                "  - Home: index.md",
+                "  - Dashboard: dashboard.md",
+                "  - Harness:",
+                "      - Attach to hosts: harness/attaching-to-hosts.md",
+                "extra:",
+                "  custom: !!python/name:material.extensions.emoji.twemoji",
+            ]
+        ),
         encoding="utf-8",
     )
     (tmp_path / "README.md").write_text(
@@ -5255,35 +5653,37 @@ def test_render_docs_lists_repo_docs(
         encoding="utf-8",
     )
     (tmp_path / "docs" / "index.md").write_text(
-        "\n".join([
-            "# Home",
-            "",
-            "Repo docs home.",
-            "",
-            "!!! tip \"Install\"",
-            "",
-            "    ctx-init --graph",
-            "",
-            "## Explore the docs",
-            "",
-            "Jump to the [dashboard docs](dashboard.md).",
-            "",
-            "### Deep section",
-            "",
-            "Nested docs body.",
-            "",
-            "<div class=\"grid cards\" markdown>",
-            "",
-            "-   **Knowledge graph**",
-            "",
-            "    ---",
-            "",
-            "    Graph docs.",
-            "",
-            "    [:octicons-arrow-right-24: Knowledge graph](knowledge-graph.md)",
-            "",
-            "</div>",
-        ]),
+        "\n".join(
+            [
+                "# Home",
+                "",
+                "Repo docs home.",
+                "",
+                '!!! tip "Install"',
+                "",
+                "    ctx-init --graph",
+                "",
+                "## Explore the docs",
+                "",
+                "Jump to the [dashboard docs](dashboard.md).",
+                "",
+                "### Deep section",
+                "",
+                "Nested docs body.",
+                "",
+                '<div class="grid cards" markdown>',
+                "",
+                "-   **Knowledge graph**",
+                "",
+                "    ---",
+                "",
+                "    Graph docs.",
+                "",
+                "    [:octicons-arrow-right-24: Knowledge graph](knowledge-graph.md)",
+                "",
+                "</div>",
+            ]
+        ),
         encoding="utf-8",
     )
     (tmp_path / "docs" / "dashboard.md").write_text(
@@ -5324,7 +5724,7 @@ def test_render_docs_lists_repo_docs(
     assert "graph/README.md" in html_out
     assert "<strong>Monitor</strong> skills, agents, MCPs, harnesses, and graph state." in html_out
     assert "Connect ctx to a non-Claude harness." in html_out
-    assert "class=\"admonition tip\"" in html_out
+    assert 'class="admonition tip"' in html_out
     assert "docs-heading-link docs-heading-level-2" in html_out
     assert "docs-heading-link docs-heading-level-3" in html_out
     assert "href='#doc-home-docs-index-md-explore-the-docs'" in html_out
@@ -5360,7 +5760,7 @@ def test_render_docs_sanitizes_active_html(
     (tmp_path / "docs" / "index.md").write_text(
         "# Home\n\n"
         "<script>alert('x')</script>\n\n"
-        "<input type=\"text\" value=\"bad\">\n\n"
+        '<input type="text" value="bad">\n\n'
         "<a href=\"javascript:alert('x')\" onclick=\"alert('x')\">bad</a>\n",
         encoding="utf-8",
     )
@@ -5371,9 +5771,9 @@ def test_render_docs_sanitizes_active_html(
     assert "<script>alert('x')</script>" not in html_out
     assert "&lt;script" in html_out
     assert "&lt;input" in html_out
-    assert "<input type=\"text\"" not in html_out
+    assert '<input type="text"' not in html_out
     assert "onclick=" not in html_out
-    assert "href=\"javascript:" not in html_out
+    assert 'href="javascript:' not in html_out
 
 
 def test_render_docs_reuses_disk_cache_after_process_cache_reset(
@@ -5407,12 +5807,7 @@ def test_render_docs_reuses_disk_cache_after_process_cache_reset(
 
 
 def test_render_docs_markdown_preserves_mkdocs_tab_controls() -> None:
-    markdown_text = (
-        '=== "One"\n\n'
-        "    First body\n\n"
-        '=== "Two"\n\n'
-        "    Second body\n"
-    )
+    markdown_text = '=== "One"\n\n    First body\n\n=== "Two"\n\n    Second body\n'
 
     html_out = dashboard_docs.render_docs_markdown(
         markdown_text,
@@ -5452,8 +5847,14 @@ def test_layout_nav_tabs_are_draggable_and_persist_order() -> None:
     assert "app-shell" in out
     assert ".app-shell" in css
     assert ".graph-canvas-wrap [data-3d-node-id]:focus" in css
-    assert ".graph-stage { width: 100%; height: calc(100vh - 2rem); height: calc(100dvh - 2rem);" in css
-    assert ".graph-canvas-wrap { position: relative; min-height: 0; background: transparent; cursor: grab; }" in css
+    assert (
+        ".graph-stage { width: 100%; height: calc(100vh - 2rem); height: calc(100dvh - 2rem);"
+        in css
+    )
+    assert (
+        ".graph-canvas-wrap { position: relative; min-height: 0; background: transparent; cursor: grab; }"
+        in css
+    )
     assert ".graph-canvas-wrap:active { cursor: grabbing; }" in css
     assert ".graph-canvas-wrap [data-edge-detail] { cursor: help; }" in css
     assert ".graph-match-histogram" in css
@@ -5462,27 +5863,33 @@ def test_layout_nav_tabs_are_draggable_and_persist_order() -> None:
     assert ".graph-range-fill" in css
     assert "width: 1rem; height: 1rem" in css
     assert "margin-top: calc((0.3rem - 1rem) / 2);" in css
-    assert 'background: transparent; border: 0; box-shadow: none;' in css
+    assert "background: transparent; border: 0; box-shadow: none;" in css
     assert '.graph-range-wrap input[type="range"]:focus-visible,' in css
     assert "outline: none !important; box-shadow: none !important;" in css
     assert '.graph-range-wrap input[type="range"]::-moz-focus-outer { border: 0; }' in css
-    assert 'border: 0; box-shadow: none; }' in css
-    assert 'outline: none;' in css
-    assert 'box-shadow: 0 0 0 0.24rem var(--accent-ring)' in css
+    assert "border: 0; box-shadow: none; }" in css
+    assert "outline: none;" in css
+    assert "box-shadow: 0 0 0 0.24rem var(--accent-ring)" in css
     assert "font-size: 0.72rem; line-height: 1; margin-top: 0.22rem;" in css
     assert "pointer-events: none" in css
     assert "pointer-events: auto" in css
     assert "cursor: none" not in css
-    assert "grid-template-rows: auto minmax(18rem, 1fr) 0.65rem minmax(10rem, var(--graph-inspector-height))" in css
+    assert (
+        "grid-template-rows: auto minmax(18rem, 1fr) 0.65rem minmax(10rem, var(--graph-inspector-height))"
+        in css
+    )
     assert "grid-template-columns: minmax(0,1fr)" in css
     assert "clamp(18rem, 34vw, 30rem)" not in css
     assert ".graph-resize-handle" in css
     assert "cursor: ns-resize" in css
-    assert "[data-testid=\"graph-edge-detail\"] { min-height: 0; max-height: 100%; overflow: auto; }" in css
+    assert (
+        '[data-testid="graph-edge-detail"] { min-height: 0; max-height: 100%; overflow: auto; }'
+        in css
+    )
     assert ".graph-edge-detail-inline" in css
     assert "border-left: 1px solid var(--border)" not in css
     assert "minmax(180px, 0.42fr) 30%" not in css
-    assert ".graph-node-selected [data-testid=\"graph-svg-node\"]" in css
+    assert '.graph-node-selected [data-testid="graph-svg-node"]' in css
     assert "fill: #facc15" in css
     assert "outline: none" in css
     assert "data-nav-storage-key='ctx-monitor-nav-order'" in out
@@ -5576,25 +5983,31 @@ def test_render_harness_wizard_guides_model_choice_and_real_commands(
     harness_dir = fake_claude / "skill-wiki" / "entities" / "harnesses"
     harness_dir.mkdir(parents=True)
     (harness_dir / "langgraph.md").write_text(
-        "\n".join([
-            "---",
-            "title: LangGraph harness",
-            "type: harness",
-            "description: Durable Python agent workflows with tool routing.",
-            "tags: [python, api, local, verification]",
-            "repo_url: https://github.com/langchain-ai/langgraph",
-            "---",
-            "# LangGraph harness",
-        ]),
+        "\n".join(
+            [
+                "---",
+                "title: LangGraph harness",
+                "type: harness",
+                "description: Durable Python agent workflows with tool routing.",
+                "tags: [python, api, local, verification]",
+                "repo_url: https://github.com/langchain-ai/langgraph",
+                "---",
+                "# LangGraph harness",
+            ]
+        ),
         encoding="utf-8",
     )
-    _write_sidecar(fake_claude, "langgraph-harness", {
-        "slug": "langgraph",
-        "subject_type": "harness",
-        "grade": "A",
-        "raw_score": 0.93,
-        "hard_floor": "",
-    })
+    _write_sidecar(
+        fake_claude,
+        "langgraph-harness",
+        {
+            "slug": "langgraph",
+            "subject_type": "harness",
+            "grade": "A",
+            "raw_score": 0.93,
+            "hard_floor": "",
+        },
+    )
 
     html_out = mt.render_harness_wizard()
 
@@ -5616,15 +6029,17 @@ def test_render_harness_wizard_guides_model_choice_and_real_commands(
 
 def test_harness_page_module_renders_catalog_cards_and_commands() -> None:
     html_out = harness_page.render_harness_wizard(
-        harnesses=[{
-            "slug": "langgraph",
-            "title": "LangGraph harness",
-            "description": "Durable Python agent workflows.",
-            "tags": ["python", "api", "verification"],
-            "score": 0.93,
-            "grade": "A",
-            "repo_url": "https://github.com/langchain-ai/langgraph",
-        }],
+        harnesses=[
+            {
+                "slug": "langgraph",
+                "title": "LangGraph harness",
+                "description": "Durable Python agent workflows.",
+                "tags": ["python", "api", "verification"],
+                "score": 0.93,
+                "grade": "A",
+                "repo_url": "https://github.com/langchain-ai/langgraph",
+            }
+        ],
         layout=lambda _title, body: body,
     )
 
@@ -5647,12 +6062,16 @@ def test_harness_wizard_entries_do_not_scan_full_sidecar_tree(
         "---\ntitle: LangGraph harness\ntype: harness\n---\n# body\n",
         encoding="utf-8",
     )
-    _write_sidecar(fake_claude, "langgraph-harness", {
-        "slug": "langgraph",
-        "subject_type": "harness",
-        "grade": "A",
-        "raw_score": 0.93,
-    })
+    _write_sidecar(
+        fake_claude,
+        "langgraph-harness",
+        {
+            "slug": "langgraph",
+            "subject_type": "harness",
+            "grade": "A",
+            "raw_score": 0.93,
+        },
+    )
     monkeypatch.setattr(
         mt,
         "sidecar_files",
@@ -5679,19 +6098,23 @@ def test_save_config_updates_casts_values_and_blank_removes_override(
     config_path = claude / "skill-system-config.json"
     config_path.parent.mkdir(parents=True)
     config_path.write_text(
-        json.dumps({
-            "resolver": {"recommendation_top_k": 4},
-            "skill_transformer": {"line_threshold": 220},
-        }),
+        json.dumps(
+            {
+                "resolver": {"recommendation_top_k": 4},
+                "skill_transformer": {"line_threshold": 220},
+            }
+        ),
         encoding="utf-8",
     )
 
-    saved = mt.save_config_updates({
-        "resolver.recommendation_top_k": "",
-        "skill_transformer.line_threshold": "240",
-        "intake.enabled": "false",
-        "graph.edge_weights.semantic": "0.65",
-    })
+    saved = mt.save_config_updates(
+        {
+            "resolver.recommendation_top_k": "",
+            "skill_transformer.line_threshold": "240",
+            "intake.enabled": "false",
+            "graph.edge_weights.semantic": "0.65",
+        }
+    )
 
     raw = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved["ok"] is True
@@ -5736,17 +6159,27 @@ def test_render_graph_landing_shows_seeds_when_available(monkeypatch) -> None:
     """With a non-empty graph, /graph (no slug) should surface popular
     seed slugs when the graph is already cached."""
     import networkx as nx
+
     G = nx.Graph()
     # High-degree hub: 'skill:python-patterns' with 5 neighbors.
-    for peer in ("skill:fastapi-pro", "skill:async-patterns",
-                 "agent:code-reviewer", "skill:pydantic", "skill:sqlalchemy"):
+    for peer in (
+        "skill:fastapi-pro",
+        "skill:async-patterns",
+        "agent:code-reviewer",
+        "skill:pydantic",
+        "skill:sqlalchemy",
+    ):
         G.add_edge("skill:python-patterns", peer, weight=2)
     G.nodes["skill:python-patterns"]["label"] = "python-patterns"
-    monkeypatch.setattr(mt, "graph_stats", lambda: {
-        "nodes": G.number_of_nodes(),
-        "edges": G.number_of_edges(),
-        "available": True,
-    })
+    monkeypatch.setattr(
+        mt,
+        "graph_stats",
+        lambda: {
+            "nodes": G.number_of_nodes(),
+            "edges": G.number_of_edges(),
+            "available": True,
+        },
+    )
     monkeypatch.setattr(graph_service, "cached_dashboard_graph", lambda: G)
 
     html_out = mt.render_graph(None)
@@ -5759,22 +6192,32 @@ def test_render_graph_landing_shows_seeds_when_available(monkeypatch) -> None:
 
 
 def test_render_graph_landing_auto_loads_top_seed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mt, "graph_stats", lambda: {
-        "nodes": 100000,
-        "edges": 2900834,
-        "available": True,
-    })
-    monkeypatch.setattr(mt, "top_degree_seeds", lambda **_kwargs: [{
-        "slug": "python-patterns",
-        "type": "skill",
-        "degree": 10000,
-        "label": "python-patterns",
-    }])
+    monkeypatch.setattr(
+        mt,
+        "graph_stats",
+        lambda: {
+            "nodes": 100000,
+            "edges": 2900834,
+            "available": True,
+        },
+    )
+    monkeypatch.setattr(
+        mt,
+        "top_degree_seeds",
+        lambda **_kwargs: [
+            {
+                "slug": "python-patterns",
+                "type": "skill",
+                "degree": 10000,
+                "label": "python-patterns",
+            }
+        ],
+    )
 
     html_out = mt.render_graph(None)
 
-    assert "const initial = \"python-patterns\";" in html_out
-    assert "const initialType = \"skill\";" in html_out
+    assert 'const initial = "python-patterns";' in html_out
+    assert 'const initialType = "skill";' in html_out
     assert "value='python-patterns'" in html_out
     assert "deg 10,000" in html_out
 
@@ -5782,17 +6225,21 @@ def test_render_graph_landing_auto_loads_top_seed(monkeypatch: pytest.MonkeyPatc
 def test_render_graph_landing_uses_default_focus_when_seed_index_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mt, "graph_stats", lambda: {
-        "nodes": 102928,
-        "edges": 2900834,
-        "available": True,
-    })
+    monkeypatch.setattr(
+        mt,
+        "graph_stats",
+        lambda: {
+            "nodes": 102928,
+            "edges": 2900834,
+            "available": True,
+        },
+    )
     monkeypatch.setattr(mt, "top_degree_seeds", lambda **_kwargs: [])
 
     html_out = mt.render_graph(None)
 
-    assert "const initial = \"github\";" in html_out
-    assert "const initialType = \"\";" in html_out
+    assert 'const initial = "github";' in html_out
+    assert 'const initialType = "";' in html_out
     assert "value='github'" in html_out
     assert "Popular seed slugs" not in html_out
 
@@ -5807,11 +6254,15 @@ def test_render_graph_landing_does_not_cold_load_graph_for_seed_chips(
         calls += 1
         raise AssertionError("graph cold-loaded")
 
-    monkeypatch.setattr(mt, "graph_stats", lambda: {
-        "nodes": 102697,
-        "edges": 2900910,
-        "available": True,
-    })
+    monkeypatch.setattr(
+        mt,
+        "graph_stats",
+        lambda: {
+            "nodes": 102697,
+            "edges": 2900910,
+            "available": True,
+        },
+    )
     monkeypatch.setattr(mt, "load_dashboard_graph", fake_load_graph)
     monkeypatch.setattr(mt, "top_degree_seeds_from_index", lambda _limit=18: [])
     monkeypatch.setattr(graph_service, "cached_dashboard_graph", lambda: None)

@@ -35,9 +35,7 @@ def _iso(dt: datetime) -> str:
 
 def _write_events(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8"
-    )
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
 
 
 def test_touched_slugs_since_cutoff(tmp_path: Path) -> None:
@@ -45,14 +43,14 @@ def test_touched_slugs_since_cutoff(tmp_path: Path) -> None:
     _write_events(
         events,
         [
-            {"event": "load", "skill": "old-one",
-             "timestamp": _iso(NOW - timedelta(days=3))},
-            {"event": "load", "skill": "fresh-one",
-             "timestamp": _iso(NOW - timedelta(hours=1))},
-            {"event": "load", "skill": "fresh-two",
-             "timestamp": _iso(NOW - timedelta(minutes=10))},
-            {"event": "load", "skill": "fresh-one",  # dup
-             "timestamp": _iso(NOW - timedelta(minutes=5))},
+            {"event": "load", "skill": "old-one", "timestamp": _iso(NOW - timedelta(days=3))},
+            {"event": "load", "skill": "fresh-one", "timestamp": _iso(NOW - timedelta(hours=1))},
+            {"event": "load", "skill": "fresh-two", "timestamp": _iso(NOW - timedelta(minutes=10))},
+            {
+                "event": "load",
+                "skill": "fresh-one",  # dup
+                "timestamp": _iso(NOW - timedelta(minutes=5)),
+            },
         ],
     )
     cutoff = NOW - timedelta(hours=2)
@@ -65,11 +63,9 @@ def test_touched_slugs_skips_malformed_lines(tmp_path: Path) -> None:
     events.parent.mkdir(parents=True, exist_ok=True)
     events.write_text(
         "not json\n"
-        + json.dumps({"event": "load", "skill": "good",
-                      "timestamp": _iso(NOW)})
+        + json.dumps({"event": "load", "skill": "good", "timestamp": _iso(NOW)})
         + "\n"
-        + json.dumps({"event": "load", "skill": 42,
-                      "timestamp": _iso(NOW)})  # non-string skill
+        + json.dumps({"event": "load", "skill": 42, "timestamp": _iso(NOW)})  # non-string skill
         + "\n",
         encoding="utf-8",
     )
@@ -88,8 +84,7 @@ def test_touched_slugs_caps_at_max(tmp_path: Path, monkeypatch) -> None:
     _write_events(
         events,
         [
-            {"event": "load", "skill": f"s{i}",
-             "timestamp": _iso(NOW - timedelta(minutes=i))}
+            {"event": "load", "skill": f"s{i}", "timestamp": _iso(NOW - timedelta(minutes=i))}
             for i in range(10)
         ],
     )
@@ -108,11 +103,8 @@ def test_read_cutoff_uses_state_file(tmp_path: Path, monkeypatch) -> None:
     assert abs((cutoff - (NOW - timedelta(hours=2))).total_seconds()) < 5
 
 
-def test_read_cutoff_falls_back_when_state_missing(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setattr(qh, "_STATE_PATH", tmp_path / "absent.json",
-                        raising=True)
+def test_read_cutoff_falls_back_when_state_missing(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(qh, "_STATE_PATH", tmp_path / "absent.json", raising=True)
     cutoff = qh._read_cutoff()
     # Default lookback is 24h; cutoff should be in the past but not ancient.
     delta = datetime.now(timezone.utc) - cutoff
@@ -145,11 +137,9 @@ def test_hook_mains_exit_zero_and_dispatch_expected_work(
     # Point everything at tmp so no real state is touched.
     monkeypatch.setenv("HOME", str(tmp_path))
     events = tmp_path / "skill-events.jsonl"
-    _write_events(events, [{"event": "load", "skill": "demo",
-                            "timestamp": _iso(NOW)}])
+    _write_events(events, [{"event": "load", "skill": "demo", "timestamp": _iso(NOW)}])
     monkeypatch.setattr(qh, "_EVENTS_PATH", events, raising=True)
-    monkeypatch.setattr(qh, "_STATE_PATH", tmp_path / "state.json",
-                        raising=True)
+    monkeypatch.setattr(qh, "_STATE_PATH", tmp_path / "state.json", raising=True)
 
     def _boom(*a, **kw):
         raise OSError("pretend the subprocess exploded")
@@ -317,9 +307,7 @@ def test_hook_mains_exit_zero_and_dispatch_expected_work(
         }
     ]
     assert "CTX_SESSION_ID" not in lifecycle_hooks.os.environ
-    packaged_last_run = json.loads(
-        packaged_state.read_text(encoding="utf-8")
-    )["last_run_at"]
+    packaged_last_run = json.loads(packaged_state.read_text(encoding="utf-8"))["last_run_at"]
     assert datetime.fromisoformat(packaged_last_run) > datetime.fromisoformat(
         packaged_seeded_last_run
     )
