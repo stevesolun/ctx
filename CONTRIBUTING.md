@@ -28,13 +28,17 @@ pytest --cov=src -q                # with coverage report
 
 ## Documentation changes
 
-Public MkDocs nav pages are release-tracked in
+Public docs surfaces are release-tracked in
 `docs/qa/feature-user-story-status.csv`. If you add, remove, or move a `.md`
-entry under `mkdocs.yml` `nav`, update the canonical feature tracker with the
-exact `docs/...md` `entrypoint_or_route` and run:
+entry under `mkdocs.yml` `nav`, or change linked public assets under
+`docs/assets/javascripts/`, `docs/services/`, or `docs/toolbox/templates/`,
+update the canonical feature tracker with the exact path in
+`entrypoint_or_route` and run:
 
 ```bash
-python -m pytest src/tests/test_feature_user_story_tracker.py -q
+python -m pytest -q --no-cov \
+  src/tests/test_feature_user_story_tracker.py \
+  src/tests/test_toolbox_cli.py
 ```
 
 ## Code style

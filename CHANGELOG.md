@@ -13,6 +13,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added telemetry retention, governance, collector, dashboard, alert, and
   release-gate runbook assets so enterprise installs can operate telemetry
   without leaking payloads by default.
+- Added public docs tracker checks to PR docs CI and local preflight so MkDocs
+  nav pages, public docs assets, and starter toolbox templates stay covered
+  before strict MkDocs builds.
 
 ### Fixed
 

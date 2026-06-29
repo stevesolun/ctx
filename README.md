@@ -48,8 +48,10 @@ The dashboard-specific tracker
 is a supporting detail ledger; canonical status and release readiness stay in the
 feature tracker.
 Rows for public MkDocs pages use the exact `docs/...md` path from `mkdocs.yml`
-as `entrypoint_or_route`, so adding a nav page also means adding or updating
-the matching feature-tracker row.
+as `entrypoint_or_route`. Public linked docs assets under
+`docs/assets/javascripts/`, `docs/services/`, and `docs/toolbox/templates/`
+are tracker-covered too, so adding, moving, or removing one means adding or
+updating the matching feature-tracker row.
 Examples from that tracker:
 
 | Tracker row | User story | Expected ctx behavior |
@@ -133,8 +135,9 @@ python scripts/ci_preflight.py --profile pr
 It uses the same changed-file classifier as GitHub Actions, then runs the
 matching local checks: stats, ruff, mypy, pip check, unit coverage, canaries,
 package build, twine, docs, graph validation, browser, and similarity gates as
-needed. Use `--profile full` before release work to force the source/package
-gates even for docs-only or graph-only changes.
+needed. For docs changes, that docs gate runs the public docs tracker checks
+before the strict MkDocs build. Use `--profile full` before release work to
+force the source/package gates even for docs-only or graph-only changes.
 
 The **`ctx-monitor`** dashboard shows currently loaded skills, agents, MCP servers, installed harness records, and generic-harness validation/escalation state. It provides load/unload buttons where ctx owns the live action, a graph view (`/graph?slug=...`), the LLM-wiki entity browser (`/wiki/<slug>`), a filterable skills grid, a session timeline, audit/runtime log views, and a live SSE event stream. Installed harness records appear in `/loaded`; harness pages appear in `/wiki` and `/graph`. Harness install/update/uninstall actions stay in `ctx-harness-install`.
 
