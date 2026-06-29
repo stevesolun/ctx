@@ -292,6 +292,8 @@ jobs:
         run: |
           python -m pytest -q --no-cov \
             src/tests/test_ci_classifier.py \
+            src/tests/test_feature_user_story_tracker.py \
+            src/tests/test_dashboard_user_story_tracker.py \
             src/tests/test_package_scaffold.py \
             src/tests/test_clean_host_contract.py \
             src/tests/test_alive_loop_e2e.py

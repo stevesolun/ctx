@@ -46,6 +46,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-docs.txt
+          python -m pip install -e ".[dev]"
+
+      - name: Validate public docs tracker
+        run: |
+          python -m pytest -q --no-cov \
+            src/tests/test_feature_user_story_tracker.py \
+            src/tests/test_dashboard_user_story_tracker.py
 
       - name: Build site (strict)
         run: |

@@ -129,9 +129,21 @@ def test_feature_user_story_tracker_covers_all_console_scripts() -> None:
     pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
     scripts = sorted(pyproject["project"]["scripts"])
     tracker = _tracker_text()
+    required_runtime_markers = (
+        "--planner",
+        "--evaluator",
+        "--contract",
+        "--restore-session-mcp",
+        "credential_env",
+        "ctx-harness-install --update",
+        "ctx-harness-install --uninstall",
+        "ctx.cli.run",
+        "ctx.runtime_lifecycle.record",
+    )
 
     assert scripts
     assert [script for script in scripts if script not in tracker] == []
+    assert [marker for marker in required_runtime_markers if marker not in tracker] == []
 
 
 def test_feature_user_story_tracker_covers_monitor_route_inventory() -> None:
@@ -157,18 +169,29 @@ def test_feature_user_story_tracker_covers_distribution_workflows() -> None:
         if path.is_file() and path.suffix in {".yml", ".yaml"}
     )
     tracker = _tracker_text()
+    docs_workflow = (workflow_dir / "docs.yml").read_text(encoding="utf-8")
+    publish_workflow = (workflow_dir / "publish.yml").read_text(encoding="utf-8")
+    hf_workflow = (workflow_dir / "huggingface-sync.yml").read_text(encoding="utf-8")
 
     assert workflows
     assert [workflow for workflow in workflows if workflow not in tracker] == []
+    for workflow in (docs_workflow, publish_workflow):
+        assert "src/tests/test_feature_user_story_tracker.py" in workflow
+        assert "src/tests/test_dashboard_user_story_tracker.py" in workflow
+    assert "github.repository == 'stevesolun/ctx'" in hf_workflow
+    assert "Missing HF_TOKEN" in hf_workflow
 
 
 def test_feature_user_story_tracker_covers_maintainer_scripts() -> None:
     scripts = sorted((repo_root / "scripts").glob("*.py"))
     tracker = _tracker_text()
     script_paths = [script.relative_to(repo_root).as_posix() for script in scripts]
+    hook_paths = _relative_file_paths(repo_root / "hooks", "*.py")
 
     assert scripts
+    assert hook_paths
     assert [path for path in script_paths if path not in tracker] == []
+    assert [path for path in hook_paths if path not in tracker] == []
 
 
 def test_feature_user_story_tracker_covers_public_docs_assets() -> None:

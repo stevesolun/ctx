@@ -29,10 +29,16 @@ jobs:
           fetch-depth: 0
           lfs: false
 
-      - name: Skip when HF_TOKEN is not configured
-        if: ${{ env.HF_TOKEN == '' }}
+      - name: Require HF_TOKEN on canonical repository
+        if: ${{ env.HF_TOKEN == '' && github.repository == 'stevesolun/ctx' }}
         run: |
-          echo "::notice title=Hugging Face sync skipped::Set the HF_TOKEN repository secret to publish Stevesolun/ctx automatically."
+          echo "::error title=Missing HF_TOKEN::Canonical Hugging Face sync must fail closed when the HF_TOKEN repository secret is absent."
+          exit 1
+
+      - name: Skip when HF_TOKEN is not configured on forks
+        if: ${{ env.HF_TOKEN == '' && github.repository != 'stevesolun/ctx' }}
+        run: |
+          echo "::notice title=Hugging Face sync skipped::Set the HF_TOKEN repository secret to publish Stevesolun/ctx automatically from a trusted repository."
 
       - name: Classify sync scope
         id: scope
