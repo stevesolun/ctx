@@ -94,6 +94,11 @@ def test_empty_permissions_stay_empty(monkeypatch) -> None:
     }
     assert payload["loopflow"]["use_tools"] is None
     assert payload["loopflow"]["use_skills"] is None
+    assert payload["mcp_server"] == {
+        "name": "ctx",
+        "command": None,
+        "tools": [],
+    }
 
 
 def test_loopflow_skill_hint_requires_skills_permission(monkeypatch) -> None:
@@ -138,6 +143,11 @@ def test_loopflow_tool_hint_requires_mcps_permission(monkeypatch) -> None:
     assert payload["capabilities"]["mcps"] == []
     assert payload["loopflow"]["use_tools"] is None
     assert payload["loopflow"]["use_skills"].startswith("use skills: ctx-recommend")
+    assert payload["mcp_server"] == {
+        "name": "ctx",
+        "command": None,
+        "tools": [],
+    }
 
 
 def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
@@ -189,7 +199,10 @@ def test_harness_install_command_is_shell_quoted(monkeypatch) -> None:
         own_llm=True,
         model_provider="open`whoami`",
         model="llama; rm -rf .",
-        harness_requirements={"runtime": "local $(touch bad)"},
+        harness_requirements={
+            "runtime": "local $(touch bad)",
+            "api_key_env": "OPENAI_API_KEY",
+        },
     )
 
     command = payload["agent_loop"]["harness_install"]
@@ -208,6 +221,58 @@ def test_harness_install_command_is_shell_quoted(monkeypatch) -> None:
         "llama; rm -rf .",
         "--harness-runtime",
         "local $(touch bad)",
+        "--api-key-env",
+        "OPENAI_API_KEY",
+    ]
+
+
+def test_main_api_key_env_reaches_harness_install(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        loopflow,
+        "recommend_bundle",
+        lambda query, *, top_k: (_ for _ in ()).throw(
+            AssertionError("recommend_bundle should not run for harness-only grants")
+        ),
+    )
+    monkeypatch.setattr(
+        loopflow,
+        "recommend_harnesses",
+        lambda *args, **kwargs: [{"name": "remote-agent-loop", "type": "harness"}],
+    )
+
+    assert (
+        loopflow.main(
+            [
+                "--goal",
+                "run remote loop",
+                "--permissions",
+                "harnesses",
+                "--own-llm",
+                "--model-provider",
+                "openai",
+                "--model",
+                "gpt-4o",
+                "--api-key-env",
+                "OPENAI_API_KEY",
+                "--compact",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert shlex.split(payload["agent_loop"]["harness_install"]) == [
+        "ctx-harness-install",
+        "remote-agent-loop",
+        "--dry-run",
+        "--goal",
+        "run remote loop",
+        "--model-provider",
+        "openai",
+        "--model",
+        "gpt-4o",
+        "--api-key-env",
+        "OPENAI_API_KEY",
     ]
 
 

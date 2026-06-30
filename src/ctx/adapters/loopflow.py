@@ -35,6 +35,7 @@ _HARNESS_REQUIREMENT_FLAGS = {
     "verification": "--harness-verify",
     "privacy": "--harness-privacy",
     "attach_mode": "--harness-attach-mode",
+    "api_key_env": "--api-key-env",
 }
 
 
@@ -249,6 +250,17 @@ def recommend_for_loop(
         if skill_names:
             use_skills += ", " + ", ".join(str(name) for name in skill_names)
     use_tools = 'use tools from the "ctx" server' if "mcps" in granted else None
+    mcp_server_command = "ctx-mcp-server" if "mcps" in granted else None
+    mcp_server_tools = (
+        [
+            "ctx__recommend_bundle",
+            "ctx__graph_query",
+            "ctx__wiki_search",
+            "ctx__wiki_get",
+        ]
+        if "mcps" in granted
+        else []
+    )
 
     return {
         "version": "ctx.loop_adapter.v1",
@@ -264,13 +276,8 @@ def recommend_for_loop(
         },
         "mcp_server": {
             "name": "ctx",
-            "command": "ctx-mcp-server",
-            "tools": [
-                "ctx__recommend_bundle",
-                "ctx__graph_query",
-                "ctx__wiki_search",
-                "ctx__wiki_get",
-            ],
+            "command": mcp_server_command,
+            "tools": mcp_server_tools,
         },
         "capabilities": capability_bundle,
         "loopflow": {
@@ -324,6 +331,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--harness-verify", default="")
     parser.add_argument("--harness-privacy", default="")
     parser.add_argument("--harness-attach-mode", default="")
+    parser.add_argument("--api-key-env", default="")
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--compact", action="store_true", help="Print compact JSON.")
     return parser
@@ -353,6 +361,7 @@ def main(argv: list[str] | None = None) -> int:
         "verification": args.harness_verify,
         "privacy": args.harness_privacy,
         "attach_mode": args.harness_attach_mode,
+        "api_key_env": args.api_key_env,
     }
     payload = recommend_for_loop(
         goal=goal,
