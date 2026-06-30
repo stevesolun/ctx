@@ -343,10 +343,10 @@ def test_recommend_for_loop_reuses_cached_toolbox(monkeypatch) -> None:
 
 
 def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
-    calls: list[str] = []
+    calls: list[dict[str, Any]] = []
 
     def fake_recommend_harnesses(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        calls.append("called")
+        calls.append({"args": args, "kwargs": kwargs})
         return [{"name": "local-agent-loop", "type": "harness", "fit_score": 0.9}]
 
     monkeypatch.setattr(
@@ -376,7 +376,16 @@ def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
         model="llama3.1",
         harness_requirements={"runtime": "local workstation"},
     )
-    assert calls == ["called"]
+    assert calls == [
+        {
+            "args": ("run with a private model local workstation ollama llama3.1 harness",),
+            "kwargs": {
+                "top_k": 5,
+                "model_provider": "ollama",
+                "model": "llama3.1",
+            },
+        }
+    ]
     assert allowed["capabilities"]["harnesses"][0]["name"] == "local-agent-loop"
     assert shlex.split(allowed["agent_loop"]["harness_install"]) == [
         "ctx-harness-install",

@@ -13,7 +13,7 @@ from typing import Any
 
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.core.resolve.recommendations import query_to_tags, recommend_by_tags
-from ctx_init import recommend_harnesses
+from ctx_init import _harness_requirements_text, recommend_harnesses
 
 
 _PERMISSION_ALIASES = {
@@ -302,7 +302,15 @@ def recommend_for_loop(
     if "harnesses" in granted and not should_recommend_harness:
         warnings.append("harnesses permission granted but no user-owned LLM/model was declared")
     if should_recommend_harness:
-        harness_goal = " ".join([goal, *requirements.values()]).strip() or query
+        harness_query_parts = [
+            goal or query,
+            _harness_requirements_text(requirements),
+            model_provider or "",
+            model or "",
+        ]
+        if any(harness_query_parts):
+            harness_query_parts.append("harness")
+        harness_goal = " ".join(part for part in harness_query_parts if part)
         capability_bundle["harnesses"] = [
             _compact_row(row)
             for row in recommend_harnesses(
