@@ -294,7 +294,17 @@ def recommend_for_loop(
     requirements, unknown_requirement_keys = _normalize_harness_requirements(
         harness_requirements or {}
     )
-    query = _build_query(
+    public_query = _build_query(
+        goal=goal,
+        loop_name=loop_name,
+        look_at=context_paths,
+        done_when=done_when_checks,
+        last_failure="",
+        loop_kind=loop_kind,
+        model=model,
+        model_provider=model_provider,
+    )
+    ranking_query = _build_query(
         goal=goal,
         loop_name=loop_name,
         look_at=context_paths,
@@ -313,7 +323,7 @@ def recommend_for_loop(
     }
     if granted.intersection({"skills", "agents", "mcps"}):
         rows = _recommend_capability_rows(
-            query,
+            ranking_query,
             permissions=granted,
             top_k=safe_top_k,
         )
@@ -331,7 +341,7 @@ def recommend_for_loop(
         warnings.append("harnesses permission granted but no user-owned LLM/model was declared")
     if should_recommend_harness:
         harness_query_parts = [
-            goal or query,
+            goal or ranking_query,
             _done_when_text(done_when_checks),
             _harness_requirements_text(requirements),
             model_provider or "",
@@ -375,7 +385,7 @@ def recommend_for_loop(
             "look_at": context_paths,
             "done_when": done_when_checks,
             "last_failure_present": bool(last_failure),
-            "query": query,
+            "query": public_query,
         },
         "mcp_server": {
             "name": "ctx",

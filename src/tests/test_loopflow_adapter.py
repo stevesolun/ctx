@@ -675,10 +675,18 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
     )
 
     payload = json.loads(capsys.readouterr().out)
+    serialized_payload = json.dumps(payload, sort_keys=True)
     assert payload["context"]["goal"] == "no high-severity upload findings"
     assert payload["context"]["done_when"] == ['"pytest tests/upload_test.py -q" passes']
     assert '"pytest tests/upload_test.py -q" passes' in payload["context"]["query"]
-    assert capability_queries == [payload["context"]["query"]]
+    assert capability_queries == [
+        "no high-severity upload findings review upload loopflow "
+        "context: upload.py, tests/upload_test.py "
+        'done when: "pytest tests/upload_test.py -q" passes '
+        "last failure: semgrep found upload risk"
+    ]
+    assert "semgrep found upload risk" not in payload["context"]["query"]
+    assert "semgrep found upload risk" not in serialized_payload
     assert payload["context"]["last_failure_present"] is True
     assert "python -m ctx.adapters.loopflow" in payload["agent_loop"]["before_plan"]
     assert "python -m ctx.adapters.loopflow" in payload["loopflow"]["before_plan"]

@@ -272,7 +272,9 @@ python -m ctx.adapters.loopflow \
 ```
 
 Add `--last-failure-file .loopflow/last-failure.txt` only after the loop has
-written that file; omit it on the first run.
+written that file; omit it on the first run. The adapter uses that failure text
+for recommendation ranking and returns only `context.last_failure_present`, not
+the raw failure.
 
 The returned payload includes LoopFlow-ready hints for the granted groups:
 
