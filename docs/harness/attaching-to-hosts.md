@@ -307,6 +307,7 @@ plan_context = recommend_for_loop(
     goal="fix checkout e2e flake",
     loop_kind="agent-loop",
     look_at=["tests/e2e", "playwright config"],
+    done_when=['"pytest tests/e2e -q" passes'],
     last_failure=last_failure_text,
     permissions={"skills", "agents", "mcps", "harnesses"},
     own_llm=True,

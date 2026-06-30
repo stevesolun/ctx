@@ -102,11 +102,19 @@ def _read_text_file(path: Path | None) -> str:
     return path.read_text(encoding="utf-8", errors="replace").strip()
 
 
+def _done_when_text(done_when: list[str]) -> str:
+    checks = [value.strip() for value in done_when if value.strip()]
+    if not checks:
+        return ""
+    return "done when: " + ", ".join(checks)
+
+
 def _build_query(
     *,
     goal: str,
     loop_name: str,
     look_at: list[str],
+    done_when: list[str],
     last_failure: str,
     loop_kind: str,
     model: str | None,
@@ -115,6 +123,8 @@ def _build_query(
     parts = [goal, loop_name, loop_kind]
     if look_at:
         parts.append("context: " + ", ".join(look_at))
+    if done_when_text := _done_when_text(done_when):
+        parts.append(done_when_text)
     if last_failure:
         parts.append("last failure: " + last_failure[:2000])
     if model or model_provider:
@@ -252,6 +262,7 @@ def recommend_for_loop(
     loop_name: str = "",
     loop_kind: str = "loopflow",
     look_at: list[str] | None = None,
+    done_when: list[str] | None = None,
     last_failure: str = "",
     permissions: set[str] | None = None,
     own_llm: bool = False,
@@ -264,6 +275,7 @@ def recommend_for_loop(
     safe_top_k = max(1, min(int(top_k), 20))
     granted = permissions or set()
     context_paths = look_at or []
+    done_when_checks = [value.strip() for value in (done_when or []) if value.strip()]
     requirements, unknown_requirement_keys = _normalize_harness_requirements(
         harness_requirements or {}
     )
@@ -271,6 +283,7 @@ def recommend_for_loop(
         goal=goal,
         loop_name=loop_name,
         look_at=context_paths,
+        done_when=done_when_checks,
         last_failure=last_failure,
         loop_kind=loop_kind,
         model=model,
@@ -304,6 +317,7 @@ def recommend_for_loop(
     if should_recommend_harness:
         harness_query_parts = [
             goal or query,
+            _done_when_text(done_when_checks),
             _harness_requirements_text(requirements),
             model_provider or "",
             model or "",
@@ -340,6 +354,7 @@ def recommend_for_loop(
             "goal": goal,
             "loop_name": loop_name,
             "look_at": context_paths,
+            "done_when": done_when_checks,
             "last_failure_present": bool(last_failure),
             "query": query,
         },
@@ -378,6 +393,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--loop-name", default="", help="Loop name when no .loop file is used.")
     parser.add_argument("--goal", default="", help="Loop goal or agent-loop task.")
     parser.add_argument("--look-at", action="append", default=[], help="Context path or phrase.")
+    parser.add_argument("--done-when", action="append", default=[], help="Verification/check hint.")
     parser.add_argument("--last-failure", default="", help="Previous failure text.")
     parser.add_argument("--last-failure-file", type=Path, help="Read previous failure from a file.")
     parser.add_argument(
@@ -422,6 +438,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--goal or a loop file with goal: is required")
     loop_name = args.loop_name or str(loop_fields.get("name") or "")
     look_at = [*loop_fields.get("look_at", []), *_split_csv(args.look_at)]
+    done_when = [
+        *[str(value) for value in loop_fields.get("done_when", [])],
+        *[str(value) for value in args.done_when],
+    ]
     last_failure = args.last_failure or _read_text_file(args.last_failure_file)
     requirements = {
         "runtime": args.harness_runtime,
@@ -437,6 +457,7 @@ def main(argv: list[str] | None = None) -> int:
         loop_name=loop_name,
         loop_kind=args.loop_kind,
         look_at=look_at,
+        done_when=done_when,
         last_failure=last_failure,
         permissions=permissions,
         own_llm=args.own_llm,

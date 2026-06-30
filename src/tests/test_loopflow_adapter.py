@@ -289,6 +289,64 @@ def test_agents_only_uses_type_filtered_recommendations(monkeypatch) -> None:
     assert [row["name"] for row in payload["capabilities"]["agents"]] == ["browser-agent"]
 
 
+def test_done_when_signals_feed_recommendation_queries(monkeypatch) -> None:
+    capability_queries: list[str] = []
+    harness_queries: list[str] = []
+
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del permissions, top_k
+        capability_queries.append(query)
+        return []
+
+    def fake_recommend_harnesses(
+        goal: str,
+        *,
+        top_k: int,
+        model_provider: str | None = None,
+        model: str | None = None,
+    ) -> list[dict[str, Any]]:
+        del top_k, model_provider, model
+        harness_queries.append(goal)
+        return [{"name": "local-agent-loop", "type": "harness"}]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+    monkeypatch.setattr(loopflow, "recommend_harnesses", fake_recommend_harnesses)
+
+    payload = loopflow.recommend_for_loop(
+        goal="fix checkout e2e",
+        permissions={"skills", "harnesses"},
+        own_llm=True,
+        model_provider="ollama",
+        model="llama3.1",
+        done_when=[
+            '"pytest src/tests/test_loopflow_adapter.py -q" passes',
+            "pnpm lint passes",
+        ],
+        harness_requirements={"verification": "playwright smoke"},
+    )
+
+    assert payload["context"]["done_when"] == [
+        '"pytest src/tests/test_loopflow_adapter.py -q" passes',
+        "pnpm lint passes",
+    ]
+    assert (
+        'done when: "pytest src/tests/test_loopflow_adapter.py -q" passes, pnpm lint passes'
+        in payload["context"]["query"]
+    )
+    assert capability_queries == [payload["context"]["query"]]
+    assert (
+        'done when: "pytest src/tests/test_loopflow_adapter.py -q" passes, pnpm lint passes'
+        in harness_queries[0]
+    )
+    assert "playwright smoke" in harness_queries[0]
+    assert "ollama llama3.1 harness" in harness_queries[0]
+
+
 def test_recommend_for_loop_reuses_cached_toolbox(monkeypatch) -> None:
     constructions = 0
     graph_loads = 0
@@ -532,6 +590,7 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
                 'loop "review upload":',
                 "  goal: no high-severity upload findings",
                 "  look at: upload.py, tests/upload_test.py",
+                '  done when "pytest tests/upload_test.py -q" passes',
             ]
         )
         + "\n",
@@ -539,11 +598,19 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
     )
     failure_file.write_text("semgrep found upload risk", encoding="utf-8")
 
-    monkeypatch.setattr(
-        loopflow,
-        "_recommend_capability_rows",
-        lambda query, *, permissions, top_k: [{"name": "security-review", "type": "skill"}],
-    )
+    capability_queries: list[str] = []
+
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del permissions, top_k
+        capability_queries.append(query)
+        return [{"name": "security-review", "type": "skill"}]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
     monkeypatch.setattr(loopflow, "recommend_harnesses", lambda *args, **kwargs: [])
 
     assert (
@@ -563,6 +630,9 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["context"]["goal"] == "no high-severity upload findings"
+    assert payload["context"]["done_when"] == ['"pytest tests/upload_test.py -q" passes']
+    assert '"pytest tests/upload_test.py -q" passes' in payload["context"]["query"]
+    assert capability_queries == [payload["context"]["query"]]
     assert payload["context"]["last_failure_present"] is True
     assert "python -m ctx.adapters.loopflow" in payload["agent_loop"]["before_plan"]
     assert "python -m ctx.adapters.loopflow" in payload["loopflow"]["before_plan"]

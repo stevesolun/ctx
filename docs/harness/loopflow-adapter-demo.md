@@ -9,8 +9,8 @@ harnesses are worth loading before the next plan.
 
 LoopFlow already owns the loop: `goal:`, `look at:`, plan, act, observe,
 reflect, and `done when`. ctx should not replace that. ctx should run before
-planning, read the same goal and failure context, and return a read-only JSON
-contract:
+planning, read the same goal, verification checks, and failure context, and
+return a read-only JSON contract:
 
 - what the loop is allowed to load;
 - which skills, agents, MCP servers, and harnesses fit the current goal;
@@ -137,6 +137,7 @@ ctx_payload = recommend_for_loop(
     loop_name=loop.name,
     loop_kind="loopflow",
     look_at=loop.look_at,
+    done_when=loop.done_when,
     last_failure=loop.last_failure_text,
     permissions={"skills", "agents", "mcps", "harnesses"},
     own_llm=runner.uses_user_owned_model,
