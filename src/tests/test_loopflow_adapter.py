@@ -694,6 +694,52 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
     assert payload["loopflow"]["use_skills"] == "use skills: security-review"
 
 
+def test_last_failure_match_fields_stay_out_of_capability_payload(monkeypatch) -> None:
+    secret = "ctxsecretneedle"
+    capability_queries: list[str] = []
+
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del permissions, top_k
+        capability_queries.append(query)
+        return [
+            {
+                "name": "security-review",
+                "type": "skill",
+                "score": 91,
+                "matching_tags": [secret],
+                "shared_tags": [secret],
+                "tags": [secret],
+                "fit_reason": f"matched {secret}",
+                "reliability_reason": f"validated {secret}",
+            }
+        ]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+    monkeypatch.setattr(loopflow, "recommend_harnesses", lambda *args, **kwargs: [])
+
+    payload = loopflow.recommend_for_loop(
+        goal="review upload handling",
+        last_failure=f"stack trace mentions {secret}",
+        permissions={"skills"},
+    )
+
+    serialized_payload = json.dumps(payload, sort_keys=True)
+    assert capability_queries == [
+        f"review upload handling loopflow last failure: stack trace mentions {secret}"
+    ]
+    assert payload["context"]["last_failure_present"] is True
+    assert secret not in payload["context"]["query"]
+    assert secret not in serialized_payload
+    assert payload["capabilities"]["skills"] == [
+        {"name": "security-review", "type": "skill", "score": 91}
+    ]
+
+
 def test_main_loop_file_read_errors_are_argparse_errors(
     tmp_path: Path,
     capsys,
