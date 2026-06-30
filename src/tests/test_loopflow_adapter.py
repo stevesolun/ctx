@@ -11,6 +11,11 @@ from ctx.adapters import loopflow
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 
 
+class _FakeGraph:
+    def number_of_nodes(self) -> int:
+        return 10
+
+
 def test_parse_loop_file_reads_loopflow_context(tmp_path: Path) -> None:
     loop_file = tmp_path / "rate-limit.loop"
     loop_file.write_text(
@@ -37,16 +42,22 @@ def test_parse_loop_file_reads_loopflow_context(tmp_path: Path) -> None:
 def test_recommend_for_loop_respects_capability_permissions(
     monkeypatch,
 ) -> None:
-    def fake_recommend_bundle(query: str, *, top_k: int) -> list[dict[str, Any]]:
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
         assert "checkout e2e" in query
-        assert top_k == 8
+        assert permissions == {"skills", "mcps"}
+        assert top_k == 2
         return [
             {"name": "playwright-debug", "type": "skill", "score": 91},
             {"name": "browser-agent", "type": "agent", "score": 85},
             {"name": "filesystem", "type": "mcp-server", "score": 80},
         ]
 
-    monkeypatch.setattr(loopflow, "recommend_bundle", fake_recommend_bundle)
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
 
     payload = loopflow.recommend_for_loop(
         goal="fix checkout e2e",
@@ -80,10 +91,15 @@ def test_recommend_for_loop_respects_capability_permissions(
 
 
 def test_empty_permissions_stay_empty(monkeypatch) -> None:
-    def fail_recommend_bundle(query: str, *, top_k: int) -> list[dict[str, Any]]:
-        raise AssertionError("recommend_bundle should not run without grants")
+    def fail_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        raise AssertionError("_recommend_capability_rows should not run without grants")
 
-    monkeypatch.setattr(loopflow, "recommend_bundle", fail_recommend_bundle)
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fail_recommend_rows)
 
     payload = loopflow.recommend_for_loop(
         goal="deny all recommendations",
@@ -112,13 +128,18 @@ def test_empty_permissions_stay_empty(monkeypatch) -> None:
 
 
 def test_loopflow_skill_hint_requires_skills_permission(monkeypatch) -> None:
-    def fake_recommend_bundle(query: str, *, top_k: int) -> list[dict[str, Any]]:
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
         return [
             {"name": "security-review", "type": "skill"},
             {"name": "filesystem", "type": "mcp-server"},
         ]
 
-    monkeypatch.setattr(loopflow, "recommend_bundle", fake_recommend_bundle)
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
 
     payload = loopflow.recommend_for_loop(
         goal="recommend only tools",
@@ -133,13 +154,18 @@ def test_loopflow_skill_hint_requires_skills_permission(monkeypatch) -> None:
 
 
 def test_loopflow_tool_hint_requires_mcps_permission(monkeypatch) -> None:
-    def fake_recommend_bundle(query: str, *, top_k: int) -> list[dict[str, Any]]:
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
         return [
             {"name": "security-review", "type": "skill"},
             {"name": "filesystem", "type": "mcp-server"},
         ]
 
-    monkeypatch.setattr(loopflow, "recommend_bundle", fake_recommend_bundle)
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
 
     payload = loopflow.recommend_for_loop(
         goal="recommend only skills",
@@ -160,6 +186,76 @@ def test_loopflow_tool_hint_requires_mcps_permission(monkeypatch) -> None:
     }
 
 
+def test_mcps_only_uses_type_filtered_recommendations(monkeypatch) -> None:
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(loopflow, "query_to_tags", lambda query: ["python"])
+    monkeypatch.setattr(loopflow, "_recommendation_graph", lambda: _FakeGraph())
+
+    def fake_recommend_by_tags(
+        graph: Any,
+        tags: list[str],
+        *,
+        top_n: int,
+        query: str | None,
+        entity_types: tuple[str, ...] | set[str] | None,
+        min_normalized_score: float,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        del graph, tags, query, min_normalized_score, kwargs
+        calls.append(tuple(entity_types or ()))
+        assert top_n == 1
+        if entity_types == ("mcp-server",):
+            return [{"name": "filesystem", "type": "mcp-server", "score": 80}]
+        return [{"name": f"skill-{index}", "type": "skill"} for index in range(5)]
+
+    monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
+
+    payload = loopflow.recommend_for_loop(
+        goal="python task",
+        permissions={"mcps"},
+        top_k=1,
+    )
+
+    assert calls == [("mcp-server",)]
+    assert payload["capabilities"]["skills"] == []
+    assert [row["name"] for row in payload["capabilities"]["mcps"]] == ["filesystem"]
+
+
+def test_agents_only_uses_type_filtered_recommendations(monkeypatch) -> None:
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(loopflow, "query_to_tags", lambda query: ["python"])
+    monkeypatch.setattr(loopflow, "_recommendation_graph", lambda: _FakeGraph())
+
+    def fake_recommend_by_tags(
+        graph: Any,
+        tags: list[str],
+        *,
+        top_n: int,
+        query: str | None,
+        entity_types: tuple[str, ...] | set[str] | None,
+        min_normalized_score: float,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        del graph, tags, query, min_normalized_score, kwargs
+        calls.append(tuple(entity_types or ()))
+        assert top_n == 2
+        if entity_types == ("agent",):
+            return [{"name": "browser-agent", "type": "agent", "score": 78}]
+        return [{"name": f"skill-{index}", "type": "skill"} for index in range(5)]
+
+    monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
+
+    payload = loopflow.recommend_for_loop(
+        goal="python task",
+        permissions={"agents"},
+        top_k=2,
+    )
+
+    assert calls == [("agent",)]
+    assert payload["capabilities"]["skills"] == []
+    assert [row["name"] for row in payload["capabilities"]["agents"]] == ["browser-agent"]
+
+
 def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
     calls: list[str] = []
 
@@ -167,7 +263,13 @@ def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
         calls.append("called")
         return [{"name": "local-agent-loop", "type": "harness", "fit_score": 0.9}]
 
-    monkeypatch.setattr(loopflow, "recommend_bundle", lambda query, *, top_k: [])
+    monkeypatch.setattr(
+        loopflow,
+        "_recommend_capability_rows",
+        lambda query, *, permissions, top_k: (_ for _ in ()).throw(
+            AssertionError("_recommend_capability_rows should not run for harness-only grants")
+        ),
+    )
     monkeypatch.setattr(loopflow, "recommend_harnesses", fake_recommend_harnesses)
 
     blocked = loopflow.recommend_for_loop(
@@ -200,7 +302,13 @@ def test_harness_install_command_is_shell_quoted(monkeypatch) -> None:
     def fake_recommend_harnesses(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
         return [{"name": "local $(touch bad)", "type": "harness", "fit_score": 0.9}]
 
-    monkeypatch.setattr(loopflow, "recommend_bundle", lambda query, *, top_k: [])
+    monkeypatch.setattr(
+        loopflow,
+        "_recommend_capability_rows",
+        lambda query, *, permissions, top_k: (_ for _ in ()).throw(
+            AssertionError("_recommend_capability_rows should not run for harness-only grants")
+        ),
+    )
     monkeypatch.setattr(loopflow, "recommend_harnesses", fake_recommend_harnesses)
 
     payload = loopflow.recommend_for_loop(
@@ -239,9 +347,9 @@ def test_harness_install_command_is_shell_quoted(monkeypatch) -> None:
 def test_main_api_key_env_reaches_harness_install(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         loopflow,
-        "recommend_bundle",
-        lambda query, *, top_k: (_ for _ in ()).throw(
-            AssertionError("recommend_bundle should not run for harness-only grants")
+        "_recommend_capability_rows",
+        lambda query, *, permissions, top_k: (_ for _ in ()).throw(
+            AssertionError("_recommend_capability_rows should not run for harness-only grants")
         ),
     )
     monkeypatch.setattr(
@@ -304,8 +412,10 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
 
     monkeypatch.setattr(
         loopflow,
-        "recommend_bundle",
-        lambda query, *, top_k: [{"name": "security-review", "type": "skill"}],
+        "_recommend_capability_rows",
+        lambda query, *, permissions, top_k: [
+            {"name": "security-review", "type": "skill"}
+        ],
     )
     monkeypatch.setattr(loopflow, "recommend_harnesses", lambda *args, **kwargs: [])
 
@@ -334,10 +444,15 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
 
 
 def test_main_empty_permissions_fail_closed(monkeypatch, capsys) -> None:
-    def fail_recommend_bundle(query: str, *, top_k: int) -> list[dict[str, Any]]:
-        raise AssertionError("recommend_bundle should not run without grants")
+    def fail_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        raise AssertionError("_recommend_capability_rows should not run without grants")
 
-    monkeypatch.setattr(loopflow, "recommend_bundle", fail_recommend_bundle)
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fail_recommend_rows)
     monkeypatch.setattr(loopflow, "recommend_harnesses", lambda *args, **kwargs: [])
 
     assert (

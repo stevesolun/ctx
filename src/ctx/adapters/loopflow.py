@@ -11,7 +11,7 @@ import sys
 from typing import Any
 
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
-from ctx.api import recommend_bundle
+from ctx.core.resolve.recommendations import query_to_tags, recommend_by_tags
 from ctx_init import recommend_harnesses
 
 
@@ -28,6 +28,7 @@ _PERMISSION_ALIASES = {
     "skills": "skills",
 }
 _ENTITY_TO_GROUP = {"agent": "agents", "mcp-server": "mcps", "skill": "skills"}
+_GROUP_TO_ENTITY = {"skills": "skill", "agents": "agent", "mcps": "mcp-server"}
 _CAPABILITY_KEYS = ("skills", "agents", "mcps", "harnesses")
 _HARNESS_REQUIREMENT_FLAGS = {
     "runtime": "--harness-runtime",
@@ -187,6 +188,46 @@ def _ctx_mcp_tool_names() -> list[str]:
     return [definition.name for definition in CtxCoreToolbox().tool_definitions()]
 
 
+def _recommendation_graph() -> Any:
+    return CtxCoreToolbox()._ensure_graph()
+
+
+def _recommend_capability_rows(
+    query: str,
+    *,
+    permissions: set[str],
+    top_k: int,
+) -> list[dict[str, Any]]:
+    entity_types = [
+        entity_type
+        for group, entity_type in _GROUP_TO_ENTITY.items()
+        if group in permissions
+    ]
+    if not entity_types:
+        return []
+    tags = query_to_tags(query)
+    if not tags:
+        return []
+    graph = _recommendation_graph()
+    if graph.number_of_nodes() == 0:
+        return []
+    from ctx_config import cfg  # noqa: PLC0415
+
+    rows: list[dict[str, Any]] = []
+    for entity_type in entity_types:
+        rows.extend(
+            recommend_by_tags(
+                graph,
+                tags,
+                top_n=top_k,
+                query=query,
+                entity_types=(entity_type,),
+                min_normalized_score=cfg.recommendation_min_normalized_score,
+            )
+        )
+    return rows
+
+
 def recommend_for_loop(
     *,
     goal: str,
@@ -223,7 +264,11 @@ def recommend_for_loop(
         "harnesses": [],
     }
     if granted.intersection({"skills", "agents", "mcps"}):
-        rows = recommend_bundle(query, top_k=max(safe_top_k * 4, safe_top_k))
+        rows = _recommend_capability_rows(
+            query,
+            permissions=granted,
+            top_k=safe_top_k,
+        )
         capability_bundle.update(
             _group_bundle(rows, permissions=granted, top_k=safe_top_k)
         )
