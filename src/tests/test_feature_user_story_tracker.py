@@ -18,16 +18,33 @@ from scripts.ci_preflight import select_checks  # noqa: E402
 
 TRACKER = repo_root / "docs" / "qa" / "feature-user-story-status.csv"
 DASHBOARD_TRACKER = repo_root / "docs" / "qa" / "dashboard-user-story-status.csv"
+CANONICAL_TRACKER = repo_root / "qa" / "feature_status.csv"
 MKDOCS = repo_root / "mkdocs.yml"
 README = repo_root / "README.md"
 PASS_STATUSES = {"Tested Pass", "Retested Pass"}
 VALIDATION_STATUSES = {"Needs Validation"}
 FIX_STATUSES = {"Needs Fix"}
 ACTIONABLE_STATUSES = PASS_STATUSES | VALIDATION_STATUSES | FIX_STATUSES
+CANONICAL_STATUSES = ACTIONABLE_STATUSES | {
+    "Needs Story",
+    "Blocked",
+    "Blocked/Human Decision",
+    "Deprecated",
+}
 
 
 def _tracker_rows() -> list[dict[str, str]]:
     with TRACKER.open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def _dashboard_tracker_rows() -> list[dict[str, str]]:
+    with DASHBOARD_TRACKER.open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def _canonical_tracker_rows() -> list[dict[str, str]]:
+    with CANONICAL_TRACKER.open(newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 
@@ -93,6 +110,66 @@ def _relative_file_paths(root: Path, pattern: str) -> list[str]:
         for path in sorted(root.glob(pattern))
         if path.is_file()
     ]
+
+
+def test_canonical_feature_status_tracker_merges_supporting_ledgers() -> None:
+    rows = _canonical_tracker_rows()
+    feature_rows = _tracker_rows()
+    dashboard_rows = _dashboard_tracker_rows()
+    expected_ids = {row["feature_id"] for row in feature_rows} | {
+        row["dashboard_id"] for row in dashboard_rows
+    }
+    required = (
+        "feature_id",
+        "source_tracker",
+        "surface",
+        "feature",
+        "entrypoint_or_route",
+        "source_evidence",
+        "risk_level",
+        "user_story",
+        "expected_behavior",
+        "test_command_or_steps",
+        "verification_mode",
+        "status",
+        "evidence",
+        "last_verified_at",
+        "owner_lane",
+        "review_status",
+        "review_notes",
+        "fix_strategy",
+        "validation_status",
+    )
+
+    assert rows
+    canonical_ids = {row["feature_id"] for row in rows}
+    assert expected_ids <= canonical_ids
+    assert len(rows) == len(canonical_ids)
+    for row in rows:
+        assert None not in row, f"{row.get('feature_id', '<unknown>')} has extra CSV columns"
+        for key in required:
+            assert row[key].strip(), f"{row.get('feature_id', '<unknown>')} missing {key}"
+        assert row["source_tracker"] in {
+            "docs/qa/feature-user-story-status.csv",
+            "docs/qa/dashboard-user-story-status.csv",
+            "expert-lane/api-mcp-harness",
+            "expert-lane/telemetry-release-governance",
+            "expert-lane/cli-package-inventory",
+        }
+        assert row["risk_level"] in {"Low", "Medium", "High", "Critical"}
+        assert row["status"] in CANONICAL_STATUSES
+        if row["status"] in FIX_STATUSES or row["bug_summary"]:
+            for key in ("bug_id", "bug_summary", "bug_repro", "fix_status"):
+                assert row[key].strip(), (
+                    f"{row.get('feature_id', '<unknown>')} has bug evidence without {key}"
+                )
+        if row["status"] == "Blocked/Human Decision":
+            assert row["owner_lane"] == "Human Owner"
+            assert "out of scope" in row["validation_status"].lower()
+
+    dist_row = next(row for row in rows if row["feature_id"] == "DIST-004")
+    assert dist_row["status"] == "Blocked/Human Decision"
+    assert "HF_TOKEN" in dist_row["bug_summary"]
 
 
 def test_feature_user_story_tracker_has_no_empty_core_fields() -> None:
@@ -233,6 +310,7 @@ def test_readme_shows_user_story_examples_from_tracker() -> None:
     tracker_ids = {row["feature_id"] for row in tracker_rows}
 
     assert "## Example user stories" in readme
+    assert "qa/feature_status.csv" in readme
     assert "docs/qa/feature-user-story-status.csv" in readme
     assert "docs/qa/dashboard-user-story-status.csv" in readme
     assert "supporting detail ledger" in readme

@@ -59,8 +59,8 @@ with persistent memory that gets smarter every session.
     strict MkDocs build. Public docs surfaces are release-tracked: when
     `mkdocs.yml` adds, removes, or moves a nav `.md` page, or public linked
     assets under `docs/assets/javascripts/`, `docs/services/`, or
-    `docs/toolbox/templates/` change, update
-    `docs/qa/feature-user-story-status.csv` with the exact path in
+    `docs/toolbox/templates/` change, update the canonical
+    `qa/feature_status.csv`; supporting docs rows still use the exact path in
     `entrypoint_or_route`.
 
 ## Why this exists
@@ -216,7 +216,7 @@ ones are flagged. New ones self-ingest.
     ---
 
     Current main is **v1.0.20** — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-    4,421 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+    3,974 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
     ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),

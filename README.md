@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-4421_inventory-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-3974_inventory-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![Graph](https://img.shields.io/badge/Graph-79%2C958_nodes_/_1%2C778%2C069_edges-red.svg)](https://stevesolun.github.io/ctx/knowledge-graph/)
 [![Skills](https://img.shields.io/badge/Skills-68%2C494-blue.svg)](https://stevesolun.github.io/ctx/catalog/?type=skill)
 [![Agents](https://img.shields.io/badge/Agents-467-purple.svg)](https://stevesolun.github.io/ctx/catalog/?type=agent)
@@ -43,11 +43,12 @@ Current shipped snapshot:
 ## Example user stories
 
 The canonical QA tracker is
-[`docs/qa/feature-user-story-status.csv`](docs/qa/feature-user-story-status.csv).
-The dashboard-specific tracker
+[`qa/feature_status.csv`](qa/feature_status.csv). The supporting feature ledger
+[`docs/qa/feature-user-story-status.csv`](docs/qa/feature-user-story-status.csv)
+and dashboard-specific ledger
 [`docs/qa/dashboard-user-story-status.csv`](docs/qa/dashboard-user-story-status.csv)
-is a supporting detail ledger; canonical status and release readiness stay in the
-feature tracker.
+are supporting detail ledgers that feed that root tracker; canonical status and
+release readiness stay in `qa/feature_status.csv`.
 Rows for public MkDocs pages use the exact `docs/...md` path from `mkdocs.yml`
 as `entrypoint_or_route`. Public linked docs assets under
 `docs/assets/javascripts/`, `docs/services/`, and `docs/toolbox/templates/`
