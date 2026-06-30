@@ -32,12 +32,14 @@ try:
         load_graph as _load_graph,
         resolve_by_seeds as _resolve_by_seeds,
     )
+
     _GRAPH_AVAILABLE = True
 except ImportError:
     _GRAPH_AVAILABLE = False
 
 try:
     from ctx_config import cfg as _cfg
+
     _WIKI_DEFAULT = str(_cfg.wiki_dir)
     _SKILLS_DEFAULT = str(_cfg.skills_dir)
     _MANIFEST_DEFAULT = str(_cfg.skill_manifest)
@@ -163,12 +165,23 @@ CONFLICTS = [
 # Priority base scores
 PRIORITY_BASE = {
     "frontend-design": 8,
-    "react": 7, "vue": 7, "angular": 7, "svelte": 7,
-    "nextjs": 8, "nuxt": 8,
-    "fastapi": 8, "django": 8, "flask": 7, "express": 8,
-    "docker": 6, "kubernetes": 6, "terraform": 7,
-    "langchain": 7, "llamaindex": 7,
-    "pytest": 5, "jest": 5,
+    "react": 7,
+    "vue": 7,
+    "angular": 7,
+    "svelte": 7,
+    "nextjs": 8,
+    "nuxt": 8,
+    "fastapi": 8,
+    "django": 8,
+    "flask": 7,
+    "express": 8,
+    "docker": 6,
+    "kubernetes": 6,
+    "terraform": 7,
+    "langchain": 7,
+    "llamaindex": 7,
+    "pytest": 5,
+    "jest": 5,
 }
 
 # Intent-boost tuning: priority bump per matching signal, capped by repeat count.
@@ -202,14 +215,14 @@ def resolve(
     needed: dict[str, dict] = {}  # skill_name -> {reason, confidence, priority}
 
     all_detections = (
-        [(d, "language") for d in profile.get("languages", [])] +
-        [(d, "framework") for d in profile.get("frameworks", [])] +
-        [(d, "infrastructure") for d in profile.get("infrastructure", [])] +
-        [(d, "data_store") for d in profile.get("data_stores", [])] +
-        [(d, "testing") for d in profile.get("testing", [])] +
-        [(d, "ai_tooling") for d in profile.get("ai_tooling", [])] +
-        [(d, "build") for d in profile.get("build_system", [])] +
-        [(d, "docs") for d in profile.get("docs", [])]
+        [(d, "language") for d in profile.get("languages", [])]
+        + [(d, "framework") for d in profile.get("frameworks", [])]
+        + [(d, "infrastructure") for d in profile.get("infrastructure", [])]
+        + [(d, "data_store") for d in profile.get("data_stores", [])]
+        + [(d, "testing") for d in profile.get("testing", [])]
+        + [(d, "ai_tooling") for d in profile.get("ai_tooling", [])]
+        + [(d, "build") for d in profile.get("build_system", [])]
+        + [(d, "docs") for d in profile.get("docs", [])]
     )
 
     for detection, category in all_detections:
@@ -247,10 +260,7 @@ def resolve(
     for det_id in list(detection_ids):
         if det_id in available:
             continue  # already a direct hit — nothing to do
-        fuzzy_matches = [
-            s for s in available
-            if det_id in s.lower()
-        ]
+        fuzzy_matches = [s for s in available if det_id in s.lower()]
         for match in fuzzy_matches[:3]:  # cap to avoid flood
             if match not in needed:
                 needed[match] = {
@@ -295,8 +305,8 @@ def resolve(
                 # historically sparser; a single strong link is still
                 # signal, not noise. Harnesses are recommended through
                 # model-onboarding catalog and loop-adapter flows, not repo scans.
-                _SKILL_NOISE_FLOOR = 0.30     # 30% of top hit's score
-                _TOOLING_NOISE_FLOOR = 0.20   # 20% (MCPs sparser)
+                _SKILL_NOISE_FLOOR = 0.30  # 30% of top hit's score
+                _TOOLING_NOISE_FLOOR = 0.20  # 20% (MCPs sparser)
                 for hit in graph_hits:
                     name = hit["name"]
                     hit_type = hit.get("type", "skill")
@@ -332,16 +342,16 @@ def resolve(
                     if hit_type == "mcp-server":
                         if any(m.get("name") == name for m in manifest["mcp_servers"]):
                             continue  # already listed
-                        manifest["mcp_servers"].append({
-                            "name": name,
-                            "reason": reason,
-                            "score": raw_score,
-                            "normalized_score": (
-                                rank_score if has_normalized_score else None
-                            ),
-                            "via": hit.get("via", [])[:4],
-                            "shared_tags": shared,
-                        })
+                        manifest["mcp_servers"].append(
+                            {
+                                "name": name,
+                                "reason": reason,
+                                "score": raw_score,
+                                "normalized_score": (rank_score if has_normalized_score else None),
+                                "via": hit.get("via", [])[:4],
+                                "shared_tags": shared,
+                            }
+                        )
                         continue
 
                     # skill / agent path. Skills must be installed locally
@@ -365,9 +375,7 @@ def resolve(
                         "entity_type": hit_type,
                     }
         except Exception as exc:  # noqa: BLE001 — graph is advisory
-            manifest["warnings"].append(
-                f"graph walk skipped: {type(exc).__name__}: {exc}"
-            )
+            manifest["warnings"].append(f"graph walk skipped: {type(exc).__name__}: {exc}")
 
     # Apply wiki overrides
     for skill_name, override in overrides.items():
@@ -408,14 +416,14 @@ def resolve(
         if info.get("entity_type", "skill") != "skill":
             continue
         if skill_name not in available:
-            manifest["suggestions"].append({
-                "skill": skill_name,
-                "reason": info["reason"],
-                "install_from": f"marketplace:search/{skill_name}",
-            })
-            manifest["warnings"].append(
-                f"{skill_name} needed but not installed ({info['reason']})"
+            manifest["suggestions"].append(
+                {
+                    "skill": skill_name,
+                    "reason": info["reason"],
+                    "install_from": f"marketplace:search/{skill_name}",
+                }
             )
+            manifest["warnings"].append(f"{skill_name} needed but not installed ({info['reason']})")
             del needed[skill_name]
 
     # Cap at max_skills
@@ -436,37 +444,43 @@ def resolve(
             if entity_type == "agent"
             else f"/mnt/skills/unknown/{skill_name}/SKILL.md"
         )
-        manifest["load"].append({
-            "skill": skill_name,
-            "entity_type": entity_type,
-            "type": entity_type,
-            "path": skill_meta.get("path", default_path),
-            "reason": info["reason"],
-            "priority": info["priority"],
-        })
+        manifest["load"].append(
+            {
+                "skill": skill_name,
+                "entity_type": entity_type,
+                "type": entity_type,
+                "path": skill_meta.get("path", default_path),
+                "reason": info["reason"],
+                "priority": info["priority"],
+            }
+        )
         loaded_names.add(skill_name)
 
     # Meta skills always loaded
     meta_skills = {"skill-router", "file-reading"}
     for ms in meta_skills:
         if ms not in loaded_names and ms in available:
-            manifest["load"].append({
-                "skill": ms,
-                "entity_type": "skill",
-                "type": "skill",
-                "path": available[ms].get("path", ""),
-                "reason": "Meta skill (always loaded)",
-                "priority": 99 if ms == "skill-router" else 50,
-            })
+            manifest["load"].append(
+                {
+                    "skill": ms,
+                    "entity_type": "skill",
+                    "type": "skill",
+                    "path": available[ms].get("path", ""),
+                    "reason": "Meta skill (always loaded)",
+                    "priority": 99 if ms == "skill-router" else 50,
+                }
+            )
             loaded_names.add(ms)
 
     # Build unload list
     for skill_name in available:
         if skill_name not in loaded_names:
-            manifest["unload"].append({
-                "skill": skill_name,
-                "reason": "Not needed for detected stack",
-            })
+            manifest["unload"].append(
+                {
+                    "skill": skill_name,
+                    "reason": "Not needed for detected stack",
+                }
+            )
 
     # Sort load by priority descending
     manifest["load"].sort(key=lambda x: -x["priority"])
@@ -477,6 +491,7 @@ def resolve(
 def read_intent_signals(intent_log_path: str) -> dict[str, int]:
     """Read today's intent signals from the intent log. Returns {signal: count}."""
     from datetime import datetime, timezone
+
     counts: dict[str, int] = {}
     log_path = Path(intent_log_path)
     if not log_path.exists():
@@ -521,11 +536,13 @@ def apply_intent_boosts(
             if skill_name in needed:
                 needed[skill_name]["priority"] += boost
             elif skill_name in available:
-                manifest["suggestions"].append({
-                    "skill": skill_name,
-                    "reason": f"Intent signal '{signal}' detected {count}x today",
-                    "install_from": available[skill_name].get("path", "local"),
-                })
+                manifest["suggestions"].append(
+                    {
+                        "skill": skill_name,
+                        "reason": f"Intent signal '{signal}' detected {count}x today",
+                        "install_from": available[skill_name].get("path", "local"),
+                    }
+                )
 
 
 def main():
@@ -534,9 +551,19 @@ def main():
     parser.add_argument("--wiki", default=_WIKI_DEFAULT, help="Wiki path")
     parser.add_argument("--available-skills", default=_SKILLS_DEFAULT, help="Skills directory")
     parser.add_argument("--output", default=_MANIFEST_DEFAULT, help="Output manifest path")
-    parser.add_argument("--max-skills", type=int, default=_MAX_SKILLS_DEFAULT, help="Max simultaneous skills")
-    parser.add_argument("--intent-log", default=_INTENT_LOG_DEFAULT, help="Intent log path for mid-session signal boosts")
-    parser.add_argument("--pending-output", default="", help="If set, also write to this path (for mid-session re-runs)")
+    parser.add_argument(
+        "--max-skills", type=int, default=_MAX_SKILLS_DEFAULT, help="Max simultaneous skills"
+    )
+    parser.add_argument(
+        "--intent-log",
+        default=_INTENT_LOG_DEFAULT,
+        help="Intent log path for mid-session signal boosts",
+    )
+    parser.add_argument(
+        "--pending-output",
+        default="",
+        help="If set, also write to this path (for mid-session re-runs)",
+    )
     args = parser.parse_args()
 
     # Load profile

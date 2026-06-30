@@ -116,6 +116,7 @@ def _top_k() -> int:
     """
     try:
         from ctx_config import cfg  # noqa: PLC0415
+
         k = int(cfg.recommendation_top_k)
     except Exception:
         k = 5
@@ -123,7 +124,9 @@ def _top_k() -> int:
 
 
 def categorise_bundle(
-    suggestions: list[dict], *, top_k: int,
+    suggestions: list[dict],
+    *,
+    top_k: int,
 ) -> dict[str, list[dict]]:
     """Group the top-``top_k`` suggestions by entity type.
 
@@ -181,8 +184,7 @@ def render_bundle_message(
         if total:
             lines.append("")
             lines.append(
-                f"Suggested bundle (top {total} by graph score — "
-                "skills, agents, and MCPs blend):"
+                f"Suggested bundle (top {total} by graph score — skills, agents, and MCPs blend):"
             )
             for etype in _TYPE_ORDER:
                 entries = bundle.get(etype, [])
@@ -208,15 +210,14 @@ def render_bundle_message(
         if lines:
             lines.append("")
         lines.append(
-            "ctx detected entities (skills / agents / MCPs) that have "
-            "been loaded but never used:"
+            "ctx detected entities (skills / agents / MCPs) that have been loaded but never used:"
         )
         for s in unload_suggestions[:top_k]:
             lines.append(f"  - {s['name']} ({s['reason']})")
         lines.append("")
         lines.append(
-            "Tell the user: \"These entities have been loaded but "
-            "unused. Want me to unload any of them?\""
+            'Tell the user: "These entities have been loaded but '
+            'unused. Want me to unload any of them?"'
         )
 
     return "\n".join(lines)
