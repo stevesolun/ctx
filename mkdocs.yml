@@ -105,6 +105,7 @@ nav:
   - Telemetry: telemetry.md
   - Harness:
       - Attach to hosts: harness/attaching-to-hosts.md
+      - LoopFlow adapter demo: harness/loopflow-adapter-demo.md
       - Clean-host contract: harness/clean-host-contract.md
   - Toolbox:
       - Overview: toolbox/index.md

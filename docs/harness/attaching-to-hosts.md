@@ -250,6 +250,9 @@ already own the control flow: plan, act, observe, reflect, and stop when their
 gate passes. Use `python -m ctx.adapters.loopflow` when that loop should ask
 ctx which capabilities it may load before planning.
 
+For a presenter-ready walkthrough, see
+[LoopFlow adapter demo](loopflow-adapter-demo.md).
+
 The adapter emits a JSON contract with:
 
 - explicit permission grants for `skills`, `agents`, `mcps`, and `harnesses`;
