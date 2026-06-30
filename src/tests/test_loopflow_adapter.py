@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ctx.adapters import loopflow
+from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 
 
 def test_parse_loop_file_reads_loopflow_context(tmp_path: Path) -> None:
@@ -67,6 +68,15 @@ def test_recommend_for_loop_respects_capability_permissions(
     assert payload["capabilities"]["agents"] == []
     assert [row["name"] for row in payload["capabilities"]["mcps"]] == ["filesystem"]
     assert payload["mcp_server"]["command"] == "ctx-mcp-server"
+    expected_tool_names = [
+        definition.name for definition in CtxCoreToolbox().tool_definitions()
+    ]
+    assert payload["mcp_server"]["tools"] == expected_tool_names
+    assert {
+        "ctx__load_entity",
+        "ctx__record_validation",
+        "ctx__session_state",
+    } <= set(payload["mcp_server"]["tools"])
 
 
 def test_empty_permissions_stay_empty(monkeypatch) -> None:

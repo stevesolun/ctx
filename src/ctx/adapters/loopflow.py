@@ -10,6 +10,7 @@ import shlex
 import sys
 from typing import Any
 
+from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.api import recommend_bundle
 from ctx_init import recommend_harnesses
 
@@ -182,6 +183,10 @@ def _harness_command(
     return shlex.join(parts)
 
 
+def _ctx_mcp_tool_names() -> list[str]:
+    return [definition.name for definition in CtxCoreToolbox().tool_definitions()]
+
+
 def recommend_for_loop(
     *,
     goal: str,
@@ -251,16 +256,7 @@ def recommend_for_loop(
             use_skills += ", " + ", ".join(str(name) for name in skill_names)
     use_tools = 'use tools from the "ctx" server' if "mcps" in granted else None
     mcp_server_command = "ctx-mcp-server" if "mcps" in granted else None
-    mcp_server_tools = (
-        [
-            "ctx__recommend_bundle",
-            "ctx__graph_query",
-            "ctx__wiki_search",
-            "ctx__wiki_get",
-        ]
-        if "mcps" in granted
-        else []
-    )
+    mcp_server_tools = _ctx_mcp_tool_names() if "mcps" in granted else []
 
     return {
         "version": "ctx.loop_adapter.v1",
