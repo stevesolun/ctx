@@ -1,6 +1,6 @@
 ---
 name: skill-router
-description: "Repo-aware recommendation manager for ctx. Scans the active repository, identifies stack and workflow signals, recommends a capped set of skills, agents, and MCP servers, and unloads helpers that no longer match the current work after user confirmation. Harnesses are recommended by the custom-model onboarding flow and then attach to the same recommendation layer."
+description: "Repo-aware recommendation manager for ctx. Scans the active repository, identifies stack and workflow signals, recommends a capped set of skills, agents, and MCP servers, and unloads helpers that no longer match the current work after user confirmation. Harnesses are recommended by the custom-model onboarding flow or loop adapters and then attach to the same recommendation layer."
 ---
 
 # Skill Router
@@ -17,8 +17,9 @@ The router manages runtime recommendations for:
 - MCP servers
 
 Harnesses are separate catalog entities. They are recommended when a user wants
-to run ctx with a non-Claude-Code host, local model, or API model. Once attached,
-the harness calls the same skills/agents/MCP recommendation engine.
+to run ctx with a non-Claude-Code host, local model, API model, or external loop
+adapter. Once attached, the harness calls the same skills/agents/MCP
+recommendation engine.
 
 ## Problem
 
@@ -38,7 +39,7 @@ ctx/
 |-- src/scan_repo.py                         # Repo scanner -> stack profile
 |-- src/ctx/core/resolve/resolve_skills.py   # Profile -> load/unload manifest
 |-- src/ctx/core/resolve/recommendations.py  # Shared scoring/ranking engine
-|-- src/ctx/adapters/                        # Claude Code hooks + generic tools
+|-- src/ctx/adapters/                        # Host adapters + generic tools
 |-- src/harness_install.py                   # Custom-model harness install flow
 `-- graph/wiki-graph-runtime.tar.gz          # Shipped graph/wiki runtime
 ```

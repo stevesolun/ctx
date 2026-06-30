@@ -1,6 +1,6 @@
 # Attaching ctx to any LLM host
 
-`ctx` ships three integration surfaces. Pick based on what your host
+`ctx` ships four integration surfaces. Pick based on what your host
 already supports:
 
 | Your host | Use |
@@ -8,8 +8,9 @@ already supports:
 | MCP-native (Claude Code, Claude Agent SDK, Cline, Goose, OpenHands, Continue) | **MCP server** — no Python, just spawn `ctx-mcp-server` |
 | Anything that isn't MCP-native but runs Python | **Python library** — `from ctx import recommend_bundle, ...` |
 | "I just want to run an agent and get recommendations" | **`ctx run` CLI** — our built-in harness |
+| LoopFlow or another loop that already owns plan/act/observe | **LoopFlow adapter** — `python -m ctx.adapters.loopflow` before planning |
 
-All three paths consume the **same** knowledge graph, llm-wiki, and
+All four paths consume the **same** knowledge graph, llm-wiki, and
 quality scoring. Recommendations are identical; only the transport
 differs.
 
@@ -242,7 +243,7 @@ process environment; secret values are not stored in the session log.
 
 ---
 
-## LoopFlow and agent-loop adapter
+## 4. LoopFlow and agent-loop adapter path
 
 DSL runners such as [LoopFlow](https://loopflow.live/) and custom agent loops
 already own the control flow: plan, act, observe, reflect, and stop when their
@@ -349,9 +350,9 @@ ctx-harness-install --recommend \
 | You're comparing models and need a harness | 3 (CLI) |
 | No catalog harness fits your model/goal | generated custom harness plan |
 | You're building an IDE extension | 1 if the IDE speaks MCP (most do), else 2 |
-| You're building a DSL runner or agent loop | `python -m ctx.adapters.loopflow` before plan |
+| You're building a DSL runner or agent loop | 4 (LoopFlow adapter) |
 
-All three paths share `~/.claude/skill-wiki/` as the source-of-truth
+All four paths share `~/.claude/skill-wiki/` as the source-of-truth
 corpus, so your recommendations are consistent regardless of the
 integration you pick.
 

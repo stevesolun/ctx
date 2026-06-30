@@ -17,4 +17,5 @@ that need the same helper put it in ctx.core or ctx.utils.
 Current adapters:
   claude_code - Claude Code hooks + skill/agent/MCP install CLIs
   generic     - model-agnostic harness (OpenRouter, Ollama, direct SDKs)
+  loopflow    - LoopFlow/custom agent-loop recommendation adapter
 """

@@ -2,8 +2,8 @@
 
 The skill router decides which skills, agents, and MCP servers are useful for
 the active repository and current development task. Harnesses are recommended in
-the custom-model onboarding flow; after a harness is attached, the same capped
-skills/agents/MCP recommendation layer can be used by that host.
+the custom-model onboarding flow or loop adapters; after a harness is attached,
+the same capped skills/agents/MCP recommendation layer can be used by that host.
 
 ## Problem
 
@@ -23,7 +23,7 @@ ctx/
 |-- src/scan_repo.py                         # Repo scanner -> stack profile
 |-- src/ctx/core/resolve/resolve_skills.py   # Profile -> load/unload manifest
 |-- src/ctx/core/resolve/recommendations.py  # Shared recommendation engine
-|-- src/ctx/adapters/                        # Claude Code hooks + generic tools
+|-- src/ctx/adapters/                        # Host adapters + generic tools
 `-- graph/wiki-graph-runtime.tar.gz          # Shipped graph/wiki runtime
 ```
 
@@ -37,8 +37,8 @@ ctx/
 5. Usage and quality signals are recorded so future recommendations improve.
 
 The same recommender is used by the CLI, MCP/library tools, Claude Code hooks,
-and attached harness hosts. Entry points should differ only in transport and
-confirmation UX, not in ranking logic.
+LoopFlow/agent-loop adapter, and attached harness hosts. Entry points should
+differ only in transport and confirmation UX, not in ranking logic.
 
 ## Reference Pages
 
