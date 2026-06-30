@@ -77,7 +77,7 @@ stable.
   "loopflow": {
     "before_plan": "Call python -m ctx.adapters.loopflow before planning and inject this JSON as read-only context.",
     "use_tools": "use tools from the \"ctx\" server",
-    "use_skills": "use skills: ctx-recommend, oocx-tfplan2md-agent-model-selection, nickcrew-claude-ctx-plugin-tool-selection",
+    "use_skills": "use skills: oocx-tfplan2md-agent-model-selection, nickcrew-claude-ctx-plugin-tool-selection",
     "harness_rule": "Only load harnesses when the loop runs on a user-owned/API/local LLM."
   },
   "mcp_server": {

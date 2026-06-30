@@ -258,7 +258,8 @@ The adapter emits a JSON contract with:
 - explicit permission grants for `skills`, `agents`, `mcps`, and `harnesses`;
 - the `ctx-mcp-server` command and ctx tool names when the permission contract
   allows ctx-core tools;
-- ranked skill, agent, and MCP recommendations from `ctx-recommend`;
+- ranked skill, agent, and MCP recommendations from the `ctx-recommend`
+  engine;
 - optional harness recommendations only when the loop declares a user-owned,
   API, or local model.
 
@@ -276,7 +277,7 @@ written that file; omit it on the first run.
 The returned payload includes LoopFlow-ready hints for the granted groups:
 
 ```loop
-use skills: ctx-recommend, security-review, code-review
+use skills: security-review, code-review
 ```
 
 When the LoopFlow run uses its own LLM rather than a hosted Claude Code

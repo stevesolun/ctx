@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-from functools import cache
 import json
 from pathlib import Path
 import re
@@ -11,7 +10,7 @@ import shlex
 import sys
 from typing import Any
 
-from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
+import ctx.api as ctx_api
 from ctx.core.resolve.recommendations import query_to_tags, recommend_by_tags
 from ctx_init import _harness_requirements_text, recommend_harnesses
 
@@ -41,11 +40,6 @@ _HARNESS_REQUIREMENT_FLAGS = {
     "attach_mode": "--harness-attach-mode",
     "api_key_env": "--api-key-env",
 }
-
-
-@cache
-def _ctx_toolbox() -> CtxCoreToolbox:
-    return CtxCoreToolbox()
 
 
 def _split_csv(values: list[str] | None) -> list[str]:
@@ -202,7 +196,7 @@ def _harness_command(
 def _ctx_mcp_tool_names(permissions: set[str]) -> list[str]:
     if not _ALL_CAPABILITY_GRANTS <= permissions:
         return []
-    return [definition.name for definition in _ctx_toolbox().tool_definitions()]
+    return ctx_api.ctx_core_tool_names()
 
 
 def _normalize_harness_requirements(
@@ -219,7 +213,7 @@ def _normalize_harness_requirements(
 
 
 def _recommendation_graph() -> Any:
-    return _ctx_toolbox()._ensure_graph()
+    return ctx_api.recommendation_graph()
 
 
 def _recommend_capability_rows(
@@ -336,11 +330,13 @@ def recommend_for_loop(
         ]
 
     use_skills = None
-    if "skills" in granted:
-        skill_names = [row["name"] for row in capability_bundle["skills"][:3]]
-        use_skills = "use skills: ctx-recommend"
-        if skill_names:
-            use_skills += ", " + ", ".join(str(name) for name in skill_names)
+    skill_names = [
+        str(row["name"])
+        for row in capability_bundle["skills"][:3]
+        if str(row.get("name") or "").strip()
+    ]
+    if skill_names:
+        use_skills = "use skills: " + ", ".join(skill_names)
     mcp_server_tools = _ctx_mcp_tool_names(granted)
     use_tools = 'use tools from the "ctx" server' if mcp_server_tools else None
     mcp_server_command = "ctx-mcp-server" if mcp_server_tools else None
@@ -432,7 +428,10 @@ def main(argv: list[str] | None = None) -> int:
 
     loop_fields: dict[str, Any] = {}
     if args.loop_file is not None:
-        loop_fields = parse_loop_file(args.loop_file)
+        try:
+            loop_fields = parse_loop_file(args.loop_file)
+        except OSError as exc:
+            parser.error(f"could not read --loop-file {args.loop_file}: {exc}")
     goal = args.goal or str(loop_fields.get("goal") or "")
     if not goal:
         parser.error("--goal or a loop file with goal: is required")
@@ -442,7 +441,10 @@ def main(argv: list[str] | None = None) -> int:
         *[str(value) for value in loop_fields.get("done_when", [])],
         *[str(value) for value in args.done_when],
     ]
-    last_failure = args.last_failure or _read_text_file(args.last_failure_file)
+    try:
+        last_failure = args.last_failure or _read_text_file(args.last_failure_file)
+    except OSError as exc:
+        parser.error(f"could not read --last-failure-file {args.last_failure_file}: {exc}")
     requirements = {
         "runtime": args.harness_runtime,
         "autonomy": args.harness_autonomy,

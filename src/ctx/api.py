@@ -361,6 +361,16 @@ def list_all_entities(
     return result
 
 
+def ctx_core_tool_names() -> list[str]:
+    """Return the ctx-core tool names exposed by the shared toolbox."""
+    return [definition.name for definition in _get_toolbox().tool_definitions()]
+
+
+def recommendation_graph() -> Any:
+    """Return the shared recommendation graph."""
+    return _get_toolbox()._ensure_graph()
+
+
 def default_wiki_dir() -> Path | None:
     """Resolve the configured wiki directory. None when no config is reachable.
 

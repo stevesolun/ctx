@@ -7,8 +7,9 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+import pytest
+import ctx.api as ctx_api
 from ctx.adapters import loopflow
-from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 
 
 class _FakeGraph:
@@ -112,7 +113,7 @@ def test_mcp_server_tools_are_filtered_by_permission_groups(monkeypatch) -> None
         permissions={"skills", "agents", "mcps", "harnesses"},
     )
     assert all_grants["mcp_server"]["command"] == "ctx-mcp-server"
-    expected_tool_names = [definition.name for definition in CtxCoreToolbox().tool_definitions()]
+    expected_tool_names = ctx_api.ctx_core_tool_names()
     assert all_grants["mcp_server"]["tools"] == expected_tool_names
     assert {
         "ctx__load_entity",
@@ -211,12 +212,34 @@ def test_loopflow_tool_hint_requires_mcps_permission(monkeypatch) -> None:
     assert [row["name"] for row in payload["capabilities"]["skills"]] == ["security-review"]
     assert payload["capabilities"]["mcps"] == []
     assert payload["loopflow"]["use_tools"] is None
-    assert payload["loopflow"]["use_skills"].startswith("use skills: ctx-recommend")
+    assert payload["loopflow"]["use_skills"] == "use skills: security-review"
     assert payload["mcp_server"] == {
         "name": "ctx",
         "command": None,
         "tools": [],
     }
+
+
+def test_loopflow_skill_hint_requires_returned_skill_capabilities(monkeypatch) -> None:
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del query, permissions, top_k
+        return [{"name": "filesystem", "type": "mcp-server"}]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+
+    payload = loopflow.recommend_for_loop(
+        goal="recommend only mcp servers",
+        permissions={"skills", "mcps"},
+    )
+
+    assert payload["capabilities"]["skills"] == []
+    assert payload["capabilities"]["mcps"] == [{"name": "filesystem", "type": "mcp-server"}]
+    assert payload["loopflow"]["use_skills"] is None
 
 
 def test_mcps_only_uses_type_filtered_recommendations(monkeypatch) -> None:
@@ -347,57 +370,35 @@ def test_done_when_signals_feed_recommendation_queries(monkeypatch) -> None:
     assert "ollama llama3.1 harness" in harness_queries[0]
 
 
-def test_recommend_for_loop_reuses_cached_toolbox(monkeypatch) -> None:
+def test_api_helpers_reuse_cached_toolbox(monkeypatch) -> None:
     constructions = 0
     graph_loads = 0
+    graph = _FakeGraph()
 
     class _FakeToolbox:
         def __init__(self) -> None:
             nonlocal constructions
             constructions += 1
-            self._graph: _FakeGraph | None = None
 
         def tool_definitions(self) -> list[Any]:
-            return []
+            return [type("_ToolDefinition", (), {"name": "ctx__recommend_bundle"})()]
 
         def _ensure_graph(self) -> _FakeGraph:
             nonlocal graph_loads
-            if self._graph is None:
-                graph_loads += 1
-                self._graph = _FakeGraph()
-            return self._graph
+            graph_loads += 1
+            return graph
 
-    def fake_recommend_by_tags(
-        graph: Any,
-        tags: list[str],
-        *,
-        top_n: int,
-        query: str | None,
-        entity_types: tuple[str, ...] | set[str] | None,
-        min_normalized_score: float,
-        **kwargs: Any,
-    ) -> list[dict[str, Any]]:
-        del graph, tags, top_n, query, min_normalized_score, kwargs
-        assert entity_types == ("agent",)
-        return [{"name": "browser-agent", "type": "agent", "score": 78}]
-
-    monkeypatch.setattr(loopflow, "CtxCoreToolbox", _FakeToolbox)
-    monkeypatch.setattr(loopflow, "query_to_tags", lambda query: ["python"])
-    monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
-    loopflow._ctx_toolbox.cache_clear()
+    monkeypatch.setattr(ctx_api, "CtxCoreToolbox", _FakeToolbox)
+    monkeypatch.setattr(ctx_api, "_default_toolbox", None)
     try:
-        for _ in range(2):
-            payload = loopflow.recommend_for_loop(
-                goal="python task",
-                permissions={"agents"},
-                top_k=1,
-            )
-            assert [row["name"] for row in payload["capabilities"]["agents"]] == ["browser-agent"]
+        assert ctx_api.ctx_core_tool_names() == ["ctx__recommend_bundle"]
+        assert ctx_api.recommendation_graph() is graph
+        assert ctx_api.recommendation_graph() is graph
     finally:
-        loopflow._ctx_toolbox.cache_clear()
+        ctx_api._default_toolbox = None
 
     assert constructions == 1
-    assert graph_loads == 1
+    assert graph_loads == 2
 
 
 def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
@@ -637,7 +638,42 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
     assert "python -m ctx.adapters.loopflow" in payload["agent_loop"]["before_plan"]
     assert "python -m ctx.adapters.loopflow" in payload["loopflow"]["before_plan"]
     assert payload["loopflow"]["use_tools"] is None
-    assert payload["loopflow"]["use_skills"].startswith("use skills: ctx-recommend")
+    assert payload["loopflow"]["use_skills"] == "use skills: security-review"
+
+
+def test_main_loop_file_read_errors_are_argparse_errors(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    missing_loop_file = tmp_path / "missing.loop"
+
+    with pytest.raises(SystemExit) as exc_info:
+        loopflow.main(["--loop-file", str(missing_loop_file)])
+
+    assert exc_info.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "could not read --loop-file" in stderr
+    assert str(missing_loop_file) in stderr
+
+
+def test_main_last_failure_file_read_errors_are_argparse_errors(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    missing_failure_file = tmp_path / "missing-failure.txt"
+
+    with pytest.raises(SystemExit) as exc_info:
+        loopflow.main([
+            "--goal",
+            "fix checkout",
+            "--last-failure-file",
+            str(missing_failure_file),
+        ])
+
+    assert exc_info.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "could not read --last-failure-file" in stderr
+    assert str(missing_failure_file) in stderr
 
 
 def test_main_empty_permissions_fail_closed(monkeypatch, capsys) -> None:
