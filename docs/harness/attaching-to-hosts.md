@@ -256,7 +256,8 @@ For a presenter-ready walkthrough, see
 The adapter emits a JSON contract with:
 
 - explicit permission grants for `skills`, `agents`, `mcps`, and `harnesses`;
-- the `ctx-mcp-server` command and ctx tool names for MCP-aware loops;
+- the `ctx-mcp-server` command and ctx tool names when the permission contract
+  allows ctx-core tools;
 - ranked skill, agent, and MCP recommendations from `ctx-recommend`;
 - optional harness recommendations only when the loop declares a user-owned,
   API, or local model.
@@ -293,6 +294,10 @@ python -m ctx.adapters.loopflow \
   --harness-privacy "no cloud prompts"
 ```
 
+Other harness matching hints use the same names as the install flow:
+`--harness-autonomy`, `--harness-verify`, `--harness-attach-mode`, and
+`--api-key-env`.
+
 Generic agent loops can import the same adapter directly:
 
 ```python
@@ -312,9 +317,9 @@ plan_context = recommend_for_loop(
 
 Load only the groups that are explicitly granted in `permissions`. If
 `harnesses` is granted without `--own-llm`, `--model-provider`, or `--model`,
-the adapter returns a warning and no harness recommendations. The ctx MCP tool
-list is also permission-filtered; ctx tools that can operate across all
-capability groups only appear when all of those groups are granted.
+the adapter returns a warning and no harness recommendations. The ctx MCP
+command and tool list are also permission-filtered; ctx tools that can operate
+across all capability groups only appear when all of those groups are granted.
 
 ---
 

@@ -146,7 +146,7 @@ ctx_payload = recommend_for_loop(
 
 loop.add_readonly_context("ctx", ctx_payload)
 
-if ctx_payload["permissions"]["mcps"]:
+if ctx_payload["mcp_server"]["command"]:
     runner.register_mcp_server(
         name=ctx_payload["mcp_server"]["name"],
         command=ctx_payload["mcp_server"]["command"],
@@ -166,7 +166,8 @@ The adapter fails closed:
 
 - `--permissions skills` only returns skill recommendations.
 - `--permissions mcps` only returns MCP server recommendations unless all
-  affected capability grants make ctx MCP tools safe to advertise.
+  capability groups are granted, which lets ctx MCP tools operate safely across
+  skills, agents, MCPs, and harnesses.
 - `--permissions harnesses` returns no harnesses unless `--own-llm`,
   `--model-provider`, or `--model` is present.
 - `agent_loop.harness_install` is always a `--dry-run` command. It shows what
@@ -183,7 +184,7 @@ The integration proposal for LoopFlow is intentionally small:
 2. Let `.loop` users grant capability groups: `skills`, `agents`, `mcps`,
    and `harnesses`.
 3. Inject the returned JSON as read-only context before planning.
-4. Register the ctx MCP server only when the `mcps` permission is granted.
+4. Register the ctx MCP server only when the adapter returns an MCP command.
 5. Surface `agent_loop.harness_install` as an explicit user action, not an
    automatic install.
 

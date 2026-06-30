@@ -6,7 +6,7 @@ the MCP server and the first-party ``ctx run`` CLI, but are not
 great entrypoints for someone building their own loop. This module
 is the one stable, flat namespace such callers should target.
 
-Three delivery paths, in increasing order of coupling to ctx:
+Four delivery paths, in increasing order of coupling to ctx:
 
 1. **Attach the MCP server.** Zero Python dependency on ctx — your
    harness just spawns ``ctx-mcp-server`` and speaks JSON-RPC. The
@@ -21,6 +21,11 @@ Three delivery paths, in increasing order of coupling to ctx:
 3. **Use ``ctx run`` directly.** The full harness-over-LiteLLM
    experience, no host-side code required. Good if you don't already
    have a loop.
+
+4. **Use the LoopFlow adapter.** If another runner already owns
+   plan/act/observe, call ``python -m ctx.adapters.loopflow`` or
+   ``ctx.adapters.loopflow.recommend_for_loop`` before planning to get
+   a permissioned JSON contract for the current loop.
 
 Public functions:
 

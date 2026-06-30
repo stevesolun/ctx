@@ -189,7 +189,7 @@ The helper `resolve_graph.load_graph()` does this for you.
 
 ### Via recommendation paths
 
-The graph backs two recommendation paths:
+The graph backs these recommendation paths:
 
 - Execution recommendation surfaces (`ctx.recommend_bundle`, MCP
   `ctx__recommend_bundle`, generic harness tools, Claude Code hook
@@ -204,9 +204,10 @@ The graph backs two recommendation paths:
   extracted wiki has the skill index JSON but no graph nodes for
   those records, the same recommender falls back to the index file.
 - Harness recommendations are a separate path for custom/API/local
-  model onboarding (`ctx-init --model-mode custom ...`) and
-  `ctx-harness-install`. They use the same graph filtered to
-  `harness` nodes and the higher harness match floor from `config.json`.
+  model onboarding (`ctx-init --model-mode custom ...`),
+  `ctx-harness-install`, and LoopFlow/agent-loop adapter calls that declare a
+  user-owned/API/local model. They use the same graph filtered to `harness`
+  nodes and the higher harness match floor from `config.json`.
 - Repository scans still start from stack detections, then turn that profile
   into the same tag/query bundle used by the execution recommender. If a
   shipped graph is unavailable, scan output falls back to the legacy installed

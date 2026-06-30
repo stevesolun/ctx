@@ -1,7 +1,7 @@
 """
 ctx — Alive skill system + model-agnostic harness for Claude Code and other LLMs.
 
-Three delivery surfaces (pick what fits your integration):
+Four delivery surfaces (pick what fits your integration):
 
   1. **MCP server** — attach from any MCP host (Claude Code, Claude
      Agent SDK, Cline, Goose, OpenHands, custom):
@@ -15,6 +15,11 @@ Three delivery surfaces (pick what fits your integration):
          from ctx import recommend_bundle, graph_query, wiki_search
          bundle = recommend_bundle("python web api", top_k=5)
 
+  4. **Loop adapter** — emit permissioned pre-plan context for an
+     external loop that already owns plan/act/observe:
+         python -m ctx.adapters.loopflow --goal "fix checkout" \\
+                 --permissions skills,agents,mcps
+
 See docs/harness/attaching-to-hosts.md for host-specific recipes.
 
 Package layout:
@@ -24,6 +29,7 @@ Package layout:
       .claude_code   - Claude Code hooks + install CLIs
       .generic       - model-agnostic harness (LiteLLM, MCP, loop,
                        session, compaction, ctx-core tools)
+      .loopflow      - LoopFlow/custom agent-loop recommendation adapter
     ctx.cli        - user-facing CLI entrypoints (`ctx run` et al.)
     ctx.mcp_server - the standalone MCP server (H8)
     ctx.api        - blessed public Python API for custom harnesses

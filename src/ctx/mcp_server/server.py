@@ -7,8 +7,8 @@ this server and gain access to the ctx-core recommendation surface
 WITHOUT using our ``ctx run`` harness loop.
 
 Why ship this as a byproduct of H7?
-    Plan 001 §3 identified three delivery options — library (A), full
-    harness (B), or hybrid (C). User picked B in the locked decisions,
+    Historical Plan 001 §3 compared library (A), full harness (B),
+    and hybrid (C). User picked B in the locked decisions,
     but Option A's deliverable (a standalone MCP server exposing the
     skill/graph system) is strictly additive and doubles the surface
     the project reaches. H7's CtxCoreToolbox already has the read-only

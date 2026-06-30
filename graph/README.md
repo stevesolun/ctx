@@ -15,10 +15,11 @@ Current snapshot:
 - Long skill bodies are kept behind the configured micro-skill line gate; the
   shipped tarball excludes raw `SKILL.md.original` backups.
 
-The runtime recommendation paths use this graph in two ways:
+The runtime recommendation paths use this graph in these ways:
 
 - Development recommendations return skills, agents, and MCP servers only.
-- Custom/API/local model onboarding recommends harnesses using the higher harness fit floor in `src/config.json`.
+- Custom/API/local model onboarding and LoopFlow/agent-loop adapter calls
+  recommend harnesses using the higher harness fit floor in `src/config.json`.
 
 ## Files
 
