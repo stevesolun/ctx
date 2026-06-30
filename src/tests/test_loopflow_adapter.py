@@ -378,15 +378,21 @@ def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
     )
     assert calls == ["called"]
     assert allowed["capabilities"]["harnesses"][0]["name"] == "local-agent-loop"
-    assert (
-        "ctx-harness-install local-agent-loop --dry-run" in allowed["agent_loop"]["harness_install"]
-    )
-    assert "--model-provider" in allowed["agent_loop"]["harness_install"]
+    assert shlex.split(allowed["agent_loop"]["harness_install"]) == [
+        "ctx-harness-install",
+        "--dry-run",
+        "--goal=run with a private model",
+        "--model-provider=ollama",
+        "--model=llama3.1",
+        "--harness-runtime=local workstation",
+        "--",
+        "local-agent-loop",
+    ]
 
 
 def test_harness_install_command_is_shell_quoted(monkeypatch) -> None:
     def fake_recommend_harnesses(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        return [{"name": "local $(touch bad)", "type": "harness", "fit_score": 0.9}]
+        return [{"name": "-local $(touch bad)", "type": "harness", "fit_score": 0.9}]
 
     monkeypatch.setattr(
         loopflow,
@@ -398,35 +404,31 @@ def test_harness_install_command_is_shell_quoted(monkeypatch) -> None:
     monkeypatch.setattr(loopflow, "recommend_harnesses", fake_recommend_harnesses)
 
     payload = loopflow.recommend_for_loop(
-        goal="run $(touch bad)",
+        goal="-run $(touch bad)",
         permissions={"harnesses"},
         own_llm=True,
-        model_provider="open`whoami`",
-        model="llama; rm -rf .",
+        model_provider="-open`whoami`",
+        model="-llama; rm -rf .",
         harness_requirements={
-            "runtime": "local $(touch bad)",
-            "api_key_env": "OPENAI_API_KEY",
+            "runtime": "-local $(touch bad)",
+            "api_key_env": "-OPENAI_API_KEY",
         },
     )
 
     command = payload["agent_loop"]["harness_install"]
 
-    assert command.startswith("ctx-harness-install 'local $(touch bad)' --dry-run")
-    assert "'run $(touch bad)'" in command
+    assert command.startswith("ctx-harness-install --dry-run")
+    assert command.endswith("-- '-local $(touch bad)'")
     assert shlex.split(command) == [
         "ctx-harness-install",
-        "local $(touch bad)",
         "--dry-run",
-        "--goal",
-        "run $(touch bad)",
-        "--model-provider",
-        "open`whoami`",
-        "--model",
-        "llama; rm -rf .",
-        "--harness-runtime",
-        "local $(touch bad)",
-        "--api-key-env",
-        "OPENAI_API_KEY",
+        "--goal=-run $(touch bad)",
+        "--model-provider=-open`whoami`",
+        "--model=-llama; rm -rf .",
+        "--harness-runtime=-local $(touch bad)",
+        "--api-key-env=-OPENAI_API_KEY",
+        "--",
+        "-local $(touch bad)",
     ]
 
 
@@ -457,12 +459,11 @@ def test_unknown_harness_requirements_warn_without_crashing(monkeypatch) -> None
     assert payload["warnings"] == ["ignored unknown harness requirement(s): unknown"]
     assert shlex.split(payload["agent_loop"]["harness_install"]) == [
         "ctx-harness-install",
-        "local-agent-loop",
         "--dry-run",
-        "--goal",
-        "run with a private model",
-        "--harness-runtime",
-        "local workstation",
+        "--goal=run with a private model",
+        "--harness-runtime=local workstation",
+        "--",
+        "local-agent-loop",
     ]
 
 
@@ -503,16 +504,13 @@ def test_main_api_key_env_reaches_harness_install(monkeypatch, capsys) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert shlex.split(payload["agent_loop"]["harness_install"]) == [
         "ctx-harness-install",
-        "remote-agent-loop",
         "--dry-run",
-        "--goal",
-        "run remote loop",
-        "--model-provider",
-        "openai",
-        "--model",
-        "gpt-4o",
-        "--api-key-env",
-        "OPENAI_API_KEY",
+        "--goal=run remote loop",
+        "--model-provider=openai",
+        "--model=gpt-4o",
+        "--api-key-env=OPENAI_API_KEY",
+        "--",
+        "remote-agent-loop",
     ]
 
 

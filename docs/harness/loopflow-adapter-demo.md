@@ -119,7 +119,7 @@ stable.
   "agent_loop": {
     "before_act": "Load only the granted capability groups from capabilities.*.",
     "on_failure": "Pass the latest failure back as last_failure before the next plan.",
-    "harness_install": "ctx-harness-install autogen --dry-run --goal 'mcp agent loop local ollama filesystem' --model-provider ollama --model ollama/llama3.1"
+    "harness_install": "ctx-harness-install --dry-run '--goal=mcp agent loop local ollama filesystem' --model-provider=ollama --model=ollama/llama3.1 -- autogen"
   },
   "warnings": []
 }

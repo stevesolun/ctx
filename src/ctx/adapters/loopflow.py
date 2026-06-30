@@ -175,16 +175,17 @@ def _harness_command(
 ) -> str | None:
     if not harnesses:
         return None
-    parts = ["ctx-harness-install", str(harnesses[0]["name"]), "--dry-run"]
+    parts = ["ctx-harness-install", "--dry-run"]
     if goal:
-        parts.extend(["--goal", goal])
+        parts.append(f"--goal={goal}")
     if model_provider:
-        parts.extend(["--model-provider", model_provider])
+        parts.append(f"--model-provider={model_provider}")
     if model:
-        parts.extend(["--model", model])
+        parts.append(f"--model={model}")
     for key, value in requirements.items():
         if value:
-            parts.extend([_HARNESS_REQUIREMENT_FLAGS[key], value])
+            parts.append(f"{_HARNESS_REQUIREMENT_FLAGS[key]}={value}")
+    parts.extend(["--", str(harnesses[0]["name"])])
     return shlex.join(parts)
 
 
