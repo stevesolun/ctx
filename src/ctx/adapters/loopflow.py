@@ -281,7 +281,12 @@ def recommend_for_loop(
     harness_requirements: dict[str, str] | None = None,
     top_k: int = 5,
 ) -> dict[str, Any]:
-    """Return a permissioned ctx adapter payload for a DSL or agent loop."""
+    """Return a permissioned ctx adapter payload for a DSL or agent loop.
+
+    Empty permissions fail closed. ``last_failure`` may influence ranking, but
+    the raw failure text is omitted from the returned context and capability
+    rows.
+    """
     safe_top_k = max(1, min(int(top_k), 20))
     granted = permissions or set()
     context_paths = look_at or []
