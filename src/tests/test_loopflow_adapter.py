@@ -708,12 +708,14 @@ def test_main_last_failure_file_read_errors_are_argparse_errors(
     missing_failure_file = tmp_path / "missing-failure.txt"
 
     with pytest.raises(SystemExit) as exc_info:
-        loopflow.main([
-            "--goal",
-            "fix checkout",
-            "--last-failure-file",
-            str(missing_failure_file),
-        ])
+        loopflow.main(
+            [
+                "--goal",
+                "fix checkout",
+                "--last-failure-file",
+                str(missing_failure_file),
+            ]
+        )
 
     assert exc_info.value.code == 2
     stderr = capsys.readouterr().err
