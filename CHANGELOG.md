@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Added the LoopFlow/custom agent-loop adapter
+  (`python -m ctx.adapters.loopflow`) for permissioned pre-plan skill, agent,
+  MCP, ctx MCP server, and user-owned model harness recommendations.
+
 ### Changed
 
 - Hardened docs deploy and release publish gates so feature and dashboard
