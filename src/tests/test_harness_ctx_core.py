@@ -394,6 +394,8 @@ class TestToolDefinitions:
             "ctx__unload_entity",
             "ctx__session_end",
             "ctx__session_state",
+            "ctx__loop_provision",
+            "ctx__loop_topup",
         }
 
     def test_all_are_tool_definitions(self, toolbox: CtxCoreToolbox) -> None:

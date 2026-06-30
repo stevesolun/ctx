@@ -30,6 +30,12 @@ H6 module is the source of truth for the tool catalogue):
     ctx__wiki_search(query, top_n=15)
     ctx__wiki_get(slug)
 
+The above are read-only. Two write-capable tools provision skills for a
+harness loop (recommend + install into ~/.claude/skills so the names resolve):
+
+    ctx__loop_provision(goal, intent=None, top_k=5, dry_run=False)
+    ctx__loop_topup(goal, reflection, loaded=[], top_k=5, dry_run=False)
+
 Protocol coverage mirrors H2's client implementation — the minimal
 operational subset: initialize + initialized notification +
 tools/list + tools/call + shutdown. Plus the server-only extras:
