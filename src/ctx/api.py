@@ -186,9 +186,7 @@ def _call(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     toolbox = _get_toolbox()
     with telemetry_span():
         try:
-            raw = toolbox.dispatch(
-                ToolCall(id="api", name=tool_name, arguments=arguments)
-            )
+            raw = toolbox.dispatch(ToolCall(id="api", name=tool_name, arguments=arguments))
             payload = json.loads(raw)
         except Exception as exc:  # noqa: BLE001 - preserve existing propagation.
             _record_api_event(
@@ -333,11 +331,13 @@ def list_all_entities(
         else:
             from ctx.core.wiki.wiki_query import load_all_pages  # noqa: PLC0415
 
-            result = sorted({
-                page.name
-                for page in load_all_pages(wiki)
-                if entity_type is None or page.entity_type == entity_type
-            })
+            result = sorted(
+                {
+                    page.name
+                    for page in load_all_pages(wiki)
+                    if entity_type is None or page.entity_type == entity_type
+                }
+            )
             outcome = "ok"
             error_kind = None
     except Exception as exc:  # noqa: BLE001 - preserve existing propagation.

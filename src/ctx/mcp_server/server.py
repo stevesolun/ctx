@@ -72,11 +72,11 @@ _SERVER_VERSION = "0.1.0"
 
 # JSON-RPC error codes per the MCP / JSON-RPC 2.0 spec.
 class _ErrorCode:
-    PARSE_ERROR = -32700        # invalid JSON
-    INVALID_REQUEST = -32600    # not a well-formed request
-    METHOD_NOT_FOUND = -32601   # method unknown
-    INVALID_PARAMS = -32602     # params don't match method
-    INTERNAL_ERROR = -32603     # something inside our handler exploded
+    PARSE_ERROR = -32700  # invalid JSON
+    INVALID_REQUEST = -32600  # not a well-formed request
+    METHOD_NOT_FOUND = -32601  # method unknown
+    INVALID_PARAMS = -32602  # params don't match method
+    INTERNAL_ERROR = -32603  # something inside our handler exploded
 
 
 @dataclass
@@ -149,9 +149,7 @@ def _handle_tools_call(state: _ServerState, params: dict[str, Any]) -> dict[str,
 
     arguments = params.get("arguments") or {}
     if not isinstance(arguments, dict):
-        raise _JsonRpcError(
-            _ErrorCode.INVALID_PARAMS, "params.arguments must be an object"
-        )
+        raise _JsonRpcError(_ErrorCode.INVALID_PARAMS, "params.arguments must be an object")
 
     if not toolbox.owns(name):
         raise _JsonRpcError(
@@ -160,9 +158,7 @@ def _handle_tools_call(state: _ServerState, params: dict[str, Any]) -> dict[str,
         )
 
     try:
-        result_json = toolbox.dispatch(
-            ToolCall(id="mcp", name=name, arguments=dict(arguments))
-        )
+        result_json = toolbox.dispatch(ToolCall(id="mcp", name=name, arguments=dict(arguments)))
     except ValueError as exc:
         # Unknown ctx-core subtool, malformed args, etc.
         return {
@@ -177,9 +173,7 @@ def _handle_tools_call(state: _ServerState, params: dict[str, Any]) -> dict[str,
             "content": [
                 {
                     "type": "text",
-                    "text": (
-                        f"internal error in {name}: {type(exc).__name__}: {exc}"
-                    ),
+                    "text": (f"internal error in {name}: {type(exc).__name__}: {exc}"),
                 }
             ],
             "isError": True,
@@ -398,7 +392,9 @@ def run_server(
 
 
 def _process_line(
-    text: str, state: _ServerState, out_stream: BinaryIO,
+    text: str,
+    state: _ServerState,
+    out_stream: BinaryIO,
 ) -> None:
     """Parse one JSON line, dispatch, emit response (or not, for notifications)."""
     started = time.perf_counter()
@@ -406,7 +402,8 @@ def _process_line(
         frame = json.loads(text)
     except json.JSONDecodeError as exc:
         _write_error(
-            out_stream, None,
+            out_stream,
+            None,
             _ErrorCode.PARSE_ERROR,
             f"parse error: {exc}",
         )
@@ -426,7 +423,8 @@ def _process_line(
 
     if not isinstance(frame, dict):
         _write_error(
-            out_stream, None,
+            out_stream,
+            None,
             _ErrorCode.INVALID_REQUEST,
             "request must be a JSON object",
         )
@@ -461,7 +459,8 @@ def _process_line(
     if not isinstance(method, str) or not method:
         if not is_notification:
             _write_error(
-                out_stream, req_id,
+                out_stream,
+                req_id,
                 _ErrorCode.INVALID_REQUEST,
                 "method must be a non-empty string",
             )
@@ -492,7 +491,8 @@ def _process_line(
         handler = _HANDLERS.get(method)
         if handler is None:
             _write_error(
-                out_stream, req_id,
+                out_stream,
+                req_id,
                 _ErrorCode.METHOD_NOT_FOUND,
                 f"method not found: {method}",
             )
@@ -521,7 +521,8 @@ def _process_line(
         except Exception as exc:  # noqa: BLE001
             _logger.error("handler %s raised", method, exc_info=True)
             _write_error(
-                out_stream, req_id,
+                out_stream,
+                req_id,
                 _ErrorCode.INTERNAL_ERROR,
                 f"internal error: {type(exc).__name__}",
             )
