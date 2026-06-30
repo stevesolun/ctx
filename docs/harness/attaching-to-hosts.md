@@ -280,6 +280,10 @@ The returned payload includes LoopFlow-ready hints for the granted groups:
 use skills: security-review, code-review
 ```
 
+Only installed/local skill rows are named in `loopflow.use_skills`. Installable
+catalog skills remain under `capabilities.skills` with `status: available` and
+their `install_command` metadata.
+
 When the LoopFlow run uses its own LLM rather than a hosted Claude Code
 session, grant harnesses and pass the model profile:
 

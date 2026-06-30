@@ -140,11 +140,32 @@ def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
         "matching_tags",
         "shared_tags",
         "tags",
+        "source_catalog",
+        "status",
+        "source",
+        "skill_id",
+        "installs",
+        "detail_url",
+        "install_command",
+        "category",
+        "invoke_command",
+        "security_review",
     ):
         value = row.get(key)
         if value not in (None, "", [], {}):
             compact[key] = value
     return compact
+
+
+def _is_loadable_skill_row(row: dict[str, Any]) -> bool:
+    status = str(row.get("status") or "").strip().lower()
+    source_catalog = str(row.get("source_catalog") or "").strip().lower()
+    install_command = str(row.get("install_command") or "").strip()
+    if status in {"available", "remote-cataloged"}:
+        return False
+    if source_catalog == "skill-index" or install_command:
+        return False
+    return True
 
 
 def _group_bundle(
@@ -330,11 +351,13 @@ def recommend_for_loop(
         ]
 
     use_skills = None
-    skill_names = [
-        str(row["name"])
-        for row in capability_bundle["skills"][:3]
-        if str(row.get("name") or "").strip()
-    ]
+    skill_names: list[str] = []
+    for row in capability_bundle["skills"]:
+        if len(skill_names) >= 3:
+            break
+        name = str(row.get("name") or "").strip()
+        if name and _is_loadable_skill_row(row):
+            skill_names.append(name)
     if skill_names:
         use_skills = "use skills: " + ", ".join(skill_names)
     mcp_server_tools = _ctx_mcp_tool_names(granted)

@@ -77,7 +77,7 @@ stable.
   "loopflow": {
     "before_plan": "Call python -m ctx.adapters.loopflow before planning and inject this JSON as read-only context.",
     "use_tools": "use tools from the \"ctx\" server",
-    "use_skills": "use skills: oocx-tfplan2md-agent-model-selection, nickcrew-claude-ctx-plugin-tool-selection",
+    "use_skills": "use skills: oocx-tfplan2md-agent-model-selection",
     "harness_rule": "Only load harnesses when the loop runs on a user-owned/API/local LLM."
   },
   "mcp_server": {
@@ -100,8 +100,14 @@ stable.
   },
   "capabilities": {
     "skills": [
-      {"name": "oocx-tfplan2md-agent-model-selection", "type": "skill"},
-      {"name": "nickcrew-claude-ctx-plugin-tool-selection", "type": "skill"}
+      {"name": "oocx-tfplan2md-agent-model-selection", "type": "skill", "status": "installed"},
+      {
+        "name": "nickcrew-claude-ctx-plugin-tool-selection",
+        "type": "skill",
+        "status": "available",
+        "source_catalog": "skill-index",
+        "install_command": "ctx-skill-install nickcrew-claude-ctx-plugin-tool-selection"
+      }
     ],
     "agents": [
       {"name": "oss-investigator-local-git-agent", "type": "agent"},

@@ -220,6 +220,51 @@ def test_loopflow_tool_hint_requires_mcps_permission(monkeypatch) -> None:
     }
 
 
+def test_loopflow_skill_hint_excludes_installable_catalog_skills(monkeypatch) -> None:
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del query, permissions, top_k
+        return [
+            {
+                "name": "remote-security",
+                "type": "skill",
+                "status": "available",
+                "source_catalog": "skill-index",
+                "install_command": "ctx-skill-install remote-security",
+                "detail_url": "https://example.test/remote-security",
+                "score": 92,
+            },
+            {"name": "security-review", "type": "skill", "status": "installed", "score": 88},
+            {"name": "remote-tests", "type": "skill", "status": "available", "score": 70},
+        ]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+
+    payload = loopflow.recommend_for_loop(
+        goal="review auth changes",
+        permissions={"skills"},
+    )
+
+    assert payload["capabilities"]["skills"] == [
+        {
+            "name": "remote-security",
+            "type": "skill",
+            "score": 92,
+            "source_catalog": "skill-index",
+            "status": "available",
+            "detail_url": "https://example.test/remote-security",
+            "install_command": "ctx-skill-install remote-security",
+        },
+        {"name": "security-review", "type": "skill", "score": 88, "status": "installed"},
+        {"name": "remote-tests", "type": "skill", "score": 70, "status": "available"},
+    ]
+    assert payload["loopflow"]["use_skills"] == "use skills: security-review"
+
+
 def test_loopflow_skill_hint_requires_returned_skill_capabilities(monkeypatch) -> None:
     def fake_recommend_rows(
         query: str,
