@@ -63,8 +63,7 @@ def _parse_permissions(values: list[str] | None) -> set[str]:
         normalized = _PERMISSION_ALIASES.get(value.strip().lower())
         if normalized is None:
             raise ValueError(
-                f"unknown permission {value!r}; expected one of "
-                "skills, agents, mcps, harnesses"
+                f"unknown permission {value!r}; expected one of skills, agents, mcps, harnesses"
             )
         permissions.add(normalized)
     return permissions
@@ -149,9 +148,7 @@ def _group_bundle(
     permissions: set[str],
     top_k: int,
 ) -> dict[str, list[dict[str, Any]]]:
-    grouped: dict[str, list[dict[str, Any]]] = {
-        key: [] for key in ("skills", "agents", "mcps")
-    }
+    grouped: dict[str, list[dict[str, Any]]] = {key: [] for key in ("skills", "agents", "mcps")}
     seen: set[tuple[str, str]] = set()
     for row in rows:
         group = _ENTITY_TO_GROUP.get(str(row.get("type") or ""))
@@ -205,9 +202,7 @@ def _recommend_capability_rows(
     top_k: int,
 ) -> list[dict[str, Any]]:
     entity_types = [
-        entity_type
-        for group, entity_type in _GROUP_TO_ENTITY.items()
-        if group in permissions
+        entity_type for group, entity_type in _GROUP_TO_ENTITY.items() if group in permissions
     ]
     if not entity_types:
         return []
@@ -275,18 +270,14 @@ def recommend_for_loop(
             permissions=granted,
             top_k=safe_top_k,
         )
-        capability_bundle.update(
-            _group_bundle(rows, permissions=granted, top_k=safe_top_k)
-        )
+        capability_bundle.update(_group_bundle(rows, permissions=granted, top_k=safe_top_k))
 
     warnings: list[str] = []
     should_recommend_harness = "harnesses" in granted and (
         own_llm or bool(model_provider) or bool(model)
     )
     if "harnesses" in granted and not should_recommend_harness:
-        warnings.append(
-            "harnesses permission granted but no user-owned LLM/model was declared"
-        )
+        warnings.append("harnesses permission granted but no user-owned LLM/model was declared")
     if should_recommend_harness:
         harness_goal = " ".join([goal, *requirements.values()]).strip() or query
         capability_bundle["harnesses"] = [

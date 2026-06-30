@@ -19,11 +19,11 @@ class _FakeGraph:
 def test_parse_loop_file_reads_loopflow_context(tmp_path: Path) -> None:
     loop_file = tmp_path / "rate-limit.loop"
     loop_file.write_text(
-        '\n'.join(
+        "\n".join(
             [
                 'loop "add API rate limiting":',
                 "  goal: requests are rate-limited per API key",
-                "  done when \"pnpm test rate-limit\" passes",
+                '  done when "pnpm test rate-limit" passes',
                 "  look at: the API, middleware, and the last failure",
             ]
         )
@@ -73,15 +73,11 @@ def test_recommend_for_loop_respects_capability_permissions(
         "mcps": True,
         "harnesses": False,
     }
-    assert [row["name"] for row in payload["capabilities"]["skills"]] == [
-        "playwright-debug"
-    ]
+    assert [row["name"] for row in payload["capabilities"]["skills"]] == ["playwright-debug"]
     assert payload["capabilities"]["agents"] == []
     assert [row["name"] for row in payload["capabilities"]["mcps"]] == ["filesystem"]
     assert payload["mcp_server"]["command"] == "ctx-mcp-server"
-    expected_tool_names = [
-        definition.name for definition in CtxCoreToolbox().tool_definitions()
-    ]
+    expected_tool_names = [definition.name for definition in CtxCoreToolbox().tool_definitions()]
     assert payload["mcp_server"]["tools"] == expected_tool_names
     assert {
         "ctx__load_entity",
@@ -173,9 +169,7 @@ def test_loopflow_tool_hint_requires_mcps_permission(monkeypatch) -> None:
     )
 
     assert payload["permissions"]["mcps"] is False
-    assert [row["name"] for row in payload["capabilities"]["skills"]] == [
-        "security-review"
-    ]
+    assert [row["name"] for row in payload["capabilities"]["skills"]] == ["security-review"]
     assert payload["capabilities"]["mcps"] == []
     assert payload["loopflow"]["use_tools"] is None
     assert payload["loopflow"]["use_skills"].startswith("use skills: ctx-recommend")
@@ -301,9 +295,7 @@ def test_recommend_for_loop_reuses_cached_toolbox(monkeypatch) -> None:
                 permissions={"agents"},
                 top_k=1,
             )
-            assert [row["name"] for row in payload["capabilities"]["agents"]] == [
-                "browser-agent"
-            ]
+            assert [row["name"] for row in payload["capabilities"]["agents"]] == ["browser-agent"]
     finally:
         loopflow._ctx_toolbox.cache_clear()
 
@@ -347,9 +339,9 @@ def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
     )
     assert calls == ["called"]
     assert allowed["capabilities"]["harnesses"][0]["name"] == "local-agent-loop"
-    assert "ctx-harness-install local-agent-loop --dry-run" in allowed["agent_loop"][
-        "harness_install"
-    ]
+    assert (
+        "ctx-harness-install local-agent-loop --dry-run" in allowed["agent_loop"]["harness_install"]
+    )
     assert "--model-provider" in allowed["agent_loop"]["harness_install"]
 
 
@@ -453,7 +445,7 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
     loop_file = tmp_path / "review.loop"
     failure_file = tmp_path / "failure.txt"
     loop_file.write_text(
-        '\n'.join(
+        "\n".join(
             [
                 'loop "review upload":',
                 "  goal: no high-severity upload findings",
@@ -468,9 +460,7 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
     monkeypatch.setattr(
         loopflow,
         "_recommend_capability_rows",
-        lambda query, *, permissions, top_k: [
-            {"name": "security-review", "type": "skill"}
-        ],
+        lambda query, *, permissions, top_k: [{"name": "security-review", "type": "skill"}],
     )
     monkeypatch.setattr(loopflow, "recommend_harnesses", lambda *args, **kwargs: [])
 
