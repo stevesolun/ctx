@@ -76,17 +76,52 @@ def test_recommend_for_loop_respects_capability_permissions(
     assert [row["name"] for row in payload["capabilities"]["skills"]] == ["playwright-debug"]
     assert payload["capabilities"]["agents"] == []
     assert [row["name"] for row in payload["capabilities"]["mcps"]] == ["filesystem"]
-    assert payload["mcp_server"]["command"] == "ctx-mcp-server"
+    assert payload["mcp_server"] == {
+        "name": "ctx",
+        "command": None,
+        "tools": [],
+    }
+
+
+def test_mcp_server_tools_are_filtered_by_permission_groups(monkeypatch) -> None:
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", lambda *args, **kwargs: [])
+    monkeypatch.setattr(loopflow, "recommend_harnesses", lambda *args, **kwargs: [])
+
+    mcps_only = loopflow.recommend_for_loop(
+        goal="recommend only mcp servers",
+        permissions={"mcps"},
+    )
+    assert mcps_only["mcp_server"] == {
+        "name": "ctx",
+        "command": None,
+        "tools": [],
+    }
+
+    core_recommendations = loopflow.recommend_for_loop(
+        goal="recommend core capabilities",
+        permissions={"skills", "agents", "mcps"},
+    )
+    assert core_recommendations["mcp_server"] == {
+        "name": "ctx",
+        "command": None,
+        "tools": [],
+    }
+
+    all_grants = loopflow.recommend_for_loop(
+        goal="recommend every capability",
+        permissions={"skills", "agents", "mcps", "harnesses"},
+    )
+    assert all_grants["mcp_server"]["command"] == "ctx-mcp-server"
     expected_tool_names = [definition.name for definition in CtxCoreToolbox().tool_definitions()]
-    assert payload["mcp_server"]["tools"] == expected_tool_names
+    assert all_grants["mcp_server"]["tools"] == expected_tool_names
     assert {
         "ctx__load_entity",
         "ctx__record_validation",
         "ctx__session_state",
-    } <= set(payload["mcp_server"]["tools"])
+    } <= set(all_grants["mcp_server"]["tools"])
 
 
-def test_empty_permissions_stay_empty(monkeypatch) -> None:
+def test_missing_and_empty_permissions_stay_empty(monkeypatch) -> None:
     def fail_recommend_rows(
         query: str,
         *,
@@ -97,30 +132,29 @@ def test_empty_permissions_stay_empty(monkeypatch) -> None:
 
     monkeypatch.setattr(loopflow, "_recommend_capability_rows", fail_recommend_rows)
 
-    payload = loopflow.recommend_for_loop(
-        goal="deny all recommendations",
-        permissions=set(),
-    )
-
-    assert payload["permissions"] == {
-        "skills": False,
-        "agents": False,
-        "mcps": False,
-        "harnesses": False,
-    }
-    assert payload["capabilities"] == {
-        "skills": [],
-        "agents": [],
-        "mcps": [],
-        "harnesses": [],
-    }
-    assert payload["loopflow"]["use_tools"] is None
-    assert payload["loopflow"]["use_skills"] is None
-    assert payload["mcp_server"] == {
-        "name": "ctx",
-        "command": None,
-        "tools": [],
-    }
+    for payload in (
+        loopflow.recommend_for_loop(goal="deny all recommendations"),
+        loopflow.recommend_for_loop(goal="deny all recommendations", permissions=set()),
+    ):
+        assert payload["permissions"] == {
+            "skills": False,
+            "agents": False,
+            "mcps": False,
+            "harnesses": False,
+        }
+        assert payload["capabilities"] == {
+            "skills": [],
+            "agents": [],
+            "mcps": [],
+            "harnesses": [],
+        }
+        assert payload["loopflow"]["use_tools"] is None
+        assert payload["loopflow"]["use_skills"] is None
+        assert payload["mcp_server"] == {
+            "name": "ctx",
+            "command": None,
+            "tools": [],
+        }
 
 
 def test_loopflow_skill_hint_requires_skills_permission(monkeypatch) -> None:
@@ -145,8 +179,13 @@ def test_loopflow_skill_hint_requires_skills_permission(monkeypatch) -> None:
     assert payload["permissions"]["skills"] is False
     assert payload["capabilities"]["skills"] == []
     assert [row["name"] for row in payload["capabilities"]["mcps"]] == ["filesystem"]
-    assert payload["loopflow"]["use_tools"] == 'use tools from the "ctx" server'
+    assert payload["loopflow"]["use_tools"] is None
     assert payload["loopflow"]["use_skills"] is None
+    assert payload["mcp_server"] == {
+        "name": "ctx",
+        "command": None,
+        "tools": [],
+    }
 
 
 def test_loopflow_tool_hint_requires_mcps_permission(monkeypatch) -> None:
@@ -391,6 +430,42 @@ def test_harness_install_command_is_shell_quoted(monkeypatch) -> None:
     ]
 
 
+def test_unknown_harness_requirements_warn_without_crashing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        loopflow,
+        "_recommend_capability_rows",
+        lambda query, *, permissions, top_k: (_ for _ in ()).throw(
+            AssertionError("_recommend_capability_rows should not run for harness-only grants")
+        ),
+    )
+    monkeypatch.setattr(
+        loopflow,
+        "recommend_harnesses",
+        lambda *args, **kwargs: [{"name": "local-agent-loop", "type": "harness"}],
+    )
+
+    payload = loopflow.recommend_for_loop(
+        goal="run with a private model",
+        permissions={"harnesses"},
+        own_llm=True,
+        harness_requirements={
+            "runtime": "local workstation",
+            "unknown": "ignored",
+        },
+    )
+
+    assert payload["warnings"] == ["ignored unknown harness requirement(s): unknown"]
+    assert shlex.split(payload["agent_loop"]["harness_install"]) == [
+        "ctx-harness-install",
+        "local-agent-loop",
+        "--dry-run",
+        "--goal",
+        "run with a private model",
+        "--harness-runtime",
+        "local workstation",
+    ]
+
+
 def test_main_api_key_env_reaches_harness_install(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         loopflow,
@@ -484,7 +559,7 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
     assert payload["context"]["last_failure_present"] is True
     assert "python -m ctx.adapters.loopflow" in payload["agent_loop"]["before_plan"]
     assert "python -m ctx.adapters.loopflow" in payload["loopflow"]["before_plan"]
-    assert payload["loopflow"]["use_tools"] == 'use tools from the "ctx" server'
+    assert payload["loopflow"]["use_tools"] is None
     assert payload["loopflow"]["use_skills"].startswith("use skills: ctx-recommend")
 
 
@@ -500,31 +575,34 @@ def test_main_empty_permissions_fail_closed(monkeypatch, capsys) -> None:
     monkeypatch.setattr(loopflow, "_recommend_capability_rows", fail_recommend_rows)
     monkeypatch.setattr(loopflow, "recommend_harnesses", lambda *args, **kwargs: [])
 
-    assert (
-        loopflow.main(
-            [
-                "--goal",
-                "deny all recommendations",
-                "--permissions",
-                "",
-                "--compact",
-            ]
-        )
-        == 0
-    )
+    for argv in (
+        [
+            "--goal",
+            "deny all recommendations",
+            "--permissions",
+            "",
+            "--compact",
+        ],
+        [
+            "--goal",
+            "deny all recommendations",
+            "--compact",
+        ],
+    ):
+        assert loopflow.main(argv) == 0
 
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["permissions"] == {
-        "skills": False,
-        "agents": False,
-        "mcps": False,
-        "harnesses": False,
-    }
-    assert payload["capabilities"] == {
-        "skills": [],
-        "agents": [],
-        "mcps": [],
-        "harnesses": [],
-    }
-    assert payload["loopflow"]["use_tools"] is None
-    assert payload["loopflow"]["use_skills"] is None
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["permissions"] == {
+            "skills": False,
+            "agents": False,
+            "mcps": False,
+            "harnesses": False,
+        }
+        assert payload["capabilities"] == {
+            "skills": [],
+            "agents": [],
+            "mcps": [],
+            "harnesses": [],
+        }
+        assert payload["loopflow"]["use_tools"] is None
+        assert payload["loopflow"]["use_skills"] is None

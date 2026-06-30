@@ -31,6 +31,7 @@ _PERMISSION_ALIASES = {
 _ENTITY_TO_GROUP = {"agent": "agents", "mcp-server": "mcps", "skill": "skills"}
 _GROUP_TO_ENTITY = {"skills": "skill", "agents": "agent", "mcps": "mcp-server"}
 _CAPABILITY_KEYS = ("skills", "agents", "mcps", "harnesses")
+_ALL_CAPABILITY_GRANTS = frozenset(_CAPABILITY_KEYS)
 _HARNESS_REQUIREMENT_FLAGS = {
     "runtime": "--harness-runtime",
     "autonomy": "--harness-autonomy",
@@ -57,7 +58,7 @@ def _split_csv(values: list[str] | None) -> list[str]:
 
 
 def _parse_permissions(values: list[str] | None) -> set[str]:
-    raw = _split_csv(values) if values is not None else ["skills", "agents", "mcps"]
+    raw = _split_csv(values)
     permissions: set[str] = set()
     for value in raw:
         normalized = _PERMISSION_ALIASES.get(value.strip().lower())
@@ -187,8 +188,23 @@ def _harness_command(
     return shlex.join(parts)
 
 
-def _ctx_mcp_tool_names() -> list[str]:
+def _ctx_mcp_tool_names(permissions: set[str]) -> list[str]:
+    if not _ALL_CAPABILITY_GRANTS <= permissions:
+        return []
     return [definition.name for definition in _ctx_toolbox().tool_definitions()]
+
+
+def _normalize_harness_requirements(
+    requirements: dict[str, str],
+) -> tuple[dict[str, str], list[str]]:
+    known: dict[str, str] = {}
+    unknown: list[str] = []
+    for key, value in requirements.items():
+        if key in _HARNESS_REQUIREMENT_FLAGS:
+            known[key] = value
+        else:
+            unknown.append(str(key))
+    return known, sorted(unknown)
 
 
 def _recommendation_graph() -> Any:
@@ -245,9 +261,11 @@ def recommend_for_loop(
 ) -> dict[str, Any]:
     """Return a permissioned ctx adapter payload for a DSL or agent loop."""
     safe_top_k = max(1, min(int(top_k), 20))
-    granted = permissions if permissions is not None else {"skills", "agents", "mcps"}
+    granted = permissions or set()
     context_paths = look_at or []
-    requirements = harness_requirements or {}
+    requirements, unknown_requirement_keys = _normalize_harness_requirements(
+        harness_requirements or {}
+    )
     query = _build_query(
         goal=goal,
         loop_name=loop_name,
@@ -273,6 +291,10 @@ def recommend_for_loop(
         capability_bundle.update(_group_bundle(rows, permissions=granted, top_k=safe_top_k))
 
     warnings: list[str] = []
+    if unknown_requirement_keys:
+        warnings.append(
+            "ignored unknown harness requirement(s): " + ", ".join(unknown_requirement_keys)
+        )
     should_recommend_harness = "harnesses" in granted and (
         own_llm or bool(model_provider) or bool(model)
     )
@@ -296,9 +318,9 @@ def recommend_for_loop(
         use_skills = "use skills: ctx-recommend"
         if skill_names:
             use_skills += ", " + ", ".join(str(name) for name in skill_names)
-    use_tools = 'use tools from the "ctx" server' if "mcps" in granted else None
-    mcp_server_command = "ctx-mcp-server" if "mcps" in granted else None
-    mcp_server_tools = _ctx_mcp_tool_names() if "mcps" in granted else []
+    mcp_server_tools = _ctx_mcp_tool_names(granted)
+    use_tools = 'use tools from the "ctx" server' if mcp_server_tools else None
+    mcp_server_command = "ctx-mcp-server" if mcp_server_tools else None
 
     return {
         "version": "ctx.loop_adapter.v1",

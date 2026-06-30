@@ -52,9 +52,11 @@ python -m ctx.adapters.loopflow \
   --permissions skills,agents,mcps,harnesses \
   --own-llm \
   --model-provider ollama \
-  --model ollama/llama3.1 \
-  --last-failure-file .loopflow/last-failure.txt
+  --model ollama/llama3.1
 ```
+
+Add `--last-failure-file .loopflow/last-failure.txt` after LoopFlow has written
+that file.
 
 ## Example payload
 
@@ -163,7 +165,8 @@ logic, and ctx refreshes recommendations based on what just failed.
 The adapter fails closed:
 
 - `--permissions skills` only returns skill recommendations.
-- `--permissions mcps` returns the `ctx-mcp-server` command and MCP tool names.
+- `--permissions mcps` only returns MCP server recommendations unless all
+  affected capability grants make ctx MCP tools safe to advertise.
 - `--permissions harnesses` returns no harnesses unless `--own-llm`,
   `--model-provider`, or `--model` is present.
 - `agent_loop.harness_install` is always a `--dry-run` command. It shows what

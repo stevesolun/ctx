@@ -11,8 +11,8 @@ already supports:
 | LoopFlow or another loop that already owns plan/act/observe | **LoopFlow adapter** — `python -m ctx.adapters.loopflow` before planning |
 
 All four paths consume the **same** knowledge graph, llm-wiki, and
-quality scoring. Recommendations are identical; only the transport
-differs.
+quality scoring inputs. Output shape and grouping can differ by host
+surface; the transport and permission contract decide what each loop sees.
 
 ---
 
@@ -266,14 +266,15 @@ For LoopFlow, keep the `.loop` file in charge and call ctx before the plan:
 ```bash
 python -m ctx.adapters.loopflow \
   --loop-file rate-limit.loop \
-  --permissions skills,agents,mcps \
-  --last-failure-file .loopflow/last-failure.txt
+  --permissions skills,agents,mcps
 ```
 
-The returned payload includes LoopFlow-ready hints such as:
+Add `--last-failure-file .loopflow/last-failure.txt` only after the loop has
+written that file; omit it on the first run.
+
+The returned payload includes LoopFlow-ready hints for the granted groups:
 
 ```loop
-use tools from the "ctx" server
 use skills: ctx-recommend, security-review, code-review
 ```
 
@@ -311,7 +312,9 @@ plan_context = recommend_for_loop(
 
 Load only the groups that are explicitly granted in `permissions`. If
 `harnesses` is granted without `--own-llm`, `--model-provider`, or `--model`,
-the adapter returns a warning and no harness recommendations.
+the adapter returns a warning and no harness recommendations. The ctx MCP tool
+list is also permission-filtered; ctx tools that can operate across all
+capability groups only appear when all of those groups are granted.
 
 ---
 
