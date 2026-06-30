@@ -49,6 +49,14 @@ Public functions:
         by default) — lets callers pre-build a custom CtxCoreToolbox
         pointed at a non-default location.
 
+Adapter support helpers:
+
+    ctx_core_tool_names()
+        Return ctx-core tool names exposed by the shared toolbox.
+
+    recommendation_graph()
+        Return the shared recommendation graph for adapter-side ranking.
+
 Plan 001 Phase H9.
 """
 
@@ -362,12 +370,12 @@ def list_all_entities(
 
 
 def ctx_core_tool_names() -> list[str]:
-    """Return the ctx-core tool names exposed by the shared toolbox."""
+    """Return ctx-core tool names exposed by the shared toolbox for adapter payloads."""
     return [definition.name for definition in _get_toolbox().tool_definitions()]
 
 
 def recommendation_graph() -> Any:
-    """Return the shared recommendation graph."""
+    """Return the shared recommendation graph for adapter-side ranking."""
     return _get_toolbox()._ensure_graph()
 
 

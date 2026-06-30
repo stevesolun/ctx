@@ -53,7 +53,8 @@ PENDING_UNLOAD = CLAUDE_DIR / "pending-unload.json"
 SHOWN_FLAG = CLAUDE_DIR / ".bundle-suggest-shown"
 
 # Entity-type display ordering for the execution bundle. Harnesses are
-# recommended through ctx-init / ctx-harness-install, not Claude Code hooks.
+# recommended through ctx-init / ctx-harness-install / loop adapters, not
+# Claude Code hooks.
 _TYPE_ORDER: tuple[str, ...] = ("skill", "agent", "mcp-server")
 _TYPE_DISPLAY: dict[str, str] = {
     "skill": "Skills",

@@ -294,7 +294,7 @@ def resolve(
                 # MCPs keep a slightly lower floor because that type is
                 # historically sparser; a single strong link is still
                 # signal, not noise. Harnesses are recommended through
-                # the model-onboarding catalog flow, not repo scans.
+                # model-onboarding catalog and loop-adapter flows, not repo scans.
                 _SKILL_NOISE_FLOOR = 0.30     # 30% of top hit's score
                 _TOOLING_NOISE_FLOOR = 0.20   # 20% (MCPs sparser)
                 for hit in graph_hits:
