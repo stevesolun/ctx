@@ -256,6 +256,61 @@ def test_agents_only_uses_type_filtered_recommendations(monkeypatch) -> None:
     assert [row["name"] for row in payload["capabilities"]["agents"]] == ["browser-agent"]
 
 
+def test_recommend_for_loop_reuses_cached_toolbox(monkeypatch) -> None:
+    constructions = 0
+    graph_loads = 0
+
+    class _FakeToolbox:
+        def __init__(self) -> None:
+            nonlocal constructions
+            constructions += 1
+            self._graph: _FakeGraph | None = None
+
+        def tool_definitions(self) -> list[Any]:
+            return []
+
+        def _ensure_graph(self) -> _FakeGraph:
+            nonlocal graph_loads
+            if self._graph is None:
+                graph_loads += 1
+                self._graph = _FakeGraph()
+            return self._graph
+
+    def fake_recommend_by_tags(
+        graph: Any,
+        tags: list[str],
+        *,
+        top_n: int,
+        query: str | None,
+        entity_types: tuple[str, ...] | set[str] | None,
+        min_normalized_score: float,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        del graph, tags, top_n, query, min_normalized_score, kwargs
+        assert entity_types == ("agent",)
+        return [{"name": "browser-agent", "type": "agent", "score": 78}]
+
+    monkeypatch.setattr(loopflow, "CtxCoreToolbox", _FakeToolbox)
+    monkeypatch.setattr(loopflow, "query_to_tags", lambda query: ["python"])
+    monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
+    loopflow._ctx_toolbox.cache_clear()
+    try:
+        for _ in range(2):
+            payload = loopflow.recommend_for_loop(
+                goal="python task",
+                permissions={"agents"},
+                top_k=1,
+            )
+            assert [row["name"] for row in payload["capabilities"]["agents"]] == [
+                "browser-agent"
+            ]
+    finally:
+        loopflow._ctx_toolbox.cache_clear()
+
+    assert constructions == 1
+    assert graph_loads == 1
+
+
 def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
     calls: list[str] = []
 

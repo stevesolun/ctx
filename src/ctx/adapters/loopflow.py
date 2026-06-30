@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from functools import cache
 import json
 from pathlib import Path
 import re
@@ -39,6 +40,11 @@ _HARNESS_REQUIREMENT_FLAGS = {
     "attach_mode": "--harness-attach-mode",
     "api_key_env": "--api-key-env",
 }
+
+
+@cache
+def _ctx_toolbox() -> CtxCoreToolbox:
+    return CtxCoreToolbox()
 
 
 def _split_csv(values: list[str] | None) -> list[str]:
@@ -185,11 +191,11 @@ def _harness_command(
 
 
 def _ctx_mcp_tool_names() -> list[str]:
-    return [definition.name for definition in CtxCoreToolbox().tool_definitions()]
+    return [definition.name for definition in _ctx_toolbox().tool_definitions()]
 
 
 def _recommendation_graph() -> Any:
-    return CtxCoreToolbox()._ensure_graph()
+    return _ctx_toolbox()._ensure_graph()
 
 
 def _recommend_capability_rows(
