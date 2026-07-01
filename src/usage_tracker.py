@@ -316,11 +316,11 @@ def update_skill_page(
         into pending-unload.json (so callers can count stale detections
         without re-reading the page).
 
-    Pass ``wiki_dir`` to target a non-default wiki; falls back to the
-    module-level ``ENTITIES_DIR`` for backward compatibility. Strix
-    vuln-0004: previously the ``--wiki`` CLI flag only gated the
-    existence check, then this function ignored it and silently wrote
-    into ``WIKI_DIR``.
+    Pass ``wiki_dir`` to target a non-default wiki. When ``wiki_dir`` is
+    omitted, a custom module-level ``ENTITIES_DIR`` takes precedence over the
+    default packed wiki fallback for backward compatibility. Strix vuln-0004:
+    previously the ``--wiki`` CLI flag only gated the existence check, then
+    this function ignored it and silently wrote into ``WIKI_DIR``.
     """
     if not SAFE_NAME_RE.match(skill_name):
         print(f"Warning: skipping invalid skill name: {skill_name!r}", file=sys.stderr)
@@ -368,7 +368,9 @@ def append_wiki_log(
     """Append session summary to wiki log.md.
 
     Honors ``wiki_dir`` if provided so Strix vuln-0004 (``--wiki`` flag
-    silently ignored) is closed end-to-end.
+    silently ignored) is closed end-to-end. When ``wiki_dir`` is omitted, a
+    custom module-level ``LOG_PATH`` takes precedence over the default packed
+    wiki fallback.
     """
     entry = (
         f"\n## [{_today()}] session-end | usage-sync\n"

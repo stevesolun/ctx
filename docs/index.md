@@ -31,12 +31,13 @@ with persistent memory that gets smarter every session.
     Optional extras: `pip install "claude-ctx[embeddings]"` for the
     semantic backend, `pip install "claude-ctx[harness]"` for local/API
     model harness runs, `pip install "claude-ctx[dev]"` for the
-    pytest/mypy/ruff toolchain. After install the `ctx-scan-repo`,
+    pytest/mypy/ruff toolchain. After install the `ctx`, `ctx-scan-repo`,
     `ctx-skill-quality`, `ctx-skill-health`, and `ctx-toolbox` console
-    scripts are on PATH. `ctx-init --graph` installs the fast pre-built
-    runtime graph that powers recommendations and harness dry-runs; source checkouts use
-    `graph/wiki-graph-runtime.tar.gz`, while pip installs download the
-    matching GitHub release asset. Use
+    scripts are on PATH; `python -m ctx --help` reaches the same
+    run/resume/sessions CLI as `ctx`. `ctx-init --graph` installs the fast
+    pre-built runtime graph that powers recommendations and harness dry-runs;
+    source checkouts use `graph/wiki-graph-runtime.tar.gz`, while pip installs
+    download the matching GitHub release asset. Use
     `ctx-init --graph --graph-install-mode full` when you want the full
     markdown LLM-wiki expanded locally.
 
