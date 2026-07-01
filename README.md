@@ -53,7 +53,7 @@ Rows for public MkDocs pages use the exact `docs/...md` path from `mkdocs.yml`
 as `entrypoint_or_route`. Public linked docs assets under
 `docs/assets/javascripts/`, `docs/services/`, and `docs/toolbox/templates/`
 are tracker-covered too, so adding, moving, or removing one means adding or
-updating the matching feature-tracker row.
+updating matching rows in the supporting feature ledger and canonical tracker.
 Examples from that tracker:
 
 | Tracker row | User story | Expected ctx behavior |

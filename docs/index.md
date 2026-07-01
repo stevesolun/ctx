@@ -59,9 +59,9 @@ with persistent memory that gets smarter every session.
     strict MkDocs build. Public docs surfaces are release-tracked: when
     `mkdocs.yml` adds, removes, or moves a nav `.md` page, or public linked
     assets under `docs/assets/javascripts/`, `docs/services/`, or
-    `docs/toolbox/templates/` change, update the canonical
-    `qa/feature_status.csv`; supporting docs rows still use the exact path in
-    `entrypoint_or_route`.
+    `docs/toolbox/templates/` change, update both
+    `docs/qa/feature-user-story-status.csv` and the canonical
+    `qa/feature_status.csv` with the exact path in `entrypoint_or_route`.
 
 ## Why this exists
 
