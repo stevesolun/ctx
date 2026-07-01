@@ -14,7 +14,10 @@ backend-agnostic. Both implementations return L2-normalised float32 vectors
 so downstream cosine similarity is a single dot product.
 
 Backend selection is centralised in ``get_embedder(name)``; callers pass the
-string from ``ctx_config.intake.embedding.backend``. Heavy imports
+string from ``ctx_config.intake.embedding.backend``. For the Ollama backend,
+``intake.embedding.base_url`` wins first, then ``OLLAMA_URL`` when set, then
+``http://localhost:11434``. An empty or malformed ``OLLAMA_URL`` is treated as
+configuration and rejected instead of silently falling back. Heavy imports
 (``sentence_transformers``, ``requests``) happen lazily inside the concrete
 class to keep the module cheap to import.
 

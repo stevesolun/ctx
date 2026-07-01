@@ -89,6 +89,11 @@ signal:
 1. **Semantic cosine** — when the embedding backend is available, entity
    text is embedded and semantic neighbors above the configured build floor
    contribute weighted edges.
+   The default backend is `sentence-transformers`. Setting
+   `intake.embedding.backend` to `ollama` uses
+   `intake.embedding.base_url`, then `OLLAMA_URL` when set, then
+   `http://localhost:11434`; non-local hosts require
+   `intake.embedding.allow_remote: true`, and malformed values fail closed.
 2. **Explicit frontmatter tags** — each entity page's YAML `tags:`
    list contributes edges between every pair of entities that share
    a tag. Popular tags capped at 500 nodes to avoid noise-floor
