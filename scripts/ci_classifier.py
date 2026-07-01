@@ -28,6 +28,7 @@ DOCS_PATTERNS = (
     "graph/README.md",
     "LICENSE",
     "mkdocs.yml",
+    "qa/**",
     "requirements-docs.txt",
 )
 GRAPH_ARTIFACT_PATTERNS = (
