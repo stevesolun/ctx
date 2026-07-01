@@ -101,7 +101,8 @@ The shipped config keeps telemetry local:
 ```
 
 `local_redacted` removes or hashes raw input fields such as `query`, `prompt`,
-`tool_input`, `stdout`, `stderr`, paths, repo names, and secrets. The only
+`tool_input`, `stdout`, `stderr`, repo names, secrets, `paths`, dotted path
+keys such as `ctx.repo.path`, and keys ending in `_path` or `_paths`. The only
 accepted modes are `local_redacted`, `disabled`, `off`, and `none`; unknown modes
 fail closed instead of emitting raw fields.
 

@@ -15,4 +15,6 @@ New CLIs (harness-facing, added H7):
   ctx run        - drive any model autonomously against a task
   ctx resume     - continue a previous session
   ctx sessions   - list / inspect sessions
+
+The package entrypoint ``python -m ctx`` delegates to the same harness CLI.
 """

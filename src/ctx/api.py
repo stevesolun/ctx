@@ -20,7 +20,8 @@ Four delivery paths, in increasing order of coupling to ctx:
 
 3. **Use ``ctx run`` directly.** The full harness-over-LiteLLM
    experience, no host-side code required. Good if you don't already
-   have a loop.
+   have a loop. ``python -m ctx run`` reaches the same CLI when the
+   console script is unavailable.
 
 4. **Use the LoopFlow adapter.** If another runner already owns
    plan/act/observe, call ``python -m ctx.adapters.loopflow`` or
