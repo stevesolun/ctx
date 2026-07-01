@@ -34,8 +34,8 @@ from the per-repo file fall back to the global value.
         "analysis": "dynamic",
         // Optional: restrict to these glob projects
         "projects": ["*"],
-        // Optional: restrict to these file globs
-        "files": ["src/**/*.py"]
+        // Optional: match intent signals
+        "signals": ["python"]
       },
 
       "budget": {
@@ -52,8 +52,8 @@ from the per-repo file fall back to the global value.
 
       "trigger": {
         "slash": true,
-        "session_start": false,
-        "file_save": false,
+        // Optional file-save glob; null disables file-save
+        "file_save": null,
         "pre_commit": true,
         "session_end": false
       },
@@ -101,9 +101,11 @@ at `~/.claude/toolbox-runs/<plan_hash>.json`.
 
 ### `trigger`
 
-At least one trigger must be true. Multiple triggers are allowed — a
-`ship-it` toolbox typically enables `slash`, `pre_commit`, and
-`session_end`.
+Multiple triggers are allowed — a `ship-it` toolbox typically enables
+`slash`, `pre_commit`, and `session_end`. `file_save` is a glob string
+such as `"**/*.md"`; use `null` to disable file-save matching.
+`session-start` is not configured in the trigger map: any active toolbox
+with a non-empty `pre` list can preload those skills at session start.
 
 ### `guardrail`
 
@@ -133,11 +135,11 @@ ctx-toolbox import my-toolboxes.yaml
 
 ## Validation
 
-`toolbox_config.load()` validates on read:
+`toolbox_config` validates on read:
 
 - `version` must equal `1`.
-- Every toolbox needs at least one trigger.
 - `scope.analysis` must be one of `diff`, `dynamic`, `graph-blast`, `full`.
+- `dedup.policy` must be one of `fresh`, `cached`.
 - `budget.max_tokens` and `budget.max_seconds` must be positive ints.
 
 Invalid entries raise `ValueError` with the offending key.

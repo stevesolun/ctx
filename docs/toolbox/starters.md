@@ -10,12 +10,13 @@ in `.toolbox.yaml`.
 
 Runs `code-reviewer`, `security-reviewer`, `architect-review`,
 `test-automator`, `performance-engineer`, `accessibility-tester`, and
-`docs-lookup` against the diff + graph blast radius.
+`docs-lookup` against the dynamic review scope.
 
 - **Triggers**: slash, pre-commit, session-end.
-- **Scope**: `dynamic` — diff plus imports of changed modules.
+- **Scope**: `dynamic` — diff by default, graph-blast for tiny diffs with
+  graph edges, full repo when no diff exists.
 - **Budget**: 200 k tokens / 420 seconds.
-- **Guardrail**: on (HIGH/CRITICAL blocks pre-commit).
+- **Guardrail**: off.
 
 Best for: shipping a feature branch. The council covers correctness,
 security, architecture, testing, performance, accessibility, and docs in
@@ -25,10 +26,10 @@ one pass.
 
 > **Full-repo security audit with blocking guardrail on HIGH findings.**
 
-Runs `security-reviewer`, `backend-security-coder`, `frontend-security-coder`,
-and `compliance-auditor` against the entire repo.
+Runs `security-reviewer`, `security-auditor`, `penetration-tester`,
+`compliance-auditor`, and `threat-detection-engineer` against the entire repo.
 
-- **Triggers**: slash, pre-commit.
+- **Triggers**: slash, pre-commit, file-save on `**/auth/**`.
 - **Scope**: `full` — every tracked file.
 - **Budget**: 300 k tokens / 600 seconds.
 - **Guardrail**: on.
@@ -40,12 +41,12 @@ Expensive; not a per-commit hook.
 
 > **Graph-informed refactor review with regression and dead-code checks.**
 
-Runs `architect-review`, `refactor-cleaner`, `test-automator`, and
-`code-reviewer` against diff + graph blast.
+Runs `architect-review`, `refactor-cleaner`, `code-reviewer`,
+`test-automator`, and `dependency-manager` against graph-blast scope.
 
-- **Triggers**: slash, pre-commit.
-- **Scope**: `dynamic`.
-- **Budget**: 120 k tokens / 300 seconds.
+- **Triggers**: slash, session-end.
+- **Scope**: `graph-blast`.
+- **Budget**: 180 k tokens / 360 seconds.
 - **Guardrail**: off — flags issues without blocking.
 
 Best for: mid-refactor checkpoints. Catches orphaned code, downstream
@@ -55,12 +56,12 @@ breakage, missing test updates.
 
 > **Documentation pass: accuracy, completeness, clarity, and API parity.**
 
-Runs `docs-lookup`, `technical-writer`, and `code-reviewer` against docs
-diffs.
+Runs `technical-writer`, `docs-architect`, `api-documenter`, and
+`tutorial-engineer` against docs diffs.
 
-- **Triggers**: slash, pre-commit.
+- **Triggers**: slash, file-save on `**/*.md`.
 - **Scope**: `diff`.
-- **Budget**: 60 k tokens / 180 seconds.
+- **Budget**: 120 k tokens / 240 seconds.
 - **Guardrail**: off.
 
 Best for: docs-heavy branches and README updates.
@@ -73,8 +74,8 @@ Invokes `intent_interview` in interactive mode, then activates whichever
 starters the user selects.
 
 - **Triggers**: slash only.
-- **Scope**: `full` (fresh scan of a new repo).
-- **Budget**: small — this bundle is just an orchestrator.
+- **Scope**: `diff`.
+- **Budget**: 100 k tokens / 300 seconds.
 
 Best for: `git init` followed by `toolbox init`.
 

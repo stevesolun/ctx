@@ -214,6 +214,8 @@ ctx run \
 
 See `ctx run --help` for the full flag set (budgets, compaction,
 system prompt overrides, session resume, JSON output, ...).
+If the console script is unavailable, use the package entrypoint instead:
+`python -m ctx run ...`.
 
 Planning and review modes are opt-in flags on `ctx run`. Use `--planner` to
 produce a structured spec before generation, `--evaluator` to grade and revise
