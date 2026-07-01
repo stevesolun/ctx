@@ -96,6 +96,10 @@ _RAW_VALUE_KEYS = frozenset(
 _SCALAR_TYPES = (str, int, float, bool, type(None))
 
 
+def _raw_value_key_like(normalized_key: str) -> bool:
+    return normalized_key in _RAW_VALUE_KEYS or normalized_key.endswith(("_path", "_paths"))
+
+
 @dataclass(frozen=True)
 class TelemetryEvent:
     """One canonical ctx telemetry event."""
@@ -2664,7 +2668,7 @@ def _sanitize_payload(
             sanitized[key] = "[redacted]"
             continue
         normalized = key.lower().replace("-", "_")
-        if privacy_mode == DEFAULT_PRIVACY_MODE and normalized in _RAW_VALUE_KEYS:
+        if privacy_mode == DEFAULT_PRIVACY_MODE and _raw_value_key_like(normalized):
             if value is not None:
                 sanitized[f"{key}_hash"] = hash_identifier(str(value), salt=hash_salt)
             continue

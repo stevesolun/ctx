@@ -64,6 +64,7 @@ def test_record_event_writes_local_redacted_envelope(tmp_path: Path) -> None:
         cwd="/Users/example/private-repo/service",
         payload={
             "query": "debug failing checkout for customer acme",
+            "repo_path": "/Users/example/private-repo",
             "result_count": 2,
             "token": "sk-secret-token-value",
             "ranked": [{"slug": "python-patterns", "score": 0.91}],
@@ -90,6 +91,9 @@ def test_record_event_writes_local_redacted_envelope(tmp_path: Path) -> None:
     assert raw["payload"]["token"] == "[redacted]"
     assert "query" not in raw["payload"]
     assert raw["payload"]["query_hash"].startswith("sha256:")
+    assert "repo_path" not in raw["payload"]
+    assert raw["payload"]["repo_path_hash"].startswith("sha256:")
+    assert "/Users/example/private-repo" not in path.read_text(encoding="utf-8")
 
     got = list(read_events(path, trusted_root=tmp_path))
     assert len(got) == 1
