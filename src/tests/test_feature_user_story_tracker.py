@@ -31,6 +31,15 @@ CANONICAL_STATUSES = ACTIONABLE_STATUSES | {
     "Blocked/Human Decision",
     "Deprecated",
 }
+CANONICAL_STATUS_OVERRIDES = {
+    "DIST-004": {
+        "source_status": "Needs Fix",
+        "canonical_status": "Blocked/Human Decision",
+        "owner_lane": "Human Owner",
+        "review_note": "canonical status override",
+        "validation_status": "out of scope",
+    },
+}
 
 
 def _tracker_rows() -> list[dict[str, str]]:
@@ -119,6 +128,8 @@ def test_canonical_feature_status_tracker_merges_supporting_ledgers() -> None:
     expected_ids = {row["feature_id"] for row in feature_rows} | {
         row["dashboard_id"] for row in dashboard_rows
     }
+    supporting_statuses = {row["feature_id"]: row["status"] for row in feature_rows}
+    supporting_statuses.update({row["dashboard_id"]: row["status"] for row in dashboard_rows})
     required = (
         "feature_id",
         "source_tracker",
@@ -158,6 +169,21 @@ def test_canonical_feature_status_tracker_merges_supporting_ledgers() -> None:
         }
         assert row["risk_level"] in {"Low", "Medium", "High", "Critical"}
         assert row["status"] in CANONICAL_STATUSES
+        source_status = supporting_statuses.get(row["feature_id"])
+        if source_status is not None:
+            if row["status"] == source_status:
+                assert row["feature_id"] not in CANONICAL_STATUS_OVERRIDES
+            else:
+                override = CANONICAL_STATUS_OVERRIDES.get(row["feature_id"])
+                assert override is not None, (
+                    f"{row['feature_id']} status differs from supporting ledger without "
+                    "a canonical override contract"
+                )
+                assert source_status == override["source_status"]
+                assert row["status"] == override["canonical_status"]
+                assert row["owner_lane"] == override["owner_lane"]
+                assert override["review_note"] in row["review_notes"].lower()
+                assert override["validation_status"] in row["validation_status"].lower()
         if row["status"] in FIX_STATUSES or row["bug_summary"]:
             for key in ("bug_id", "bug_summary", "bug_repro", "fix_status"):
                 assert row[key].strip(), (
@@ -167,9 +193,7 @@ def test_canonical_feature_status_tracker_merges_supporting_ledgers() -> None:
             assert row["owner_lane"] == "Human Owner"
             assert "out of scope" in row["validation_status"].lower()
 
-    dist_row = next(row for row in rows if row["feature_id"] == "DIST-004")
-    assert dist_row["status"] == "Blocked/Human Decision"
-    assert "HF_TOKEN" in dist_row["bug_summary"]
+    assert set(CANONICAL_STATUS_OVERRIDES) <= canonical_ids
 
 
 def test_feature_user_story_tracker_has_no_empty_core_fields() -> None:

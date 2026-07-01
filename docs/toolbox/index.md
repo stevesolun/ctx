@@ -24,8 +24,9 @@ Each arrow is a concrete module:
 - **Declare**: [`toolbox_config.py`](https://github.com/stevesolun/ctx/blob/main/src/toolbox_config.py)
   loads `~/.claude/toolboxes.json` and merges per-repo `.toolbox.yaml` on top.
 - **Trigger**: [`toolbox_hooks.py`](https://github.com/stevesolun/ctx/blob/main/src/toolbox_hooks.py)
-  listens for `session-start`, `file-save`, `pre-commit`, `session-end`, and
-  the `/toolbox run` slash command.
+  listens for `session-start`, `file-save`, `pre-commit`, and `session-end`.
+  User-initiated `/toolbox run` wrappers use the same toolbox config but do
+  not enter through `toolbox_hooks.py`.
 - **Plan**: [`council_runner.py`](https://github.com/stevesolun/ctx/blob/main/src/council_runner.py)
   assembles a `RunPlan` honoring scope, budget caps, dedup, and graph-blast expansion.
 - **Verdict**: [`toolbox_verdict.py`](https://github.com/stevesolun/ctx/blob/main/src/toolbox_verdict.py)

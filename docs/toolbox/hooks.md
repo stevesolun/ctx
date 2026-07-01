@@ -11,13 +11,14 @@ toolbox config but are not emitted by this hook runner.
 |---|---|---|
 | `session-start` | New Claude Code session | Skill preloaders, intent suggestions |
 | `file-save` | File written to disk | Linters, quick reviewers |
-| `pre-commit` | `git commit` before write | Guardrail councils (`ship-it`, `security-sweep`) |
+| `pre-commit` | `git commit` before write | `security-sweep` guardrail |
 | `session-end` | Session closes | Digest, behavior miner, retro |
-| `slash:/toolbox run <name>` | User-initiated wrapper | Anything |
 
 `session-start` matches active toolboxes with a non-empty `pre` list.
 `file-save`, `pre-commit`, and `session-end` use the toolbox's `trigger`
-map. Events with no matching toolbox emit nothing.
+map. Events with no matching toolbox emit nothing. User-initiated slash
+wrappers are dispatched outside `toolbox_hooks.py` and select toolboxes from
+the same config with `trigger.slash`.
 
 ## Emission format
 
@@ -26,9 +27,9 @@ One JSON line per matching toolbox, on stdout:
 ```jsonc
 {
   "trigger": "pre-commit",
-  "toolbox": "ship-it",
+  "toolbox": "security-sweep",
   "plan_file": "/Users/steve/.claude/toolbox-runs/abc123.json",
-  "agents": ["code-reviewer", "security-reviewer", "architect-review"],
+  "agents": ["security-reviewer", "security-auditor", "penetration-tester"],
   "files": ["src/toolbox_verdict.py", "src/tests/test_toolbox_verdict.py"],
   "source": "fresh",
   "guardrail": true
