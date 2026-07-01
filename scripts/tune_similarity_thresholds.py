@@ -22,6 +22,14 @@ from ctx_config import cfg  # noqa: E402
 from intake_gate import compose_corpus_text  # noqa: E402
 
 FIXTURE_DIR = SRC_DIR / "tests" / "fixtures" / "similarity"
+USAGE = """usage: python scripts/tune_similarity_thresholds.py
+
+Sweep similarity thresholds against the fixture corpus and print precision,
+recall, F1, and confusion counts for candidate defaults.
+
+Requires the configured embedding backend. Use --help to show this message
+without loading the embedding model.
+"""
 
 
 @dataclass(frozen=True)
@@ -66,8 +74,30 @@ def _score(pair: _Pair, embedder, root: Path) -> float:
     return float(top[0].score) if top else 0.0
 
 
-def main() -> None:
+def _precision_recall_f1(
+    near_scores: list[tuple[str, float]],
+    negative_scores: list[tuple[str, float]],
+    threshold: float,
+) -> tuple[float, float, float, int, int, int]:
+    tp = sum(1 for _, score in near_scores if score >= threshold)
+    fn = len(near_scores) - tp
+    fp = sum(1 for _, score in negative_scores if score >= threshold)
+    recall = tp / (tp + fn) if (tp + fn) else 0
+    precision = tp / (tp + fp) if (tp + fp) else 0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0
+    return precision, recall, f1, tp, fn, fp
+
+
+def main(argv: list[str] | None = None) -> int:
     import tempfile
+
+    args = sys.argv[1:] if argv is None else argv
+    if any(arg in {"-h", "--help"} for arg in args):
+        print(USAGE)
+        return 0
+    if args:
+        print(USAGE, file=sys.stderr)
+        return 2
 
     embedder = cfg.build_intake_embedder()
     near = _load("near_duplicates.jsonl")
@@ -100,15 +130,23 @@ def main() -> None:
     # Sweep: at each candidate near_dup threshold, compute P/R assuming a pair
     # is flagged iff top_score >= threshold.
     print("\n=== Threshold sweep (flag if score >= t) ===")
-    print(f"{'threshold':>10} {'recall':>8} {'precision':>10} {'TP':>4} {'FN':>4} {'FP':>4}")
+    print(
+        f"{'threshold':>10} {'recall':>8} {'precision':>10} "
+        f"{'f1':>8} {'TP':>4} {'FN':>4} {'FP':>4}"
+    )
     for t in [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.82, 0.85, 0.88, 0.90, 0.93]:
-        tp = sum(1 for _, s in near_scores if s >= t)
-        fn = len(near_scores) - tp
-        fp = sum(1 for _, s in distinct_scores + adv_scores if s >= t)
-        recall = tp / (tp + fn) if (tp + fn) else 0
-        precision = tp / (tp + fp) if (tp + fp) else 0
-        print(f"{t:>10.2f} {recall:>8.3f} {precision:>10.3f} {tp:>4} {fn:>4} {fp:>4}")
+        precision, recall, f1, tp, fn, fp = _precision_recall_f1(
+            near_scores,
+            distinct_scores + adv_scores,
+            t,
+        )
+        print(
+            f"{t:>10.2f} {recall:>8.3f} {precision:>10.3f} "
+            f"{f1:>8.3f} {tp:>4} {fn:>4} {fp:>4}"
+        )
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

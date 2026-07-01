@@ -10,6 +10,14 @@ from pathlib import Path
 
 CLAUDE_HOME = Path(os.path.expanduser("~/.claude"))
 BACKUPS = CLAUDE_HOME / "backups"
+USAGE = """usage: python scripts/audit_backup.py [SNAPSHOT]
+
+Summarize a backup snapshot and flag expected ~/.claude files missing from it.
+
+Arguments:
+  SNAPSHOT  Optional backup snapshot directory. Defaults to the latest
+            directory under ~/.claude/backups.
+"""
 
 
 def latest_snapshot() -> Path:
@@ -17,8 +25,15 @@ def latest_snapshot() -> Path:
     return snaps[-1]
 
 
+def _snapshot_arg(argv: list[str]) -> Path:
+    if len(argv) > 1 and argv[1] in {"-h", "--help"}:
+        print(USAGE)
+        raise SystemExit(0)
+    return Path(argv[1]) if len(argv) > 1 else latest_snapshot()
+
+
 def main() -> int:
-    snap = Path(sys.argv[1]) if len(sys.argv) > 1 else latest_snapshot()
+    snap = _snapshot_arg(sys.argv)
     manifest = json.loads((snap / "manifest.json").read_text(encoding="utf-8-sig"))
 
     print(f"snapshot:  {snap}")
