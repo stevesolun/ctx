@@ -121,6 +121,7 @@ ctx-harness-install text-to-cad --dry-run   # inspect before cloning/running any
 ctx-harness-install text-to-cad             # install after reviewing the plan
 ctx-harness-install text-to-cad --update --dry-run
 ctx-harness-install text-to-cad --uninstall --dry-run
+python -m ctx --help      # same run/resume/sessions CLI as the ctx script
 python -m ctx.adapters.loopflow --goal "fix checkout e2e" --permissions skills,agents,mcps
 ctx-skill-quality list     # four-signal quality score for every skill
 ctx-skill-quality explain python-patterns   # drill into a single skill

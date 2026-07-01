@@ -27,7 +27,7 @@ Each arrow is a concrete module:
   listens for `session-start`, `file-save`, `pre-commit`, `session-end`, and
   the `/toolbox run` slash command.
 - **Plan**: [`council_runner.py`](https://github.com/stevesolun/ctx/blob/main/src/council_runner.py)
-  assembles a `RunPlan` honoring scope, dedup, and graph-blast expansion.
+  assembles a `RunPlan` honoring scope, budget caps, dedup, and graph-blast expansion.
 - **Verdict**: [`toolbox_verdict.py`](https://github.com/stevesolun/ctx/blob/main/src/toolbox_verdict.py)
   merges findings by id and escalates level to max(findings).
 
@@ -64,7 +64,8 @@ Or let the `pre-commit` hook fire it automatically — see
 | Mode | What gets reviewed | Best for |
 |---|---|---|
 | `diff` | Files in the current uncommitted diff | Pre-commit, real-time review |
-| `dynamic` | Diff + graph blast radius (imports of modified files) | Refactor safety |
+| `dynamic` | Diff by default; graph-blast for tiny diffs when graph edges are available; full repo when no diff exists | General-purpose review |
+| `graph-blast` | Diff plus one graph hop when graph edges are supplied | Refactor safety |
 | `full` | Entire repo | Security sweeps, docs audits |
 
 ## Related

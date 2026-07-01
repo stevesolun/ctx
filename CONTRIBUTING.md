@@ -28,12 +28,13 @@ pytest --cov=src -q                # with coverage report
 
 ## Documentation changes
 
-Public docs surfaces are release-tracked in
+Public docs surfaces are release-tracked in the canonical
+`qa/feature_status.csv` tracker. Supporting feature rows remain in
 `docs/qa/feature-user-story-status.csv`. If you add, remove, or move a `.md`
 entry under `mkdocs.yml` `nav`, or change linked public assets under
 `docs/assets/javascripts/`, `docs/services/`, or `docs/toolbox/templates/`,
-update the canonical feature tracker with the exact path in
-`entrypoint_or_route` and run:
+update `qa/feature_status.csv` with the exact path in `entrypoint_or_route`
+and run:
 
 ```bash
 python -m pytest -q --no-cov \
