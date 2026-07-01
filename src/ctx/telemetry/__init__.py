@@ -1229,7 +1229,11 @@ def _ctx_version() -> str | None:
     try:
         return package_version("claude-ctx")
     except PackageNotFoundError:
-        return None
+        try:
+            from ctx import __version__
+        except (ImportError, AttributeError):
+            return None
+        return __version__ or None
 
 
 def _resolve_path(path: Path, *, trusted_root: Path | None = None) -> Path:
