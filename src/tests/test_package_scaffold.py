@@ -157,10 +157,7 @@ def test_every_subpackage_has_docstring() -> None:
         mod = importlib.import_module(name)
         if not (mod.__doc__ and mod.__doc__.strip()):
             missing.append(name)
-    assert not missing, (
-        "The following ctx subpackages are missing module docstrings: "
-        f"{missing}"
-    )
+    assert not missing, f"The following ctx subpackages are missing module docstrings: {missing}"
 
 
 def test_pyproject_declares_all_subpackages() -> None:
@@ -179,9 +176,7 @@ def test_pyproject_declares_all_subpackages() -> None:
     declared = set(data["tool"]["setuptools"]["packages"])
     expected = set(_EXPECTED_SUBPACKAGES)
     missing = expected - declared
-    assert not missing, (
-        f"pyproject.toml packages list is missing: {sorted(missing)}"
-    )
+    assert not missing, f"pyproject.toml packages list is missing: {sorted(missing)}"
 
 
 def test_flat_console_scripts_are_packaged() -> None:
@@ -217,10 +212,7 @@ def test_flat_console_scripts_are_packaged() -> None:
         if "." not in target.split(":", 1)[0]
     }
     missing = flat_targets - packaged_modules
-    assert not missing, (
-        "Flat console script targets missing from py-modules: "
-        f"{sorted(missing)}"
-    )
+    assert not missing, f"Flat console script targets missing from py-modules: {sorted(missing)}"
 
 
 def test_no_legacy_flat_shadow() -> None:
@@ -232,6 +224,4 @@ def test_no_legacy_flat_shadow() -> None:
     and does NOT collide with the new package path."""
     src = Path(__file__).resolve().parent.parent
     collision = src / "ctx.py"
-    assert not collision.exists(), (
-        f"{collision} shadows the ctx package — rename or remove it."
-    )
+    assert not collision.exists(), f"{collision} shadows the ctx package — rename or remove it."

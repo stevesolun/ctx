@@ -116,30 +116,23 @@ def _is_graph_artifact_path(path: str) -> bool:
 
 
 def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
-    files = [
-        normalized
-        for path in paths
-        if (normalized := _normalize_path(path))
-    ]
+    files = [normalized for path in paths if (normalized := _normalize_path(path))]
     ci_changed = any(_matches(path, (".github/workflows/**",)) for path in files)
     docs_changed = any(_matches(path, DOCS_PATTERNS) for path in files)
     graph_artifact_changed = any(_is_graph_artifact_path(path) for path in files)
     graph_only = bool(files) and all(_matches(path, ("graph/**",)) for path in files)
     return {
-        "browser_changed": ci_changed
-        or any(_matches(path, BROWSER_PATTERNS) for path in files),
+        "browser_changed": ci_changed or any(_matches(path, BROWSER_PATTERNS) for path in files),
         "ci_changed": ci_changed,
         "docs_changed": docs_changed,
         "docs_only": bool(files) and all(_matches(path, DOCS_PATTERNS) for path in files),
         "graph_artifact_changed": graph_artifact_changed,
         "graph_changed": any(_matches(path, ("graph/**",)) for path in files),
         "graph_only": graph_only,
-        "package_changed": ci_changed
-        or any(_matches(path, PACKAGE_PATTERNS) for path in files),
+        "package_changed": ci_changed or any(_matches(path, PACKAGE_PATTERNS) for path in files),
         "similarity_changed": ci_changed
         or any(_matches(path, SIMILARITY_PATTERNS) for path in files),
-        "source_changed": ci_changed
-        or any(_matches(path, SOURCE_PATTERNS) for path in files),
+        "source_changed": ci_changed or any(_matches(path, SOURCE_PATTERNS) for path in files),
         "telemetry_changed": ci_changed
         or any(_matches(path, TELEMETRY_PATTERNS) for path in files),
     }
