@@ -113,14 +113,18 @@ def main(argv: list[str] | None = None) -> int:
     print("\n=== Near-duplicate scores (should be HIGH) ===")
     for pid, s in sorted(near_scores, key=lambda x: x[1]):
         print(f"  {pid}: {s:.4f}")
-    print(f"  min={min(s for _, s in near_scores):.4f} "
-          f"median={sorted(s for _, s in near_scores)[len(near_scores)//2]:.4f}")
+    print(
+        f"  min={min(s for _, s in near_scores):.4f} "
+        f"median={sorted(s for _, s in near_scores)[len(near_scores) // 2]:.4f}"
+    )
 
     print("\n=== Distinct scores (should be LOW) ===")
     for pid, s in sorted(distinct_scores, key=lambda x: -x[1])[:10]:
         print(f"  {pid}: {s:.4f}")
-    print(f"  max={max(s for _, s in distinct_scores):.4f} "
-          f"median={sorted(s for _, s in distinct_scores)[len(distinct_scores)//2]:.4f}")
+    print(
+        f"  max={max(s for _, s in distinct_scores):.4f} "
+        f"median={sorted(s for _, s in distinct_scores)[len(distinct_scores) // 2]:.4f}"
+    )
 
     print("\n=== Adversarial scores (should be LOW — precision traps) ===")
     for pid, s in sorted(adv_scores, key=lambda x: -x[1]):
@@ -131,8 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     # is flagged iff top_score >= threshold.
     print("\n=== Threshold sweep (flag if score >= t) ===")
     print(
-        f"{'threshold':>10} {'recall':>8} {'precision':>10} "
-        f"{'f1':>8} {'TP':>4} {'FN':>4} {'FP':>4}"
+        f"{'threshold':>10} {'recall':>8} {'precision':>10} {'f1':>8} {'TP':>4} {'FN':>4} {'FP':>4}"
     )
     for t in [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.82, 0.85, 0.88, 0.90, 0.93]:
         precision, recall, f1, tp, fn, fp = _precision_recall_f1(
@@ -140,10 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             distinct_scores + adv_scores,
             t,
         )
-        print(
-            f"{t:>10.2f} {recall:>8.3f} {precision:>10.3f} "
-            f"{f1:>8.3f} {tp:>4} {fn:>4} {fp:>4}"
-        )
+        print(f"{t:>10.2f} {recall:>8.3f} {precision:>10.3f} {f1:>8.3f} {tp:>4} {fn:>4} {fp:>4}")
 
     return 0
 

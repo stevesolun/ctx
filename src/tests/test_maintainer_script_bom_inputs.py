@@ -84,33 +84,35 @@ def test_dashboard_graph_index_accepts_bom_graph_json(tmp_path: Path) -> None:
     graph_json = tmp_path / "graph.json"
     output = tmp_path / "dashboard.sqlite3"
     graph_json.write_text(
-        json.dumps({
-            "graph": {"export_id": "fixture"},
-            "nodes": [
-                {
-                    "id": "skill:alpha",
-                    "label": "Alpha",
-                    "type": "skill",
-                    "tags": ["python", "test"],
-                    "quality_score": 0.9,
-                },
-                {
-                    "id": "mcp-server:github",
-                    "label": "GitHub",
-                    "type": "mcp-server",
-                    "tags": ["github"],
-                },
-            ],
-            "links": [
-                {
-                    "source": "skill:alpha",
-                    "target": "mcp-server:github",
-                    "weight": 0.77,
-                    "shared_tags": ["github"],
-                    "reasons": ["fixture"],
-                }
-            ],
-        }),
+        json.dumps(
+            {
+                "graph": {"export_id": "fixture"},
+                "nodes": [
+                    {
+                        "id": "skill:alpha",
+                        "label": "Alpha",
+                        "type": "skill",
+                        "tags": ["python", "test"],
+                        "quality_score": 0.9,
+                    },
+                    {
+                        "id": "mcp-server:github",
+                        "label": "GitHub",
+                        "type": "mcp-server",
+                        "tags": ["github"],
+                    },
+                ],
+                "links": [
+                    {
+                        "source": "skill:alpha",
+                        "target": "mcp-server:github",
+                        "weight": 0.77,
+                        "shared_tags": ["github"],
+                        "reasons": ["fixture"],
+                    }
+                ],
+            }
+        ),
         encoding="utf-8-sig",
     )
 
