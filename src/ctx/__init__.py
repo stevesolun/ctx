@@ -10,6 +10,7 @@ Four delivery surfaces (pick what fits your integration):
   2. **Generic harness CLI** — drive any LLM against a task:
          ctx run --model openrouter/anthropic/claude-opus-4.7 \\
                  --task "fix the failing tests"
+     The same CLI is available through ``python -m ctx``.
 
   3. **Python library** — use from your own harness / tool:
          from ctx import recommend_bundle, graph_query, wiki_search

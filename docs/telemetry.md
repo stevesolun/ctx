@@ -25,7 +25,8 @@ Outcome and dimensions live in attributes such as `otel.status_code`,
 Every recorded event gets a generated OpenTelemetry-compatible `trace_id` and
 `span_id` when the caller does not provide one. OTLP export maps those to the
 log record `traceId` and `spanId` fields and also includes ctx release
-provenance as `ctx.version`.
+provenance as `ctx.version`. In installed wheels this comes from package
+metadata; in source checkouts it falls back to `ctx.__version__`.
 
 ## Metric Shape
 
