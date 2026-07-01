@@ -1,6 +1,6 @@
 """
 tune_similarity_thresholds.py -- Sweep thresholds against the fixture corpus
-and print the precision/recall surface so we can pick sensible defaults.
+and print the precision/recall/F1 surface so we can pick sensible defaults.
 
 Run once after editing fixtures or changing the embedder; not part of CI.
 """
