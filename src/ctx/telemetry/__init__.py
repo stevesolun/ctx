@@ -38,9 +38,7 @@ RETENTION_STATUS_SCHEMA_VERSION = "ctx.telemetry.retention_status.v1"
 DEFAULT_TELEMETRY_PATH = Path(os.path.expanduser("~/.ctx/telemetry/events.jsonl"))
 DEFAULT_EXPORT_PATH = Path(os.path.expanduser("~/.ctx/telemetry/exported-events.jsonl"))
 DEFAULT_METRICS_PATH = Path(os.path.expanduser("~/.ctx/telemetry/metrics.jsonl"))
-DEFAULT_METRICS_EXPORT_PATH = Path(
-    os.path.expanduser("~/.ctx/telemetry/exported-metrics.jsonl")
-)
+DEFAULT_METRICS_EXPORT_PATH = Path(os.path.expanduser("~/.ctx/telemetry/exported-metrics.jsonl"))
 DEFAULT_OTLP_LOGS_ENDPOINT = "http://localhost:4318/v1/logs"
 DEFAULT_OTLP_METRICS_ENDPOINT = "http://localhost:4318/v1/metrics"
 DEFAULT_PRIVACY_MODE = "local_redacted"
@@ -71,28 +69,30 @@ _DEFAULT_HISTOGRAM_BOUNDS = (
 )
 _PRIVATE_DIR_MODE = 0o700
 _PRIVATE_FILE_MODE = 0o600
-_RAW_VALUE_KEYS = frozenset({
-    "command",
-    "command_output",
-    "cwd",
-    "goal",
-    "input",
-    "model_response",
-    "output",
-    "path",
-    "prompt",
-    "query",
-    "raw_input",
-    "raw_prompt",
-    "repo",
-    "response",
-    "stderr",
-    "stdout",
-    "task",
-    "tool_args",
-    "tool_input",
-    "tool_output",
-})
+_RAW_VALUE_KEYS = frozenset(
+    {
+        "command",
+        "command_output",
+        "cwd",
+        "goal",
+        "input",
+        "model_response",
+        "output",
+        "path",
+        "prompt",
+        "query",
+        "raw_input",
+        "raw_prompt",
+        "repo",
+        "response",
+        "stderr",
+        "stdout",
+        "task",
+        "tool_args",
+        "tool_input",
+        "tool_output",
+    }
+)
 _SCALAR_TYPES = (str, int, float, bool, type(None))
 
 
@@ -781,7 +781,9 @@ def _record_metric(
         print(f"ctx telemetry: failed to write metric ({type(exc).__name__})", file=sys.stderr)
         return None
     if settings["metric_export_enabled"]:
-        _export_recorded_metric(metric, settings=settings, source_path=target, trusted_root=trusted_root)
+        _export_recorded_metric(
+            metric, settings=settings, source_path=target, trusted_root=trusted_root
+        )
     return metric
 
 
@@ -1012,9 +1014,7 @@ def export_metrics(
             trusted_root=trusted_root,
         )
         checkpoint_after_metric_id = last_metric.metric_id
-        checkpoint_advanced = (
-            checkpoint_after_metric_id != pending.checkpoint_before_metric_id
-        )
+        checkpoint_advanced = checkpoint_after_metric_id != pending.checkpoint_before_metric_id
     status_path = _metric_export_status_path(
         settings,
         source_path=source_path,
@@ -1080,9 +1080,7 @@ def preview_metrics_export(
         include_exported=include_exported,
     )
     last_metric_id = (
-        pending.metrics[-1].metric_id
-        if pending.metrics
-        else pending.checkpoint_before_metric_id
+        pending.metrics[-1].metric_id if pending.metrics else pending.checkpoint_before_metric_id
     )
     status_path = _metric_export_status_path(
         settings,
@@ -1142,7 +1140,9 @@ def preview_export(
         trusted_root=trusted_root,
         include_exported=include_exported,
     )
-    last_event_id = pending.events[-1].event_id if pending.events else pending.checkpoint_before_event_id
+    last_event_id = (
+        pending.events[-1].event_id if pending.events else pending.checkpoint_before_event_id
+    )
     status_path = _export_status_path(
         settings,
         source_path=source_path,
@@ -1292,9 +1292,7 @@ def _settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
         "otlp_timeout_seconds": float(_mapping_get(otlp, "timeout_seconds", 5.0)),
         "otlp_service_name": str(_mapping_get(otlp, "service_name", "ctx")),
         "otlp_service_namespace": str(_mapping_get(otlp, "service_namespace", "ctx")),
-        "otlp_deployment_environment": str(
-            _mapping_get(otlp, "deployment_environment", "local")
-        ),
+        "otlp_deployment_environment": str(_mapping_get(otlp, "deployment_environment", "local")),
         "max_payload_keys": int(
             _mapping_get(limits, "max_payload_keys", _MAX_PAYLOAD_KEYS),
         ),
@@ -1346,9 +1344,7 @@ def _metric_settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
         "otlp_timeout_seconds": float(_mapping_get(otlp, "timeout_seconds", 5.0)),
         "otlp_service_name": str(_mapping_get(otlp, "service_name", "ctx")),
         "otlp_service_namespace": str(_mapping_get(otlp, "service_namespace", "ctx")),
-        "otlp_deployment_environment": str(
-            _mapping_get(otlp, "deployment_environment", "local")
-        ),
+        "otlp_deployment_environment": str(_mapping_get(otlp, "deployment_environment", "local")),
         "histogram_bounds": _histogram_bounds(metrics),
         "max_payload_keys": int(
             _mapping_get(limits, "max_payload_keys", _MAX_PAYLOAD_KEYS),
@@ -1362,9 +1358,7 @@ def _metric_settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
 def _retention_settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
     raw = dict(config or _config_get("telemetry", {}) or {})
     raw_retention = raw.get("retention")
-    retention: Mapping[str, Any] = (
-        raw_retention if isinstance(raw_retention, Mapping) else {}
-    )
+    retention: Mapping[str, Any] = raw_retention if isinstance(raw_retention, Mapping) else {}
     events = retention.get("events")
     metrics = retention.get("metrics")
     return {
@@ -1391,16 +1385,8 @@ def _retention_policy(
     policy: Mapping[str, Any] = signal_policy if isinstance(signal_policy, Mapping) else {}
     raw_max_age_days = _mapping_get(policy, "max_age_days", None)
     raw_max_records = _mapping_get(policy, "max_records", None)
-    max_age_days = (
-        max(0, int(raw_max_age_days))
-        if raw_max_age_days not in (None, "")
-        else None
-    )
-    max_records = (
-        max(0, int(raw_max_records))
-        if raw_max_records not in (None, "")
-        else None
-    )
+    max_age_days = max(0, int(raw_max_age_days)) if raw_max_age_days not in (None, "") else None
+    max_records = max(0, int(raw_max_records)) if raw_max_records not in (None, "") else None
     return max_age_days, max_records
 
 
@@ -1594,9 +1580,7 @@ def _apply_retention_policy(
         else:
             kept.append(record)
     effective_max_records = (
-        max(max_records, min_keep_records)
-        if max_records is not None and max_records > 0
-        else None
+        max(max_records, min_keep_records) if max_records is not None and max_records > 0 else None
     )
     if effective_max_records is not None and len(kept) > effective_max_records:
         overflow = len(kept) - effective_max_records
@@ -1614,9 +1598,7 @@ def _rewrite_retention_file(
     drop_malformed: bool,
 ) -> None:
     lines: list[tuple[int, str]] = [
-        (record.index, record.raw_line)
-        for record in records
-        if record.index in kept_by_index
+        (record.index, record.raw_line) for record in records if record.index in kept_by_index
     ]
     if not drop_malformed:
         lines.extend(malformed_lines)
@@ -2473,7 +2455,9 @@ def _otlp_logs_payload(events: list[TelemetryEvent], settings: Mapping[str, Any]
                 "scopeLogs": [
                     {
                         "scope": {"name": "ctx.telemetry", "version": SCHEMA_VERSION},
-                        "logRecords": [_otlp_log_record(event, settings=settings) for event in events],
+                        "logRecords": [
+                            _otlp_log_record(event, settings=settings) for event in events
+                        ],
                     }
                 ],
             }
@@ -2498,8 +2482,7 @@ def _otlp_metrics_payload(
                     {
                         "scope": {"name": "ctx.telemetry", "version": METRIC_SCHEMA_VERSION},
                         "metrics": [
-                            _otlp_metric_record(metric, settings=settings)
-                            for metric in metrics
+                            _otlp_metric_record(metric, settings=settings) for metric in metrics
                         ],
                     }
                 ],
@@ -2643,10 +2626,7 @@ def _iso_to_unix_nanos(value: str) -> int:
 
 
 def _otlp_attributes(attributes: Mapping[str, Any]) -> list[dict[str, Any]]:
-    return [
-        {"key": key, "value": _otlp_value(value)}
-        for key, value in sorted(attributes.items())
-    ]
+    return [{"key": key, "value": _otlp_value(value)} for key, value in sorted(attributes.items())]
 
 
 def _otlp_value(value: Any) -> dict[str, Any]:

@@ -160,9 +160,9 @@ def test_canonical_feature_status_tracker_merges_supporting_ledgers() -> None:
         assert row["status"] in CANONICAL_STATUSES
         if row["status"] in FIX_STATUSES or row["bug_summary"]:
             for key in ("bug_id", "bug_summary", "bug_repro", "fix_status"):
-                assert row[key].strip(), (
-                    f"{row.get('feature_id', '<unknown>')} has bug evidence without {key}"
-                )
+                assert row[
+                    key
+                ].strip(), f"{row.get('feature_id', '<unknown>')} has bug evidence without {key}"
         if row["status"] == "Blocked/Human Decision":
             assert row["owner_lane"] == "Human Owner"
             assert "out of scope" in row["validation_status"].lower()
@@ -193,13 +193,13 @@ def test_feature_user_story_tracker_has_no_empty_core_fields() -> None:
         assert row["status"] in ACTIONABLE_STATUSES
         if row["status"] in FIX_STATUSES:
             for key in ("error_id", "error_summary", "fix_status"):
-                assert row[key].strip(), (
-                    f"{row.get('feature_id', '<unknown>')} has {row['status']} without {key}"
-                )
+                assert row[
+                    key
+                ].strip(), f"{row.get('feature_id', '<unknown>')} has {row['status']} without {key}"
         if row["status"] in VALIDATION_STATUSES:
-            assert row["notes"].strip(), (
-                f"{row.get('feature_id', '<unknown>')} needs validation without a validation note"
-            )
+            assert (
+                row["notes"].strip()
+            ), f"{row.get('feature_id', '<unknown>')} needs validation without a validation note"
 
 
 def test_feature_user_story_tracker_covers_all_console_scripts() -> None:
