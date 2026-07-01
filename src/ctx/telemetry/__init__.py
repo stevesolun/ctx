@@ -79,6 +79,7 @@ _RAW_VALUE_KEYS = frozenset(
         "model_response",
         "output",
         "path",
+        "paths",
         "prompt",
         "query",
         "raw_input",
@@ -2667,7 +2668,7 @@ def _sanitize_payload(
         if secret_key_like(key):
             sanitized[key] = "[redacted]"
             continue
-        normalized = key.lower().replace("-", "_")
+        normalized = key.lower().replace("-", "_").replace(".", "_")
         if privacy_mode == DEFAULT_PRIVACY_MODE and _raw_value_key_like(normalized):
             if value is not None:
                 sanitized[f"{key}_hash"] = hash_identifier(str(value), salt=hash_salt)

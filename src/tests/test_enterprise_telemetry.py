@@ -104,6 +104,27 @@ def test_record_event_writes_local_redacted_envelope(tmp_path: Path) -> None:
     assert got[0].ctx_version == event.ctx_version
 
 
+def test_sanitize_payload_hashes_common_path_key_shapes() -> None:
+    payload = telemetry.sanitize_payload(
+        {
+            "paths": ["/Users/example/private-repo/a.py"],
+            "ctx.repo.path": "/Users/example/private-repo",
+            "file.paths": ["/Users/example/private-repo/b.py"],
+            "safe": "kept",
+        },
+        config={"mode": "local_redacted", "privacy": {"hash_salt": "test-salt"}},
+    )
+
+    assert payload["paths_hash"].startswith("sha256:")
+    assert payload["ctx.repo.path_hash"].startswith("sha256:")
+    assert payload["file.paths_hash"].startswith("sha256:")
+    assert payload["safe"] == "kept"
+    assert "paths" not in payload
+    assert "ctx.repo.path" not in payload
+    assert "file.paths" not in payload
+    assert "/Users/example/private-repo" not in json.dumps(payload)
+
+
 def test_telemetry_span_propagates_trace_to_nested_events(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
 
