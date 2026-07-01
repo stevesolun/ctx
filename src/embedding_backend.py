@@ -150,9 +150,7 @@ class OllamaEmbedder:
     def __post_init__(self) -> None:
         parsed = urlparse(self.base_url)
         if parsed.scheme not in ("http", "https"):
-            raise ValueError(
-                f"base_url scheme must be http or https: {self.base_url!r}"
-            )
+            raise ValueError(f"base_url scheme must be http or https: {self.base_url!r}")
         host = (parsed.hostname or "").lower()
         if not host:
             raise ValueError(f"base_url has no host: {self.base_url!r}")
@@ -197,9 +195,7 @@ class OllamaEmbedder:
             except Exception as exc:
                 raise OllamaEmbedderError(idx, str(exc)) from exc
             if "embedding" not in payload:
-                raise OllamaEmbedderError(
-                    idx, f"response missing 'embedding' key: {payload!r}"
-                )
+                raise OllamaEmbedderError(idx, f"response missing 'embedding' key: {payload!r}")
             rows.append(payload["embedding"])
         return _l2_normalize(np.asarray(rows, dtype=np.float32))
 
@@ -222,12 +218,14 @@ def get_embedder(
     if key in ("", "sentence-transformers", "st", "sbert"):
         return SentenceTransformerEmbedder(model_name=model or DEFAULT_ST_MODEL)
     if key in ("ollama", "ol"):
+        configured_base_url = (
+            os.environ["OLLAMA_URL"] if "OLLAMA_URL" in os.environ else DEFAULT_OLLAMA_URL
+        )
         return OllamaEmbedder(
             model_name=model or DEFAULT_OLLAMA_MODEL,
-            base_url=base_url or os.environ.get("OLLAMA_URL", DEFAULT_OLLAMA_URL),
+            base_url=base_url or configured_base_url,
             allow_remote=allow_remote,
         )
     raise ValueError(
-        f"unknown embedding backend {backend!r}; expected "
-        f"'sentence-transformers' or 'ollama'"
+        f"unknown embedding backend {backend!r}; expected 'sentence-transformers' or 'ollama'"
     )

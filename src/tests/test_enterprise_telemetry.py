@@ -710,10 +710,7 @@ def test_export_events_posts_otlp_http_payload(
     assert log_record["body"] == {"stringValue": "ctx.mcp.request"}
     assert len(log_record["traceId"]) == 32
     assert len(log_record["spanId"]) == 16
-    attributes = {
-        item["key"]: item["value"]
-        for item in log_record["attributes"]
-    }
+    attributes = {item["key"]: item["value"] for item in log_record["attributes"]}
     assert attributes["event.name"] == {"stringValue": "ctx.mcp.request"}
     assert attributes["ctx.outcome"] == {"stringValue": "error"}
     assert attributes["error.type"] == {"stringValue": "method_not_found"}
@@ -778,10 +775,7 @@ def test_export_events_hashes_legacy_session_id_for_otlp(
     assert result.failed == 0
     payload = calls[0]
     log_record = payload["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]
-    attributes = {
-        item["key"]: item["value"]
-        for item in log_record["attributes"]
-    }
+    attributes = {item["key"]: item["value"] for item in log_record["attributes"]}
     assert "ctx.session_id" not in attributes
     assert attributes["ctx.session.hash"] == {
         "stringValue": hash_identifier("legacy-session-private", salt="tenant-a")
@@ -1931,9 +1925,7 @@ def test_telemetry_retention_cli_plans_then_enforces(
     assert enforced["dry_run"] is False
     assert enforced["results"][0]["status"] == "pruned"
     assert enforced["results"][0]["dropped_records"] == 1
-    assert [event.event_id for event in read_events(path, trusted_root=tmp_path)] == [
-        "event-2"
-    ]
+    assert [event.event_id for event in read_events(path, trusted_root=tmp_path)] == ["event-2"]
     assert json.loads(status_path.read_text(encoding="utf-8"))["schema_version"] == (
         RETENTION_STATUS_SCHEMA_VERSION
     )
@@ -2014,9 +2006,7 @@ def test_default_config_declares_local_only_export_disabled() -> None:
         assert telemetry["privacy"]["hash_salt_env"] == "CTX_TELEMETRY_HASH_SALT"
         assert telemetry["privacy"]["hash_salt_path"] == "~/.ctx/telemetry/hash-salt"
         assert telemetry["retention"]["enabled"] is True
-        assert telemetry["retention"]["status_path"] == (
-            "~/.ctx/telemetry/retention-status.json"
-        )
+        assert telemetry["retention"]["status_path"] == ("~/.ctx/telemetry/retention-status.json")
         assert telemetry["retention"]["min_keep_records"] == 1000
         assert telemetry["retention"]["drop_malformed"] is False
         assert telemetry["retention"]["events"]["max_age_days"] == 90
