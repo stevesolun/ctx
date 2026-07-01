@@ -7,15 +7,13 @@ the hook system can execute.
 ## Responsibilities
 
 1. **Resolve the toolbox** — merge global + per-repo config.
-2. **Compute scope** — walk the current diff or full repo, honoring
-   `scope.analysis` and optional `scope.files` globs.
-3. **Graph-blast expansion** — for `dynamic` scope, add every file that
-   imports a changed module (via the knowledge graph edge map).
-4. **Enforce budget** — drop files until the plan fits within
-   `budget.max_tokens` (estimated by line count × heuristic).
-5. **Honor dedup** — skip if the same file set was run within
-   `dedup.window_seconds` and policy is `user-configurable`.
-6. **Persist** — write the plan to
+2. **Compute scope** — use explicit files, the current diff, the full repo,
+   or one-hop graph expansion when a graph edge map is supplied.
+3. **Carry budget caps** — copy the toolbox token and second caps into the
+   plan so downstream execution can enforce them.
+4. **Honor dedup** — reuse a cached plan when the toolbox policy is `cached`
+   and the matching hash is still inside `dedup.window_seconds`.
+5. **Persist** — write the plan to
    `~/.claude/toolbox-runs/<plan_hash>.json` for downstream reads.
 
 ## RunPlan
@@ -23,57 +21,53 @@ the hook system can execute.
 ```python
 @dataclass(frozen=True)
 class RunPlan:
-    plan_hash: str
     toolbox: str
     agents: tuple[str, ...]
     files: tuple[str, ...]
-    source: str           # "slash" | "pre-commit" | ...
+    scope_mode: str
+    budget_tokens: int
+    budget_seconds: int
     guardrail: bool
-    budget: Budget
     created_at: float
+    plan_hash: str
+    source: str           # "fresh" | "cached"
 ```
 
-The `plan_hash` is deterministic (sha256 of `toolbox|sorted(files)|agents`),
-which lets dedup work across triggers without any additional state.
+The `plan_hash` is deterministic from the toolbox, agents, file set, and
+effective scope mode, which lets dedup work without any additional state.
 
 ## CLI
 
 ```bash
 # Build and persist a plan for the named toolbox
-python -m council_runner build ship-it
+python -m council_runner plan --toolbox ship-it
 
 # Build without persisting (useful for inspection)
-python -m council_runner build ship-it --dry-run
-
-# Show a previously persisted plan
-python -m council_runner show <plan_hash>
+python -m council_runner plan --toolbox ship-it --dry-run
 
 # List recent plans
-python -m council_runner list --limit 10
+python -m council_runner history --limit 10
+
+# Delete stale plans
+python -m council_runner purge --older-than-days 30
 ```
 
 ## Budget estimation
 
-Token estimates are intentionally rough. The runner assumes ~4 tokens per
-line of source, then sorts files by recency (newest first) and greedily
-takes until `max_tokens` is reached. If a single file exceeds the budget,
-the plan is truncated rather than dropped — the council still runs on a
-partial view.
-
-This cheap estimate is fine because the council itself enforces its own
-budgets; `council_runner`'s job is just to stay in the right ballpark.
+The runner records `budget.max_tokens` and `budget.max_seconds` in the plan.
+The downstream council execution is responsible for enforcing those caps.
 
 ## Dedup window
 
-Dedup compares the sorted file list, not the plan hash — that way a
-toolbox and its re-run with a newer budget still dedup correctly.
+Dedup looks up the deterministic `plan_hash`. If the toolbox policy is
+`cached` and the existing plan is still inside `dedup.window_seconds`, the
+runner returns that cached plan instead of writing a fresh one.
 
 ## Graph-blast expansion
 
-For `dynamic` scope, `council_runner` reads the graph edge map produced
-by `scan_repo.py` and walks imports one hop out from each changed file.
-It stops at one hop to keep scope bounded; deep graph walks are reserved
-for explicit `full` mode.
+When callers provide a graph edge map, `graph-blast` expands changed files by
+one hop. Without a graph map, graph-blast falls back to the changed set so the
+CLI remains deterministic and cheap.
 
 ## Related
 

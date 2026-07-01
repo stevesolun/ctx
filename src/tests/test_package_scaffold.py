@@ -14,7 +14,10 @@ custom-harness Python imports.
 from __future__ import annotations
 
 import importlib
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -118,6 +121,30 @@ def test_ctx_has_version() -> None:
     match = re.search(r'^__version__ = "([^"]+)"$', source_init, re.MULTILINE)
     assert match
     assert match.group(1) == data["project"]["version"]
+
+
+def test_python_m_ctx_delegates_to_console_cli() -> None:
+    """The flagship package supports the same entry surface as `ctx`."""
+    root = Path(__file__).resolve().parent.parent.parent
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(root / "src"),
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "ctx", "--help"],
+        cwd=root,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "usage:" in result.stdout
+    assert "run" in result.stdout
+    assert "resume" in result.stdout
 
 
 def test_every_subpackage_has_docstring() -> None:

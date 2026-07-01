@@ -45,8 +45,10 @@ except ImportError:
     STALE_THRESHOLD = 30
     KEEP_DAYS = 5
 
-ENTITIES_DIR = WIKI_DIR / "entities" / "skills"
-LOG_PATH = WIKI_DIR / "log.md"
+_DEFAULT_ENTITIES_DIR = WIKI_DIR / "entities" / "skills"
+_DEFAULT_LOG_PATH = WIKI_DIR / "log.md"
+ENTITIES_DIR = _DEFAULT_ENTITIES_DIR
+LOG_PATH = _DEFAULT_LOG_PATH
 
 def _today() -> str:
     """Today's date in UTC, computed fresh per call.
@@ -214,13 +216,28 @@ def _wiki_root(wiki_dir: Path | None) -> Path:
     return wiki_dir if wiki_dir else WIKI_DIR
 
 
+def _custom_entities_dir_active(wiki_dir: Path | None) -> bool:
+    return wiki_dir is None and ENTITIES_DIR != _DEFAULT_ENTITIES_DIR
+
+
+def _custom_log_path_active(wiki_dir: Path | None) -> bool:
+    return wiki_dir is None and LOG_PATH != _DEFAULT_LOG_PATH
+
+
 def _read_skill_page(
     skill_name: str,
     *,
     wiki_dir: Path | None = None,
 ) -> tuple[Path, str, str] | None:
-    wiki_root = _wiki_root(wiki_dir)
     relpath = _skill_page_relpath(skill_name)
+    entities_dir = (wiki_dir / "entities" / "skills") if wiki_dir else ENTITIES_DIR
+    if _custom_entities_dir_active(wiki_dir):
+        page_path = entities_dir / f"{skill_name}.md"
+        if not page_path.exists():
+            return None
+        return page_path, relpath, page_path.read_text(encoding="utf-8")
+
+    wiki_root = _wiki_root(wiki_dir)
     packs_dir = wiki_root / "wiki-packs"
     if packs_dir.is_dir():
         pages = load_merged_wiki_pages(packs_dir)
@@ -229,7 +246,6 @@ def _read_skill_page(
             return None
         return wiki_root / relpath, relpath, content
 
-    entities_dir = (wiki_dir / "entities" / "skills") if wiki_dir else ENTITIES_DIR
     page_path = entities_dir / f"{skill_name}.md"
     if not page_path.exists():
         return None
@@ -243,6 +259,10 @@ def _write_skill_page(
     *,
     wiki_dir: Path | None = None,
 ) -> None:
+    if _custom_entities_dir_active(wiki_dir):
+        _atomic_write_text(page_path, content)
+        return
+
     if page_path.exists():
         _atomic_write_text(page_path, content)
     packs_dir = _wiki_root(wiki_dir) / "wiki-packs"
@@ -351,6 +371,13 @@ def append_wiki_log(loaded_count: int, used_skills: set[str], stale_count: int,
     )
     if used_skills:
         entry += f"- Used: {', '.join(sorted(used_skills))}\n"
+
+    if _custom_log_path_active(wiki_dir):
+        if not LOG_PATH.exists():
+            return
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(entry)
+        return
 
     wiki_root = _wiki_root(wiki_dir)
     packs_dir = wiki_root / "wiki-packs"

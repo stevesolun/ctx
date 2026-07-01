@@ -18,30 +18,25 @@ can surface:
 
 ## User profile
 
-Signals aggregate into `~/.claude/user-profile.json`:
+Signals aggregate into `~/.claude/user-profile.json` as a `BehaviorProfile`:
 
 ```jsonc
 {
-  "version": 1,
-  "updated_at": 1713456789,
-  "signals": {
-    "co_invocation": {
-      "code-reviewer|security-reviewer": 4,
-      "architect-review|test-automator": 3
-    },
-    "skill_cadence": {
-      "python-patterns": {"loads": 12, "sessions": 12}
-    },
-    "file_types": {"py": 87, "md": 31, "tf": 0},
-    "commit_types": {"fix": 8, "feat": 2}
-  },
+  "total_intent_events": 87,
+  "total_commits": 10,
+  "co_invocation_pairs": [{"a": "python", "b": "pytest", "count": 4}],
+  "skill_cadence": [["python-patterns", 12]],
+  "file_types": [["py", 87], ["md", 31]],
+  "commit_types": [["fix", 8], ["feat", 2]],
   "suggestions": [
     {
-      "id": "bundle:reviewers-pair",
-      "rationale": "4 co-invocations of code-reviewer + security-reviewer",
-      "evidence_count": 4
+      "kind": "co-invocation",
+      "rationale": "Signals 'python' and 'pytest' co-occurred 4x.",
+      "evidence": 4,
+      "proposed": {"name": "python-pytest-bundle"}
     }
-  ]
+  ],
+  "generated_at": 1713456789
 }
 ```
 
@@ -51,31 +46,26 @@ On `session-end`, the hook calls `format_digest(profile)` and prints
 anything new. Example output:
 
 ```
-[behavior-miner] 2 suggestions:
-  - bundle:reviewers-pair  (4 co-invocations)
-    → add to 'review' toolbox:
-       ctx-toolbox add review --post code-reviewer,security-reviewer
-  - promote:python-patterns  (loaded in 12/12 sessions)
-    → promote to 'pre' in your default toolbox
+[toolbox] 2 suggestion(s):
+  - python-pytest-bundle (co-invocation, 4x): Signals 'python' and 'pytest' co-occurred 4x.
+  - python-patterns-default (skill-cadence, 12x): Skill 'python-patterns' was loaded/unloaded 12x.
 ```
 
-Suggestions are never applied automatically. The user runs the command,
-or accepts the suggestion via `toolbox init --accept <id>`.
+Suggestions are never applied automatically. The digest is advisory; apply
+changes through the normal `ctx-toolbox` commands after review.
 
 ## CLI
 
 ```bash
-# Rebuild the profile from scratch (scans ~/.claude/history/)
-python -m behavior_miner build
+# Build the full JSON profile without saving it
+python -m behavior_miner profile
 
-# Show current suggestions
-python -m behavior_miner show
+# Build and persist ~/.claude/user-profile.json
+python -m behavior_miner profile --save
 
-# Print digest (same output as session-end hook)
-python -m behavior_miner digest
-
-# Drop a suggestion (noise reduction)
-python -m behavior_miner dismiss bundle:reviewers-pair
+# Print a short digest, optionally persisting the underlying profile
+python -m behavior_miner suggest --limit 5
+python -m behavior_miner suggest --save
 ```
 
 ## Privacy
