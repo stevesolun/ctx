@@ -52,12 +52,13 @@ with persistent memory that gets smarter every session.
     ```
 
     The preflight uses the same changed-file classifier as GitHub Actions and
-    runs the matching local gates before you open a PR: stats, ruff, mypy, pip
-    check, unit coverage, canaries, package build, twine, docs, graph
-    validation, browser, and similarity checks as needed. Use `--profile full`
-    before release work to force the source/package gates even for docs-only or
-    graph-only changes. Docs changes run public docs tracker checks before the
-    strict MkDocs build. Public docs surfaces are release-tracked: when
+    runs the matching local gates before you open a PR: stats, ruff
+    format/check, mypy, pip check, unit coverage, canaries, package build,
+    twine, docs, graph validation, browser, and similarity checks as needed.
+    Use `--profile full` before release work to force the source/package gates
+    even for docs-only or graph-only changes. Docs changes run public docs
+    tracker checks before the strict MkDocs build. Public docs surfaces are
+    release-tracked: when
     `mkdocs.yml` adds, removes, or moves a nav `.md` page, or public linked
     assets under `docs/assets/javascripts/`, `docs/services/`, or
     `docs/toolbox/templates/` change, update both
