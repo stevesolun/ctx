@@ -1,0 +1,31 @@
+{
+  "description": "Graph-informed refactor review with regression and dead-code checks",
+  "pre": ["architect-review", "refactor-cleaner"],
+  "post": [
+    "architect-review",
+    "refactor-cleaner",
+    "code-reviewer",
+    "test-automator",
+    "dependency-manager"
+  ],
+  "scope": {
+    "projects": ["*"],
+    "signals": [],
+    "analysis": "graph-blast"
+  },
+  "trigger": {
+    "slash": true,
+    "pre_commit": false,
+    "session_end": true,
+    "file_save": null
+  },
+  "budget": {
+    "max_tokens": 180000,
+    "max_seconds": 360
+  },
+  "dedup": {
+    "window_seconds": 900,
+    "policy": "cached"
+  },
+  "guardrail": false
+}

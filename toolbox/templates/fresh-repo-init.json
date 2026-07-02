@@ -1,0 +1,29 @@
+{
+  "description": "New-repo bootstrap: run the intent interview, scaffold plan, pick initial toolbox",
+  "pre": [],
+  "post": [
+    "planner",
+    "architect",
+    "tdd-guide"
+  ],
+  "scope": {
+    "projects": ["*"],
+    "signals": [],
+    "analysis": "diff"
+  },
+  "trigger": {
+    "slash": true,
+    "pre_commit": false,
+    "session_end": false,
+    "file_save": null
+  },
+  "budget": {
+    "max_tokens": 100000,
+    "max_seconds": 300
+  },
+  "dedup": {
+    "window_seconds": 0,
+    "policy": "fresh"
+  },
+  "guardrail": false
+}

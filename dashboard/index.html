@@ -1,0 +1,2311 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Not a catalog: a repo-aware recommendation layer that loads the right skills, agents, MCPs, and harnesses from your tools or the shipped graph.">
+      
+      
+      
+        <link rel="canonical" href="https://stevesolun.github.io/ctx/dashboard/">
+      
+      
+        <link rel="prev" href="../entity-onboarding/">
+      
+      
+        <link rel="next" href="../telemetry/">
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.44">
+    
+    
+      
+        <title>Dashboard - ctx</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.0253249f.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#dashboard-ctx-monitor" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="ctx" class="md-header__button md-logo" aria-label="ctx" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ctx
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Dashboard
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/stevesolun/ctx" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    stevesolun/ctx
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../catalog/" class="md-tabs__link">
+        
+  
+    
+  
+  Catalog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../knowledge-graph/" class="md-tabs__link">
+        
+  
+    
+  
+  Knowledge graph
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../huggingface-publish/" class="md-tabs__link">
+        
+  
+    
+  
+  Hugging Face publish
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../entity-onboarding/" class="md-tabs__link">
+        
+  
+    
+  
+  Entity onboarding
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+    
+  
+  Dashboard
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../telemetry/" class="md-tabs__link">
+        
+  
+    
+  
+  Telemetry
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../harness/attaching-to-hosts/" class="md-tabs__link">
+          
+  
+    
+  
+  Harness
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../toolbox/" class="md-tabs__link">
+          
+  
+    
+  
+  Toolbox
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../skill-router/" class="md-tabs__link">
+          
+  
+    
+  
+  Skill router
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../skills-health/" class="md-tabs__link">
+          
+  
+    
+  
+  Health
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="ctx" class="md-nav__button md-logo" aria-label="ctx" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ctx
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/stevesolun/ctx" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    stevesolun/ctx
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Catalog
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge-graph/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Knowledge graph
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../huggingface-publish/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Hugging Face publish
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../entity-onboarding/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Entity onboarding
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Dashboard
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Dashboard
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Usage
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#smoke-test-the-dashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      Smoke-test the dashboard
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#check-queue-and-artifact-state-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      Check queue and artifact state - /status
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#browse-the-llm-wiki-wiki" class="md-nav__link">
+    <span class="md-ellipsis">
+      Browse the LLM wiki - /wiki
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Browse the LLM wiki - /wiki">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#catalog-badge-links" class="md-nav__link">
+    <span class="md-ellipsis">
+      Catalog badge links
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#explore-the-knowledge-graph-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      Explore the knowledge graph — /graph
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#read-the-quality-kpis-kpi" class="md-nav__link">
+    <span class="md-ellipsis">
+      Read the quality KPIs — /kpi
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Routes
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Routes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#top-navigation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Top navigation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#html-views" class="md-nav__link">
+    <span class="md-ellipsis">
+      HTML views
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      JSON API
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mutation-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      Mutation endpoints
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kpis-measures-scores" class="md-nav__link">
+    <span class="md-ellipsis">
+      KPIs, measures, scores
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="KPIs, measures, scores">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#on-the-home-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      On the home page
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#on-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      On /skills
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#on-skillslug" class="md-nav__link">
+    <span class="md-ellipsis">
+      On /skill/&lt;slug&gt;
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#on-sessionid" class="md-nav__link">
+    <span class="md-ellipsis">
+      On /session/&lt;id&gt;
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      Security
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stopping" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stopping
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telemetry/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Telemetry
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Harness
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            Harness
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness/attaching-to-hosts/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Attach to hosts
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness/loopflow-adapter-demo/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    LoopFlow adapter demo
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness/clean-host-contract/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Clean-host contract
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../toolbox/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Toolbox
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_9" id="__nav_9_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            Toolbox
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/starters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Starter toolboxes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/council-runner/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Council runner
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/hooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Hooks & triggers
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/behavior-miner/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Behavior miner
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/intent-interview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Intent interview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/verdicts/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Verdicts & guardrails
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backup-hook-install/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Backup hook install
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../skill-router/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Skill router
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_10" id="__nav_10_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            Skill router
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stack-signatures/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Stack signatures
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skill-stack-matrix/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Skill-stack matrix
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../marketplace-registry/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Marketplace registry
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Health
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            Health
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skills-health/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Skill health
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-anchor/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Memory anchoring
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skill-lifecycle-and-dashboard/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Skill lifecycle & dashboard
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skill-quality-install/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Skill-quality install
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Usage
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#smoke-test-the-dashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      Smoke-test the dashboard
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#check-queue-and-artifact-state-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      Check queue and artifact state - /status
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#browse-the-llm-wiki-wiki" class="md-nav__link">
+    <span class="md-ellipsis">
+      Browse the LLM wiki - /wiki
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Browse the LLM wiki - /wiki">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#catalog-badge-links" class="md-nav__link">
+    <span class="md-ellipsis">
+      Catalog badge links
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#explore-the-knowledge-graph-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      Explore the knowledge graph — /graph
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#read-the-quality-kpis-kpi" class="md-nav__link">
+    <span class="md-ellipsis">
+      Read the quality KPIs — /kpi
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Routes
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Routes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#top-navigation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Top navigation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#html-views" class="md-nav__link">
+    <span class="md-ellipsis">
+      HTML views
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      JSON API
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mutation-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      Mutation endpoints
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kpis-measures-scores" class="md-nav__link">
+    <span class="md-ellipsis">
+      KPIs, measures, scores
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="KPIs, measures, scores">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#on-the-home-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      On the home page
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#on-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      On /skills
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#on-skillslug" class="md-nav__link">
+    <span class="md-ellipsis">
+      On /skill/&lt;slug&gt;
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#on-sessionid" class="md-nav__link">
+    <span class="md-ellipsis">
+      On /session/&lt;id&gt;
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      Security
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stopping" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stopping
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/stevesolun/ctx/edit/main/docs/dashboard.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="dashboard-ctx-monitor">Dashboard (<code>ctx-monitor</code>)<a class="headerlink" href="#dashboard-ctx-monitor" title="Permanent link">&para;</a></h1>
+<p>Local HTTP dashboard for ctx's currently supported live observables:
+loaded skills, agents, MCP servers, and installed harness records; session timelines; the
+knowledge graph; the LLM-wiki browser; quality grades + scores;
+durable queue state; graph/wiki artifact versions; filterable audit
+logs; generic-harness validation/escalation state; a live event stream;
+and harness wiki/graph browsing.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ctx-monitor<span class="w"> </span>serve<span class="w">              </span><span class="c1"># http://127.0.0.1:8765</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>ctx-monitor<span class="w"> </span>serve<span class="w"> </span>--port<span class="w"> </span><span class="m">8888</span><span class="w">  </span><span class="c1"># custom port</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>ctx-monitor<span class="w"> </span>serve<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8888</span><span class="w">  </span><span class="c1"># LAN read-only with startup token URL</span>
+</span></code></pre></div>
+<p>Zero Python dependencies added by the dashboard. Everything runs on
+stdlib <code>http.server</code>, using daemon request threads so a live
+<code>/api/events.stream</code> client cannot block normal dashboard or JSON API
+requests. The graph page uses a built-in dependency-free SVG neighborhood
+renderer with zoom, drag, hover details, and a list fallback. It does not load
+third-party JavaScript.</p>
+<h2 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h2>
+<p>Every page in the dashboard has the same top nav, so getting around
+is <code>Home -&gt; jump anywhere</code>. The dashboard indexes skills, agents, MCP
+servers, and harness pages in wiki/graph views. Harness installation,
+update, and uninstall run through <code>ctx-harness-install</code>; dashboard
+load/unload POSTs reject harnesses with the exact dry-run command to use.
+Quality scoring is shown for sidecar-backed skills, agents, and MCP servers.
+The <code>/recommend</code> page exposes the same selectable recommendation flow as the
+CLI/API: query, top-k, selected and rejected IDs, select-all/select-none helpers,
+TLDR/reason text, and related suggestions for partially selected bundles.
+Generic/API/local harnesses that call ctx-core validation tools write to
+the runtime lifecycle ledger. The dashboard exposes that ledger at
+<code>/runtime</code> and as JSON at <code>/api/runtime.json</code>, including validation and
+escalation state, tool-selection totals, selected-vs-system source counts, token
+usage totals, attribution counts, and recent per-tool usage rows.</p>
+<h3 id="smoke-test-the-dashboard">Smoke-test the dashboard<a class="headerlink" href="#smoke-test-the-dashboard" title="Permanent link">&para;</a></h3>
+<p>Use the repo smoke check after dashboard changes or before screenshots. It uses
+only stdlib HTTP calls against a running <code>ctx-monitor</code> instance and checks the
+core pages plus graph/wiki/catalog APIs.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ctx-monitor<span class="w"> </span>serve
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>scripts/dashboard_smoke.py<span class="w"> </span>--warm
+</span></code></pre></div>
+<p>To make latency regressions fail the command, add named thresholds:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>python<span class="w"> </span>scripts/dashboard_smoke.py<span class="w"> </span>--warm<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--fail-on-slow<span class="w"> </span>graph-api-warm<span class="o">=</span><span class="m">1</span>.0<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--fail-on-slow<span class="w"> </span>kpi-warm<span class="o">=</span><span class="m">3</span>.0
+</span></code></pre></div>
+<h3 id="check-queue-and-artifact-state-status">Check queue and artifact state - <code>/status</code><a class="headerlink" href="#check-queue-and-artifact-state-status" title="Permanent link">&para;</a></h3>
+<p>The status tab shows the durable wiki/graph maintenance queue and the
+generated graph/wiki artifacts that ctx can ship or consume. It reports:</p>
+<ul>
+<li>queue DB availability and job counts by state (<code>pending</code>, <code>running</code>,
+  <code>succeeded</code>, <code>failed</code>, <code>cancelled</code>)</li>
+<li>the 20 most recent queue jobs with kind, attempts, source, worker, and
+  last error; counts and the recent-job window are bounded in the queue DB,
+  not by loading the whole queue into dashboard memory</li>
+<li>explicit crash recovery state: expired leases are requeued until their
+  retry budget is exhausted; exhausted leases become <code>failed</code>; operator
+  cancellations become terminal <code>cancelled</code> jobs</li>
+<li>a visible queue DB error callout when the queue file exists but cannot be
+  opened or queried</li>
+<li>artifact presence and byte size for generated
+  <code>~/.claude/skill-wiki/graphify-out/{graph.json,graph-delta.json,communities.json}</code>
+  plus the runtime skill index, falling back to the repo <code>graph/</code>
+  directory during source checkouts. The status page also reports the full
+  <code>wiki-graph.tar.gz</code> artifact when present.</li>
+<li>artifact promotion metadata, including the latest promoted hash when
+  the crash-safe promotion path has recorded it</li>
+</ul>
+<h3 id="browse-the-llm-wiki-wiki">Browse the LLM wiki - <code>/wiki</code><a class="headerlink" href="#browse-the-llm-wiki-wiki" title="Permanent link">&para;</a></h3>
+<h4 id="catalog-badge-links">Catalog badge links<a class="headerlink" href="#catalog-badge-links" title="Permanent link">&para;</a></h4>
+<p>The README entity badges open the public <code>/catalog/</code> launcher so they never
+point at a dead <code>127.0.0.1</code> URL from GitHub, PyPI, or Hugging Face. The public
+page provides search, autocomplete suggestions, and tile cards that deep-link
+into the local dashboard. To open the full live searchable tile catalog, install
+the full wiki pages and start the local dashboard:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ctx-init<span class="w"> </span>--graph<span class="w"> </span>--graph-install-mode<span class="w"> </span>full<span class="w"> </span>--model-mode<span class="w"> </span>skip
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>ctx-monitor<span class="w"> </span>serve
+</span></code></pre></div>
+<p>Then use:</p>
+<ul>
+<li>Skills: <code>http://127.0.0.1:8765/wiki?type=skill</code></li>
+<li>Agents: <code>http://127.0.0.1:8765/wiki?type=agent</code></li>
+<li>MCP servers: <code>http://127.0.0.1:8765/wiki?type=mcp-server</code></li>
+<li>Harnesses: <code>http://127.0.0.1:8765/wiki?type=harness</code></li>
+</ul>
+<p>The local catalog includes search, browser autocomplete suggestions, type
+filters, tile cards, and click-through detail pages for each entity.</p>
+<p>The wiki tab requires full wiki markdown content from
+<code>ctx-init --graph --graph-install-mode full</code> or local/private wiki entities.
+The default runtime graph install powers recommendations and graph stats but
+does not expand every entity page. When entity pages exist, the wiki tab is a
+filterable card grid over a deterministic, bounded dashboard sample:
+up to 500 pages per dashboard-supported entity type under
+<code>~/.claude/skill-wiki/entities/{skills,agents,mcp-servers,harnesses}/</code>.
+MCP server pages use the sharded layout
+<code>entities/mcp-servers/&lt;first-char-or-0-9&gt;/&lt;slug&gt;.md</code>; the dashboard
+routes <code>/wiki/&lt;slug&gt;</code> to the same shard convention. Harness pages use
+the flat <code>entities/harnesses/&lt;slug&gt;.md</code> layout. Each card shows:</p>
+<ul>
+<li>the slug (click to open <code>/wiki/&lt;slug&gt;?type=&lt;entity&gt;</code>)</li>
+<li>the quality grade pill (A/B/C/D/F) when the entity has a sidecar,
+  otherwise a <code>skill</code>, <code>agent</code>, <code>mcp-server</code>, or <code>harness</code> type badge</li>
+<li>the frontmatter <code>description</code></li>
+<li>up to 6 tags</li>
+</ul>
+<p>The <strong>left sidebar</strong> has a text search over the visible sample that
+matches slug, description, and tags, plus skill/agent/MCP/harness type
+checkboxes. Pair them to
+answer questions like "show me all grade-B agents related to
+testing" — check <code>agent</code>, type <code>testing</code> in the search box.</p>
+<p>Dashboard-supported entity pages (<code>/wiki/&lt;slug&gt;?type=&lt;entity&gt;</code>) render a
+bounded markdown preview and a bounded frontmatter table on the right, plus a
+quality banner with deep links to <code>/skill/&lt;slug&gt;</code> (sidecar detail) and
+<code>/graph?slug=&lt;slug&gt;&amp;type=&lt;entity&gt;</code> (1-hop neighborhood). Long body previews and
+frontmatter values are visibly marked as truncated.</p>
+<h3 id="explore-the-knowledge-graph-graph">Explore the knowledge graph — <code>/graph</code><a class="headerlink" href="#explore-the-knowledge-graph-graph" title="Permanent link">&para;</a></h3>
+<p>The graph tab is a dependency-free interactive SVG view over the
+dashboard-supported skill/agent/MCP/harness graph. Imported skills are normal
+<code>skill</code> nodes in the graph. Harness nodes are browsable and filterable here;
+install/update actions remain in <code>ctx-harness-install</code>. If the SVG renderer
+cannot initialize, the dashboard falls back to a list view over the same graph
+payload.
+When you arrive with no
+slug selected, the page shows:</p>
+<ul>
+<li>a stats line with the total node + edge counts</li>
+<li>a <strong>Popular seed slugs</strong> panel — the 18 highest-degree entities
+  rendered as clickable entity-type chips.
+  Click a chip to explore that entity's 1-hop neighborhood</li>
+<li>a search box — type any valid skill, agent, MCP, or harness slug and press
+  <code>explore</code> (or hit Enter)</li>
+<li>the graph list panel itself, which activates as soon as you pick a
+  seed</li>
+</ul>
+<p>Inside the graph view, entity pills identify the node type. The focus node has
+<code>depth=0</code> in the page data, and neighbor rows remain filterable by entity type
+and shared tag/token text.</p>
+<p>The JSON endpoint still includes blended graph edge weights, combining
+semantic similarity, explicit tag overlap, and slug-token overlap where
+available. <strong>Tap any row</strong> to
+navigate to that entity's wiki page. The type checkboxes hide or show
+skills, agents, MCP servers, and harnesses without reloading the graph.</p>
+<h3 id="read-the-quality-kpis-kpi">Read the quality KPIs — <code>/kpi</code><a class="headerlink" href="#read-the-quality-kpis-kpi" title="Permanent link">&para;</a></h3>
+<p>The KPI tab is the browser equivalent of <code>python -m kpi_dashboard
+render</code>. It aggregates the quality + lifecycle sidecars under
+<code>~/.claude/skill-quality/</code> into a single page with six tables:</p>
+<ol>
+<li><strong>Header banner</strong> — total entity count, subject breakdown, grade
+   pill counts, link to the raw <code>/api/kpi.json</code> payload, link back to
+   <code>/skills</code>.</li>
+<li><strong>Grade distribution</strong> — A/B/C/D/F count and share.</li>
+<li><strong>Lifecycle tiers</strong> — counts for <code>active</code>, <code>watch</code>, <code>demote</code>,
+   <code>archive</code>.</li>
+<li><strong>Hard floors active</strong> — which override reasons are currently
+   pinning entities to F (<code>never_loaded_stale</code>, <code>intake_fail</code>, etc.)
+   and how many entities each one catches.</li>
+<li><strong>By category</strong> — per-category count, average score, and full
+   A/B/C/D/F mix. This is the row most useful for "where are my D/F
+   skills concentrated?"</li>
+<li><strong>Top demotion candidates</strong> — up to 25 active-or-watch entities
+   graded D/F, sorted by consecutive-D streak desc then raw score
+   asc. Click a slug to jump to its sidecar.</li>
+<li><strong>Archived</strong> — slugs currently in the archive tier, with their
+   last-known grade.</li>
+</ol>
+<p>If the quality sidecar directory is empty (no scoring has happened
+yet), the page shows a helpful empty-state pointing at
+<code>ctx-skill-quality recompute --all</code>.</p>
+<h2 id="routes">Routes<a class="headerlink" href="#routes" title="Permanent link">&para;</a></h2>
+<h3 id="top-navigation">Top navigation<a class="headerlink" href="#top-navigation" title="Permanent link">&para;</a></h3>
+<p>Every page shows the same nav bar. The tabs cover the
+dashboard-supported observable surface of ctx:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Home · Loaded · Skills · Wiki · Graph · Recommend · Manage · Harness Setup · Docs · Config · Status · KPIs · Runtime · Sessions · Logs · Live
+</span></code></pre></div>
+<h3 id="html-views">HTML views<a class="headerlink" href="#html-views" title="Permanent link">&para;</a></h3>
+<p>Harness catalog entries are visible in wiki and graph routes. <code>/loaded</code> shows
+installed harness records from <code>~/.claude/harness-installs/*.json</code>, not the
+full catalog. Harness installation, update, and uninstall remain
+<code>ctx-harness-install</code> workflows, while harness scoring is not exposed in the
+dashboard yet.
+Dashboard POST actions are available only from loopback clients and require the
+per-process monitor token injected into the rendered page.</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>What it shows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/</code></td>
+<td>Home: seven stat cards (loaded, sidecars, wiki entities, graph nodes, runtime checks, audit events, sessions), grade distribution pills, recent sessions table, recent audit events</td>
+</tr>
+<tr>
+<td><code>/loaded</code></td>
+<td><strong>Currently-loaded skills, agents, MCP servers, and installed harness records</strong> from <code>~/.claude/skill-manifest.json</code> plus <code>~/.claude/harness-installs/*.json</code>; skill/agent/MCP rows expose supported live actions</td>
+</tr>
+<tr>
+<td><code>/skills</code></td>
+<td>Every sidecar as a filterable <strong>card grid</strong>: left sidebar (search by slug, grade checkboxes, skill/agent/MCP toggle, hide-floored), card shows grade pill + raw score + links to sidecar/wiki/graph</td>
+</tr>
+<tr>
+<td><code>/skill/&lt;slug&gt;</code></td>
+<td>Full sidecar breakdown: four-signal score (telemetry · intake · graph · routing), hard-floor reason, computed_at timestamp, per-skill audit timeline</td>
+</tr>
+<tr>
+<td><code>/wiki</code></td>
+<td><strong>Wiki entity index</strong> - bounded card-grid sample of up to 500 pages per dashboard-supported entity type under <code>~/.claude/skill-wiki/entities/{skills,agents,mcp-servers,harnesses}/</code>, including sharded MCP server pages and flat harness pages. Left sidebar: text search over the visible sample (slug, description, tag), skill/agent/MCP/harness checkboxes.</td>
+</tr>
+<tr>
+<td><code>/wiki/&lt;slug&gt;?type=&lt;entity&gt;</code></td>
+<td>Dashboard-supported wiki entity page rendered: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views. The optional <code>type</code> query disambiguates duplicate slugs such as <code>langgraph</code>.</td>
+</tr>
+<tr>
+<td><code>/graph</code></td>
+<td><strong>Graph explorer landing page</strong> - node/edge count header, a "Popular seed slugs" block (18 highest-degree skill/agent/MCP/harness entities as clickable chips), search box for any skill/agent/MCP/harness slug, and the built-in graph list panel. Clicking a seed chip navigates to <code>/graph?slug=&lt;slug&gt;&amp;type=&lt;entity&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>/graph?slug=&lt;slug&gt;&amp;type=&lt;entity&gt;</code></td>
+<td><strong>Built-in</strong> 1-hop neighborhood around the target skill/agent/MCP/harness slug. Entity pills identify skill, agent, MCP server, and harness rows. Tap any node to navigate to that entity's typed wiki page. Type and tag filters run client-side.</td>
+</tr>
+<tr>
+<td><code>/recommend</code></td>
+<td>Selectable recommendation page: query and top-k controls, repeated selected/rejected ID inputs, select-all/select-none helpers, recommendation state, TLDR/reason text, and graph-backed related suggestions for partial selections.</td>
+</tr>
+<tr>
+<td><code>/manage</code></td>
+<td>Search, inspect, edit, delete, and manually import skill/agent/MCP/harness wiki entities through the same safe-name and mutation-token checks as live load/unload. Manual skill upserts run the required static SkillSpector gate before the wiki page is written or queued for graph refresh.</td>
+</tr>
+<tr>
+<td><code>/harness</code></td>
+<td>Harness Setup wizard for non-Claude/custom API/local model users: collects model, goals, tool needs, safety constraints, and shows the harness recommendation/install path.</td>
+</tr>
+<tr>
+<td><code>/docs</code></td>
+<td>Local repo docs rendered inside the dashboard with MkDocs-like tabs, sidebar table of contents, in-dashboard search, and source links.</td>
+</tr>
+<tr>
+<td><code>/config</code></td>
+<td>Effective ctx config with defaults, required markers, field explanations, and editable user overrides where supported.</td>
+</tr>
+<tr>
+<td><code>/status</code></td>
+<td>Durable queue, artifact, and telemetry status: job counts by state, recent queue jobs, graph/wiki artifact sizes, crash-safe promotion metadata, local spool counts, and exporter degradation details.</td>
+</tr>
+<tr>
+<td><code>/kpi</code></td>
+<td><strong>KPI dashboard</strong> — total entity count with subject breakdown, grade distribution pills, two-column tables for grade counts and lifecycle tiers (active · watch · demote · archive), hard-floor reasons with counts, <strong>By category</strong> table (count · avg score · A/B/C/D/F mix per category), <strong>Top demotion candidates</strong> (active/watch entries graded D or F, sorted by consecutive-D streak desc then score asc), and the <strong>Archived</strong> list. Same shape as <code>python -m kpi_dashboard render</code> but HTML</td>
+</tr>
+<tr>
+<td><code>/runtime</code></td>
+<td>Generic harness runtime ledger from <code>CTX_RUNTIME_LIFECYCLE_DIR</code> or <code>~/.ctx/runtime/events.jsonl</code>: validation totals, failed/error checks, tool-selection totals, active selected loads, user/system/host source split, token totals, exact/estimated/unavailable attribution counts, recent tool usage rows, and open escalations. Grouped token history is available in <code>/api/runtime.json</code>.</td>
+</tr>
+<tr>
+<td><code>/sessions</code></td>
+<td>Index of every session (audit + skill-events), first/last seen, counts of skills loaded/unloaded, agents loaded/unloaded, MCPs loaded/unloaded, and lifecycle transitions</td>
+</tr>
+<tr>
+<td><code>/session/&lt;id&gt;</code></td>
+<td>Per-session audit timeline showing the load → score_updated → unload triad with timestamps</td>
+</tr>
+<tr>
+<td><code>/logs</code></td>
+<td>Last 500 audit events in a filterable table (client-side filter on event name, subject, session id)</td>
+</tr>
+<tr>
+<td><code>/events</code></td>
+<td>Live SSE stream of new audit events</td>
+</tr>
+</tbody>
+</table>
+<h3 id="json-api">JSON API<a class="headerlink" href="#json-api" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/sessions.json</code></td>
+<td>All sessions with aggregated counts</td>
+</tr>
+<tr>
+<td><code>GET /api/manifest.json</code></td>
+<td>Raw <code>skill-manifest.json</code> passthrough</td>
+</tr>
+<tr>
+<td><code>GET /api/status.json</code></td>
+<td><code>{queue, artifacts, telemetry}</code> payload: durable queue counts/recent jobs, graph/wiki artifact file status and promotion metadata, plus telemetry spool/export health including malformed records and exporter errors</td>
+</tr>
+<tr>
+<td><code>GET /api/skill/&lt;slug&gt;.json</code></td>
+<td>Raw sidecar for one slug</td>
+</tr>
+<tr>
+<td><code>GET /api/graph/&lt;slug&gt;.json?type=&lt;entity&gt;&amp;hops=1&amp;limit=40</code></td>
+<td>Dashboard-shaped skill/agent/MCP/harness <code>{nodes, edges, center}</code>; <code>type</code> is optional but recommended for duplicate slugs, <code>hops</code> is [1, 3], <code>limit</code> is [5, 150].</td>
+</tr>
+<tr>
+<td><code>GET /api/kpi.json</code></td>
+<td><code>DashboardSummary</code> passthrough — <code>{total, by_subject, grade_counts, lifecycle_counts, category_breakdown, hard_floor_counts, low_quality_candidates, archived, generated_at}</code>. Returns <code>{total: 0, detail: "no sidecars yet"}</code> when the quality directory is empty</td>
+</tr>
+<tr>
+<td><code>GET /api/runtime.json</code></td>
+<td>Runtime lifecycle summary: source path, validation count, failed/error count, open-escalation count, latest validation, recent validations, open escalations, session IDs, <code>tool_selection</code>, <code>token_usage</code>, <code>token_usage_history</code>, and <code>recent_tool_usage</code>.</td>
+</tr>
+<tr>
+<td><code>GET /api/config.json</code></td>
+<td>Effective/default/user config payload used by the Config tab.</td>
+</tr>
+<tr>
+<td><code>GET /api/entities/search.json?q=&lt;text&gt;&amp;type=&lt;entity&gt;&amp;limit=80</code></td>
+<td>Wiki entity search results for Manage, Config, and entity picker flows.</td>
+</tr>
+<tr>
+<td><code>GET /api/entity/&lt;slug&gt;.json?type=&lt;entity&gt;</code></td>
+<td>Frontmatter and Markdown body for one wiki entity.</td>
+</tr>
+<tr>
+<td><code>GET /api/events.stream</code></td>
+<td>Server-sent events tail of <code>~/.claude/ctx-audit.jsonl</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="mutation-endpoints">Mutation endpoints<a class="headerlink" href="#mutation-endpoints" title="Permanent link">&para;</a></h3>
+<p>Dashboard GET views are read-only. When <code>ctx-monitor</code> is bound to a
+non-loopback host, HTML, <code>/api/*</code> JSON, and SSE routes require the
+read-token URL printed by <code>ctx-monitor</code>; the first successful token URL
+sets an HttpOnly same-site cookie for dashboard navigation. Keep the
+default loopback bind for local automation. POST endpoints enforce
+same-origin (browser tab open on another origin can't forge a request), require the per-process
+<code>X-CTX-Monitor-Token</code> injected into the dashboard page, and reject any
+slug failing the shared safe-name validator. That validator blocks path
+separators, Windows drive-relative strings, malformed names, and Windows
+reserved device names such as <code>con.txt</code> and <code>nul.</code>. There is no harness
+load/unload mutation endpoint yet.</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Body</th>
+<th>Calls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /api/load</code></td>
+<td><code>{"slug": "...", "entity_type": "skill"}</code></td>
+<td><code>skill_install.install_skill(slug)</code></td>
+</tr>
+<tr>
+<td><code>POST /api/load</code></td>
+<td><code>{"slug": "...", "entity_type": "agent"}</code></td>
+<td><code>agent_install.install_agent(slug)</code></td>
+</tr>
+<tr>
+<td><code>POST /api/load</code></td>
+<td><code>{"slug": "...", "entity_type": "mcp-server"}</code></td>
+<td><code>mcp_install.install_mcp(slug, command?, json_config?, auto=True)</code></td>
+</tr>
+<tr>
+<td><code>POST /api/unload</code></td>
+<td><code>{"slug": "...", "entity_type": "skill"}</code></td>
+<td><code>skill_unload.unload_from_session([slug])</code></td>
+</tr>
+<tr>
+<td><code>POST /api/unload</code></td>
+<td><code>{"slug": "...", "entity_type": "agent"}</code></td>
+<td>remove the agent row from <code>skill-manifest.json</code> and append an unload row</td>
+</tr>
+<tr>
+<td><code>POST /api/unload</code></td>
+<td><code>{"slug": "...", "entity_type": "mcp-server"}</code></td>
+<td><code>mcp_install.uninstall_mcp(slug, wiki_dir=...)</code></td>
+</tr>
+<tr>
+<td><code>POST /api/config</code></td>
+<td><code>{"updates": {...}}</code></td>
+<td>persist supported user config overrides after validation</td>
+</tr>
+<tr>
+<td><code>POST /api/entity/upsert</code></td>
+<td>entity metadata/body payload</td>
+<td>write or update a wiki entity, then attach graph/recommendation metadata</td>
+</tr>
+<tr>
+<td><code>POST /api/entity/delete</code></td>
+<td><code>{"slug": "...", "entity_type": "skill"}</code></td>
+<td>remove a dashboard-supported wiki entity after safe-name validation</td>
+</tr>
+</tbody>
+</table>
+<p>Harness load/unload POSTs are rejected with the exact
+<code>ctx-harness-install ... --dry-run</code> command to run instead. Skill rows emit
+<code>skill.loaded</code> / <code>skill.unloaded</code>, agent rows emit <code>agent.loaded</code> /
+<code>agent.unloaded</code>, and MCP rows emit <code>toolbox.triggered</code> with
+<code>meta.entity_type="mcp-server"</code> and <code>meta.action</code> set to <code>loaded</code> or
+<code>unloaded</code>. All dashboard-driven rows use <code>actor=user</code> and
+<code>meta.via="ctx-monitor"</code> so they appear in the session timeline.</p>
+<h2 id="kpis-measures-scores">KPIs, measures, scores<a class="headerlink" href="#kpis-measures-scores" title="Permanent link">&para;</a></h2>
+<p>The dashboard surfaces every quality signal ctx currently computes for
+sidecar-backed skills, agents, and MCP servers. Harness scoring is not
+yet exposed in the dashboard. Nothing is aggregated-only — you can
+always drill from a headline number to the raw sidecar that produced it.</p>
+<h3 id="on-the-home-page">On the home page<a class="headerlink" href="#on-the-home-page" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Card</th>
+<th>What it means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Currently loaded</strong></td>
+<td>Count of entries in <code>skill-manifest.json[load]</code>. Clicking the card drills to <code>/loaded</code></td>
+</tr>
+<tr>
+<td><strong>Sidecars</strong></td>
+<td>Total sidecars in <code>~/.claude/skill-quality/</code></td>
+</tr>
+<tr>
+<td><strong>Wiki entities</strong></td>
+<td>Count of dashboard-supported wiki pages (skills + agents + MCP servers + harnesses)</td>
+</tr>
+<tr>
+<td><strong>Knowledge graph</strong></td>
+<td>Dashboard-supported skill/agent/MCP/harness node count + edge count from <code>graphify-out/graph.json</code></td>
+</tr>
+<tr>
+<td><strong>Runtime checks</strong></td>
+<td>Validation totals, failed/error checks, and open escalations from the generic runtime lifecycle ledger</td>
+</tr>
+<tr>
+<td><strong>Audit events</strong></td>
+<td>Line count of <code>~/.claude/ctx-audit.jsonl</code></td>
+</tr>
+<tr>
+<td><strong>Sessions</strong></td>
+<td>Unique session IDs seen across audit + events</td>
+</tr>
+<tr>
+<td><strong>Grade pills</strong></td>
+<td>A / B / C / D / F counts across all sidecars, colored</td>
+</tr>
+</tbody>
+</table>
+<h3 id="on-skills">On <code>/skills</code><a class="headerlink" href="#on-skills" title="Permanent link">&para;</a></h3>
+<p>Every card shows:</p>
+<ul>
+<li><strong>grade</strong> — A / B / C / D / F pill (A=green, F=red)</li>
+<li><strong>raw score</strong> — float in [0, 1] before the hard-floor override</li>
+<li><strong>subject_type</strong> — skill, agent, or mcp-server</li>
+<li><strong>hard floor reason</strong> — <code>never_loaded_stale</code>, <code>intake_fail</code>, etc.
+  when the floor is active</li>
+</ul>
+<p>Cards sorted by <code>(grade, -raw_score)</code> so high-scoring A's come first.</p>
+<h3 id="on-skillslug">On <code>/skill/&lt;slug&gt;</code><a class="headerlink" href="#on-skillslug" title="Permanent link">&para;</a></h3>
+<p>The full four-signal breakdown from the sidecar:</p>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th style="text-align: right;">Weight (default)</th>
+<th>What it measures</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Telemetry</strong></td>
+<td style="text-align: right;">0.40</td>
+<td>Load frequency + recency from <code>skill-events.jsonl</code>. Rewards skills that are actually used.</td>
+</tr>
+<tr>
+<td><strong>Intake</strong></td>
+<td style="text-align: right;">0.20</td>
+<td>Structural health: frontmatter fields present, H1 present, minimum body length, description length. Zero if <code>intake_fail</code> floor is active.</td>
+</tr>
+<tr>
+<td><strong>Graph</strong></td>
+<td style="text-align: right;">0.25</td>
+<td>Connectivity in the knowledge graph: degree, average edge weight, community size</td>
+</tr>
+<tr>
+<td><strong>Routing</strong></td>
+<td style="text-align: right;">0.15</td>
+<td>Router hit rate from <code>~/.claude/router-trace.jsonl</code>: how often this skill was among the top-K recommendations when surfaced</td>
+</tr>
+</tbody>
+</table>
+<p>The final score is <code>sum(weight[i] * signal[i])</code>. A hard floor
+(<code>never_loaded_stale</code>, <code>intake_fail</code>) can override the score to
+force an F grade regardless of other signals.</p>
+<p>The skill detail page also shows the audit timeline for this slug
+specifically: every <code>skill.loaded</code>, <code>skill.unloaded</code>,
+<code>skill.score_updated</code> row with its session_id, so you can trace
+exactly why the score changed when it did.</p>
+<h3 id="on-sessionid">On <code>/session/&lt;id&gt;</code><a class="headerlink" href="#on-sessionid" title="Permanent link">&para;</a></h3>
+<p>The per-session view lets you watch a skill's lifecycle inside one
+session:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>skill.loaded        fastapi-pro       session-abc  @ 10:23:05
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>skill.score_updated fastapi-pro       session-abc  @ 10:31:47   grade C-&gt;B
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>skill.unloaded      fastapi-pro       session-abc  @ 11:04:02
+</span></code></pre></div>
+<p>The <code>load → score_updated → unload</code> triad is the canonical
+observability proof that ctx's telemetry pipeline is live.</p>
+<h2 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Binds to 127.0.0.1 by default</strong>. Use <code>--host 0.0.0.0</code> only if
+  you actually want LAN-visible read-only access. The startup output
+  prints a one-process read-token URL; without that token or the cookie
+  it sets, LAN HTML/API/SSE requests return 403. Mutations remain
+  disabled on non-loopback binds.</li>
+<li><strong>Same-origin gating on mutation</strong>. Any POST with an <code>Origin</code>
+  header that doesn't match <code>Host</code> returns 403. Curl and direct
+  tool calls are allowed (no Origin header at all).</li>
+<li><strong>Slug allowlist on all paths</strong>. Anywhere the dashboard resolves
+  a skill, agent, MCP, or harness slug to a file path (<code>/wiki/&lt;slug&gt;</code>,
+  <code>/graph?slug=&lt;slug&gt;&amp;type=&lt;entity&gt;</code>, <code>/api/graph/&lt;slug&gt;.json</code>), the slug is
+  validated through the shared
+  safe-name helper — no path traversal, no absolute paths, no UNC
+  shares, no Windows reserved device names.</li>
+</ul>
+<h2 id="stopping">Stopping<a class="headerlink" href="#stopping" title="Permanent link">&para;</a></h2>
+<p>Ctrl+C in the terminal. Request handling is threaded for local dashboard
+responsiveness, and shutdown signals any open SSE workers. The monitor is
+still not suitable for shared/production serving.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.indexes", "navigation.top", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.action.edit"], "search": "../assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.83f73b43.min.js"></script>
+      
+        <script src="../assets/javascripts/repo-stats-refresh.js"></script>
+      
+        <script src="../assets/javascripts/catalog.js"></script>
+      
+    
+  </body>
+</html>

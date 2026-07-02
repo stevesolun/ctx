@@ -1,0 +1,31 @@
+{
+  "description": "Full-repo security audit with blocking guardrail on HIGH findings",
+  "pre": [],
+  "post": [
+    "security-reviewer",
+    "security-auditor",
+    "penetration-tester",
+    "compliance-auditor",
+    "threat-detection-engineer"
+  ],
+  "scope": {
+    "projects": ["*"],
+    "signals": ["security", "auth", "crypto"],
+    "analysis": "full"
+  },
+  "trigger": {
+    "slash": true,
+    "pre_commit": true,
+    "session_end": false,
+    "file_save": "**/auth/**"
+  },
+  "budget": {
+    "max_tokens": 300000,
+    "max_seconds": 600
+  },
+  "dedup": {
+    "window_seconds": 0,
+    "policy": "fresh"
+  },
+  "guardrail": true
+}

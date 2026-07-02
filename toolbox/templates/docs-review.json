@@ -1,0 +1,30 @@
+{
+  "description": "Documentation pass: accuracy, completeness, clarity, and API parity",
+  "pre": ["docs-lookup"],
+  "post": [
+    "technical-writer",
+    "docs-architect",
+    "api-documenter",
+    "tutorial-engineer"
+  ],
+  "scope": {
+    "projects": ["*"],
+    "signals": ["documentation"],
+    "analysis": "diff"
+  },
+  "trigger": {
+    "slash": true,
+    "pre_commit": false,
+    "session_end": false,
+    "file_save": "**/*.md"
+  },
+  "budget": {
+    "max_tokens": 120000,
+    "max_seconds": 240
+  },
+  "dedup": {
+    "window_seconds": 300,
+    "policy": "cached"
+  },
+  "guardrail": false
+}

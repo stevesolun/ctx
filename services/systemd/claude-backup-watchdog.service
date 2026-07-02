@@ -1,0 +1,40 @@
+# Systemd user unit for the ctx backup watchdog.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp docs/services/systemd/claude-backup-watchdog.service \
+#       ~/.config/systemd/user/
+#   # Edit the copy: set CTX_REPO to the absolute path of this checkout
+#   # and confirm your python3 path (e.g. /usr/bin/python3).
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now claude-backup-watchdog.service
+#
+# Status / stop / tail:
+#   systemctl --user status   claude-backup-watchdog.service
+#   systemctl --user stop     claude-backup-watchdog.service
+#   journalctl --user -u      claude-backup-watchdog.service -f
+
+[Unit]
+Description=Claude ~/.claude backup watchdog (ctx)
+After=default.target
+
+[Service]
+Type=simple
+# Adjust CTX_REPO to your checkout, and Python if you use a venv.
+Environment=CTX_REPO=%h/ctx
+ExecStart=/usr/bin/python3 ${CTX_REPO}/src/backup_mirror.py watchdog --interval 60
+# Crash-recover: back off 5s between restarts, give up after 3 fast crashes.
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+# Least-privilege: the watchdog only needs to read ~/.claude and write
+# ~/.claude/backups. No network. No privilege escalation.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.claude/backups
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,1888 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Not a catalog: a repo-aware recommendation layer that loads the right skills, agents, MCPs, and harnesses from your tools or the shipped graph.">
+      
+      
+      
+        <link rel="canonical" href="https://stevesolun.github.io/ctx/entity-onboarding/">
+      
+      
+        <link rel="prev" href="../huggingface-publish/">
+      
+      
+        <link rel="next" href="../dashboard/">
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.44">
+    
+    
+      
+        <title>Entity onboarding - ctx</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.0253249f.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#entity-onboarding" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="ctx" class="md-header__button md-logo" aria-label="ctx" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ctx
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Entity onboarding
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/stevesolun/ctx" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    stevesolun/ctx
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../catalog/" class="md-tabs__link">
+        
+  
+    
+  
+  Catalog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../knowledge-graph/" class="md-tabs__link">
+        
+  
+    
+  
+  Knowledge graph
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../huggingface-publish/" class="md-tabs__link">
+        
+  
+    
+  
+  Hugging Face publish
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+    
+  
+  Entity onboarding
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../dashboard/" class="md-tabs__link">
+        
+  
+    
+  
+  Dashboard
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../telemetry/" class="md-tabs__link">
+        
+  
+    
+  
+  Telemetry
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../harness/attaching-to-hosts/" class="md-tabs__link">
+          
+  
+    
+  
+  Harness
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../toolbox/" class="md-tabs__link">
+          
+  
+    
+  
+  Toolbox
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../skill-router/" class="md-tabs__link">
+          
+  
+    
+  
+  Skill router
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../skills-health/" class="md-tabs__link">
+          
+  
+    
+  
+  Health
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="ctx" class="md-nav__button md-logo" aria-label="ctx" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ctx
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/stevesolun/ctx" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    stevesolun/ctx
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Catalog
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge-graph/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Knowledge graph
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../huggingface-publish/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Hugging Face publish
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Entity onboarding
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Entity onboarding
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#updating-the-graph-and-llm-wiki" class="md-nav__link">
+    <span class="md-ellipsis">
+      Updating the Graph and LLM Wiki
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#repair-incremental-attach" class="md-nav__link">
+    <span class="md-ellipsis">
+      Repair Incremental Attach
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-and-cyber-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      Security and Cyber Check
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#updating-an-existing-entity" class="md-nav__link">
+    <span class="md-ellipsis">
+      Updating an Existing Entity
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#removing-or-retiring-an-entity" class="md-nav__link">
+    <span class="md-ellipsis">
+      Removing or Retiring an Entity
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-a-skill" class="md-nav__link">
+    <span class="md-ellipsis">
+      Add a Skill
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-an-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      Add an Agent
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-an-mcp-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      Add an MCP Server
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-a-harness" class="md-nav__link">
+    <span class="md-ellipsis">
+      Add a Harness
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#initialize-model-choice" class="md-nav__link">
+    <span class="md-ellipsis">
+      Initialize Model Choice
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Dashboard
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telemetry/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Telemetry
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Harness
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            Harness
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness/attaching-to-hosts/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Attach to hosts
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness/loopflow-adapter-demo/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    LoopFlow adapter demo
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness/clean-host-contract/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Clean-host contract
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../toolbox/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Toolbox
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_9" id="__nav_9_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            Toolbox
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/starters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Starter toolboxes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/council-runner/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Council runner
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/hooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Hooks & triggers
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/behavior-miner/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Behavior miner
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/intent-interview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Intent interview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../toolbox/verdicts/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Verdicts & guardrails
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backup-hook-install/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Backup hook install
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../skill-router/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Skill router
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_10" id="__nav_10_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            Skill router
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stack-signatures/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Stack signatures
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skill-stack-matrix/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Skill-stack matrix
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../marketplace-registry/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Marketplace registry
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Health
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            Health
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skills-health/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Skill health
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-anchor/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Memory anchoring
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skill-lifecycle-and-dashboard/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Skill lifecycle & dashboard
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skill-quality-install/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Skill-quality install
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#updating-the-graph-and-llm-wiki" class="md-nav__link">
+    <span class="md-ellipsis">
+      Updating the Graph and LLM Wiki
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#repair-incremental-attach" class="md-nav__link">
+    <span class="md-ellipsis">
+      Repair Incremental Attach
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-and-cyber-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      Security and Cyber Check
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#updating-an-existing-entity" class="md-nav__link">
+    <span class="md-ellipsis">
+      Updating an Existing Entity
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#removing-or-retiring-an-entity" class="md-nav__link">
+    <span class="md-ellipsis">
+      Removing or Retiring an Entity
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-a-skill" class="md-nav__link">
+    <span class="md-ellipsis">
+      Add a Skill
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-an-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      Add an Agent
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-an-mcp-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      Add an MCP Server
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-a-harness" class="md-nav__link">
+    <span class="md-ellipsis">
+      Add a Harness
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#initialize-model-choice" class="md-nav__link">
+    <span class="md-ellipsis">
+      Initialize Model Choice
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/stevesolun/ctx/edit/main/docs/entity-onboarding.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="entity-onboarding">Entity Onboarding<a class="headerlink" href="#entity-onboarding" title="Permanent link">&para;</a></h1>
+<p>ctx treats skills, agents, MCP servers, and harnesses as wiki entities that can
+be indexed, linked in the knowledge graph, and recommended from the same
+surface. The important distinction is install behavior:</p>
+<ul>
+<li>Skills and agents are local Claude Code assets.</li>
+<li>MCP servers are recorded first, then installed only when the user opts in.</li>
+<li>Harnesses are recorded first. A harness describes the machinery around the
+  model: runtime, tools, access boundaries, memory, verification, and approval
+  policy. Adding one never executes upstream setup commands.</li>
+</ul>
+<p>After adding any entity, drain the durable wiki queue when you want the local
+runtime graph to see it immediately:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ctx-wiki-worker<span class="w"> </span>--wiki<span class="w"> </span>~/.claude/skill-wiki<span class="w"> </span>--limit<span class="w"> </span><span class="m">1</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>ctx-scan-repo<span class="w"> </span>--repo<span class="w"> </span>.<span class="w"> </span>--recommend
+</span></code></pre></div>
+<p>If a persisted semantic vector index exists, that worker pass also runs a
+best-effort incremental attach into <code>graphify-out/entity-overlays.jsonl</code> and,
+when active graph packs exist, writes a small graph overlay pack for the
+changed entity. If the vector index is missing, the worker can still write a
+node-only graph overlay pack and refresh <code>graph-store.sqlite3</code>, so local
+dashboard/search/recommendation reads see the merged base+overlay graph without
+a full all-pairs semantic rebuild. The wiki page remains the source of truth;
+only legacy installs without active graph packs fall back to the normal
+incremental graph export job.</p>
+<h2 id="updating-the-graph-and-llm-wiki">Updating the Graph and LLM Wiki<a class="headerlink" href="#updating-the-graph-and-llm-wiki" title="Permanent link">&para;</a></h2>
+<p>Use this sequence for every accepted skill, agent, MCP server, or harness
+change. The graph and LLM-wiki are shippable artifacts, not scratch output, so
+the update is treated like a release step.</p>
+<ol>
+<li>Add or update the entity through the matching command:
+   <code>ctx-skill-add</code>, <code>ctx-agent-add</code>, <code>ctx-mcp-add</code>, or <code>ctx-harness-add</code>.</li>
+<li>If the entity already exists, read the update review. It lists changed
+   fields, likely benefits, regressions, and security findings. Do not pass
+   <code>--update-existing</code> until those findings are acceptable.</li>
+<li>Run the security/cyber check below.</li>
+<li>Park heavyweight graph artifacts locally before rebuilds:
+   <code>python scripts/graph_artifact_guard.py park</code>. This keeps background Git
+   integrations from repeatedly LFS-cleaning the full wiki tarball while it is
+   still changing.</li>
+<li>Drain the wiki queue for local runtime use:
+   <code>ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1</code>. This updates the
+   wiki index, writes wiki overlay packs, attempts incremental ANN graph attach
+   when a vector index exists, writes graph overlay packs when active packs are
+   present, and queues a graph-store refresh so local reads see the merged view.</li>
+<li>Rebuild the curated wiki graph with <code>ctx-wiki-graphify</code> before shipping
+   release artifacts or when you need a full graph/export reconciliation.</li>
+<li>Repack <code>graph/wiki-graph.tar.gz</code> through the artifact promotion path:
+   write a staged tarball, validate it, atomically promote it, and keep the
+   generated <code>*.promotion.json</code> metadata with the previous/current hashes.
+   Never commit local review reports or raw caches.</li>
+<li>Refresh the bulk skill index when shipping large skill updates.
+   This adds first-class <code>skill</code> nodes, skill pages under <code>entities/skills/</code>, install
+   commands, duplicate hints, and metadata-only quality/security signals:</li>
+</ol>
+<p><div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>src/import_skills_sh_catalog.py<span class="w"> </span>--from-api-union<span class="w"> </span>&lt;raw.json&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>--catalog-out<span class="w"> </span>graph/skills-sh-catalog.json.gz<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>--wiki-tar<span class="w"> </span>graph/wiki-graph.tar.gz<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>--update-wiki-tar
+</span></code></pre></div>
+9. Refresh published counts with <code>python src/update_repo_stats.py</code>.
+10. Verify the changed entity can be recommended through
+   <code>ctx-scan-repo --repo . --recommend</code> or <code>ctx__recommend_bundle</code>.
+11. Unpark and stage the graph artifacts once the release candidate is final:
+    <code>python scripts/graph_artifact_guard.py unpark</code>, then <code>git add</code> the graph
+    artifacts intentionally. Run <code>python scripts/graph_artifact_guard.py prune</code>
+    after interrupted Git/LFS runs or after release staging to clean prunable
+    local LFS cache entries. Add <code>--include-git-prune</code> only when you explicitly
+    want repo-wide dangling Git objects removed too.</p>
+<p>The durable wiki worker drains <code>entity-upsert</code>, <code>graph-export</code>,
+<code>skill-index-refresh</code>, <code>tar-refresh</code>, and <code>artifact-promotion</code> jobs. Use
+<code>ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1</code> for a controlled
+single-job drain, or omit <code>--limit</code> to drain the ready queue.</p>
+<p>For a manual attach dry-run against an existing vector index:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ctx-incremental-attach<span class="w"> </span>attach<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--index-dir<span class="w"> </span>~/.claude/skill-wiki/.embedding-cache/graph/vector-index<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--overlay<span class="w"> </span>~/.claude/skill-wiki/graphify-out/entity-overlays.jsonl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>--node-id<span class="w"> </span>skill:fastapi-review<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>--type<span class="w"> </span>skill<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span>--label<span class="w"> </span>fastapi-review<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span>--text-file<span class="w"> </span>~/.claude/skill-wiki/entities/skills/fastapi-review.md<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span>--dry-run
+</span></code></pre></div>
+<p>Use <code>ctx-incremental-attach calibrate --graph ~/.claude/skill-wiki/graphify-out/graph.json</code>
+to inspect the current graph's semantic and degree distributions before
+changing attach thresholds.</p>
+<p>Validate the attach quality before relying on a new ANN backend or changed
+threshold:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ctx-incremental-shadow<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--index-dir<span class="w"> </span>~/.claude/skill-wiki/.embedding-cache/graph/vector-index<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>--graph<span class="w"> </span>~/.claude/skill-wiki/graphify-out/graph.json<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--sample-size<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>--min-overlap<span class="w"> </span><span class="m">0</span>.85
+</span></code></pre></div>
+<p>The shadow gate pretends sampled existing nodes are new, compares incremental
+attach neighbors to batch graph semantic neighbors, reports precision/recall
+for top 5/10/20, score deltas, and bad examples, then exits non-zero if
+recall at the largest top-k is below the overlap floor.</p>
+<h2 id="repair-incremental-attach">Repair Incremental Attach<a class="headerlink" href="#repair-incremental-attach" title="Permanent link">&para;</a></h2>
+<p>If the worker says <code>incremental attach skipped (no vector index)</code>, build the
+persisted semantic index once:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>ctx-wiki-graphify<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--wiki-dir<span class="w"> </span>~/.claude/skill-wiki<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>--incremental<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>--graph-only<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span>--semantic-vector-index<span class="w"> </span>numpy-flat
+</span></code></pre></div>
+<p><code>numpy-flat</code> is exact and portable. <code>--semantic-vector-index auto</code> keeps the
+portable exact backend at this graph size and can switch to the optional ANN
+backend only above the configured node threshold. <code>hnswlib</code> is optional and
+should be shadow-gated before release use.</p>
+<p>Then process pending entity updates:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>ctx-wiki-worker<span class="w"> </span>--wiki<span class="w"> </span>~/.claude/skill-wiki
+</span></code></pre></div>
+<p>That is the supported "attach pending" flow today: the queue is durable, so
+failed or skipped entity-upsert jobs remain visible to the worker and can be
+retried after the index exists. Use manual <code>ctx-incremental-attach attach
+--dry-run</code> for one-off debugging, not as the normal bulk path.</p>
+<h2 id="security-and-cyber-check">Security and Cyber Check<a class="headerlink" href="#security-and-cyber-check" title="Permanent link">&para;</a></h2>
+<p>Run this before applying <code>--update-existing</code>, before installing a harness with
+approved commands, and before shipping a refreshed graph tarball.</p>
+<ul>
+<li>Inspect changed entity markdown and frontmatter for shell commands, setup
+  commands, install commands, URLs, requested permissions, and model/provider
+  access.</li>
+<li>Treat these as manual-review blockers: <code>curl | sh</code>, <code>wget | bash</code>,
+  <code>Invoke-Expression</code>, broad <code>rm -rf</code>, <code>git reset --hard</code>, <code>chmod 777</code>, secret
+  upload, disabled auth/TLS/sandboxing/audit/tests, or unpinned package sources.</li>
+<li>For MCP and harness updates, check network access, filesystem scope, auth
+  material, command transports, and whether setup or verify commands execute
+  remote code.</li>
+<li>Prefer dry-run first: <code>ctx-harness-install &lt;slug&gt; --dry-run</code> and
+  <code>ctx-harness-install &lt;slug&gt; --update --dry-run</code>.</li>
+<li>If a candidate is useful but risky, document the safer install path or keep it
+  as metadata instead of shipping it as an installed skill.</li>
+</ul>
+<h2 id="updating-an-existing-entity">Updating an Existing Entity<a class="headerlink" href="#updating-an-existing-entity" title="Permanent link">&para;</a></h2>
+<p>The add commands are non-destructive by default when the target skill, agent,
+MCP server, or harness already exists. The first add attempt prints an update
+review instead of replacing files. That review lists changed fields, expected
+benefits, possible regressions, security findings, and a recommendation.</p>
+<p>Use this flow for every entity type:</p>
+<ol>
+<li>Run the normal add command.</li>
+<li>If ctx prints <code>Existing &lt;type&gt; already exists</code>, read the benefits and risks.</li>
+<li>Keep the current entity by doing nothing, or re-run with <code>--skip-existing</code>
+   in batch jobs where you do not want reviews.</li>
+<li>Apply the replacement only after review with <code>--update-existing</code>.</li>
+<li>Drain the queue with <code>ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1</code>
+   for immediate local recommendation use, or rebuild with <code>ctx-wiki-graphify</code>
+   when the update should be reconciled into shipped graph artifacts.</li>
+</ol>
+<p>Examples:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>ctx-skill-add<span class="w"> </span>--skill-path<span class="w"> </span>./SKILL.md<span class="w"> </span>--name<span class="w"> </span>fastapi-review
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>ctx-skill-add<span class="w"> </span>--skill-path<span class="w"> </span>./SKILL.md<span class="w"> </span>--name<span class="w"> </span>fastapi-review<span class="w"> </span>--update-existing
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>ctx-agent-add<span class="w"> </span>--agent-path<span class="w"> </span>./code-reviewer.md<span class="w"> </span>--name<span class="w"> </span>code-reviewer
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>ctx-agent-add<span class="w"> </span>--agent-path<span class="w"> </span>./code-reviewer.md<span class="w"> </span>--name<span class="w"> </span>code-reviewer<span class="w"> </span>--update-existing
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>ctx-mcp-add<span class="w"> </span>--from-json<span class="w"> </span>./github-mcp.json
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>ctx-mcp-add<span class="w"> </span>--from-json<span class="w"> </span>./github-mcp.json<span class="w"> </span>--update-existing
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>ctx-harness-add<span class="w"> </span>--from-json<span class="w"> </span>./text-to-cad-harness.json
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>ctx-harness-add<span class="w"> </span>--from-json<span class="w"> </span>./text-to-cad-harness.json<span class="w"> </span>--update-existing
+</span></code></pre></div>
+<p><code>ctx-harness-install --update</code> is different: it refreshes an installed harness
+checkout under <code>~/.claude/harnesses/&lt;slug&gt;</code>. Catalog entity replacement uses
+<code>ctx-harness-add --update-existing</code>.</p>
+<h2 id="removing-or-retiring-an-entity">Removing or Retiring an Entity<a class="headerlink" href="#removing-or-retiring-an-entity" title="Permanent link">&para;</a></h2>
+<p>Removal has three separate meanings. First decide which one you need.</p>
+<ul>
+<li><strong>Catalog removal</strong> stops ctx from showing the entity in the wiki, graph, and
+  recommendations. Use the dashboard: <code>ctx-monitor serve</code>, open <strong>Manage</strong>,
+  search for the slug and type, then choose <strong>Delete selected</strong>. This deletes
+  the wiki page and queues an <code>entity-upsert</code> delete plus <code>graph-export</code> job.</li>
+<li><strong>Runtime unload</strong> removes a currently loaded entity from the live manifest.
+  Use the dashboard <strong>Loaded</strong> page. MCP unloads call the Claude MCP removal
+  path when available; skill and agent unloads remove the manifest row.</li>
+<li><strong>Installed-file removal</strong> is type-specific. Use
+  <code>ctx-harness-install &lt;slug&gt; --uninstall</code> for harness checkouts,
+  <code>ctx-mcp-uninstall &lt;slug&gt;</code> for installed MCPs, and <code>ctx-lifecycle archive</code>
+  then <code>ctx-lifecycle purge</code> for stale local skills that should be deleted
+  after the configured grace period.</li>
+</ul>
+<p>After deleting an entity page, drain or rebuild before trusting recommendation
+results:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ctx-wiki-worker<span class="w"> </span>--wiki<span class="w"> </span>~/.claude/skill-wiki<span class="w"> </span>--limit<span class="w"> </span><span class="m">1</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>ctx-scan-repo<span class="w"> </span>--repo<span class="w"> </span>.<span class="w"> </span>--recommend
+</span></code></pre></div>
+<p>If you need an auditable manual flow without the browser, use the dashboard
+local API only from loopback with the per-process monitor token printed into
+the served page. The API route is <code>POST /api/entity/delete</code> with
+<code>{"slug": "...", "entity_type": "skill|agent|mcp-server|harness"}</code>.</p>
+<h2 id="add-a-skill">Add a Skill<a class="headerlink" href="#add-a-skill" title="Permanent link">&para;</a></h2>
+<p>Use this when you have a local <code>SKILL.md</code> that should be installed under
+<code>~/.claude/skills/&lt;name&gt;/SKILL.md</code> and mirrored into the wiki.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>ctx-skill-add<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>--skill-path<span class="w"> </span>./SKILL.md<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>--name<span class="w"> </span>fastapi-review
+</span></code></pre></div>
+<p>What happens:</p>
+<ol>
+<li>The name is validated.</li>
+<li>NVIDIA SkillSpector runs in static <code>--no-llm</code> mode by default; the add
+   fails unless the scan passes. Use <code>--no-security-scan</code> only for a deliberate
+   local exception.</li>
+<li>Intake checks run against the markdown.</li>
+<li>The skill is copied into <code>~/.claude/skills/</code>.</li>
+<li>A wiki page is created under <code>entities/skills/</code>.</li>
+<li>The wiki index and log are updated.</li>
+</ol>
+<h2 id="add-an-agent">Add an Agent<a class="headerlink" href="#add-an-agent" title="Permanent link">&para;</a></h2>
+<p>Use this when you have a local Claude Code agent markdown file.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>ctx-agent-add<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span>--agent-path<span class="w"> </span>./code-reviewer.md<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span>--name<span class="w"> </span>code-reviewer
+</span></code></pre></div>
+<p>Batch-add every top-level <code>.md</code> file in a directory:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>ctx-agent-add<span class="w"> </span>--scan-dir<span class="w"> </span>./agents<span class="w"> </span>--skip-existing
+</span></code></pre></div>
+<p>Agents are copied into <code>~/.claude/agents/</code> and mirrored into
+<code>entities/agents/</code>. Re-run <code>ctx-wiki-graphify</code> after adding agents if you want
+graph recommendations to include them.</p>
+<h2 id="add-an-mcp-server">Add an MCP Server<a class="headerlink" href="#add-an-mcp-server" title="Permanent link">&para;</a></h2>
+<p>Use this when you want the MCP server available as a recommendation before
+installing it into a host.</p>
+<p>Create <code>github-mcp.json</code>:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="p">{</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;GitHub MCP&quot;</span><span class="p">,</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span><span class="nt">&quot;slug&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;github-mcp&quot;</span><span class="p">,</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;MCP server for GitHub repository and issue workflows.&quot;</span><span class="p">,</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">  </span><span class="nt">&quot;github_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://github.com/modelcontextprotocol/servers&quot;</span><span class="p">,</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">  </span><span class="nt">&quot;sources&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;manual&quot;</span><span class="p">],</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">  </span><span class="nt">&quot;tags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;github&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;automation&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;repository&quot;</span><span class="p">],</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="w">  </span><span class="nt">&quot;transports&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;stdio&quot;</span><span class="p">]</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>Add it:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>ctx-mcp-add<span class="w"> </span>--from-json<span class="w"> </span>./github-mcp.json
+</span></code></pre></div>
+<p>MCP pages live under <code>entities/mcp-servers/&lt;shard&gt;/&lt;slug&gt;.md</code>. The add command
+detects existing pages by slug and, when possible, canonical GitHub URL. If a
+match exists, ctx prints the update review and skips replacement unless
+<code>--update-existing</code> is passed.</p>
+<h2 id="add-a-harness">Add a Harness<a class="headerlink" href="#add-a-harness" title="Permanent link">&para;</a></h2>
+<p>Use this when a repo provides the runtime around a model rather than just a
+tool. Harness examples include coding-agent loops, CAD-generation runtimes,
+browser-automation runners, evaluation loops, and local-model workbenches.</p>
+<p>Example: add <code>earthtojake/text-to-cad</code> as a harness recommendation.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>ctx-harness-add<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span>--repo<span class="w"> </span>https://github.com/earthtojake/text-to-cad<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span>--name<span class="w"> </span><span class="s2">&quot;Text to CAD&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">&quot;Harness for turning text prompts into CAD artifacts.&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span>--tag<span class="w"> </span>cad<span class="w"> </span>--tag<span class="w"> </span>3d<span class="w"> </span>--tag<span class="w"> </span>automation<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">  </span>--model-provider<span class="w"> </span>openai<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">  </span>--runtime<span class="w"> </span>python<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">  </span>--capability<span class="w"> </span><span class="s2">&quot;Generate CAD artifacts from natural language&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">  </span>--setup-command<span class="w"> </span><span class="s2">&quot;pip install -e .&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">  </span>--verify-command<span class="w"> </span><span class="s2">&quot;pytest&quot;</span>
+</span></code></pre></div>
+<p>Or load one JSON record:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="p">{</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nt">&quot;repo_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://github.com/earthtojake/text-to-cad&quot;</span><span class="p">,</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Text to CAD&quot;</span><span class="p">,</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">  </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Harness for turning text prompts into CAD artifacts.&quot;</span><span class="p">,</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">  </span><span class="nt">&quot;tags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;cad&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;3d&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;automation&quot;</span><span class="p">],</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">  </span><span class="nt">&quot;model_providers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;openai&quot;</span><span class="p">],</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">  </span><span class="nt">&quot;runtimes&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;python&quot;</span><span class="p">],</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">  </span><span class="nt">&quot;capabilities&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;Generate CAD artifacts from natural language&quot;</span><span class="p">],</span>
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="w">  </span><span class="nt">&quot;setup_commands&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;pip install -e .&quot;</span><span class="p">],</span>
+</span><span id="__span-14-10"><a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="w">  </span><span class="nt">&quot;verify_commands&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;pytest&quot;</span><span class="p">],</span>
+</span><span id="__span-14-11"><a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="w">  </span><span class="nt">&quot;sources&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;manual&quot;</span><span class="p">]</span>
+</span><span id="__span-14-12"><a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="p">}</span>
+</span></code></pre></div>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>ctx-harness-add<span class="w"> </span>--from-json<span class="w"> </span>./text-to-cad-harness.json
+</span></code></pre></div>
+<p>Harness pages live under <code>entities/harnesses/&lt;slug&gt;.md</code>. Setup and verification
+commands are documentation only; ctx records them so the user can inspect and
+decide before running anything.</p>
+<p>To inspect and install a harness:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>ctx-harness-install<span class="w"> </span>text-to-cad<span class="w"> </span>--dry-run
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>ctx-harness-install<span class="w"> </span>text-to-cad
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>ctx-harness-install<span class="w"> </span>text-to-cad<span class="w"> </span>--update<span class="w"> </span>--dry-run
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>ctx-harness-install<span class="w"> </span>text-to-cad<span class="w"> </span>--uninstall<span class="w"> </span>--dry-run
+</span></code></pre></div>
+<p>The installer clones or copies the harness into <code>~/.claude/harnesses/&lt;slug&gt;</code> and
+writes <code>~/.claude/harness-installs/&lt;slug&gt;.json</code>. It does not run setup commands
+unless you pass <code>--approve-commands</code>, and it does not run verification commands
+unless you also pass <code>--run-verify</code>.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>ctx-harness-install<span class="w"> </span>text-to-cad<span class="w"> </span>--approve-commands<span class="w"> </span>--run-verify
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>ctx-harness-install<span class="w"> </span>text-to-cad<span class="w"> </span>--update<span class="w"> </span>--approve-commands<span class="w"> </span>--run-verify
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>ctx-harness-install<span class="w"> </span>text-to-cad<span class="w"> </span>--uninstall
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>ctx-harness-install<span class="w"> </span>text-to-cad<span class="w"> </span>--uninstall<span class="w"> </span>--keep-files
+</span></code></pre></div>
+<h2 id="initialize-model-choice">Initialize Model Choice<a class="headerlink" href="#initialize-model-choice" title="Permanent link">&para;</a></h2>
+<p>During setup, record whether you use Claude Code or your own model. Plain
+<code>ctx-init</code> starts a small wizard when it is attached to an interactive
+terminal; use <code>ctx-init --wizard</code> to force the prompts, or pass explicit flags
+such as <code>--model-mode skip</code> for non-interactive automation.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>ctx-init
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>ctx-init<span class="w"> </span>--wizard
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>ctx-init<span class="w"> </span>--model-mode<span class="w"> </span>skip
+</span></code></pre></div>
+<p>For Claude Code:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>ctx-init<span class="w"> </span>--model-mode<span class="w"> </span>claude-code<span class="w"> </span>--goal<span class="w"> </span><span class="s2">&quot;maintain a FastAPI service&quot;</span>
+</span></code></pre></div>
+<p>For a custom model:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>ctx-init<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span>--model-mode<span class="w"> </span>custom<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">  </span>--model<span class="w"> </span>openai/gpt-5.5<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">  </span>--goal<span class="w"> </span><span class="s2">&quot;build CAD artifacts from text prompts&quot;</span>
+</span></code></pre></div>
+<p>Add <code>--validate-model</code> only when you want <code>ctx-init</code> to make one small provider
+call. Without that flag, setup writes <code>~/.claude/ctx-model-profile.json</code> and
+prints harness recommendations without calling the model.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.indexes", "navigation.top", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.action.edit"], "search": "../assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.83f73b43.min.js"></script>
+      
+        <script src="../assets/javascripts/repo-stats-refresh.js"></script>
+      
+        <script src="../assets/javascripts/catalog.js"></script>
+      
+    
+  </body>
+</html>
