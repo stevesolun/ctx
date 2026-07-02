@@ -164,11 +164,16 @@ def resolve_scope(
 # ── Plan hashing + dedup cache ──────────────────────────────────────────────
 
 
-def _hash_plan(toolbox: str, agents: tuple[str, ...],
-               files: tuple[str, ...], scope_mode: str) -> str:
+def _hash_plan(
+    toolbox: str, agents: tuple[str, ...], files: tuple[str, ...], scope_mode: str
+) -> str:
     payload = json.dumps(
-        {"toolbox": toolbox, "agents": list(agents),
-         "files": list(files), "scope_mode": scope_mode},
+        {
+            "toolbox": toolbox,
+            "agents": list(agents),
+            "files": list(files),
+            "scope_mode": scope_mode,
+        },
         sort_keys=True,
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()[:16]
@@ -179,8 +184,9 @@ def _runs_dir() -> Path:
     return RUNS_DIR
 
 
-def _find_cached_plan(plan_hash: str, window_seconds: int,
-                      now: float | None = None) -> RunPlan | None:
+def _find_cached_plan(
+    plan_hash: str, window_seconds: int, now: float | None = None
+) -> RunPlan | None:
     _validate_plan_hash(plan_hash)
     target = _runs_dir() / f"{plan_hash}.json"
     if not target.exists():
@@ -213,7 +219,6 @@ def _plan_from_dict(raw: dict, source: str) -> RunPlan:
     )
 
 
-
 def persist_plan(plan: RunPlan) -> Path:
     _validate_plan_hash(plan.plan_hash)
     target = _runs_dir() / f"{plan.plan_hash}.json"
@@ -242,7 +247,10 @@ def build_plan(
 
     root = repo_root or Path.cwd()
     files, effective_mode = resolve_scope(
-        tb, root, explicit_files=explicit_files, graph_edges=graph_edges,
+        tb,
+        root,
+        explicit_files=explicit_files,
+        graph_edges=graph_edges,
     )
     files_tuple = tuple(files)
     agents = tuple(tb.post)
@@ -251,8 +259,7 @@ def build_plan(
     timestamp = now if now is not None else time.time()
 
     if tb.dedup.policy == "cached":
-        cached = _find_cached_plan(plan_hash, tb.dedup.window_seconds,
-                                   now=timestamp)
+        cached = _find_cached_plan(plan_hash, tb.dedup.window_seconds, now=timestamp)
         if cached is not None:
             return cached
 
@@ -334,8 +341,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--toolbox", required=True)
     sp.add_argument("--files", nargs="*", help="Override scope with explicit files")
     sp.add_argument("--repo", help="Repo root (default: cwd)")
-    sp.add_argument("--dry-run", action="store_true",
-                    help="Do not persist the plan to ~/.claude/toolbox-runs/")
+    sp.add_argument(
+        "--dry-run", action="store_true", help="Do not persist the plan to ~/.claude/toolbox-runs/"
+    )
     sp.set_defaults(func=cmd_plan)
 
     sp = sub.add_parser("history", help="List recent run plans")

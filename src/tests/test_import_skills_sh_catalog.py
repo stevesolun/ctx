@@ -192,7 +192,8 @@ def test_update_wiki_tarball_adds_skills_sh_as_first_class_skill_nodes_and_pages
         page = page_file.read().decode("utf-8")
 
     external_node = next(
-        node for node in graph_out["nodes"]
+        node
+        for node in graph_out["nodes"]
         if node["id"] == "skill:skills-sh-open-feishu-cn-lark-doc"
     )
     assert external_node["type"] == "skill"
@@ -284,12 +285,14 @@ def test_update_wiki_tarball_preserves_existing_skills_sh_semantic_edges(
         graph_out = _read_json(tf, "./graphify-out/graph.json")
 
     node = next(
-        node for node in graph_out["nodes"]
+        node
+        for node in graph_out["nodes"]
         if node["id"] == "skill:skills-sh-open-feishu-cn-lark-doc"
     )
     assert node["source_catalog"] == "skills.sh"
     edges = [
-        edge for edge in graph_out["edges"]
+        edge
+        for edge in graph_out["edges"]
         if edge["target"] == "skill:skills-sh-open-feishu-cn-lark-doc"
         or edge["source"] == "skill:skills-sh-open-feishu-cn-lark-doc"
     ]
@@ -557,8 +560,7 @@ def test_hydrated_skills_sh_body_is_indexed_and_rendered(
                 "tags": ["skill"],
                 "detail_url": "https://skills.sh/vercel-labs/skills/find-skills",
                 "install_command": (
-                    "npx skills add https://github.com/vercel-labs/skills "
-                    "--skill find-skills"
+                    "npx skills add https://github.com/vercel-labs/skills --skill find-skills"
                 ),
             }
         ],
@@ -598,9 +600,7 @@ def test_hydrated_skills_sh_body_is_indexed_and_rendered(
         names = tf.getnames()
         graph_out = _read_json(tf, "./graphify-out/graph.json")
         catalog_out = _read_json(tf, "./external-catalogs/skills-sh/catalog.json")
-        page_member = tf.getmember(
-            "./entities/skills/skills-sh-vercel-labs-skills-find-skills.md"
-        )
+        page_member = tf.getmember("./entities/skills/skills-sh-vercel-labs-skills-find-skills.md")
         page_file = tf.extractfile(page_member)
         assert page_file is not None
         page = page_file.read().decode("utf-8")
@@ -625,10 +625,7 @@ def test_hydrated_skills_sh_body_is_indexed_and_rendered(
     assert "skill_body" not in catalog_out["skills"][0]
     assert catalog_out["skills"][0]["body_char_count"] == len(skill["skill_body"])
     assert "body_available: true" in page
-    assert (
-        "converted_path: "
-        '"converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md"'
-    ) in page
+    assert ('converted_path: "converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md"') in page
     assert "Body availability: hydrated from Skills.sh detail page." in page
     assert "## Upstream SKILL.md" not in page
     assert converted == "# Find Skills\n\nUse this skill to discover relevant skills.\n"
@@ -675,8 +672,7 @@ def test_update_wiki_tarball_preserves_stripped_catalog_converted_body(
                 "tags": ["skill"],
                 "detail_url": "https://skills.sh/vercel-labs/skills/find-skills",
                 "install_command": (
-                    "npx skills add https://github.com/vercel-labs/skills "
-                    "--skill find-skills"
+                    "npx skills add https://github.com/vercel-labs/skills --skill find-skills"
                 ),
                 "body_available": True,
                 "converted_path": converted_path.removeprefix("./"),
@@ -815,10 +811,7 @@ def test_update_wiki_tarball_drops_skills_sh_original_body_files(
         names = set(tf.getnames())
 
     assert converted_path in names
-    assert (
-        "./converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md.original"
-        not in names
-    )
+    assert "./converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md.original" not in names
     assert "./converted/curated-long/SKILL.md.original" not in names
     assert "./converted/curated-long/README.md.original" not in names
     assert "./entities/skills/curated-long.md.original" not in names
@@ -909,13 +902,10 @@ def test_update_wiki_tarball_downgrades_missing_stripped_body(
                 "tags": ["skill"],
                 "detail_url": "https://skills.sh/vercel-labs/skills/find-skills",
                 "install_command": (
-                    "npx skills add https://github.com/vercel-labs/skills "
-                    "--skill find-skills"
+                    "npx skills add https://github.com/vercel-labs/skills --skill find-skills"
                 ),
                 "body_available": True,
-                "converted_path": (
-                    "converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md"
-                ),
+                "converted_path": ("converted/skills-sh-vercel-labs-skills-find-skills/SKILL.md"),
             }
         ],
     }
@@ -979,8 +969,7 @@ def test_update_wiki_tarball_micro_converts_long_skills_sh_body(
                 "tags": ["skill"],
                 "detail_url": "https://skills.sh/example/skills/long-skill",
                 "install_command": (
-                    "npx skills add https://github.com/example/skills "
-                    "--skill long-skill"
+                    "npx skills add https://github.com/example/skills --skill long-skill"
                 ),
                 "body_available": True,
                 "converted_path": "converted/skills-sh-example-skills-long-skill/SKILL.md",
@@ -1408,7 +1397,9 @@ def test_hydration_writes_progress_and_status_file(
 ) -> None:
     status_path = tmp_path / "hydrate-status.json"
 
-    def fetch(url: str, timeout: int = 30, max_bytes: int = 2_000_000) -> tuple[str | None, str | None]:
+    def fetch(
+        url: str, timeout: int = 30, max_bytes: int = 2_000_000
+    ) -> tuple[str | None, str | None]:
         if url.endswith("/bad"):
             return None, "boom"
         return "<main><div class='prose'><p>Body.</p></div></main>", None

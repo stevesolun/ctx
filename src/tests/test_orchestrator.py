@@ -23,24 +23,26 @@ def _minimal_wiki_for_orchestrator(tmp_path: Path) -> Path:
     """Build a wiki that satisfies run_check without external modules."""
     wiki = make_wiki(tmp_path)
     # Write all required SCHEMA sections so no points are deducted for them.
-    schema_text = "\n".join([
-        "# Wiki Schema",
-        "",
-        "## Domain",
-        "Core skill domain description.",
-        "",
-        "## Conventions",
-        "Naming conventions here.",
-        "",
-        "## Tag Taxonomy",
-        "- python: python, testing",
-        "",
-        "## Page Thresholds",
-        "MAX_PAGE_LINES: 200",
-        "",
-        "## Update Policy",
-        "90 days.",
-    ])
+    schema_text = "\n".join(
+        [
+            "# Wiki Schema",
+            "",
+            "## Domain",
+            "Core skill domain description.",
+            "",
+            "## Conventions",
+            "Naming conventions here.",
+            "",
+            "## Tag Taxonomy",
+            "- python: python, testing",
+            "",
+            "## Page Thresholds",
+            "MAX_PAGE_LINES: 200",
+            "",
+            "## Update Policy",
+            "90 days.",
+        ]
+    )
     (wiki / "SCHEMA.md").write_text(schema_text, encoding="utf-8")
     return wiki
 
@@ -53,13 +55,17 @@ class TestOrchestratorHealthScorePerfect:
 
         # Two pages cross-linking each other -- no orphans, no broken links.
         make_entity_page(
-            wiki, "alpha", ["python"],
+            wiki,
+            "alpha",
+            ["python"],
             body="See [[entities/skills/beta]].",
             updated=_FRESH_DATE,
             wikilinks=["entities/skills/beta"],
         )
         make_entity_page(
-            wiki, "beta", ["python"],
+            wiki,
+            "beta",
+            ["python"],
             body="See [[entities/skills/alpha]].",
             updated=_FRESH_DATE,
             wikilinks=["entities/skills/alpha"],
@@ -85,17 +91,15 @@ class TestOrchestratorHealthDeductsForOrphans:
 
         # Create two isolated pages with no cross-links.
         make_entity_page(wiki, "island-one", ["python"], body="Standalone.", updated=_FRESH_DATE)
-        make_entity_page(wiki, "island-two", ["python"], body="Also standalone.", updated=_FRESH_DATE)
+        make_entity_page(
+            wiki, "island-two", ["python"], body="Also standalone.", updated=_FRESH_DATE
+        )
 
         report = wo.run_check(wiki)
 
-        assert len(report.orphan_pages) >= 2, (
-            f"Expected 2+ orphan pages, got {report.orphan_pages}"
-        )
+        assert len(report.orphan_pages) >= 2, f"Expected 2+ orphan pages, got {report.orphan_pages}"
         # Each orphan costs 1 point; 2 orphans -> score <= 98.
-        assert report.score <= 98, (
-            f"Score should have dropped for orphans but got {report.score}"
-        )
+        assert report.score <= 98, f"Score should have dropped for orphans but got {report.score}"
 
 
 class TestOrchestratorHealthDeductsForBrokenLinks:
@@ -139,7 +143,9 @@ class TestOrchestratorStatusReturnsCounts:
         wiki = _minimal_wiki_for_orchestrator(tmp_path)
 
         make_entity_page(wiki, "skill-one", ["python"], body="One.", updated=_FRESH_DATE)
-        make_entity_page(wiki, "skill-two", ["python"], body="Two.", updated=_FRESH_DATE, has_pipeline=True)
+        make_entity_page(
+            wiki, "skill-two", ["python"], body="Two.", updated=_FRESH_DATE, has_pipeline=True
+        )
 
         # Create a converted directory for skill-two to simulate a pipeline.
         (wiki / "converted" / "skill-two").mkdir(parents=True)
@@ -191,4 +197,6 @@ class TestOrchestratorStatusReturnsCounts:
         with mock.patch.object(wo, "_skill_names_on_disk", return_value=[]):
             report = wo.run_check(wiki)
 
-        assert any("[lint]" in warning and "no-frontmatter" in warning for warning in report.warnings)
+        assert any(
+            "[lint]" in warning and "no-frontmatter" in warning for warning in report.warnings
+        )

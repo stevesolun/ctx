@@ -94,9 +94,7 @@ def _safe_session_id(raw: str) -> str:
     if not isinstance(raw, str) or not raw:
         raise ValueError("session_id must be a non-empty string")
     if not all(c.isalnum() or c in "-_" for c in raw):
-        raise ValueError(
-            f"invalid session_id {raw!r}; allowed: alphanumeric, '-', '_'"
-        )
+        raise ValueError(f"invalid session_id {raw!r}; allowed: alphanumeric, '-', '_'")
     if len(raw) > 128:
         raise ValueError(f"session_id too long ({len(raw)} > 128)")
     return raw
@@ -167,8 +165,7 @@ def _message_to_dict(msg: Message) -> dict[str, Any]:
     out: dict[str, Any] = {"role": msg.role, "content": msg.content}
     if msg.tool_calls:
         out["tool_calls"] = [
-            {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
-            for tc in msg.tool_calls
+            {"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in msg.tool_calls
         ]
     if msg.tool_call_id is not None:
         out["tool_call_id"] = msg.tool_call_id
@@ -188,7 +185,7 @@ def _dict_to_message(d: dict[str, Any]) -> Message:
         for tc in raw_tcs
     )
     return Message(
-        role=d.get("role", "user"),       # type: ignore[arg-type]
+        role=d.get("role", "user"),  # type: ignore[arg-type]
         content=str(d.get("content", "")),
         tool_calls=tool_calls,
         tool_call_id=d.get("tool_call_id"),
@@ -217,10 +214,7 @@ def _repair_unresolved_tool_call_tail(
     if assistant.role != "assistant" or not assistant.tool_calls:
         return messages
 
-    missing = [
-        call for call in assistant.tool_calls
-        if call.id not in seen_tool_results
-    ]
+    missing = [call for call in assistant.tool_calls if call.id not in seen_tool_results]
     if not missing:
         return messages
 
@@ -420,7 +414,9 @@ class SessionStore:
         self.write_event("message", _message_to_dict(message))
 
     def write_model_response(
-        self, iteration: int, response: CompletionResponse,
+        self,
+        iteration: int,
+        response: CompletionResponse,
     ) -> None:
         self.write_event(
             "model_response",
@@ -553,13 +549,15 @@ class JsonlObserver(LoopObserver):
         # practice only the first iteration has pre-existing messages
         # that weren't recorded; subsequent iterations append through
         # on_model_response + on_tool_call).
-        new_msgs = messages[self._last_message_count:]
+        new_msgs = messages[self._last_message_count :]
         for msg in new_msgs:
             self._store.write_message(msg)
         self._last_message_count = len(messages)
 
     def on_model_response(
-        self, iteration: int, response: CompletionResponse,
+        self,
+        iteration: int,
+        response: CompletionResponse,
     ) -> None:
         self._store.write_model_response(iteration, response)
         # The loop appends an assistant Message directly after — we
@@ -629,7 +627,9 @@ def _iter_events(path: Path) -> Iterator[dict[str, Any]]:
             except json.JSONDecodeError as exc:
                 _logger.warning(
                     "session %s line %d: dropping malformed JSONL (%s)",
-                    path.name, line_no, exc,
+                    path.name,
+                    line_no,
+                    exc,
                 )
                 continue
 
@@ -664,7 +664,8 @@ def load_session(
         etype = event.get("type")
         if etype == "session_start":
             metadata = {
-                k: v for k, v in event.items()
+                k: v
+                for k, v in event.items()
                 if k not in ("type", "ts", "session_id", "seed_messages")
             }
         elif etype == "message":
@@ -673,7 +674,8 @@ def load_session(
             except (TypeError, ValueError) as exc:
                 _logger.warning(
                     "session %s: dropping malformed message event: %s",
-                    session_id, exc,
+                    session_id,
+                    exc,
                 )
         elif etype == "model_response":
             usage = _usage_from_dict(event.get("usage"))
@@ -694,9 +696,12 @@ def load_session(
     return ReplayState(
         session_id=session_id,
         path=path,
-        messages=tuple(_repair_unresolved_tool_call_tail(
-            messages, session_id=session_id,
-        )),
+        messages=tuple(
+            _repair_unresolved_tool_call_tail(
+                messages,
+                session_id=session_id,
+            )
+        ),
         metadata=metadata,
         stopped=stopped,
         stop_reason=stop_reason,

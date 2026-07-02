@@ -161,8 +161,7 @@ def run_watchdog(
                 if result.snapshot_path is not None:
                     stats.snapshots_taken += 1
                     stats.snapshot_ids.append(result.snapshot_path.name)
-                    emit(f"[watchdog] tick {stats.ticks} snapshot "
-                         f"{result.snapshot_path.name}")
+                    emit(f"[watchdog] tick {stats.ticks} snapshot {result.snapshot_path.name}")
 
             if max_iterations is not None and stats.ticks >= max_iterations:
                 break
@@ -172,6 +171,8 @@ def run_watchdog(
     finally:
         _restore_signal_handlers(previous)
 
-    emit(f"[watchdog] stop ticks={stats.ticks} "
-         f"snapshots={stats.snapshots_taken} errors={stats.errors}")
+    emit(
+        f"[watchdog] stop ticks={stats.ticks} "
+        f"snapshots={stats.snapshots_taken} errors={stats.errors}"
+    )
     return stats

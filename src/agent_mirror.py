@@ -48,11 +48,22 @@ _logger = logging.getLogger(__name__)
 # stage files (01-scope, 02-plan, BUILDER, REVIEWER, SKILL). Those must
 # not be treated as agents by name — they happen to live under the
 # agents dir for routing convenience but are pipeline fragments.
-_PIPELINE_NAMES: frozenset[str] = frozenset({
-    "01-scope", "02-plan", "03-build", "03a-build", "03b-build",
-    "04-check", "05-deliver",
-    "BUILDER", "REVIEWER", "SKILL", "QUICKSTART", "EXECUTIVE-BRIEF",
-})
+_PIPELINE_NAMES: frozenset[str] = frozenset(
+    {
+        "01-scope",
+        "02-plan",
+        "03-build",
+        "03a-build",
+        "03b-build",
+        "04-check",
+        "05-deliver",
+        "BUILDER",
+        "REVIEWER",
+        "SKILL",
+        "QUICKSTART",
+        "EXECUTIVE-BRIEF",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -61,7 +72,7 @@ class MirrorResult:
 
     slug: str
     status: str  # "mirrored" | "unchanged" | "skipped-no-frontmatter"
-                 # | "skipped-pipeline-fragment" | "pruned" | "not-found"
+    # | "skipped-pipeline-fragment" | "pruned" | "not-found"
     source_path: str | None
     dest_path: str | None
     bytes_copied: int = 0
@@ -150,22 +161,29 @@ def mirror_one(
         validate_skill_name(slug)
     except ValueError as exc:
         return MirrorResult(
-            slug=slug, status="skipped-no-frontmatter",
-            source_path=None, dest_path=None,
+            slug=slug,
+            status="skipped-no-frontmatter",
+            source_path=None,
+            dest_path=None,
             message=f"invalid slug: {exc}",
         )
 
     source = agents_dir / f"{slug}.md"
     if not source.is_file():
         return MirrorResult(
-            slug=slug, status="not-found", source_path=None, dest_path=None,
+            slug=slug,
+            status="not-found",
+            source_path=None,
+            dest_path=None,
             message=f"no live agent file at {source}",
         )
 
     if _looks_like_pipeline_fragment(source):
         return MirrorResult(
-            slug=slug, status="skipped-pipeline-fragment",
-            source_path=str(source), dest_path=None,
+            slug=slug,
+            status="skipped-pipeline-fragment",
+            source_path=str(source),
+            dest_path=None,
             message="pipeline fragment, not an agent",
         )
 
@@ -173,15 +191,19 @@ def mirror_one(
         text = source.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         return MirrorResult(
-            slug=slug, status="skipped-no-frontmatter",
-            source_path=str(source), dest_path=None,
+            slug=slug,
+            status="skipped-no-frontmatter",
+            source_path=str(source),
+            dest_path=None,
             message=f"read failed: {exc}",
         )
 
     if not _has_agent_frontmatter(text):
         return MirrorResult(
-            slug=slug, status="skipped-no-frontmatter",
-            source_path=str(source), dest_path=None,
+            slug=slug,
+            status="skipped-no-frontmatter",
+            source_path=str(source),
+            dest_path=None,
             message="file missing name:/description: frontmatter",
         )
 
@@ -197,15 +219,19 @@ def mirror_one(
             existing = ""
         if _sha256(existing) == _sha256(text):
             return MirrorResult(
-                slug=slug, status="unchanged",
-                source_path=str(source), dest_path=str(dest),
+                slug=slug,
+                status="unchanged",
+                source_path=str(source),
+                dest_path=str(dest),
                 bytes_copied=0,
             )
 
     if dry_run:
         return MirrorResult(
-            slug=slug, status="mirrored",
-            source_path=str(source), dest_path=str(dest),
+            slug=slug,
+            status="mirrored",
+            source_path=str(source),
+            dest_path=str(dest),
             bytes_copied=len(text.encode("utf-8")),
             message="dry-run: no files written",
         )
@@ -213,8 +239,10 @@ def mirror_one(
     dest_dir.mkdir(parents=True, exist_ok=True)
     _atomic_write_text(dest, text)
     return MirrorResult(
-        slug=slug, status="mirrored",
-        source_path=str(source), dest_path=str(dest),
+        slug=slug,
+        status="mirrored",
+        source_path=str(source),
+        dest_path=str(dest),
         bytes_copied=len(text.encode("utf-8")),
     )
 
@@ -236,16 +264,25 @@ def mirror_all(
         # Fast short-circuit before the expensive read when we can tell
         # from the filename alone that we should skip.
         if _looks_like_pipeline_fragment(path):
-            results.append(MirrorResult(
-                slug=slug, status="skipped-pipeline-fragment",
-                source_path=str(path), dest_path=None,
-                message="pipeline fragment, not an agent",
-            ))
+            results.append(
+                MirrorResult(
+                    slug=slug,
+                    status="skipped-pipeline-fragment",
+                    source_path=str(path),
+                    dest_path=None,
+                    message="pipeline fragment, not an agent",
+                )
+            )
             continue
-        results.append(mirror_one(
-            slug, agents_dir=agents_dir, wiki_dir=wiki_dir,
-            force=force, dry_run=dry_run,
-        ))
+        results.append(
+            mirror_one(
+                slug,
+                agents_dir=agents_dir,
+                wiki_dir=wiki_dir,
+                force=force,
+                dry_run=dry_run,
+            )
+        )
     return results
 
 
@@ -271,24 +308,36 @@ def prune_orphans(
         if source.is_file():
             continue  # Still present upstream, skip.
         if dry_run:
-            results.append(MirrorResult(
-                slug=slug, status="pruned",
-                source_path=None, dest_path=str(dest),
-                message="dry-run: would delete",
-            ))
+            results.append(
+                MirrorResult(
+                    slug=slug,
+                    status="pruned",
+                    source_path=None,
+                    dest_path=str(dest),
+                    message="dry-run: would delete",
+                )
+            )
             continue
         try:
             dest.unlink()
-            results.append(MirrorResult(
-                slug=slug, status="pruned",
-                source_path=None, dest_path=str(dest),
-            ))
+            results.append(
+                MirrorResult(
+                    slug=slug,
+                    status="pruned",
+                    source_path=None,
+                    dest_path=str(dest),
+                )
+            )
         except OSError as exc:
-            results.append(MirrorResult(
-                slug=slug, status="skipped-no-frontmatter",
-                source_path=None, dest_path=str(dest),
-                message=f"unlink failed: {exc}",
-            ))
+            results.append(
+                MirrorResult(
+                    slug=slug,
+                    status="skipped-no-frontmatter",
+                    source_path=None,
+                    dest_path=str(dest),
+                    message=f"unlink failed: {exc}",
+                )
+            )
     return results
 
 
@@ -313,27 +362,33 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--slug", help="Mirror a single slug")
     parser.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Rewrite mirrored files even when content hash is unchanged",
     )
     parser.add_argument(
-        "--prune", action="store_true",
+        "--prune",
+        action="store_true",
         help="Delete mirrored bodies whose live agent file vanished",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Report what would happen without writing or deleting",
     )
     parser.add_argument(
-        "--agents-dir", default=str(cfg.agents_dir),
+        "--agents-dir",
+        default=str(cfg.agents_dir),
         help="Live agents dir (default: cfg.agents_dir)",
     )
     parser.add_argument(
-        "--wiki-dir", default=str(cfg.wiki_dir),
+        "--wiki-dir",
+        default=str(cfg.wiki_dir),
         help="Wiki root (default: cfg.wiki_dir)",
     )
     parser.add_argument(
-        "--json", action="store_true",
+        "--json",
+        action="store_true",
         help="Emit results as JSON for automation",
     )
     return parser
@@ -348,20 +403,32 @@ def main() -> None:
 
     results: list[MirrorResult] = []
     if args.slug:
-        results.append(mirror_one(
-            args.slug, agents_dir=agents_dir, wiki_dir=wiki_dir,
-            force=args.force, dry_run=args.dry_run,
-        ))
-    else:
-        results.extend(mirror_all(
-            agents_dir=agents_dir, wiki_dir=wiki_dir,
-            force=args.force, dry_run=args.dry_run,
-        ))
-        if args.prune:
-            results.extend(prune_orphans(
-                agents_dir=agents_dir, wiki_dir=wiki_dir,
+        results.append(
+            mirror_one(
+                args.slug,
+                agents_dir=agents_dir,
+                wiki_dir=wiki_dir,
+                force=args.force,
                 dry_run=args.dry_run,
-            ))
+            )
+        )
+    else:
+        results.extend(
+            mirror_all(
+                agents_dir=agents_dir,
+                wiki_dir=wiki_dir,
+                force=args.force,
+                dry_run=args.dry_run,
+            )
+        )
+        if args.prune:
+            results.extend(
+                prune_orphans(
+                    agents_dir=agents_dir,
+                    wiki_dir=wiki_dir,
+                    dry_run=args.dry_run,
+                )
+            )
 
     if args.json:
         print(json.dumps([r.__dict__ for r in results], indent=2))
@@ -377,8 +444,10 @@ def main() -> None:
 
     # Exit 0 unless something unexpected happened.
     hard_failures = [
-        r for r in results
-        if r.status in ("skipped-no-frontmatter",) and r.message.startswith(("read failed", "unlink failed"))
+        r
+        for r in results
+        if r.status in ("skipped-no-frontmatter",)
+        and r.message.startswith(("read failed", "unlink failed"))
     ]
     sys.exit(1 if hard_failures else 0)
 

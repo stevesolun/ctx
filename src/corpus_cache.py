@@ -144,9 +144,7 @@ class CorpusCache:
         self._ensure_dir()
         # Atomic write via tempfile + os.replace so a crash mid-write
         # never leaves a partial manifest.
-        fd, tmp = tempfile.mkstemp(
-            prefix="_manifest.", suffix=".json.tmp", dir=self._backend_dir
-        )
+        fd, tmp = tempfile.mkstemp(prefix="_manifest.", suffix=".json.tmp", dir=self._backend_dir)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(data, fh, ensure_ascii=False, sort_keys=True, indent=2)
@@ -276,9 +274,7 @@ class CorpusCache:
             if not isinstance(sha, str):
                 continue
             try:
-                vec = np.load(
-                    self._vector_path(sid, sha), allow_pickle=False
-                )
+                vec = np.load(self._vector_path(sid, sha), allow_pickle=False)
             except (FileNotFoundError, ValueError, OSError):
                 continue
             if vec.ndim != 1:

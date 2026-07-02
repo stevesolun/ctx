@@ -8,6 +8,7 @@ import yaml  # type: ignore[import-untyped]
 # Ensure src/ is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+
 def _parse_frontmatter(page: str) -> dict:
     """Extract and parse the YAML frontmatter block from a markdown page."""
     assert page.startswith("---\n"), "Page must start with YAML frontmatter"

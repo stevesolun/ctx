@@ -59,7 +59,12 @@ _EMBEDDED_TEMPLATES: dict[str, dict] = {
         "pre": ["docs-lookup"],
         "post": ["technical-writer", "docs-architect", "api-documenter", "tutorial-engineer"],
         "scope": {"projects": ["*"], "signals": ["documentation"], "analysis": "diff"},
-        "trigger": {"slash": True, "pre_commit": False, "session_end": False, "file_save": "**/*.md"},
+        "trigger": {
+            "slash": True,
+            "pre_commit": False,
+            "session_end": False,
+            "file_save": "**/*.md",
+        },
         "budget": {"max_tokens": 120000, "max_seconds": 240},
         "dedup": {"window_seconds": 300, "policy": "cached"},
         "guardrail": False,
@@ -77,7 +82,13 @@ _EMBEDDED_TEMPLATES: dict[str, dict] = {
     "refactor-safety": {
         "description": "Graph-informed refactor review with regression and dead-code checks",
         "pre": ["architect-review", "refactor-cleaner"],
-        "post": ["architect-review", "refactor-cleaner", "code-reviewer", "test-automator", "dependency-manager"],
+        "post": [
+            "architect-review",
+            "refactor-cleaner",
+            "code-reviewer",
+            "test-automator",
+            "dependency-manager",
+        ],
         "scope": {"projects": ["*"], "signals": [], "analysis": "graph-blast"},
         "trigger": {"slash": True, "pre_commit": False, "session_end": True, "file_save": None},
         "budget": {"max_tokens": 180000, "max_seconds": 360},
@@ -87,9 +98,20 @@ _EMBEDDED_TEMPLATES: dict[str, dict] = {
     "security-sweep": {
         "description": "Full-repo security audit with blocking guardrail on HIGH findings",
         "pre": [],
-        "post": ["security-reviewer", "security-auditor", "penetration-tester", "compliance-auditor", "threat-detection-engineer"],
+        "post": [
+            "security-reviewer",
+            "security-auditor",
+            "penetration-tester",
+            "compliance-auditor",
+            "threat-detection-engineer",
+        ],
         "scope": {"projects": ["*"], "signals": ["security", "auth", "crypto"], "analysis": "full"},
-        "trigger": {"slash": True, "pre_commit": True, "session_end": False, "file_save": "**/auth/**"},
+        "trigger": {
+            "slash": True,
+            "pre_commit": True,
+            "session_end": False,
+            "file_save": "**/auth/**",
+        },
         "budget": {"max_tokens": 300000, "max_seconds": 600},
         "dedup": {"window_seconds": 0, "policy": "fresh"},
         "guardrail": True,
@@ -97,8 +119,20 @@ _EMBEDDED_TEMPLATES: dict[str, dict] = {
     "ship-it": {
         "description": "Professional council of 7 experts for end-of-feature review",
         "pre": [],
-        "post": ["code-reviewer", "security-reviewer", "architect-review", "test-automator", "performance-engineer", "accessibility-tester", "docs-lookup"],
-        "scope": {"projects": ["*"], "signals": ["python", "typescript", "rust", "go", "java"], "analysis": "dynamic"},
+        "post": [
+            "code-reviewer",
+            "security-reviewer",
+            "architect-review",
+            "test-automator",
+            "performance-engineer",
+            "accessibility-tester",
+            "docs-lookup",
+        ],
+        "scope": {
+            "projects": ["*"],
+            "signals": ["python", "typescript", "rust", "go", "java"],
+            "analysis": "dynamic",
+        },
         "trigger": {"slash": True, "pre_commit": True, "session_end": True, "file_save": None},
         "budget": {"max_tokens": 200000, "max_seconds": 420},
         "dedup": {"window_seconds": 600, "policy": "fresh"},
@@ -134,8 +168,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     for name, tb in sorted(tset.toolboxes.items()):
         flag = " yes " if name in active else "  -  "
         print(
-            f"{name.ljust(widest)}  {flag}   {len(tb.pre):3d}  "
-            f"{len(tb.post):4d}  {tb.description}"
+            f"{name.ljust(widest)}  {flag}   {len(tb.pre):3d}  {len(tb.post):4d}  {tb.description}"
         )
     return 0
 
@@ -160,8 +193,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         )
         return 1
     tset = ToolboxSet.empty() if args.force else tset
-    starters = ["ship-it", "security-sweep", "refactor-safety",
-                "docs-review", "fresh-repo-init"]
+    starters = ["ship-it", "security-sweep", "refactor-safety", "docs-review", "fresh-repo-init"]
     added: list[str] = []
     for name in starters:
         try:
@@ -207,8 +239,8 @@ def cmd_export(args: argparse.Namespace) -> int:
         print(json.dumps({"name": tb.name, **tb.to_dict()}, indent=2))
         return 0
     import yaml  # type: ignore[import-untyped]
-    payload = {"version": SCHEMA_VERSION,
-               "toolboxes": {tb.name: tb.to_dict()}}
+
+    payload = {"version": SCHEMA_VERSION, "toolboxes": {tb.name: tb.to_dict()}}
     print(yaml.safe_dump(payload, sort_keys=False), end="")
     return 0
 
@@ -223,6 +255,7 @@ def cmd_import(args: argparse.Namespace) -> int:
             _print_err("PyYAML is required to import .yaml files; pip install pyyaml.")
             return 1
         import yaml  # type: ignore[import-untyped]
+
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     else:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -266,15 +299,16 @@ def cmd_validate(args: argparse.Namespace) -> int:
     errors: list[str] = []
     try:
         g = load_global()
-        print(f"global ({global_config_path()}): "
-              f"{len(g.toolboxes)} toolbox(es)")
+        print(f"global ({global_config_path()}): {len(g.toolboxes)} toolbox(es)")
     except ValueError as exc:
         errors.append(f"global: {exc}")
     try:
         r = load_repo()
         repo_p = repo_config_path()
-        print(f"repo   ({repo_p}): {len(r.toolboxes)} toolbox(es) "
-              f"({'exists' if repo_p.exists() else 'absent'})")
+        print(
+            f"repo   ({repo_p}): {len(r.toolboxes)} toolbox(es) "
+            f"({'exists' if repo_p.exists() else 'absent'})"
+        )
     except ValueError as exc:
         errors.append(f"repo: {exc}")
     if errors:
@@ -294,6 +328,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     point for every toolbox operation.
     """
     from toolbox_hooks import run_trigger  # local import — avoids circular
+
     file_path = args.file_path or None
     repo_root = Path(args.repo).resolve() if args.repo else None
     return run_trigger(args.event, file_path=file_path, repo_root=repo_root)
@@ -316,20 +351,22 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("list", help="List available toolboxes").set_defaults(func=cmd_list)
-    sub.add_parser("status", help="Show active toolboxes + config paths").set_defaults(func=cmd_status)
+    sub.add_parser("status", help="Show active toolboxes + config paths").set_defaults(
+        func=cmd_status
+    )
 
     sp = sub.add_parser(
         "run",
         help="Fire a toolbox trigger event (session-start / session-end / pre-commit / file-save / slash)",
     )
-    sp.add_argument("--event", required=True,
-                    choices=["session-start", "session-end", "pre-commit",
-                             "file-save", "slash"],
-                    help="Trigger event to fire")
-    sp.add_argument("--file-path", default=None,
-                    help="File path for file-save events")
-    sp.add_argument("--repo", default=None,
-                    help="Repo root (defaults to current working dir)")
+    sp.add_argument(
+        "--event",
+        required=True,
+        choices=["session-start", "session-end", "pre-commit", "file-save", "slash"],
+        help="Trigger event to fire",
+    )
+    sp.add_argument("--file-path", default=None, help="File path for file-save events")
+    sp.add_argument("--repo", default=None, help="Repo root (defaults to current working dir)")
     sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("show", help="Show one toolbox")

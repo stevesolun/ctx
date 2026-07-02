@@ -37,29 +37,35 @@ def _write_memory(root: Path, name: str, body: str) -> Path:
 # ── _looks_like_path ───────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("token", [
-    "scan_repo.py",
-    "src/foo.py",
-    "src/foo.py:42",
-    "~/.claude/skills/foo/SKILL.md",
-    "mkdocs.yml",
-    "pyproject.toml",
-    "docs/index.md",
-    "README.rst",
-])
+@pytest.mark.parametrize(
+    "token",
+    [
+        "scan_repo.py",
+        "src/foo.py",
+        "src/foo.py:42",
+        "~/.claude/skills/foo/SKILL.md",
+        "mkdocs.yml",
+        "pyproject.toml",
+        "docs/index.md",
+        "README.rst",
+    ],
+)
 def test_looks_like_path_accepts_paths(token: str) -> None:
     assert ma._looks_like_path(token) is True
 
 
-@pytest.mark.parametrize("token", [
-    "add_skill()",
-    "SAFE_NAME_RE",
-    "323d981",
-    "--strict",
-    "https://example.com/foo.py",
-    "",
-    "hello world.py",     # contains whitespace → reject
-])
+@pytest.mark.parametrize(
+    "token",
+    [
+        "add_skill()",
+        "SAFE_NAME_RE",
+        "323d981",
+        "--strict",
+        "https://example.com/foo.py",
+        "",
+        "hello world.py",  # contains whitespace → reject
+    ],
+)
 def test_looks_like_path_rejects_non_paths(token: str) -> None:
     assert ma._looks_like_path(token) is False
 
@@ -74,13 +80,15 @@ def test_strip_line_suffix_with_digits() -> None:
 def test_strip_line_suffix_no_digits_returned_unchanged() -> None:
     # Drive-letter colon must not be mistaken for a line suffix.
     assert ma._strip_line_suffix("C:/Users/me/foo.py") == (
-        "C:/Users/me/foo.py", None,
+        "C:/Users/me/foo.py",
+        None,
     )
 
 
 def test_strip_line_suffix_non_numeric_ignored() -> None:
     assert ma._strip_line_suffix("foo.py:notaline") == (
-        "foo.py:notaline", None,
+        "foo.py:notaline",
+        None,
     )
 
 
@@ -138,8 +146,7 @@ def test_resolve_missing_returns_false(tmp_path: Path) -> None:
     assert ma._resolve("nonexistent.py", tmp_path) is False
 
 
-def test_resolve_tilde_expansion(tmp_path: Path,
-                                 monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_tilde_expansion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))  # Windows
     (tmp_path / "note.md").write_text("x", encoding="utf-8")
@@ -176,9 +183,7 @@ def test_scan_memory_file_empty_body(tmp_path: Path) -> None:
     assert result.refs == ()
 
 
-def test_scan_memory_file_unreadable(tmp_path: Path,
-                                     monkeypatch: pytest.MonkeyPatch
-                                     ) -> None:
+def test_scan_memory_file_unreadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     mem = _write_memory(tmp_path / "mem", "oops.md", "x")
 
     def _boom(self, *a, **kw):  # type: ignore[no-untyped-def]
@@ -198,10 +203,8 @@ def test_build_report_totals(tmp_path: Path) -> None:
     (repo / "src" / "a.py").write_text("", encoding="utf-8")
 
     mem_dir = tmp_path / "mem"
-    _write_memory(mem_dir, "n1.md",
-                  "ref `src/a.py` and `src/dead.py`")
-    _write_memory(mem_dir, "n2.md",
-                  "only `missing.md` here")
+    _write_memory(mem_dir, "n1.md", "ref `src/a.py` and `src/dead.py`")
+    _write_memory(mem_dir, "n2.md", "only `missing.md` here")
 
     report = ma.build_report(repo_root=repo, memory_root=mem_dir, now=1.0)
     assert report.generated_at == 1.0
@@ -212,9 +215,7 @@ def test_build_report_totals(tmp_path: Path) -> None:
 
 
 def test_build_report_missing_memory_root(tmp_path: Path) -> None:
-    report = ma.build_report(repo_root=tmp_path,
-                             memory_root=tmp_path / "no-mem",
-                             now=1.0)
+    report = ma.build_report(repo_root=tmp_path, memory_root=tmp_path / "no-mem", now=1.0)
     assert report.files == ()
     assert report.has_dead is False
 
@@ -224,9 +225,7 @@ def test_build_report_all_live(tmp_path: Path) -> None:
     repo.mkdir()
     (repo / "foo.py").write_text("", encoding="utf-8")
     _write_memory(tmp_path / "mem", "n.md", "See `foo.py`.")
-    report = ma.build_report(repo_root=repo,
-                             memory_root=tmp_path / "mem",
-                             now=1.0)
+    report = ma.build_report(repo_root=repo, memory_root=tmp_path / "mem", now=1.0)
     assert report.dead_count == 0
     assert report.has_dead is False
 
@@ -239,9 +238,7 @@ def test_format_dashboard_clean(tmp_path: Path) -> None:
     repo.mkdir()
     (repo / "foo.py").write_text("", encoding="utf-8")
     _write_memory(tmp_path / "mem", "n.md", "See `foo.py`.")
-    report = ma.build_report(repo_root=repo,
-                             memory_root=tmp_path / "mem",
-                             now=1.0)
+    report = ma.build_report(repo_root=repo, memory_root=tmp_path / "mem", now=1.0)
     out = ma.format_dashboard(report)
     assert "All references resolve." in out
     assert "live=1" in out
@@ -251,11 +248,8 @@ def test_format_dashboard_clean(tmp_path: Path) -> None:
 def test_format_dashboard_dead_refs(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    _write_memory(tmp_path / "mem", "n.md",
-                  "ref `missing.py` and `gone.md:7`")
-    report = ma.build_report(repo_root=repo,
-                             memory_root=tmp_path / "mem",
-                             now=1.0)
+    _write_memory(tmp_path / "mem", "n.md", "ref `missing.py` and `gone.md:7`")
+    report = ma.build_report(repo_root=repo, memory_root=tmp_path / "mem", now=1.0)
     out = ma.format_dashboard(report)
     assert "Dead references:" in out
     assert "missing.py" in out
@@ -289,7 +283,10 @@ def test_detect_repo_root_falls_back_to_start(tmp_path: Path) -> None:
 def test_anchor_ref_to_dict() -> None:
     r = ma.AnchorRef(raw="foo.py:3", path="foo.py", line=3, exists=True)
     assert r.to_dict() == {
-        "raw": "foo.py:3", "path": "foo.py", "line": 3, "exists": True,
+        "raw": "foo.py:3",
+        "path": "foo.py",
+        "line": 3,
+        "exists": True,
     }
 
 
@@ -297,9 +294,7 @@ def test_anchor_report_to_dict(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _write_memory(tmp_path / "mem", "n.md", "ref `missing.py`")
-    report = ma.build_report(repo_root=repo,
-                             memory_root=tmp_path / "mem",
-                             now=1.0)
+    report = ma.build_report(repo_root=repo, memory_root=tmp_path / "mem", now=1.0)
     d = report.to_dict()
     assert d["totals"] == {"total": 1, "live": 0, "dead": 1}
     assert d["generated_at"] == 1.0
@@ -309,50 +304,58 @@ def test_anchor_report_to_dict(tmp_path: Path) -> None:
 # ── CLI ────────────────────────────────────────────────────────────────────
 
 
-def test_cli_scan_outputs_json(tmp_path: Path,
-                               capsys: pytest.CaptureFixture) -> None:
+def test_cli_scan_outputs_json(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "foo.py").write_text("", encoding="utf-8")
     _write_memory(tmp_path / "mem", "n.md", "ref `foo.py`")
-    rc = ma.main([
-        "scan",
-        "--repo-root", str(repo),
-        "--memory-root", str(tmp_path / "mem"),
-    ])
+    rc = ma.main(
+        [
+            "scan",
+            "--repo-root",
+            str(repo),
+            "--memory-root",
+            str(tmp_path / "mem"),
+        ]
+    )
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
     assert data["totals"] == {"total": 1, "live": 1, "dead": 0}
 
 
-def test_cli_dashboard(tmp_path: Path,
-                      capsys: pytest.CaptureFixture) -> None:
+def test_cli_dashboard(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _write_memory(tmp_path / "mem", "n.md", "ref `missing.py`")
-    rc = ma.main([
-        "dashboard",
-        "--repo-root", str(repo),
-        "--memory-root", str(tmp_path / "mem"),
-    ])
+    rc = ma.main(
+        [
+            "dashboard",
+            "--repo-root",
+            str(repo),
+            "--memory-root",
+            str(tmp_path / "mem"),
+        ]
+    )
     assert rc == 0
     out = capsys.readouterr().out
     assert "[memory-anchor]" in out
     assert "missing.py" in out
 
 
-def test_cli_check_strict_nonzero_on_dead(tmp_path: Path,
-                                          capsys: pytest.CaptureFixture
-                                          ) -> None:
+def test_cli_check_strict_nonzero_on_dead(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _write_memory(tmp_path / "mem", "n.md", "ref `missing.py`")
-    rc = ma.main([
-        "check",
-        "--strict",
-        "--repo-root", str(repo),
-        "--memory-root", str(tmp_path / "mem"),
-    ])
+    rc = ma.main(
+        [
+            "check",
+            "--strict",
+            "--repo-root",
+            str(repo),
+            "--memory-root",
+            str(tmp_path / "mem"),
+        ]
+    )
     assert rc == 2
     assert "missing.py" in capsys.readouterr().out
 
@@ -362,12 +365,16 @@ def test_cli_check_strict_zero_when_clean(tmp_path: Path) -> None:
     repo.mkdir()
     (repo / "foo.py").write_text("", encoding="utf-8")
     _write_memory(tmp_path / "mem", "n.md", "ref `foo.py`")
-    rc = ma.main([
-        "check",
-        "--strict",
-        "--repo-root", str(repo),
-        "--memory-root", str(tmp_path / "mem"),
-    ])
+    rc = ma.main(
+        [
+            "check",
+            "--strict",
+            "--repo-root",
+            str(repo),
+            "--memory-root",
+            str(tmp_path / "mem"),
+        ]
+    )
     assert rc == 0
 
 
@@ -375,11 +382,15 @@ def test_cli_check_without_strict_zero_even_on_dead(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _write_memory(tmp_path / "mem", "n.md", "ref `missing.py`")
-    rc = ma.main([
-        "check",
-        "--repo-root", str(repo),
-        "--memory-root", str(tmp_path / "mem"),
-    ])
+    rc = ma.main(
+        [
+            "check",
+            "--repo-root",
+            str(repo),
+            "--memory-root",
+            str(tmp_path / "mem"),
+        ]
+    )
     assert rc == 0
 
 

@@ -142,7 +142,7 @@ class TokenBudgetCompactor:
     def __init__(
         self,
         *,
-        max_chars: int = 60_000,        # ~15k tokens, safe for 32k+ ctx
+        max_chars: int = 60_000,  # ~15k tokens, safe for 32k+ ctx
         max_messages: int = 80,
         keep_head: int = 2,
         keep_tail: int = 10,
@@ -238,8 +238,7 @@ class TokenBudgetCompactor:
         middle = messages[head_end:tail_start]
         if len(middle) < self._min_middle:
             _logger.debug(
-                "compact: skipping, expanded middle only %d messages "
-                "(need >= %d)",
+                "compact: skipping, expanded middle only %d messages (need >= %d)",
                 len(middle),
                 self._min_middle,
             )
@@ -293,8 +292,7 @@ class TokenBudgetCompactor:
             Message(
                 role="user",
                 content=(
-                    "Here is the middle of a longer conversation. Summarise:\n\n"
-                    f"{stringified}"
+                    f"Here is the middle of a longer conversation. Summarise:\n\n{stringified}"
                 ),
             ),
         ]
@@ -308,8 +306,7 @@ class TokenBudgetCompactor:
             )
         except Exception as exc:  # noqa: BLE001
             _logger.warning(
-                "compact: summary call failed (%s); leaving middle as "
-                "'[compaction failed]' stub",
+                "compact: summary call failed (%s); leaving middle as '[compaction failed]' stub",
                 exc,
             )
             return "[compaction summary failed; original turns omitted]", Usage()
@@ -350,9 +347,7 @@ def _tail_start_preserving_tool_pairs(messages: list[Message], keep_tail: int) -
         return len(messages)
     tail_start = max(0, len(messages) - keep_tail)
     needed = {
-        msg.tool_call_id
-        for msg in messages[tail_start:]
-        if msg.role == "tool" and msg.tool_call_id
+        msg.tool_call_id for msg in messages[tail_start:] if msg.role == "tool" and msg.tool_call_id
     }
     if not needed:
         return tail_start
@@ -386,18 +381,13 @@ def _head_end_preserving_tool_pairs(messages: list[Message], keep_head: int) -> 
         return 0
     head_end = min(len(messages), keep_head)
     pending = {
-        call.id
-        for msg in messages[:head_end]
-        if msg.role == "assistant"
-        for call in msg.tool_calls
+        call.id for msg in messages[:head_end] if msg.role == "assistant" for call in msg.tool_calls
     }
     if not pending:
         return head_end
 
     seen = {
-        msg.tool_call_id
-        for msg in messages[:head_end]
-        if msg.role == "tool" and msg.tool_call_id
+        msg.tool_call_id for msg in messages[:head_end] if msg.role == "tool" and msg.tool_call_id
     }
     missing = set(pending - seen)
     if not missing:
@@ -426,8 +416,7 @@ def _render_messages_for_summary(messages: list[Message]) -> str:
             lines.append(
                 f"[{role}] (tool_calls: "
                 + ", ".join(
-                    f"{tc.name}({_json.dumps(tc.arguments, default=str)})"
-                    for tc in msg.tool_calls
+                    f"{tc.name}({_json.dumps(tc.arguments, default=str)})" for tc in msg.tool_calls
                 )
                 + ")"
             )
@@ -460,10 +449,7 @@ def compact_now(
     if len(new_messages) < len(messages):
         # Extract the summary text out of the notice message.
         for m in new_messages:
-            if (
-                m.role == "assistant"
-                and m.content.startswith(_DEFAULT_COMPACTION_NOTICE_PREFIX)
-            ):
+            if m.role == "assistant" and m.content.startswith(_DEFAULT_COMPACTION_NOTICE_PREFIX):
                 # Drop the "[Compacted N prior messages.] " prefix.
                 parts = m.content.split("] ", 1)
                 summary = parts[1] if len(parts) == 2 else m.content

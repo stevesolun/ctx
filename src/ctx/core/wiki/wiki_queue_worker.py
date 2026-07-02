@@ -168,10 +168,7 @@ def _process_entity_upsert(wiki_path: Path, payload: dict[str, Any]) -> str:
                 source="entity-delete",
             )
             suffix = _pack_compaction_suffix_if_due(wiki_path)
-            return (
-                f"queued graph store refresh for deleted {subject_type} entity {slug}"
-                f"{suffix}"
-            )
+            return f"queued graph store refresh for deleted {subject_type} entity {slug}{suffix}"
         else:
             wiki_queue.enqueue_maintenance_job(
                 wiki_path,
@@ -230,10 +227,7 @@ def _enqueue_pack_compaction_if_due(wiki_path: Path) -> bool:
             overlay_threshold=threshold,
             validate=False,
         )
-        if not (
-            bool(status.get("needs_compaction"))
-            and bool(status.get("can_compact_now"))
-        ):
+        if not (bool(status.get("needs_compaction")) and bool(status.get("can_compact_now"))):
             return False
         wiki_queue.enqueue_maintenance_job(
             wiki_path,
@@ -306,9 +300,11 @@ def _wiki_relative_path(wiki_path: Path, entity_path: Path) -> str:
 def _resolve_entity_path(wiki_path: Path, raw_path: str) -> Path:
     wiki_root = Path(wiki_path).resolve()
     candidate_path = Path(raw_path)
-    candidate = candidate_path.resolve() if candidate_path.is_absolute() else (
-        wiki_root / candidate_path
-    ).resolve()
+    candidate = (
+        candidate_path.resolve()
+        if candidate_path.is_absolute()
+        else (wiki_root / candidate_path).resolve()
+    )
     if not candidate.is_relative_to(wiki_root):
         raise ValueError(f"entity_path escapes wiki root: {raw_path}")
     reject_symlink_path(candidate)
@@ -415,15 +411,17 @@ def _try_graph_pack_node_upsert(
         parent_export_id=base.base_export_id,
         config_hash=base.config_hash,
         model_id=base.model_id,
-        nodes=[{
-            "id": node_id,
-            "label": slug,
-            "title": slug,
-            "type": entity_type,
-            "tags": _extract_frontmatter_tags(text),
-            "source": "entity-upsert",
-            "content_hash": content_hash,
-        }],
+        nodes=[
+            {
+                "id": node_id,
+                "label": slug,
+                "title": slug,
+                "type": entity_type,
+                "tags": _extract_frontmatter_tags(text),
+                "source": "entity-upsert",
+                "content_hash": content_hash,
+            }
+        ],
         edges=[],
         tombstones=[{"node_id": node_id, "source": "entity-upsert"}],
     )
@@ -467,19 +465,21 @@ def _semantic_vector_delta_index_dirs(wiki_path: Path) -> list[Path]:
     if not delta_root.is_dir():
         return []
     return sorted(
-        path for path in delta_root.iterdir()
+        path
+        for path in delta_root.iterdir()
         if path.is_dir() and (path / _VECTOR_INDEX_META_NAME).is_file()
     )
 
 
 def _semantic_vector_delta_write_dir(wiki_path: Path, entity_type: str) -> Path:
-    safe_type = "".join(
-        char if char.isalnum() or char in {"-", "_"} else "-"
-        for char in entity_type
-    ).strip("-_") or "entity"
+    safe_type = (
+        "".join(
+            char if char.isalnum() or char in {"-", "_"} else "-" for char in entity_type
+        ).strip("-_")
+        or "entity"
+    )
     return (
-        _semantic_vector_index_dir(wiki_path)
-        .with_name("vector-index-deltas")
+        _semantic_vector_index_dir(wiki_path).with_name("vector-index-deltas")
         / f"local-{safe_type}"
     )
 
@@ -563,6 +563,7 @@ def _handle_artifact_promotion(_wiki_path: Path, payload: dict[str, Any]) -> str
     validate = None
     if validator == "wiki-tar":
         from import_skills_sh_catalog import _validate_wiki_tarball_candidate  # noqa: PLC0415
+
         validate = _validate_wiki_tarball_candidate
     elif validator not in (None, "", "none"):
         raise ValueError(f"unsupported artifact validator: {validator}")

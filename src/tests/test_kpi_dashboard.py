@@ -30,7 +30,10 @@ NOW = datetime(2026, 4, 19, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def _write_skill(
-    skills_dir: Path, slug: str, *, tags: list[str] | None = None,
+    skills_dir: Path,
+    slug: str,
+    *,
+    tags: list[str] | None = None,
     category: str | None = None,
 ) -> Path:
     d = skills_dir / slug
@@ -151,7 +154,8 @@ class TestResolveCategory:
 
 class TestCollectRows:
     def test_union_of_quality_and_lifecycle(
-        self, sources: cl.LifecycleSources,
+        self,
+        sources: cl.LifecycleSources,
     ) -> None:
         _write_skill(sources.skills_dir, "a", tags=["python"])
         _write_skill(sources.skills_dir, "b", tags=["react"])
@@ -169,7 +173,8 @@ class TestCollectRows:
         assert row_c.grade == ""
 
     def test_lifecycle_defaults_to_active(
-        self, sources: cl.LifecycleSources,
+        self,
+        sources: cl.LifecycleSources,
     ) -> None:
         _write_skill(sources.skills_dir, "a", tags=["python"])
         _write_quality(sources.sidecar_dir, "a", grade="A", score=0.9)
@@ -177,7 +182,8 @@ class TestCollectRows:
         assert rows[0].lifecycle_state == cl.STATE_ACTIVE
 
     def test_mcp_quality_subdir_is_included(
-        self, sources: cl.LifecycleSources,
+        self,
+        sources: cl.LifecycleSources,
     ) -> None:
         _write_quality(
             sources.sidecar_dir / "mcp",
@@ -189,12 +195,12 @@ class TestCollectRows:
 
         rows = kd.collect_rows(sources=sources)
 
-        assert [(r.slug, r.subject_type) for r in rows] == [
-            ("filesystem", "mcp-server")
-        ]
+        assert [(r.slug, r.subject_type) for r in rows] == [("filesystem", "mcp-server")]
 
     def test_mcp_rows_do_not_probe_skill_or_agent_sources(
-        self, sources: cl.LifecycleSources, monkeypatch: pytest.MonkeyPatch,
+        self,
+        sources: cl.LifecycleSources,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_quality(
             sources.sidecar_dir / "mcp",
@@ -214,7 +220,8 @@ class TestCollectRows:
         assert rows[0].category == "uncategorized"
 
     def test_lifecycle_only_mcp_keeps_subject_type(
-        self, sources: cl.LifecycleSources,
+        self,
+        sources: cl.LifecycleSources,
     ) -> None:
         _write_lifecycle(
             sources.sidecar_dir,
@@ -230,7 +237,8 @@ class TestCollectRows:
         ]
 
     def test_lifecycle_only_mcp_is_not_dropped_by_same_slug_skill_quality(
-        self, sources: cl.LifecycleSources,
+        self,
+        sources: cl.LifecycleSources,
     ) -> None:
         _write_quality(
             sources.sidecar_dir,
@@ -254,7 +262,8 @@ class TestCollectRows:
         ]
 
     def test_duplicate_skill_and_mcp_slugs_are_distinct_rows(
-        self, sources: cl.LifecycleSources,
+        self,
+        sources: cl.LifecycleSources,
     ) -> None:
         _write_skill(sources.skills_dir, "langgraph", tags=["python"])
         _write_quality(
@@ -280,7 +289,8 @@ class TestCollectRows:
         ]
 
     def test_corrupt_quality_sidecar_is_skipped(
-        self, sources: cl.LifecycleSources,
+        self,
+        sources: cl.LifecycleSources,
     ) -> None:
         _write_skill(sources.skills_dir, "a", tags=["python"])
         sources.sidecar_dir.mkdir(parents=True)
@@ -291,7 +301,8 @@ class TestCollectRows:
         assert rows[0].grade == ""
 
     def test_ignores_lifecycle_sidecars_as_quality(
-        self, sources: cl.LifecycleSources,
+        self,
+        sources: cl.LifecycleSources,
     ) -> None:
         # A stray lifecycle file with no matching quality file must not be
         # picked up by the quality walker.
@@ -308,14 +319,26 @@ class TestCollectRows:
 
 
 def _row(
-    slug: str, *, grade: str = "B", score: float = 0.65, category: str = "language",
-    subject: str = "skill", state: str = cl.STATE_ACTIVE, streak: int = 0,
+    slug: str,
+    *,
+    grade: str = "B",
+    score: float = 0.65,
+    category: str = "language",
+    subject: str = "skill",
+    state: str = cl.STATE_ACTIVE,
+    streak: int = 0,
     hard_floor: str | None = None,
 ) -> kd.EntityRow:
     return kd.EntityRow(
-        slug=slug, subject_type=subject, category=category, grade=grade,
-        score=score, hard_floor=hard_floor, lifecycle_state=state,
-        consecutive_d_count=streak, computed_at="2026-04-19T12:00:00+00:00",
+        slug=slug,
+        subject_type=subject,
+        category=category,
+        grade=grade,
+        score=score,
+        hard_floor=hard_floor,
+        lifecycle_state=state,
+        consecutive_d_count=streak,
+        computed_at="2026-04-19T12:00:00+00:00",
     )
 
 
@@ -323,7 +346,7 @@ class TestAggregate:
     def test_grade_counts_normalize_blank_to_f(self) -> None:
         rows = [
             _row("a", grade="A", score=0.9),
-            _row("b", grade=""),   # archived-only, no score
+            _row("b", grade=""),  # archived-only, no score
             _row("c", grade="D", score=0.3),
         ]
         summary = kd.aggregate(rows, now=NOW)
@@ -418,8 +441,10 @@ class TestRenderMarkdown:
             by_subject={"skill": 2, "agent": 1},
             grade_counts={"A": 1, "B": 1, "C": 0, "D": 1, "F": 0},
             lifecycle_counts={
-                cl.STATE_ACTIVE: 3, cl.STATE_WATCH: 0,
-                cl.STATE_DEMOTE: 0, cl.STATE_ARCHIVE: 0,
+                cl.STATE_ACTIVE: 3,
+                cl.STATE_WATCH: 0,
+                cl.STATE_DEMOTE: 0,
+                cl.STATE_ARCHIVE: 0,
             },
         )
         md = kd.render_markdown(summary)
@@ -435,9 +460,15 @@ class TestRenderMarkdown:
             generated_at="2026-04-19T00:00:00+00:00",
             total=0,
             grade_counts={g: 0 for g in ("A", "B", "C", "D", "F")},
-            lifecycle_counts={s: 0 for s in (
-                cl.STATE_ACTIVE, cl.STATE_WATCH, cl.STATE_DEMOTE, cl.STATE_ARCHIVE,
-            )},
+            lifecycle_counts={
+                s: 0
+                for s in (
+                    cl.STATE_ACTIVE,
+                    cl.STATE_WATCH,
+                    cl.STATE_DEMOTE,
+                    cl.STATE_ARCHIVE,
+                )
+            },
         )
         md = kd.render_markdown(summary)
         assert "_No active D/F-grade entries — corpus is healthy._" in md
@@ -449,19 +480,23 @@ class TestRenderMarkdown:
             total=1,
             grade_counts={"A": 0, "B": 0, "C": 0, "D": 1, "F": 0},
             lifecycle_counts={
-                cl.STATE_ACTIVE: 1, cl.STATE_WATCH: 0,
-                cl.STATE_DEMOTE: 0, cl.STATE_ARCHIVE: 0,
+                cl.STATE_ACTIVE: 1,
+                cl.STATE_WATCH: 0,
+                cl.STATE_DEMOTE: 0,
+                cl.STATE_ARCHIVE: 0,
             },
-            low_quality_candidates=[{
-                "slug": "stale-skill",
-                "subject_type": "skill",
-                "category": "language",
-                "grade": "D",
-                "score": 0.25,
-                "lifecycle_state": cl.STATE_ACTIVE,
-                "consecutive_d_count": 2,
-                "hard_floor": "never_loaded_stale",
-            }],
+            low_quality_candidates=[
+                {
+                    "slug": "stale-skill",
+                    "subject_type": "skill",
+                    "category": "language",
+                    "grade": "D",
+                    "score": 0.25,
+                    "lifecycle_state": cl.STATE_ACTIVE,
+                    "consecutive_d_count": 2,
+                    "hard_floor": "never_loaded_stale",
+                }
+            ],
         )
         md = kd.render_markdown(summary)
         assert "stale-skill" in md
@@ -485,16 +520,25 @@ class TestGenerateIntegration:
         _write_quality(sources.sidecar_dir, "py-util", grade="A", score=0.9)
         _write_quality(sources.sidecar_dir, "react-state", grade="C", score=0.45)
         _write_quality(
-            sources.sidecar_dir, "docker-ops", grade="D", score=0.25,
+            sources.sidecar_dir,
+            "docker-ops",
+            grade="D",
+            score=0.25,
             hard_floor="never_loaded_stale",
         )
         _write_quality(
-            sources.sidecar_dir, "helper", subject_type="agent",
-            grade="B", score=0.7,
+            sources.sidecar_dir,
+            "helper",
+            subject_type="agent",
+            grade="B",
+            score=0.7,
         )
         _write_lifecycle(sources.sidecar_dir, "old", state=cl.STATE_ARCHIVE)
         _write_lifecycle(
-            sources.sidecar_dir, "docker-ops", state=cl.STATE_WATCH, streak=1,
+            sources.sidecar_dir,
+            "docker-ops",
+            state=cl.STATE_WATCH,
+            streak=1,
         )
 
         summary = kd.generate(sources=sources, top_n=5, now=NOW)
@@ -551,9 +595,13 @@ class TestCLI:
 
         import ctx_config
         import skill_quality
+
         monkeypatch.setattr(ctx_config, "cfg", _FakeCfg(), raising=True)
         monkeypatch.setattr(
-            skill_quality, "default_sidecar_dir", lambda: sidecar, raising=True,
+            skill_quality,
+            "default_sidecar_dir",
+            lambda: sidecar,
+            raising=True,
         )
 
         rc = kd.main(["render"])
@@ -580,9 +628,13 @@ class TestCLI:
 
         import ctx_config
         import skill_quality
+
         monkeypatch.setattr(ctx_config, "cfg", _FakeCfg(), raising=True)
         monkeypatch.setattr(
-            skill_quality, "default_sidecar_dir", lambda: sidecar, raising=True,
+            skill_quality,
+            "default_sidecar_dir",
+            lambda: sidecar,
+            raising=True,
         )
 
         rc = kd.main(["render", "--json"])
@@ -608,9 +660,13 @@ class TestCLI:
 
         import ctx_config
         import skill_quality
+
         monkeypatch.setattr(ctx_config, "cfg", _FakeCfg(), raising=True)
         monkeypatch.setattr(
-            skill_quality, "default_sidecar_dir", lambda: sidecar, raising=True,
+            skill_quality,
+            "default_sidecar_dir",
+            lambda: sidecar,
+            raising=True,
         )
 
         out_path = tmp_path / "kpi.md"
@@ -636,9 +692,13 @@ class TestCLI:
 
         import ctx_config
         import skill_quality
+
         monkeypatch.setattr(ctx_config, "cfg", _FakeCfg(), raising=True)
         monkeypatch.setattr(
-            skill_quality, "default_sidecar_dir", lambda: sidecar, raising=True,
+            skill_quality,
+            "default_sidecar_dir",
+            lambda: sidecar,
+            raising=True,
         )
 
         rc = kd.main(["summary"])

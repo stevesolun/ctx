@@ -52,7 +52,10 @@ _logger = logging.getLogger(__name__)
 _GRADES: tuple[str, ...] = ("A", "B", "C", "D", "F")
 _UNCATEGORIZED = "uncategorized"
 _LIFECYCLE_STATES: tuple[str, ...] = (
-    STATE_ACTIVE, STATE_WATCH, STATE_DEMOTE, STATE_ARCHIVE,
+    STATE_ACTIVE,
+    STATE_WATCH,
+    STATE_DEMOTE,
+    STATE_ARCHIVE,
 )
 _PARALLEL_QUALITY_READ_THRESHOLD = 512
 _QUALITY_READ_WORKERS = 8
@@ -68,14 +71,14 @@ class EntityRow:
     """One slug's dashboard-relevant facts, joined across sinks."""
 
     slug: str
-    subject_type: str                     # "skill" | "agent"
-    category: str                         # always a concrete string (never None)
-    grade: str                            # "A"/"B"/"C"/"D"/"F" or "" if no score
-    score: float                          # 0..1; 0.0 if no score
+    subject_type: str  # "skill" | "agent"
+    category: str  # always a concrete string (never None)
+    grade: str  # "A"/"B"/"C"/"D"/"F" or "" if no score
+    score: float  # 0..1; 0.0 if no score
     hard_floor: str | None
-    lifecycle_state: str                  # one of _LIFECYCLE_STATES
+    lifecycle_state: str  # one of _LIFECYCLE_STATES
     consecutive_d_count: int
-    computed_at: str                      # ISO-8601 or ""
+    computed_at: str  # ISO-8601 or ""
 
 
 @dataclass(frozen=True)
@@ -230,9 +233,7 @@ def _read_lifecycle_file(path: Path) -> LifecycleState | None:
     if not isinstance(data, dict):
         return None
     history_raw = data.get("history", [])
-    history = tuple(
-        dict(e) for e in history_raw if isinstance(e, dict)
-    )
+    history = tuple(dict(e) for e in history_raw if isinstance(e, dict))
     try:
         streak = int(data.get("consecutive_d_count", 0))
     except (TypeError, ValueError):
@@ -297,7 +298,8 @@ def _guess_subject(slug: str, sources: LifecycleSources) -> str:
 
 
 def collect_rows(
-    *, sources: LifecycleSources,
+    *,
+    sources: LifecycleSources,
 ) -> list[EntityRow]:
     """Walk both sinks and return one row per known slug (union)."""
     lifecycle_cache: dict[Path, dict[str, LifecycleState]] = {}
@@ -314,9 +316,7 @@ def collect_rows(
         try:
             score = _read_quality_file(
                 sidecar_path,
-                subject_type_override=(
-                    "mcp-server" if sidecar_dir.name == "mcp" else None
-                ),
+                subject_type_override=("mcp-server" if sidecar_dir.name == "mcp" else None),
             )
         except (json.JSONDecodeError, ValueError, OSError, KeyError, TypeError) as exc:
             _logger.warning("kpi_dashboard: skipping %s: %s", slug, exc)
@@ -342,9 +342,7 @@ def collect_rows(
     lifecycle_rows: list[tuple[str, Path, QualityScore | None, LifecycleState | None]] = []
     for lifecycle_slug, lifecycle_state in lifecycle_states(sources.sidecar_dir).items():
         if (lifecycle_slug, lifecycle_state.subject_type) not in quality_subjects:
-            lifecycle_rows.append(
-                (lifecycle_slug, sources.sidecar_dir, None, lifecycle_state)
-            )
+            lifecycle_rows.append((lifecycle_slug, sources.sidecar_dir, None, lifecycle_state))
 
     row_sources = sorted(
         quality_rows + lifecycle_rows,
@@ -396,7 +394,10 @@ def _grade_key(grade: str) -> str:
 
 
 def aggregate(
-    rows: list[EntityRow], *, now: datetime | None = None, top_n: int = 10,
+    rows: list[EntityRow],
+    *,
+    now: datetime | None = None,
+    top_n: int = 10,
 ) -> DashboardSummary:
     now = now or datetime.now(timezone.utc)
 
@@ -411,13 +412,9 @@ def aggregate(
     for r in rows:
         by_subject[r.subject_type] = by_subject.get(r.subject_type, 0) + 1
         grade_counts[_grade_key(r.grade)] += 1
-        lifecycle_counts[r.lifecycle_state] = (
-            lifecycle_counts.get(r.lifecycle_state, 0) + 1
-        )
+        lifecycle_counts[r.lifecycle_state] = lifecycle_counts.get(r.lifecycle_state, 0) + 1
         if r.hard_floor:
-            hard_floor_counts[r.hard_floor] = (
-                hard_floor_counts.get(r.hard_floor, 0) + 1
-            )
+            hard_floor_counts[r.hard_floor] = hard_floor_counts.get(r.hard_floor, 0) + 1
         bucket = r.category if r.category in category_buckets else _UNCATEGORIZED
         category_buckets[bucket].append(r)
 
@@ -426,9 +423,7 @@ def aggregate(
         if not cat_bucket:
             continue
         scored = [r for r in cat_bucket if r.grade in _GRADES]
-        avg_score = (
-            sum(r.score for r in scored) / len(scored) if scored else 0.0
-        )
+        avg_score = sum(r.score for r in scored) / len(scored) if scored else 0.0
         mix = {g: 0 for g in _GRADES}
         for r in cat_bucket:
             mix[_grade_key(r.grade)] += 1
@@ -447,9 +442,9 @@ def aggregate(
 
     # Low-quality candidates: D/F grade, sorted by (streak desc, score asc).
     candidates = [
-        r for r in rows
-        if _grade_key(r.grade) in ("D", "F")
-        and r.lifecycle_state in (STATE_ACTIVE, STATE_WATCH)
+        r
+        for r in rows
+        if _grade_key(r.grade) in ("D", "F") and r.lifecycle_state in (STATE_ACTIVE, STATE_WATCH)
     ]
     candidates.sort(key=lambda r: (-r.consecutive_d_count, r.score))
     low_quality = [
@@ -474,7 +469,8 @@ def aggregate(
             "last_grade": r.grade or "",
             "computed_at": r.computed_at,
         }
-        for r in rows if r.lifecycle_state == STATE_ARCHIVE
+        for r in rows
+        if r.lifecycle_state == STATE_ARCHIVE
     ]
 
     return DashboardSummary(
@@ -514,10 +510,7 @@ def render_markdown(summary: DashboardSummary) -> str:
     out.append("")
     out.append(f"**Total entities:** {summary.total}")
     if summary.by_subject:
-        parts = [
-            f"{subject}: {count}"
-            for subject, count in sorted(summary.by_subject.items())
-        ]
+        parts = [f"{subject}: {count}" for subject, count in sorted(summary.by_subject.items())]
         out.append(f"**By subject:** {'  ·  '.join(parts)}")
     out.append("")
 
@@ -546,7 +539,8 @@ def render_markdown(summary: DashboardSummary) -> str:
         out.append("| Reason | Count |")
         out.append("| ------ | ----: |")
         for reason, count in sorted(
-            summary.hard_floor_counts.items(), key=lambda kv: (-kv[1], kv[0]),
+            summary.hard_floor_counts.items(),
+            key=lambda kv: (-kv[1], kv[0]),
         ):
             out.append(f"| {reason} | {count} |")
         out.append("")
@@ -563,8 +557,11 @@ def render_markdown(summary: DashboardSummary) -> str:
                 cat=entry["category"],
                 count=entry["count"],
                 avg=entry["avg_score"],
-                a=mix.get("A", 0), b=mix.get("B", 0), c=mix.get("C", 0),
-                d=mix.get("D", 0), f=mix.get("F", 0),
+                a=mix.get("A", 0),
+                b=mix.get("B", 0),
+                c=mix.get("C", 0),
+                d=mix.get("D", 0),
+                f=mix.get("F", 0),
             )
         )
     out.append("")
@@ -575,12 +572,8 @@ def render_markdown(summary: DashboardSummary) -> str:
     if not summary.low_quality_candidates:
         out.append("_No active D/F-grade entries — corpus is healthy._")
     else:
-        out.append(
-            "| Slug | Subject | Category | Grade | Score | State | D-streak | Hard floor |"
-        )
-        out.append(
-            "| ---- | ------- | -------- | :---: | ----: | ----- | -------: | ---------- |"
-        )
+        out.append("| Slug | Subject | Category | Grade | Score | State | D-streak | Hard floor |")
+        out.append("| ---- | ------- | -------- | :---: | ----: | ----- | -------: | ---------- |")
         for c in summary.low_quality_candidates:
             out.append(
                 "| {slug} | {subj} | {cat} | {grade} | {score:.3f} | {state} | {streak} | {floor} |".format(
@@ -627,6 +620,7 @@ def render_markdown(summary: DashboardSummary) -> str:
 def _build_sources_from_config() -> LifecycleSources:
     from ctx_config import cfg
     from skill_quality import default_sidecar_dir
+
     return LifecycleSources(
         skills_dir=cfg.skills_dir,
         agents_dir=cfg.agents_dir,
@@ -635,7 +629,10 @@ def _build_sources_from_config() -> LifecycleSources:
 
 
 def generate(
-    *, sources: LifecycleSources, top_n: int = 10, now: datetime | None = None,
+    *,
+    sources: LifecycleSources,
+    top_n: int = 10,
+    now: datetime | None = None,
 ) -> DashboardSummary:
     rows = collect_rows(sources=sources)
     return aggregate(rows, now=now, top_n=top_n)
@@ -682,8 +679,9 @@ def build_argparser() -> argparse.ArgumentParser:
     r = sub.add_parser("render", help="Render Markdown or JSON dashboard")
     r.add_argument("--out", help="Write to this path instead of stdout")
     r.add_argument("--json", action="store_true", help="Emit JSON instead of Markdown")
-    r.add_argument("--limit", type=int, default=10,
-                   help="Max rows in the demotion-candidates section")
+    r.add_argument(
+        "--limit", type=int, default=10, help="Max rows in the demotion-candidates section"
+    )
     r.set_defaults(func=cmd_render)
 
     s = sub.add_parser("summary", help="Print a terse one-screen summary")

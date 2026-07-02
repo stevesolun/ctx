@@ -60,15 +60,14 @@ INTENT_LOG = Path(os.path.expanduser("~/.claude/intent-log.jsonl"))
 SKILL_MANIFEST = Path(os.path.expanduser("~/.claude/skill-manifest.json"))
 USER_PROFILE = Path(os.path.expanduser("~/.claude/user-profile.json"))
 
-MIN_EVIDENCE = 3          # minimum hits before a signal nominates a toolbox
-MAX_PAIRS = 10            # cap on stored co-invocation pairs
-MAX_SKILLS = 20           # cap on stored skill cadence entries
-MAX_FILE_TYPES = 20       # cap on stored file-type entries
+MIN_EVIDENCE = 3  # minimum hits before a signal nominates a toolbox
+MAX_PAIRS = 10  # cap on stored co-invocation pairs
+MAX_SKILLS = 20  # cap on stored skill cadence entries
+MAX_FILE_TYPES = 20  # cap on stored file-type entries
 
 # Conventional Commit types we recognize. Anything else lands in "other".
 COMMIT_TYPES = frozenset(
-    {"feat", "fix", "refactor", "docs", "test", "chore",
-     "perf", "ci", "security", "style", "build"}
+    {"feat", "fix", "refactor", "docs", "test", "chore", "perf", "ci", "security", "style", "build"}
 )
 _COMMIT_PREFIX_RE = re.compile(r"^(?P<type>[a-z]+)(\([^)]+\))?(!)?:\s", re.IGNORECASE)
 
@@ -85,10 +84,10 @@ class CoInvocationPair:
 
 @dataclass(frozen=True)
 class Suggestion:
-    kind: str          # "co-invocation" | "skill-cadence" | "file-type" | "commit-type"
-    rationale: str     # human-readable justification
-    evidence: int      # count backing this suggestion
-    proposed: dict     # proposed Toolbox dict (name + key fields)
+    kind: str  # "co-invocation" | "skill-cadence" | "file-type" | "commit-type"
+    rationale: str  # human-readable justification
+    evidence: int  # count backing this suggestion
+    proposed: dict  # proposed Toolbox dict (name + key fields)
 
 
 @dataclass(frozen=True)
@@ -96,9 +95,9 @@ class BehaviorProfile:
     total_intent_events: int
     total_commits: int
     co_invocation_pairs: tuple[CoInvocationPair, ...]
-    skill_cadence: tuple[tuple[str, int], ...]       # (skill_name, count)
-    file_types: tuple[tuple[str, int], ...]          # (token, count)
-    commit_types: tuple[tuple[str, int], ...]        # (type, count)
+    skill_cadence: tuple[tuple[str, int], ...]  # (skill_name, count)
+    file_types: tuple[tuple[str, int], ...]  # (token, count)
+    commit_types: tuple[tuple[str, int], ...]  # (type, count)
     suggestions: tuple[Suggestion, ...]
     generated_at: float
 
@@ -145,8 +144,7 @@ def _git_commit_types(repo_root: Path, limit: int = 500) -> list[str]:
     """
     try:
         out = subprocess.check_output(
-            ["git", "-C", str(repo_root), "log",
-             f"--max-count={limit}", "--pretty=format:%s"],
+            ["git", "-C", str(repo_root), "log", f"--max-count={limit}", "--pretty=format:%s"],
             text=True,
             stderr=subprocess.DEVNULL,
         )
@@ -217,21 +215,23 @@ def _suggest_from_co_invocation(pairs: Counter) -> list[Suggestion]:
     for (a, b), count in pairs.most_common(5):
         if count < MIN_EVIDENCE:
             break
-        out.append(Suggestion(
-            kind="co-invocation",
-            rationale=(
-                f"Signals {a!r} and {b!r} co-occurred {count}x. "
-                "Consider a toolbox that always loads both domains together."
-            ),
-            evidence=count,
-            proposed={
-                "name": f"{a}-{b}-bundle",
-                "description": f"Auto-suggested bundle for {a} + {b} work",
-                "pre": [],
-                "post": [],
-                "scope": {"signals": [a, b], "analysis": "dynamic"},
-            },
-        ))
+        out.append(
+            Suggestion(
+                kind="co-invocation",
+                rationale=(
+                    f"Signals {a!r} and {b!r} co-occurred {count}x. "
+                    "Consider a toolbox that always loads both domains together."
+                ),
+                evidence=count,
+                proposed={
+                    "name": f"{a}-{b}-bundle",
+                    "description": f"Auto-suggested bundle for {a} + {b} work",
+                    "pre": [],
+                    "post": [],
+                    "scope": {"signals": [a, b], "analysis": "dynamic"},
+                },
+            )
+        )
     return out
 
 
@@ -248,22 +248,24 @@ def _suggest_from_commit_types(types: Counter) -> list[Suggestion]:
         share = count / total
         if share < 0.15:  # ignore long-tail types
             continue
-        out.append(Suggestion(
-            kind="commit-type",
-            rationale=(
-                f"{count} of last {total} commits were {t!r} "
-                f"({share:.0%}). A tuned {t!r} toolbox may cut review time."
-            ),
-            evidence=count,
-            proposed={
-                "name": f"{t}-review",
-                "description": f"Auto-suggested council for {t} commits",
-                "pre": [],
-                "post": [],
-                "scope": {"analysis": "diff"},
-                "trigger": {"pre_commit": True},
-            },
-        ))
+        out.append(
+            Suggestion(
+                kind="commit-type",
+                rationale=(
+                    f"{count} of last {total} commits were {t!r} "
+                    f"({share:.0%}). A tuned {t!r} toolbox may cut review time."
+                ),
+                evidence=count,
+                proposed={
+                    "name": f"{t}-review",
+                    "description": f"Auto-suggested council for {t} commits",
+                    "pre": [],
+                    "post": [],
+                    "scope": {"analysis": "diff"},
+                    "trigger": {"pre_commit": True},
+                },
+            )
+        )
     return out
 
 
@@ -272,21 +274,23 @@ def _suggest_from_skill_cadence(cadence: Counter) -> list[Suggestion]:
     for skill, count in cadence.most_common(5):
         if count < MIN_EVIDENCE:
             break
-        out.append(Suggestion(
-            kind="skill-cadence",
-            rationale=(
-                f"Skill {skill!r} was loaded/unloaded {count}x. "
-                "Pinning it to a toolbox's pre list avoids repeated toggling."
-            ),
-            evidence=count,
-            proposed={
-                "name": f"{skill}-default",
-                "description": f"Auto-suggested pre-load for {skill}",
-                "pre": [skill],
-                "post": [],
-                "scope": {"analysis": "dynamic"},
-            },
-        ))
+        out.append(
+            Suggestion(
+                kind="skill-cadence",
+                rationale=(
+                    f"Skill {skill!r} was loaded/unloaded {count}x. "
+                    "Pinning it to a toolbox's pre list avoids repeated toggling."
+                ),
+                evidence=count,
+                proposed={
+                    "name": f"{skill}-default",
+                    "description": f"Auto-suggested pre-load for {skill}",
+                    "pre": [skill],
+                    "post": [],
+                    "scope": {"analysis": "dynamic"},
+                },
+            )
+        )
     return out
 
 
@@ -295,21 +299,23 @@ def _suggest_from_file_types(file_types: Counter) -> list[Suggestion]:
     for token, count in file_types.most_common(3):
         if count < MIN_EVIDENCE:
             break
-        out.append(Suggestion(
-            kind="file-type",
-            rationale=(
-                f"Signal {token!r} hit {count}x across tool uses. "
-                "A toolbox scoped to this signal could cover most sessions."
-            ),
-            evidence=count,
-            proposed={
-                "name": f"{token}-default",
-                "description": f"Auto-suggested default for {token} work",
-                "pre": [],
-                "post": [],
-                "scope": {"signals": [token], "analysis": "dynamic"},
-            },
-        ))
+        out.append(
+            Suggestion(
+                kind="file-type",
+                rationale=(
+                    f"Signal {token!r} hit {count}x across tool uses. "
+                    "A toolbox scoped to this signal could cover most sessions."
+                ),
+                evidence=count,
+                proposed={
+                    "name": f"{token}-default",
+                    "description": f"Auto-suggested default for {token} work",
+                    "pre": [],
+                    "post": [],
+                    "scope": {"signals": [token], "analysis": "dynamic"},
+                },
+            )
+        )
     return out
 
 
@@ -334,8 +340,7 @@ def build_profile(
     commit_counter = Counter(commit_types)
 
     co_list = tuple(
-        CoInvocationPair(a=a, b=b, count=n)
-        for (a, b), n in pairs.most_common(MAX_PAIRS)
+        CoInvocationPair(a=a, b=b, count=n) for (a, b), n in pairs.most_common(MAX_PAIRS)
     )
     skill_list = tuple(cadence.most_common(MAX_SKILLS))
     file_list = tuple(file_types.most_common(MAX_FILE_TYPES))
@@ -471,17 +476,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("profile", help="Mine behaviour and emit full JSON profile")
     sp.add_argument("--repo", help="Repo root for commit-type mining (default: cwd)")
-    sp.add_argument("--save", action="store_true",
-                    help="Persist to ~/.claude/user-profile.json")
+    sp.add_argument("--save", action="store_true", help="Persist to ~/.claude/user-profile.json")
     sp.set_defaults(func=cmd_profile)
 
-    sp = sub.add_parser("suggest",
-                        help="Print a short toolbox-suggestion digest")
+    sp = sub.add_parser("suggest", help="Print a short toolbox-suggestion digest")
     sp.add_argument("--repo", help="Repo root (default: cwd)")
-    sp.add_argument("--save", action="store_true",
-                    help="Also persist the underlying profile")
-    sp.add_argument("--limit", type=int, default=5,
-                    help="Max suggestions to show (default: 5)")
+    sp.add_argument("--save", action="store_true", help="Also persist the underlying profile")
+    sp.add_argument("--limit", type=int, default=5, help="Max suggestions to show (default: 5)")
     sp.set_defaults(func=cmd_suggest)
 
     return p

@@ -60,9 +60,7 @@ class TestScanSkillsDir:
         result = catalog_builder.scan_skills_dir(tmp_path / "does-not-exist")
         assert result == []
 
-    def test_empty_dir_returns_empty(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_dir_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch)
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
@@ -87,9 +85,7 @@ class TestScanSkillsDir:
         (skills_dir / "flat.md").write_text("# flat", encoding="utf-8")
         assert catalog_builder.scan_skills_dir(skills_dir) == []
 
-    def test_single_skill_parsed(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_single_skill_parsed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch, threshold=180)
         skills_dir = tmp_path / "skills"
         _make_skill(skills_dir, "my-skill", 10)
@@ -102,9 +98,7 @@ class TestScanSkillsDir:
         assert r["over_180"] is False
         assert "SKILL.md" in r["path"]
 
-    def test_over_threshold_flag(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_over_threshold_flag(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch, threshold=180)
         skills_dir = tmp_path / "skills"
         _make_skill(skills_dir, "fat-skill", 200)
@@ -129,9 +123,7 @@ class TestScanSkillsDir:
         result = catalog_builder.scan_skills_dir(skills_dir)
         assert result[0]["over_180"] is True
 
-    def test_multiple_skills_sorted(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_multiple_skills_sorted(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch, threshold=180)
         skills_dir = tmp_path / "skills"
         _make_skill(skills_dir, "zebra", 5)
@@ -152,9 +144,7 @@ class TestScanSkillsDir:
         result = catalog_builder.scan_skills_dir(skills_dir)
         assert result[0]["lines"] == 0
 
-    def test_unicode_content_handled(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_unicode_content_handled(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch, threshold=180)
         skills_dir = tmp_path / "skills"
         d = skills_dir / "unicode-skill"
@@ -200,17 +190,13 @@ class TestScanAgentsDir:
         result = catalog_builder.scan_agents_dir(tmp_path / "no-agents")
         assert result == []
 
-    def test_empty_dir_returns_empty(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_dir_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch)
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
         assert catalog_builder.scan_agents_dir(agents_dir) == []
 
-    def test_non_md_files_ignored(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_non_md_files_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch)
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
@@ -218,9 +204,7 @@ class TestScanAgentsDir:
         (agents_dir / "data.json").write_text("{}", encoding="utf-8")
         assert catalog_builder.scan_agents_dir(agents_dir) == []
 
-    def test_single_agent_parsed(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_single_agent_parsed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch, threshold=180)
         agents_dir = tmp_path / "agents"
         _make_agent(agents_dir, "my-agent", 50)
@@ -233,9 +217,7 @@ class TestScanAgentsDir:
         assert r["over_180"] is False
         assert r["path"].endswith("my-agent.md")
 
-    def test_over_threshold_flag(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_over_threshold_flag(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch, threshold=180)
         agents_dir = tmp_path / "agents"
         _make_agent(agents_dir, "fat-agent", 200)
@@ -251,9 +233,7 @@ class TestScanAgentsDir:
         result = catalog_builder.scan_agents_dir(agents_dir)
         assert result[0]["over_180"] is False
 
-    def test_stem_used_as_name(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_stem_used_as_name(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Agent name should be the stem (filename without .md extension)."""
         _patched_cfg(monkeypatch, threshold=180)
         agents_dir = tmp_path / "agents"
@@ -261,9 +241,7 @@ class TestScanAgentsDir:
         result = catalog_builder.scan_agents_dir(agents_dir)
         assert result[0]["name"] == "code-reviewer"
 
-    def test_multiple_agents_sorted(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_multiple_agents_sorted(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch, threshold=180)
         agents_dir = tmp_path / "agents"
         for name in ("zzz", "aaa", "mmm"):
@@ -292,9 +270,7 @@ class TestScanAgentsDir:
         err = capsys.readouterr().err
         assert "Warning" in err
 
-    def test_unicode_agent_content(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_unicode_agent_content(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch, threshold=180)
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
@@ -358,9 +334,7 @@ class TestBuildCatalog:
         assert stats["skills"] == 2
         assert stats["agents"] == 1
 
-    def test_over_180_count_correct(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_over_180_count_correct(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch, threshold=180)
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
@@ -389,9 +363,7 @@ class TestBuildCatalog:
         assert "my-skill" in content
         assert "my-agent" in content
 
-    def test_over_180_flag_in_table(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_over_180_flag_in_table(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """The warning character should appear for over-threshold items."""
         _patched_cfg(monkeypatch, threshold=180)
         wiki_dir = tmp_path / "wiki"
@@ -404,9 +376,7 @@ class TestBuildCatalog:
         # The warning flag character should be present somewhere in the row
         assert "⚠" in content  # ⚠
 
-    def test_under_threshold_no_flag(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_under_threshold_no_flag(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch, threshold=180)
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
@@ -427,9 +397,7 @@ class TestBuildCatalog:
         extra = tmp_path / "extra-skills"
         _make_skill(extra, "extra-skill", 10)
 
-        stats = catalog_builder.build_catalog(
-            wiki_dir, tmp_path / "s", tmp_path / "a", [extra]
-        )
+        stats = catalog_builder.build_catalog(wiki_dir, tmp_path / "s", tmp_path / "a", [extra])
         assert stats["total"] == 1
         assert stats["skills"] == 1
 
@@ -443,9 +411,7 @@ class TestBuildCatalog:
         extra = tmp_path / "extra-agents"
         _make_agent(extra, "extra-agent", 10)
 
-        stats = catalog_builder.build_catalog(
-            wiki_dir, tmp_path / "s", tmp_path / "a", [extra]
-        )
+        stats = catalog_builder.build_catalog(wiki_dir, tmp_path / "s", tmp_path / "a", [extra])
         assert stats["total"] == 1
         assert stats["agents"] == 1
 
@@ -457,8 +423,7 @@ class TestBuildCatalog:
         wiki_dir.mkdir()
 
         stats = catalog_builder.build_catalog(
-            wiki_dir, tmp_path / "s", tmp_path / "a",
-            [tmp_path / "ghost-dir"]
+            wiki_dir, tmp_path / "s", tmp_path / "a", [tmp_path / "ghost-dir"]
         )
         assert stats["total"] == 0
 
@@ -476,9 +441,7 @@ class TestBuildCatalog:
         assert "OLD CONTENT" not in content
         assert "# Skill Catalog" in content
 
-    def test_summary_table_total_row(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_summary_table_total_row(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch, threshold=180)
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
@@ -490,9 +453,7 @@ class TestBuildCatalog:
         assert "Total items" in content
         assert "| 1 |" in content
 
-    def test_catalog_path_in_stats(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_catalog_path_in_stats(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _patched_cfg(monkeypatch, threshold=180)
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
@@ -568,9 +529,7 @@ class TestUpdateWikiIndex:
             "catalog_path": "/tmp/catalog.md",
         }
 
-    def test_no_index_md_is_noop(
-        self, tmp_path: Path
-    ) -> None:
+    def test_no_index_md_is_noop(self, tmp_path: Path) -> None:
         """If index.md doesn't exist, function returns without error."""
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
@@ -578,9 +537,7 @@ class TestUpdateWikiIndex:
         catalog_builder.update_wiki_index(wiki_dir, self._stats())
         assert not (wiki_dir / "index.md").exists()
 
-    def test_catalog_ref_inserted_once(
-        self, tmp_path: Path
-    ) -> None:
+    def test_catalog_ref_inserted_once(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         index_path = wiki_dir / "index.md"
@@ -590,9 +547,7 @@ class TestUpdateWikiIndex:
         content = index_path.read_text(encoding="utf-8")
         assert content.count("[[catalog]]") == 1
 
-    def test_catalog_ref_not_duplicated_on_second_call(
-        self, tmp_path: Path
-    ) -> None:
+    def test_catalog_ref_not_duplicated_on_second_call(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         index_path = wiki_dir / "index.md"
@@ -603,9 +558,7 @@ class TestUpdateWikiIndex:
         content = index_path.read_text(encoding="utf-8")
         assert content.count("[[catalog]]") == 1
 
-    def test_catalog_ref_inserted_under_skills_section(
-        self, tmp_path: Path
-    ) -> None:
+    def test_catalog_ref_inserted_under_skills_section(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         index_path = wiki_dir / "index.md"
@@ -618,9 +571,7 @@ class TestUpdateWikiIndex:
         catalog_idx = next(i for i, line in enumerate(lines) if "[[catalog]]" in line)
         assert catalog_idx == skills_idx + 1
 
-    def test_catalog_ref_appended_when_no_skills_section(
-        self, tmp_path: Path
-    ) -> None:
+    def test_catalog_ref_appended_when_no_skills_section(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         index_path = wiki_dir / "index.md"
@@ -630,9 +581,7 @@ class TestUpdateWikiIndex:
         content = index_path.read_text(encoding="utf-8")
         assert "[[catalog]]" in content
 
-    def test_total_pages_updated(
-        self, tmp_path: Path
-    ) -> None:
+    def test_total_pages_updated(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         index_path = wiki_dir / "index.md"
@@ -646,9 +595,7 @@ class TestUpdateWikiIndex:
         assert "Total pages: 42" in content
         assert "Total pages: 0" not in content
 
-    def test_last_updated_replaced(
-        self, tmp_path: Path
-    ) -> None:
+    def test_last_updated_replaced(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         index_path = wiki_dir / "index.md"
@@ -663,9 +610,7 @@ class TestUpdateWikiIndex:
         # The new date should match YYYY-MM-DD pattern
         assert re.search(r"Last updated: \d{4}-\d{2}-\d{2}", content)
 
-    def test_index_with_existing_catalog_ref_updates_counts(
-        self, tmp_path: Path
-    ) -> None:
+    def test_index_with_existing_catalog_ref_updates_counts(self, tmp_path: Path) -> None:
         """Already-present [[catalog]] should not be duplicated; total should update."""
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
@@ -680,9 +625,7 @@ class TestUpdateWikiIndex:
         assert content.count("[[catalog]]") == 1
         assert "Total pages: 99" in content
 
-    def test_empty_index_md(
-        self, tmp_path: Path
-    ) -> None:
+    def test_empty_index_md(self, tmp_path: Path) -> None:
         """Empty index.md should not raise; catalog ref is appended."""
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
@@ -707,18 +650,14 @@ class TestAppendLog:
             "catalog_path": "/tmp/wiki/catalog.md",
         }
 
-    def test_no_log_md_is_noop(
-        self, tmp_path: Path
-    ) -> None:
+    def test_no_log_md_is_noop(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         # log.md does not exist — must not raise
         catalog_builder.append_log(wiki_dir, self._stats())
         assert not (wiki_dir / "log.md").exists()
 
-    def test_entry_appended_to_existing_log(
-        self, tmp_path: Path
-    ) -> None:
+    def test_entry_appended_to_existing_log(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         log_path = wiki_dir / "log.md"
@@ -729,9 +668,7 @@ class TestAppendLog:
         assert "Old entry." in content
         assert "catalog-build" in content
 
-    def test_log_contains_counts(
-        self, tmp_path: Path
-    ) -> None:
+    def test_log_contains_counts(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         log_path = wiki_dir / "log.md"
@@ -739,14 +676,12 @@ class TestAppendLog:
 
         catalog_builder.append_log(wiki_dir, self._stats())
         content = log_path.read_text(encoding="utf-8")
-        assert "7" in content   # total
-        assert "4" in content   # skills
-        assert "3" in content   # agents
-        assert "2" in content   # over_180
+        assert "7" in content  # total
+        assert "4" in content  # skills
+        assert "3" in content  # agents
+        assert "2" in content  # over_180
 
-    def test_log_contains_catalog_path(
-        self, tmp_path: Path
-    ) -> None:
+    def test_log_contains_catalog_path(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         (wiki_dir / "log.md").write_text("", encoding="utf-8")
@@ -755,9 +690,7 @@ class TestAppendLog:
         content = (wiki_dir / "log.md").read_text(encoding="utf-8")
         assert "/tmp/wiki/catalog.md" in content
 
-    def test_log_contains_date(
-        self, tmp_path: Path
-    ) -> None:
+    def test_log_contains_date(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         (wiki_dir / "log.md").write_text("", encoding="utf-8")
@@ -766,9 +699,7 @@ class TestAppendLog:
         content = (wiki_dir / "log.md").read_text(encoding="utf-8")
         assert re.search(r"\d{4}-\d{2}-\d{2}", content)
 
-    def test_multiple_appends_accumulate(
-        self, tmp_path: Path
-    ) -> None:
+    def test_multiple_appends_accumulate(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         log_path = wiki_dir / "log.md"
@@ -779,9 +710,7 @@ class TestAppendLog:
         content = log_path.read_text(encoding="utf-8")
         assert content.count("catalog-build") == 2
 
-    def test_empty_log_md_gets_entry(
-        self, tmp_path: Path
-    ) -> None:
+    def test_empty_log_md_gets_entry(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         (wiki_dir / "log.md").write_text("", encoding="utf-8")
@@ -866,9 +795,12 @@ class TestMain:
             "sys.argv",
             [
                 "catalog_builder",
-                "--wiki", str(wiki_dir),
-                "--skills-dir", str(tmp_path / "skills"),
-                "--agents-dir", str(tmp_path / "agents"),
+                "--wiki",
+                str(wiki_dir),
+                "--skills-dir",
+                str(tmp_path / "skills"),
+                "--agents-dir",
+                str(tmp_path / "agents"),
             ],
         )
         with pytest.raises(SystemExit) as exc_info:
@@ -892,9 +824,12 @@ class TestMain:
             "sys.argv",
             [
                 "catalog_builder",
-                "--wiki", str(wiki_dir),
-                "--skills-dir", str(skills_dir),
-                "--agents-dir", str(agents_dir),
+                "--wiki",
+                str(wiki_dir),
+                "--skills-dir",
+                str(skills_dir),
+                "--agents-dir",
+                str(agents_dir),
             ],
         )
         catalog_builder.main()
@@ -915,10 +850,14 @@ class TestMain:
             "sys.argv",
             [
                 "catalog_builder",
-                "--wiki", str(wiki_dir),
-                "--skills-dir", str(tmp_path / "skills"),
-                "--agents-dir", str(tmp_path / "agents"),
-                "--extra-dirs", str(extra),
+                "--wiki",
+                str(wiki_dir),
+                "--skills-dir",
+                str(tmp_path / "skills"),
+                "--agents-dir",
+                str(tmp_path / "agents"),
+                "--extra-dirs",
+                str(extra),
             ],
         )
         catalog_builder.main()
@@ -940,9 +879,12 @@ class TestMain:
             "sys.argv",
             [
                 "catalog_builder",
-                "--wiki", str(wiki_dir),
-                "--skills-dir", str(tmp_path / "skills"),
-                "--agents-dir", str(tmp_path / "agents"),
+                "--wiki",
+                str(wiki_dir),
+                "--skills-dir",
+                str(tmp_path / "skills"),
+                "--agents-dir",
+                str(tmp_path / "agents"),
             ],
         )
         catalog_builder.main()

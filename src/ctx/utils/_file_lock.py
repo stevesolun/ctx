@@ -65,6 +65,7 @@ def file_lock(target: Path, timeout: float = 10.0) -> Iterator[None]:
 
 def _acquire(fd: int, timeout: float) -> None:
     import time
+
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
         try:

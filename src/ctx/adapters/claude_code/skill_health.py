@@ -63,7 +63,7 @@ _SEVERITY_RANK = {"ok": 0, "warning": 1, "error": 2}
 @dataclass(frozen=True)
 class Issue:
     code: str
-    severity: str              # "warning" | "error"
+    severity: str  # "warning" | "error"
     message: str
 
     def to_dict(self) -> dict:
@@ -73,7 +73,7 @@ class Issue:
 @dataclass(frozen=True)
 class EntityHealth:
     name: str
-    kind: str                  # "skill" | "agent"
+    kind: str  # "skill" | "agent"
     path: str
     lines: int
     has_frontmatter: bool
@@ -169,16 +169,18 @@ def _read_safe(path: Path) -> str | None:
         return None
 
 
-def _inspect(path: Path, kind: str, name: str,
-             line_threshold: int,
-             min_body_lines: int) -> EntityHealth:
+def _inspect(
+    path: Path, kind: str, name: str, line_threshold: int, min_body_lines: int
+) -> EntityHealth:
     text = _read_safe(path)
     if text is None:
         return EntityHealth(
-            name=name, kind=kind, path=str(path), lines=0,
+            name=name,
+            kind=kind,
+            path=str(path),
+            lines=0,
             has_frontmatter=False,
-            issues=(Issue("unreadable", "error",
-                          "file could not be read as UTF-8"),),
+            issues=(Issue("unreadable", "error", "file could not be read as UTF-8"),),
         )
 
     lines = text.count("\n") + (1 if text and not text.endswith("\n") else 0)
@@ -187,35 +189,50 @@ def _inspect(path: Path, kind: str, name: str,
     issues: list[Issue] = []
 
     if not frontmatter:
-        issues.append(Issue(
-            "no-frontmatter", "error",
-            "missing or malformed YAML frontmatter",
-        ))
+        issues.append(
+            Issue(
+                "no-frontmatter",
+                "error",
+                "missing or malformed YAML frontmatter",
+            )
+        )
     else:
         if not frontmatter.get("name"):
-            issues.append(Issue(
-                "frontmatter-missing-name", "error",
-                "frontmatter missing required 'name' field",
-            ))
+            issues.append(
+                Issue(
+                    "frontmatter-missing-name",
+                    "error",
+                    "frontmatter missing required 'name' field",
+                )
+            )
         if not frontmatter.get("description"):
-            issues.append(Issue(
-                "frontmatter-missing-description", "warning",
-                "frontmatter missing 'description' (router relevance suffers)",
-            ))
+            issues.append(
+                Issue(
+                    "frontmatter-missing-description",
+                    "warning",
+                    "frontmatter missing 'description' (router relevance suffers)",
+                )
+            )
 
     body_lines = [ln for ln in body.splitlines() if ln.strip()]
     if len(body_lines) < min_body_lines:
-        issues.append(Issue(
-            "empty-body", "error",
-            f"body has fewer than {min_body_lines} non-blank lines",
-        ))
+        issues.append(
+            Issue(
+                "empty-body",
+                "error",
+                f"body has fewer than {min_body_lines} non-blank lines",
+            )
+        )
 
     if lines > line_threshold:
-        issues.append(Issue(
-            "over-threshold", "warning",
-            f"{lines} lines exceeds threshold {line_threshold} "
-            "(consider moving reference material to a /references page)",
-        ))
+        issues.append(
+            Issue(
+                "over-threshold",
+                "warning",
+                f"{lines} lines exceeds threshold {line_threshold} "
+                "(consider moving reference material to a /references page)",
+            )
+        )
 
     return EntityHealth(
         name=name,
@@ -227,8 +244,7 @@ def _inspect(path: Path, kind: str, name: str,
     )
 
 
-def scan_skills(skills_dir: Path, line_threshold: int,
-                min_body_lines: int) -> list[EntityHealth]:
+def scan_skills(skills_dir: Path, line_threshold: int, min_body_lines: int) -> list[EntityHealth]:
     out: list[EntityHealth] = []
     if not skills_dir.exists():
         return out
@@ -237,26 +253,27 @@ def scan_skills(skills_dir: Path, line_threshold: int,
             continue
         skill_md = entry / "SKILL.md"
         if not skill_md.exists():
-            out.append(EntityHealth(
-                name=entry.name, kind="skill", path=str(skill_md),
-                lines=0, has_frontmatter=False,
-                issues=(Issue("missing-file", "error",
-                              "skill directory has no SKILL.md"),),
-            ))
+            out.append(
+                EntityHealth(
+                    name=entry.name,
+                    kind="skill",
+                    path=str(skill_md),
+                    lines=0,
+                    has_frontmatter=False,
+                    issues=(Issue("missing-file", "error", "skill directory has no SKILL.md"),),
+                )
+            )
             continue
-        out.append(_inspect(skill_md, "skill", entry.name,
-                            line_threshold, min_body_lines))
+        out.append(_inspect(skill_md, "skill", entry.name, line_threshold, min_body_lines))
     return out
 
 
-def scan_agents(agents_dir: Path, line_threshold: int,
-                min_body_lines: int) -> list[EntityHealth]:
+def scan_agents(agents_dir: Path, line_threshold: int, min_body_lines: int) -> list[EntityHealth]:
     out: list[EntityHealth] = []
     if not agents_dir.exists():
         return out
     for entry in sorted(agents_dir.glob("*.md")):
-        out.append(_inspect(entry, "agent", entry.stem,
-                            line_threshold, min_body_lines))
+        out.append(_inspect(entry, "agent", entry.stem, line_threshold, min_body_lines))
     return out
 
 
@@ -301,19 +318,17 @@ def _pending_names(pending: dict | None) -> list[str]:
     return names
 
 
-def detect_drift(entities: Sequence[EntityHealth],
-                 manifest_path: Path = MANIFEST_PATH,
-                 pending_path: Path = PENDING_PATH) -> DriftReport:
+def detect_drift(
+    entities: Sequence[EntityHealth],
+    manifest_path: Path = MANIFEST_PATH,
+    pending_path: Path = PENDING_PATH,
+) -> DriftReport:
     known = _entity_names(entities)
     manifest = _load_json(manifest_path)
     pending = _load_json(pending_path)
 
-    orphaned_manifest = tuple(
-        sorted({n for n in _manifest_names(manifest) if n not in known})
-    )
-    orphaned_pending = tuple(
-        sorted({n for n in _pending_names(pending) if n not in known})
-    )
+    orphaned_manifest = tuple(sorted({n for n in _manifest_names(manifest) if n not in known}))
+    orphaned_pending = tuple(sorted({n for n in _pending_names(pending) if n not in known}))
     return DriftReport(
         orphaned_manifest=orphaned_manifest,
         orphaned_pending=orphaned_pending,
@@ -330,13 +345,15 @@ def _tally(entities: Sequence[EntityHealth]) -> dict[str, int]:
     return totals
 
 
-def build_report(skills_dir: Path = SKILLS_DIR,
-                 agents_dir: Path = AGENTS_DIR,
-                 line_threshold: int = DEFAULT_LINE_THRESHOLD,
-                 min_body_lines: int = DEFAULT_MIN_BODY_LINES,
-                 manifest_path: Path = MANIFEST_PATH,
-                 pending_path: Path = PENDING_PATH,
-                 now: float | None = None) -> HealthReport:
+def build_report(
+    skills_dir: Path = SKILLS_DIR,
+    agents_dir: Path = AGENTS_DIR,
+    line_threshold: int = DEFAULT_LINE_THRESHOLD,
+    min_body_lines: int = DEFAULT_MIN_BODY_LINES,
+    manifest_path: Path = MANIFEST_PATH,
+    pending_path: Path = PENDING_PATH,
+    now: float | None = None,
+) -> HealthReport:
     skills = scan_skills(skills_dir, line_threshold, min_body_lines)
     agents = scan_agents(agents_dir, line_threshold, min_body_lines)
     entities = tuple(skills + agents)
@@ -361,9 +378,7 @@ def format_dashboard(report: HealthReport) -> str:
     )
     lines = [header]
 
-    problems = [
-        e for e in report.entities if e.severity != "ok"
-    ]
+    problems = [e for e in report.entities if e.severity != "ok"]
     if problems:
         lines.append("")
         lines.append("Issues:")
@@ -392,8 +407,7 @@ def format_dashboard(report: HealthReport) -> str:
             )
         if report.drift.orphaned_pending:
             lines.append(
-                "  pending suggestions missing on disk: "
-                + ", ".join(report.drift.orphaned_pending)
+                "  pending suggestions missing on disk: " + ", ".join(report.drift.orphaned_pending)
             )
 
     if len(lines) == 1:
@@ -417,8 +431,7 @@ class HealResult:
         return not self.manifest_removed and not self.pending_removed
 
 
-def _heal_manifest(manifest_path: Path,
-                   orphans: Iterable[str]) -> tuple[str, ...]:
+def _heal_manifest(manifest_path: Path, orphans: Iterable[str]) -> tuple[str, ...]:
     orphan_set = set(orphans)
     if not orphan_set:
         return ()
@@ -428,7 +441,8 @@ def _heal_manifest(manifest_path: Path,
             return ()
         loads = data.get("load") or []
         kept = [
-            item for item in loads
+            item
+            for item in loads
             if not (isinstance(item, dict) and item.get("skill") in orphan_set)
         ]
         if len(kept) == len(loads):
@@ -438,8 +452,7 @@ def _heal_manifest(manifest_path: Path,
     return tuple(sorted(orphan_set))
 
 
-def _heal_pending(pending_path: Path,
-                  orphans: Iterable[str]) -> tuple[str, ...]:
+def _heal_pending(pending_path: Path, orphans: Iterable[str]) -> tuple[str, ...]:
     orphan_set = set(orphans)
     if not orphan_set:
         return ()
@@ -449,14 +462,14 @@ def _heal_pending(pending_path: Path,
             return ()
         suggestions = data.get("graph_suggestions") or []
         kept_suggestions = [
-            item for item in suggestions
+            item
+            for item in suggestions
             if not (isinstance(item, dict) and item.get("name") in orphan_set)
         ]
         unmatched = data.get("unmatched_signals") or []
         kept_unmatched = [s for s in unmatched if s not in orphan_set]
 
-        if (len(kept_suggestions) == len(suggestions)
-                and len(kept_unmatched) == len(unmatched)):
+        if len(kept_suggestions) == len(suggestions) and len(kept_unmatched) == len(unmatched):
             return ()
         data["graph_suggestions"] = kept_suggestions
         data["unmatched_signals"] = kept_unmatched
@@ -464,15 +477,11 @@ def _heal_pending(pending_path: Path,
     return tuple(sorted(orphan_set))
 
 
-def heal(report: HealthReport,
-         manifest_path: Path = MANIFEST_PATH,
-         pending_path: Path = PENDING_PATH) -> HealResult:
-    manifest_removed = _heal_manifest(
-        manifest_path, report.drift.orphaned_manifest
-    )
-    pending_removed = _heal_pending(
-        pending_path, report.drift.orphaned_pending
-    )
+def heal(
+    report: HealthReport, manifest_path: Path = MANIFEST_PATH, pending_path: Path = PENDING_PATH
+) -> HealResult:
+    manifest_removed = _heal_manifest(manifest_path, report.drift.orphaned_manifest)
+    pending_removed = _heal_pending(pending_path, report.drift.orphaned_pending)
     return HealResult(
         manifest_removed=manifest_removed,
         pending_removed=pending_removed,
@@ -526,11 +535,9 @@ def cmd_heal(args: argparse.Namespace) -> int:
         print("[heal] nothing to do.")
         return 0
     if result.manifest_removed:
-        print("[heal] removed from manifest: "
-              + ", ".join(result.manifest_removed))
+        print("[heal] removed from manifest: " + ", ".join(result.manifest_removed))
     if result.pending_removed:
-        print("[heal] removed from pending: "
-              + ", ".join(result.pending_removed))
+        print("[heal] removed from pending: " + ", ".join(result.pending_removed))
     return 0
 
 
@@ -539,8 +546,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def _add_common(sp: argparse.ArgumentParser) -> None:
-        sp.add_argument("--line-threshold", type=int,
-                        default=DEFAULT_LINE_THRESHOLD)
+        sp.add_argument("--line-threshold", type=int, default=DEFAULT_LINE_THRESHOLD)
 
     sp = sub.add_parser("scan", help="Emit a JSON health report")
     _add_common(sp)
@@ -550,14 +556,12 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(sp)
     sp.set_defaults(func=cmd_dashboard)
 
-    sp = sub.add_parser("check",
-                        help="Dashboard + nonzero exit on error in --strict")
+    sp = sub.add_parser("check", help="Dashboard + nonzero exit on error in --strict")
     _add_common(sp)
     sp.add_argument("--strict", action="store_true")
     sp.set_defaults(func=cmd_check)
 
-    sp = sub.add_parser("heal",
-                        help="Drop orphan entries from manifest + pending")
+    sp = sub.add_parser("heal", help="Drop orphan entries from manifest + pending")
     _add_common(sp)
     sp.set_defaults(func=cmd_heal)
 

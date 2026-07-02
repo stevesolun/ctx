@@ -49,9 +49,17 @@ MIN_OUTBOUND_LINKS = 2
 TODAY = date.today()
 ROOT_FILES = {"SCHEMA.md", "index.md", "log.md"}
 CHECK_ORDER = [
-    "broken_wikilink", "orphan_page", "stale_content", "missing_frontmatter",
-    "index_completeness", "tag_hygiene", "wikilink_minimum",
-    "log_rotation", "oversized_page", "pipeline_linkage", "contradiction",
+    "broken_wikilink",
+    "orphan_page",
+    "stale_content",
+    "missing_frontmatter",
+    "index_completeness",
+    "tag_hygiene",
+    "wikilink_minimum",
+    "log_rotation",
+    "oversized_page",
+    "pipeline_linkage",
+    "contradiction",
 ]
 
 
@@ -123,8 +131,10 @@ def _parse_date(value: str) -> date | None:
             continue
     return None
 
+
 def _wikilinks(text: str) -> list[str]:
     return WIKILINK_RE.findall(text)
+
 
 def _collect_pages(wiki: Path) -> dict[str, WikiPage]:
     pages: dict[str, WikiPage] = {}
@@ -153,8 +163,10 @@ def _collect_pages(wiki: Path) -> dict[str, WikiPage]:
             pages[page.stem] = page
     return pages
 
+
 def _is_canonical(slug: str) -> bool:
     return "/" in slug
+
 
 def _schema_tags(wiki: Path) -> set[str]:
     schema = _read_wiki_page(wiki, "SCHEMA.md")
@@ -168,6 +180,7 @@ def _schema_tags(wiki: Path) -> set[str]:
         tags.update(t.strip().lower() for t in re.split(r"[,\s]+", rest) if t.strip())
     return tags
 
+
 def _index_refs(wiki: Path) -> set[str]:
     index = _read_wiki_page(wiki, "index.md")
     if index is None:
@@ -178,9 +191,11 @@ def _index_refs(wiki: Path) -> set[str]:
         refs.add(Path(link.strip()).stem)
     return refs
 
+
 def _log_entry_count(wiki: Path) -> int:
     log = _read_wiki_page(wiki, "log.md")
     return len(re.findall(r"^##\s+\[", log, re.MULTILINE)) if log is not None else 0
+
 
 def _find(check: str, sev: str, page: str, msg: str) -> Finding:
     return Finding(check=check, severity=sev, page=page, message=msg)
@@ -194,9 +209,13 @@ def check_broken_wikilinks(pages: dict[str, WikiPage]) -> list[Finding]:
         for link in _wikilinks(_read(path)):
             lc = link.strip().removesuffix(".md")
             if lc not in pages and Path(lc).stem not in pages:
-                out.append(_find("broken_wikilink", "error", slug,
-                                 f"[[{link}]] resolves to no existing page"))
+                out.append(
+                    _find(
+                        "broken_wikilink", "error", slug, f"[[{link}]] resolves to no existing page"
+                    )
+                )
     return out
+
 
 def check_orphan_pages(pages: dict[str, WikiPage]) -> list[Finding]:
     inbound: dict[str, int] = {s: 0 for s in pages}
@@ -212,6 +231,7 @@ def check_orphan_pages(pages: dict[str, WikiPage]) -> list[Finding]:
         if count == 0 and _is_canonical(slug)
     ]
 
+
 def check_missing_frontmatter(pages: dict[str, WikiPage]) -> list[Finding]:
     out: list[Finding] = []
     for slug, path in pages.items():
@@ -219,11 +239,20 @@ def check_missing_frontmatter(pages: dict[str, WikiPage]) -> list[Finding]:
             continue
         fm = _parse_frontmatter(_read(path))
         if not fm:
-            out.append(_find("missing_frontmatter", "error", slug, "No YAML frontmatter block found"))
+            out.append(
+                _find("missing_frontmatter", "error", slug, "No YAML frontmatter block found")
+            )
         elif missing := REQUIRED_FM_KEYS - fm.keys():
-            out.append(_find("missing_frontmatter", "error", slug,
-                             f"Frontmatter missing keys: {sorted(missing)}"))
+            out.append(
+                _find(
+                    "missing_frontmatter",
+                    "error",
+                    slug,
+                    f"Frontmatter missing keys: {sorted(missing)}",
+                )
+            )
     return out
+
 
 def check_stale_content(pages: dict[str, WikiPage]) -> list[Finding]:
     out: list[Finding] = []
@@ -233,9 +262,16 @@ def check_stale_content(pages: dict[str, WikiPage]) -> list[Finding]:
         fm = _parse_frontmatter(_read(path))
         updated = _parse_date(str(fm.get("updated", "")))
         if updated and (age := (TODAY - updated).days) > STALE_DAYS:
-            out.append(_find("stale_content", "warn", slug,
-                             f"updated {age} days ago (threshold: {STALE_DAYS})"))
+            out.append(
+                _find(
+                    "stale_content",
+                    "warn",
+                    slug,
+                    f"updated {age} days ago (threshold: {STALE_DAYS})",
+                )
+            )
     return out
+
 
 def check_index_completeness(pages: dict[str, WikiPage], wiki: Path) -> list[Finding]:
     refs = _index_refs(wiki)
@@ -244,6 +280,7 @@ def check_index_completeness(pages: dict[str, WikiPage], wiki: Path) -> list[Fin
         for slug in pages
         if _is_canonical(slug) and slug not in refs and Path(slug).stem not in refs
     ]
+
 
 def check_tag_hygiene(pages: dict[str, WikiPage], wiki: Path) -> list[Finding]:
     allowed = _schema_tags(wiki)
@@ -258,24 +295,38 @@ def check_tag_hygiene(pages: dict[str, WikiPage], wiki: Path) -> list[Finding]:
         for tag in tag_list:
             t = tag.strip().lower()
             if t and t not in allowed and t != "uncategorized":
-                out.append(_find("tag_hygiene", "warn", slug,
-                                 f"Tag '{t}' not in SCHEMA.md taxonomy"))
+                out.append(
+                    _find("tag_hygiene", "warn", slug, f"Tag '{t}' not in SCHEMA.md taxonomy")
+                )
     return out
+
 
 def check_wikilink_minimum(pages: dict[str, WikiPage]) -> list[Finding]:
     return [
-        _find("wikilink_minimum", "warn", slug,
-              f"{n} outbound [[wikilinks]] (minimum: {MIN_OUTBOUND_LINKS})")
+        _find(
+            "wikilink_minimum",
+            "warn",
+            slug,
+            f"{n} outbound [[wikilinks]] (minimum: {MIN_OUTBOUND_LINKS})",
+        )
         for slug, path in pages.items()
         if _is_canonical(slug) and (n := len(_wikilinks(_read(path)))) < MIN_OUTBOUND_LINKS
     ]
 
+
 def check_log_rotation(wiki: Path) -> list[Finding]:
     n = _log_entry_count(wiki)
     if n > LOG_ENTRY_LIMIT:
-        return [_find("log_rotation", "warn", "log.md",
-                      f"{n} entries (threshold: {LOG_ENTRY_LIMIT}); consider archiving")]
+        return [
+            _find(
+                "log_rotation",
+                "warn",
+                "log.md",
+                f"{n} entries (threshold: {LOG_ENTRY_LIMIT}); consider archiving",
+            )
+        ]
     return []
+
 
 def check_oversized_pages(pages: dict[str, WikiPage]) -> list[Finding]:
     return [
@@ -283,6 +334,7 @@ def check_oversized_pages(pages: dict[str, WikiPage]) -> list[Finding]:
         for slug, path in pages.items()
         if _is_canonical(slug) and (n := len(_read(path).splitlines())) > MAX_PAGE_LINES
     ]
+
 
 def check_pipeline_linkage(pages: dict[str, WikiPage], wiki: Path) -> list[Finding]:
     converted = wiki / "converted"
@@ -294,9 +346,16 @@ def check_pipeline_linkage(pages: dict[str, WikiPage], wiki: Path) -> list[Findi
         if str(fm.get("has_pipeline", "")).strip().lower() not in ("true", "yes", "1"):
             continue
         if not (converted / path.stem).is_dir():
-            out.append(_find("pipeline_linkage", "error", slug,
-                             f"has_pipeline: true but converted/{path.stem}/ not found"))
+            out.append(
+                _find(
+                    "pipeline_linkage",
+                    "error",
+                    slug,
+                    f"has_pipeline: true but converted/{path.stem}/ not found",
+                )
+            )
     return out
+
 
 def check_contradictions(pages: dict[str, WikiPage]) -> list[Finding]:
     out: list[Finding] = []
@@ -305,8 +364,9 @@ def check_contradictions(pages: dict[str, WikiPage]) -> list[Finding]:
             continue
         raw = _parse_frontmatter(_read(path)).get("contradictions", None)
         if raw is not None and str(raw).strip() not in ("", "null", "~", "[]"):
-            out.append(_find("contradiction", "info", slug,
-                             f"Flagged for contradiction review: {raw}"))
+            out.append(
+                _find("contradiction", "info", slug, f"Flagged for contradiction review: {raw}")
+            )
     return out
 
 
@@ -315,6 +375,7 @@ def _index_section_for_slug(slug: str) -> str:
     if len(parts) >= 2 and parts[0] == "entities":
         return INDEX_SECTION_FOR_SUBJECT.get(parts[1], "## Skills")
     return INDEX_SECTION_FOR_SUBJECT.get(parts[0], "## Skills")
+
 
 def fix_index(wiki: Path, missing_slugs: list[str]) -> int:
     text = _read_wiki_page(wiki, "index.md")
@@ -328,14 +389,13 @@ def fix_index(wiki: Path, missing_slugs: list[str]) -> int:
         if entry in content:
             continue
         section = _index_section_for_slug(slug)
-        insert_at = next(
-            (i + 1 for i, ln in enumerate(lines) if ln.strip() == section), len(lines)
-        )
+        insert_at = next((i + 1 for i, ln in enumerate(lines) if ln.strip() == section), len(lines))
         lines.insert(insert_at, entry)
         content = "\n".join(lines)
         added += 1
     _write_wiki_page(wiki, "index.md", "\n".join(lines) + "\n")
     return added
+
 
 def fix_log_rotation(wiki: Path) -> bool:
     text = _read_wiki_page(wiki, "log.md")
@@ -347,9 +407,12 @@ def fix_log_rotation(wiki: Path) -> bool:
     if len(entries) <= LOG_ENTRY_LIMIT:
         return False
     archive_relpath = f"log-archive-{TODAY.isoformat()}.md"
-    _write_wiki_page(wiki, archive_relpath, "# Skill Wiki Log Archive\n\n" + "".join(entries[:-100]))
+    _write_wiki_page(
+        wiki, archive_relpath, "# Skill Wiki Log Archive\n\n" + "".join(entries[:-100])
+    )
     _write_wiki_page(wiki, "log.md", header + "".join(entries[-100:]))
     return True
+
 
 def run_audit(wiki: Path) -> AuditResult:
     pages = _collect_pages(wiki)
@@ -375,6 +438,7 @@ def run_audit(wiki: Path) -> AuditResult:
     }
     return AuditResult(findings=tuple(findings), stats=stats)
 
+
 def print_report(result: AuditResult) -> None:
     s = result.stats
     print(
@@ -396,23 +460,31 @@ def print_report(result: AuditResult) -> None:
         print("\nNo issues found. Wiki is healthy.")
     print()
 
+
 def print_json_output(result: AuditResult) -> None:
-    print(json.dumps({
-        "stats": result.stats,
-        "findings": [
-            {"check": f.check, "severity": f.severity, "page": f.page, "message": f.message}
-            for f in result.findings
-        ],
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "stats": result.stats,
+                "findings": [
+                    {"check": f.check, "severity": f.severity, "page": f.page, "message": f.message}
+                    for f in result.findings
+                ],
+            },
+            indent=2,
+        )
+    )
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Audit skill wiki health.")
-    parser.add_argument("--wiki", default=str(cfg.wiki_dir),
-                        help=f"Wiki root path (default: {cfg.wiki_dir})")
-    parser.add_argument("--fix", action="store_true",
-                        help="Auto-fix: add missing index entries, rotate log")
-    parser.add_argument("--json", action="store_true",
-                        help="Output findings as JSON")
+    parser.add_argument(
+        "--wiki", default=str(cfg.wiki_dir), help=f"Wiki root path (default: {cfg.wiki_dir})"
+    )
+    parser.add_argument(
+        "--fix", action="store_true", help="Auto-fix: add missing index entries, rotate log"
+    )
+    parser.add_argument("--json", action="store_true", help="Output findings as JSON")
     args = parser.parse_args()
 
     wiki = Path(args.wiki).expanduser().resolve()

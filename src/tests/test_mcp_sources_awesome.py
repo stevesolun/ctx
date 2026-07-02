@@ -145,9 +145,7 @@ class TestParseReadmeExcerpt:
             try:
                 McpRecord.from_dict(entry)
             except Exception as exc:
-                pytest.fail(
-                    f"McpRecord.from_dict() raised for entry {entry.get('name')!r}: {exc}"
-                )
+                pytest.fail(f"McpRecord.from_dict() raised for entry {entry.get('name')!r}: {exc}")
 
 
 # ---------------------------------------------------------------------------

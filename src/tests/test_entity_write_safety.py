@@ -110,14 +110,16 @@ def test_mcp_add_rejects_symlinked_entity_parent(
         monkeypatch.setattr(mcp_add, "record_embedding", lambda **kwargs: None)
         monkeypatch.setattr(mcp_add, "update_index", lambda *args, **kwargs: None)
         monkeypatch.setattr(mcp_add, "append_log", lambda *args, **kwargs: None)
-        record = McpRecord.from_dict({
-            "name": "github-mcp",
-            "description": "A GitHub MCP server",
-            "sources": ["test"],
-            "github_url": "https://github.com/org/github-mcp",
-            "tags": ["github"],
-            "transports": ["stdio"],
-        })
+        record = McpRecord.from_dict(
+            {
+                "name": "github-mcp",
+                "description": "A GitHub MCP server",
+                "sources": ["test"],
+                "github_url": "https://github.com/org/github-mcp",
+                "tags": ["github"],
+                "transports": ["stdio"],
+            }
+        )
 
         with pytest.raises(ValueError, match="symlinked path"):
             mcp_add.add_mcp(record=record, wiki_path=wiki)

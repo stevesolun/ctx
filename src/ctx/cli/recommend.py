@@ -46,10 +46,7 @@ def _render_row(row: dict[str, Any]) -> str:
     action_text = f"  run={action}" if action else ""
     category = row.get("category")
     category_text = f"  category={category}" if category else ""
-    return (
-        f"{entity_type:>10}  {name:<40} score={score_text}"
-        f"{suffix}{category_text}{action_text}"
-    )
+    return f"{entity_type:>10}  {name:<40} score={score_text}{suffix}{category_text}{action_text}"
 
 
 def main(argv: list[str] | None = None) -> int:

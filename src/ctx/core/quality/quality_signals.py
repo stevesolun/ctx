@@ -106,9 +106,7 @@ def telemetry_signal(
     ever_loaded_term = 1.0 if not never_loaded else 0.0
 
     # Term 2: recent volume, saturating at _TELEMETRY_RECENT_SATURATION
-    recent_term = min(
-        1.0, recent_load_count / float(_TELEMETRY_RECENT_SATURATION)
-    )
+    recent_term = min(1.0, recent_load_count / float(_TELEMETRY_RECENT_SATURATION))
 
     # Term 3: recency. Linear decay from 1.0 (just loaded) to 0.0 at
     # stale_threshold_days. Never-loaded short-circuits to 0.
@@ -117,9 +115,7 @@ def telemetry_signal(
     else:
         if last_load_age_days < 0:
             raise ValueError("last_load_age_days must be >= 0 when present")
-        recency_term = max(
-            0.0, 1.0 - (last_load_age_days / stale_threshold_days)
-        )
+        recency_term = max(0.0, 1.0 - (last_load_age_days / stale_threshold_days))
 
     score = (
         _TELEMETRY_EVER_LOADED_WEIGHT * ever_loaded_term

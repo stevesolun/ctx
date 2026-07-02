@@ -82,35 +82,42 @@ def install_agent(
         validate_skill_name(slug)
     except ValueError as exc:
         return InstallResult(
-            slug=slug, status="failed", installed_path=None,
+            slug=slug,
+            status="failed",
+            installed_path=None,
             message=f"invalid slug: {exc}",
         )
 
     source = _mirror_path(wiki_dir, slug)
     if not source.is_file():
         return InstallResult(
-            slug=slug, status="not-in-wiki", installed_path=None,
-            message=(
-                f"no mirrored body at {source}. "
-                "Run ctx-agent-mirror first to populate."
-            ),
+            slug=slug,
+            status="not-in-wiki",
+            installed_path=None,
+            message=(f"no mirrored body at {source}. Run ctx-agent-mirror first to populate."),
         )
 
     dest = agents_dir / f"{slug}.md"
     if dest.exists() and not force:
         if not dry_run:
             record_install(
-                slug, entity_type="agent", source="ctx-agent-install",
+                slug,
+                entity_type="agent",
+                source="ctx-agent-install",
             )
             bump_entity_status(_entity_path(wiki_dir, slug), status="installed")
         return InstallResult(
-            slug=slug, status="skipped-existing", installed_path=str(dest),
+            slug=slug,
+            status="skipped-existing",
+            installed_path=str(dest),
             message="already installed; pass --force to overwrite",
         )
 
     if dry_run:
         return InstallResult(
-            slug=slug, status="would-install", installed_path=str(dest),
+            slug=slug,
+            status="would-install",
+            installed_path=str(dest),
             message="dry-run: no files written",
         )
 
@@ -118,7 +125,9 @@ def install_agent(
         safe_copy_file(source, dest, dest_root=agents_dir)
     except (OSError, ValueError) as exc:
         return InstallResult(
-            slug=slug, status="failed", installed_path=None,
+            slug=slug,
+            status="failed",
+            installed_path=None,
             message=str(exc),
         )
 
@@ -159,11 +168,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force", action="store_true", help="Overwrite existing agent")
     parser.add_argument("--dry-run", action="store_true", help="Print intent only")
     parser.add_argument(
-        "--wiki-dir", default=str(cfg.wiki_dir),
+        "--wiki-dir",
+        default=str(cfg.wiki_dir),
         help="Wiki root (default: cfg.wiki_dir)",
     )
     parser.add_argument(
-        "--agents-dir", default=str(cfg.agents_dir),
+        "--agents-dir",
+        default=str(cfg.agents_dir),
         help="Live agents dir (default: cfg.agents_dir)",
     )
     parser.add_argument("--json", action="store_true", help="Emit results as JSON")
@@ -191,10 +202,15 @@ def main() -> None:
 
     results: list[InstallResult] = []
     for slug in uniq:
-        results.append(install_agent(
-            slug, wiki_dir=wiki_dir, agents_dir=agents_dir,
-            force=args.force, dry_run=args.dry_run,
-        ))
+        results.append(
+            install_agent(
+                slug,
+                wiki_dir=wiki_dir,
+                agents_dir=agents_dir,
+                force=args.force,
+                dry_run=args.dry_run,
+            )
+        )
 
     if args.json:
         print(json.dumps([r.__dict__ for r in results], indent=2))

@@ -48,17 +48,15 @@ _CARD_TEST_ID_RE = re.compile(r'data-test-id="mcp-server-card-([a-z0-9][a-z0-9_-
 # rather than encoding an attribute order into a single regex.
 _DETAIL_REPO_TAG_RE = re.compile(
     r'<a\b[^>]*?data-test-id="mcp-server-github-repo"[^>]*?>'
-    r'(?P<inner>.*?)</a>',
+    r"(?P<inner>.*?)</a>",
     re.DOTALL,
 )
-_DETAIL_REPO_HREF_RE = re.compile(
-    r'href="(?P<url>https://github\.com/[A-Za-z0-9_.\-/]+)"'
-)
+_DETAIL_REPO_HREF_RE = re.compile(r'href="(?P<url>https://github\.com/[A-Za-z0-9_.\-/]+)"')
 # Stars render as ``(N stars)`` or ``(N star)`` inside the GitHub
 # anchor, often wrapped across multiple lines with whitespace/newlines
 # between ``(``, the number, and the word. ``\s+`` matches newlines so
 # the pattern survives pulsemcp's pretty-printed markup.
-_STARS_RE = re.compile(r'\(\s*(\d+)\s+stars?\s*\)', re.DOTALL)
+_STARS_RE = re.compile(r"\(\s*(\d+)\s+stars?\s*\)", re.DOTALL)
 
 
 class _CardTextExtractor(HTMLParser):
@@ -118,7 +116,7 @@ def _split_cards(html: str) -> list[str]:
         end = anchors[i + 1].start() if i + 1 < len(anchors) else len(html)
         # Find nearest preceding "<a" — bounded scan.
         scan_from = max(0, m.start() - 500)
-        a_open = html.rfind('<a ', scan_from, m.start())
+        a_open = html.rfind("<a ", scan_from, m.start())
         start = a_open if a_open >= 0 else m.start()
         slices.append(html[start:end])
     return slices
@@ -162,7 +160,12 @@ def _to_record(card_html: str) -> dict | None:
         if creator is None and tag == "p" and "text-gray-500" in cls:
             creator = text
             continue
-        if description is None and tag == "p" and "text-pulse-black" in cls and "leading-relaxed" in cls:
+        if (
+            description is None
+            and tag == "p"
+            and "text-pulse-black" in cls
+            and "leading-relaxed" in cls
+        ):
             description = text
             continue
         if tag == "p" and "Classification" in text:

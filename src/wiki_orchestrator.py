@@ -31,12 +31,19 @@ TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 SCRIPT_DIR = Path(__file__).parent
 STALE_DAYS = 90
 SCHEMA_REQUIRED_SECTIONS = [
-    "## Domain", "## Conventions", "## Tag Taxonomy",
-    "## Page Thresholds", "## Update Policy",
+    "## Domain",
+    "## Conventions",
+    "## Tag Taxonomy",
+    "## Page Thresholds",
+    "## Update Policy",
 ]
 _CATALOG_EXCLUDES = {
-    "SCHEMA.md", "index.md", "log.md",
-    "catalog.md", "versions-catalog.md", "converted-index.md",
+    "SCHEMA.md",
+    "index.md",
+    "log.md",
+    "catalog.md",
+    "versions-catalog.md",
+    "converted-index.md",
 }
 
 
@@ -88,6 +95,7 @@ def _try_import(name: str, report: HealthReport) -> Any | None:
     cls.__module__ resolve correctly.
     """
     if name == "wiki_lint":
+
         class _PackageWikiLint:
             @staticmethod
             def run_lint(wiki_dir: Path) -> list[str]:
@@ -122,9 +130,11 @@ def _try_import(name: str, report: HealthReport) -> Any | None:
 def _count_log_entries(log_path: Path) -> int:
     if not log_path.exists():
         return 0
-    return sum(1 for ln in log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-               if ln.startswith("## ["))
-
+    return sum(
+        1
+        for ln in log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        if ln.startswith("## [")
+    )
 
 
 def _entity_pages(wiki_dir: Path) -> list[Path]:
@@ -141,8 +151,9 @@ def _all_wikilinks(wiki_dir: Path) -> set[str]:
     links: set[str] = set()
     for md in wiki_dir.rglob("*.md"):
         try:
-            for m in re.finditer(r"\[\[([^\]]+)\]\]",
-                                 md.read_text(encoding="utf-8", errors="replace")):
+            for m in re.finditer(
+                r"\[\[([^\]]+)\]\]", md.read_text(encoding="utf-8", errors="replace")
+            ):
                 links.add(m.group(1).strip())
         except Exception as exc:
             print(f"Warning: failed to extract wikilinks from {md}: {exc}", file=sys.stderr)
@@ -395,8 +406,10 @@ def run_sync(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: AR
     if cb and hasattr(cb, "build_catalog"):
         try:
             stats = cb.build_catalog(
-                wiki_dir=wiki_dir, skills_dir=cfg.skills_dir,
-                agents_dir=cfg.agents_dir, extra_dirs=cfg.extra_skill_dirs,
+                wiki_dir=wiki_dir,
+                skills_dir=cfg.skills_dir,
+                agents_dir=cfg.agents_dir,
+                extra_dirs=cfg.extra_skill_dirs,
             )
             if hasattr(cb, "update_wiki_index"):
                 cb.update_wiki_index(wiki_dir, stats)
@@ -562,10 +575,9 @@ def run_status(wiki_dir: Path) -> None:
 
     pages = _entity_pages(wiki_dir)
     stale = sum(
-        1 for p in pages
-        if _is_stale(_parse_frontmatter(
-            p.read_text(encoding="utf-8", errors="replace")
-        ))
+        1
+        for p in pages
+        if _is_stale(_parse_frontmatter(p.read_text(encoding="utf-8", errors="replace")))
     )
 
     log_path = wiki_dir / "log.md"
@@ -603,8 +615,9 @@ def main() -> None:
             "  python wiki_orchestrator.py --status\n"
         ),
     )
-    p.add_argument("--wiki", default=str(cfg.wiki_dir),
-                   help=f"Wiki directory (default: {cfg.wiki_dir})")
+    p.add_argument(
+        "--wiki", default=str(cfg.wiki_dir), help=f"Wiki directory (default: {cfg.wiki_dir})"
+    )
     p.add_argument("--check", action="store_true", help="Read-only validation; health score 0-100")
     p.add_argument("--sync", action="store_true", help="Full ordered sync of all wiki components")
     p.add_argument("--add", metavar="PATH_OR_NAME", help="Add or refresh a single skill")

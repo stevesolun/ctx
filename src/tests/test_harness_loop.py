@@ -357,9 +357,7 @@ class TestBudgets:
         assert len([m for m in result.messages if m.role == "tool"]) == 1
 
     def test_cost_budget_trips_on_terminal_response(self) -> None:
-        provider = _Scripted(
-            [_stop_response("done", usage=Usage(cost_usd=0.50))]
-        )
+        provider = _Scripted([_stop_response("done", usage=Usage(cost_usd=0.50))])
         result = run_loop(
             provider=provider,
             system_prompt="",
@@ -570,9 +568,7 @@ class TestToolDispatch:
             task="call tool",
             tool_executor=exec_,
             tool_policy=lambda call: (
-                "write tools require explicit allow"
-                if call.name == "custom__delete"
-                else None
+                "write tools require explicit allow" if call.name == "custom__delete" else None
             ),
         )
 
@@ -617,12 +613,8 @@ class TestToolDispatch:
         )
         router.start()
         try:
-            tc = ToolCall(
-                id="c1", name="fake__echo", arguments={"text": "via-router"}
-            )
-            provider = _Scripted(
-                [_tool_response(tc), _stop_response("done")]
-            )
+            tc = ToolCall(id="c1", name="fake__echo", arguments={"text": "via-router"})
+            provider = _Scripted([_tool_response(tc), _stop_response("done")])
             result = run_loop(
                 provider=provider,
                 system_prompt="",
@@ -642,9 +634,7 @@ class TestToolDispatch:
         def exec_(call: ToolCall) -> str:
             return f"result-{call.id}"
 
-        provider = _Scripted(
-            [_tool_response(tc1, tc2), _stop_response("done")]
-        )
+        provider = _Scripted([_tool_response(tc1, tc2), _stop_response("done")])
         result = run_loop(
             provider=provider,
             system_prompt="",
@@ -751,11 +741,11 @@ class TestUsage:
 
     def test_cost_none_when_provider_never_reports(self) -> None:
         """Ollama + others don't report cost — result reflects that as None."""
-        provider = _Scripted(
-            [_stop_response("hi", usage=Usage(input_tokens=1, output_tokens=1))]
-        )
+        provider = _Scripted([_stop_response("hi", usage=Usage(input_tokens=1, output_tokens=1))])
         result = run_loop(
-            provider=provider, system_prompt="", task="task",
+            provider=provider,
+            system_prompt="",
+            task="task",
         )
         assert result.usage.cost_usd is None
 
@@ -949,6 +939,7 @@ class TestObserver:
 
 
 # ── State seeding (resume path) ─────────────────────────────────────────────
+
 
 class TestResumePath:
     def test_prior_messages_appended_after_task(self) -> None:

@@ -88,13 +88,13 @@ def test_record_from_skillspector_report_normalizes_safe_result() -> None:
 
 
 def test_stamp_entity_text_is_visible_and_idempotent() -> None:
-    text = "---\ntitle: Demo\nskillspector_status: \"old\"\n---\n# Demo\n"
+    text = '---\ntitle: Demo\nskillspector_status: "old"\n---\n# Demo\n'
     once = stamp_entity_text(text, _record())
     twice = stamp_entity_text(once, _record())
 
     assert once == twice
     assert "skillspector_checked: true" in once
-    assert "skillspector_status: \"passed\"" in once
+    assert 'skillspector_status: "passed"' in once
     assert "not NVIDIA endorsement" in once
     assert once.count(STAMP_BEGIN) == 1
 
@@ -147,12 +147,12 @@ def test_stamp_directory_updates_only_audited_entities(tmp_path: Path) -> None:
     stats = stamp_directory(wiki, audit)
 
     assert stats == {"stamped": 1, "missing": 0, "audit_records": 1}
-    assert "skillspector_checked: true" in (
-        wiki / "entities" / "skills" / "demo.md"
-    ).read_text(encoding="utf-8")
-    assert "skillspector_checked" not in (
-        wiki / "entities" / "skills" / "other.md"
-    ).read_text(encoding="utf-8")
+    assert "skillspector_checked: true" in (wiki / "entities" / "skills" / "demo.md").read_text(
+        encoding="utf-8"
+    )
+    assert "skillspector_checked" not in (wiki / "entities" / "skills" / "other.md").read_text(
+        encoding="utf-8"
+    )
     assert (wiki / "security" / "skillspector-audit.jsonl.gz").exists()
 
 

@@ -79,24 +79,31 @@ def synthetic_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     # Graph
     G = nx.Graph()
-    G.add_node("skill:python-patterns", label="python-patterns",
-               type="skill", tags=["python", "patterns"])
-    G.add_node("skill:fastapi-pro", label="fastapi-pro",
-               type="skill", tags=["python", "api", "web"])
-    G.add_node("agent:code-reviewer", label="code-reviewer",
-               type="agent", tags=["python", "review"])
-    G.add_node("harness:fastapi-pro", label="fastapi-pro",
-               type="harness", tags=["python", "api", "harness"])
+    G.add_node(
+        "skill:python-patterns", label="python-patterns", type="skill", tags=["python", "patterns"]
+    )
+    G.add_node(
+        "skill:fastapi-pro", label="fastapi-pro", type="skill", tags=["python", "api", "web"]
+    )
+    G.add_node(
+        "agent:code-reviewer", label="code-reviewer", type="agent", tags=["python", "review"]
+    )
+    G.add_node(
+        "harness:fastapi-pro",
+        label="fastapi-pro",
+        type="harness",
+        tags=["python", "api", "harness"],
+    )
     for i in range(8):
-        G.add_node(f"skill:python-extra-{i}", label=f"python-extra-{i}",
-                   type="skill", tags=["python"])
-    G.add_edge("skill:python-patterns", "skill:fastapi-pro",
-               weight=0.8, shared_tags=["python"])
-    G.add_edge("skill:python-patterns", "agent:code-reviewer",
-               weight=0.6, shared_tags=["python"])
+        G.add_node(
+            f"skill:python-extra-{i}", label=f"python-extra-{i}", type="skill", tags=["python"]
+        )
+    G.add_edge("skill:python-patterns", "skill:fastapi-pro", weight=0.8, shared_tags=["python"])
+    G.add_edge("skill:python-patterns", "agent:code-reviewer", weight=0.6, shared_tags=["python"])
     (wiki / "graphify-out").mkdir()
     (wiki / "graphify-out" / "graph.json").write_text(
-        json.dumps(nx.node_link_data(G, edges="edges")), encoding="utf-8",
+        json.dumps(nx.node_link_data(G, edges="edges")),
+        encoding="utf-8",
     )
 
     # Point ctx-config and the module-level toolbox singleton at the
@@ -109,8 +116,10 @@ def synthetic_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # synthetic corpus (rather than caching the real one from a prior
     # test in the same session).
     from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
+
     monkeypatch.setattr(
-        ctx.api, "_default_toolbox",
+        ctx.api,
+        "_default_toolbox",
         CtxCoreToolbox(
             wiki_dir=wiki,
             graph_path=wiki / "graphify-out" / "graph.json",
@@ -144,15 +153,17 @@ def captured_api_events(
 
 class TestPublicApiShape:
     # Names third-party harnesses must keep seeing verbatim.
-    _REQUIRED_NAMES = frozenset({
-        "CtxCoreToolbox",
-        "default_wiki_dir",
-        "graph_query",
-        "list_all_entities",
-        "recommend_bundle",
-        "wiki_get",
-        "wiki_search",
-    })
+    _REQUIRED_NAMES = frozenset(
+        {
+            "CtxCoreToolbox",
+            "default_wiki_dir",
+            "graph_query",
+            "list_all_entities",
+            "recommend_bundle",
+            "wiki_get",
+            "wiki_search",
+        }
+    )
 
     def test_top_level_exports(self) -> None:
         assert self._REQUIRED_NAMES <= set(ctx.__all__)
@@ -223,7 +234,8 @@ class TestRecommendBundle:
         assert "fastapi-pro" in names
 
     def test_empty_query_returns_empty_list(
-        self, synthetic_home: Path,
+        self,
+        synthetic_home: Path,
     ) -> None:
         assert ctx.recommend_bundle("") == []
 
@@ -232,7 +244,8 @@ class TestRecommendBundle:
         assert len(bundle) <= 1
 
     def test_execution_bundle_excludes_harnesses_and_caps_to_five(
-        self, synthetic_home: Path,
+        self,
+        synthetic_home: Path,
     ) -> None:
         bundle = ctx.recommend_bundle("python api harness", top_k=50)
         assert len(bundle) <= 5
@@ -322,7 +335,8 @@ class TestWikiSearch:
 
 class TestWikiGet:
     def test_hit_returns_frontmatter_and_body(
-        self, synthetic_home: Path,
+        self,
+        synthetic_home: Path,
     ) -> None:
         page = ctx.wiki_get("python-patterns")
         assert page is not None
@@ -331,7 +345,8 @@ class TestWikiGet:
         assert "body" in page
 
     def test_entity_type_disambiguates_duplicate_slug(
-        self, synthetic_home: Path,
+        self,
+        synthetic_home: Path,
     ) -> None:
         default_page = ctx.wiki_get("fastapi-pro")
         assert default_page is not None
@@ -343,7 +358,8 @@ class TestWikiGet:
         assert harness_page["frontmatter"]["title"] == "FastAPI Harness"
 
     def test_invalid_entity_type_returns_none(
-        self, synthetic_home: Path,
+        self,
+        synthetic_home: Path,
     ) -> None:
         assert ctx.wiki_get("fastapi-pro", entity_type="plugin") is None
 
@@ -351,14 +367,16 @@ class TestWikiGet:
         assert ctx.wiki_get("does-not-exist") is None
 
     def test_invalid_slug_returns_none(
-        self, synthetic_home: Path,
+        self,
+        synthetic_home: Path,
     ) -> None:
         assert ctx.wiki_get("../../etc/passwd") is None
 
 
 class TestListAllEntities:
     def test_no_filter_returns_all_types(
-        self, synthetic_home: Path,
+        self,
+        synthetic_home: Path,
     ) -> None:
         entities = ctx.list_all_entities()
         assert "python-patterns" in entities
@@ -369,7 +387,7 @@ class TestListAllEntities:
     def test_skill_filter(self, synthetic_home: Path) -> None:
         entities = ctx.list_all_entities(entity_type="skill")
         assert "python-patterns" in entities
-        assert "code-reviewer" not in entities   # it's an agent
+        assert "code-reviewer" not in entities  # it's an agent
 
     def test_agent_filter(self, synthetic_home: Path) -> None:
         entities = ctx.list_all_entities(entity_type="agent")
@@ -390,11 +408,7 @@ class TestListAllEntities:
         wiki = ctx.default_wiki_dir()
         assert wiki is not None
         (wiki / "entities" / "skills" / "python-patterns.md").write_text(
-            "---\n"
-            "name: python-patterns\n"
-            "title: Stale Physical Skill\n"
-            "---\n"
-            "# stale\n",
+            "---\nname: python-patterns\ntitle: Stale Physical Skill\n---\n# stale\n",
             encoding="utf-8",
         )
         write_wiki_base_pack(
@@ -411,12 +425,7 @@ class TestListAllEntities:
                     "# Pack Only Skill\n"
                 ),
                 "entities/mcp-servers/g/github.md": (
-                    "---\n"
-                    "name: github\n"
-                    "title: GitHub MCP\n"
-                    "type: mcp-server\n"
-                    "---\n"
-                    "# GitHub MCP\n"
+                    "---\nname: github\ntitle: GitHub MCP\ntype: mcp-server\n---\n# GitHub MCP\n"
                 ),
             },
         )
@@ -426,7 +435,9 @@ class TestListAllEntities:
         assert ctx.list_all_entities(entity_type="mcp-server") == ["github"]
 
     def test_empty_wiki_returns_empty(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # Point default_wiki_dir at a nonexistent path.
         monkeypatch.setattr(ctx.api, "default_wiki_dir", lambda: None)
@@ -435,7 +446,8 @@ class TestListAllEntities:
 
 class TestDefaultWikiDir:
     def test_returns_path_when_wiki_exists(
-        self, synthetic_home: Path,
+        self,
+        synthetic_home: Path,
     ) -> None:
         # Fixture patched default_wiki_dir to return the synthetic
         # corpus — confirm the re-export still points at the patch.
@@ -444,7 +456,9 @@ class TestDefaultWikiDir:
         assert isinstance(result, Path)
 
     def test_unpatched_returns_none_when_missing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Exercise the un-patched implementation (not via the fixture).
 
@@ -458,6 +472,7 @@ class TestDefaultWikiDir:
         monkeypatch.setenv("USERPROFILE", str(tmp_path / "does-not-exist"))
         # Break the ctx_config singleton so the fallback branch runs.
         import sys
+
         monkeypatch.setitem(sys.modules, "ctx_config", None)
         result = real_default_wiki_dir()
         assert result is None

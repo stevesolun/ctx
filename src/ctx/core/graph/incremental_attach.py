@@ -329,7 +329,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     validate_indexes.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     attach = sub.add_parser("attach", help="Attach one entity through the semantic vector index")
-    attach.add_argument("--index-dir", required=True, help="Path to a persisted vector-index directory")
+    attach.add_argument(
+        "--index-dir", required=True, help="Path to a persisted vector-index directory"
+    )
     attach.add_argument(
         "--delta-index-dir",
         action="append",
@@ -340,7 +342,9 @@ def main(argv: list[str] | None = None) -> int:
         "--delta-index-write-dir",
         help="Optional local vector-index directory to upsert this entity after attach",
     )
-    attach.add_argument("--overlay", required=True, help="Path to graphify-out/entity-overlays.jsonl")
+    attach.add_argument(
+        "--overlay", required=True, help="Path to graphify-out/entity-overlays.jsonl"
+    )
     attach.add_argument("--node-id", required=True, help="Graph node id, e.g. skill:my-skill")
     attach.add_argument("--type", required=True, dest="entity_type", help="Entity type")
     attach.add_argument("--label", help="Display label; defaults to the slug part of --node-id")
@@ -367,17 +371,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Parent graph export id for --pack-root; defaults to --base-export-id",
     )
     attach.add_argument("--config-hash", help="Graph config hash for --pack-root")
-    attach.add_argument("--dry-run", action="store_true", help="Print the overlay record without writing")
+    attach.add_argument(
+        "--dry-run", action="store_true", help="Print the overlay record without writing"
+    )
     attach.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     args = parser.parse_args(argv)
     if args.command == "calibrate":
         from ctx.core.graph.resolve_graph import load_graph  # noqa: PLC0415
 
-        graph_path = (
-            Path(args.graph)
-            if args.graph
-            else Path(args.graph_dir) / "graph.json"
-        )
+        graph_path = Path(args.graph) if args.graph else Path(args.graph_dir) / "graph.json"
         graph = load_graph(graph_path)
         summary = calibrate_attach_defaults(graph)
         if args.json:
@@ -419,9 +421,7 @@ def main(argv: list[str] | None = None) -> int:
                 model_id=args.model_id,
                 top_k=args.top_k,
                 min_score=(
-                    args.min_score
-                    if args.min_score is not None
-                    else _default_min_semantic_score()
+                    args.min_score if args.min_score is not None else _default_min_semantic_score()
                 ),
                 min_final_weight=args.min_final_weight,
                 dry_run=args.dry_run,
@@ -433,9 +433,7 @@ def main(argv: list[str] | None = None) -> int:
                 config_hash=args.config_hash,
                 delta_index_dirs=[Path(path) for path in args.delta_index_dir or []],
                 delta_index_write_dir=(
-                    Path(args.delta_index_write_dir)
-                    if args.delta_index_write_dir
-                    else None
+                    Path(args.delta_index_write_dir) if args.delta_index_write_dir else None
                 ),
             )
         except Exception as exc:  # noqa: BLE001 - CLI reports concise errors.
@@ -506,9 +504,7 @@ def _resolve_attach_vector(
     embedder = get_embedder(embedding_backend, model=embedding_model)
     resolved_model_id = embedder.name
     if model_id and model_id != resolved_model_id:
-        raise ValueError(
-            f"--model-id {model_id!r} does not match embedder {resolved_model_id!r}"
-        )
+        raise ValueError(f"--model-id {model_id!r} does not match embedder {resolved_model_id!r}")
     return embedder.embed([text]), resolved_model_id, _content_hash(text)
 
 
@@ -548,7 +544,9 @@ def _write_attach_pack(
 
 def _attach_pack_id(record: dict[str, Any]) -> str:
     node_id = str(record.get("node_id") or "entity")
-    content_hash = str(record.get("content_hash") or _content_hash(json.dumps(record, sort_keys=True)))
+    content_hash = str(
+        record.get("content_hash") or _content_hash(json.dumps(record, sort_keys=True))
+    )
     safe_node = re.sub(r"[^A-Za-z0-9._-]+", "-", node_id).strip(".-_").lower()
     if not safe_node:
         safe_node = "entity"
@@ -677,9 +675,7 @@ def _blend_ann_score(
         "type_affinity": round(type_weight * type_affinity, 4),
     }
     final = min(sum(components.values()), 1.0)
-    return round(final, 4), {
-        key: value for key, value in components.items() if value > 0.0
-    }
+    return round(final, 4), {key: value for key, value in components.items() if value > 0.0}
 
 
 def _utc_now() -> str:
@@ -692,8 +688,7 @@ def _percentiles(values: Iterable[float]) -> dict[int, float]:
         return {}
     array = np.asarray(series, dtype=np.float64)
     return {
-        percentile: round(float(np.percentile(array, percentile)), 4)
-        for percentile in _PERCENTILES
+        percentile: round(float(np.percentile(array, percentile)), 4) for percentile in _PERCENTILES
     }
 
 

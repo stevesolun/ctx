@@ -73,12 +73,14 @@ def append_overlay_tombstone(path: Path, *, node_id: str, source: str) -> str:
         records = load_overlay_records(path)
         if not records:
             return "skipped"
-        records.append({
-            "action": "delete",
-            "node_id": node_id,
-            "source": source,
-            "deleted_at": _utc_now(),
-        })
+        records.append(
+            {
+                "action": "delete",
+                "node_id": node_id,
+                "source": source,
+                "deleted_at": _utc_now(),
+            }
+        )
         write_overlay_records_atomic(path, records)
         return "inserted"
 

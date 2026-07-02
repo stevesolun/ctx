@@ -13,8 +13,15 @@ def render_harness_wizard(
 ) -> str:
     """Render the manual harness setup wizard for user-owned LLMs."""
     provider_options = (
-        "openai", "anthropic", "google", "huggingface", "openrouter",
-        "ollama", "lm-studio", "local", "other",
+        "openai",
+        "anthropic",
+        "google",
+        "huggingface",
+        "openrouter",
+        "ollama",
+        "lm-studio",
+        "local",
+        "other",
     )
     provider_html = "".join(
         f"<option value='{html.escape(provider)}'>{html.escape(provider)}</option>"

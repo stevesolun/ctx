@@ -89,10 +89,7 @@ class CosineRanker:
         for sid in ids:
             v = vectors[sid]
             if v.ndim != 1 or v.shape[0] != dim:
-                raise ValueError(
-                    f"vector for {sid!r} has shape {v.shape}; "
-                    f"expected ({dim},)"
-                )
+                raise ValueError(f"vector for {sid!r} has shape {v.shape}; expected ({dim},)")
             rows.append(v.astype(np.float32, copy=False))
         matrix = np.vstack(rows)
         return cls(_l2_normalize_rows(matrix), ids)
@@ -137,9 +134,7 @@ class CosineRanker:
         if not isinstance(query, np.ndarray) or query.ndim != 1:
             raise ValueError(f"query must be a 1-D numpy array, got {query!r}")
         if query.shape[0] != self.dim:
-            raise ValueError(
-                f"query dim {query.shape[0]} does not match corpus dim {self.dim}"
-            )
+            raise ValueError(f"query dim {query.shape[0]} does not match corpus dim {self.dim}")
         q = query.astype(np.float32, copy=False)
         norm = float(np.linalg.norm(q))
         if norm > 0.0:
@@ -155,8 +150,7 @@ class CosineRanker:
             order = top_idx[np.argsort(-scores[top_idx], kind="stable")]
 
         return [
-            RankedMatch(subject_id=self._ids[int(i)], score=float(scores[int(i)]))
-            for i in order
+            RankedMatch(subject_id=self._ids[int(i)], score=float(scores[int(i)])) for i in order
         ]
 
 

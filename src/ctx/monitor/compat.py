@@ -198,7 +198,9 @@ def _dashboard_graph_pack_cache_key(packs_dir: Path) -> tuple[tuple[str, float, 
 _mcp_shard = core_entity_types.mcp_shard
 
 
-_DASHBOARD_ENTITY_SOURCES: tuple[tuple[str, str, bool], ...] = core_entity_types.entity_source_specs()
+_DASHBOARD_ENTITY_SOURCES: tuple[tuple[str, str, bool], ...] = (
+    core_entity_types.entity_source_specs()
+)
 _DASHBOARD_ENTITY_TYPES: tuple[str, ...] = tuple(
     entity_type for _, entity_type, _ in _DASHBOARD_ENTITY_SOURCES
 )
@@ -294,8 +296,7 @@ def _scan_skill_entity_content(slug: str, content: str) -> tuple[bool, str]:
         return True, "SkillSpector: passed"
     return (
         False,
-        "SkillSpector security scan did not pass: "
-        f"{result.status}\n\n{render_scan_report(result)}",
+        f"SkillSpector security scan did not pass: {result.status}\n\n{render_scan_report(result)}",
     )
 
 
@@ -309,12 +310,14 @@ def _entity_crud_deps() -> dashboard_entities.EntityCrudDeps:
         iter_wiki_entity_paths=_iter_wiki_entity_paths,
         read_manifest=_read_manifest,
         perform_unload=_perform_unload,
-        queue_entity_refresh=lambda entity_type, slug, entity_path, content, action: _queue_entity_refresh(
-            entity_type=entity_type,
-            slug=slug,
-            entity_path=entity_path,
-            content=content,
-            action=action,
+        queue_entity_refresh=lambda entity_type, slug, entity_path, content, action: (
+            _queue_entity_refresh(
+                entity_type=entity_type,
+                slug=slug,
+                entity_path=entity_path,
+                content=content,
+                action=action,
+            )
         ),
         file_lock=file_lock,
         write_entity_text=_write_entity_text,
@@ -406,11 +409,7 @@ def _extract_embedded_quality_block(markdown_text: str) -> tuple[str, str | None
     matches = list(_WIKI_QUALITY_BLOCK_RE.finditer(markdown_text))
     if not matches:
         return markdown_text, None
-    quality_blocks = [
-        match.group(1).strip()
-        for match in matches
-        if match.group(1).strip()
-    ]
+    quality_blocks = [match.group(1).strip() for match in matches if match.group(1).strip()]
     body = _WIKI_QUALITY_BLOCK_RE.sub("\n\n", markdown_text)
     body = re.sub(r"\n{3,}", "\n\n", body).strip()
     quality_markdown = "\n\n".join(quality_blocks).strip() or None
@@ -754,8 +753,6 @@ def _session_detail(session_id: str) -> dict:
 # ─── HTML rendering ──────────────────────────────────────────────────────────
 
 
-
-
 # ─── Graph neighborhood (for /graph) ────────────────────────────────────────
 
 
@@ -1053,9 +1050,8 @@ def _render_skill_detail(slug: str, entity_type: str | None = None) -> str:
 
 def _top_degree_seeds_from_index(limit: int = 18) -> list[dict]:
     index_path = _dashboard_graph_index_path()
-    if (
-        _dashboard_graph_has_runtime_overlays()
-        and not _dashboard_index_covers_runtime_overlays(index_path)
+    if _dashboard_graph_has_runtime_overlays() and not _dashboard_index_covers_runtime_overlays(
+        index_path
     ):
         return []
     ensured_index_path = _ensure_dashboard_graph_index()
@@ -1320,7 +1316,6 @@ def _render_wiki_index(entity_type: str | None = None, query: str = "") -> str:
     )
 
 
-
 def _docs_roots() -> list[Path]:
     return _docs_page.docs_roots(Path.cwd(), _source_root())
 
@@ -1524,12 +1519,10 @@ def _route_dispatch_deps() -> _monitor_app.RouteDispatchDeps:
         render_config=_render_config,
         render_status=_render_status,
         render_wiki_index=_render_wiki_index,
-        render_wiki_entity=lambda slug, entity_type, mutations_enabled: (
-            _render_wiki_entity(
-                slug,
-                entity_type,
-                mutations_enabled=mutations_enabled,
-            )
+        render_wiki_entity=lambda slug, entity_type, mutations_enabled: _render_wiki_entity(
+            slug,
+            entity_type,
+            mutations_enabled=mutations_enabled,
         ),
         render_kpi=_render_kpi,
         render_runtime_lifecycle=_render_runtime_lifecycle,
@@ -1612,6 +1605,7 @@ def _monitor_handler_deps() -> _MonitorHandlerDeps:
 
 
 _MonitorHandler = _build_monitor_handler(_monitor_handler_deps())
+
 
 def _make_monitor_server(host: str, port: int) -> _MonitorServer:
     global _MONITOR_MUTATIONS_ENABLED

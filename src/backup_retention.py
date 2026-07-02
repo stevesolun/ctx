@@ -39,10 +39,10 @@ from backup_config import BackupRetention
 class RetentionPlan:
     """Result of planning a prune pass against a retention policy."""
 
-    keep: tuple[str, ...]       # snapshot_ids preserved
-    delete: tuple[str, ...]     # snapshot_ids to prune
+    keep: tuple[str, ...]  # snapshot_ids preserved
+    delete: tuple[str, ...]  # snapshot_ids to prune
     protected_by_latest: tuple[str, ...]  # subset of keep, by keep_latest rule
-    protected_by_daily: tuple[str, ...]   # subset of keep, by keep_daily rule
+    protected_by_daily: tuple[str, ...]  # subset of keep, by keep_daily rule
 
     def to_dict(self) -> dict:
         return {

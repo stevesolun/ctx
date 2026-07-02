@@ -17,8 +17,16 @@ from pathlib import Path
 from typing import Any
 
 _SCHEMA_TAGS = (
-    "python", "fastapi", "docker", "testing", "architecture",
-    "patterns", "cli", "database", "async", "security",
+    "python",
+    "fastapi",
+    "docker",
+    "testing",
+    "architecture",
+    "patterns",
+    "cli",
+    "database",
+    "async",
+    "security",
 )
 
 _MINIMAL_SCHEMA = """\
@@ -44,7 +52,7 @@ Pages older than 90 days are considered stale.
 
 _TODAY = date.today().isoformat()
 _FRESH_DATE = _TODAY
-_STALE_DATE = "2024-01-01"   # safely older than the 90-day stale threshold
+_STALE_DATE = "2024-01-01"  # safely older than the 90-day stale threshold
 
 
 def make_wiki(tmp_path: Path) -> Path:

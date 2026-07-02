@@ -30,9 +30,7 @@ class GraphWikiConsistencyReport:
     def ok(self) -> bool:
         """Return whether the merged graph and wiki entity views agree."""
         return (
-            not self.missing_wiki_pages
-            and not self.orphan_wiki_pages
-            and not self.stale_wiki_links
+            not self.missing_wiki_pages and not self.orphan_wiki_pages and not self.stale_wiki_links
         )
 
     def errors(self) -> list[str]:
@@ -59,10 +57,12 @@ def validate_graph_wiki_consistency(
         expected_paths = _entity_page_candidates(entity_type, slug)
         if expected_paths & normalised_pages:
             continue
-        missing.append({
-            "node_id": node_id,
-            "expected_paths": sorted(expected_paths),
-        })
+        missing.append(
+            {
+                "node_id": node_id,
+                "expected_paths": sorted(expected_paths),
+            }
+        )
     graph_node_ids = {node_id for node_id, _entity_type, _slug in graph_nodes}
     orphan_pages = [
         {"path": page, "expected_node_id": node_id}
@@ -214,12 +214,14 @@ def _stale_entity_wikilinks(
             if key in seen:
                 continue
             seen.add(key)
-            stale.append({
-                "source_path": normalised_source,
-                "target": target,
-                "expected_node_id": node_id,
-                "reason": reason,
-            })
+            stale.append(
+                {
+                    "source_path": normalised_source,
+                    "target": target,
+                    "expected_node_id": node_id,
+                    "reason": reason,
+                }
+            )
     return stale
 
 

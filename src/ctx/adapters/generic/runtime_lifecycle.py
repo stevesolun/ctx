@@ -230,18 +230,21 @@ class RuntimeLifecycleStore:
                     loaded[key]["evidence"].append(event["evidence"])
             elif action == "unload_requested":
                 current = loaded.pop(key, None)
-                unloaded.append({
-                    "entity_type": key[0],
-                    "slug": key[1],
-                    "unloaded_at": event.get("created_at"),
-                    "reason": event.get("reason"),
-                    "was_loaded": current is not None,
-                    "was_used": bool(current and current.get("used")),
-                })
+                unloaded.append(
+                    {
+                        "entity_type": key[0],
+                        "slug": key[1],
+                        "unloaded_at": event.get("created_at"),
+                        "reason": event.get("reason"),
+                        "was_loaded": current is not None,
+                        "was_used": bool(current and current.get("used")),
+                    }
+                )
 
         loaded_entries = list(loaded.values())
         unload_candidates = [
-            entry for entry in loaded_entries
+            entry
+            for entry in loaded_entries
             if not entry["used"]
             and _loaded_before_latest_dev_event(entry, latest_dev_event_epoch)
             and (min_age == 0 or now - float(entry.get("loaded_at_epoch") or 0) >= min_age)
@@ -255,12 +258,8 @@ class RuntimeLifecycleStore:
             "unloaded": unloaded,
             "validations": validations,
             "escalations": escalations,
-            "latest_validation_status": (
-                str(validations[-1]["status"]) if validations else None
-            ),
-            "open_escalations": [
-                event for event in escalations if event["status"] == "open"
-            ],
+            "latest_validation_status": (str(validations[-1]["status"]) if validations else None),
+            "open_escalations": [event for event in escalations if event["status"] == "open"],
         }
 
     def _record(self, **event: Any) -> dict[str, Any]:
@@ -308,9 +307,7 @@ class RuntimeLifecycleStore:
     def events_path(self) -> Path:
         root = self.root
         if root is None:
-            root = Path(
-                os.environ.get("CTX_RUNTIME_LIFECYCLE_DIR", "~/.ctx/runtime")
-            ).expanduser()
+            root = Path(os.environ.get("CTX_RUNTIME_LIFECYCLE_DIR", "~/.ctx/runtime")).expanduser()
         return root / "events.jsonl"
 
 
@@ -367,9 +364,7 @@ def _record_runtime_lifecycle_telemetry(event: dict[str, Any]) -> None:
 def _validate_entity_type(raw: str) -> str:
     value = raw.strip()
     if value not in _ENTITY_TYPES:
-        raise ValueError(
-            "entity_type must be one of " + ", ".join(sorted(_ENTITY_TYPES))
-        )
+        raise ValueError("entity_type must be one of " + ", ".join(sorted(_ENTITY_TYPES)))
     return value
 
 
@@ -418,10 +413,7 @@ def _security_scan_state(
             "status": "not_provided",
             "scanner": "skillspector",
             "required": False,
-            "summary": (
-                "No SkillSpector scan proof was provided by the host for this "
-                "skill load."
-            ),
+            "summary": ("No SkillSpector scan proof was provided by the host for this skill load."),
             "recommended_command": f"ctx-skill-install {slug} --security-scan-required",
         }
 

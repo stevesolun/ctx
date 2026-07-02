@@ -30,13 +30,15 @@ from ctx.core.wiki.wiki_packs import write_wiki_base_pack  # noqa: E402
 def test_allowlist_parses_comments_and_blanks(tmp_path: Path) -> None:
     p = tmp_path / "allow.txt"
     p.write_text(
-        "\n".join([
-            "# header comment",
-            "",
-            "alpha beta  # legitimate distinct",
-            "  gamma delta",
-            "# trailing comment",
-        ]),
+        "\n".join(
+            [
+                "# header comment",
+                "",
+                "alpha beta  # legitimate distinct",
+                "  gamma delta",
+                "# trailing comment",
+            ]
+        ),
         encoding="utf-8",
     )
     assert dc.load_allowlist(p) == {("alpha", "beta"), ("delta", "gamma")}
@@ -63,10 +65,7 @@ def test_discover_entities_reads_wiki_packs_before_physical_pages(tmp_path: Path
     stale_dir = tmp_path / "entities" / "skills"
     stale_dir.mkdir(parents=True)
     (stale_dir / "stale.md").write_text(
-        "---\n"
-        "description: stale physical page\n"
-        "---\n"
-        "# stale\n",
+        "---\ndescription: stale physical page\n---\n# stale\n",
         encoding="utf-8",
     )
     write_wiki_base_pack(
@@ -75,25 +74,10 @@ def test_discover_entities_reads_wiki_packs_before_physical_pages(tmp_path: Path
         base_export_id="export-1",
         pages={
             "entities/skills/pack-skill.md": (
-                "---\n"
-                "description: pack skill description\n"
-                "tags:\n"
-                "  - pack\n"
-                "---\n"
-                "# pack skill\n"
+                "---\ndescription: pack skill description\ntags:\n  - pack\n---\n# pack skill\n"
             ),
-            "entities/agents/reviewer.md": (
-                "---\n"
-                "description: review agent\n"
-                "---\n"
-                "# reviewer\n"
-            ),
-            "entities/mcp-servers/g/github.md": (
-                "---\n"
-                "description: github mcp\n"
-                "---\n"
-                "# github\n"
-            ),
+            "entities/agents/reviewer.md": ("---\ndescription: review agent\n---\n# reviewer\n"),
+            "entities/mcp-servers/g/github.md": ("---\ndescription: github mcp\n---\n# github\n"),
         },
     )
 
@@ -130,8 +114,10 @@ def test_state_round_trip(tmp_path: Path) -> None:
 def test_state_invalidates_on_model_change(tmp_path: Path) -> None:
     s = dc.DedupState(
         version=dc.DEDUP_STATE_VERSION,
-        model_id="m1", threshold=0.85,
-        entity_hashes={"skill:a": "h1"}, last_findings=[],
+        model_id="m1",
+        threshold=0.85,
+        entity_hashes={"skill:a": "h1"},
+        last_findings=[],
     )
     dc.save_state(tmp_path, s)
     loaded = dc.load_state(tmp_path, model_id="m2", threshold=0.85)
@@ -141,8 +127,10 @@ def test_state_invalidates_on_model_change(tmp_path: Path) -> None:
 def test_state_invalidates_on_threshold_change(tmp_path: Path) -> None:
     s = dc.DedupState(
         version=dc.DEDUP_STATE_VERSION,
-        model_id="m1", threshold=0.85,
-        entity_hashes={"skill:a": "h1"}, last_findings=[],
+        model_id="m1",
+        threshold=0.85,
+        entity_hashes={"skill:a": "h1"},
+        last_findings=[],
     )
     dc.save_state(tmp_path, s)
     loaded = dc.load_state(tmp_path, model_id="m1", threshold=0.90)
@@ -163,15 +151,24 @@ def test_find_high_similarity_pairs_emits_each_pair_once() -> None:
     not N² (no double-emission).
     """
     # Three identical vectors → all three pairs are perfectly similar
-    vecs = np.array([
-        [1.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0],
-    ], dtype="float32")
+    vecs = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+        ],
+        dtype="float32",
+    )
     # L2 already normalised
     entities = [
-        dc.EntityRef(node_id=f"skill:{s}", type="skill", slug=s,
-                     path=Path(f"/{s}.md"), description=s, tags=())
+        dc.EntityRef(
+            node_id=f"skill:{s}",
+            type="skill",
+            slug=s,
+            path=Path(f"/{s}.md"),
+            description=s,
+            tags=(),
+        )
         for s in ["a", "b", "c"]
     ]
     pairs = dc.find_high_similarity_pairs(entities, vecs, threshold=0.99)
@@ -185,8 +182,14 @@ def test_find_high_similarity_pairs_threshold_filters() -> None:
     # Two orthogonal vectors → cosine = 0
     vecs = np.array([[1.0, 0.0], [0.0, 1.0]], dtype="float32")
     entities = [
-        dc.EntityRef(node_id=f"skill:{s}", type="skill", slug=s,
-                     path=Path(f"/{s}.md"), description=s, tags=())
+        dc.EntityRef(
+            node_id=f"skill:{s}",
+            type="skill",
+            slug=s,
+            path=Path(f"/{s}.md"),
+            description=s,
+            tags=(),
+        )
         for s in ["a", "b"]
     ]
     pairs = dc.find_high_similarity_pairs(entities, vecs, threshold=0.50)
@@ -202,8 +205,14 @@ def test_find_high_similarity_pairs_chunking_consistent() -> None:
     norms[norms == 0] = 1.0
     vecs = raw / norms
     entities = [
-        dc.EntityRef(node_id=f"skill:e{i}", type="skill", slug=f"e{i}",
-                     path=Path(f"/e{i}.md"), description="", tags=())
+        dc.EntityRef(
+            node_id=f"skill:e{i}",
+            type="skill",
+            slug=f"e{i}",
+            path=Path(f"/e{i}.md"),
+            description="",
+            tags=(),
+        )
         for i in range(n)
     ]
     a = sorted(dc.find_high_similarity_pairs(entities, vecs, threshold=0.5, chunk_size=8))
@@ -218,8 +227,10 @@ def test_find_high_similarity_pairs_chunking_consistent() -> None:
 
 def test_render_markdown_with_no_findings() -> None:
     rep = dc.DedupReport(
-        threshold=0.85, model_id="m1",
-        total_entities=10, pairs_evaluated=45,
+        threshold=0.85,
+        model_id="m1",
+        total_entities=10,
+        pairs_evaluated=45,
     )
     md = dc.render_markdown(rep)
     assert "No actionable findings" in md
@@ -228,18 +239,25 @@ def test_render_markdown_with_no_findings() -> None:
 
 def test_render_markdown_caps_at_top_n() -> None:
     refs = [
-        dc.EntityRef(node_id=f"skill:e{i}", type="skill", slug=f"e{i}",
-                     path=Path(f"/e{i}.md"), description=f"desc{i}", tags=())
+        dc.EntityRef(
+            node_id=f"skill:e{i}",
+            type="skill",
+            slug=f"e{i}",
+            path=Path(f"/e{i}.md"),
+            description=f"desc{i}",
+            tags=(),
+        )
         for i in range(150)
     ]
     pairs = [
-        dc.DedupPair(a=refs[i], b=refs[i + 1],
-                     similarity=0.99 - i * 0.0001, shared_tags=())
+        dc.DedupPair(a=refs[i], b=refs[i + 1], similarity=0.99 - i * 0.0001, shared_tags=())
         for i in range(149)
     ]
     rep = dc.DedupReport(
-        threshold=0.85, model_id="m1",
-        total_entities=150, pairs_evaluated=149,
+        threshold=0.85,
+        model_id="m1",
+        total_entities=150,
+        pairs_evaluated=149,
         findings=pairs,
     )
     md = dc.render_markdown(rep, top_n=10)
@@ -262,8 +280,12 @@ def test_incremental_skips_unchanged_pairs(tmp_path: Path) -> None:
     # Build a tiny embeddings.npz + topk-state.json the loader can read.
     refs = [
         dc.EntityRef(
-            node_id=f"skill:e{i}", type="skill", slug=f"e{i}",
-            path=tmp_path / f"e{i}.md", description=f"d{i}", tags=("t",),
+            node_id=f"skill:e{i}",
+            type="skill",
+            slug=f"e{i}",
+            path=tmp_path / f"e{i}.md",
+            description=f"d{i}",
+            tags=("t",),
         )
         for i in range(3)
     ]
@@ -275,7 +297,8 @@ def test_incremental_skips_unchanged_pairs(tmp_path: Path) -> None:
     hashes = {r.node_id: dc._entity_hash_for_state(r) for r in refs}
     prior = dc.DedupState(
         version=dc.DEDUP_STATE_VERSION,
-        model_id="test", threshold=0.85,
+        model_id="test",
+        threshold=0.85,
         entity_hashes=hashes,
         last_findings=[
             {"a": "skill:e0", "b": "skill:e1", "similarity": 0.999},
@@ -301,8 +324,14 @@ def test_incremental_recomputes_when_entity_changed(tmp_path: Path) -> None:
     import numpy as np
 
     refs = [
-        dc.EntityRef(node_id=f"skill:e{i}", type="skill", slug=f"e{i}",
-                     path=tmp_path / f"e{i}.md", description=f"d{i}", tags=())
+        dc.EntityRef(
+            node_id=f"skill:e{i}",
+            type="skill",
+            slug=f"e{i}",
+            path=tmp_path / f"e{i}.md",
+            description=f"d{i}",
+            tags=(),
+        )
         for i in range(3)
     ]
     vecs = np.array([[1.0, 0.0], [0.999, 0.045], [0.0, 1.0]], dtype="float32")
@@ -320,8 +349,14 @@ def test_incremental_recomputes_when_entity_changed(tmp_path: Path) -> None:
 
 def test_render_markdown_includes_distribution_buckets() -> None:
     refs = [
-        dc.EntityRef(node_id=f"skill:e{i}", type="skill", slug=f"e{i}",
-                     path=Path(f"/e{i}.md"), description="", tags=())
+        dc.EntityRef(
+            node_id=f"skill:e{i}",
+            type="skill",
+            slug=f"e{i}",
+            path=Path(f"/e{i}.md"),
+            description="",
+            tags=(),
+        )
         for i in range(4)
     ]
     pairs = [
@@ -330,8 +365,11 @@ def test_render_markdown_includes_distribution_buckets() -> None:
         dc.DedupPair(a=refs[0], b=refs[3], similarity=0.86, shared_tags=()),
     ]
     rep = dc.DedupReport(
-        threshold=0.85, model_id="m1",
-        total_entities=4, pairs_evaluated=6, findings=pairs,
+        threshold=0.85,
+        model_id="m1",
+        total_entities=4,
+        pairs_evaluated=6,
+        findings=pairs,
     )
     md = dc.render_markdown(rep)
     assert "≥0.99" in md and "0.90-0.95" in md and "0.85-0.90" in md

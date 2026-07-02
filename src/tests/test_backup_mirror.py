@@ -35,9 +35,7 @@ def fake_home(tmp_path, monkeypatch):
 
 
 def _seed_home(home: Path) -> None:
-    (home / "settings.json").write_text(
-        json.dumps({"theme": "dark"}), encoding="utf-8"
-    )
+    (home / "settings.json").write_text(json.dumps({"theme": "dark"}), encoding="utf-8")
     (home / "skill-manifest.json").write_text(
         json.dumps({"load": [{"skill": "alpha"}]}), encoding="utf-8"
     )
@@ -267,28 +265,34 @@ def test_restore_target_resolution_rejects_unknown_layout():
 # ── Security hardening: manifest path traversal ─────────────────────────────
 
 
-@pytest.mark.parametrize("bad_dest", [
-    "",
-    "..",
-    "../escape",
-    "../../etc/passwd",
-    "foo/../bar",
-    "a\\b",             # backslash forbidden
-    "/absolute/path",
-    "has\x00null",
-    "memory/../foo",
-])
+@pytest.mark.parametrize(
+    "bad_dest",
+    [
+        "",
+        "..",
+        "../escape",
+        "../../etc/passwd",
+        "foo/../bar",
+        "a\\b",  # backslash forbidden
+        "/absolute/path",
+        "has\x00null",
+        "memory/../foo",
+    ],
+)
 def test_validate_manifest_dest_rejects_traversal(bad_dest):
     with pytest.raises(ValueError):
         bm._validate_manifest_dest(bad_dest)
 
 
-@pytest.mark.parametrize("good_dest", [
-    "settings.json",
-    "agents/reviewer.md",
-    "skills/brainstorming/SKILL.md",
-    "memory/demo-slug/user_role.md",
-])
+@pytest.mark.parametrize(
+    "good_dest",
+    [
+        "settings.json",
+        "agents/reviewer.md",
+        "skills/brainstorming/SKILL.md",
+        "memory/demo-slug/user_role.md",
+    ],
+)
 def test_validate_manifest_dest_accepts_valid(good_dest):
     p = bm._validate_manifest_dest(good_dest)
     assert ".." not in p.parts
@@ -299,13 +303,15 @@ def test_verify_flags_tampered_manifest_dest(fake_home):
     _seed_home(fake_home)
     snap = bm.create_snapshot()
     manifest = json.loads((snap / "manifest.json").read_text())
-    manifest["entries"].append({
-        "source": "/tmp/evil",
-        "dest": "../../etc/passwd",
-        "size": 10,
-        "sha256": "0" * 64,
-        "skipped": None,
-    })
+    manifest["entries"].append(
+        {
+            "source": "/tmp/evil",
+            "dest": "../../etc/passwd",
+            "size": 10,
+            "sha256": "0" * 64,
+            "skipped": None,
+        }
+    )
     (snap / "manifest.json").write_text(json.dumps(manifest))
     report = bm.verify_snapshot(snap)
     assert not report.ok
@@ -317,21 +323,27 @@ def test_restore_refuses_tampered_manifest_dest(fake_home):
     _seed_home(fake_home)
     snap = bm.create_snapshot()
     manifest = json.loads((snap / "manifest.json").read_text())
-    manifest["entries"].append({
-        "source": "/tmp/evil",
-        "dest": "../../etc/passwd",
-        "size": 10,
-        "sha256": "0" * 64,
-        "skipped": None,
-    })
+    manifest["entries"].append(
+        {
+            "source": "/tmp/evil",
+            "dest": "../../etc/passwd",
+            "size": 10,
+            "sha256": "0" * 64,
+            "skipped": None,
+        }
+    )
     (snap / "manifest.json").write_text(json.dumps(manifest))
     with pytest.raises(RuntimeError, match="failed verification"):
         bm.restore_snapshot(snap, claude_home=fake_home)
 
 
 def test_resolve_restore_target_rejects_traversal():
-    for bad in ("../../etc/passwd", "memory/../../escape/file.md",
-                "/absolute/path.md", "agents/../../../escape.md"):
+    for bad in (
+        "../../etc/passwd",
+        "memory/../../escape/file.md",
+        "/absolute/path.md",
+        "agents/../../../escape.md",
+    ):
         with pytest.raises(ValueError):
             bm._resolve_restore_target(bad, Path("/tmp/home"))
 

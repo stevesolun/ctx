@@ -81,16 +81,18 @@ def _resp(content: str) -> CompletionResponse:
     )
 
 
-_VALID_JSON = json.dumps({
-    "summary": "Fix the three failing pytest cases.",
-    "success_criteria": [
-        "All tests pass.",
-        "No new tests added.",
-    ],
-    "approach": "Read the traceback for each, fix the minimal change.",
-    "out_of_scope": ["Refactor unrelated code."],
-    "risks": ["The tests might be pinning wrong behaviour."],
-})
+_VALID_JSON = json.dumps(
+    {
+        "summary": "Fix the three failing pytest cases.",
+        "success_criteria": [
+            "All tests pass.",
+            "No new tests added.",
+        ],
+        "approach": "Read the traceback for each, fix the minimal change.",
+        "out_of_scope": ["Refactor unrelated code."],
+        "risks": ["The tests might be pinning wrong behaviour."],
+    }
+)
 
 
 # ── PlanArtifact ───────────────────────────────────────────────────────────
@@ -155,16 +157,28 @@ class TestPlanArtifact:
 
     def test_summary_fallback_message(self) -> None:
         p = PlanArtifact(
-            task="t", summary="", success_criteria=(), approach="",
-            out_of_scope=(), risks=(), usage=Usage(), raw_json="",
+            task="t",
+            summary="",
+            success_criteria=(),
+            approach="",
+            out_of_scope=(),
+            risks=(),
+            usage=Usage(),
+            raw_json="",
         )
         md = p.to_markdown()
         assert "_(no summary produced)_" in md
 
     def test_write_to_disk(self, tmp_path: Path) -> None:
         p = PlanArtifact(
-            task="t", summary="s", success_criteria=("c",), approach="",
-            out_of_scope=(), risks=(), usage=Usage(), raw_json="",
+            task="t",
+            summary="s",
+            success_criteria=("c",),
+            approach="",
+            out_of_scope=(),
+            risks=(),
+            usage=Usage(),
+            raw_json="",
         )
         path = tmp_path / "nested" / "dir" / "plan.md"
         result = p.write(path)
@@ -296,7 +310,10 @@ class TestPlanner:
     def test_model_and_temperature_passed(self) -> None:
         provider = _Scripted([_resp(_VALID_JSON)])
         Planner(
-            provider, model="openrouter/x", temperature=0.2, max_tokens=500,
+            provider,
+            model="openrouter/x",
+            temperature=0.2,
+            max_tokens=500,
         ).plan("t")
         call = provider.calls[0]
         assert call["model"] == "openrouter/x"
@@ -312,18 +329,14 @@ class TestPlanner:
     def test_context_appended_to_user_turn(self) -> None:
         provider = _Scripted([_resp(_VALID_JSON)])
         Planner(provider).plan("fix bugs", context="src/ has 3 failing tests")
-        user_msg = next(
-            m for m in provider.calls[0]["messages"] if m.role == "user"
-        )
+        user_msg = next(m for m in provider.calls[0]["messages"] if m.role == "user")
         assert "src/ has 3 failing tests" in user_msg.content
         assert "Task: fix bugs" in user_msg.content
 
     def test_system_prompt_present(self) -> None:
         provider = _Scripted([_resp(_VALID_JSON)])
         Planner(provider).plan("t")
-        sys_msg = next(
-            m for m in provider.calls[0]["messages"] if m.role == "system"
-        )
+        sys_msg = next(m for m in provider.calls[0]["messages"] if m.role == "system")
         assert "planner agent" in sys_msg.content.lower()
         assert "JSON" in sys_msg.content
 
@@ -361,8 +374,14 @@ class TestAugmentedSystemPrompt:
 
     def test_separator_present(self) -> None:
         plan = PlanArtifact(
-            task="t", summary="s", success_criteria=(), approach="",
-            out_of_scope=(), risks=(), usage=Usage(), raw_json="",
+            task="t",
+            summary="s",
+            success_criteria=(),
+            approach="",
+            out_of_scope=(),
+            risks=(),
+            usage=Usage(),
+            raw_json="",
         )
         augmented = augmented_system_prompt("base", plan)
         assert "---" in augmented
@@ -406,7 +425,7 @@ def fake_litellm_two_calls(monkeypatch: pytest.MonkeyPatch):
         return responses.pop(0)
 
     fake.completion = completion  # type: ignore[attr-defined]
-    fake._calls = calls           # type: ignore[attr-defined]
+    fake._calls = calls  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "litellm", fake)
     return fake
 
@@ -423,10 +442,14 @@ class TestCliIntegration:
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "fix the failing tests",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "plan-run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "fix the failing tests",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "plan-run",
                 "--planner",
                 "--no-ctx-tools",
                 "--quiet",
@@ -452,17 +475,19 @@ class TestCliIntegration:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "t",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "no-plan",
+                "--model",
+                "ollama/x",
+                "--task",
+                "t",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "no-plan",
                 "--no-ctx-tools",
                 "--quiet",
             ]
         )
-        first_line = (
-            (tmp_path / "no-plan.jsonl").read_text(encoding="utf-8").splitlines()[0]
-        )
+        first_line = (tmp_path / "no-plan.jsonl").read_text(encoding="utf-8").splitlines()[0]
         event = json.loads(first_line)
         assert event["planner_used"] is False
         assert event["plan"] is None
@@ -477,11 +502,16 @@ class TestCliIntegration:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--planner-model", "openrouter/y",
-                "--task", "t",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "planner-model-override",
+                "--model",
+                "ollama/x",
+                "--planner-model",
+                "openrouter/y",
+                "--task",
+                "t",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "planner-model-override",
                 "--planner",
                 "--no-ctx-tools",
                 "--quiet",

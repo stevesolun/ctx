@@ -137,6 +137,7 @@ def _checkpoint_path(wiki_path: Path, source: str) -> Path:
     older ad-hoc check missed. Security-auditor H-3.
     """
     from ctx.utils._safe_name import validate_source_name  # noqa: PLC0415
+
     validate_source_name(source, field="source")
     return wiki_path / CHECKPOINT_SUBDIR / f"{source}.json"
 

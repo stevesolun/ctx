@@ -29,9 +29,7 @@ def _minimal_profile() -> dict[str, Any]:
     return {
         "repo_path": "/tmp/repo",
         "languages": [],
-        "frameworks": [
-            {"name": "react", "confidence": 0.95, "evidence": ["package.json"]}
-        ],
+        "frameworks": [{"name": "react", "confidence": 0.95, "evidence": ["package.json"]}],
         "infrastructure": [],
         "data_stores": [],
         "testing": [],
@@ -303,11 +301,15 @@ def test_ctx_init_recommends_harness_from_wiki_frontmatter_only(
     monkeypatch.setattr(
         ctx_init,
         "_harness_frontmatter_from_wiki",
-        lambda slug: {
-            "tags": ["browser", "automation"],
-            "capabilities": ["browser automation", "agent harness"],
-            "model_providers": ["openai"],
-        } if slug == "frontmatter-only" else {},
+        lambda slug: (
+            {
+                "tags": ["browser", "automation"],
+                "capabilities": ["browser automation", "agent harness"],
+                "model_providers": ["openai"],
+            }
+            if slug == "frontmatter-only"
+            else {}
+        ),
     )
 
     results = ctx_init.recommend_harnesses(
@@ -345,12 +347,16 @@ def test_ctx_init_uses_harness_catalog_without_loading_full_graph(
     monkeypatch.setattr(
         ctx_config,
         "cfg",
-        type("Cfg", (), {
-            "wiki_dir": tmp_path,
-            "claude_dir": tmp_path / ".claude",
-            "recommendation_top_k": 5,
-            "harness_recommendation_min_fit_score": 0.85,
-        })(),
+        type(
+            "Cfg",
+            (),
+            {
+                "wiki_dir": tmp_path,
+                "claude_dir": tmp_path / ".claude",
+                "recommendation_top_k": 5,
+                "harness_recommendation_min_fit_score": 0.85,
+            },
+        )(),
     )
     monkeypatch.setattr(
         ctx_init,
@@ -400,12 +406,16 @@ def test_ctx_init_uses_runtime_harness_body_for_cloud_tool_fit(
     monkeypatch.setattr(
         ctx_config,
         "cfg",
-        type("Cfg", (), {
-            "wiki_dir": tmp_path,
-            "claude_dir": tmp_path / ".claude",
-            "recommendation_top_k": 5,
-            "harness_recommendation_min_fit_score": 0.85,
-        })(),
+        type(
+            "Cfg",
+            (),
+            {
+                "wiki_dir": tmp_path,
+                "claude_dir": tmp_path / ".claude",
+                "recommendation_top_k": 5,
+                "harness_recommendation_min_fit_score": 0.85,
+            },
+        )(),
     )
     monkeypatch.setattr(
         ctx_init,
@@ -503,16 +513,20 @@ def test_ctx_init_prints_harness_install_handoff_for_custom_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(ctx_init, "_load_recommendation_graph", _harness_graph)
-    args = type("Args", (), {
-        "model_mode": "custom",
-        "model": "openai/gpt-5.5",
-        "model_provider": "openai",
-        "api_key_env": "",
-        "base_url": None,
-        "goal": "build an openai python agent graph with checkpointing",
-        "force": True,
-        "validate_model": False,
-    })()
+    args = type(
+        "Args",
+        (),
+        {
+            "model_mode": "custom",
+            "model": "openai/gpt-5.5",
+            "model_provider": "openai",
+            "api_key_env": "",
+            "base_url": None,
+            "goal": "build an openai python agent graph with checkpointing",
+            "force": True,
+            "validate_model": False,
+        },
+    )()
 
     assert ctx_init.run_model_onboarding(args, tmp_path) == 0
 

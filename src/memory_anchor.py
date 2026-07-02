@@ -47,14 +47,42 @@ from typing import Sequence
 DEFAULT_MEMORY_ROOT = Path(os.path.expanduser("~/.claude/projects"))
 
 
-KNOWN_EXTENSIONS = frozenset({
-    ".py", ".md", ".json", ".yaml", ".yml", ".toml",
-    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-    ".rs", ".go", ".java", ".c", ".h", ".cpp", ".hpp",
-    ".sh", ".bash", ".zsh", ".fish",
-    ".html", ".css", ".scss", ".sass",
-    ".sql", ".txt", ".rst", ".ini", ".cfg",
-})
+KNOWN_EXTENSIONS = frozenset(
+    {
+        ".py",
+        ".md",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".mjs",
+        ".cjs",
+        ".rs",
+        ".go",
+        ".java",
+        ".c",
+        ".h",
+        ".cpp",
+        ".hpp",
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".fish",
+        ".html",
+        ".css",
+        ".scss",
+        ".sass",
+        ".sql",
+        ".txt",
+        ".rst",
+        ".ini",
+        ".cfg",
+    }
+)
 
 # Inline code spans: backtick-delimited, not crossing newlines.
 _CODE_SPAN = re.compile(r"`([^`\n]+)`")
@@ -69,9 +97,9 @@ _LINE_TAIL = re.compile(r":(\d+)$")
 
 @dataclass(frozen=True)
 class AnchorRef:
-    raw: str           # exactly what the memory note wrote between backticks
-    path: str          # normalised path sans line suffix
-    line: int | None   # optional line number if suffix was present
+    raw: str  # exactly what the memory note wrote between backticks
+    path: str  # normalised path sans line suffix
+    line: int | None  # optional line number if suffix was present
     exists: bool
 
     def to_dict(self) -> dict:
@@ -218,20 +246,21 @@ def _resolve(path_str: str, repo_root: Path) -> bool:
     return any(c.exists() for c in candidates)
 
 
-def scan_memory_file(memory_path: Path,
-                     repo_root: Path) -> MemoryAnchorFile:
+def scan_memory_file(memory_path: Path, repo_root: Path) -> MemoryAnchorFile:
     try:
         text = memory_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return MemoryAnchorFile(memory_path=str(memory_path), refs=())
     refs: list[AnchorRef] = []
     for raw, path, line in extract_refs(text):
-        refs.append(AnchorRef(
-            raw=raw,
-            path=path,
-            line=line,
-            exists=_resolve(path, repo_root),
-        ))
+        refs.append(
+            AnchorRef(
+                raw=raw,
+                path=path,
+                line=line,
+                exists=_resolve(path, repo_root),
+            )
+        )
     return MemoryAnchorFile(memory_path=str(memory_path), refs=tuple(refs))
 
 
@@ -244,13 +273,10 @@ def _iter_memory_files(memory_root: Path) -> list[Path]:
 # ── Report ─────────────────────────────────────────────────────────────────
 
 
-def build_report(repo_root: Path,
-                 memory_root: Path = DEFAULT_MEMORY_ROOT,
-                 now: float | None = None) -> AnchorReport:
-    files = tuple(
-        scan_memory_file(mf, repo_root)
-        for mf in _iter_memory_files(memory_root)
-    )
+def build_report(
+    repo_root: Path, memory_root: Path = DEFAULT_MEMORY_ROOT, now: float | None = None
+) -> AnchorReport:
+    files = tuple(scan_memory_file(mf, repo_root) for mf in _iter_memory_files(memory_root))
     return AnchorReport(
         generated_at=now if now is not None else time.time(),
         repo_root=str(repo_root),
@@ -277,8 +303,7 @@ def format_dashboard(report: AnchorReport) -> str:
         lines.append(f"  {f.memory_path}")
         for ref in f.dead:
             if ref.line is not None:
-                lines.append(f"    - `{ref.raw}` (path={ref.path}, "
-                             f"line={ref.line})")
+                lines.append(f"    - `{ref.raw}` (path={ref.path}, line={ref.line})")
             else:
                 lines.append(f"    - `{ref.raw}`")
     return "\n".join(lines)
@@ -299,10 +324,8 @@ def _detect_repo_root(start: Path) -> Path:
 
 
 def _build_cli_report(args: argparse.Namespace) -> AnchorReport:
-    repo_root = Path(args.repo_root).resolve() if args.repo_root \
-        else _detect_repo_root(Path.cwd())
-    memory_root = Path(args.memory_root).expanduser() if args.memory_root \
-        else DEFAULT_MEMORY_ROOT
+    repo_root = Path(args.repo_root).resolve() if args.repo_root else _detect_repo_root(Path.cwd())
+    memory_root = Path(args.memory_root).expanduser() if args.memory_root else DEFAULT_MEMORY_ROOT
     return build_report(repo_root=repo_root, memory_root=memory_root)
 
 
@@ -329,11 +352,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def _add_common(sp: argparse.ArgumentParser) -> None:
-        sp.add_argument("--repo-root", default=None,
-                        help="Repository root (default: auto-detect from cwd)")
-        sp.add_argument("--memory-root", default=None,
-                        help="Memory directory "
-                             "(default: ~/.claude/projects)")
+        sp.add_argument(
+            "--repo-root", default=None, help="Repository root (default: auto-detect from cwd)"
+        )
+        sp.add_argument(
+            "--memory-root", default=None, help="Memory directory (default: ~/.claude/projects)"
+        )
 
     sp = sub.add_parser("scan", help="Emit a JSON anchor report")
     _add_common(sp)
@@ -343,8 +367,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(sp)
     sp.set_defaults(func=cmd_dashboard)
 
-    sp = sub.add_parser("check",
-                        help="Dashboard + nonzero exit on dead refs in --strict")
+    sp = sub.add_parser("check", help="Dashboard + nonzero exit on dead refs in --strict")
     _add_common(sp)
     sp.add_argument("--strict", action="store_true")
     sp.set_defaults(func=cmd_check)

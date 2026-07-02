@@ -184,7 +184,9 @@ def test_claude_adapter_modules_use_cfg_paths() -> None:
 class TestConfigReload:
     """test_config_reload -- reload() picks up changes to the raw config."""
 
-    def test_reload_updates_singleton(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_reload_updates_singleton(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Write a temporary default config with a custom line_threshold
         custom_config = tmp_path / "config.json"
         import json
@@ -303,21 +305,23 @@ class TestConfigIntake:
         assert cfg.intake_cache_root.is_absolute()
 
     def test_intake_overrides_applied(self) -> None:
-        raw = _minimal_raw({
-            "intake": {
-                "enabled": False,
-                "dup_threshold": 0.95,
-                "near_dup_threshold": 0.80,
-                "min_neighbors": 2,
-                "min_neighbor_score": 0.50,
-                "min_body_chars": 200,
-                "embedding": {
-                    "backend": "ollama",
-                    "model": "nomic-embed-text",
-                    "allow_remote": True,
+        raw = _minimal_raw(
+            {
+                "intake": {
+                    "enabled": False,
+                    "dup_threshold": 0.95,
+                    "near_dup_threshold": 0.80,
+                    "min_neighbors": 2,
+                    "min_neighbor_score": 0.50,
+                    "min_body_chars": 200,
+                    "embedding": {
+                        "backend": "ollama",
+                        "model": "nomic-embed-text",
+                        "allow_remote": True,
+                    },
                 },
-            },
-        })
+            }
+        )
         cfg = Config(raw)
         assert cfg.intake_enabled is False
         assert cfg.intake_dup_threshold == pytest.approx(0.95)
@@ -340,9 +344,11 @@ class TestConfigIntake:
         assert ic.min_body_chars == 120
 
     def test_build_intake_config_honours_overrides(self) -> None:
-        raw = _minimal_raw({
-            "intake": {"dup_threshold": 0.91, "near_dup_threshold": 0.75},
-        })
+        raw = _minimal_raw(
+            {
+                "intake": {"dup_threshold": 0.91, "near_dup_threshold": 0.75},
+            }
+        )
         cfg = Config(raw)
         ic = cfg.build_intake_config()
         assert ic.dup_threshold == pytest.approx(0.91)
@@ -358,16 +364,20 @@ class TestConfigIntake:
     def test_build_intake_embedder_ollama_selection(self) -> None:
         from embedding_backend import OllamaEmbedder
 
-        raw = _minimal_raw({
-            "intake": {"embedding": {"backend": "ollama"}},
-        })
+        raw = _minimal_raw(
+            {
+                "intake": {"embedding": {"backend": "ollama"}},
+            }
+        )
         cfg = Config(raw)
         emb = cfg.build_intake_embedder()
         assert isinstance(emb, OllamaEmbedder)
 
     def test_non_string_model_falls_back_to_none(self) -> None:
-        raw = _minimal_raw({
-            "intake": {"embedding": {"model": 42}},  # wrong type
-        })
+        raw = _minimal_raw(
+            {
+                "intake": {"embedding": {"model": 42}},  # wrong type
+            }
+        )
         cfg = Config(raw)
         assert cfg.intake_model is None

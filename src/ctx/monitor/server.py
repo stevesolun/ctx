@@ -219,8 +219,7 @@ def build_monitor_handler(deps: MonitorHandlerDeps) -> type[BaseHTTPRequestHandl
                     else:
                         self._send_html_status(
                             403,
-                            "<h1>403</h1>"
-                            "<p>monitor read token required on non-loopback bind</p>",
+                            "<h1>403</h1><p>monitor read token required on non-loopback bind</p>",
                         )
                     return
                 query_token = qs.get("token", "")

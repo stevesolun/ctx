@@ -169,11 +169,7 @@ def seed_toolboxes(*, force: bool = False) -> ToolboxSeedResult:
     if force:
         cmd.append("--force")
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if (
-        not force
-        and result.returncode != 0
-        and _toolbox_init_already_present(result.stderr)
-    ):
+    if not force and result.returncode != 0 and _toolbox_init_already_present(result.stderr):
         return ToolboxSeedResult(returncode=0, already_present=True)
     if result.stdout.strip():
         print(result.stdout.rstrip())
@@ -189,9 +185,13 @@ def install_hooks(*, ctx_src_dir: Path, settings_path: Path | None = None) -> in
     """Run ``inject_hooks.main()`` to wire PostToolUse + Stop hooks."""
     target_settings = settings_path or (_claude_dir() / "settings.json")
     cmd = [
-        sys.executable, "-m", "ctx.adapters.claude_code.inject_hooks",
-        "--settings", str(target_settings),
-        "--ctx-dir", str(ctx_src_dir),
+        sys.executable,
+        "-m",
+        "ctx.adapters.claude_code.inject_hooks",
+        "--settings",
+        str(target_settings),
+        "--ctx-dir",
+        str(ctx_src_dir),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.stdout.strip():
@@ -226,9 +226,7 @@ _GRAPH_ENTITY_OVERLAY_SCORE_FIELDS = (
     "tag_sim",
     "token_sim",
 )
-_GRAPH_ENTITY_OVERLAY_SHA256 = (
-    "2d7c22c5a520172ee2d3b73bb579079cd9946cebcad4eeed7b18d3282284f269"
-)
+_GRAPH_ENTITY_OVERLAY_SHA256 = "2d7c22c5a520172ee2d3b73bb579079cd9946cebcad4eeed7b18d3282284f269"
 _GRAPH_ARCHIVE_NAMES = {
     "runtime": _GRAPH_RUNTIME_ARCHIVE_NAME,
     "full": _GRAPH_ARCHIVE_NAME,
@@ -237,20 +235,19 @@ _GRAPH_ARCHIVE_SHA256 = {
     "runtime": "993fc08377fdb09edcff4414c59b10fc121189b4a161bf796e3f8f6600907bb1",
     "full": "d051d4f21208abe3e73975a9c30650150138d88919c27979d725be936a6ea10a",
 }
-_GRAPH_RELEASE_URL = (
-    "https://github.com/stevesolun/ctx/releases/download/"
-    "v{version}/{archive_name}"
+_GRAPH_RELEASE_URL = "https://github.com/stevesolun/ctx/releases/download/v{version}/{archive_name}"
+_GRAPH_REQUIRED_FILES = frozenset(
+    {
+        "index.md",
+        "graphify-out/graph.json",
+        "graphify-out/graph-delta.json",
+        "graphify-out/communities.json",
+        "graphify-out/graph-report.md",
+        "graphify-out/graph-export-manifest.json",
+        "graphify-out/dashboard-neighborhoods.sqlite3",
+        "external-catalogs/skills-sh/catalog.json",
+    }
 )
-_GRAPH_REQUIRED_FILES = frozenset({
-    "index.md",
-    "graphify-out/graph.json",
-    "graphify-out/graph-delta.json",
-    "graphify-out/communities.json",
-    "graphify-out/graph-report.md",
-    "graphify-out/graph-export-manifest.json",
-    "graphify-out/dashboard-neighborhoods.sqlite3",
-    "external-catalogs/skills-sh/catalog.json",
-})
 _GRAPH_MANAGED_PATHS = (
     "graphify-out",
     "entities",
@@ -277,14 +274,16 @@ _GRAPH_RUNTIME_PREFIXES = (
     "entities/harnesses/",
     "wiki-packs/",
 )
-_GRAPH_RUNTIME_ROOT_FILES = frozenset({
-    "catalog.md",
-    "converted-index.md",
-    "index.md",
-    "log.md",
-    "SCHEMA.md",
-    "versions-catalog.md",
-})
+_GRAPH_RUNTIME_ROOT_FILES = frozenset(
+    {
+        "catalog.md",
+        "converted-index.md",
+        "index.md",
+        "log.md",
+        "SCHEMA.md",
+        "versions-catalog.md",
+    }
+)
 
 
 def build_graph(
@@ -382,9 +381,7 @@ def _find_local_graph_archive(install_mode: str = "runtime") -> Path | None:
         archive_names.append(_GRAPH_ARCHIVE_NAME)
     graph_dirs = (module_path.parent.parent / "graph", Path.cwd() / "graph")
     candidates = [
-        graph_dir / archive_name
-        for archive_name in archive_names
-        for graph_dir in graph_dirs
+        graph_dir / archive_name for archive_name in archive_names for graph_dir in graph_dirs
     ]
     for candidate in candidates:
         if candidate.is_file() and not _is_lfs_pointer_file(candidate):
@@ -470,18 +467,14 @@ def _validate_graph_entity_overlay(path: Path) -> None:
             if not isinstance(edge, dict):
                 raise ValueError(f"{path} line {lineno} edge {index} must be an object")
             if not isinstance(edge.get("source"), str) or not isinstance(edge.get("target"), str):
-                raise ValueError(
-                    f"{path} line {lineno} edge {index} must contain source/target"
-                )
+                raise ValueError(f"{path} line {lineno} edge {index} must contain source/target")
             numeric_scores: dict[str, float] = {}
             for field in _GRAPH_ENTITY_OVERLAY_SCORE_FIELDS:
                 value = edge.get(field)
                 if value is None:
                     continue
                 if not isinstance(value, int | float) or not 0 <= float(value) <= 1:
-                    raise ValueError(
-                        f"{path} line {lineno} edge {index} {field} must be 0..1"
-                    )
+                    raise ValueError(f"{path} line {lineno} edge {index} {field} must be 0..1")
                 numeric_scores[field] = float(value)
             if (
                 "weight" in numeric_scores
@@ -531,9 +524,7 @@ def _expected_graph_archive_sha256(
 
 
 def _verify_local_graph_archive(archive: Path, *, requested_install_mode: str) -> None:
-    archive_mode = (
-        "full" if archive.name == _GRAPH_ARCHIVE_NAME else requested_install_mode
-    )
+    archive_mode = "full" if archive.name == _GRAPH_ARCHIVE_NAME else requested_install_mode
     expected = _GRAPH_ARCHIVE_SHA256.get(archive_mode)
     if expected is None:
         return
@@ -615,9 +606,7 @@ def _extract_graph_archive_to_dir(
 ) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     target_root = target_dir.resolve()
-    prefer_packed_full_wiki = (
-        install_mode == "full" and _archive_has_full_wiki_pack(archive)
-    )
+    prefer_packed_full_wiki = install_mode == "full" and _archive_has_full_wiki_pack(archive)
     if (
         install_mode == "full"
         and not prefer_packed_full_wiki
@@ -680,9 +669,7 @@ def _archive_has_full_wiki_pack(archive: Path) -> bool:
                             continue
                         row = json.loads(raw_line)
                         if not isinstance(row, dict):
-                            raise ValueError(
-                                f"wiki pack page row must be an object: {member.name}"
-                            )
+                            raise ValueError(f"wiki pack page row must be an object: {member.name}")
                         relpath = row.get("path")
                         if isinstance(relpath, str) and _is_full_entity_wiki_page(relpath):
                             has_full_entity_page = True
@@ -789,8 +776,7 @@ def _refresh_graph_store(wiki_dir: Path) -> None:
         raise ValueError(f"graph-store.sqlite3 refresh failed: {exc}") from exc
     if not report.get("ok"):
         raise ValueError(
-            "graph-store.sqlite3 validation failed: "
-            f"{report.get('errors', [])}",
+            f"graph-store.sqlite3 validation failed: {report.get('errors', [])}",
         )
 
 
@@ -897,8 +883,7 @@ def _validate_wiki_pack_outline(packs_dir: Path, *, expected_export_id: str) -> 
     base_export_id = entries[0].manifest.base_export_id
     if base_export_id != expected_export_id:
         raise ValueError(
-            "wiki-packs export_id mismatch: expected "
-            f"{expected_export_id}, got {base_export_id}",
+            f"wiki-packs export_id mismatch: expected {expected_export_id}, got {base_export_id}",
         )
     if "index.md" not in pages:
         raise ValueError("wiki-packs payload is missing index.md")
@@ -923,9 +908,13 @@ def _validate_graph_json_outline(path: Path) -> None:
     outline = f"{head_text}\n{tail_text}"
     if '"nodes"' not in outline and not _json_file_contains_any_key(path, ("nodes",)):
         raise ValueError("graphify-out/graph.json is missing a nodes list")
-    if '"edges"' not in outline and '"links"' not in outline and not _json_file_contains_any_key(
-        path,
-        ("edges", "links"),
+    if (
+        '"edges"' not in outline
+        and '"links"' not in outline
+        and not _json_file_contains_any_key(
+            path,
+            ("edges", "links"),
+        )
     ):
         raise ValueError("graphify-out/graph.json is missing an edges/links list")
 
@@ -1002,11 +991,7 @@ def _promote_graph_tree(
 ) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     target_root = target_dir.resolve()
-    managed_paths = (
-        _GRAPH_MANAGED_PATHS
-        if install_mode == "full"
-        else _GRAPH_RUNTIME_MANAGED_PATHS
-    )
+    managed_paths = _GRAPH_MANAGED_PATHS if install_mode == "full" else _GRAPH_RUNTIME_MANAGED_PATHS
     for name in managed_paths:
         source = staging_dir / name
         destination = target_dir / name
@@ -1100,40 +1085,42 @@ _MODEL_PROFILE_NAME = "ctx-model-profile.json"
 
 _HARNESS_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
-_HARNESS_GOAL_NOISE = frozenset({
-    "build",
-    "across",
-    "coding",
-    "compatible",
-    "create",
-    "into",
-    "like",
-    "make",
-    "own",
-    "turn",
-    "write",
-    "need",
-    "want",
-    "using",
-    "custom",
-    "harness",
-    "harnesses",
-    "model",
-    "models",
-    "llm",
-    "llms",
-    "api",
-    "apis",
-    "work",
-    "workflow",
-    "workflows",
-    "project",
-    "repo",
-    "development",
-    "dev",
-    "from",
-    "only",
-})
+_HARNESS_GOAL_NOISE = frozenset(
+    {
+        "build",
+        "across",
+        "coding",
+        "compatible",
+        "create",
+        "into",
+        "like",
+        "make",
+        "own",
+        "turn",
+        "write",
+        "need",
+        "want",
+        "using",
+        "custom",
+        "harness",
+        "harnesses",
+        "model",
+        "models",
+        "llm",
+        "llms",
+        "api",
+        "apis",
+        "work",
+        "workflow",
+        "workflows",
+        "project",
+        "repo",
+        "development",
+        "dev",
+        "from",
+        "only",
+    }
+)
 
 _HARNESS_SIGNAL_ALIASES: dict[str, set[str]] = {
     "ai": {"ai", "llm", "model"},
@@ -1161,46 +1148,50 @@ _HARNESS_SIGNAL_ALIASES: dict[str, set[str]] = {
     "tools": {"tool", "tools"},
 }
 
-_HARNESS_SOFT_REQUIREMENT_SIGNALS = frozenset({
-    "browser",
-    "check",
-    "checks",
-    "darwin",
-    "linux",
-    "mac",
-    "macos",
-    "gpt",
-    "mcp",
-    "npm",
-    "pytest",
-    "secret",
-    "secrets",
-    "shell",
-    "win32",
-    "windows",
-})
+_HARNESS_SOFT_REQUIREMENT_SIGNALS = frozenset(
+    {
+        "browser",
+        "check",
+        "checks",
+        "darwin",
+        "linux",
+        "mac",
+        "macos",
+        "gpt",
+        "mcp",
+        "npm",
+        "pytest",
+        "secret",
+        "secrets",
+        "shell",
+        "win32",
+        "windows",
+    }
+)
 
-_HARNESS_DOMAIN_SIGNALS = frozenset({
-    "3d",
-    "build123d",
-    "cad",
-    "dxf",
-    "freecad",
-    "geometry",
-    "glb",
-    "mesh",
-    "modeling",
-    "modelling",
-    "ocp",
-    "robot",
-    "robotics",
-    "rhino",
-    "stl",
-    "urdf",
-    "viewer",
-    "vtk",
-    "wasm",
-})
+_HARNESS_DOMAIN_SIGNALS = frozenset(
+    {
+        "3d",
+        "build123d",
+        "cad",
+        "dxf",
+        "freecad",
+        "geometry",
+        "glb",
+        "mesh",
+        "modeling",
+        "modelling",
+        "ocp",
+        "robot",
+        "robotics",
+        "rhino",
+        "stl",
+        "urdf",
+        "viewer",
+        "vtk",
+        "wasm",
+    }
+)
 
 _DEFAULT_HARNESS_RELIABILITY_WEIGHTS = {
     "context": 0.34,
@@ -1209,54 +1200,60 @@ _DEFAULT_HARNESS_RELIABILITY_WEIGHTS = {
 }
 
 _HARNESS_RELIABILITY_TERMS = {
-    "context": frozenset({
-        "context",
-        "contexts",
-        "document",
-        "documents",
-        "durable",
-        "knowledge",
-        "memory",
-        "persistent",
-        "replay",
-        "retrieval",
-        "state",
-        "wiki",
-    }),
-    "constraints": frozenset({
-        "access",
-        "approval",
-        "approvals",
-        "boundaries",
-        "boundary",
-        "governance",
-        "limits",
-        "permission",
-        "permissions",
-        "policy",
-        "policies",
-        "rules",
-        "sandbox",
-        "security",
-    }),
-    "convergence": frozenset({
-        "automated",
-        "check",
-        "checks",
-        "eval",
-        "evals",
-        "evaluation",
-        "gates",
-        "idempotence",
-        "monitoring",
-        "pytest",
-        "retries",
-        "retry",
-        "tests",
-        "tracing",
-        "validation",
-        "verify",
-    }),
+    "context": frozenset(
+        {
+            "context",
+            "contexts",
+            "document",
+            "documents",
+            "durable",
+            "knowledge",
+            "memory",
+            "persistent",
+            "replay",
+            "retrieval",
+            "state",
+            "wiki",
+        }
+    ),
+    "constraints": frozenset(
+        {
+            "access",
+            "approval",
+            "approvals",
+            "boundaries",
+            "boundary",
+            "governance",
+            "limits",
+            "permission",
+            "permissions",
+            "policy",
+            "policies",
+            "rules",
+            "sandbox",
+            "security",
+        }
+    ),
+    "convergence": frozenset(
+        {
+            "automated",
+            "check",
+            "checks",
+            "eval",
+            "evals",
+            "evaluation",
+            "gates",
+            "idempotence",
+            "monitoring",
+            "pytest",
+            "retries",
+            "retry",
+            "tests",
+            "tracing",
+            "validation",
+            "verify",
+        }
+    ),
 }
 
 _MODEL_VERSION_PREFIXES = (
@@ -1373,7 +1370,8 @@ def recommend_harnesses(
         )
         results = _add_unranked_harness_candidates(graph, results)
         results = [
-            row for row in results
+            row
+            for row in results
             if _harness_supports_provider(
                 graph,
                 str(row.get("name") or ""),
@@ -1383,18 +1381,12 @@ def recommend_harnesses(
         ]
         installed = _installed_harness_slugs(cfg.claude_dir / "harness-installs")
         if installed:
-            results = [
-                row for row in results
-                if str(row.get("name") or "") not in installed
-            ]
+            results = [row for row in results if str(row.get("name") or "") not in installed]
         threshold = cfg.harness_recommendation_min_fit_score
         for row in results:
             row.update(_annotate_harness_fit(graph, row, signals))
         if results:
-            results = [
-                row for row in results
-                if float(row.get("fit_score") or 0.0) >= threshold
-            ]
+            results = [row for row in results if float(row.get("fit_score") or 0.0) >= threshold]
             results.sort(
                 key=lambda row: (
                     -float(row.get("fit_score") or 0.0),
@@ -1429,14 +1421,16 @@ def _add_unranked_harness_candidates(
         slug = str(data.get("label") or str(node_id).rsplit(":", 1)[-1]).strip()
         if not slug or slug in seen:
             continue
-        expanded.append({
-            "name": slug,
-            "type": "harness",
-            "score": 75.0,
-            "normalized_score": 0.0,
-            "matching_tags": [],
-            "source": data.get("source") or "catalog",
-        })
+        expanded.append(
+            {
+                "name": slug,
+                "type": "harness",
+                "score": 75.0,
+                "normalized_score": 0.0,
+                "matching_tags": [],
+                "source": data.get("source") or "catalog",
+            }
+        )
         seen.add(slug)
     return expanded
 
@@ -1465,22 +1459,14 @@ def _annotate_harness_fit(
             matched.append(signal)
     matched_set = set(matched)
     all_matched_set = matched_set | set(soft_matched)
-    missing = [
-        signal for signal in scored_signals
-        if signal not in matched_set
-    ]
+    missing = [signal for signal in scored_signals if signal not in matched_set]
 
-    coverage = (
-        len(matched) / len(scored_signals)
-        if scored_signals else 0.0
-    )
+    coverage = len(matched) / len(scored_signals) if scored_signals else 0.0
     breadth = min(len(all_matched_set) / 3.0, 1.0)
     raw_strength = _clamp_harness_score(float(row.get("score") or 0.0) / 75.0)
     domain_fit = _harness_domain_fit(relevant_signals, terms)
     fit_score = round(
-        _clamp_harness_score(
-            ((0.8 * coverage * breadth) + (0.2 * raw_strength)) * domain_fit
-        ),
+        _clamp_harness_score(((0.8 * coverage * breadth) + (0.2 * raw_strength)) * domain_fit),
         4,
     )
     return {
@@ -1527,9 +1513,7 @@ def _relevant_harness_signals(signals: list[str]) -> list[str]:
 
 def _looks_like_model_version_signal(signal: str) -> bool:
     token = signal.strip().lower()
-    return any(char.isdigit() for char in token) and token.startswith(
-        _MODEL_VERSION_PREFIXES
-    )
+    return any(char.isdigit() for char in token) and token.startswith(_MODEL_VERSION_PREFIXES)
 
 
 def _is_soft_harness_requirement_signal(signal: str) -> bool:
@@ -1601,8 +1585,7 @@ def _harness_reliability_metadata(terms: set[str]) -> dict[str, Any]:
         }
 
     reliability_score = round(
-        _clamp_harness_score(weighted_total / total_weight)
-        if total_weight > 0 else 0.0,
+        _clamp_harness_score(weighted_total / total_weight) if total_weight > 0 else 0.0,
         4,
     )
     return {
@@ -1638,15 +1621,11 @@ def _harness_reliability_reason(covered: list[str]) -> str:
     if not covered:
         return "no harness reliability signals for context, constraints, or convergence"
     missing = [
-        dimension for dimension in _DEFAULT_HARNESS_RELIABILITY_WEIGHTS
-        if dimension not in covered
+        dimension for dimension in _DEFAULT_HARNESS_RELIABILITY_WEIGHTS if dimension not in covered
     ]
     if not missing:
         return "covers context, constraints, and convergence"
-    return (
-        "covers " + ", ".join(covered)
-        + "; missing " + ", ".join(missing)
-    )
+    return "covers " + ", ".join(covered) + "; missing " + ", ".join(missing)
 
 
 def _add_harness_terms(terms: set[str], raw: object) -> None:
@@ -1684,10 +1663,7 @@ def _harness_signal_matches(signal: str, terms: set[str]) -> bool:
 
 
 def _harness_tokens(value: str) -> set[str]:
-    tokens = {
-        token for token in _HARNESS_TOKEN_RE.findall(value.lower())
-        if len(token) >= 2
-    }
+    tokens = {token for token in _HARNESS_TOKEN_RE.findall(value.lower()) if len(token) >= 2}
     expanded = set(tokens)
     for token in tokens:
         expanded.update(_HARNESS_SIGNAL_ALIASES.get(token, ()))
@@ -1742,10 +1718,12 @@ def _provider_match_candidates(
     model: str | None,
 ) -> set[str]:
     providers = {
-        candidate for candidate in (
+        candidate
+        for candidate in (
             _normalise_model_provider(model_provider),
             _normalise_model_provider(_model_provider_prefix(model or "")),
-        ) if candidate
+        )
+        if candidate
     }
     parts = [part for part in (model or "").split("/") if part]
     if parts and _normalise_model_provider(parts[0]) in {"openrouter", "litellm"}:
@@ -1782,10 +1760,7 @@ def _normalise_model_providers(raw: object) -> set[str]:
         values = [str(item) for item in raw]
     else:
         return set()
-    return {
-        provider for value in values
-        if (provider := _normalise_model_provider(value))
-    }
+    return {provider for value in values if (provider := _normalise_model_provider(value))}
 
 
 def _harness_model_providers_from_graph(graph: Any, slug: str) -> set[str]:
@@ -1799,9 +1774,7 @@ def _harness_model_providers_from_graph(graph: Any, slug: str) -> set[str]:
 
 
 def _harness_model_providers_from_wiki(slug: str) -> set[str]:
-    return _normalise_model_providers(
-        _harness_frontmatter_from_wiki(slug).get("model_providers")
-    )
+    return _normalise_model_providers(_harness_frontmatter_from_wiki(slug).get("model_providers"))
 
 
 def _harness_frontmatter_from_wiki(slug: str) -> dict[str, Any]:
@@ -1865,12 +1838,14 @@ def _load_harness_catalog_graph() -> Any:
         if body.strip():
             data["_body"] = body
         display_name = str(data.get("name") or data.get("title") or slug).strip() or slug
-        data.update({
-            "label": slug,
-            "display_name": display_name,
-            "type": "harness",
-            "source": data.get("source") or "wiki",
-        })
+        data.update(
+            {
+                "label": slug,
+                "display_name": display_name,
+                "type": "harness",
+                "source": data.get("source") or "wiki",
+            }
+        )
         graph.add_node(f"harness:{slug}", **data)
     return graph
 
@@ -1943,10 +1918,14 @@ def _prompt_text(prompt: str, *, default: str | None = None) -> str:
 
 def _prompt_model_mode(default: str = "claude-code") -> str:
     while True:
-        answer = input(
-            "Use Claude Code or a custom model with ctx? "
-            f"[{default}; choices: claude-code/custom/skip] "
-        ).strip().lower()
+        answer = (
+            input(
+                "Use Claude Code or a custom model with ctx? "
+                f"[{default}; choices: claude-code/custom/skip] "
+            )
+            .strip()
+            .lower()
+        )
         mode = answer or default
         if mode in {"claude-code", "custom", "skip"}:
             return mode
@@ -1955,10 +1934,14 @@ def _prompt_model_mode(default: str = "claude-code") -> str:
 
 def _prompt_knowledge_mode(default: str = "shipped") -> str:
     while True:
-        answer = input(
-            "Use ctx shipped knowledge, local/private knowledge, or both? "
-            f"[{default}; choices: shipped/local/enriched/skip] "
-        ).strip().lower()
+        answer = (
+            input(
+                "Use ctx shipped knowledge, local/private knowledge, or both? "
+                f"[{default}; choices: shipped/local/enriched/skip] "
+            )
+            .strip()
+            .lower()
+        )
         mode = answer or default
         if mode in _KNOWLEDGE_MODES:
             return mode
@@ -1975,10 +1958,7 @@ def _harness_requirements_from_args(args: argparse.Namespace) -> dict[str, str]:
 
 
 def _harness_requirements_text(requirements: dict[str, str]) -> str:
-    return " ".join(
-        value for _key, value in requirements.items()
-        if value.strip()
-    )
+    return " ".join(value for _key, value in requirements.items() if value.strip())
 
 
 def _harness_plan_command(
@@ -2073,10 +2053,13 @@ def run_wizard(args: argparse.Namespace) -> None:
         provider_default = args.model_provider or (
             _model_provider_prefix(args.model) if args.model else None
         )
-        args.model_provider = _prompt_text(
-            "Provider prefix",
-            default=provider_default,
-        ) or None
+        args.model_provider = (
+            _prompt_text(
+                "Provider prefix",
+                default=provider_default,
+            )
+            or None
+        )
         api_key_default = _resolve_api_key_env(
             args.api_key_env,
             args.model,
@@ -2086,10 +2069,13 @@ def run_wizard(args: argparse.Namespace) -> None:
             "API key environment variable (blank for local/no key)",
             default=api_key_default,
         )
-        args.base_url = _prompt_text(
-            "Provider base URL (blank for default)",
-            default=args.base_url,
-        ) or None
+        args.base_url = (
+            _prompt_text(
+                "Provider base URL (blank for default)",
+                default=args.base_url,
+            )
+            or None
+        )
 
     args.goal = _prompt_text(
         "What do you want ctx to help you build or maintain?",
@@ -2118,13 +2104,9 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
         print("  [warn] --model-mode custom requires --model", file=sys.stderr)
         return 1
 
-    provider = args.model_provider or (
-        _model_provider_prefix(args.model) if args.model else None
-    )
+    provider = args.model_provider or (_model_provider_prefix(args.model) if args.model else None)
     api_key_env = _resolve_api_key_env(args.api_key_env, args.model, provider)
-    harness_requirements = (
-        _harness_requirements_from_args(args) if mode == "custom" else {}
-    )
+    harness_requirements = _harness_requirements_from_args(args) if mode == "custom" else {}
     profile: dict[str, Any] = {
         "mode": mode,
         "provider": provider,
@@ -2158,7 +2140,8 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
         return rc
 
     recommendation_query = " ".join(
-        part for part in [
+        part
+        for part in [
             goal,
             _harness_requirements_text(harness_requirements),
             provider or "",
@@ -2181,12 +2164,15 @@ def run_model_onboarding(args: argparse.Namespace, claude: Path) -> int:
             print(f"         install: ctx-harness-install {name} --dry-run")
     elif goal or mode == "custom":
         print("  [info] no harness recommendations matched yet")
-        print("       build plan: " + _harness_plan_command(
-            goal=goal,
-            model_provider=provider,
-            model=args.model,
-            harness_requirements=harness_requirements,
-        ))
+        print(
+            "       build plan: "
+            + _harness_plan_command(
+                goal=goal,
+                model_provider=provider,
+                model=args.model,
+                harness_requirements=harness_requirements,
+            )
+        )
     return rc
 
 
@@ -2199,11 +2185,13 @@ def main(argv: list[str] | None = None) -> int:
         description="Bootstrap ~/.claude/ for ctx (claude-ctx).",
     )
     parser.add_argument(
-        "--hooks", action="store_true",
+        "--hooks",
+        action="store_true",
         help="Inject PostToolUse + Stop hooks into ~/.claude/settings.json",
     )
     parser.add_argument(
-        "--graph", action="store_true",
+        "--graph",
+        action="store_true",
         help=(
             "Install the pre-built knowledge graph after setup. Uses local "
             "graph/wiki-graph.tar.gz when present; otherwise downloads the "
@@ -2244,7 +2232,8 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Overwrite existing config files if present",
     )
     parser.add_argument(

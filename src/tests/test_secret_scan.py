@@ -18,10 +18,7 @@ def test_find_inline_secret_flags_nested_secret_value() -> None:
         },
     }
 
-    assert (
-        find_inline_secret(config)
-        == "mcpServers.github.env.GITHUB_TOKEN"
-    )
+    assert find_inline_secret(config) == "mcpServers.github.env.GITHUB_TOKEN"
 
 
 def test_find_inline_secret_allows_placeholders() -> None:
@@ -56,6 +53,4 @@ def test_redact_secret_text_masks_assignment_and_token_shapes() -> None:
         "token=ghp_abcdefghijklmnopqrstuvwxyz123456"
     )
 
-    assert redact_secret_text(text) == (
-        "OPENAI_API_KEY=[redacted] token=[redacted]"
-    )
+    assert redact_secret_text(text) == ("OPENAI_API_KEY=[redacted] token=[redacted]")

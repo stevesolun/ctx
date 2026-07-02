@@ -60,9 +60,7 @@ def _seed_skill(
             encoding="utf-8",
         )
     if with_original:
-        (d / "SKILL.md.original").write_text(
-            "original body\n", encoding="utf-8"
-        )
+        (d / "SKILL.md.original").write_text("original body\n", encoding="utf-8")
     if refs:
         r = d / "references"
         r.mkdir(parents=True, exist_ok=True)
@@ -87,9 +85,7 @@ def _symlink_to(target: Path, link: Path, *, target_is_directory: bool) -> None:
 
 
 class TestPickSource:
-    def test_prefer_transformed_finds_transformed(
-        self, wiki_dir: Path
-    ) -> None:
+    def test_prefer_transformed_finds_transformed(self, wiki_dir: Path) -> None:
         d = _seed_skill(wiki_dir, "s", with_transformed=True, with_original=True)
         path, variant = skill_install._pick_source(d, "transformed")
         assert variant == "transformed"
@@ -101,16 +97,12 @@ class TestPickSource:
         assert variant == "original"
         assert path is not None and path.name == "SKILL.md.original"
 
-    def test_prefer_original_falls_back_to_transformed(
-        self, wiki_dir: Path
-    ) -> None:
+    def test_prefer_original_falls_back_to_transformed(self, wiki_dir: Path) -> None:
         d = _seed_skill(wiki_dir, "s", with_transformed=True, with_original=False)
         path, variant = skill_install._pick_source(d, "original")
         assert variant == "transformed"
 
-    def test_prefer_transformed_falls_back_to_original(
-        self, wiki_dir: Path
-    ) -> None:
+    def test_prefer_transformed_falls_back_to_original(self, wiki_dir: Path) -> None:
         d = _seed_skill(wiki_dir, "s", with_transformed=False, with_original=True)
         path, variant = skill_install._pick_source(d, "transformed")
         assert variant == "original"
@@ -130,34 +122,32 @@ class TestCopyBundleFiles:
         d.mkdir(parents=True)
         assert skill_install._copy_bundle_files(d, tmp_path / "out") == 0
 
-    def test_copies_multiple_md_files(
-        self, wiki_dir: Path, tmp_path: Path
-    ) -> None:
+    def test_copies_multiple_md_files(self, wiki_dir: Path, tmp_path: Path) -> None:
         src = _seed_skill(
-            wiki_dir, "s", refs=["one", "two", "three"],
+            wiki_dir,
+            "s",
+            refs=["one", "two", "three"],
         )
         dest = tmp_path / "dest"
         n = skill_install._copy_bundle_files(src, dest)
         assert n == 3
         out = dest / "references"
         assert (out / "one.md").read_text(encoding="utf-8") == "ref one\n"
-        assert sorted(p.name for p in out.glob("*.md")) == [
-            "one.md", "three.md", "two.md"
-        ]
+        assert sorted(p.name for p in out.glob("*.md")) == ["one.md", "three.md", "two.md"]
 
-    def test_copies_nested_bundle_dirs(
-        self, wiki_dir: Path, tmp_path: Path
-    ) -> None:
+    def test_copies_nested_bundle_dirs(self, wiki_dir: Path, tmp_path: Path) -> None:
         d = _seed_skill(wiki_dir, "s")
         (d / "resources").mkdir()
         (d / "resources" / "implementation-playbook.md").write_text(
-            "patterns\n", encoding="utf-8",
+            "patterns\n",
+            encoding="utf-8",
         )
         (d / "scripts").mkdir()
         (d / "scripts" / "review.py").write_text("print('ok')\n", encoding="utf-8")
         (d / "assets" / "templates").mkdir(parents=True)
         (d / "assets" / "templates" / "review.md").write_text(
-            "template\n", encoding="utf-8",
+            "template\n",
+            encoding="utf-8",
         )
         (d / "reference").mkdir()
         (d / "reference" / "python.md").write_text("python\n", encoding="utf-8")
@@ -177,25 +167,27 @@ class TestCopyBundleFiles:
 class TestInstallSkill:
     def test_invalid_slug(self, wiki_dir: Path, skills_dir: Path) -> None:
         r = skill_install.install_skill(
-            "../evil", wiki_dir=wiki_dir, skills_dir=skills_dir,
+            "../evil",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
         )
         assert r.status == "failed"
         assert "invalid slug" in r.message
 
-    def test_not_in_wiki_missing_converted(
-        self, wiki_dir: Path, skills_dir: Path
-    ) -> None:
+    def test_not_in_wiki_missing_converted(self, wiki_dir: Path, skills_dir: Path) -> None:
         r = skill_install.install_skill(
-            "ghost", wiki_dir=wiki_dir, skills_dir=skills_dir,
+            "ghost",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
         )
         assert r.status == "not-in-wiki"
 
-    def test_not_in_wiki_empty_converted(
-        self, wiki_dir: Path, skills_dir: Path
-    ) -> None:
+    def test_not_in_wiki_empty_converted(self, wiki_dir: Path, skills_dir: Path) -> None:
         (wiki_dir / "converted" / "shell").mkdir()
         r = skill_install.install_skill(
-            "shell", wiki_dir=wiki_dir, skills_dir=skills_dir,
+            "shell",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
         )
         assert r.status == "not-in-wiki"
         assert "no SKILL.md" in r.message
@@ -208,7 +200,9 @@ class TestInstallSkill:
     ) -> None:
         _seed_skill(wiki_dir, "s", refs=["a", "b"])
         r = skill_install.install_skill(
-            "s", wiki_dir=wiki_dir, skills_dir=skills_dir,
+            "s",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
         )
         assert r.status == "installed"
         assert r.references_copied == 2
@@ -216,9 +210,7 @@ class TestInstallSkill:
         assert (skills_dir / "s" / "references" / "a.md").is_file()
         # Manifest entry tagged skill.
         m = install_utils.load_manifest()
-        assert any(
-            e["skill"] == "s" and e["entity_type"] == "skill" for e in m["load"]
-        )
+        assert any(e["skill"] == "s" and e["entity_type"] == "skill" for e in m["load"])
         # Entity status flipped.
         entity = wiki_dir / "entities" / "skills" / "s.md"
         assert "status: installed" in entity.read_text(encoding="utf-8")
@@ -233,9 +225,7 @@ class TestInstallSkill:
         _seed_skill(wiki_dir, "s")
         scanner = tmp_path / "fake_skillspector.py"
         scanner.write_text(
-            "import sys\n"
-            "print('skillspector scanned ' + sys.argv[2])\n"
-            "raise SystemExit(0)\n",
+            "import sys\nprint('skillspector scanned ' + sys.argv[2])\nraise SystemExit(0)\n",
             encoding="utf-8",
         )
 
@@ -432,7 +422,10 @@ class TestInstallSkill:
     ) -> None:
         _seed_skill(wiki_dir, "s", refs=["a"])
         r = skill_install.install_skill(
-            "s", wiki_dir=wiki_dir, skills_dir=skills_dir, dry_run=True,
+            "s",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+            dry_run=True,
         )
         assert r.status == "would-install"
         assert r.references_copied == 1
@@ -449,19 +442,23 @@ class TestInstallSkill:
         converted = _seed_skill(wiki_dir, "code-review-excellence")
         (converted / "resources").mkdir()
         (converted / "resources" / "implementation-playbook.md").write_text(
-            "review playbook\n", encoding="utf-8",
+            "review playbook\n",
+            encoding="utf-8",
         )
         (converted / "scripts").mkdir()
         (converted / "scripts" / "pr-analyzer.py").write_text(
-            "print('review')\n", encoding="utf-8",
+            "print('review')\n",
+            encoding="utf-8",
         )
         (converted / "assets").mkdir()
         (converted / "assets" / "review-checklist.md").write_text(
-            "checklist\n", encoding="utf-8",
+            "checklist\n",
+            encoding="utf-8",
         )
         (converted / "reference").mkdir()
         (converted / "reference" / "security-review-guide.md").write_text(
-            "security\n", encoding="utf-8",
+            "security\n",
+            encoding="utf-8",
         )
 
         r = skill_install.install_skill(
@@ -490,7 +487,9 @@ class TestInstallSkill:
         (skills_dir / "s").mkdir()
         (skills_dir / "s" / "SKILL.md").write_text("existing\n", encoding="utf-8")
         r = skill_install.install_skill(
-            "s", wiki_dir=wiki_dir, skills_dir=skills_dir,
+            "s",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
         )
         assert r.status == "skipped-existing"
         # Manifest reconciled even though the copy was skipped.
@@ -511,9 +510,7 @@ class TestInstallSkill:
         (skills_dir / "s" / "SKILL.md").write_text("existing\n", encoding="utf-8")
         scanner = tmp_path / "fake_skillspector.py"
         scanner.write_text(
-            "import sys\n"
-            "print('scanned existing ' + sys.argv[2])\n"
-            "raise SystemExit(0)\n",
+            "import sys\nprint('scanned existing ' + sys.argv[2])\nraise SystemExit(0)\n",
             encoding="utf-8",
         )
 
@@ -541,7 +538,10 @@ class TestInstallSkill:
         (skills_dir / "s").mkdir()
         (skills_dir / "s" / "SKILL.md").write_text("x\n", encoding="utf-8")
         r = skill_install.install_skill(
-            "s", wiki_dir=wiki_dir, skills_dir=skills_dir, dry_run=True,
+            "s",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+            dry_run=True,
         )
         assert r.status == "skipped-existing"
         assert install_utils.load_manifest()["load"] == []
@@ -556,7 +556,10 @@ class TestInstallSkill:
         (skills_dir / "s").mkdir()
         (skills_dir / "s" / "SKILL.md").write_text("old\n", encoding="utf-8")
         r = skill_install.install_skill(
-            "s", wiki_dir=wiki_dir, skills_dir=skills_dir, force=True,
+            "s",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+            force=True,
         )
         assert r.status == "installed"
         content = (skills_dir / "s" / "SKILL.md").read_text(encoding="utf-8")
@@ -575,14 +578,19 @@ class TestInstallSkill:
         outside.mkdir()
         _symlink_to(outside, skills_dir / "s", target_is_directory=True)
         r = skill_install.install_skill(
-            "s", wiki_dir=wiki_dir, skills_dir=skills_dir, force=True,
+            "s",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+            force=True,
         )
         assert r.status == "failed"
         assert "symlinked destination parent" in r.message
         assert not (outside / "SKILL.md").exists()
 
     def test_rejects_symlinked_agent_destination_file(
-        self, tmp_path: Path, isolated_manifest: Path,
+        self,
+        tmp_path: Path,
+        isolated_manifest: Path,
     ) -> None:
         wiki = tmp_path / "agent-wiki"
         agents_dir = tmp_path / "agents"
@@ -601,7 +609,10 @@ class TestInstallSkill:
         )
         _symlink_to(outside, agents_dir / "architect.md", target_is_directory=False)
         r = agent_install.install_agent(
-            "architect", wiki_dir=wiki, agents_dir=agents_dir, force=True,
+            "architect",
+            wiki_dir=wiki,
+            agents_dir=agents_dir,
+            force=True,
         )
         assert r.status == "failed"
         assert "symlinked destination file" in r.message
@@ -615,7 +626,10 @@ class TestInstallSkill:
     ) -> None:
         _seed_skill(wiki_dir, "s", with_transformed=False, with_original=True)
         r = skill_install.install_skill(
-            "s", wiki_dir=wiki_dir, skills_dir=skills_dir, prefer="original",
+            "s",
+            wiki_dir=wiki_dir,
+            skills_dir=skills_dir,
+            prefer="original",
         )
         assert r.status == "installed"
         assert r.source_variant == "original"
@@ -687,9 +701,7 @@ class TestSplitSlugs:
         assert out == ["x", "y"]
 
     def test_all_three_sources_combined(self) -> None:
-        out = skill_install._split_slugs(
-            self._ns(slug="a", slugs="b,c", slugs_positional=["d"])
-        )
+        out = skill_install._split_slugs(self._ns(slug="a", slugs="b,c", slugs_positional=["d"]))
         assert out == ["a", "b", "c", "d"]
 
     def test_empty(self) -> None:
@@ -700,9 +712,7 @@ class TestSplitSlugs:
 
 
 class TestMain:
-    def test_no_slugs_exits_2(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_slugs_exits_2(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("sys.argv", ["ctx-skill-install"])
         with pytest.raises(SystemExit) as ei:
             skill_install.main()
@@ -719,9 +729,15 @@ class TestMain:
         _seed_skill(wiki_dir, "s")
         monkeypatch.setattr(
             "sys.argv",
-            ["ctx-skill-install", "--slug", "s",
-             "--wiki-dir", str(wiki_dir),
-             "--skills-dir", str(skills_dir)],
+            [
+                "ctx-skill-install",
+                "--slug",
+                "s",
+                "--wiki-dir",
+                str(wiki_dir),
+                "--skills-dir",
+                str(skills_dir),
+            ],
         )
         with pytest.raises(SystemExit) as ei:
             skill_install.main()
@@ -736,9 +752,14 @@ class TestMain:
     ) -> None:
         monkeypatch.setattr(
             "sys.argv",
-            ["ctx-skill-install", "ghost",
-             "--wiki-dir", str(wiki_dir),
-             "--skills-dir", str(skills_dir)],
+            [
+                "ctx-skill-install",
+                "ghost",
+                "--wiki-dir",
+                str(wiki_dir),
+                "--skills-dir",
+                str(skills_dir),
+            ],
         )
         with pytest.raises(SystemExit) as ei:
             skill_install.main()
@@ -757,10 +778,18 @@ class TestMain:
         _seed_skill(wiki_dir, "t")
         monkeypatch.setattr(
             "sys.argv",
-            ["ctx-skill-install", "--slug", "s", "--slugs", "s,t",
-             "--wiki-dir", str(wiki_dir),
-             "--skills-dir", str(skills_dir),
-             "--json"],
+            [
+                "ctx-skill-install",
+                "--slug",
+                "s",
+                "--slugs",
+                "s,t",
+                "--wiki-dir",
+                str(wiki_dir),
+                "--skills-dir",
+                str(skills_dir),
+                "--json",
+            ],
         )
         with pytest.raises(SystemExit):
             skill_install.main()
@@ -779,10 +808,16 @@ class TestMain:
         _seed_skill(wiki_dir, "s", refs=["r1"])
         monkeypatch.setattr(
             "sys.argv",
-            ["ctx-skill-install", "--slug", "s",
-             "--wiki-dir", str(wiki_dir),
-             "--skills-dir", str(skills_dir),
-             "--json"],
+            [
+                "ctx-skill-install",
+                "--slug",
+                "s",
+                "--wiki-dir",
+                str(wiki_dir),
+                "--skills-dir",
+                str(skills_dir),
+                "--json",
+            ],
         )
         with pytest.raises(SystemExit):
             skill_install.main()
@@ -859,9 +894,15 @@ class TestMain:
         (skills_dir / "s" / "SKILL.md").write_text("existing\n", encoding="utf-8")
         monkeypatch.setattr(
             "sys.argv",
-            ["ctx-skill-install", "--slug", "s",
-             "--wiki-dir", str(wiki_dir),
-             "--skills-dir", str(skills_dir)],
+            [
+                "ctx-skill-install",
+                "--slug",
+                "s",
+                "--wiki-dir",
+                str(wiki_dir),
+                "--skills-dir",
+                str(skills_dir),
+            ],
         )
         with pytest.raises(SystemExit) as ei:
             skill_install.main()

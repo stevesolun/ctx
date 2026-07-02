@@ -116,7 +116,11 @@ class TestWikiUpsertSkillPageNew:
         result = upsert_skill_page(
             str(tmp_wiki),
             "python-patterns",
-            {"reason": "python patterns detected", "path": "/skills/python-patterns", "priority": 80},
+            {
+                "reason": "python patterns detected",
+                "path": "/skills/python-patterns",
+                "priority": 80,
+            },
         )
         assert result is True
 
@@ -153,7 +157,9 @@ class TestWikiUpsertSkillPageNew:
 
     def test_uncategorized_tag_when_no_match(self, tmp_wiki: Path) -> None:
         upsert_skill_page(str(tmp_wiki), "mystery-skill", {"reason": "something obscure"})
-        content = (tmp_wiki / "entities" / "skills" / "mystery-skill.md").read_text(encoding="utf-8")
+        content = (tmp_wiki / "entities" / "skills" / "mystery-skill.md").read_text(
+            encoding="utf-8"
+        )
         assert "uncategorized" in content
 
 

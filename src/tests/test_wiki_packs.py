@@ -36,9 +36,10 @@ def test_wiki_base_pack_manifest_round_trips(tmp_path: Path) -> None:
     assert manifest.page_count == 2
     assert manifest.tombstone_count == 0
     assert read_wiki_pack_manifest(pack_dir / "wiki-pack-manifest.json") == manifest
-    assert json.loads((pack_dir / "pages.jsonl").read_text(encoding="utf-8").splitlines()[0])[
-        "path"
-    ] == "entities/skills/python.md"
+    assert (
+        json.loads((pack_dir / "pages.jsonl").read_text(encoding="utf-8").splitlines()[0])["path"]
+        == "entities/skills/python.md"
+    )
 
 
 def test_load_merged_wiki_pages_applies_overlay_and_tombstones(tmp_path: Path) -> None:
@@ -333,16 +334,18 @@ def test_wiki_pack_cli_compact_emits_json(tmp_path: Path, capsys: pytest.Capture
     )
     staged_pack = tmp_path / "staged" / "base-export-2"
 
-    rc = wiki_packs.main([
-        "compact",
-        "--packs-dir",
-        str(active_packs),
-        "--staged-pack-dir",
-        str(staged_pack),
-        "--base-export-id",
-        "wiki-export-2",
-        "--json",
-    ])
+    rc = wiki_packs.main(
+        [
+            "compact",
+            "--packs-dir",
+            str(active_packs),
+            "--staged-pack-dir",
+            str(staged_pack),
+            "--base-export-id",
+            "wiki-export-2",
+            "--json",
+        ]
+    )
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -369,14 +372,16 @@ def test_wiki_pack_cli_promote_emits_json(tmp_path: Path, capsys: pytest.Capture
         pages={"entities/skills/new.md": "# New\n"},
     )
 
-    rc = wiki_packs.main([
-        "promote",
-        "--staged-packs-dir",
-        str(staged_packs),
-        "--active-packs-dir",
-        str(active_packs),
-        "--json",
-    ])
+    rc = wiki_packs.main(
+        [
+            "promote",
+            "--staged-packs-dir",
+            str(staged_packs),
+            "--active-packs-dir",
+            str(active_packs),
+            "--json",
+        ]
+    )
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)

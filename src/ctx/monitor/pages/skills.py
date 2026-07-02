@@ -22,10 +22,7 @@ def render_skills(
     """Render the paginated quality sidecar grid."""
     sidecars = payload["items"]
 
-    cards = "".join(
-        _sidecar_card(sidecar, sidecar_entity_type)
-        for sidecar in sidecars
-    )
+    cards = "".join(_sidecar_card(sidecar, sidecar_entity_type) for sidecar in sidecars)
 
     start_index = ((payload["page"] - 1) * payload["limit"]) + 1 if payload["total"] else 0
     end_index = min(payload["page"] * payload["limit"], payload["total"])
@@ -34,11 +31,7 @@ def render_skills(
         if payload["filtered"]
         else f"Showing {start_index}-{end_index} of {payload['catalog_total']} sidecars"
     )
-    query_base = {
-        key: value
-        for key, value in (query_params or {}).items()
-        if key not in {"page"}
-    }
+    query_base = {key: value for key, value in (query_params or {}).items() if key not in {"page"}}
 
     def page_href(page: int) -> str:
         params = {

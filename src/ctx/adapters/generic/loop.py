@@ -57,9 +57,9 @@ _logger = logging.getLogger(__name__)
 
 StopReason = Literal[
     "completed",
-    "length",            # provider truncated (finish_reason=length)
-    "empty_response",    # no content + no tool calls
-    "provider_other",    # finish_reason='other' with no usable output
+    "length",  # provider truncated (finish_reason=length)
+    "empty_response",  # no content + no tool calls
+    "provider_other",  # finish_reason='other' with no usable output
     "max_iterations",
     "cost_budget",
     "token_budget",
@@ -86,19 +86,19 @@ class LoopObserver(Protocol):
     need lives on the observer itself.
     """
 
-    def on_iteration_start(self, iteration: int, messages: list[Message]) -> None:
-        ...
+    def on_iteration_start(self, iteration: int, messages: list[Message]) -> None: ...
 
-    def on_model_response(self, iteration: int, response: CompletionResponse) -> None:
-        ...
+    def on_model_response(self, iteration: int, response: CompletionResponse) -> None: ...
 
     def on_tool_call(
-        self, iteration: int, call: ToolCall, result: str, error: str | None,
-    ) -> None:
-        ...
+        self,
+        iteration: int,
+        call: ToolCall,
+        result: str,
+        error: str | None,
+    ) -> None: ...
 
-    def on_stop(self, result: "LoopResult") -> None:
-        ...
+    def on_stop(self, result: "LoopResult") -> None: ...
 
 
 class _NullObserver:
@@ -111,7 +111,11 @@ class _NullObserver:
         pass
 
     def on_tool_call(
-        self, iteration: int, call: ToolCall, result: str, error: str | None,
+        self,
+        iteration: int,
+        call: ToolCall,
+        result: str,
+        error: str | None,
     ) -> None:
         pass
 
@@ -174,16 +178,14 @@ def _budget_stop_reason(
     if budget_usd is not None and totals.cost_usd > budget_usd:
         return (
             "cost_budget",
-            f"cumulative cost ${totals.cost_usd:.4f} exceeded budget "
-            f"${budget_usd:.4f}",
+            f"cumulative cost ${totals.cost_usd:.4f} exceeded budget ${budget_usd:.4f}",
         )
     if budget_tokens is not None:
         total_tokens = totals.input_tokens + totals.output_tokens
         if total_tokens > budget_tokens:
             return (
                 "token_budget",
-                f"cumulative tokens {total_tokens} exceeded budget "
-                f"{budget_tokens}",
+                f"cumulative tokens {total_tokens} exceeded budget {budget_tokens}",
             )
     return None, ""
 
@@ -263,9 +265,7 @@ def run_loop(
     # messages already begin with a system message, don't duplicate the
     # caller-supplied one. Codex review fix #3.
     conversation: list[Message] = []
-    has_replayed_system = bool(
-        messages and messages[0].role == "system" and messages[0].content
-    )
+    has_replayed_system = bool(messages and messages[0].role == "system" and messages[0].content)
     if append_task_after_messages:
         if system_prompt and not has_replayed_system:
             conversation.append(Message(role="system", content=system_prompt))
@@ -395,16 +395,13 @@ def run_loop(
             elif not final_message.strip():
                 stop_reason = "empty_response"
                 stop_detail = (
-                    f"empty content with no tool calls "
-                    f"(finish_reason={finish or 'unset'!r})"
+                    f"empty content with no tool calls (finish_reason={finish or 'unset'!r})"
                 )
             elif finish in ("stop", "end_turn", ""):
                 stop_reason = "completed"
             else:
                 stop_reason = "provider_other"
-                stop_detail = (
-                    f"unexpected finish_reason={finish!r} with no tool calls"
-                )
+                stop_detail = f"unexpected finish_reason={finish!r} with no tool calls"
             break
 
         # Execute every tool call. Policy denials and execution errors
@@ -554,9 +551,7 @@ def _complete_provider(
     try:
         outcome = results.get(timeout=provider_timeout)
     except queue.Empty as exc:
-        raise TimeoutError(
-            f"provider call timed out after {provider_timeout:.3f}s"
-        ) from exc
+        raise TimeoutError(f"provider call timed out after {provider_timeout:.3f}s") from exc
     if isinstance(outcome, BaseException):
         raise outcome
     return outcome
@@ -571,9 +566,7 @@ def _is_provider_timeout_exception(exc: BaseException) -> bool:
     if "timeout" in class_name:
         return True
     timeout_modules = ("httpx", "requests", "litellm", "openai", "anthropic")
-    return "timeout" in str(exc).lower() and any(
-        name in module_name for name in timeout_modules
-    )
+    return "timeout" in str(exc).lower() and any(name in module_name for name in timeout_modules)
 
 
 def _collect_tools(
@@ -592,8 +585,7 @@ def _collect_tools(
         conflicts = sorted(reserved_prefixes & set(router.server_names))
         if conflicts:
             raise ValueError(
-                "MCP server name conflicts with caller tool namespace: "
-                + ", ".join(conflicts)
+                "MCP server name conflicts with caller tool namespace: " + ", ".join(conflicts)
             )
 
     merged: list[ToolDefinition] = []

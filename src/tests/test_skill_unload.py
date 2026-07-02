@@ -49,6 +49,7 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("USERPROFILE", str(home))
 
     from ctx.adapters.claude_code.install import skill_unload
+
     importlib.reload(skill_unload)
     monkeypatch.setattr(skill_unload, "CLAUDE_DIR", home / ".claude")
     monkeypatch.setattr(
@@ -145,27 +146,30 @@ def test_unload_from_session_writes_manifest_event_and_audit(
     unload, home = fake_home
     audit_calls: list[tuple[str, str, dict[str, object]]] = []
     fake_audit = types.SimpleNamespace(
-        log_skill_event=lambda event, slug, **kwargs: audit_calls.append(
-            (event, slug, kwargs)
-        )
+        log_skill_event=lambda event, slug, **kwargs: audit_calls.append((event, slug, kwargs))
     )
     monkeypatch.setitem(sys.modules, "ctx_audit_log", fake_audit)
     monkeypatch.setenv("CTX_SESSION_ID", "session-123")
     manifest_path = home / ".claude" / "skill-manifest.json"
     manifest_path.write_text(
-        json.dumps({
-            "load": [{
-                "skill": "real-skill",
-                "entity_type": "skill",
-                "source": "test",
-            }, {
-                "skill": "kept-skill",
-                "entity_type": "skill",
-                "source": "test",
-            }],
-            "unload": [],
-            "warnings": [],
-        }),
+        json.dumps(
+            {
+                "load": [
+                    {
+                        "skill": "real-skill",
+                        "entity_type": "skill",
+                        "source": "test",
+                    },
+                    {
+                        "skill": "kept-skill",
+                        "entity_type": "skill",
+                        "source": "test",
+                    },
+                ],
+                "unload": [],
+                "warnings": [],
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -173,16 +177,20 @@ def test_unload_from_session_writes_manifest_event_and_audit(
 
     assert removed == ["real-skill"]
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["load"] == [{
-        "skill": "kept-skill",
-        "entity_type": "skill",
-        "source": "test",
-    }]
-    assert manifest["unload"] == [{
-        "skill": "real-skill",
-        "entity_type": "skill",
-        "source": "test",
-    }]
+    assert manifest["load"] == [
+        {
+            "skill": "kept-skill",
+            "entity_type": "skill",
+            "source": "test",
+        }
+    ]
+    assert manifest["unload"] == [
+        {
+            "skill": "real-skill",
+            "entity_type": "skill",
+            "source": "test",
+        }
+    ]
     events = [
         json.loads(line)
         for line in (home / ".claude" / "skill-events.jsonl")
@@ -200,15 +208,17 @@ def test_unload_from_session_writes_manifest_event_and_audit(
     assert events[0]["meta"] == {"source": "skill_unload"}
     if os.name != "nt":
         assert stat.S_IMODE((home / ".claude" / "skill-events.jsonl").stat().st_mode) == 0o600
-    assert audit_calls == [(
-        "skill.unloaded",
-        "real-skill",
-        {
-            "actor": "cli",
-            "session_id": "session-123",
-            "meta": {"via": "skill_unload"},
-        },
-    )]
+    assert audit_calls == [
+        (
+            "skill.unloaded",
+            "real-skill",
+            {
+                "actor": "cli",
+                "session_id": "session-123",
+                "meta": {"via": "skill_unload"},
+            },
+        )
+    ]
 
 
 def test_agent_unload_entrypoint_only_removes_agent_when_slug_matches_skill(
@@ -224,26 +234,29 @@ def test_agent_unload_entrypoint_only_removes_agent_when_slug_matches_skill(
     )
     audit_calls: list[tuple[str, str, dict[str, object]]] = []
     fake_audit = types.SimpleNamespace(
-        log_skill_event=lambda event, slug, **kwargs: audit_calls.append(
-            (event, slug, kwargs)
-        )
+        log_skill_event=lambda event, slug, **kwargs: audit_calls.append((event, slug, kwargs))
     )
     monkeypatch.setitem(sys.modules, "ctx_audit_log", fake_audit)
     manifest_path = home / ".claude" / "skill-manifest.json"
     manifest_path.write_text(
-        json.dumps({
-            "load": [{
-                "skill": "real-skill",
-                "entity_type": "skill",
-                "source": "test",
-            }, {
-                "skill": "real-skill",
-                "entity_type": "agent",
-                "source": "test",
-            }],
-            "unload": [],
-            "warnings": [],
-        }),
+        json.dumps(
+            {
+                "load": [
+                    {
+                        "skill": "real-skill",
+                        "entity_type": "skill",
+                        "source": "test",
+                    },
+                    {
+                        "skill": "real-skill",
+                        "entity_type": "agent",
+                        "source": "test",
+                    },
+                ],
+                "unload": [],
+                "warnings": [],
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -251,16 +264,20 @@ def test_agent_unload_entrypoint_only_removes_agent_when_slug_matches_skill(
 
     assert "Unloaded from session: real-skill" in capsys.readouterr().out
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["load"] == [{
-        "skill": "real-skill",
-        "entity_type": "skill",
-        "source": "test",
-    }]
-    assert manifest["unload"] == [{
-        "skill": "real-skill",
-        "entity_type": "agent",
-        "source": "test",
-    }]
+    assert manifest["load"] == [
+        {
+            "skill": "real-skill",
+            "entity_type": "skill",
+            "source": "test",
+        }
+    ]
+    assert manifest["unload"] == [
+        {
+            "skill": "real-skill",
+            "entity_type": "agent",
+            "source": "test",
+        }
+    ]
     assert audit_calls[0][0] == "agent.unloaded"
 
 
@@ -270,15 +287,17 @@ def test_permanent_suppression_updates_graph_node(fake_home):
     graph_dir.mkdir(parents=True)
     graph_path = graph_dir / "graph.json"
     graph_path.write_text(
-        json.dumps({
-            "directed": False,
-            "multigraph": False,
-            "graph": {},
-            "nodes": [
-                {"id": "skill:real-skill", "label": "real-skill", "type": "skill"},
-            ],
-            "edges": [],
-        }),
+        json.dumps(
+            {
+                "directed": False,
+                "multigraph": False,
+                "graph": {},
+                "nodes": [
+                    {"id": "skill:real-skill", "label": "real-skill", "type": "skill"},
+                ],
+                "edges": [],
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -325,12 +344,7 @@ def test_permanent_suppression_updates_pack_only_wiki_page(fake_home):
         base_export_id="export-1",
         pages={
             "entities/skills/real-skill.md": (
-                "---\n"
-                "name: real-skill\n"
-                "status: stale\n"
-                "never_load: false\n"
-                "---\n\n"
-                "# real-skill\n"
+                "---\nname: real-skill\nstatus: stale\nnever_load: false\n---\n\n# real-skill\n"
             ),
         },
     )

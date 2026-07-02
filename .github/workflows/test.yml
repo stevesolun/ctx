@@ -90,7 +90,7 @@ jobs:
           python -m pip install ".[dev]"
 
       - name: Run static quality gates
-        run: python -m ruff check src hooks scripts && python -m mypy src && python -m pip check
+        run: python -m ruff format --check src hooks scripts && python -m ruff check src hooks scripts && python -m mypy src && python -m pip check
 
   unit-linux:
     name: "unit-linux"

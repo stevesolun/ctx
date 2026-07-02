@@ -125,9 +125,7 @@ TOP_FILES: tuple[str, ...] = _CFG.top_files
 MAX_FILE_BYTES: int = _CFG.max_file_bytes
 
 # Directories inside ~/.claude that we copy as trees.
-TREE_SOURCES: tuple[tuple[str, str], ...] = tuple(
-    (t.src, t.dest) for t in _CFG.trees
-)
+TREE_SOURCES: tuple[tuple[str, str], ...] = tuple((t.src, t.dest) for t in _CFG.trees)
 
 # True when projects/*/memory should be walked and mirrored.
 MEMORY_GLOB: bool = _CFG.memory_glob
@@ -144,8 +142,8 @@ _SNAPSHOT_TEMP_PREFIX = ".tmp-"
 
 @dataclass(frozen=True)
 class ManifestEntry:
-    source: str        # absolute path at time of backup
-    dest: str          # relative path under the snapshot dir
+    source: str  # absolute path at time of backup
+    dest: str  # relative path under the snapshot dir
     size: int
     sha256: str | None  # None if skipped
     skipped: str | None  # reason code when content not copied
@@ -276,7 +274,6 @@ def _validate_manifest_dest(dest_rel: str) -> Path:
     return p
 
 
-
 # ── Create ──────────────────────────────────────────────────────────────────
 
 
@@ -287,18 +284,14 @@ _REASON_SAFE_CHARS = "-_."
 
 def _sanitize_reason(raw: str) -> str:
     """Make ``raw`` safe to embed in a directory name. Caps at 40 chars."""
-    cleaned = "".join(
-        c if (c.isalnum() or c in _REASON_SAFE_CHARS) else "-"
-        for c in raw.lower()
-    )
+    cleaned = "".join(c if (c.isalnum() or c in _REASON_SAFE_CHARS) else "-" for c in raw.lower())
     # Collapse runs of '-' so "edit//settings" doesn't produce "edit----"
     while "--" in cleaned:
         cleaned = cleaned.replace("--", "-")
     return cleaned.strip("-_.")[:40]
 
 
-def _new_snapshot_id(now: float | None = None,
-                     reason: str | None = None) -> str:
+def _new_snapshot_id(now: float | None = None, reason: str | None = None) -> str:
     """Build snapshot directory name from SNAPSHOT_FMT + NAME_FORMAT + reason.
 
     Timestamp gets microsecond precision to avoid collisions under
@@ -328,9 +321,9 @@ def _publish_snapshot_dir(tmp_path: Path, snap_path: Path) -> None:
     _fsync_parent_dir(snap_path.parent)
 
 
-def create_snapshot(backups_dir: Path | None = None,
-                    now: float | None = None,
-                    reason: str | None = None) -> Path:
+def create_snapshot(
+    backups_dir: Path | None = None, now: float | None = None, reason: str | None = None
+) -> Path:
     """Produce a fresh backup snapshot and return its directory.
 
     ``reason`` is an optional label appended to the snapshot folder so
@@ -468,13 +461,15 @@ def list_snapshots(backups_dir: Path | None = None) -> list[SnapshotInfo]:
             continue
         entries = raw.get("entries") or []
         total = sum(int(e.get("size") or 0) for e in entries)
-        out.append(SnapshotInfo(
-            snapshot_id=str(raw.get("snapshot_id") or child.name),
-            path=str(child),
-            created_at=float(raw.get("created_at") or 0),
-            file_count=len(entries),
-            total_bytes=total,
-        ))
+        out.append(
+            SnapshotInfo(
+                snapshot_id=str(raw.get("snapshot_id") or child.name),
+                path=str(child),
+                created_at=float(raw.get("created_at") or 0),
+                file_count=len(entries),
+                total_bytes=total,
+            )
+        )
     return out
 
 
@@ -557,9 +552,9 @@ class RestoreReport:
         return asdict(self)
 
 
-def restore_snapshot(snap_path: Path,
-                     claude_home: Path | None = None,
-                     dry_run: bool = False) -> RestoreReport:
+def restore_snapshot(
+    snap_path: Path, claude_home: Path | None = None, dry_run: bool = False
+) -> RestoreReport:
     """
     Restore the given snapshot over ``claude_home``. Refuses to start
     unless the snapshot verifies clean.
@@ -592,9 +587,7 @@ def restore_snapshot(snap_path: Path,
             raise ValueError(f"snapshot source escapes snapshot root: {dest_rel_raw!r}")
         target = _resolve_restore_target(dest_rel_raw, claude_home)
         if not _contained(target, claude_home):
-            raise ValueError(
-                f"restore target escapes claude_home: {dest_rel_raw!r}"
-            )
+            raise ValueError(f"restore target escapes claude_home: {dest_rel_raw!r}")
         if not dry_run:
             _atomic_copy(src, target)
         restored.append(str(target))
@@ -661,8 +654,7 @@ def _delete_snapshot_dirs(
     return removed
 
 
-def prune_snapshots(keep: int,
-                    backups_dir: Path | None = None) -> tuple[str, ...]:
+def prune_snapshots(keep: int, backups_dir: Path | None = None) -> tuple[str, ...]:
     """Legacy prune: keep only the ``keep`` newest snapshots.
 
     Retained for backward compatibility. New callers should prefer
@@ -736,8 +728,8 @@ def prune_by_policy(
 class SnapshotIfChangedResult:
     """Outcome of a snapshot-if-changed run."""
 
-    snapshot_path: Path | None   # None when no snapshot was taken
-    report: ChangeReport          # resolved via TYPE_CHECKING import above
+    snapshot_path: Path | None  # None when no snapshot was taken
+    report: ChangeReport  # resolved via TYPE_CHECKING import above
     reason: str | None
 
     def to_dict(self) -> dict:
@@ -748,9 +740,9 @@ class SnapshotIfChangedResult:
         }
 
 
-def snapshot_if_changed(reason: str | None = None,
-                        backups_dir: Path | None = None,
-                        now: float | None = None) -> SnapshotIfChangedResult:
+def snapshot_if_changed(
+    reason: str | None = None, backups_dir: Path | None = None, now: float | None = None
+) -> SnapshotIfChangedResult:
     """Take a new snapshot iff at least one tracked file has changed.
 
     Compares current SHA-256 hashes of all files under the active
@@ -770,7 +762,9 @@ def snapshot_if_changed(reason: str | None = None,
 
     if not report.has_changes and last_path is not None:
         return SnapshotIfChangedResult(
-            snapshot_path=None, report=report, reason=reason,
+            snapshot_path=None,
+            report=report,
+            reason=reason,
         )
 
     snap_path = create_snapshot(backups_dir=backups_dir, now=now, reason=reason)
@@ -782,15 +776,16 @@ def snapshot_if_changed(reason: str | None = None,
     except (OSError, ValueError) as exc:
         print(f"[snapshot-if-changed] prune skipped: {exc}", file=sys.stderr)
     return SnapshotIfChangedResult(
-        snapshot_path=snap_path, report=report, reason=reason,
+        snapshot_path=snap_path,
+        report=report,
+        reason=reason,
     )
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 
-def _resolve_snapshot_arg(arg: str | None,
-                          backups_dir: Path) -> Path:
+def _resolve_snapshot_arg(arg: str | None, backups_dir: Path) -> Path:
     snaps = list_snapshots(backups_dir)
     if not snaps:
         raise FileNotFoundError("no snapshots exist")
@@ -875,19 +870,20 @@ def cmd_restore(args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         print(
-            "Run `python src/backup_mirror.py verify --snapshot "
-            f"{snap_path.name}` to diagnose.",
+            f"Run `python src/backup_mirror.py verify --snapshot {snap_path.name}` to diagnose.",
             file=sys.stderr,
         )
         return 2
     label = "[restore:dry-run]" if report.dry_run else "[restore]"
-    print(f"{label} {report.snapshot_id}  files={len(report.restored)}  "
-          f"skipped={len(report.skipped)}")
+    print(
+        f"{label} {report.snapshot_id}  files={len(report.restored)}  skipped={len(report.skipped)}"
+    )
     return 0
 
 
 def cmd_watchdog(args: argparse.Namespace) -> int:
     from backup_watchdog import run_watchdog  # noqa: PLC0415
+
     max_iters = 1 if args.once else None
     stats = run_watchdog(
         interval=args.interval,
@@ -932,16 +928,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     c = sub.add_parser("create", help="Take a new snapshot.")
-    c.add_argument("--reason", default=None,
-                   help="Short label appended to snapshot folder name.")
+    c.add_argument("--reason", default=None, help="Short label appended to snapshot folder name.")
     c.set_defaults(func=cmd_create)
 
     sic = sub.add_parser(
         "snapshot-if-changed",
         help="Snapshot only if any tracked file changed since the last one.",
     )
-    sic.add_argument("--reason", default=None,
-                     help="Short label appended to snapshot folder name.")
+    sic.add_argument("--reason", default=None, help="Short label appended to snapshot folder name.")
     sic.add_argument("--json", action="store_true")
     sic.set_defaults(func=cmd_snapshot_if_changed)
 
@@ -950,8 +944,7 @@ def build_parser() -> argparse.ArgumentParser:
     ls.set_defaults(func=cmd_list)
 
     v = sub.add_parser("verify", help="Verify a snapshot against its manifest.")
-    v.add_argument("--snapshot", default="latest",
-                   help="Snapshot ID or 'latest'.")
+    v.add_argument("--snapshot", default="latest", help="Snapshot ID or 'latest'.")
     v.add_argument("--json", action="store_true")
     v.set_defaults(func=cmd_verify)
 
@@ -964,29 +957,31 @@ def build_parser() -> argparse.ArgumentParser:
         "watchdog",
         help="Poll ~/.claude on an interval and snapshot on change.",
     )
-    wd.add_argument("--interval", type=float, default=60.0,
-                    help="Seconds between polls (clamped to [5, 3600]).")
-    wd.add_argument("--reason-prefix", default="watchdog",
-                    help="Prefix for the --reason label on each snapshot.")
-    wd.add_argument("--once", action="store_true",
-                    help="Run exactly one tick and exit.")
-    wd.add_argument("--json", action="store_true",
-                    help="Print run stats as JSON on exit.")
+    wd.add_argument(
+        "--interval", type=float, default=60.0, help="Seconds between polls (clamped to [5, 3600])."
+    )
+    wd.add_argument(
+        "--reason-prefix",
+        default="watchdog",
+        help="Prefix for the --reason label on each snapshot.",
+    )
+    wd.add_argument("--once", action="store_true", help="Run exactly one tick and exit.")
+    wd.add_argument("--json", action="store_true", help="Print run stats as JSON on exit.")
     wd.set_defaults(func=cmd_watchdog)
 
     pr = sub.add_parser(
         "prune",
         help="Delete old snapshots. Use --policy for configured retention "
-             "(keep_latest + keep_daily) or --keep N for legacy mode.",
+        "(keep_latest + keep_daily) or --keep N for legacy mode.",
     )
-    pr.add_argument("--keep", type=int, default=None,
-                    help="Legacy: keep only the N newest snapshots.")
-    pr.add_argument("--policy", action="store_true",
-                    help="Apply retention policy from config.")
-    pr.add_argument("--dry-run", action="store_true",
-                    help="Report what would be pruned; delete nothing.")
-    pr.add_argument("--json", action="store_true",
-                    help="Emit plan as JSON. Only with --policy.")
+    pr.add_argument(
+        "--keep", type=int, default=None, help="Legacy: keep only the N newest snapshots."
+    )
+    pr.add_argument("--policy", action="store_true", help="Apply retention policy from config.")
+    pr.add_argument(
+        "--dry-run", action="store_true", help="Report what would be pruned; delete nothing."
+    )
+    pr.add_argument("--json", action="store_true", help="Emit plan as JSON. Only with --policy.")
     pr.set_defaults(func=cmd_prune)
 
     return p

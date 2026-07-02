@@ -216,9 +216,7 @@ def enqueue(
                     if reuse_terminal or existing.status not in TERMINAL_STATUSES:
                         conn.execute("COMMIT")
                         return existing
-                    idempotency_key = (
-                        f"{idempotency_key}:run:{timestamp:.6f}:{time.monotonic_ns()}"
-                    )
+                    idempotency_key = f"{idempotency_key}:run:{timestamp:.6f}:{time.monotonic_ns()}"
             cur = conn.execute(
                 """
                 INSERT INTO wiki_queue_jobs (
@@ -404,9 +402,7 @@ def cancel_job(
                 conn.execute("COMMIT")
                 return current
             if current.status in (STATUS_SUCCEEDED, STATUS_FAILED):
-                raise RuntimeError(
-                    f"queue job {current.id} is already terminal: {current.status}"
-                )
+                raise RuntimeError(f"queue job {current.id} is already terminal: {current.status}")
             if current.status == STATUS_RUNNING and expected_worker_id is not None:
                 _assert_job_leased_by_worker(current, expected_worker_id)
             conn.execute(

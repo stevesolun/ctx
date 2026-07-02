@@ -157,6 +157,7 @@ def perform_load(
     try:
         if entity_type == "agent":
             from ctx.adapters.claude_code.install.agent_install import install_agent
+
             result = install_agent(
                 slug,
                 wiki_dir=deps.wiki_dir(),
@@ -164,6 +165,7 @@ def perform_load(
             )
         elif entity_type == "mcp-server":
             from ctx.adapters.claude_code.install.mcp_install import install_mcp
+
             result = install_mcp(
                 slug,
                 wiki_dir=deps.wiki_dir(),
@@ -173,6 +175,7 @@ def perform_load(
             )
         else:
             from ctx.adapters.claude_code.install.skill_install import install_skill
+
             result = install_skill(
                 slug,
                 wiki_dir=deps.wiki_dir(),
@@ -286,16 +289,18 @@ def search_wiki_entities(
         ).lower()
         if terms and not all(term in haystack for term in terms):
             continue
-        results.append({
-            "slug": slug,
-            "display_slug": display_slug,
-            "type": current_type,
-            "title": title,
-            "description": description,
-            "tags": tags[:12],
-            "path": str(path),
-            "href": deps.entity_wiki_href(slug, current_type),
-        })
+        results.append(
+            {
+                "slug": slug,
+                "display_slug": display_slug,
+                "type": current_type,
+                "title": title,
+                "description": description,
+                "tags": tags[:12],
+                "path": str(path),
+                "href": deps.entity_wiki_href(slug, current_type),
+            }
+        )
         if len(results) >= max(1, limit):
             break
     return results
@@ -321,9 +326,7 @@ def upsert_wiki_entity(payload: dict[str, Any], *, deps: EntityCrudDeps) -> tupl
         requested_type = str(payload.get("entity_type", "skill")).strip() or "skill"
         existing_detail = deps.wiki_entity_detail(requested_slug, requested_type)
         existing_meta = (
-            existing_detail.get("frontmatter")
-            if isinstance(existing_detail, dict)
-            else None
+            existing_detail.get("frontmatter") if isinstance(existing_detail, dict) else None
         )
         confirm_update = str(payload.get("confirm_update", "")).strip().lower() in {
             "1",
@@ -379,8 +382,7 @@ def delete_wiki_entity(
             if not unloaded:
                 return (
                     False,
-                    f"{normalized}:{slug} is loaded; unload before delete failed: "
-                    f"{unload_detail}",
+                    f"{normalized}:{slug} is loaded; unload before delete failed: {unload_detail}",
                 )
         with deps.file_lock(path):
             path.unlink()

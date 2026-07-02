@@ -37,9 +37,7 @@ def render_manage(
         "<p class='muted'>Search skills, agents, MCP servers, and harnesses. "
         "Edit the wiki page, delete stale entries, or add a new entity. Saves "
         "write into <code>~/.claude/skill-wiki/entities/</code> and queue graph "
-        "refresh work for the knowledge graph.</p>"
-        + read_only
-        + "<div class='wizard-layout'>"
+        "refresh work for the knowledge graph.</p>" + read_only + "<div class='wizard-layout'>"
         "<section class='card'>"
         "<h2>Search catalog</h2>"
         "<div class='wizard-grid'>"
@@ -89,7 +87,6 @@ def render_manage(
         f"  token: {json.dumps(token)},\n"
         f"  initialResults: {initial_results_json}\n"
         "};\n"
-        "</script>"
-        + inline_script("monitor-manage.js")
+        "</script>" + inline_script("monitor-manage.js")
     )
     return layout("Manage catalog", body)

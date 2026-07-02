@@ -70,7 +70,7 @@ def fake_litellm(monkeypatch: pytest.MonkeyPatch):
         }
 
     fake.completion = completion  # type: ignore[attr-defined]
-    fake._calls = calls           # type: ignore[attr-defined]
+    fake._calls = calls  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "litellm", fake)
     return fake
 
@@ -258,14 +258,20 @@ class TestRunCommand:
         )
 
     def test_happy_path_writes_session(
-        self, fake_litellm: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/llama3",
-                "--task", "say hi",
-                "--sessions-dir", str(tmp_path),
+                "--model",
+                "ollama/llama3",
+                "--task",
+                "say hi",
+                "--sessions-dir",
+                str(tmp_path),
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -304,9 +310,12 @@ class TestRunCommand:
         exit_code = main(
             [
                 "run",
-                "--task", "say hi",
-                "--sessions-dir", str(sessions),
-                "--session-id", "profile-run",
+                "--task",
+                "say hi",
+                "--sessions-dir",
+                str(sessions),
+                "--session-id",
+                "profile-run",
                 "--no-ctx-tools",
                 "--quiet",
             ],
@@ -317,9 +326,13 @@ class TestRunCommand:
         assert call["model"] == "openai/gpt-5.5"
         assert call["api_key"] == "profile-secret"
         assert call["api_base"] == "https://api.example.test/v1"
-        first_line = (sessions / "profile-run.jsonl").read_text(
-            encoding="utf-8",
-        ).splitlines()[0]
+        first_line = (
+            (sessions / "profile-run.jsonl")
+            .read_text(
+                encoding="utf-8",
+            )
+            .splitlines()[0]
+        )
         event = json.loads(first_line)
         assert event["model"] == "openai/gpt-5.5"
         assert event["provider"] == "openai"
@@ -351,10 +364,14 @@ class TestRunCommand:
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/qwen",
-                "--task", "say hi",
-                "--sessions-dir", str(sessions),
-                "--session-id", "override-run",
+                "--model",
+                "ollama/qwen",
+                "--task",
+                "say hi",
+                "--sessions-dir",
+                str(sessions),
+                "--session-id",
+                "override-run",
                 "--no-ctx-tools",
                 "--quiet",
             ],
@@ -365,24 +382,35 @@ class TestRunCommand:
         assert call["model"] == "ollama/qwen"
         assert "api_key" not in call
         assert "api_base" not in call
-        first_line = (sessions / "override-run.jsonl").read_text(
-            encoding="utf-8",
-        ).splitlines()[0]
+        first_line = (
+            (sessions / "override-run.jsonl")
+            .read_text(
+                encoding="utf-8",
+            )
+            .splitlines()[0]
+        )
         event = json.loads(first_line)
         assert event["provider"] == "ollama"
         assert event["api_key_env"] == ""
         assert event["base_url"] == ""
 
     def test_session_id_flag_pins_id(
-        self, fake_litellm: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         main(
             [
                 "run",
-                "--model", "ollama/llama3",
-                "--task", "hi",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "pinned-session",
+                "--model",
+                "ollama/llama3",
+                "--task",
+                "hi",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "pinned-session",
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -390,7 +418,9 @@ class TestRunCommand:
         assert (tmp_path / "pinned-session.jsonl").is_file()
 
     def test_session_id_reuse_is_rejected_without_overwrite(
-        self, fake_litellm: Any, tmp_path: Path,
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "pinned-session.jsonl"
@@ -398,10 +428,14 @@ class TestRunCommand:
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/llama3",
-                "--task", "hi",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "pinned-session",
+                "--model",
+                "ollama/llama3",
+                "--task",
+                "hi",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "pinned-session",
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -412,7 +446,9 @@ class TestRunCommand:
         assert "already exists" in captured.err
 
     def test_session_id_reuse_can_overwrite_with_flag(
-        self, fake_litellm: Any, tmp_path: Path,
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "pinned-session.jsonl"
@@ -420,10 +456,14 @@ class TestRunCommand:
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/llama3",
-                "--task", "hi",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "pinned-session",
+                "--model",
+                "ollama/llama3",
+                "--task",
+                "hi",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "pinned-session",
                 "--overwrite-session",
                 "--no-ctx-tools",
                 "--quiet",
@@ -433,19 +473,29 @@ class TestRunCommand:
         assert "sentinel" not in path.read_text(encoding="utf-8")
 
     def test_metadata_recorded(
-        self, fake_litellm: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         main(
             [
                 "run",
-                "--model", "openrouter/anthropic/claude",
-                "--task", "task-content",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "meta-test",
+                "--model",
+                "openrouter/anthropic/claude",
+                "--task",
+                "task-content",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "meta-test",
                 "--no-ctx-tools",
-                "--budget-usd", "1.5",
-                "--api-key-env", "CUSTOM_OPENROUTER_KEY",
-                "--base-url", "https://openrouter.example/api",
+                "--budget-usd",
+                "1.5",
+                "--api-key-env",
+                "CUSTOM_OPENROUTER_KEY",
+                "--base-url",
+                "https://openrouter.example/api",
                 "--quiet",
             ]
         )
@@ -462,23 +512,29 @@ class TestRunCommand:
         assert event["budget_usd"] == 1.5
 
     def test_tool_policy_metadata_recorded(
-        self, fake_litellm: Any, tmp_path: Path,
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
     ) -> None:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "hi",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "policy-meta",
-                "--allow-tool", "ctx__*",
-                "--deny-tool", "ctx__wiki_get",
+                "--model",
+                "ollama/x",
+                "--task",
+                "hi",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "policy-meta",
+                "--allow-tool",
+                "ctx__*",
+                "--deny-tool",
+                "ctx__wiki_get",
                 "--quiet",
             ]
         )
-        first_line = (tmp_path / "policy-meta.jsonl").read_text(
-            encoding="utf-8"
-        ).splitlines()[0]
+        first_line = (tmp_path / "policy-meta.jsonl").read_text(encoding="utf-8").splitlines()[0]
         event = json.loads(first_line)
         assert event["tool_policy"] == {
             "allow": ["ctx__*"],
@@ -486,7 +542,10 @@ class TestRunCommand:
         }
 
     def test_deny_tool_blocks_model_tool_call(
-        self, fake_litellm: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         def completion(**kwargs: Any) -> dict[str, Any]:
             fake_litellm._calls.append(kwargs)
@@ -496,10 +555,14 @@ class TestRunCommand:
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "call denied tool",
-                "--sessions-dir", str(tmp_path),
-                "--deny-tool", "ctx__wiki_get",
+                "--model",
+                "ollama/x",
+                "--task",
+                "call denied tool",
+                "--sessions-dir",
+                str(tmp_path),
+                "--deny-tool",
+                "ctx__wiki_get",
                 "--json",
                 "--quiet",
             ]
@@ -543,9 +606,12 @@ class TestRunCommand:
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "abnormal stop",
-                "--sessions-dir", str(tmp_path),
+                "--model",
+                "ollama/x",
+                "--task",
+                "abnormal stop",
+                "--sessions-dir",
+                str(tmp_path),
                 "--no-ctx-tools",
                 "--json",
                 "--quiet",
@@ -587,10 +653,14 @@ class TestRunCommand:
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "timeout",
-                "--sessions-dir", str(tmp_path),
-                "--provider-timeout", "0.01",
+                "--model",
+                "ollama/x",
+                "--task",
+                "timeout",
+                "--sessions-dir",
+                str(tmp_path),
+                "--provider-timeout",
+                "0.01",
                 "--no-ctx-tools",
                 "--json",
                 "--quiet",
@@ -610,14 +680,20 @@ class TestRunCommand:
         }
 
     def test_json_output(
-        self, fake_litellm: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "hi",
-                "--sessions-dir", str(tmp_path),
+                "--model",
+                "ollama/x",
+                "--task",
+                "hi",
+                "--sessions-dir",
+                str(tmp_path),
                 "--no-ctx-tools",
                 "--json",
                 "--quiet",
@@ -655,14 +731,19 @@ class TestRunCommand:
 
         monkeypatch.setattr(run_cli, "run_loop", missing_extra)
 
-        exit_code = main([
-            "run",
-            "--model", "ollama/x",
-            "--task", "hi",
-            "--sessions-dir", str(tmp_path),
-            "--no-ctx-tools",
-            "--quiet",
-        ])
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "hi",
+                "--sessions-dir",
+                str(tmp_path),
+                "--no-ctx-tools",
+                "--quiet",
+            ]
+        )
 
         captured = capsys.readouterr()
         assert exit_code == 2
@@ -670,7 +751,8 @@ class TestRunCommand:
         assert "Traceback" not in captured.err
 
     def test_task_required(
-        self, capsys: pytest.CaptureFixture[str],
+        self,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         with pytest.raises(SystemExit):
             main(["run", "--model", "ollama/x"])
@@ -686,7 +768,9 @@ class TestRunCommand:
         ],
     )
     def test_positive_numeric_flags_reject_zero(
-        self, flag: str, value: str,
+        self,
+        flag: str,
+        value: str,
     ) -> None:
         with pytest.raises(SystemExit):
             main(["run", "--model", "ollama/x", "--task", "hi", flag, value])
@@ -700,10 +784,14 @@ class TestRunCommand:
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "hi",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "../bad",
+                "--model",
+                "ollama/x",
+                "--task",
+                "hi",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "../bad",
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -713,14 +801,19 @@ class TestRunCommand:
         assert "invalid session_id" in captured.err
 
     def test_no_ctx_tools_skips_extra_tools(
-        self, fake_litellm: Any, tmp_path: Path,
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
     ) -> None:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "hi",
-                "--sessions-dir", str(tmp_path),
+                "--model",
+                "ollama/x",
+                "--task",
+                "hi",
+                "--sessions-dir",
+                str(tmp_path),
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -730,15 +823,21 @@ class TestRunCommand:
         assert "tools" not in first_call  # loop passes None → omitted
 
     def test_system_prompt_override(
-        self, fake_litellm: Any, tmp_path: Path,
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
     ) -> None:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "hi",
-                "--system-prompt", "be terse",
-                "--sessions-dir", str(tmp_path),
+                "--model",
+                "ollama/x",
+                "--task",
+                "hi",
+                "--system-prompt",
+                "be terse",
+                "--sessions-dir",
+                str(tmp_path),
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -758,10 +857,14 @@ class TestRunCommand:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "hi",
-                "--system-prompt", "-",
-                "--sessions-dir", str(tmp_path),
+                "--model",
+                "ollama/x",
+                "--task",
+                "hi",
+                "--system-prompt",
+                "-",
+                "--sessions-dir",
+                str(tmp_path),
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -787,10 +890,14 @@ class TestRunCommand:
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "hi",
-                "--sessions-dir", str(tmp_path / "sessions"),
-                "--session-id", "lifecycle-run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "hi",
+                "--sessions-dir",
+                str(tmp_path / "sessions"),
+                "--session-id",
+                "lifecycle-run",
                 "--quiet",
             ]
         )
@@ -799,9 +906,7 @@ class TestRunCommand:
 
         events = [
             json.loads(line)
-            for line in (lifecycle_dir / "events.jsonl").read_text(
-                encoding="utf-8"
-            ).splitlines()
+            for line in (lifecycle_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
         assert [event["action"] for event in events] == [
             "dev_event",
@@ -811,10 +916,7 @@ class TestRunCommand:
         assert "task" not in events[0]["payload"]
         assert events[0]["payload"]["task_hash"].startswith("sha256:")
         assert "hi" not in json.dumps(events[0])
-        cli_events = [
-            event for event in telemetry_events
-            if event["event_name"] == "ctx.cli.run"
-        ]
+        cli_events = [event for event in telemetry_events if event["event_name"] == "ctx.cli.run"]
         assert [event["payload"]["ctx.run.phase"] for event in cli_events] == [
             "started",
             "finished",
@@ -823,7 +925,8 @@ class TestRunCommand:
         assert cli_events[-1]["payload"]["ctx.stop_reason"] == "completed"
         assert "hi" not in json.dumps([event["payload"] for event in cli_events])
         tool = next(
-            item for item in fake_litellm._calls[0]["tools"]
+            item
+            for item in fake_litellm._calls[0]["tools"]
             if item["function"]["name"] == "ctx__load_entity"
         )
         assert "session_id" not in tool["function"]["parameters"]["properties"]
@@ -843,10 +946,14 @@ class TestRunCommand:
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "hi",
-                "--sessions-dir", str(tmp_path / "sessions"),
-                "--session-id", "trace-run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "hi",
+                "--sessions-dir",
+                str(tmp_path / "sessions"),
+                "--session-id",
+                "trace-run",
                 "--quiet",
             ]
         )
@@ -856,8 +963,7 @@ class TestRunCommand:
         events = list(read_events(telemetry_path, trusted_root=tmp_path))
         cli_events = [event for event in events if event.event_name == "ctx.cli.run"]
         lifecycle_events = [
-            event for event in events
-            if event.event_name == "ctx.runtime_lifecycle.record"
+            event for event in events if event.event_name == "ctx.runtime_lifecycle.record"
         ]
 
         assert [event.payload["ctx.run.phase"] for event in cli_events] == [
@@ -874,9 +980,7 @@ class TestRunCommand:
         assert cli_events[1].span_id == cli_events[0].span_id
         assert all(event.trace_id == cli_events[0].trace_id for event in lifecycle_events)
         assert all(event.parent_span_id == cli_events[0].span_id for event in lifecycle_events)
-        assert {event.span_id for event in lifecycle_events}.isdisjoint(
-            {cli_events[0].span_id}
-        )
+        assert {event.span_id for event in lifecycle_events}.isdisjoint({cli_events[0].span_id})
         assert "hi" not in telemetry_path.read_text(encoding="utf-8")
 
     def test_run_exception_telemetry_hashes_provider_error(
@@ -889,9 +993,7 @@ class TestRunCommand:
         telemetry_path = _enable_real_telemetry(monkeypatch, tmp_path)
 
         def fail_run_loop(*_args: Any, **_kwargs: Any) -> None:
-            raise RuntimeError(
-                "private provider failure for /Users/example/private-repo"
-            )
+            raise RuntimeError("private provider failure for /Users/example/private-repo")
 
         monkeypatch.setattr(run_cli, "run_loop", fail_run_loop)
 
@@ -899,10 +1001,14 @@ class TestRunCommand:
             main(
                 [
                     "run",
-                    "--model", "ollama/x",
-                    "--task", "private run task",
-                    "--sessions-dir", str(tmp_path / "sessions"),
-                    "--session-id", "trace-run-error",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "private run task",
+                    "--sessions-dir",
+                    str(tmp_path / "sessions"),
+                    "--session-id",
+                    "trace-run-error",
                     "--no-ctx-tools",
                     "--quiet",
                 ]
@@ -910,7 +1016,8 @@ class TestRunCommand:
 
         capsys.readouterr()
         events = [
-            event for event in read_events(telemetry_path, trusted_root=tmp_path)
+            event
+            for event in read_events(telemetry_path, trusted_root=tmp_path)
             if event.event_name == "ctx.cli.run"
         ]
         assert [event.payload["ctx.run.phase"] for event in events] == [
@@ -938,15 +1045,15 @@ class TestSessionsCommand:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        exit_code = main(
-            ["sessions", "not-there", "--sessions-dir", str(tmp_path)]
-        )
+        exit_code = main(["sessions", "not-there", "--sessions-dir", str(tmp_path)])
         captured = capsys.readouterr()
         assert exit_code == 1
         assert "session log not found" in captured.err
 
     def test_list_empty(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         exit_code = main(["sessions", "--sessions-dir", str(tmp_path)])
         assert exit_code == 0
@@ -954,16 +1061,22 @@ class TestSessionsCommand:
         assert "no sessions" in captured.out.lower()
 
     def test_list_after_run(
-        self, fake_litellm: Any, tmp_path: Path,
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "hi",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "listed",
+                "--model",
+                "ollama/x",
+                "--task",
+                "hi",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "listed",
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -974,17 +1087,23 @@ class TestSessionsCommand:
         assert "listed" in captured.out
 
     def test_list_json(
-        self, fake_litellm: Any, tmp_path: Path,
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         for sid in ("alpha", "beta"):
             main(
                 [
                     "run",
-                    "--model", "ollama/x",
-                    "--task", "hi",
-                    "--sessions-dir", str(tmp_path),
-                    "--session-id", sid,
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "hi",
+                    "--sessions-dir",
+                    str(tmp_path),
+                    "--session-id",
+                    sid,
                     "--no-ctx-tools",
                     "--quiet",
                 ]
@@ -996,40 +1115,50 @@ class TestSessionsCommand:
         assert ids == ["alpha", "beta"]
 
     def test_detail_view(
-        self, fake_litellm: Any, tmp_path: Path,
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "detail-task",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "detail",
+                "--model",
+                "ollama/x",
+                "--task",
+                "detail-task",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "detail",
                 "--no-ctx-tools",
                 "--quiet",
             ]
         )
         capsys.readouterr()
-        exit_code = main(
-            ["sessions", "detail", "--sessions-dir", str(tmp_path)]
-        )
+        exit_code = main(["sessions", "detail", "--sessions-dir", str(tmp_path)])
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "detail" in captured.out
         assert "detail-task" in captured.out
 
     def test_detail_json(
-        self, fake_litellm: Any, tmp_path: Path,
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "jdetail",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "jdetail",
+                "--model",
+                "ollama/x",
+                "--task",
+                "jdetail",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "jdetail",
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -1037,8 +1166,10 @@ class TestSessionsCommand:
         capsys.readouterr()
         main(
             [
-                "sessions", "jdetail",
-                "--sessions-dir", str(tmp_path),
+                "sessions",
+                "jdetail",
+                "--sessions-dir",
+                str(tmp_path),
                 "--json",
             ]
         )
@@ -1050,42 +1181,51 @@ class TestSessionsCommand:
 
 # ── Subcommand: resume ────────────────────────────────────────────────────
 
+
 class TestResumeCommand:
     @staticmethod
     def _write_session_with_mcp(tmp_path: Path, session_id: str) -> None:
         (tmp_path / f"{session_id}.jsonl").write_text(
-            json.dumps({
-                "type": "session_start",
-                "ts": "t",
-                "session_id": session_id,
-                "task": "old",
-                "model": "ollama/x",
-                "ctx_tools_enabled": False,
-                "mcp": [
-                    {
-                        "name": "danger",
-                        "command": "definitely-not-a-real-mcp-command",
-                        "args": ["--from-session"],
-                        "credential_env": ["DANGER_TOKEN"],
-                    }
-                ],
-            })
+            json.dumps(
+                {
+                    "type": "session_start",
+                    "ts": "t",
+                    "session_id": session_id,
+                    "task": "old",
+                    "model": "ollama/x",
+                    "ctx_tools_enabled": False,
+                    "mcp": [
+                        {
+                            "name": "danger",
+                            "command": "definitely-not-a-real-mcp-command",
+                            "args": ["--from-session"],
+                            "credential_env": ["DANGER_TOKEN"],
+                        }
+                    ],
+                }
+            )
             + "\n",
             encoding="utf-8",
         )
 
     def test_resume_after_initial_run(
-        self, fake_litellm: Any, tmp_path: Path,
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         # Initial run.
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "first",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "resumable",
+                "--model",
+                "ollama/x",
+                "--task",
+                "first",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "resumable",
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -1094,9 +1234,12 @@ class TestResumeCommand:
         # Resume.
         exit_code = main(
             [
-                "resume", "resumable",
-                "--task", "follow-up",
-                "--sessions-dir", str(tmp_path),
+                "resume",
+                "resumable",
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(tmp_path),
                 "--quiet",
             ]
         )
@@ -1104,8 +1247,7 @@ class TestResumeCommand:
         # Session file now has BOTH runs — count 'stop' events.
         text = (tmp_path / "resumable.jsonl").read_text(encoding="utf-8")
         stop_count = sum(
-            1 for line in text.splitlines()
-            if line and json.loads(line)["type"] == "stop"
+            1 for line in text.splitlines() if line and json.loads(line)["type"] == "stop"
         )
         assert stop_count == 2
 
@@ -1128,10 +1270,14 @@ class TestResumeCommand:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "first",
-                "--sessions-dir", str(sessions_dir),
-                "--session-id", "lifecycle-resume",
+                "--model",
+                "ollama/x",
+                "--task",
+                "first",
+                "--sessions-dir",
+                str(sessions_dir),
+                "--session-id",
+                "lifecycle-resume",
                 "--quiet",
             ]
         )
@@ -1139,9 +1285,12 @@ class TestResumeCommand:
 
         exit_code = main(
             [
-                "resume", "lifecycle-resume",
-                "--task", "follow-up",
-                "--sessions-dir", str(sessions_dir),
+                "resume",
+                "lifecycle-resume",
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(sessions_dir),
                 "--quiet",
             ]
         )
@@ -1149,9 +1298,7 @@ class TestResumeCommand:
 
         events = [
             json.loads(line)
-            for line in (lifecycle_dir / "events.jsonl").read_text(
-                encoding="utf-8"
-            ).splitlines()
+            for line in (lifecycle_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
         ]
         assert [event["action"] for event in events] == [
             "dev_event",
@@ -1164,8 +1311,7 @@ class TestResumeCommand:
         assert events[2]["payload"]["task_hash"].startswith("sha256:")
         assert "follow-up" not in json.dumps(events[2])
         resume_events = [
-            event for event in telemetry_events
-            if event["event_name"] == "ctx.cli.resume"
+            event for event in telemetry_events if event["event_name"] == "ctx.cli.resume"
         ]
         assert [event["payload"]["ctx.run.phase"] for event in resume_events] == [
             "started",
@@ -1174,12 +1320,11 @@ class TestResumeCommand:
         assert resume_events[0]["payload"]["ctx.messages.prior_count"] > 0
         assert resume_events[0]["payload"]["ctx.task.length"] == len("follow-up")
         assert resume_events[-1]["payload"]["ctx.stop_reason"] == "completed"
-        assert "follow-up" not in json.dumps(
-            [event["payload"] for event in resume_events]
-        )
+        assert "follow-up" not in json.dumps([event["payload"] for event in resume_events])
         resume_call = fake_litellm._calls[-1]
         tool = next(
-            item for item in resume_call["tools"]
+            item
+            for item in resume_call["tools"]
             if item["function"]["name"] == "ctx__session_state"
         )
         assert "session_id" not in tool["function"]["parameters"]["properties"]
@@ -1199,10 +1344,14 @@ class TestResumeCommand:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "first",
-                "--sessions-dir", str(sessions_dir),
-                "--session-id", "trace-resume",
+                "--model",
+                "ollama/x",
+                "--task",
+                "first",
+                "--sessions-dir",
+                str(sessions_dir),
+                "--session-id",
+                "trace-resume",
                 "--quiet",
             ]
         )
@@ -1210,9 +1359,12 @@ class TestResumeCommand:
 
         exit_code = main(
             [
-                "resume", "trace-resume",
-                "--task", "follow-up",
-                "--sessions-dir", str(sessions_dir),
+                "resume",
+                "trace-resume",
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(sessions_dir),
                 "--quiet",
             ]
         )
@@ -1221,18 +1373,14 @@ class TestResumeCommand:
         capsys.readouterr()
         events = list(read_events(telemetry_path, trusted_root=tmp_path))
         run_cli_events = [event for event in events if event.event_name == "ctx.cli.run"]
-        resume_cli_events = [
-            event for event in events if event.event_name == "ctx.cli.resume"
-        ]
+        resume_cli_events = [event for event in events if event.event_name == "ctx.cli.resume"]
         lifecycle_events = [
-            event for event in events
-            if event.event_name == "ctx.runtime_lifecycle.record"
+            event for event in events if event.event_name == "ctx.runtime_lifecycle.record"
         ]
         resume_trace_id = resume_cli_events[0].trace_id
         resume_span_id = resume_cli_events[0].span_id
         resume_lifecycle_events = [
-            event for event in lifecycle_events
-            if event.trace_id == resume_trace_id
+            event for event in lifecycle_events if event.trace_id == resume_trace_id
         ]
 
         assert [event.payload["ctx.run.phase"] for event in resume_cli_events] == [
@@ -1263,10 +1411,14 @@ class TestResumeCommand:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "first",
-                "--sessions-dir", str(sessions_dir),
-                "--session-id", "trace-resume-error",
+                "--model",
+                "ollama/x",
+                "--task",
+                "first",
+                "--sessions-dir",
+                str(sessions_dir),
+                "--session-id",
+                "trace-resume-error",
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -1274,9 +1426,7 @@ class TestResumeCommand:
         capsys.readouterr()
 
         def fail_run_loop(*_args: Any, **_kwargs: Any) -> None:
-            raise RuntimeError(
-                "private resume provider failure for /Users/example/private-repo"
-            )
+            raise RuntimeError("private resume provider failure for /Users/example/private-repo")
 
         monkeypatch.setattr(run_cli, "run_loop", fail_run_loop)
 
@@ -1285,15 +1435,18 @@ class TestResumeCommand:
                 [
                     "resume",
                     "trace-resume-error",
-                    "--task", "private resume task",
-                    "--sessions-dir", str(sessions_dir),
+                    "--task",
+                    "private resume task",
+                    "--sessions-dir",
+                    str(sessions_dir),
                     "--quiet",
                 ]
             )
 
         capsys.readouterr()
         events = [
-            event for event in read_events(telemetry_path, trusted_root=tmp_path)
+            event
+            for event in read_events(telemetry_path, trusted_root=tmp_path)
             if event.event_name == "ctx.cli.resume"
         ]
         assert [event.payload["ctx.run.phase"] for event in events] == [
@@ -1327,10 +1480,14 @@ class TestResumeCommand:
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "private task",
-                "--sessions-dir", str(tmp_path / "sessions"),
-                "--session-id", "lifecycle-disabled",
+                "--model",
+                "ollama/x",
+                "--task",
+                "private task",
+                "--sessions-dir",
+                str(tmp_path / "sessions"),
+                "--session-id",
+                "lifecycle-disabled",
                 "--quiet",
             ]
         )
@@ -1350,12 +1507,18 @@ class TestResumeCommand:
         main(
             [
                 "run",
-                "--model", "openai/local-model",
-                "--task", "first",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "provider-resume",
-                "--api-key-env", "LOCAL_KEY",
-                "--base-url", "http://127.0.0.1:8000/v1",
+                "--model",
+                "openai/local-model",
+                "--task",
+                "first",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "provider-resume",
+                "--api-key-env",
+                "LOCAL_KEY",
+                "--base-url",
+                "http://127.0.0.1:8000/v1",
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -1365,9 +1528,12 @@ class TestResumeCommand:
 
         exit_code = main(
             [
-                "resume", "provider-resume",
-                "--task", "follow-up",
-                "--sessions-dir", str(tmp_path),
+                "resume",
+                "provider-resume",
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(tmp_path),
                 "--quiet",
             ]
         )
@@ -1386,11 +1552,16 @@ class TestResumeCommand:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "first",
-                "--system-prompt", "",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "empty-system",
+                "--model",
+                "ollama/x",
+                "--task",
+                "first",
+                "--system-prompt",
+                "",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "empty-system",
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -1402,8 +1573,10 @@ class TestResumeCommand:
             [
                 "resume",
                 "empty-system",
-                "--task", "follow-up",
-                "--sessions-dir", str(tmp_path),
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(tmp_path),
                 "--quiet",
             ]
         )
@@ -1417,30 +1590,31 @@ class TestResumeCommand:
         ]
         message_events = [
             json.loads(line)
-            for line in (tmp_path / "empty-system.jsonl").read_text(
-                encoding="utf-8"
-            ).splitlines()
+            for line in (tmp_path / "empty-system.jsonl").read_text(encoding="utf-8").splitlines()
             if json.loads(line)["type"] == "message"
         ]
-        assert [event["content"] for event in message_events].count(
-            "final answer"
-        ) == 2
-        assert [event["content"] for event in message_events].count(
-            "follow-up"
-        ) == 1
+        assert [event["content"] for event in message_events].count("final answer") == 2
+        assert [event["content"] for event in message_events].count("follow-up") == 1
 
     def test_resume_inherits_recorded_tool_policy(
-        self, fake_litellm: Any, tmp_path: Path,
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "first",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "policy-resume",
-                "--deny-tool", "ctx__wiki_get",
+                "--model",
+                "ollama/x",
+                "--task",
+                "first",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "policy-resume",
+                "--deny-tool",
+                "ctx__wiki_get",
                 "--quiet",
             ]
         )
@@ -1453,9 +1627,12 @@ class TestResumeCommand:
         fake_litellm.completion = completion
         exit_code = main(
             [
-                "resume", "policy-resume",
-                "--task", "follow-up",
-                "--sessions-dir", str(tmp_path),
+                "resume",
+                "policy-resume",
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(tmp_path),
                 "--json",
                 "--quiet",
             ]
@@ -1471,27 +1648,31 @@ class TestResumeCommand:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         (tmp_path / "budget-resume.jsonl").write_text(
-            json.dumps({
-                "type": "session_start",
-                "ts": "t",
-                "session_id": "budget-resume",
-                "task": "old",
-                "model": "ollama/x",
-                "ctx_tools_enabled": False,
-                "budget_tokens": 10,
-            })
+            json.dumps(
+                {
+                    "type": "session_start",
+                    "ts": "t",
+                    "session_id": "budget-resume",
+                    "task": "old",
+                    "model": "ollama/x",
+                    "ctx_tools_enabled": False,
+                    "budget_tokens": 10,
+                }
+            )
             + "\n"
-            + json.dumps({
-                "type": "stop",
-                "ts": "t",
-                "session_id": "budget-resume",
-                "stop_reason": "completed",
-                "usage": {
-                    "input_tokens": 6,
-                    "output_tokens": 3,
-                    "cost_usd": None,
-                },
-            })
+            + json.dumps(
+                {
+                    "type": "stop",
+                    "ts": "t",
+                    "session_id": "budget-resume",
+                    "stop_reason": "completed",
+                    "usage": {
+                        "input_tokens": 6,
+                        "output_tokens": 3,
+                        "cost_usd": None,
+                    },
+                }
+            )
             + "\n",
             encoding="utf-8",
         )
@@ -1500,8 +1681,10 @@ class TestResumeCommand:
             [
                 "resume",
                 "budget-resume",
-                "--task", "follow-up",
-                "--sessions-dir", str(tmp_path),
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(tmp_path),
                 "--json",
                 "--quiet",
             ]
@@ -1514,15 +1697,20 @@ class TestResumeCommand:
         assert payload["usage"]["output_tokens"] == 6
 
     def test_resume_skips_recorded_mcp_by_default(
-        self, fake_litellm: Any, tmp_path: Path,
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         self._write_session_with_mcp(tmp_path, "tampered")
         exit_code = main(
             [
-                "resume", "tampered",
-                "--task", "follow-up",
-                "--sessions-dir", str(tmp_path),
+                "resume",
+                "tampered",
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(tmp_path),
             ]
         )
         captured = capsys.readouterr()
@@ -1530,7 +1718,9 @@ class TestResumeCommand:
         assert "recorded MCP server(s) skipped" in captured.err
 
     def test_resume_restores_recorded_mcp_only_with_flag(
-        self, fake_litellm: Any, tmp_path: Path,
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -1563,9 +1753,12 @@ class TestResumeCommand:
         self._write_session_with_mcp(tmp_path, "restore-mcp")
         exit_code = main(
             [
-                "resume", "restore-mcp",
-                "--task", "follow-up",
-                "--sessions-dir", str(tmp_path),
+                "resume",
+                "restore-mcp",
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(tmp_path),
                 "--restore-session-mcp",
             ]
         )
@@ -1578,24 +1771,30 @@ class TestResumeCommand:
         assert calls == ["start", "list_tools", "stop"]
 
     def test_resume_without_model_in_session_requires_flag(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         # Hand-write a session log with no 'model' in metadata.
         path = tmp_path / "no-model.jsonl"
         path.write_text(
-            json.dumps({"type": "session_start", "ts": "t",
-                        "session_id": "no-model", "task": "old"})
+            json.dumps(
+                {"type": "session_start", "ts": "t", "session_id": "no-model", "task": "old"}
+            )
             + "\n"
-            + json.dumps({"type": "message", "ts": "t",
-                          "session_id": "no-model",
-                          "role": "user", "content": "hi"})
+            + json.dumps(
+                {
+                    "type": "message",
+                    "ts": "t",
+                    "session_id": "no-model",
+                    "role": "user",
+                    "content": "hi",
+                }
+            )
             + "\n",
             encoding="utf-8",
         )
-        exit_code = main(
-            ["resume", "no-model", "--task", "go",
-             "--sessions-dir", str(tmp_path)]
-        )
+        exit_code = main(["resume", "no-model", "--task", "go", "--sessions-dir", str(tmp_path)])
         assert exit_code == 1
 
     def test_resume_missing_session(
@@ -1603,10 +1802,7 @@ class TestResumeCommand:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        exit_code = main(
-            ["resume", "not-there", "--task", "go",
-             "--sessions-dir", str(tmp_path)]
-        )
+        exit_code = main(["resume", "not-there", "--task", "go", "--sessions-dir", str(tmp_path)])
         captured = capsys.readouterr()
         assert exit_code == 1
         assert "session log not found" in captured.err

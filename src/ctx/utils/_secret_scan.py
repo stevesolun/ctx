@@ -39,10 +39,7 @@ TOKEN_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
 def secret_key_like(key: str) -> bool:
     normalized = re.sub(r"[^a-z0-9]+", "_", key.lower())
     compact = normalized.replace("_", "")
-    return any(
-        marker in normalized or marker in compact
-        for marker in SECRET_KEY_MARKERS
-    )
+    return any(marker in normalized or marker in compact for marker in SECRET_KEY_MARKERS)
 
 
 def placeholder_secret_value(value: str) -> bool:
@@ -134,7 +131,8 @@ def redact_secret_text(text: str) -> str:
         redacted = pattern.sub("[redacted]", redacted)
     secret_env_values = sorted(
         (
-            value for key, value in os.environ.items()
+            value
+            for key, value in os.environ.items()
             if value and len(value) >= 6 and secret_key_like(key)
         ),
         key=len,

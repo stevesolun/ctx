@@ -138,7 +138,8 @@ def render_loaded(
         + section("Harnesses", "harness")
         + f"<h2>Recently unloaded ({len(unload_rows)})</h2>"
         "<table><tr><th>Slug</th><th>Type</th><th>Source / reason</th><th></th></tr>"
-        + unload_html + "</table>"
+        + unload_html
+        + "</table>"
         "<script>\n"
         f"const CTX_MONITOR_MUTATIONS_ENABLED = {json.dumps(mutations_enabled)};\n"
         f"const CTX_MONITOR_TOKEN = {json.dumps(mutation_token)};\n"

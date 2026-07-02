@@ -180,9 +180,7 @@ def test_existing_agent_update_existing_applies_change(
     assert result["update_required"] is False
     assert result["is_new_page"] is False
     assert installed.read_text(encoding="utf-8") == updated_text
-    assert "Updated agent with stronger review coverage" in entity.read_text(
-        encoding="utf-8"
-    )
+    assert "Updated agent with stronger review coverage" in entity.read_text(encoding="utf-8")
 
 
 def test_new_agent_add_writes_converted_agent_mirror(
@@ -280,13 +278,21 @@ def test_main_existing_agent_prints_update_review(
         encoding="utf-8",
     )
     _patch_side_effects(monkeypatch)
-    monkeypatch.setattr(sys, "argv", [
-        "agent_add.py",
-        "--agent-path", str(source),
-        "--name", "reviewer-agent",
-        "--wiki", str(wiki),
-        "--agents-dir", str(agents_dir),
-    ])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "agent_add.py",
+            "--agent-path",
+            str(source),
+            "--name",
+            "reviewer-agent",
+            "--wiki",
+            str(wiki),
+            "--agents-dir",
+            str(agents_dir),
+        ],
+    )
 
     agent_add.main()
 

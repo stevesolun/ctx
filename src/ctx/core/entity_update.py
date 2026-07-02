@@ -66,13 +66,22 @@ _QUALITY_GRADE_RANK: dict[str, int] = {
 
 
 _SECURITY_PATTERNS: tuple[tuple[str, str], ...] = (
-    (r"\b(curl|wget)\b[^\n]*(\||;|&&)\s*(sh|bash|zsh|pwsh|powershell)\b", "network-fetched shell code"),
+    (
+        r"\b(curl|wget)\b[^\n]*(\||;|&&)\s*(sh|bash|zsh|pwsh|powershell)\b",
+        "network-fetched shell code",
+    ),
     (r"\bInvoke-Expression\b|\biex\b", "PowerShell dynamic execution"),
     (r"\brm\s+-rf\s+(/|\$HOME|~|\*)", "broad destructive deletion"),
     (r"\bgit\s+reset\s+--hard\b|\bgit\s+clean\s+-[fdx]+", "destructive git cleanup"),
     (r"\bchmod\s+777\b", "world-writable permission change"),
-    (r"\b(disable|bypass|turn off)\b[^\n]*(auth|tls|ssl|sandbox|audit|ci|test|lint)", "disables a safety control"),
-    (r"\b(AWS|GITHUB|OPENAI|ANTHROPIC|GOOGLE|AZURE)_[A-Z0-9_]*\b[^\n]*(curl|http|post|upload)", "possible secret exfiltration"),
+    (
+        r"\b(disable|bypass|turn off)\b[^\n]*(auth|tls|ssl|sandbox|audit|ci|test|lint)",
+        "disables a safety control",
+    ),
+    (
+        r"\b(AWS|GITHUB|OPENAI|ANTHROPIC|GOOGLE|AZURE)_[A-Z0-9_]*\b[^\n]*(curl|http|post|upload)",
+        "possible secret exfiltration",
+    ),
 )
 
 
@@ -95,10 +104,13 @@ def build_update_review(
     existing_fm, existing_body = parse_frontmatter_and_body(existing_text)
     proposed_fm, proposed_body = parse_frontmatter_and_body(proposed_text)
 
-    changed_fields = tuple(sorted(
-        key for key in set(existing_fm) | set(proposed_fm)
-        if existing_fm.get(key) != proposed_fm.get(key)
-    ))
+    changed_fields = tuple(
+        sorted(
+            key
+            for key in set(existing_fm) | set(proposed_fm)
+            if existing_fm.get(key) != proposed_fm.get(key)
+        )
+    )
     benefits: list[str] = []
     risks: list[str] = []
 
@@ -143,9 +155,7 @@ def build_update_review(
         risks.append(f"removes quality score {old_quality_score:g}")
     elif old_quality_score is not None and new_quality_score is not None:
         if new_quality_score < old_quality_score:
-            risks.append(
-                f"quality score drops from {old_quality_score:g} to {new_quality_score:g}"
-            )
+            risks.append(f"quality score drops from {old_quality_score:g} to {new_quality_score:g}")
         elif new_quality_score > old_quality_score:
             benefits.append(
                 f"quality score improves from {old_quality_score:g} to {new_quality_score:g}"
@@ -161,17 +171,13 @@ def build_update_review(
         old_rank = _QUALITY_GRADE_RANK.get(old_quality_grade)
         new_rank = _QUALITY_GRADE_RANK.get(new_quality_grade)
         if old_rank is not None and new_rank is not None and new_rank < old_rank:
-            risks.append(
-                f"quality grade drops from {old_quality_grade} to {new_quality_grade}"
-            )
+            risks.append(f"quality grade drops from {old_quality_grade} to {new_quality_grade}")
         elif old_rank is not None and new_rank is not None and new_rank > old_rank:
             benefits.append(
                 f"quality grade improves from {old_quality_grade} to {new_quality_grade}"
             )
         else:
-            risks.append(
-                f"quality grade changes from {old_quality_grade} to {new_quality_grade}"
-            )
+            risks.append(f"quality grade changes from {old_quality_grade} to {new_quality_grade}")
     elif new_quality_grade:
         benefits.append(f"adds quality grade {new_quality_grade}")
 

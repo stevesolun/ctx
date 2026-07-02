@@ -65,7 +65,9 @@ def ensure_wiki(wiki_path: str) -> None:
     with file_lock(schema_path):
         _reject_symlink(schema_path)
         if not schema_path.exists():
-            atomic_write_text(schema_path, f"""# Skill Wiki Schema
+            atomic_write_text(
+                schema_path,
+                f"""# Skill Wiki Schema
 
 ## Domain
 Catalog and management of all available skills, plugins, MCP servers,
@@ -101,14 +103,18 @@ harnesses, and marketplace sources for the agent development environment.
 - Flag for user review in lint report
 
 Created: {TODAY}
-""", encoding="utf-8")
+""",
+                encoding="utf-8",
+            )
 
     # index.md
     index_path = wiki / "index.md"
     with file_lock(index_path):
         _reject_symlink(index_path)
         if not index_path.exists():
-            atomic_write_text(index_path, f"""# Skill Wiki Index
+            atomic_write_text(
+                index_path,
+                f"""# Skill Wiki Index
 
 > Content catalog. Every wiki page listed under its type with a one-line summary.
 > Last updated: {TODAY} | Total pages: 0
@@ -128,14 +134,18 @@ Created: {TODAY}
 ## Comparisons
 
 ## Queries
-""", encoding="utf-8")
+""",
+                encoding="utf-8",
+            )
 
     # log.md
     log_path = wiki / "log.md"
     with file_lock(log_path):
         _reject_symlink(log_path)
         if not log_path.exists():
-            atomic_write_text(log_path, f"""# Skill Wiki Log
+            atomic_write_text(
+                log_path,
+                f"""# Skill Wiki Log
 
 > Chronological record of all wiki actions. Append-only.
 > Format: `## [YYYY-MM-DD] action | subject`
@@ -143,7 +153,9 @@ Created: {TODAY}
 ## [{TODAY}] create | Wiki initialized
 - Domain: Skills, plugins, MCP server catalog, and harness catalog
 - Structure created with SCHEMA.md, index.md, log.md
-""", encoding="utf-8")
+""",
+                encoding="utf-8",
+            )
 
 
 def save_scan(wiki_path: str, profile: dict) -> str:
@@ -262,18 +274,28 @@ def upsert_skill_page(
             # Infer tags from reason
             tags = []
             reason = skill_info.get("reason", "").lower()
-            for tag in ["python", "javascript", "typescript", "react", "docker",
-                         "fastapi", "django", "langchain", "mcp", "testing"]:
+            for tag in [
+                "python",
+                "javascript",
+                "typescript",
+                "react",
+                "docker",
+                "fastapi",
+                "django",
+                "langchain",
+                "mcp",
+                "testing",
+            ]:
                 if tag in reason or tag in skill_name:
                     tags.append(tag)
             if not tags:
                 tags = ["uncategorized"]
 
             safe_path = _sanitize_yaml_value(
-                skill_info.get('path') or skill_info.get('command', 'unknown')
+                skill_info.get("path") or skill_info.get("command", "unknown")
             )
-            safe_reason = _sanitize_yaml_value(skill_info.get('reason', 'Unknown'))
-            safe_repo = _sanitize_yaml_value(skill_info.get('repo', 'unknown'))
+            safe_reason = _sanitize_yaml_value(skill_info.get("reason", "Unknown"))
+            safe_repo = _sanitize_yaml_value(skill_info.get("repo", "unknown"))
 
             content = f"""---
 title: {skill_name}
@@ -281,10 +303,10 @@ created: {TODAY}
 updated: {TODAY}
 type: {entity_type}
 status: installed
-tags: [{', '.join(tags)}]
+tags: [{", ".join(tags)}]
 source: local
 path: {safe_path}
-stacks: [{', '.join(tags)}]
+stacks: [{", ".join(tags)}]
 always_load: false
 never_load: false
 last_used: {TODAY}
@@ -302,7 +324,7 @@ Detected and loaded by skill-router.
 {safe_reason}
 
 ## Priority Score
-{skill_info.get('priority', 0)}
+{skill_info.get("priority", 0)}
 
 ## Related Skills
 <!-- Add [[wikilinks]] to related skills -->
@@ -316,8 +338,11 @@ Detected and loaded by skill-router.
             # Update existing page: bump updated date and use_count
             assert content is not None
             content = re.sub(
-                r"^updated: .+$", f"updated: {TODAY}",
-                content, count=1, flags=re.MULTILINE,
+                r"^updated: .+$",
+                f"updated: {TODAY}",
+                content,
+                count=1,
+                flags=re.MULTILINE,
             )
             # Increment use_count
             old_count = _find_field(content, "use_count")
@@ -325,19 +350,24 @@ Detected and loaded by skill-router.
                 try:
                     new_count = int(old_count) + 1
                     content = re.sub(
-                        r"^use_count: .+$", f"use_count: {new_count}",
-                        content, count=1, flags=re.MULTILINE,
+                        r"^use_count: .+$",
+                        f"use_count: {new_count}",
+                        content,
+                        count=1,
+                        flags=re.MULTILINE,
                     )
                 except ValueError:
                     pass
 
             content = re.sub(
-                r"^last_used: .+$", f"last_used: {TODAY}",
-                content, count=1, flags=re.MULTILINE,
+                r"^last_used: .+$",
+                f"last_used: {TODAY}",
+                content,
+                count=1,
+                flags=re.MULTILINE,
             )
         _write_wiki_page(wiki_path, relpath, content)
     return is_new
-
 
 
 # Section header used for each subject type in index.md. The canonical map
@@ -423,8 +453,7 @@ def update_index(
 
         for slug in sorted(new_entries):
             entry = (
-                f"- [[{_entity_index_link(subject_type, slug)}]] "
-                "- Auto-discovered by skill-router"
+                f"- [[{_entity_index_link(subject_type, slug)}]] - Auto-discovered by skill-router"
             )
             if entry not in content:
                 lines.insert(insert_idx, entry)
@@ -485,14 +514,20 @@ def upsert_usage(wiki_path: str, skill_name: str, session_date: str, used: bool)
             if old_count:
                 try:
                     content = re.sub(
-                        r"^use_count: .+$", f"use_count: {int(old_count) + 1}",
-                        content, count=1, flags=re.MULTILINE,
+                        r"^use_count: .+$",
+                        f"use_count: {int(old_count) + 1}",
+                        content,
+                        count=1,
+                        flags=re.MULTILINE,
                     )
                 except ValueError:
                     pass
             content = re.sub(
-                r"^last_used: .+$", f"last_used: {session_date}",
-                content, count=1, flags=re.MULTILINE,
+                r"^last_used: .+$",
+                f"last_used: {session_date}",
+                content,
+                count=1,
+                flags=re.MULTILINE,
             )
 
         _write_wiki_page(wiki_path, relpath, content)
@@ -515,10 +550,16 @@ def mark_stale(wiki_path: str, skill_name: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Sync scan results into skill wiki")
-    parser.add_argument("--init", action="store_true", help="Initialize wiki structure only (no profile/manifest needed)")
+    parser.add_argument(
+        "--init",
+        action="store_true",
+        help="Initialize wiki structure only (no profile/manifest needed)",
+    )
     parser.add_argument("--profile", help="Path to stack-profile.json")
     parser.add_argument("--manifest", help="Path to skill-manifest.json")
-    parser.add_argument("--wiki", default=os.path.expanduser("~/.claude/skill-wiki"), help="Wiki path")
+    parser.add_argument(
+        "--wiki", default=os.path.expanduser("~/.claude/skill-wiki"), help="Wiki path"
+    )
     args = parser.parse_args()
 
     # --init mode: just create wiki structure
@@ -578,20 +619,13 @@ def main():
         f"Warnings: {len(manifest.get('warnings', []))}",
         f"Scan saved: {scan_file}",
     ]
-    new_pages = [
-        slug
-        for new_entries in new_entries_by_subject.values()
-        for slug in new_entries
-    ]
+    new_pages = [slug for new_entries in new_entries_by_subject.values() for slug in new_entries]
     if new_pages:
         details.append(f"New pages: {', '.join(new_pages)}")
 
     append_log(args.wiki, "scan", repo_name, details)
 
-    print(
-        f"Wiki synced: {len(new_pages)} new pages, "
-        f"{len(manifest['load'])} entities tracked"
-    )
+    print(f"Wiki synced: {len(new_pages)} new pages, {len(manifest['load'])} entities tracked")
 
 
 if __name__ == "__main__":

@@ -51,12 +51,8 @@ def test_graph_artifact_guard_parks_and_unparks_tracked_artifacts(
     assert _git(repo, "ls-files", "-v", "graph/entity-overlays.jsonl").startswith("S ")
 
     assert guard.main(["--repo", str(repo), "unpark"]) == 0
-    assert not _git(repo, "ls-files", "-v", "graph/wiki-graph.tar.gz").startswith(
-        "S "
-    )
-    assert not _git(repo, "ls-files", "-v", "graph/entity-overlays.jsonl").startswith(
-        "S "
-    )
+    assert not _git(repo, "ls-files", "-v", "graph/wiki-graph.tar.gz").startswith("S ")
+    assert not _git(repo, "ls-files", "-v", "graph/entity-overlays.jsonl").startswith("S ")
 
 
 def test_graph_artifact_guard_removes_only_stale_graph_files(

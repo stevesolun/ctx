@@ -34,10 +34,28 @@ else:
 
 # Directories to always skip
 SKIP_DIRS = {
-    "node_modules", ".git", "__pycache__", "venv", ".venv", "env",
-    ".env", "dist", "build", ".next", ".nuxt", ".cache", ".tox",
-    "target", "vendor", ".terraform", ".serverless", "coverage",
-    ".mypy_cache", ".pytest_cache", ".ruff_cache", "egg-info",
+    "node_modules",
+    ".git",
+    "__pycache__",
+    "venv",
+    ".venv",
+    "env",
+    ".env",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    ".cache",
+    ".tox",
+    "target",
+    "vendor",
+    ".terraform",
+    ".serverless",
+    "coverage",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "egg-info",
 }
 
 # Max depth for directory scanning
@@ -55,33 +73,81 @@ def _default_output_path() -> Path:
 def scan_directory(repo_path: str, max_depth: int = MAX_DEPTH) -> dict:
     """Walk the repo and collect file/dir signals without reading contents."""
     signals: dict[str, list[Any]] = {
-        "files": [],        # (relative_path, extension)
-        "dirs": [],         # relative directory paths
-        "config_files": [], # config files found (will be read)
+        "files": [],  # (relative_path, extension)
+        "dirs": [],  # relative directory paths
+        "config_files": [],  # config files found (will be read)
     }
 
     repo = Path(repo_path).resolve()
     config_names = {
-        "package.json", "pyproject.toml", "requirements.txt", "Pipfile",
-        "Cargo.toml", "go.mod", "Gemfile", "composer.json", "pom.xml",
-        "build.gradle", "build.gradle.kts",
-        "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
-        "tsconfig.json", "next.config.js", "next.config.mjs", "next.config.ts",
-        "nuxt.config.ts", "nuxt.config.js", "angular.json", "svelte.config.js",
-        "vite.config.ts", "vite.config.js", "webpack.config.js",
-        "tailwind.config.js", "tailwind.config.ts",
-        "jest.config.js", "jest.config.ts", "vitest.config.ts",
-        "pytest.ini", "setup.cfg", "tox.ini",
-        "mkdocs.yml", ".gitlab-ci.yml", "Jenkinsfile",
-        "turbo.json", "nx.json", "lerna.json", "pnpm-workspace.yaml",
-        "fly.toml", "vercel.json", "netlify.toml", "render.yaml",
-        "serverless.yml", "cdk.json", "Pulumi.yaml",
-        "mcp.json", "CLAUDE.md", ".cursorrules", ".windsurfrules",
-        "alembic.ini", "dbt_project.yml",
-        "openapi.yaml", "openapi.json", "swagger.yaml", "swagger.json",
-        ".coveragerc", "playwright.config.ts", "cypress.config.ts",
-        "poetry.lock", "yarn.lock", "pnpm-lock.yaml", "package-lock.json",
-        "Cargo.lock", "Gemfile.lock", "go.sum", "composer.lock",
+        "package.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "Pipfile",
+        "Cargo.toml",
+        "go.mod",
+        "Gemfile",
+        "composer.json",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "Dockerfile",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "tsconfig.json",
+        "next.config.js",
+        "next.config.mjs",
+        "next.config.ts",
+        "nuxt.config.ts",
+        "nuxt.config.js",
+        "angular.json",
+        "svelte.config.js",
+        "vite.config.ts",
+        "vite.config.js",
+        "webpack.config.js",
+        "tailwind.config.js",
+        "tailwind.config.ts",
+        "jest.config.js",
+        "jest.config.ts",
+        "vitest.config.ts",
+        "pytest.ini",
+        "setup.cfg",
+        "tox.ini",
+        "mkdocs.yml",
+        ".gitlab-ci.yml",
+        "Jenkinsfile",
+        "turbo.json",
+        "nx.json",
+        "lerna.json",
+        "pnpm-workspace.yaml",
+        "fly.toml",
+        "vercel.json",
+        "netlify.toml",
+        "render.yaml",
+        "serverless.yml",
+        "cdk.json",
+        "Pulumi.yaml",
+        "mcp.json",
+        "CLAUDE.md",
+        ".cursorrules",
+        ".windsurfrules",
+        "alembic.ini",
+        "dbt_project.yml",
+        "openapi.yaml",
+        "openapi.json",
+        "swagger.yaml",
+        "swagger.json",
+        ".coveragerc",
+        "playwright.config.ts",
+        "cypress.config.ts",
+        "poetry.lock",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "package-lock.json",
+        "Cargo.lock",
+        "Gemfile.lock",
+        "go.sum",
+        "composer.lock",
     }
 
     # Hidden dirs that DO carry signal — must be walked. ``.github``
@@ -98,9 +164,9 @@ def scan_directory(repo_path: str, max_depth: int = MAX_DEPTH) -> dict:
         # Skip ignored dirs. Hidden dirs are dropped EXCEPT the
         # allowlisted signal-bearing ones (.github etc.).
         dirnames[:] = [
-            d for d in dirnames
-            if d not in SKIP_DIRS
-            and (not d.startswith(".") or d in SIGNAL_HIDDEN_DIRS)
+            d
+            for d in dirnames
+            if d not in SKIP_DIRS and (not d.startswith(".") or d in SIGNAL_HIDDEN_DIRS)
         ]
 
         if depth > max_depth:
@@ -115,9 +181,7 @@ def scan_directory(repo_path: str, max_depth: int = MAX_DEPTH) -> dict:
             signals["files"].append((rel_path, ext))
 
             if fname in config_names or fname.endswith(".tf"):
-                signals["config_files"].append(
-                    os.path.join(dirpath, fname)
-                )
+                signals["config_files"].append(os.path.join(dirpath, fname))
 
     return signals
 
@@ -258,10 +322,19 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
 
     # --- LANGUAGES ---
     lang_map = {
-        ".py": "python", ".ts": "typescript", ".tsx": "typescript",
-        ".js": "javascript", ".jsx": "javascript",
-        ".rs": "rust", ".go": "go", ".java": "java", ".kt": "kotlin",
-        ".rb": "ruby", ".swift": "swift", ".cs": "csharp", ".php": "php",
+        ".py": "python",
+        ".ts": "typescript",
+        ".tsx": "typescript",
+        ".js": "javascript",
+        ".jsx": "javascript",
+        ".rs": "rust",
+        ".go": "go",
+        ".java": "java",
+        ".kt": "kotlin",
+        ".rb": "ruby",
+        ".swift": "swift",
+        ".cs": "csharp",
+        ".php": "php",
     }
     detected_langs: dict[str, int] = {}
     for ext, count in ext_counts.items():
@@ -286,9 +359,9 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
                 evidence.append(lf)
                 conf = min(conf + 0.1, 1.0)
 
-        profile["languages"].append({
-            "name": lang, "confidence": round(conf, 2), "evidence": evidence
-        })
+        profile["languages"].append(
+            {"name": lang, "confidence": round(conf, 2), "evidence": evidence}
+        )
 
     # --- FRAMEWORKS (check deps) ---
     fw_checks = [
@@ -329,10 +402,14 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
     ]
     for dep_set, dep_name, stack_id, category, conf in fw_checks:
         if dep_name in dep_set:
-            profile["frameworks"].append({
-                "name": stack_id, "category": category,
-                "confidence": conf, "evidence": [f"{dep_name} in dependencies"]
-            })
+            profile["frameworks"].append(
+                {
+                    "name": stack_id,
+                    "category": category,
+                    "confidence": conf,
+                    "evidence": [f"{dep_name} in dependencies"],
+                }
+            )
 
     # Config-based framework detection
     config_fw = {
@@ -352,10 +429,9 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
                 existing[0]["confidence"] = max(existing[0]["confidence"], conf)
                 existing[0]["evidence"].append(cfg_name)
             else:
-                profile["frameworks"].append({
-                    "name": stack_id, "category": cat,
-                    "confidence": conf, "evidence": [cfg_name]
-                })
+                profile["frameworks"].append(
+                    {"name": stack_id, "category": cat, "confidence": conf, "evidence": [cfg_name]}
+                )
 
     # --- INFRASTRUCTURE ---
     infra_map = {
@@ -376,34 +452,35 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
     }
     for cfg_name, (stack_id, conf) in infra_map.items():
         if cfg_name in config_basenames:
-            profile["infrastructure"].append({
-                "name": stack_id, "confidence": conf, "evidence": [cfg_name]
-            })
+            profile["infrastructure"].append(
+                {"name": stack_id, "confidence": conf, "evidence": [cfg_name]}
+            )
 
     # GitHub Actions
     if ".github" in dir_basenames:
         gh_wf = [d for d in signals["dirs"] if "workflows" in d and ".github" in d]
         if gh_wf:
-            profile["infrastructure"].append({
-                "name": "github-actions", "confidence": 1.0,
-                "evidence": [".github/workflows/"]
-            })
+            profile["infrastructure"].append(
+                {"name": "github-actions", "confidence": 1.0, "evidence": [".github/workflows/"]}
+            )
 
     # Terraform
     tf_files = [f for f, ext in signals["files"] if ext == ".tf"]
     if tf_files:
-        profile["infrastructure"].append({
-            "name": "terraform", "confidence": 1.0,
-            "evidence": [f"{len(tf_files)} .tf files"]
-        })
+        profile["infrastructure"].append(
+            {"name": "terraform", "confidence": 1.0, "evidence": [f"{len(tf_files)} .tf files"]}
+        )
 
     # K8s
     k8s_dirs = {"k8s", "kubernetes", "helm", "charts"}
     if k8s_dirs & dir_basenames:
-        profile["infrastructure"].append({
-            "name": "kubernetes", "confidence": 0.95,
-            "evidence": [f"directory: {k8s_dirs & dir_basenames}"]
-        })
+        profile["infrastructure"].append(
+            {
+                "name": "kubernetes",
+                "confidence": 0.95,
+                "evidence": [f"directory: {k8s_dirs & dir_basenames}"],
+            }
+        )
 
     # --- DATA STORES ---
     data_checks = [
@@ -438,25 +515,27 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
         if dep_name in dep_set:
             existing = [d for d in profile["data_stores"] if d["name"] == stack_id]
             if not existing:
-                profile["data_stores"].append({
-                    "name": stack_id, "confidence": conf,
-                    "evidence": [f"{dep_name} in dependencies"]
-                })
+                profile["data_stores"].append(
+                    {
+                        "name": stack_id,
+                        "confidence": conf,
+                        "evidence": [f"{dep_name} in dependencies"],
+                    }
+                )
 
     if "alembic" in dir_basenames or "alembic.ini" in config_basenames:
         existing = [d for d in profile["data_stores"] if d["name"] == "sqlalchemy"]
         if existing:
             existing[0]["evidence"].append("alembic/ directory")
         else:
-            profile["data_stores"].append({
-                "name": "sqlalchemy", "confidence": 0.95,
-                "evidence": ["alembic/ directory"]
-            })
+            profile["data_stores"].append(
+                {"name": "sqlalchemy", "confidence": 0.95, "evidence": ["alembic/ directory"]}
+            )
 
     if "dbt_project.yml" in config_basenames:
-        profile["data_stores"].append({
-            "name": "dbt", "confidence": 1.0, "evidence": ["dbt_project.yml"]
-        })
+        profile["data_stores"].append(
+            {"name": "dbt", "confidence": 1.0, "evidence": ["dbt_project.yml"]}
+        )
 
     # --- TESTING ---
     test_map = {
@@ -473,9 +552,9 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
         if cfg_name in config_basenames:
             existing = [t for t in profile["testing"] if t["name"] == stack_id]
             if not existing:
-                profile["testing"].append({
-                    "name": stack_id, "confidence": conf, "evidence": [cfg_name]
-                })
+                profile["testing"].append(
+                    {"name": stack_id, "confidence": conf, "evidence": [cfg_name]}
+                )
 
     # Dev-dependency based test-framework detection — catches pytest /
     # jest / vitest / playwright / cypress declared in pyproject
@@ -493,33 +572,35 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
         if dep_name in dep_set:
             existing = [t for t in profile["testing"] if t["name"] == stack_id]
             if not existing:
-                profile["testing"].append({
-                    "name": stack_id, "confidence": conf,
-                    "evidence": [f"{dep_name} in dependencies"],
-                })
+                profile["testing"].append(
+                    {
+                        "name": stack_id,
+                        "confidence": conf,
+                        "evidence": [f"{dep_name} in dependencies"],
+                    }
+                )
 
     # --- AI TOOLING ---
     if "mcp.json" in config_basenames or ".mcp" in dir_basenames:
-        profile["ai_tooling"].append({
-            "name": "mcp", "confidence": 1.0,
-            "evidence": ["mcp.json or .mcp/ directory"]
-        })
+        profile["ai_tooling"].append(
+            {"name": "mcp", "confidence": 1.0, "evidence": ["mcp.json or .mcp/ directory"]}
+        )
     if "CLAUDE.md" in config_basenames:
-        profile["ai_tooling"].append({
-            "name": "claude-code", "confidence": 0.95,
-            "evidence": ["CLAUDE.md"]
-        })
+        profile["ai_tooling"].append(
+            {"name": "claude-code", "confidence": 0.95, "evidence": ["CLAUDE.md"]}
+        )
 
     # --- BUILD SYSTEM ---
     build_map = {
-        "vite.config.ts": "vite", "vite.config.js": "vite",
+        "vite.config.ts": "vite",
+        "vite.config.js": "vite",
         "webpack.config.js": "webpack",
     }
     for cfg_name, stack_id in build_map.items():
         if cfg_name in config_basenames:
-            profile["build_system"].append({
-                "name": stack_id, "confidence": 1.0, "evidence": [cfg_name]
-            })
+            profile["build_system"].append(
+                {"name": stack_id, "confidence": 1.0, "evidence": [cfg_name]}
+            )
 
     # --- DOCS ---
     doc_map = {
@@ -529,19 +610,17 @@ def detect_stack(repo_path: str, signals: dict) -> dict:
     }
     for cfg_name, stack_id in doc_map.items():
         if cfg_name in config_basenames:
-            profile["docs"].append({
-                "name": stack_id, "confidence": 1.0, "evidence": [cfg_name]
-            })
+            profile["docs"].append({"name": stack_id, "confidence": 1.0, "evidence": [cfg_name]})
 
     openapi_files = [
-        f for f, _ in signals["files"]
+        f
+        for f, _ in signals["files"]
         if os.path.basename(f) in ("openapi.yaml", "openapi.json", "swagger.yaml", "swagger.json")
     ]
     if openapi_files:
-        profile["docs"].append({
-            "name": "openapi", "confidence": 0.95,
-            "evidence": openapi_files[:3]
-        })
+        profile["docs"].append(
+            {"name": "openapi", "confidence": 0.95, "evidence": openapi_files[:3]}
+        )
 
     # --- MONOREPO ---
     monorepo_signals = {"turbo.json", "nx.json", "lerna.json", "pnpm-workspace.yaml"}
@@ -693,13 +772,9 @@ def _print_recommendations(repo: str, profile: dict) -> None:
     print("=" * 60)
 
     skills = [
-        e for e in load_entries
-        if (e.get("entity_type") or e.get("type") or "skill") == "skill"
+        e for e in load_entries if (e.get("entity_type") or e.get("type") or "skill") == "skill"
     ]
-    agents = [
-        e for e in load_entries
-        if (e.get("entity_type") or e.get("type")) == "agent"
-    ]
+    agents = [e for e in load_entries if (e.get("entity_type") or e.get("type")) == "agent"]
 
     # Skills section
     print(f"\n-- Skills ({len(skills)}) --")
@@ -775,10 +850,14 @@ def main():
 
     # Summary to stdout
     total = (
-        len(profile["languages"]) + len(profile["frameworks"]) +
-        len(profile["infrastructure"]) + len(profile["data_stores"]) +
-        len(profile["testing"]) + len(profile["ai_tooling"]) +
-        len(profile["build_system"]) + len(profile["docs"])
+        len(profile["languages"])
+        + len(profile["frameworks"])
+        + len(profile["infrastructure"])
+        + len(profile["data_stores"])
+        + len(profile["testing"])
+        + len(profile["ai_tooling"])
+        + len(profile["build_system"])
+        + len(profile["docs"])
     )
     print(f"Scanned {args.repo}: {total} stack elements detected")
     print(f"Type: {profile['project_type']} | Monorepo: {profile['monorepo']}")

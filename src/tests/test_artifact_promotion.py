@@ -122,14 +122,16 @@ def test_promote_staged_artifact_recovers_after_post_replace_crash(
         "mtime_ns": 1,
     }
     metadata_path.write_text(
-        json.dumps({
-            "schema_version": 1,
-            "status": "staged",
-            "target": str(target),
-            "started_at": "2026-05-04T00:00:00+00:00",
-            "previous": previous,
-            "candidate": candidate,
-        }),
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "staged",
+                "target": str(target),
+                "started_at": "2026-05-04T00:00:00+00:00",
+                "previous": previous,
+                "candidate": candidate,
+            }
+        ),
         encoding="utf-8",
     )
 

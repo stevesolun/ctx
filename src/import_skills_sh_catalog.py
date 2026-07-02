@@ -84,19 +84,76 @@ _HYDRATION_CHECKPOINT_FIELDS = (
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _SAFE_SLUG_RE = re.compile(r"[^a-z0-9]+")
 _VOID_HTML_TAGS = {
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
-    "param", "source", "track", "wbr",
+    "area",
+    "base",
+    "br",
+    "col",
+    "embed",
+    "hr",
+    "img",
+    "input",
+    "link",
+    "meta",
+    "param",
+    "source",
+    "track",
+    "wbr",
 }
 _NOISY_EXTERNAL_EDGE_TAGS = {
-    "skills-sh", "skill", "skills", "ai", "agent", "agents", "api", "web", "code",
+    "skills-sh",
+    "skill",
+    "skills",
+    "ai",
+    "agent",
+    "agents",
+    "api",
+    "web",
+    "code",
 }
 _COMMON_TAGS = {
-    "ai", "api", "agent", "agents", "anthropic", "automation", "aws", "azure",
-    "claude", "cloud", "code", "codex", "css", "data", "database", "deploy",
-    "design", "devops", "docker", "docs", "fastapi", "frontend", "github",
-    "google", "javascript", "kubernetes", "llm", "mcp", "microsoft", "nextjs",
-    "node", "openai", "performance", "playwright", "postgres", "python",
-    "react", "security", "skill", "testing", "typescript", "vercel", "web",
+    "ai",
+    "api",
+    "agent",
+    "agents",
+    "anthropic",
+    "automation",
+    "aws",
+    "azure",
+    "claude",
+    "cloud",
+    "code",
+    "codex",
+    "css",
+    "data",
+    "database",
+    "deploy",
+    "design",
+    "devops",
+    "docker",
+    "docs",
+    "fastapi",
+    "frontend",
+    "github",
+    "google",
+    "javascript",
+    "kubernetes",
+    "llm",
+    "mcp",
+    "microsoft",
+    "nextjs",
+    "node",
+    "openai",
+    "performance",
+    "playwright",
+    "postgres",
+    "python",
+    "react",
+    "security",
+    "skill",
+    "testing",
+    "typescript",
+    "vercel",
+    "web",
 }
 _TAG_ALIASES = {
     "doc": "docs",
@@ -224,19 +281,24 @@ def _read_sitemap_records() -> list[dict[str, Any]]:
             full_id = f"{source}/{skill_id}"
         else:
             continue
-        records.append({
-            "id": full_id,
-            "source": source,
-            "skillId": skill_id,
-            "name": skill_id,
-            "installs": 0,
-            "_from_sitemap": True,
-        })
+        records.append(
+            {
+                "id": full_id,
+                "source": source,
+                "skillId": skill_id,
+                "name": skill_id,
+                "installs": 0,
+                "_from_sitemap": True,
+            }
+        )
     return records
 
 
 def _fetch_query(
-    query: str, *, limit: int, delay_seconds: float = 0.0,
+    query: str,
+    *,
+    limit: int,
+    delay_seconds: float = 0.0,
 ) -> tuple[str, list[dict[str, Any]], str | None]:
     if delay_seconds > 0:
         time.sleep(delay_seconds)
@@ -293,8 +355,21 @@ class _SkillBodyParser(HTMLParser):
         if self._capture_depth == 0:
             return
         if tag in {
-            "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "blockquote",
-            "li", "ul", "ol", "div", "section", "article",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "p",
+            "pre",
+            "blockquote",
+            "li",
+            "ul",
+            "ol",
+            "div",
+            "section",
+            "article",
         }:
             self._push("\n")
         if tag == "pre" and self._pre_depth > 0:
@@ -379,10 +454,7 @@ def _fetch_detail_html(
 
 
 def _github_repo_parts(source: str) -> tuple[str, str] | None:
-    if (
-        "/" not in source
-        or source.startswith(("http://", "https://"))
-    ):
+    if "/" not in source or source.startswith(("http://", "https://")):
         return None
     owner, repo = source.split("/", 1)
     if not owner or not repo:
@@ -515,7 +587,8 @@ def _refresh_body_summary(catalog: dict[str, Any]) -> dict[str, Any]:
     raw_skills = catalog.get("skills")
     skills = raw_skills if isinstance(raw_skills, list) else []
     body_available_count = sum(
-        1 for item in skills
+        1
+        for item in skills
         if isinstance(item, dict) and (item.get("body_available") or item.get("skill_body"))
     )
     attempted_count = catalog.get("body_hydration_attempted_count", 0)
@@ -527,7 +600,8 @@ def _refresh_body_summary(catalog: dict[str, Any]) -> dict[str, Any]:
         "body_packaged_count": body_available_count,
         "body_hydrated_total_count": body_available_count,
         "body_hydration_checkpoint_applied_count": catalog.get(
-            "body_hydration_checkpoint_applied_count", 0,
+            "body_hydration_checkpoint_applied_count",
+            0,
         ),
         "body_hydration_attempted_count": attempted_count,
         "body_hydrated_count": hydrated_count,
@@ -540,7 +614,11 @@ def _refresh_body_summary(catalog: dict[str, Any]) -> dict[str, Any]:
 
 def _catalog_skills(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     raw_skills = catalog.get("skills")
-    return [item for item in raw_skills if isinstance(item, dict)] if isinstance(raw_skills, list) else []
+    return (
+        [item for item in raw_skills if isinstance(item, dict)]
+        if isinstance(raw_skills, list)
+        else []
+    )
 
 
 def _has_packaged_or_inline_body(item: dict[str, Any]) -> bool:
@@ -566,8 +644,12 @@ def drop_body_unavailable_skills(catalog: dict[str, Any]) -> dict[str, int]:
     catalog["observed_unique_skills_before_body_prune"] = original_count
     catalog["observed_unique_skills"] = len(kept)
     catalog["body_unavailable_pruned_count"] = pruned_count
-    catalog["body_unavailable_pruned_at"] = _utc_now() if pruned_count else catalog.get(
-        "body_unavailable_pruned_at",
+    catalog["body_unavailable_pruned_at"] = (
+        _utc_now()
+        if pruned_count
+        else catalog.get(
+            "body_unavailable_pruned_at",
+        )
     )
     site_total = catalog.get("site_reported_total")
     catalog["coverage_vs_site_reported_total"] = (
@@ -576,17 +658,20 @@ def drop_body_unavailable_skills(catalog: dict[str, Any]) -> dict[str, int]:
     overlap = catalog.setdefault("overlap", {})
     if isinstance(overlap, dict):
         overlap["skill_id_matches_existing_wiki"] = sum(
-            1 for item in kept
+            1
+            for item in kept
             if isinstance(item.get("overlap"), dict)
             and item["overlap"].get("skill_id_in_existing_wiki")
         )
         overlap["ctx_slug_matches_existing_wiki"] = sum(
-            1 for item in kept
+            1
+            for item in kept
             if isinstance(item.get("overlap"), dict)
             and item["overlap"].get("ctx_slug_in_existing_wiki")
         )
     catalog["ctx_slug_collisions_resolved"] = sum(
-        1 for item in kept
+        1
+        for item in kept
         if isinstance(item.get("overlap"), dict)
         and item["overlap"].get("ctx_slug_collision_resolved")
     )
@@ -617,22 +702,15 @@ def hydrate_catalog_bodies(
     skills = raw_skills if isinstance(raw_skills, list) else []
     total = len(skills)
     checkpoint_applied = _apply_hydration_checkpoint(catalog, checkpoint_path)
+
     def has_available_body(item: dict[str, Any]) -> bool:
         return bool(item.get("body_available") or item.get("skill_body"))
 
     already_available = sum(
-        1 for item in skills
-        if isinstance(item, dict) and has_available_body(item)
+        1 for item in skills if isinstance(item, dict) and has_available_body(item)
     )
-    pending = [
-        item for item in skills
-        if isinstance(item, dict)
-        and not has_available_body(item)
-    ]
-    fetchable = [
-        item for item in pending
-        if str(item.get("detail_url") or "").strip()
-    ]
+    pending = [item for item in skills if isinstance(item, dict) and not has_available_body(item)]
+    fetchable = [item for item in pending if str(item.get("detail_url") or "").strip()]
     fetchable_count = len(fetchable)
     not_fetchable = len(pending) - fetchable_count
     candidates = fetchable
@@ -707,8 +785,7 @@ def hydrate_catalog_bodies(
 
     if candidates:
         checkpoint_writer = (
-            _open_checkpoint_writer(checkpoint_path)
-            if checkpoint_path is not None else None
+            _open_checkpoint_writer(checkpoint_path) if checkpoint_path is not None else None
         )
         try:
             with cf.ThreadPoolExecutor(max_workers=max(workers, 1)) as executor:
@@ -722,7 +799,9 @@ def hydrate_catalog_bodies(
                             body = body[:max_body_chars].rstrip()
                         item["skill_body"] = body
                         item["body_available"] = True
-                        item["body_source_url"] = body_source_url or str(item.get("detail_url") or "")
+                        item["body_source_url"] = body_source_url or str(
+                            item.get("detail_url") or ""
+                        )
                         item["body_hydrated_at"] = hydration_time
                         item.pop("body_error", None)
                         hydrated += 1
@@ -730,11 +809,13 @@ def hydrate_catalog_bodies(
                         item["body_available"] = False
                         if error:
                             item["body_error"] = error
-                            errors.append({
-                                "id": str(item.get("id") or ""),
-                                "detail_url": str(item.get("detail_url") or ""),
-                                "error": error,
-                            })
+                            errors.append(
+                                {
+                                    "id": str(item.get("id") or ""),
+                                    "detail_url": str(item.get("detail_url") or ""),
+                                    "error": error,
+                                }
+                            )
                     if checkpoint_writer is not None:
                         json.dump(
                             _checkpoint_record(item),
@@ -745,8 +826,7 @@ def hydrate_catalog_bodies(
                         checkpoint_writer.write("\n")
                         checkpoint_writer.flush()
                     if progress_every > 0 and (
-                        completed % progress_every == 0
-                        or completed == len(candidates)
+                        completed % progress_every == 0 or completed == len(candidates)
                     ):
                         elapsed = max(time.time() - started, 0.001)
                         rate = completed / elapsed
@@ -781,9 +861,28 @@ def fetch_api_union(*, limit: int, workers: int, delay_seconds: float = 0.0) -> 
     chars = string.ascii_lowercase + string.digits
     queries = [a + b for a in chars for b in chars]
     queries += [
-        "skill", "skills", "agent", "claude", "code", "ai", "dev", "test",
-        "data", "api", "web", "app", "github", "mcp", "llm", "react",
-        "python", "typescript", "openai", "vercel", "google", "microsoft",
+        "skill",
+        "skills",
+        "agent",
+        "claude",
+        "code",
+        "ai",
+        "dev",
+        "test",
+        "data",
+        "api",
+        "web",
+        "app",
+        "github",
+        "mcp",
+        "llm",
+        "react",
+        "python",
+        "typescript",
+        "openai",
+        "vercel",
+        "google",
+        "microsoft",
         "anthropic",
     ]
     queries = list(dict.fromkeys(queries))
@@ -876,9 +975,7 @@ def normalize_catalog(raw: dict[str, Any], existing: ExistingWikiIndex) -> dict[
         raise ValueError("input JSON must contain a list at key 'skills'")
     sitemap_records = _read_sitemap_records()
     api_ids = {
-        str(item.get("id"))
-        for item in skills_in
-        if isinstance(item, dict) and item.get("id")
+        str(item.get("id")) for item in skills_in if isinstance(item, dict) and item.get("id")
     }
     sitemap_merged = [item for item in sitemap_records if str(item.get("id")) not in api_ids]
     skills_in = [*skills_in, *sitemap_merged]
@@ -908,26 +1005,28 @@ def normalize_catalog(raw: dict[str, Any], existing: ExistingWikiIndex) -> dict[
         ctx_slug_overlap = ctx_slug in existing.skill_slugs
         overlap_skill_id += int(skill_id_overlap)
         overlap_ctx_slug += int(ctx_slug_overlap)
-        normalized.append({
-            "id": full_id,
-            "ctx_slug": ctx_slug,
-            "base_ctx_slug": base_ctx_slug,
-            "source": source,
-            "skill_id": skill_id,
-            "name": name,
-            "type": "skill",
-            "status": "remote-cataloged",
-            "source_catalog": "skills.sh",
-            "installs": installs,
-            "tags": tags,
-            "detail_url": _detail_url(source, skill_id),
-            "install_command": _install_command(source, skill_id),
-            "overlap": {
-                "skill_id_in_existing_wiki": skill_id_overlap,
-                "ctx_slug_in_existing_wiki": ctx_slug_overlap,
-                "ctx_slug_collision_resolved": ctx_slug_collision,
-            },
-        })
+        normalized.append(
+            {
+                "id": full_id,
+                "ctx_slug": ctx_slug,
+                "base_ctx_slug": base_ctx_slug,
+                "source": source,
+                "skill_id": skill_id,
+                "name": name,
+                "type": "skill",
+                "status": "remote-cataloged",
+                "source_catalog": "skills.sh",
+                "installs": installs,
+                "tags": tags,
+                "detail_url": _detail_url(source, skill_id),
+                "install_command": _install_command(source, skill_id),
+                "overlap": {
+                    "skill_id_in_existing_wiki": skill_id_overlap,
+                    "ctx_slug_in_existing_wiki": ctx_slug_overlap,
+                    "ctx_slug_collision_resolved": ctx_slug_collision,
+                },
+            }
+        )
 
     normalized.sort(key=lambda s: (-int(s["installs"]), str(s["id"])))
     observed = len(normalized)
@@ -1072,8 +1171,14 @@ def _meaningful_tags(raw_tags: Any) -> list[str]:
 
 def _source_reputation(source: str) -> int:
     trusted_prefixes = (
-        "anthropics/", "vercel-labs/", "vercel/", "microsoft/", "google/",
-        "aws-samples/", "openai/", "github/",
+        "anthropics/",
+        "vercel-labs/",
+        "vercel/",
+        "microsoft/",
+        "google/",
+        "aws-samples/",
+        "openai/",
+        "github/",
     )
     if source.startswith(trusted_prefixes):
         return 25
@@ -1133,8 +1238,8 @@ def _render_external_entity_page(
     body_source_url = str(item.get("body_source_url") or "")
     body_status = (
         "hydrated from Skills.sh detail page."
-        if body_available else
-        "metadata-only; canonical body remains upstream."
+        if body_available
+        else "metadata-only; canonical body remains upstream."
     )
     body = f"""---
 title: {json.dumps(label, ensure_ascii=False)}
@@ -1209,8 +1314,7 @@ def _skills_sh_node_ids(catalog: dict[str, Any]) -> set[str]:
 def _is_skills_sh_graph_node(node: dict[str, Any]) -> bool:
     node_id = str(node.get("id") or "")
     return node_id.startswith(SKILLS_SH_NODE_PREFIX + "skills-sh-") or (
-        node.get("source_catalog") == "skills.sh"
-        and node.get("type") == "skill"
+        node.get("source_catalog") == "skills.sh" and node.get("type") == "skill"
     )
 
 
@@ -1230,7 +1334,8 @@ def _filter_skills_sh_communities(
             filtered[str(community_id)] = raw_community
             continue
         members = [
-            str(member) for member in raw_members
+            str(member)
+            for member in raw_members
             if not (
                 str(member).startswith(SKILLS_SH_NODE_PREFIX + "skills-sh-")
                 and str(member) not in valid_node_ids
@@ -1289,12 +1394,14 @@ def _render_graph_report(graph: dict[str, Any], communities: dict[str, Any] | No
     ]
     if export_id is not None:
         lines.append(f"> Export ID: {export_id}")
-    lines.extend([
-        f"> Nodes: {len(nodes):,} | Edges: {len(edges):,} | Communities: {community_count:,}",
-        "",
-        "## Most Connected Nodes",
-        "",
-    ])
+    lines.extend(
+        [
+            f"> Nodes: {len(nodes):,} | Edges: {len(edges):,} | Communities: {community_count:,}",
+            "",
+            "## Most Connected Nodes",
+            "",
+        ]
+    )
     for node_id, count in top_nodes:
         node = node_by_id.get(node_id, {})
         label = node.get("label") or node_id
@@ -1304,7 +1411,9 @@ def _render_graph_report(graph: dict[str, Any], communities: dict[str, Any] | No
     return "\n".join(lines)
 
 
-def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
+def _augment_graph_with_external_nodes(
+    graph: dict[str, Any], catalog: dict[str, Any]
+) -> dict[str, Any]:
     nodes = graph.get("nodes")
     edges = graph.get("edges") if "edges" in graph else graph.get("links")
     if not isinstance(nodes, list) or not isinstance(edges, list):
@@ -1319,15 +1428,13 @@ def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str,
         str(node.get("id"))
         for node in nodes
         if str(node.get("id") or "").startswith(LEGACY_EXTERNAL_NODE_PREFIX)
-        or (
-            node.get("external_catalog") == "skills.sh"
-            and node.get("type") == "external-skill"
-        )
+        or (node.get("external_catalog") == "skills.sh" and node.get("type") == "external-skill")
     }
     if legacy_skills_sh_ids:
         nodes = [node for node in nodes if str(node.get("id")) not in legacy_skills_sh_ids]
         edges = [
-            edge for edge in edges
+            edge
+            for edge in edges
             if str(edge.get("source")) not in legacy_skills_sh_ids
             and str(edge.get("target")) not in legacy_skills_sh_ids
         ]
@@ -1339,21 +1446,15 @@ def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str,
         and str(node.get("id") or "") not in valid_skills_sh_ids
     }
     if stale_skills_sh_ids:
-        nodes = [
-            node for node in nodes
-            if str(node.get("id") or "") not in stale_skills_sh_ids
-        ]
+        nodes = [node for node in nodes if str(node.get("id") or "") not in stale_skills_sh_ids]
         edges = [
-            edge for edge in edges
+            edge
+            for edge in edges
             if str(edge.get("source") or "") not in stale_skills_sh_ids
             and str(edge.get("target") or "") not in stale_skills_sh_ids
         ]
     edges = [edge for edge in edges if edge.get("source_catalog") != "skills.sh"]
-    node_by_id = {
-        str(node.get("id")): node
-        for node in nodes
-        if str(node.get("id") or "")
-    }
+    node_by_id = {str(node.get("id")): node for node in nodes if str(node.get("id") or "")}
     existing_skills_sh_incident_edges: dict[str, int] = {}
     for edge in edges:
         for endpoint in (str(edge.get("source") or ""), str(edge.get("target") or "")):
@@ -1410,8 +1511,7 @@ def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str,
         item["graph_node_id"] = external_id
         item["entity_path"] = _skills_sh_entity_path(ctx_slug)
         item["converted_path"] = (
-            _skills_sh_converted_path(ctx_slug)
-            if quality.get("body_available") else None
+            _skills_sh_converted_path(ctx_slug) if quality.get("body_available") else None
         )
         item["merge_state"] = "alias-of-curated" if duplicate_targets else "remote-cataloged"
         item["duplicate_of"] = duplicate_targets[0] if duplicate_targets else None
@@ -1463,18 +1563,20 @@ def _augment_graph_with_external_nodes(graph: dict[str, Any], catalog: dict[str,
             if target in seen_targets:
                 continue
             seen_targets.add(target)
-            edges.append({
-                "source": target,
-                "target": external_id,
-                "semantic_sim": 0.0,
-                "tag_sim": 0.2 if shared_tags else 0.0,
-                "token_sim": 0.2 if shared_tokens else 0.0,
-                "final_weight": 0.03,
-                "weight": 0.03,
-                "shared_tags": shared_tags,
-                "shared_tokens": shared_tokens,
-                "source_catalog": "skills.sh",
-            })
+            edges.append(
+                {
+                    "source": target,
+                    "target": external_id,
+                    "semantic_sim": 0.0,
+                    "tag_sim": 0.2 if shared_tags else 0.0,
+                    "token_sim": 0.2 if shared_tokens else 0.0,
+                    "final_weight": 0.03,
+                    "weight": 0.03,
+                    "shared_tags": shared_tags,
+                    "shared_tokens": shared_tokens,
+                    "source_catalog": "skills.sh",
+                }
+            )
             added_edges += 1
             if len(seen_targets) >= MAX_EXTERNAL_EDGES_PER_NODE:
                 break
@@ -1528,6 +1630,7 @@ def _converted_skill_files_from_body(
     if not root.startswith(f"{CONVERTED_SKILL_ROOT}/skills-sh-"):
         return {converted_path: body.encode("utf-8")}
     from ctx_config import cfg as _cfg
+
     line_threshold = _cfg.line_threshold
     if len(body.splitlines()) <= line_threshold:
         return {converted_path: body.encode("utf-8")}
@@ -1646,8 +1749,7 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
         valid_converted_slugs = {
             str(item.get("ctx_slug") or "")
             for item in _catalog_skills(catalog)
-            if str(item.get("ctx_slug") or "")
-            and str(item.get("converted_path") or "")
+            if str(item.get("ctx_slug") or "") and str(item.get("converted_path") or "")
         }
         graph_for_report: dict[str, Any] | None = None
         communities_for_report: dict[str, Any] | None = None
@@ -1672,10 +1774,7 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
                 or (
                     is_skills_sh_converted
                     and len(parts) >= 2
-                    and (
-                        parts[1] in replacement_slugs
-                        or parts[1] not in valid_converted_slugs
-                    )
+                    and (parts[1] in replacement_slugs or parts[1] not in valid_converted_slugs)
                 )
                 or safe_name.endswith(".original")
                 or safe_name.endswith(".lock")
@@ -1739,11 +1838,22 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
         summary = {
             k: catalog.get(k)
             for k in (
-                "schema_version", "source", "api", "fetched_at", "site_reported_total",
-                "observed_unique_skills", "coverage_vs_site_reported_total",
-                "query_count", "query_error_count", "ctx_slug_collisions_resolved", "overlap",
-                "graph_skill_nodes", "graph_skill_edges", "body_available_count",
-                "body_hydration_attempted_count", "body_hydrated_count",
+                "schema_version",
+                "source",
+                "api",
+                "fetched_at",
+                "site_reported_total",
+                "observed_unique_skills",
+                "coverage_vs_site_reported_total",
+                "query_count",
+                "query_error_count",
+                "ctx_slug_collisions_resolved",
+                "overlap",
+                "graph_skill_nodes",
+                "graph_skill_edges",
+                "body_available_count",
+                "body_hydration_attempted_count",
+                "body_hydrated_count",
                 "body_hydration_error_count",
             )
         }
@@ -1759,10 +1869,11 @@ def update_wiki_tarball(tarball: Path, catalog: dict[str, Any]) -> None:
             if not external_id or not entity_path or not isinstance(quality, dict):
                 continue
             duplicate_raw = item.get("duplicate_targets")
-            duplicate_targets = [
-                str(target) for target in duplicate_raw
-                if target
-            ] if isinstance(duplicate_raw, list) else []
+            duplicate_targets = (
+                [str(target) for target in duplicate_raw if target]
+                if isinstance(duplicate_raw, list)
+                else []
+            )
             page = _render_external_entity_page(
                 item,
                 external_id=external_id,
@@ -1993,8 +2104,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--fetch", action="store_true", help="Fetch a Skills.sh API union")
-    source.add_argument("--from-api-union", type=Path, help="Use a previously fetched API union JSON")
-    source.add_argument("--from-catalog", type=Path, help="Use a normalized Skills.sh catalog JSON or JSON.gz")
+    source.add_argument(
+        "--from-api-union", type=Path, help="Use a previously fetched API union JSON"
+    )
+    source.add_argument(
+        "--from-catalog", type=Path, help="Use a normalized Skills.sh catalog JSON or JSON.gz"
+    )
     parser.add_argument("--query-limit", type=int, default=100_000)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--delay-ms", type=int, default=0)

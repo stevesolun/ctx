@@ -156,8 +156,7 @@ def build_pack_manifest(
 ) -> GraphPackManifest:
     """Create a manifest and compute SHA-256 checksums for pack artifacts."""
     checksums = {
-        _normalise_artifact_name(name): sha256_file(pack_dir / name)
-        for name in artifact_paths
+        _normalise_artifact_name(name): sha256_file(pack_dir / name) for name in artifact_paths
     }
     return GraphPackManifest(
         pack_id=pack_id,
@@ -312,9 +311,7 @@ def compact_graph_packs(
     source_base = entries[0].manifest
     graph = load_merged_pack_graph(packs_dir)
     graph.graph["ctx_compacted_from_base_export_id"] = source_base.base_export_id
-    graph.graph["ctx_compacted_pack_ids"] = [
-        entry.manifest.pack_id for entry in entries
-    ]
+    graph.graph["ctx_compacted_pack_ids"] = [entry.manifest.pack_id for entry in entries]
     graph.graph["ctx_compacted_overlay_count"] = len(entries) - 1
     return write_base_pack(
         pack_dir=compacted_pack_dir,
@@ -370,7 +367,9 @@ def promote_graph_pack_set(
         if _paths_same(backup_dir, active_packs_dir) or _paths_same(backup_dir, staged_packs_dir):
             raise GraphPackManifestError("backup graph packs directory must be distinct")
         if backup_dir.exists():
-            raise GraphPackManifestError(f"backup graph packs directory already exists: {backup_dir}")
+            raise GraphPackManifestError(
+                f"backup graph packs directory already exists: {backup_dir}"
+            )
         backup_dir.parent.mkdir(parents=True, exist_ok=True)
 
     active_packs_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -381,7 +380,12 @@ def promote_graph_pack_set(
             moved_active = True
         staged_packs_dir.replace(active_packs_dir)
     except OSError as exc:
-        if moved_active and backup_dir is not None and backup_dir.exists() and not active_packs_dir.exists():
+        if (
+            moved_active
+            and backup_dir is not None
+            and backup_dir.exists()
+            and not active_packs_dir.exists()
+        ):
             backup_dir.replace(active_packs_dir)
         raise GraphPackManifestError(f"failed to promote graph pack set: {exc}") from exc
 
@@ -435,7 +439,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Validated staged graph packs root to promote",
     )
     promote.add_argument("--active-packs-dir", required=True, help="Active graph packs root")
-    promote.add_argument("--backup-packs-dir", help="Optional rollback directory for old active packs")
+    promote.add_argument(
+        "--backup-packs-dir", help="Optional rollback directory for old active packs"
+    )
     promote.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     args = parser.parse_args(argv)
 

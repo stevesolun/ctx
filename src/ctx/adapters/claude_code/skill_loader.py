@@ -112,8 +112,7 @@ def update_manifest(name: str, entity_type: str = "skill") -> None:
         # existing entry defaults to "skill" to preserve the pre-fix
         # implicit contract.
         loaded_pairs = {
-            (e.get("skill"), e.get("entity_type", "skill"))
-            for e in manifest.get("load", [])
+            (e.get("skill"), e.get("entity_type", "skill")) for e in manifest.get("load", [])
         }
         if (name, entity_type) not in loaded_pairs:
             manifest["load"].append(
@@ -161,9 +160,7 @@ def clear_pending(names: list[str]) -> None:
     try:
         pending = json.loads(PENDING_SKILLS.read_text(encoding="utf-8"))
         graph_suggestions = pending.get("graph_suggestions", [])
-        pending["graph_suggestions"] = [
-            s for s in graph_suggestions if s["name"] not in names
-        ]
+        pending["graph_suggestions"] = [s for s in graph_suggestions if s["name"] not in names]
         unmatched = pending.get("unmatched_signals", [])
         pending["unmatched_signals"] = [s for s in unmatched if s not in names]
         _atomic_write_text(PENDING_SKILLS, json.dumps(pending, indent=2))
@@ -243,8 +240,7 @@ def main() -> None:
     parser.add_argument(
         "--skillspector-bin",
         help=(
-            "SkillSpector executable. Defaults to CTX_SKILLSPECTOR_BIN or "
-            "'skillspector' on PATH."
+            "SkillSpector executable. Defaults to CTX_SKILLSPECTOR_BIN or 'skillspector' on PATH."
         ),
     )
     parser.add_argument(

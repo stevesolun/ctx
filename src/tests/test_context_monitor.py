@@ -42,6 +42,7 @@ TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 # extract_signals
 # ---------------------------------------------------------------------------
 
+
 class TestExtractSignals:
     def test_keyword_match_react(self):
         signals = extract_signals("Read", {"file_path": "src/App.tsx"})
@@ -101,6 +102,7 @@ class TestExtractSignals:
 # load_manifest_skills
 # ---------------------------------------------------------------------------
 
+
 class TestLoadManifestSkills:
     def test_happy_path(self, tmp_path, monkeypatch):
         manifest = {"load": [{"skill": "react"}, {"skill": "docker"}]}
@@ -131,6 +133,7 @@ class TestLoadManifestSkills:
 # append_intent_log
 # ---------------------------------------------------------------------------
 
+
 class TestAppendIntentLog:
     def test_creates_file_and_appends(self, tmp_path, monkeypatch):
         log = tmp_path / "intent.jsonl"
@@ -156,6 +159,7 @@ class TestAppendIntentLog:
 # count_recent_unmatched
 # ---------------------------------------------------------------------------
 
+
 class TestCountRecentUnmatched:
     def test_all_matched(self):
         unmatched = count_recent_unmatched(["react", "docker"], {"react", "docker"})
@@ -176,6 +180,7 @@ class TestCountRecentUnmatched:
 # ---------------------------------------------------------------------------
 # write_pending_skills
 # ---------------------------------------------------------------------------
+
 
 class TestWritePendingSkills:
     def test_writes_pending_skills_file(self, tmp_path, monkeypatch):
@@ -247,7 +252,9 @@ class TestWritePendingSkills:
         assert _cm.graph_suggest(["fastapi"]) == [{"name": "fastapi-pro", "type": "skill"}]
         assert calls["entity_types"] == ("skill", "agent", "mcp-server")
 
-    def test_graph_suggest_reads_active_packs_without_legacy_graph_json(self, tmp_path, monkeypatch):
+    def test_graph_suggest_reads_active_packs_without_legacy_graph_json(
+        self, tmp_path, monkeypatch
+    ):
         graph_out = tmp_path / "skill-wiki" / "graphify-out"
         graph = nx.Graph()
         graph.add_node("skill:fastapi-pro", type="skill", label="fastapi-pro", tags=["fastapi"])
@@ -287,16 +294,20 @@ class TestWritePendingSkills:
 # load_recent_unmatched_count
 # ---------------------------------------------------------------------------
 
+
 class TestLoadRecentUnmatchedCount:
     def _write_log(self, path: Path, entries: list[dict]) -> None:
         path.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
 
     def test_happy_path_counts_distinct(self, tmp_path, monkeypatch):
         log = tmp_path / "intent.jsonl"
-        self._write_log(log, [
-            {"date": TODAY, "unmatched": ["react", "docker"]},
-            {"date": TODAY, "unmatched": ["react"]},  # react already counted
-        ])
+        self._write_log(
+            log,
+            [
+                {"date": TODAY, "unmatched": ["react", "docker"]},
+                {"date": TODAY, "unmatched": ["react"]},  # react already counted
+            ],
+        )
         monkeypatch.setattr(_cm, "INTENT_LOG", log)
         count = load_recent_unmatched_count()
         assert count == 2  # react + docker distinct
@@ -307,7 +318,7 @@ class TestLoadRecentUnmatchedCount:
 
     def test_skips_bad_lines(self, tmp_path, monkeypatch):
         log = tmp_path / "intent.jsonl"
-        log.write_text(f'not-json\n{json.dumps({"date": TODAY, "unmatched": ["react"]})}\n')
+        log.write_text(f"not-json\n{json.dumps({'date': TODAY, 'unmatched': ['react']})}\n")
         monkeypatch.setattr(_cm, "INTENT_LOG", log)
         assert load_recent_unmatched_count() == 1
 
@@ -321,6 +332,7 @@ class TestLoadRecentUnmatchedCount:
 # ---------------------------------------------------------------------------
 # _parse_stdin_payload
 # ---------------------------------------------------------------------------
+
 
 class TestParseStdinPayload:
     def test_valid_payload(self, monkeypatch):
@@ -364,6 +376,7 @@ class TestParseStdinPayload:
 # main()
 # ---------------------------------------------------------------------------
 
+
 class TestMain:
     def test_no_signals_exits_0(self, tmp_path, monkeypatch):
         """When tool input produces no signals, main exits 0."""
@@ -385,7 +398,9 @@ class TestMain:
         monkeypatch.setattr(_cm, "PENDING_SKILLS", tmp_path / "pending.json")
         monkeypatch.setattr(_cm, "_THRESHOLD", 999)  # prevent pending write
         tool_input = json.dumps({"file_path": "Dockerfile"})
-        monkeypatch.setattr(sys, "argv", ["context_monitor.py", "--tool", "Read", "--input", tool_input])
+        monkeypatch.setattr(
+            sys, "argv", ["context_monitor.py", "--tool", "Read", "--input", tool_input]
+        )
         _cm.main()
         lines = [line for line in log.read_text().strip().split("\n") if line]
         assert len(lines) == 1
@@ -416,7 +431,9 @@ class TestMain:
         monkeypatch.setattr(_cm, "INTENT_LOG", log)
         monkeypatch.setattr(_cm, "MANIFEST_PATH", tmp_path / "manifest.json")
         monkeypatch.setattr(_cm, "PENDING_SKILLS", tmp_path / "pending.json")
-        monkeypatch.setattr(sys, "argv", ["context_monitor.py", "--tool", "Read", "--input", "not-json"])
+        monkeypatch.setattr(
+            sys, "argv", ["context_monitor.py", "--tool", "Read", "--input", "not-json"]
+        )
         # Should not crash
         try:
             _cm.main()
@@ -433,7 +450,9 @@ class TestMain:
         monkeypatch.setattr(_cm, "PENDING_SKILLS", pending)
         monkeypatch.setattr(_cm, "_THRESHOLD", 1)  # trigger on 1 unmatched
         tool_input = json.dumps({"file_path": "Dockerfile"})
-        monkeypatch.setattr(sys, "argv", ["context_monitor.py", "--tool", "Read", "--input", tool_input])
+        monkeypatch.setattr(
+            sys, "argv", ["context_monitor.py", "--tool", "Read", "--input", tool_input]
+        )
         _cm.main()
         assert pending.exists()
 
@@ -448,6 +467,7 @@ class TestMain:
 # essentially never written — silently killing the suggestion arm of the
 # alive loop. The fix walks the intent log and checks the cumulative
 # (per-day, across all invocations) unmatched count against the threshold.
+
 
 class TestCumulativeThreshold:
     """The threshold must fire on cumulative unmatched across today's log,
@@ -465,13 +485,16 @@ class TestCumulativeThreshold:
 
     def _run_main(self, monkeypatch, tool_name: str, tool_input: dict):
         monkeypatch.setattr(
-            sys, "argv",
+            sys,
+            "argv",
             ["context_monitor.py", "--tool", tool_name, "--input", json.dumps(tool_input)],
         )
         _cm.main()
 
     def test_fires_on_cumulative_across_three_invocations(
-        self, tmp_path, monkeypatch,
+        self,
+        tmp_path,
+        monkeypatch,
     ):
         """Three invocations each surfacing ONE unmatched signal should
         trigger pending-skills write when THRESHOLD=3.
@@ -485,20 +508,21 @@ class TestCumulativeThreshold:
         monkeypatch.setattr(_cm, "_THRESHOLD", 3)
 
         # Three invocations, one unique unmatched signal each.
-        self._run_main(monkeypatch, "Read", {"file_path": "App.tsx"})       # react
+        self._run_main(monkeypatch, "Read", {"file_path": "App.tsx"})  # react
         assert not pending.exists(), "fired after 1 cumulative unmatched"
 
-        self._run_main(monkeypatch, "Read", {"file_path": "Dockerfile"})    # docker
+        self._run_main(monkeypatch, "Read", {"file_path": "Dockerfile"})  # docker
         assert not pending.exists(), "fired after 2 cumulative unmatched"
 
-        self._run_main(monkeypatch, "Read", {"file_path": "main.tf"})       # terraform
+        self._run_main(monkeypatch, "Read", {"file_path": "main.tf"})  # terraform
         assert pending.exists(), (
-            "did NOT fire after 3 cumulative unmatched — "
-            "the per-invocation threshold bug regressed"
+            "did NOT fire after 3 cumulative unmatched — the per-invocation threshold bug regressed"
         )
 
     def test_does_not_fire_below_cumulative_threshold(
-        self, tmp_path, monkeypatch,
+        self,
+        tmp_path,
+        monkeypatch,
     ):
         """Below-threshold cumulative count must NOT trigger.
 
@@ -513,7 +537,9 @@ class TestCumulativeThreshold:
         assert not pending.exists()
 
     def test_fires_when_single_invocation_surfaces_multiple(
-        self, tmp_path, monkeypatch,
+        self,
+        tmp_path,
+        monkeypatch,
     ):
         """Backward-compat: a single invocation carrying threshold-worth of
         new signals on its own still fires (the old happy path)."""
@@ -522,13 +548,16 @@ class TestCumulativeThreshold:
 
         # A Bash pip install surfaces multiple signals in one invocation.
         self._run_main(
-            monkeypatch, "Bash",
+            monkeypatch,
+            "Bash",
             {"command": "pip install fastapi django"},
         )
         assert pending.exists()
 
     def test_pending_contains_cumulative_union(
-        self, tmp_path, monkeypatch,
+        self,
+        tmp_path,
+        monkeypatch,
     ):
         """When the threshold fires, pending-skills.json lists ALL of today's
         unmatched signals, not just the current invocation's."""
@@ -549,7 +578,9 @@ class TestCumulativeThreshold:
         )
 
     def test_duplicate_signals_across_invocations_count_once(
-        self, tmp_path, monkeypatch,
+        self,
+        tmp_path,
+        monkeypatch,
     ):
         """Unique-set cumulative count — repeated signals don't inflate.
 
@@ -560,7 +591,7 @@ class TestCumulativeThreshold:
         _, pending = self._setup_paths(tmp_path, monkeypatch)
         monkeypatch.setattr(_cm, "_THRESHOLD", 2)
 
-        self._run_main(monkeypatch, "Read", {"file_path": "App.tsx"})       # react
-        self._run_main(monkeypatch, "Read", {"file_path": "index.tsx"})     # react (dup)
+        self._run_main(monkeypatch, "Read", {"file_path": "App.tsx"})  # react
+        self._run_main(monkeypatch, "Read", {"file_path": "index.tsx"})  # react (dup)
         # Only 1 unique unmatched concept; THRESHOLD=2 => no write.
         assert not pending.exists()

@@ -43,12 +43,8 @@ def fake_home(tmp_path, monkeypatch):
 
 
 def _seed_home(home: Path) -> None:
-    (home / "settings.json").write_text(
-        json.dumps({"theme": "dark"}), encoding="utf-8"
-    )
-    (home / "skill-manifest.json").write_text(
-        json.dumps({"load": []}), encoding="utf-8"
-    )
+    (home / "settings.json").write_text(json.dumps({"theme": "dark"}), encoding="utf-8")
+    (home / "skill-manifest.json").write_text(json.dumps({"load": []}), encoding="utf-8")
     agents = home / "agents"
     agents.mkdir()
     (agents / "reviewer.md").write_text("# reviewer\n", encoding="utf-8")
@@ -88,9 +84,7 @@ def test_unchanged_files_report_no_changes(fake_home):
 def test_edited_file_appears_in_changed(fake_home):
     _seed_home(fake_home)
     snap = bm.create_snapshot()
-    (fake_home / "settings.json").write_text(
-        json.dumps({"theme": "light"}), encoding="utf-8"
-    )
+    (fake_home / "settings.json").write_text(json.dumps({"theme": "light"}), encoding="utf-8")
     cfg = bc.BackupConfig()
     report = cd.detect_changes(cfg, fake_home, last_snapshot=snap)
     assert "settings.json" in report.changed
@@ -153,9 +147,7 @@ def test_snapshot_if_changed_skips_when_nothing_changed(fake_home):
 def test_snapshot_if_changed_fires_when_file_edited(fake_home):
     _seed_home(fake_home)
     bm.create_snapshot()
-    (fake_home / "settings.json").write_text(
-        json.dumps({"theme": "light"}), encoding="utf-8"
-    )
+    (fake_home / "settings.json").write_text(json.dumps({"theme": "light"}), encoding="utf-8")
     result = bm.snapshot_if_changed(reason="edit-settings")
     assert result.snapshot_path is not None
     assert "settings.json" in result.report.changed
@@ -175,9 +167,7 @@ def test_snapshot_if_changed_writes_reason_into_manifest(fake_home):
     _seed_home(fake_home)
     result = bm.snapshot_if_changed(reason="unit-test")
     assert result.snapshot_path is not None
-    manifest = json.loads(
-        (result.snapshot_path / "manifest.json").read_text(encoding="utf-8")
-    )
+    manifest = json.loads((result.snapshot_path / "manifest.json").read_text(encoding="utf-8"))
     assert manifest.get("reason") == "unit-test"
 
 

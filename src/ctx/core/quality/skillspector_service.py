@@ -177,9 +177,7 @@ def run_skillspector_scan(
         )
 
     output = "\n".join(
-        part.strip()
-        for part in (completed.stdout, completed.stderr)
-        if part and part.strip()
+        part.strip() for part in (completed.stdout, completed.stderr) if part and part.strip()
     )
     output = _sanitize_output(output)
     if completed.returncode == 0:
@@ -232,11 +230,17 @@ def render_scan_report(result: SkillSpectorResult) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run ctx's SkillSpector service gate on a skill path.")
+    parser = argparse.ArgumentParser(
+        description="Run ctx's SkillSpector service gate on a skill path."
+    )
     parser.add_argument("target", help="Skill directory or SKILL.md path to scan")
-    parser.add_argument("--optional", action="store_true", help="Return 0 even when the scan does not pass")
+    parser.add_argument(
+        "--optional", action="store_true", help="Return 0 even when the scan does not pass"
+    )
     parser.add_argument("--use-llm", action="store_true", help="Allow SkillSpector LLM analysis")
-    parser.add_argument("--skillspector-bin", default=None, help="SkillSpector executable path/name")
+    parser.add_argument(
+        "--skillspector-bin", default=None, help="SkillSpector executable path/name"
+    )
     parser.add_argument("--timeout", type=int, default=120, help="SkillSpector timeout in seconds")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
     args = parser.parse_args(argv)

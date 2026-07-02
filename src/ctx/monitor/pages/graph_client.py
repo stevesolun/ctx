@@ -52,7 +52,7 @@ def render_graph_client_script(*, focus_js: str, focus_type_js: str) -> str:
         "    const d = n.data || {};\n"
         "    const tags = Array.from(d.filter_tokens || d.tags || []).join(' ');\n"
         "    const typeKey = ['skill', 'agent', 'mcp-server', 'harness'].includes(d.type) ? d.type : 'entity';\n"
-        "    return '<a data-testid=\"graph-fallback-node\" class=\"graph-fallback-node\" '\n"
+        '    return \'<a data-testid="graph-fallback-node" class="graph-fallback-node" \'\n'
         "      + 'data-node-id=\"' + escapeHtml(d.id || '') + '\" '\n"
         "      + 'data-slug=\"' + escapeHtml(nodeSlug(d.id)) + '\" '\n"
         "      + 'data-type=\"' + escapeHtml(d.type || '') + '\" '\n"
@@ -63,8 +63,8 @@ def render_graph_client_script(*, focus_js: str, focus_type_js: str) -> str:
         "      + '<span class=\"graph-fallback-label\">' + escapeHtml(d.label || nodeSlug(d.id)) + '</span>'\n"
         "      + '<span class=\"pill entity-type-' + escapeHtml(typeKey) + '\">' + escapeHtml(d.type || 'entity') + '</span></a>';\n"
         "  }).join('');\n"
-        "  cyMount.innerHTML = '<div data-testid=\"graph-fallback\" style=\"padding:0.75rem; height:100%; overflow:auto;\">'\n"
-        "    + '<div class=\"muted\" style=\"margin-bottom:0.5rem;\">Showing list view.</div>'\n"
+        '  cyMount.innerHTML = \'<div data-testid="graph-fallback" style="padding:0.75rem; height:100%; overflow:auto;">\'\n'
+        '    + \'<div class="muted" style="margin-bottom:0.5rem;">Showing list view.</div>\'\n'
         "    + rows + '</div>';\n"
         "}\n"
         "function nodeDetail(d) {\n"
@@ -84,7 +84,7 @@ def render_graph_client_script(*, focus_js: str, focus_type_js: str) -> str:
         "}\n"
         "function nodeShapeSvg(d, p, r) {\n"
         "  const fill = nodeColor(d.type);\n"
-        "  const common = ' data-testid=\"graph-svg-node\" data-node-shape=\"' + escapeHtml(d.type || 'skill') + '\" data-radius=\"' + r.toFixed(1) + '\" fill=\"' + fill + '\" stroke=\"#fff\" stroke-width=\"2\"';\n"
+        '  const common = \' data-testid="graph-svg-node" data-node-shape="\' + escapeHtml(d.type || \'skill\') + \'" data-radius="\' + r.toFixed(1) + \'" fill="\' + fill + \'" stroke="#fff" stroke-width="2"\';\n'
         "  if (d.type === 'agent') {\n"
         "    return '<polygon' + common + ' points=\"' + polygonPoints(p.x, p.y, [[0, -r], [r, 0], [0, r], [-r, 0]]) + '\" />';\n"
         "  }\n"
@@ -225,7 +225,7 @@ def render_graph_client_script(*, focus_js: str, focus_type_js: str) -> str:
         "  const shared = Array.from(d.shared_tags || []);\n"
         "  const reasons = Array.from(d.reasons || d.edge_reasons || []);\n"
         "  if (isGraphOnlyEdge(d)) {\n"
-        "    return '<div class=\"graph-edge-signals\"><span class=\"graph-metric\"><strong>match</strong> '\n"
+        '    return \'<div class="graph-edge-signals"><span class="graph-metric"><strong>match</strong> \'\n'
         "      + escapeHtml(percentText(d.weight)) + '</span></div>';\n"
         "  }\n"
         "  const evidence = reasons.length ? reasons.join(', ') : (edgeHasEvidence(d) ? 'graph signal' : 'none');\n"
@@ -332,15 +332,15 @@ def render_graph_client_script(*, focus_js: str, focus_type_js: str) -> str:
         "    const radius = 180 + depth * 90;\n"
         "    points.set(d.id, {x: radius * Math.cos(theta) * Math.sin(phi), y: radius * Math.sin(theta) * Math.sin(phi), z: radius * Math.cos(phi)});\n"
         "  });\n"
-        "  cyMount.innerHTML = '<div data-testid=\"graph-renderer\" class=\"graph-renderer-shell\">'\n"
+        '  cyMount.innerHTML = \'<div data-testid="graph-renderer" class="graph-renderer-shell">\'\n'
         "    + '<div class=\"graph-toolbar\">'\n"
-        "    + '<button id=\"graph-zoom-in\" type=\"button\">zoom +</button><button id=\"graph-zoom-out\" type=\"button\">zoom -</button>'\n"
+        '    + \'<button id="graph-zoom-in" type="button">zoom +</button><button id="graph-zoom-out" type="button">zoom -</button>\'\n'
         "    + '<span class=\"muted\">drag rotate - wheel zoom - click drill - double-click back</span></div>'\n"
-        "    + '<div class=\"graph-canvas-wrap\"><svg data-testid=\"graph-3d\" viewBox=\"0 0 ' + width + ' ' + height + '\" style=\"display:block; width:100%; height:100%; min-height:0; background:transparent; touch-action:none;\"></svg><div id=\"graph-tooltip\" class=\"graph-tooltip\" hidden></div></div>'\n"
-        "    + '<div data-testid=\"graph-inspector-resize\" class=\"graph-resize-handle\" role=\"separator\" tabindex=\"0\" aria-orientation=\"horizontal\" aria-label=\"Resize graph details panel\" title=\"Drag to resize details panel; double-click to reset\"></div>'\n"
+        '    + \'<div class="graph-canvas-wrap"><svg data-testid="graph-3d" viewBox="0 0 \' + width + \' \' + height + \'" style="display:block; width:100%; height:100%; min-height:0; background:transparent; touch-action:none;"></svg><div id="graph-tooltip" class="graph-tooltip" hidden></div></div>\'\n'
+        '    + \'<div data-testid="graph-inspector-resize" class="graph-resize-handle" role="separator" tabindex="0" aria-orientation="horizontal" aria-label="Resize graph details panel" title="Drag to resize details panel; double-click to reset"></div>\'\n'
         "    + '<div class=\"graph-inspector-grid\">'\n"
-        "    + '<div data-testid=\"graph-node-detail\" class=\"graph-node-detail-panel\"><div data-testid=\"graph-edge-detail\" class=\"muted graph-edge-detail-inline\">Hover an edge for relationship signals.</div><div data-testid=\"graph-node-detail-tree\" class=\"muted\">Click a node to inspect neighbors.</div></div></div>'\n"
-        "    + '<div data-testid=\"graph-list\" class=\"graph-list-panel\" hidden></div></div>';\n"
+        '    + \'<div data-testid="graph-node-detail" class="graph-node-detail-panel"><div data-testid="graph-edge-detail" class="muted graph-edge-detail-inline">Hover an edge for relationship signals.</div><div data-testid="graph-node-detail-tree" class="muted">Click a node to inspect neighbors.</div></div></div>\'\n'
+        '    + \'<div data-testid="graph-list" class="graph-list-panel" hidden></div></div>\';\n'
         "  const rendererShell = cyMount.querySelector('[data-testid=\"graph-renderer\"]');\n"
         "  const svg = cyMount.querySelector('[data-testid=\"graph-3d\"]');\n"
         "  const resizeHandle = cyMount.querySelector('[data-testid=\"graph-inspector-resize\"]');\n"
@@ -557,7 +557,7 @@ def render_graph_client_script(*, focus_js: str, focus_type_js: str) -> str:
         "      const label = d.label || nodeSlug(d.id);\n"
         "      const isCenter = d.id === centerId;\n"
         "      const r = nodeRadius(d, isCenter, p.scale);\n"
-        "      return '<g data-testid=\"graph-3d-node\" role=\"button\" tabindex=\"0\" id=\"' + escapeHtml(nodeDomId(d.id)) + '\" data-3d-node-id=\"' + escapeHtml(d.id || '') + '\" data-node-detail=\"' + escapeHtml(nodeDetail(d)) + '\" data-type=\"' + escapeHtml(d.type || '') + '\" data-depth=\"' + escapeHtml(d.depth || 0) + '\" data-tags=\"' + escapeHtml(tags.toLowerCase()) + '\"><title>' + escapeHtml(nodeDetail(d)) + '</title>' + nodeShapeSvg(d, p, r) + '<text x=\"' + p.x.toFixed(1) + '\" y=\"' + (p.y + r + 14).toFixed(1) + '\" text-anchor=\"middle\" font-size=\"11\" fill=\"#111827\" style=\"pointer-events:none;\">' + escapeHtml(label).slice(0, 28) + '</text></g>';\n"
+        '      return \'<g data-testid="graph-3d-node" role="button" tabindex="0" id="\' + escapeHtml(nodeDomId(d.id)) + \'" data-3d-node-id="\' + escapeHtml(d.id || \'\') + \'" data-node-detail="\' + escapeHtml(nodeDetail(d)) + \'" data-type="\' + escapeHtml(d.type || \'\') + \'" data-depth="\' + escapeHtml(d.depth || 0) + \'" data-tags="\' + escapeHtml(tags.toLowerCase()) + \'"><title>\' + escapeHtml(nodeDetail(d)) + \'</title>\' + nodeShapeSvg(d, p, r) + \'<text x="\' + p.x.toFixed(1) + \'" y="\' + (p.y + r + 14).toFixed(1) + \'" text-anchor="middle" font-size="11" fill="#111827" style="pointer-events:none;">\' + escapeHtml(label).slice(0, 28) + \'</text></g>\';\n'
         "    }).join('');\n"
         "    const edgeHitHtml = edges.map(e => {\n"
         "      const d = e.data || {};\n"
@@ -568,7 +568,7 @@ def render_graph_client_script(*, focus_js: str, focus_type_js: str) -> str:
         "      const hx2 = s.x + (t.x - s.x) * 0.82, hy2 = s.y + (t.y - s.y) * 0.82;\n"
         "      return '<line data-testid=\"graph-3d-edge\" data-3d-edge-source=\"' + escapeHtml(d.source || '') + '\" data-3d-edge-target=\"' + escapeHtml(d.target || '') + '\" data-svg-edge-source=\"' + escapeHtml(d.source || '') + '\" data-svg-edge-target=\"' + escapeHtml(d.target || '') + '\" data-edge-weight=\"' + escapeHtml(Number(d.weight || 0).toFixed(4)) + '\" data-edge-detail=\"' + escapeHtml(edgeDetail(d)) + '\" x1=\"' + hx1.toFixed(1) + '\" y1=\"' + hy1.toFixed(1) + '\" x2=\"' + hx2.toFixed(1) + '\" y2=\"' + hy2.toFixed(1) + '\" stroke=\"transparent\" stroke-width=\"12\" style=\"pointer-events:stroke;\"><title>' + escapeHtml(edgeDetail(d)) + '</title></line>';\n"
         "    }).join('');\n"
-        "    svg.innerHTML = '<rect width=\"100%\" height=\"100%\" fill=\"transparent\" pointer-events=\"all\" />' + edgeHtml + edgeHitHtml + nodeHtml;\n"
+        '    svg.innerHTML = \'<rect width="100%" height="100%" fill="transparent" pointer-events="all" />\' + edgeHtml + edgeHitHtml + nodeHtml;\n'
         "    attach3dHoverHandlers();\n"
         "    applyFilters();\n"
         "    highlightSelected();\n"
@@ -586,7 +586,7 @@ def render_graph_client_script(*, focus_js: str, focus_type_js: str) -> str:
         "  drawGraph3d();\n"
         "  selectNode(centerId, false);\n"
         "}\n"
-        "cyMount.innerHTML = '<div data-testid=\"graph-empty\" class=\"muted\" style=\"padding:0.75rem;\">Enter a slug to render the graph.</div>';\n"
+        'cyMount.innerHTML = \'<div data-testid="graph-empty" class="muted" style="padding:0.75rem;">Enter a slug to render the graph.</div>\';\n'
         # Client-side filtering (type + tag substring).
         "function applyFilters() {\n"
         "  const allowedTypes = new Set(\n"

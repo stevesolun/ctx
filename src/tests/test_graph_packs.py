@@ -53,19 +53,21 @@ def test_base_pack_manifest_round_trips_with_file_checksums(tmp_path: Path) -> N
 
 def test_overlay_pack_manifest_requires_parent_export_id() -> None:
     with pytest.raises(GraphPackManifestError, match="parent_export_id"):
-        GraphPackManifest.from_mapping({
-            "schema_version": 1,
-            "pack_id": "overlay-1",
-            "pack_type": "overlay",
-            "base_export_id": "export-1",
-            "parent_export_id": None,
-            "config_hash": "config-sha",
-            "model_id": "bge-small-en-v1.5",
-            "node_count": 1,
-            "edge_count": 2,
-            "tombstone_count": 0,
-            "checksums": {"entity-overlays.jsonl": "a" * 64},
-        })
+        GraphPackManifest.from_mapping(
+            {
+                "schema_version": 1,
+                "pack_id": "overlay-1",
+                "pack_type": "overlay",
+                "base_export_id": "export-1",
+                "parent_export_id": None,
+                "config_hash": "config-sha",
+                "model_id": "bge-small-en-v1.5",
+                "node_count": 1,
+                "edge_count": 2,
+                "tombstone_count": 0,
+                "checksums": {"entity-overlays.jsonl": "a" * 64},
+            }
+        )
 
 
 def test_manifest_rejects_unsafe_artifact_paths(tmp_path: Path) -> None:
@@ -233,16 +235,18 @@ def test_load_merged_pack_graph_applies_overlay_nodes_and_edges(tmp_path: Path) 
     base_dir.mkdir(parents=True)
     overlay_dir.mkdir()
     (base_dir / "graph.json").write_text(
-        json.dumps({
-            "graph": {"export_id": "export-1"},
-            "nodes": [
-                {"id": "skill:python", "type": "skill", "tags": ["python"]},
-                {"id": "mcp-server:github", "type": "mcp-server", "tags": ["github"]},
-            ],
-            "edges": [
-                {"source": "skill:python", "target": "mcp-server:github", "weight": 0.4},
-            ],
-        }),
+        json.dumps(
+            {
+                "graph": {"export_id": "export-1"},
+                "nodes": [
+                    {"id": "skill:python", "type": "skill", "tags": ["python"]},
+                    {"id": "mcp-server:github", "type": "mcp-server", "tags": ["github"]},
+                ],
+                "edges": [
+                    {"source": "skill:python", "target": "mcp-server:github", "weight": 0.4},
+                ],
+            }
+        ),
         encoding="utf-8",
     )
     (overlay_dir / "nodes.jsonl").write_text(
@@ -250,12 +254,15 @@ def test_load_merged_pack_graph_applies_overlay_nodes_and_edges(tmp_path: Path) 
         encoding="utf-8",
     )
     (overlay_dir / "edges.jsonl").write_text(
-        json.dumps({
-            "source": "skill:review",
-            "target": "mcp-server:github",
-            "weight": 0.8,
-            "provenance": "overlay-test",
-        }) + "\n",
+        json.dumps(
+            {
+                "source": "skill:review",
+                "target": "mcp-server:github",
+                "weight": 0.8,
+                "provenance": "overlay-test",
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     write_pack_manifest(
@@ -351,15 +358,17 @@ def test_load_merged_pack_graph_applies_tombstones(tmp_path: Path) -> None:
     base_dir.mkdir(parents=True)
     overlay_dir.mkdir()
     (base_dir / "graph.json").write_text(
-        json.dumps({
-            "nodes": [
-                {"id": "skill:python"},
-                {"id": "skill:old"},
-            ],
-            "edges": [
-                {"source": "skill:python", "target": "skill:old", "weight": 0.4},
-            ],
-        }),
+        json.dumps(
+            {
+                "nodes": [
+                    {"id": "skill:python"},
+                    {"id": "skill:old"},
+                ],
+                "edges": [
+                    {"source": "skill:python", "target": "skill:old", "weight": 0.4},
+                ],
+            }
+        ),
         encoding="utf-8",
     )
     (overlay_dir / "tombstones.jsonl").write_text(
@@ -409,10 +418,12 @@ def test_load_merged_pack_graph_rejects_base_count_drift(tmp_path: Path) -> None
     base_dir = packs_dir / "base-export-1"
     base_dir.mkdir(parents=True)
     (base_dir / "graph.json").write_text(
-        json.dumps({
-            "nodes": [{"id": "skill:python"}],
-            "edges": [],
-        }),
+        json.dumps(
+            {
+                "nodes": [{"id": "skill:python"}],
+                "edges": [],
+            }
+        ),
         encoding="utf-8",
     )
     write_pack_manifest(
@@ -604,14 +615,16 @@ def test_compact_graph_packs_writes_staged_base_without_mutating_active_packs(
     base_dir.mkdir(parents=True)
     overlay_dir.mkdir()
     (base_dir / "graph.json").write_text(
-        json.dumps({
-            "graph": {"export_id": "export-1"},
-            "nodes": [
-                {"id": "skill:python", "type": "skill"},
-                {"id": "agent:review", "type": "agent"},
-            ],
-            "edges": [],
-        }),
+        json.dumps(
+            {
+                "graph": {"export_id": "export-1"},
+                "nodes": [
+                    {"id": "skill:python", "type": "skill"},
+                    {"id": "agent:review", "type": "agent"},
+                ],
+                "edges": [],
+            }
+        ),
         encoding="utf-8",
     )
     write_pack_manifest(
@@ -672,11 +685,13 @@ def test_main_compact_writes_json_report_and_staged_pack(
     overlay_dir = active_packs / "overlay-review"
     base_dir.mkdir(parents=True)
     (base_dir / "graph.json").write_text(
-        json.dumps({
-            "graph": {"export_id": "export-1"},
-            "nodes": [{"id": "skill:python"}, {"id": "skill:review"}],
-            "edges": [],
-        }),
+        json.dumps(
+            {
+                "graph": {"export_id": "export-1"},
+                "nodes": [{"id": "skill:python"}, {"id": "skill:review"}],
+                "edges": [],
+            }
+        ),
         encoding="utf-8",
     )
     write_pack_manifest(
@@ -707,13 +722,18 @@ def test_main_compact_writes_json_report_and_staged_pack(
     )
     staged_pack = tmp_path / "staged" / "base-export-2"
 
-    rc = main([
-        "compact",
-        "--packs-dir", str(active_packs),
-        "--staged-pack-dir", str(staged_pack),
-        "--base-export-id", "export-2",
-        "--json",
-    ])
+    rc = main(
+        [
+            "compact",
+            "--packs-dir",
+            str(active_packs),
+            "--staged-pack-dir",
+            str(staged_pack),
+            "--base-export-id",
+            "export-2",
+            "--json",
+        ]
+    )
 
     assert rc == 0
     output = json.loads(capsys.readouterr().out)
@@ -813,12 +833,16 @@ def test_main_promote_writes_json_report_and_uses_default_backup(
         graph=new_graph,
     )
 
-    rc = main([
-        "promote",
-        "--staged-packs-dir", str(staged_packs),
-        "--active-packs-dir", str(active_packs),
-        "--json",
-    ])
+    rc = main(
+        [
+            "promote",
+            "--staged-packs-dir",
+            str(staged_packs),
+            "--active-packs-dir",
+            str(active_packs),
+            "--json",
+        ]
+    )
 
     assert rc == 0
     output = json.loads(capsys.readouterr().out)

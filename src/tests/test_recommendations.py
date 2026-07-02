@@ -23,7 +23,10 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from ctx.core.resolve.recommendations import (  # noqa: E402
-    _slug_tokens, _token_idf, query_to_tags, recommend_by_tags,
+    _slug_tokens,
+    _token_idf,
+    query_to_tags,
+    recommend_by_tags,
 )
 
 
@@ -33,7 +36,9 @@ def _build_graph(entities: list[tuple[str, list[str]]]) -> nx.Graph:
     for slug, tags in entities:
         G.add_node(
             f"skill:{slug}",
-            label=slug, type="skill", tags=tags,
+            label=slug,
+            type="skill",
+            tags=tags,
         )
     # Add a small star edge so degrees aren't all zero (avoids log1p == 0
     # ties dominating the result).
@@ -49,7 +54,9 @@ def _build_graph(entities: list[tuple[str, list[str]]]) -> nx.Graph:
 
 def test_slug_tokens_splits_hyphens() -> None:
     assert _slug_tokens("python-fastapi-development") == {
-        "python", "fastapi", "development",
+        "python",
+        "fastapi",
+        "development",
     }
 
 
@@ -83,9 +90,13 @@ def test_token_idf_rare_token_outweighs_common() -> None:
 
 def test_token_idf_zero_for_universal_token() -> None:
     """A token in every label has IDF = log(N/N) = 0."""
-    G = _build_graph([
-        ("python-a", []), ("python-b", []), ("python-c", []),
-    ])
+    G = _build_graph(
+        [
+            ("python-a", []),
+            ("python-b", []),
+            ("python-c", []),
+        ]
+    )
     idf = _token_idf(G)
     assert idf["python"] == 0.0
 
@@ -125,19 +136,19 @@ def test_fastapi_query_surfaces_fastapi_skill_above_generic_python_skill() -> No
     common_python: list[tuple[str, list[str]]] = [
         (f"python-pro-{i}", ["python"]) for i in range(20)
     ]
-    common_project: list[tuple[str, list[str]]] = [
-        (f"team-project-{i}", []) for i in range(10)
-    ]
-    G = _build_graph([
-        # python-project-structure: hits common-python + common-project +
-        # has python tag.
-        ("python-project-structure", ["python"]),
-        # python-fastapi-development: hits common-python + RARE 'fastapi'.
-        # No tags.
-        ("python-fastapi-development", []),
-        *common_python,
-        *common_project,
-    ])
+    common_project: list[tuple[str, list[str]]] = [(f"team-project-{i}", []) for i in range(10)]
+    G = _build_graph(
+        [
+            # python-project-structure: hits common-python + common-project +
+            # has python tag.
+            ("python-project-structure", ["python"]),
+            # python-fastapi-development: hits common-python + RARE 'fastapi'.
+            # No tags.
+            ("python-fastapi-development", []),
+            *common_python,
+            *common_project,
+        ]
+    )
     results = recommend_by_tags(G, ["python", "fastapi", "project"], top_n=5)
     names = [r["name"] for r in results]
     assert names[0] == "python-fastapi-development", (
@@ -149,20 +160,24 @@ def test_exact_slug_token_outscores_substring_only() -> None:
     """If signal is a slug-token of A and only a substring (no token
     match) of B, A must outscore B.
     """
-    G = _build_graph([
-        ("api-design", []),       # 'api' is a slug-token
-        ("rapid-builder", []),    # 'api' is a substring of 'rapid' but not a token
-    ])
+    G = _build_graph(
+        [
+            ("api-design", []),  # 'api' is a slug-token
+            ("rapid-builder", []),  # 'api' is a substring of 'rapid' but not a token
+        ]
+    )
     results = recommend_by_tags(G, ["api"], top_n=2)
     names = [r["name"] for r in results]
     assert names[0] == "api-design"
 
 
 def test_exact_entity_slug_query_beats_common_workflow_matches() -> None:
-    G = _build_graph([
-        ("no-mistakes", ["git", "validation", "ship", "workflow"]),
-        *[(f"git-workflow-{i}", ["git", "workflow"]) for i in range(40)],
-    ])
+    G = _build_graph(
+        [
+            ("no-mistakes", ["git", "validation", "ship", "workflow"]),
+            *[(f"git-workflow-{i}", ["git", "workflow"]) for i in range(40)],
+        ]
+    )
 
     out = recommend_by_tags(G, ["no-mistakes", "git", "workflow"], top_n=5)
 
@@ -170,11 +185,13 @@ def test_exact_entity_slug_query_beats_common_workflow_matches() -> None:
 
 
 def test_exact_entity_phrase_query_beats_common_workflow_matches() -> None:
-    G = _build_graph([
-        ("no-mistakes", ["git", "validation", "ship", "workflow"]),
-        ("run", ["workflow"]),
-        *[(f"git-workflow-{i}", ["git", "workflow"]) for i in range(40)],
-    ])
+    G = _build_graph(
+        [
+            ("no-mistakes", ["git", "validation", "ship", "workflow"]),
+            ("run", ["workflow"]),
+            *[(f"git-workflow-{i}", ["git", "workflow"]) for i in range(40)],
+        ]
+    )
     query = "run no mistakes before git workflow"
 
     out = recommend_by_tags(G, query_to_tags(query), top_n=5, query=query)
@@ -184,12 +201,14 @@ def test_exact_entity_phrase_query_beats_common_workflow_matches() -> None:
 
 def test_tag_match_idf_weighting() -> None:
     """A rare tag should outweigh a common one in the score."""
-    G = _build_graph([
-        ("alpha", ["common"]),
-        ("beta", ["common"]),
-        ("gamma", ["common"]),
-        ("delta", ["common", "rare"]),
-    ])
+    G = _build_graph(
+        [
+            ("alpha", ["common"]),
+            ("beta", ["common"]),
+            ("gamma", ["common"]),
+            ("delta", ["common", "rare"]),
+        ]
+    )
     # Both 'common' and 'rare' are not in the slug — only tag overlap fires.
     results = recommend_by_tags(G, ["common", "rare"], top_n=5)
     names = [r["name"] for r in results]
@@ -204,12 +223,14 @@ def test_tag_match_idf_weighting() -> None:
 
 
 def test_rare_tag_outranks_common_tag_when_each_node_matches_once() -> None:
-    G = _build_graph([
-        ("alpha", ["common"]),
-        ("beta", ["common"]),
-        ("gamma", ["common"]),
-        ("delta", ["rare"]),
-    ])
+    G = _build_graph(
+        [
+            ("alpha", ["common"]),
+            ("beta", ["common"]),
+            ("gamma", ["common"]),
+            ("delta", ["rare"]),
+        ]
+    )
 
     results = recommend_by_tags(G, ["common", "rare"], top_n=4)
     assert results[0]["name"] == "delta"
@@ -221,20 +242,24 @@ def test_empty_query_returns_empty_list() -> None:
 
 
 def test_top_n_limit_is_respected() -> None:
-    G = _build_graph([
-        ("python-a", ["python"]),
-        ("python-b", ["python"]),
-        ("python-c", ["python"]),
-    ])
+    G = _build_graph(
+        [
+            ("python-a", ["python"]),
+            ("python-b", ["python"]),
+            ("python-c", ["python"]),
+        ]
+    )
     out = recommend_by_tags(G, ["python"], top_n=2)
     assert len(out) == 2
 
 
 def test_never_load_nodes_are_not_recommended() -> None:
-    G = _build_graph([
-        ("python-active", ["python"]),
-        ("python-stale", ["python"]),
-    ])
+    G = _build_graph(
+        [
+            ("python-active", ["python"]),
+            ("python-stale", ["python"]),
+        ]
+    )
     G.nodes["skill:python-stale"]["never_load"] = True
 
     out = recommend_by_tags(G, ["python"], top_n=5)
@@ -261,15 +286,21 @@ def test_query_to_tags_dedupes() -> None:
 
 def test_query_to_tags_splits_repo_style_identifiers() -> None:
     assert query_to_tags("awesome-skills/code-review-skill") == [
-        "awesome", "skills", "code", "review", "skill",
+        "awesome",
+        "skills",
+        "code",
+        "review",
+        "skill",
     ]
 
 
 def test_repo_style_query_recommends_slug_token_match() -> None:
-    G = _build_graph([
-        ("code-review-excellence", ["review"]),
-        ("unrelated-skill", ["docs"]),
-    ])
+    G = _build_graph(
+        [
+            ("code-review-excellence", ["review"]),
+            ("unrelated-skill", ["docs"]),
+        ]
+    )
     tags = query_to_tags("awesome-skills/code-review-skill")
 
     out = recommend_by_tags(G, tags, top_n=2)
@@ -308,14 +339,19 @@ def test_semantic_boost_changes_top_result(monkeypatch) -> None:
     """When two entities tie on tag/token signal, the one with higher
     semantic similarity to the query must rank higher.
     """
-    G = _build_graph([
-        ("foo-skill", ["common"]),
-        ("bar-skill", ["common"]),
-    ])
-    _patch_semantic(monkeypatch, sims={
-        "skill:foo-skill": 0.10,
-        "skill:bar-skill": 0.90,
-    })
+    G = _build_graph(
+        [
+            ("foo-skill", ["common"]),
+            ("bar-skill", ["common"]),
+        ]
+    )
+    _patch_semantic(
+        monkeypatch,
+        sims={
+            "skill:foo-skill": 0.10,
+            "skill:bar-skill": 0.90,
+        },
+    )
     out = recommend_by_tags(
         G,
         ["common"],
@@ -326,20 +362,24 @@ def test_semantic_boost_changes_top_result(monkeypatch) -> None:
     )
     names = [r["name"] for r in out]
     assert names[0] == "bar-skill", (
-        f"semantic-boost should put bar-skill (cos=0.9) ahead of "
-        f"foo-skill (cos=0.1); got {names}"
+        f"semantic-boost should put bar-skill (cos=0.9) ahead of foo-skill (cos=0.1); got {names}"
     )
 
 
 def test_semantic_query_can_rank_without_tag_signals(monkeypatch) -> None:
-    G = _build_graph([
-        ("go-helper", []),
-        ("rust-helper", []),
-    ])
-    _patch_semantic(monkeypatch, sims={
-        "skill:go-helper": 0.90,
-        "skill:rust-helper": 0.10,
-    })
+    G = _build_graph(
+        [
+            ("go-helper", []),
+            ("rust-helper", []),
+        ]
+    )
+    _patch_semantic(
+        monkeypatch,
+        sims={
+            "skill:go-helper": 0.90,
+            "skill:rust-helper": 0.10,
+        },
+    )
 
     out = recommend_by_tags(
         G,
@@ -456,20 +496,22 @@ def test_skill_index_can_rank_when_graph_has_no_match(tmp_path) -> None:
     catalog_dir = wiki / "external-catalogs" / "skills-sh"
     catalog_dir.mkdir(parents=True)
     (catalog_dir / "catalog.json").write_text(
-        json.dumps({
-            "skills": [
-                {
-                    "id": "open.feishu.cn/lark-doc",
-                    "source": "open.feishu.cn",
-                    "skill_id": "lark-doc",
-                    "name": "lark-doc",
-                    "tags": ["docs"],
-                    "installs": 18029,
-                    "detail_url": "https://skills.sh/site/open.feishu.cn/lark-doc",
-                    "install_command": "npx skills add https://open.feishu.cn",
-                }
-            ]
-        }),
+        json.dumps(
+            {
+                "skills": [
+                    {
+                        "id": "open.feishu.cn/lark-doc",
+                        "source": "open.feishu.cn",
+                        "skill_id": "lark-doc",
+                        "name": "lark-doc",
+                        "tags": ["docs"],
+                        "installs": 18029,
+                        "detail_url": "https://skills.sh/site/open.feishu.cn/lark-doc",
+                        "install_command": "npx skills add https://open.feishu.cn",
+                    }
+                ]
+            }
+        ),
         encoding="utf-8",
     )
     G = _build_graph([("unrelated-python", ["python"])])

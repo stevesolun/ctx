@@ -96,9 +96,7 @@ def test_attach_quality_ignores_slug_with_no_node(tmp_path: Path) -> None:
     assert G.nodes["skill:real"]["quality_score"] is None
 
 
-def _write_mcp_sidecar(
-    sidecar_dir: Path, slug: str, score: float, grade: str
-) -> None:
+def _write_mcp_sidecar(sidecar_dir: Path, slug: str, score: float, grade: str) -> None:
     """Write an MCP-shaped sidecar (no ``subject_type`` field — the
     ``mcp/`` subdir is the type discriminator for Phase 4 writes)."""
     mcp_dir = sidecar_dir / "mcp"

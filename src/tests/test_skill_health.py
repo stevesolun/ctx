@@ -26,10 +26,15 @@ from ctx.adapters.claude_code import skill_health as sh
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
-def _write_skill(root: Path, name: str, body: str, *,
-                 fm_name: str | None = None,
-                 fm_description: str | None = None,
-                 include_frontmatter: bool = True) -> Path:
+def _write_skill(
+    root: Path,
+    name: str,
+    body: str,
+    *,
+    fm_name: str | None = None,
+    fm_description: str | None = None,
+    include_frontmatter: bool = True,
+) -> Path:
     """Create a SKILL.md under root/<name>/. Returns the file path."""
     d = root / name
     d.mkdir(parents=True, exist_ok=True)
@@ -48,10 +53,15 @@ def _write_skill(root: Path, name: str, body: str, *,
     return path
 
 
-def _write_agent(root: Path, name: str, body: str, *,
-                 fm_name: str | None = None,
-                 fm_description: str | None = None,
-                 include_frontmatter: bool = True) -> Path:
+def _write_agent(
+    root: Path,
+    name: str,
+    body: str,
+    *,
+    fm_name: str | None = None,
+    fm_description: str | None = None,
+    include_frontmatter: bool = True,
+) -> Path:
     """Create an agent .md under root/<name>.md."""
     root.mkdir(parents=True, exist_ok=True)
     path = root / f"{name}.md"
@@ -85,7 +95,7 @@ def test_split_frontmatter_valid() -> None:
 
 
 def test_split_frontmatter_strips_quotes() -> None:
-    text = '---\nname: "foo"\ndescription: \'bar\'\n---\nbody\n'
+    text = "---\nname: \"foo\"\ndescription: 'bar'\n---\nbody\n"
     fields, _ = sh._split_frontmatter(text)
     assert fields == {"name": "foo", "description": "bar"}
 
@@ -120,8 +130,9 @@ def test_split_frontmatter_skips_lines_without_colon() -> None:
 
 
 def test_inspect_healthy_skill(tmp_path: Path) -> None:
-    p = _write_skill(tmp_path, "good", _healthy_body(20),
-                     fm_name="good", fm_description="a healthy skill")
+    p = _write_skill(
+        tmp_path, "good", _healthy_body(20), fm_name="good", fm_description="a healthy skill"
+    )
     h = sh._inspect(p, "skill", "good", line_threshold=180, min_body_lines=5)
     assert h.severity == "ok"
     assert h.has_frontmatter is True
@@ -133,28 +144,23 @@ def test_inspect_no_frontmatter(tmp_path: Path) -> None:
     d.mkdir()
     p = d / "SKILL.md"
     p.write_text(_healthy_body(10), encoding="utf-8")
-    h = sh._inspect(p, "skill", "no-fm",
-                    line_threshold=180, min_body_lines=5)
+    h = sh._inspect(p, "skill", "no-fm", line_threshold=180, min_body_lines=5)
     codes = {i.code for i in h.issues}
     assert "no-frontmatter" in codes
     assert h.severity == "error"
 
 
 def test_inspect_missing_name(tmp_path: Path) -> None:
-    p = _write_skill(tmp_path, "noname", _healthy_body(10),
-                     fm_description="has a description")
-    h = sh._inspect(p, "skill", "noname",
-                    line_threshold=180, min_body_lines=5)
+    p = _write_skill(tmp_path, "noname", _healthy_body(10), fm_description="has a description")
+    h = sh._inspect(p, "skill", "noname", line_threshold=180, min_body_lines=5)
     codes = {i.code for i in h.issues}
     assert "frontmatter-missing-name" in codes
     assert h.severity == "error"
 
 
 def test_inspect_missing_description(tmp_path: Path) -> None:
-    p = _write_skill(tmp_path, "nodesc", _healthy_body(10),
-                     fm_name="nodesc")
-    h = sh._inspect(p, "skill", "nodesc",
-                    line_threshold=180, min_body_lines=5)
+    p = _write_skill(tmp_path, "nodesc", _healthy_body(10), fm_name="nodesc")
+    h = sh._inspect(p, "skill", "nodesc", line_threshold=180, min_body_lines=5)
     codes = {i.code for i in h.issues}
     assert "frontmatter-missing-description" in codes
     # warning alone should not escalate to error
@@ -162,10 +168,8 @@ def test_inspect_missing_description(tmp_path: Path) -> None:
 
 
 def test_inspect_empty_body(tmp_path: Path) -> None:
-    p = _write_skill(tmp_path, "empty", "\n",
-                     fm_name="empty", fm_description="nothing here")
-    h = sh._inspect(p, "skill", "empty",
-                    line_threshold=180, min_body_lines=5)
+    p = _write_skill(tmp_path, "empty", "\n", fm_name="empty", fm_description="nothing here")
+    h = sh._inspect(p, "skill", "empty", line_threshold=180, min_body_lines=5)
     codes = {i.code for i in h.issues}
     assert "empty-body" in codes
     assert h.severity == "error"
@@ -173,23 +177,20 @@ def test_inspect_empty_body(tmp_path: Path) -> None:
 
 def test_inspect_over_threshold(tmp_path: Path) -> None:
     body = _healthy_body(200)
-    p = _write_skill(tmp_path, "big", body,
-                     fm_name="big", fm_description="too big")
-    h = sh._inspect(p, "skill", "big",
-                    line_threshold=180, min_body_lines=5)
+    p = _write_skill(tmp_path, "big", body, fm_name="big", fm_description="too big")
+    h = sh._inspect(p, "skill", "big", line_threshold=180, min_body_lines=5)
     codes = {i.code for i in h.issues}
     assert "over-threshold" in codes
     assert h.severity == "warning"
 
 
-def test_inspect_unreadable_uses_error_issue(tmp_path: Path,
-                                             monkeypatch: pytest.MonkeyPatch
-                                             ) -> None:
+def test_inspect_unreadable_uses_error_issue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     p = tmp_path / "bad.md"
     p.write_text("content", encoding="utf-8")
     monkeypatch.setattr(sh, "_read_safe", lambda _p: None)
-    h = sh._inspect(p, "skill", "bad",
-                    line_threshold=180, min_body_lines=5)
+    h = sh._inspect(p, "skill", "bad", line_threshold=180, min_body_lines=5)
     assert h.issues[0].code == "unreadable"
     assert h.severity == "error"
     assert h.has_frontmatter is False
@@ -197,8 +198,11 @@ def test_inspect_unreadable_uses_error_issue(tmp_path: Path,
 
 def test_entity_health_severity_ranks_error_over_warning() -> None:
     h = sh.EntityHealth(
-        name="x", kind="skill", path="/tmp/x",
-        lines=10, has_frontmatter=True,
+        name="x",
+        kind="skill",
+        path="/tmp/x",
+        lines=10,
+        has_frontmatter=True,
         issues=(
             sh.Issue("over-threshold", "warning", "w"),
             sh.Issue("empty-body", "error", "e"),
@@ -209,8 +213,11 @@ def test_entity_health_severity_ranks_error_over_warning() -> None:
 
 def test_entity_health_to_dict_injects_severity() -> None:
     h = sh.EntityHealth(
-        name="x", kind="skill", path="/tmp/x",
-        lines=10, has_frontmatter=True,
+        name="x",
+        kind="skill",
+        path="/tmp/x",
+        lines=10,
+        has_frontmatter=True,
         issues=(sh.Issue("frontmatter-missing-description", "warning", "w"),),
     )
     d = h.to_dict()
@@ -222,14 +229,12 @@ def test_entity_health_to_dict_injects_severity() -> None:
 
 
 def test_scan_skills_missing_dir(tmp_path: Path) -> None:
-    assert sh.scan_skills(tmp_path / "does-not-exist",
-                          line_threshold=180, min_body_lines=5) == []
+    assert sh.scan_skills(tmp_path / "does-not-exist", line_threshold=180, min_body_lines=5) == []
 
 
 def test_scan_skills_flags_missing_skill_md(tmp_path: Path) -> None:
     (tmp_path / "orphan").mkdir()
-    results = sh.scan_skills(tmp_path,
-                             line_threshold=180, min_body_lines=5)
+    results = sh.scan_skills(tmp_path, line_threshold=180, min_body_lines=5)
     assert len(results) == 1
     assert results[0].issues[0].code == "missing-file"
     assert results[0].severity == "error"
@@ -237,20 +242,15 @@ def test_scan_skills_flags_missing_skill_md(tmp_path: Path) -> None:
 
 def test_scan_skills_ignores_non_directories(tmp_path: Path) -> None:
     (tmp_path / "loose.md").write_text("ignore me", encoding="utf-8")
-    _write_skill(tmp_path, "real", _healthy_body(),
-                 fm_name="real", fm_description="desc")
-    names = [e.name for e in sh.scan_skills(tmp_path,
-                                            line_threshold=180,
-                                            min_body_lines=5)]
+    _write_skill(tmp_path, "real", _healthy_body(), fm_name="real", fm_description="desc")
+    names = [e.name for e in sh.scan_skills(tmp_path, line_threshold=180, min_body_lines=5)]
     assert names == ["real"]
 
 
 def test_scan_agents_flat_md(tmp_path: Path) -> None:
     agents = tmp_path / "agents"
-    _write_agent(agents, "agent-a", _healthy_body(),
-                 fm_name="agent-a", fm_description="ok")
-    _write_agent(agents, "agent-b", _healthy_body(),
-                 fm_name="agent-b", fm_description="ok")
+    _write_agent(agents, "agent-a", _healthy_body(), fm_name="agent-a", fm_description="ok")
+    _write_agent(agents, "agent-b", _healthy_body(), fm_name="agent-b", fm_description="ok")
     results = sh.scan_agents(agents, line_threshold=180, min_body_lines=5)
     names = sorted(e.name for e in results)
     assert names == ["agent-a", "agent-b"]
@@ -258,8 +258,7 @@ def test_scan_agents_flat_md(tmp_path: Path) -> None:
 
 
 def test_scan_agents_missing_dir(tmp_path: Path) -> None:
-    assert sh.scan_agents(tmp_path / "nope",
-                          line_threshold=180, min_body_lines=5) == []
+    assert sh.scan_agents(tmp_path / "nope", line_threshold=180, min_body_lines=5) == []
 
 
 # ── detect_drift ───────────────────────────────────────────────────────────
@@ -273,13 +272,19 @@ def _write_json(path: Path, data: dict) -> None:
 def test_detect_drift_finds_manifest_orphans(tmp_path: Path) -> None:
     manifest = tmp_path / "manifest.json"
     pending = tmp_path / "pending.json"
-    _write_json(manifest, {"load": [
-        {"skill": "alive"},
-        {"skill": "ghost"},
-    ]})
+    _write_json(
+        manifest,
+        {
+            "load": [
+                {"skill": "alive"},
+                {"skill": "ghost"},
+            ]
+        },
+    )
     entities = (
-        sh.EntityHealth(name="alive", kind="skill", path="/tmp/alive",
-                        lines=10, has_frontmatter=True, issues=()),
+        sh.EntityHealth(
+            name="alive", kind="skill", path="/tmp/alive", lines=10, has_frontmatter=True, issues=()
+        ),
     )
     drift = sh.detect_drift(entities, manifest, pending)
     assert drift.orphaned_manifest == ("ghost",)
@@ -290,16 +295,25 @@ def test_detect_drift_finds_manifest_orphans(tmp_path: Path) -> None:
 def test_detect_drift_finds_pending_orphans(tmp_path: Path) -> None:
     manifest = tmp_path / "manifest.json"
     pending = tmp_path / "pending.json"
-    _write_json(pending, {
-        "graph_suggestions": [
-            {"name": "suggested-ghost"},
-            {"name": "real-one"},
-        ],
-        "unmatched_signals": ["stray-signal"],
-    })
+    _write_json(
+        pending,
+        {
+            "graph_suggestions": [
+                {"name": "suggested-ghost"},
+                {"name": "real-one"},
+            ],
+            "unmatched_signals": ["stray-signal"],
+        },
+    )
     entities = (
-        sh.EntityHealth(name="real-one", kind="skill", path="/tmp/real",
-                        lines=10, has_frontmatter=True, issues=()),
+        sh.EntityHealth(
+            name="real-one",
+            kind="skill",
+            path="/tmp/real",
+            lines=10,
+            has_frontmatter=True,
+            issues=(),
+        ),
     )
     drift = sh.detect_drift(entities, manifest, pending)
     assert drift.orphaned_manifest == ()
@@ -333,21 +347,23 @@ def test_detect_drift_ignores_non_dict_json(tmp_path: Path) -> None:
 def test_build_report_tallies_and_includes_drift(tmp_path: Path) -> None:
     skills = tmp_path / "skills"
     agents = tmp_path / "agents"
-    _write_skill(skills, "ok", _healthy_body(),
-                 fm_name="ok", fm_description="good")
-    _write_skill(skills, "err", _healthy_body(),
-                 include_frontmatter=False)  # -> no-frontmatter error
-    _write_agent(agents, "warn", _healthy_body(),
-                 fm_name="warn")             # -> missing description warn
+    _write_skill(skills, "ok", _healthy_body(), fm_name="ok", fm_description="good")
+    _write_skill(
+        skills, "err", _healthy_body(), include_frontmatter=False
+    )  # -> no-frontmatter error
+    _write_agent(agents, "warn", _healthy_body(), fm_name="warn")  # -> missing description warn
 
     manifest = tmp_path / "manifest.json"
     _write_json(manifest, {"load": [{"skill": "ok"}, {"skill": "ghost"}]})
     pending = tmp_path / "pending.json"
 
     report = sh.build_report(
-        skills_dir=skills, agents_dir=agents,
-        line_threshold=180, min_body_lines=5,
-        manifest_path=manifest, pending_path=pending,
+        skills_dir=skills,
+        agents_dir=agents,
+        line_threshold=180,
+        min_body_lines=5,
+        manifest_path=manifest,
+        pending_path=pending,
         now=1234.0,
     )
 
@@ -363,11 +379,12 @@ def test_build_report_tallies_and_includes_drift(tmp_path: Path) -> None:
 
 def test_build_report_all_clean(tmp_path: Path) -> None:
     skills = tmp_path / "skills"
-    _write_skill(skills, "ok", _healthy_body(),
-                 fm_name="ok", fm_description="good")
+    _write_skill(skills, "ok", _healthy_body(), fm_name="ok", fm_description="good")
     report = sh.build_report(
-        skills_dir=skills, agents_dir=tmp_path / "agents",
-        line_threshold=180, min_body_lines=5,
+        skills_dir=skills,
+        agents_dir=tmp_path / "agents",
+        line_threshold=180,
+        min_body_lines=5,
         manifest_path=tmp_path / "nope1.json",
         pending_path=tmp_path / "nope2.json",
         now=1.0,
@@ -381,11 +398,12 @@ def test_build_report_all_clean(tmp_path: Path) -> None:
 
 def test_format_dashboard_all_healthy(tmp_path: Path) -> None:
     skills = tmp_path / "skills"
-    _write_skill(skills, "ok", _healthy_body(),
-                 fm_name="ok", fm_description="good")
+    _write_skill(skills, "ok", _healthy_body(), fm_name="ok", fm_description="good")
     report = sh.build_report(
-        skills_dir=skills, agents_dir=tmp_path / "a",
-        line_threshold=180, min_body_lines=5,
+        skills_dir=skills,
+        agents_dir=tmp_path / "a",
+        line_threshold=180,
+        min_body_lines=5,
         manifest_path=tmp_path / "m.json",
         pending_path=tmp_path / "p.json",
         now=1.0,
@@ -399,13 +417,13 @@ def test_format_dashboard_orders_errors_before_warnings(
     tmp_path: Path,
 ) -> None:
     skills = tmp_path / "skills"
-    _write_skill(skills, "a-warn", _healthy_body(),
-                 fm_name="a-warn")  # warning only
-    _write_skill(skills, "b-err", _healthy_body(),
-                 include_frontmatter=False)  # error
+    _write_skill(skills, "a-warn", _healthy_body(), fm_name="a-warn")  # warning only
+    _write_skill(skills, "b-err", _healthy_body(), include_frontmatter=False)  # error
     report = sh.build_report(
-        skills_dir=skills, agents_dir=tmp_path / "a",
-        line_threshold=180, min_body_lines=5,
+        skills_dir=skills,
+        agents_dir=tmp_path / "a",
+        line_threshold=180,
+        min_body_lines=5,
         manifest_path=tmp_path / "m.json",
         pending_path=tmp_path / "p.json",
         now=1.0,
@@ -424,9 +442,12 @@ def test_format_dashboard_drift_section(tmp_path: Path) -> None:
     pending = tmp_path / "p.json"
     _write_json(pending, {"unmatched_signals": ["stray"]})
     report = sh.build_report(
-        skills_dir=tmp_path / "s", agents_dir=tmp_path / "a",
-        line_threshold=180, min_body_lines=5,
-        manifest_path=manifest, pending_path=pending,
+        skills_dir=tmp_path / "s",
+        agents_dir=tmp_path / "a",
+        line_threshold=180,
+        min_body_lines=5,
+        manifest_path=manifest,
+        pending_path=pending,
         now=1.0,
     )
     out = sh.format_dashboard(report)
@@ -440,7 +461,10 @@ def test_format_dashboard_drift_section(tmp_path: Path) -> None:
 
 def test_heal_noop_when_clean(tmp_path: Path) -> None:
     report = sh.HealthReport(
-        generated_at=1.0, entities=(), drift=sh.DriftReport(), totals={},
+        generated_at=1.0,
+        entities=(),
+        drift=sh.DriftReport(),
+        totals={},
     )
     result = sh.heal(report, tmp_path / "m.json", tmp_path / "p.json")
     assert result.empty is True
@@ -448,11 +472,19 @@ def test_heal_noop_when_clean(tmp_path: Path) -> None:
 
 def test_heal_removes_manifest_orphans(tmp_path: Path) -> None:
     manifest = tmp_path / "manifest.json"
-    _write_json(manifest, {"load": [
-        {"skill": "alive"}, {"skill": "ghost-a"}, {"skill": "ghost-b"},
-    ]})
+    _write_json(
+        manifest,
+        {
+            "load": [
+                {"skill": "alive"},
+                {"skill": "ghost-a"},
+                {"skill": "ghost-b"},
+            ]
+        },
+    )
     report = sh.HealthReport(
-        generated_at=1.0, entities=(),
+        generated_at=1.0,
+        entities=(),
         drift=sh.DriftReport(orphaned_manifest=("ghost-a", "ghost-b")),
         totals={},
     )
@@ -464,15 +496,19 @@ def test_heal_removes_manifest_orphans(tmp_path: Path) -> None:
 
 def test_heal_removes_pending_orphans(tmp_path: Path) -> None:
     pending = tmp_path / "pending.json"
-    _write_json(pending, {
-        "graph_suggestions": [
-            {"name": "keep-me"},
-            {"name": "ghost"},
-        ],
-        "unmatched_signals": ["stray", "kept-signal"],
-    })
+    _write_json(
+        pending,
+        {
+            "graph_suggestions": [
+                {"name": "keep-me"},
+                {"name": "ghost"},
+            ],
+            "unmatched_signals": ["stray", "kept-signal"],
+        },
+    )
     report = sh.HealthReport(
-        generated_at=1.0, entities=(),
+        generated_at=1.0,
+        entities=(),
         drift=sh.DriftReport(orphaned_pending=("ghost", "stray")),
         totals={},
     )
@@ -485,22 +521,21 @@ def test_heal_removes_pending_orphans(tmp_path: Path) -> None:
 
 def test_heal_skips_missing_files(tmp_path: Path) -> None:
     report = sh.HealthReport(
-        generated_at=1.0, entities=(),
-        drift=sh.DriftReport(orphaned_manifest=("ghost",),
-                             orphaned_pending=("stray",)),
+        generated_at=1.0,
+        entities=(),
+        drift=sh.DriftReport(orphaned_manifest=("ghost",), orphaned_pending=("stray",)),
         totals={},
     )
-    result = sh.heal(report, tmp_path / "absent1.json",
-                     tmp_path / "absent2.json")
+    result = sh.heal(report, tmp_path / "absent1.json", tmp_path / "absent2.json")
     assert result.empty is True
 
 
-def test_heal_manifest_no_change_when_orphans_not_present(tmp_path: Path
-                                                          ) -> None:
+def test_heal_manifest_no_change_when_orphans_not_present(tmp_path: Path) -> None:
     manifest = tmp_path / "manifest.json"
     _write_json(manifest, {"load": [{"skill": "alive"}]})
     report = sh.HealthReport(
-        generated_at=1.0, entities=(),
+        generated_at=1.0,
+        entities=(),
         drift=sh.DriftReport(orphaned_manifest=("ghost",)),
         totals={},
     )
@@ -524,8 +559,7 @@ def test_heal_result_to_dict() -> None:
 
 
 @pytest.fixture
-def isolated_cli(tmp_path: Path,
-                 monkeypatch: pytest.MonkeyPatch) -> dict:
+def isolated_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     """Redirect all module-level paths at tmp_path for CLI invocations."""
     skills = tmp_path / "skills"
     agents = tmp_path / "agents"
@@ -543,10 +577,8 @@ def isolated_cli(tmp_path: Path,
     }
 
 
-def test_cli_scan_outputs_json(isolated_cli: dict,
-                               capsys: pytest.CaptureFixture) -> None:
-    _write_skill(isolated_cli["skills"], "ok", _healthy_body(),
-                 fm_name="ok", fm_description="good")
+def test_cli_scan_outputs_json(isolated_cli: dict, capsys: pytest.CaptureFixture) -> None:
+    _write_skill(isolated_cli["skills"], "ok", _healthy_body(), fm_name="ok", fm_description="good")
     rc = sh.main(["scan"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -577,11 +609,10 @@ def test_cli_scan_uses_configured_default_line_threshold(
     assert [issue["code"] for issue in issues] == ["over-threshold"]
 
 
-def test_cli_dashboard_prints_human_summary(isolated_cli: dict,
-                                            capsys: pytest.CaptureFixture
-                                            ) -> None:
-    _write_skill(isolated_cli["skills"], "ok", _healthy_body(),
-                 fm_name="ok", fm_description="good")
+def test_cli_dashboard_prints_human_summary(
+    isolated_cli: dict, capsys: pytest.CaptureFixture
+) -> None:
+    _write_skill(isolated_cli["skills"], "ok", _healthy_body(), fm_name="ok", fm_description="good")
     rc = sh.main(["dashboard"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -589,11 +620,12 @@ def test_cli_dashboard_prints_human_summary(isolated_cli: dict,
     assert "All healthy." in out
 
 
-def test_cli_check_strict_nonzero_on_error(isolated_cli: dict,
-                                           capsys: pytest.CaptureFixture
-                                           ) -> None:
-    _write_skill(isolated_cli["skills"], "bad", _healthy_body(),
-                 include_frontmatter=False)  # no-frontmatter error
+def test_cli_check_strict_nonzero_on_error(
+    isolated_cli: dict, capsys: pytest.CaptureFixture
+) -> None:
+    _write_skill(
+        isolated_cli["skills"], "bad", _healthy_body(), include_frontmatter=False
+    )  # no-frontmatter error
     rc = sh.main(["check", "--strict"])
     assert rc == 2
     out = capsys.readouterr().out
@@ -601,26 +633,30 @@ def test_cli_check_strict_nonzero_on_error(isolated_cli: dict,
 
 
 def test_cli_check_strict_zero_when_clean(isolated_cli: dict) -> None:
-    _write_skill(isolated_cli["skills"], "ok", _healthy_body(),
-                 fm_name="ok", fm_description="good")
+    _write_skill(isolated_cli["skills"], "ok", _healthy_body(), fm_name="ok", fm_description="good")
     rc = sh.main(["check", "--strict"])
     assert rc == 0
 
 
 def test_cli_check_without_strict_always_zero(isolated_cli: dict) -> None:
-    _write_skill(isolated_cli["skills"], "bad", _healthy_body(),
-                 include_frontmatter=False)
+    _write_skill(isolated_cli["skills"], "bad", _healthy_body(), include_frontmatter=False)
     rc = sh.main(["check"])
     assert rc == 0
 
 
-def test_cli_heal_removes_orphans(isolated_cli: dict,
-                                  capsys: pytest.CaptureFixture) -> None:
-    _write_skill(isolated_cli["skills"], "alive", _healthy_body(),
-                 fm_name="alive", fm_description="good")
-    _write_json(isolated_cli["manifest"], {"load": [
-        {"skill": "alive"}, {"skill": "ghost"},
-    ]})
+def test_cli_heal_removes_orphans(isolated_cli: dict, capsys: pytest.CaptureFixture) -> None:
+    _write_skill(
+        isolated_cli["skills"], "alive", _healthy_body(), fm_name="alive", fm_description="good"
+    )
+    _write_json(
+        isolated_cli["manifest"],
+        {
+            "load": [
+                {"skill": "alive"},
+                {"skill": "ghost"},
+            ]
+        },
+    )
     rc = sh.main(["heal"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -629,10 +665,8 @@ def test_cli_heal_removes_orphans(isolated_cli: dict,
     assert after["load"] == [{"skill": "alive"}]
 
 
-def test_cli_heal_noop(isolated_cli: dict,
-                       capsys: pytest.CaptureFixture) -> None:
-    _write_skill(isolated_cli["skills"], "ok", _healthy_body(),
-                 fm_name="ok", fm_description="good")
+def test_cli_heal_noop(isolated_cli: dict, capsys: pytest.CaptureFixture) -> None:
+    _write_skill(isolated_cli["skills"], "ok", _healthy_body(), fm_name="ok", fm_description="good")
     rc = sh.main(["heal"])
     assert rc == 0
     assert "nothing to do" in capsys.readouterr().out

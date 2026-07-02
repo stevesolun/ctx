@@ -99,18 +99,16 @@ class TestObserveScore:
         s = lc.LifecycleState(slug="x", subject_type="skill")
         s1 = lc.observe_score(s, _score(grade="D", computed_at=NOW))
         assert s1.consecutive_d_count == 1
-        s2 = lc.observe_score(
-            s1, _score(grade="D", computed_at=NOW + timedelta(hours=1))
-        )
+        s2 = lc.observe_score(s1, _score(grade="D", computed_at=NOW + timedelta(hours=1)))
         assert s2.consecutive_d_count == 2
 
     def test_grade_a_resets_streak(self) -> None:
         s = lc.LifecycleState(
-            slug="x", subject_type="skill", consecutive_d_count=3,
+            slug="x",
+            subject_type="skill",
+            consecutive_d_count=3,
         )
-        s1 = lc.observe_score(
-            s, _score(grade="A", computed_at=NOW + timedelta(hours=1))
-        )
+        s1 = lc.observe_score(s, _score(grade="A", computed_at=NOW + timedelta(hours=1)))
         assert s1.consecutive_d_count == 0
         assert s1.last_grade == "A"
 
@@ -121,7 +119,8 @@ class TestObserveScore:
 
     def test_idempotent_on_same_timestamp(self) -> None:
         s = lc.LifecycleState(
-            slug="x", subject_type="skill",
+            slug="x",
+            subject_type="skill",
             consecutive_d_count=1,
             last_seen_computed_at=_iso(NOW),
         )
@@ -129,9 +128,7 @@ class TestObserveScore:
         s1 = lc.observe_score(s, _score(grade="D", computed_at=NOW))
         assert s1.consecutive_d_count == 1
         # Older timestamp — also a no-op.
-        s2 = lc.observe_score(
-            s1, _score(grade="D", computed_at=NOW - timedelta(days=1))
-        )
+        s2 = lc.observe_score(s1, _score(grade="D", computed_at=NOW - timedelta(days=1)))
         assert s2.consecutive_d_count == 1
 
 
@@ -149,7 +146,9 @@ class TestClassifyTransition:
 
     def test_watch_grade_c_no_repeat(self) -> None:
         s = lc.LifecycleState(
-            slug="x", subject_type="skill", state=lc.STATE_WATCH,
+            slug="x",
+            subject_type="skill",
+            state=lc.STATE_WATCH,
         )
         p = lc.classify_transition(s, _score(grade="C"))
         # Still in Watch, nothing to propose.
@@ -157,7 +156,9 @@ class TestClassifyTransition:
 
     def test_d_streak_triggers_demote(self) -> None:
         s = lc.LifecycleState(
-            slug="x", subject_type="skill", state=lc.STATE_WATCH,
+            slug="x",
+            subject_type="skill",
+            state=lc.STATE_WATCH,
             consecutive_d_count=2,
         )
         p = lc.classify_transition(s, _score(grade="D"))
@@ -167,7 +168,9 @@ class TestClassifyTransition:
 
     def test_d_streak_below_threshold_no_demote(self) -> None:
         s = lc.LifecycleState(
-            slug="x", subject_type="skill", state=lc.STATE_WATCH,
+            slug="x",
+            subject_type="skill",
+            state=lc.STATE_WATCH,
             consecutive_d_count=1,
         )
         p = lc.classify_transition(s, _score(grade="D"))
@@ -176,7 +179,9 @@ class TestClassifyTransition:
     def test_demote_aged_proposes_archive(self) -> None:
         since = NOW - timedelta(days=20)
         s = lc.LifecycleState(
-            slug="x", subject_type="skill", state=lc.STATE_DEMOTE,
+            slug="x",
+            subject_type="skill",
+            state=lc.STATE_DEMOTE,
             state_since=_iso(since),
         )
         p = lc.classify_transition(s, None, now=NOW)
@@ -187,7 +192,9 @@ class TestClassifyTransition:
     def test_demote_young_no_archive(self) -> None:
         since = NOW - timedelta(days=3)
         s = lc.LifecycleState(
-            slug="x", subject_type="skill", state=lc.STATE_DEMOTE,
+            slug="x",
+            subject_type="skill",
+            state=lc.STATE_DEMOTE,
             state_since=_iso(since),
         )
         p = lc.classify_transition(s, None, now=NOW)
@@ -196,7 +203,9 @@ class TestClassifyTransition:
     def test_archive_needs_include_delete_flag(self) -> None:
         since = NOW - timedelta(days=90)
         s = lc.LifecycleState(
-            slug="x", subject_type="skill", state=lc.STATE_ARCHIVE,
+            slug="x",
+            subject_type="skill",
+            state=lc.STATE_ARCHIVE,
             state_since=_iso(since),
         )
         # Default review flow does NOT propose delete.
@@ -216,8 +225,12 @@ class TestClassifyTransition:
 class TestStateSidecar:
     def test_save_load_roundtrip(self, tmp_path: Path) -> None:
         state = lc.LifecycleState(
-            slug="demo", subject_type="skill", state=lc.STATE_WATCH,
-            state_since=_iso(NOW), consecutive_d_count=1, last_grade="C",
+            slug="demo",
+            subject_type="skill",
+            state=lc.STATE_WATCH,
+            state_since=_iso(NOW),
+            consecutive_d_count=1,
+            last_grade="C",
             history=({"at": _iso(NOW), "event": "watch", "note": "test"},),
         )
         lc.save_lifecycle_state(state, sidecar_dir=tmp_path)
@@ -249,9 +262,7 @@ class TestStateSidecar:
 
         assert not (real / "demo.lifecycle.json").exists()
 
-    def test_load_rejects_symlinked_lifecycle_sidecar_file(
-        self, tmp_path: Path
-    ) -> None:
+    def test_load_rejects_symlinked_lifecycle_sidecar_file(self, tmp_path: Path) -> None:
         real = tmp_path / "real.lifecycle.json"
         real.write_text(json.dumps({"slug": "demo"}), encoding="utf-8")
         link = tmp_path / "demo.lifecycle.json"
@@ -271,7 +282,11 @@ class TestStateSidecar:
             state = replace(
                 state,
                 history=lc._append_history(
-                    state, event=f"e{i}", note=f"n{i}", cfg=cfg, at=_iso(NOW),
+                    state,
+                    event=f"e{i}",
+                    note=f"n{i}",
+                    cfg=cfg,
+                    at=_iso(NOW),
                 ),
             )
         assert len(state.history) == 3
@@ -307,18 +322,25 @@ class TestApplyProposal:
         sidecar_dir = tmp_path / "quality"
         _make_fake_skill(skills, "demo")
         sources = lc.LifecycleSources(
-            skills_dir=skills, agents_dir=tmp_path / "agents",
+            skills_dir=skills,
+            agents_dir=tmp_path / "agents",
             sidecar_dir=sidecar_dir,
         )
         cfg = lc.LifecycleConfig()
         state = lc.LifecycleState(slug="demo", subject_type="skill")
         proposal = lc.Proposal(
-            slug="demo", subject_type="skill",
-            current_state=lc.STATE_ACTIVE, target_state=lc.STATE_DEMOTE,
+            slug="demo",
+            subject_type="skill",
+            current_state=lc.STATE_ACTIVE,
+            target_state=lc.STATE_DEMOTE,
             reason="test",
         )
         new_state = lc.apply_proposal(
-            proposal, state, sources=sources, cfg=cfg, now=NOW,
+            proposal,
+            state,
+            sources=sources,
+            cfg=cfg,
+            now=NOW,
         )
         assert new_state.state == lc.STATE_DEMOTE
         assert not (skills / "demo").exists()
@@ -332,14 +354,17 @@ class TestApplyProposal:
         link = skills / "demo"
         _symlink_to(outside, link, target_is_directory=True)
         sources = lc.LifecycleSources(
-            skills_dir=skills, agents_dir=tmp_path / "agents",
+            skills_dir=skills,
+            agents_dir=tmp_path / "agents",
             sidecar_dir=sidecar_dir,
         )
         cfg = lc.LifecycleConfig()
         state = lc.LifecycleState(slug="demo", subject_type="skill")
         proposal = lc.Proposal(
-            slug="demo", subject_type="skill",
-            current_state=lc.STATE_ACTIVE, target_state=lc.STATE_DEMOTE,
+            slug="demo",
+            subject_type="skill",
+            current_state=lc.STATE_ACTIVE,
+            target_state=lc.STATE_DEMOTE,
             reason="test",
         )
 
@@ -357,20 +382,29 @@ class TestApplyProposal:
         demoted = skills / cfg.demoted_subdir
         _make_fake_skill(demoted, "demo")
         sources = lc.LifecycleSources(
-            skills_dir=skills, agents_dir=tmp_path / "agents",
+            skills_dir=skills,
+            agents_dir=tmp_path / "agents",
             sidecar_dir=sidecar_dir,
         )
         state = lc.LifecycleState(
-            slug="demo", subject_type="skill", state=lc.STATE_DEMOTE,
+            slug="demo",
+            subject_type="skill",
+            state=lc.STATE_DEMOTE,
             state_since=_iso(NOW - timedelta(days=20)),
         )
         proposal = lc.Proposal(
-            slug="demo", subject_type="skill",
-            current_state=lc.STATE_DEMOTE, target_state=lc.STATE_ARCHIVE,
+            slug="demo",
+            subject_type="skill",
+            current_state=lc.STATE_DEMOTE,
+            target_state=lc.STATE_ARCHIVE,
             reason="test",
         )
         new_state = lc.apply_proposal(
-            proposal, state, sources=sources, cfg=cfg, now=NOW,
+            proposal,
+            state,
+            sources=sources,
+            cfg=cfg,
+            now=NOW,
         )
         assert new_state.state == lc.STATE_ARCHIVE
         assert not (demoted / "demo").exists()
@@ -386,16 +420,21 @@ class TestApplyProposal:
         link = demoted / "demo"
         _symlink_to(outside, link, target_is_directory=True)
         sources = lc.LifecycleSources(
-            skills_dir=skills, agents_dir=tmp_path / "agents",
+            skills_dir=skills,
+            agents_dir=tmp_path / "agents",
             sidecar_dir=sidecar_dir,
         )
         state = lc.LifecycleState(
-            slug="demo", subject_type="skill", state=lc.STATE_DEMOTE,
+            slug="demo",
+            subject_type="skill",
+            state=lc.STATE_DEMOTE,
             state_since=_iso(NOW - timedelta(days=20)),
         )
         proposal = lc.Proposal(
-            slug="demo", subject_type="skill",
-            current_state=lc.STATE_DEMOTE, target_state=lc.STATE_ARCHIVE,
+            slug="demo",
+            subject_type="skill",
+            current_state=lc.STATE_DEMOTE,
+            target_state=lc.STATE_ARCHIVE,
             reason="test",
         )
 
@@ -414,28 +453,36 @@ class TestApplyProposal:
         _make_fake_skill(archive, "demo")
         # Seed both sidecars so we can verify they get removed.
         sidecar_dir.mkdir()
-        (sidecar_dir / "demo.json").write_text(
-            json.dumps({"slug": "demo"}), encoding="utf-8"
-        )
+        (sidecar_dir / "demo.json").write_text(json.dumps({"slug": "demo"}), encoding="utf-8")
         (sidecar_dir / "demo.lifecycle.json").write_text(
             json.dumps({"slug": "demo"}), encoding="utf-8"
         )
         sources = lc.LifecycleSources(
-            skills_dir=skills, agents_dir=tmp_path / "agents",
+            skills_dir=skills,
+            agents_dir=tmp_path / "agents",
             sidecar_dir=sidecar_dir,
         )
         state = lc.LifecycleState(
-            slug="demo", subject_type="skill", state=lc.STATE_ARCHIVE,
+            slug="demo",
+            subject_type="skill",
+            state=lc.STATE_ARCHIVE,
             state_since=_iso(NOW - timedelta(days=90)),
         )
         proposal = lc.Proposal(
-            slug="demo", subject_type="skill",
-            current_state=lc.STATE_ARCHIVE, target_state="deleted",
+            slug="demo",
+            subject_type="skill",
+            current_state=lc.STATE_ARCHIVE,
+            target_state="deleted",
             reason="past delete threshold",
-            requires_typed_confirmation=True, auto_safe=False,
+            requires_typed_confirmation=True,
+            auto_safe=False,
         )
         new_state = lc.apply_proposal(
-            proposal, state, sources=sources, cfg=cfg, now=NOW,
+            proposal,
+            state,
+            sources=sources,
+            cfg=cfg,
+            now=NOW,
         )
         assert new_state.state == "deleted"
         assert not (archive / "demo").exists()
@@ -459,18 +506,24 @@ class TestApplyProposal:
         quality.write_text(json.dumps({"slug": "demo"}), encoding="utf-8")
         lifecycle.write_text(json.dumps({"slug": "demo"}), encoding="utf-8")
         sources = lc.LifecycleSources(
-            skills_dir=skills, agents_dir=tmp_path / "agents",
+            skills_dir=skills,
+            agents_dir=tmp_path / "agents",
             sidecar_dir=sidecar_dir,
         )
         state = lc.LifecycleState(
-            slug="demo", subject_type="skill", state=lc.STATE_ARCHIVE,
+            slug="demo",
+            subject_type="skill",
+            state=lc.STATE_ARCHIVE,
             state_since=_iso(NOW - timedelta(days=90)),
         )
         proposal = lc.Proposal(
-            slug="demo", subject_type="skill",
-            current_state=lc.STATE_ARCHIVE, target_state="deleted",
+            slug="demo",
+            subject_type="skill",
+            current_state=lc.STATE_ARCHIVE,
+            target_state="deleted",
             reason="past delete threshold",
-            requires_typed_confirmation=True, auto_safe=False,
+            requires_typed_confirmation=True,
+            auto_safe=False,
         )
 
         with pytest.raises(ValueError, match="symlinked path"):
@@ -481,25 +534,30 @@ class TestApplyProposal:
         assert lifecycle.is_file()
         assert (outside / "SKILL.md").is_file()
 
-    def test_demote_missing_source_still_advances_state(
-        self, tmp_path: Path
-    ) -> None:
+    def test_demote_missing_source_still_advances_state(self, tmp_path: Path) -> None:
         skills = tmp_path / "skills"
         skills.mkdir()
         sources = lc.LifecycleSources(
-            skills_dir=skills, agents_dir=tmp_path / "agents",
+            skills_dir=skills,
+            agents_dir=tmp_path / "agents",
             sidecar_dir=tmp_path / "quality",
         )
         cfg = lc.LifecycleConfig()
         state = lc.LifecycleState(slug="ghost", subject_type="skill")
         proposal = lc.Proposal(
-            slug="ghost", subject_type="skill",
-            current_state=lc.STATE_ACTIVE, target_state=lc.STATE_DEMOTE,
+            slug="ghost",
+            subject_type="skill",
+            current_state=lc.STATE_ACTIVE,
+            target_state=lc.STATE_DEMOTE,
             reason="test",
         )
         # Should not raise even though there is nothing on disk to move.
         new_state = lc.apply_proposal(
-            proposal, state, sources=sources, cfg=cfg, now=NOW,
+            proposal,
+            state,
+            sources=sources,
+            cfg=cfg,
+            now=NOW,
         )
         assert new_state.state == lc.STATE_DEMOTE
 
@@ -513,21 +571,30 @@ class TestApplyProposal:
         # Pre-create a conflicting archive dir.
         _make_fake_skill(archive, "demo")
         sources = lc.LifecycleSources(
-            skills_dir=skills, agents_dir=tmp_path / "agents",
+            skills_dir=skills,
+            agents_dir=tmp_path / "agents",
             sidecar_dir=sidecar_dir,
         )
         state = lc.LifecycleState(
-            slug="demo", subject_type="skill", state=lc.STATE_DEMOTE,
+            slug="demo",
+            subject_type="skill",
+            state=lc.STATE_DEMOTE,
             state_since=_iso(NOW - timedelta(days=20)),
         )
         proposal = lc.Proposal(
-            slug="demo", subject_type="skill",
-            current_state=lc.STATE_DEMOTE, target_state=lc.STATE_ARCHIVE,
+            slug="demo",
+            subject_type="skill",
+            current_state=lc.STATE_DEMOTE,
+            target_state=lc.STATE_ARCHIVE,
             reason="test",
         )
         with pytest.raises(FileExistsError):
             lc.apply_proposal(
-                proposal, state, sources=sources, cfg=cfg, now=NOW,
+                proposal,
+                state,
+                sources=sources,
+                cfg=cfg,
+                now=NOW,
             )
 
 
@@ -544,19 +611,25 @@ class TestPromoteArchived:
         archive = skills / cfg.archive_subdir
         _make_fake_skill(archive, "demo")
         sources = lc.LifecycleSources(
-            skills_dir=skills, agents_dir=tmp_path / "agents",
+            skills_dir=skills,
+            agents_dir=tmp_path / "agents",
             sidecar_dir=sidecar_dir,
         )
         # Seed an archive-state sidecar so promote can read subject_type.
         state = lc.LifecycleState(
-            slug="demo", subject_type="skill", state=lc.STATE_ARCHIVE,
+            slug="demo",
+            subject_type="skill",
+            state=lc.STATE_ARCHIVE,
             state_since=_iso(NOW - timedelta(days=30)),
             consecutive_d_count=5,
         )
         lc.save_lifecycle_state(state, sidecar_dir=sidecar_dir)
 
         new_state = lc.promote_archived(
-            "demo", sources=sources, cfg=cfg, now=NOW,
+            "demo",
+            sources=sources,
+            cfg=cfg,
+            now=NOW,
         )
         assert new_state.state == lc.STATE_ACTIVE
         assert new_state.consecutive_d_count == 0
@@ -564,7 +637,9 @@ class TestPromoteArchived:
         assert not (archive / "demo").exists()
 
     def test_restore_rolls_back_move_when_state_save_fails(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         skills = tmp_path / "skills"
         sidecar_dir = tmp_path / "quality"
@@ -572,11 +647,14 @@ class TestPromoteArchived:
         archive = skills / cfg.archive_subdir
         _make_fake_skill(archive, "demo")
         sources = lc.LifecycleSources(
-            skills_dir=skills, agents_dir=tmp_path / "agents",
+            skills_dir=skills,
+            agents_dir=tmp_path / "agents",
             sidecar_dir=sidecar_dir,
         )
         state = lc.LifecycleState(
-            slug="demo", subject_type="skill", state=lc.STATE_ARCHIVE,
+            slug="demo",
+            subject_type="skill",
+            state=lc.STATE_ARCHIVE,
             state_since=_iso(NOW - timedelta(days=30)),
             consecutive_d_count=5,
         )
@@ -596,7 +674,8 @@ class TestPromoteArchived:
         skills = tmp_path / "skills"
         skills.mkdir()
         sources = lc.LifecycleSources(
-            skills_dir=skills, agents_dir=tmp_path / "agents",
+            skills_dir=skills,
+            agents_dir=tmp_path / "agents",
             sidecar_dir=tmp_path / "quality",
         )
         with pytest.raises(FileNotFoundError):
@@ -612,7 +691,8 @@ class TestPromoteArchived:
         link = archive / "demo"
         _symlink_to(outside, link, target_is_directory=True)
         sources = lc.LifecycleSources(
-            skills_dir=skills, agents_dir=tmp_path / "agents",
+            skills_dir=skills,
+            agents_dir=tmp_path / "agents",
             sidecar_dir=sidecar_dir,
         )
 
@@ -630,8 +710,12 @@ class TestPromoteArchived:
 
 
 def _write_quality_sidecar(
-    sidecar_dir: Path, slug: str, *, grade: str,
-    subject_type: str = "skill", computed_at: datetime | None = None,
+    sidecar_dir: Path,
+    slug: str,
+    *,
+    grade: str,
+    subject_type: str = "skill",
+    computed_at: datetime | None = None,
 ) -> None:
     sidecar_dir.mkdir(parents=True, exist_ok=True)
     ts = computed_at or NOW
@@ -649,15 +733,14 @@ def _write_quality_sidecar(
         "weights": {"telemetry": 0.4, "intake": 0.2, "graph": 0.25, "routing": 0.15},
         "computed_at": _iso(ts),
     }
-    (sidecar_dir / f"{slug}.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
+    (sidecar_dir / f"{slug}.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
 class TestPlanReview:
     def test_empty_corpus(self, tmp_path: Path) -> None:
         sources = lc.LifecycleSources(
-            skills_dir=tmp_path / "skills", agents_dir=tmp_path / "agents",
+            skills_dir=tmp_path / "skills",
+            agents_dir=tmp_path / "agents",
             sidecar_dir=tmp_path / "quality",
         )
         proposals, observed = lc.plan_review(sources=sources, now=NOW)
@@ -673,14 +756,16 @@ class TestPlanReview:
         # it over the threshold.
         lc.save_lifecycle_state(
             lc.LifecycleState(
-                slug="struggling", subject_type="skill",
+                slug="struggling",
+                subject_type="skill",
                 consecutive_d_count=1,
                 last_seen_computed_at=_iso(NOW - timedelta(days=1)),
             ),
             sidecar_dir=sidecar,
         )
         sources = lc.LifecycleSources(
-            skills_dir=tmp_path / "skills", agents_dir=tmp_path / "agents",
+            skills_dir=tmp_path / "skills",
+            agents_dir=tmp_path / "agents",
             sidecar_dir=sidecar,
         )
         proposals, observed = lc.plan_review(sources=sources, now=NOW)
@@ -690,21 +775,22 @@ class TestPlanReview:
         assert targets.get("struggling") == lc.STATE_DEMOTE
         assert observed["struggling"].consecutive_d_count == 2
 
-    def test_archive_candidate_surfaced_without_quality_sidecar(
-        self, tmp_path: Path
-    ) -> None:
+    def test_archive_candidate_surfaced_without_quality_sidecar(self, tmp_path: Path) -> None:
         sidecar = tmp_path / "quality"
         # Demoted entry with no remaining quality sidecar — should still
         # be classified for archive based on age alone.
         lc.save_lifecycle_state(
             lc.LifecycleState(
-                slug="oldie", subject_type="skill", state=lc.STATE_DEMOTE,
+                slug="oldie",
+                subject_type="skill",
+                state=lc.STATE_DEMOTE,
                 state_since=_iso(NOW - timedelta(days=30)),
             ),
             sidecar_dir=sidecar,
         )
         sources = lc.LifecycleSources(
-            skills_dir=tmp_path / "skills", agents_dir=tmp_path / "agents",
+            skills_dir=tmp_path / "skills",
+            agents_dir=tmp_path / "agents",
             sidecar_dir=sidecar,
         )
         proposals, _ = lc.plan_review(sources=sources, now=NOW)
@@ -774,9 +860,11 @@ def cli_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             return default
 
     import ctx_config
+
     monkeypatch.setattr(ctx_config, "cfg", _FakeCfg(), raising=True)
 
     import skill_quality as sq
+
     monkeypatch.setattr(sq, "default_sidecar_dir", lambda: sidecar, raising=True)
     monkeypatch.setattr(lc, "default_sidecar_dir", lambda: sidecar, raising=True)
     return tmp_path
@@ -784,7 +872,9 @@ def cli_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 class TestCLIReview:
     def test_review_dry_run_no_changes(
-        self, cli_env: Path, capsys: pytest.CaptureFixture,
+        self,
+        cli_env: Path,
+        capsys: pytest.CaptureFixture,
     ) -> None:
         sidecar = cli_env / "quality"
         _write_quality_sidecar(sidecar, "watchme", grade="C")
@@ -802,7 +892,9 @@ class TestCLIReview:
         assert state.last_grade == "C"
 
     def test_review_json_emits_proposals(
-        self, cli_env: Path, capsys: pytest.CaptureFixture,
+        self,
+        cli_env: Path,
+        capsys: pytest.CaptureFixture,
     ) -> None:
         sidecar = cli_env / "quality"
         _write_quality_sidecar(sidecar, "watchme", grade="C")
@@ -813,7 +905,9 @@ class TestCLIReview:
         assert payload["proposals"][0]["target_state"] == lc.STATE_WATCH
 
     def test_review_auto_applies_watch(
-        self, cli_env: Path, capsys: pytest.CaptureFixture,
+        self,
+        cli_env: Path,
+        capsys: pytest.CaptureFixture,
     ) -> None:
         sidecar = cli_env / "quality"
         _write_quality_sidecar(sidecar, "watchme", grade="C")
@@ -825,7 +919,9 @@ class TestCLIReview:
 
 class TestCLIPurge:
     def test_purge_empty_noop(
-        self, cli_env: Path, capsys: pytest.CaptureFixture,
+        self,
+        cli_env: Path,
+        capsys: pytest.CaptureFixture,
     ) -> None:
         rc = lc.main(["purge"])
         assert rc == 0
@@ -845,8 +941,8 @@ class TestCLIPurge:
 # pins the propagation so a future refactor that accidentally breaks
 # get() traversal fails loudly.
 
-class TestBuildConfigPropagates:
 
+class TestBuildConfigPropagates:
     def _rebuild_with_override(self, overrides: dict):
         """Rebuild ctx_config.cfg with a lifecycle override and reload
         ctx_lifecycle so its late-bound import picks up the new cfg."""
@@ -858,6 +954,7 @@ class TestBuildConfigPropagates:
         _cc.cfg = _cc.Config(raw)
 
         import ctx_lifecycle as _cl
+
         importlib.reload(_cl)
         return _cl._build_config()
 
@@ -888,6 +985,7 @@ class TestBuildConfigPropagates:
         raw.pop("quality", None)
         _cc.cfg = _cc.Config(raw)
         import ctx_lifecycle as _cl
+
         importlib.reload(_cl)
 
         cfg = _cl._build_config()

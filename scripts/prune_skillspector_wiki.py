@@ -106,19 +106,21 @@ def build_pruned_artifacts(
         generated=timestamp,
     )
 
-    audit_records = {
-        slug: record for slug, record in records.items() if slug not in remove_slugs
-    }
+    audit_records = {slug: record for slug, record in records.items() if slug not in remove_slugs}
     pruned_catalog, catalog_removed = _prune_catalog_file(root_catalog, remove_slugs)
-    replacements = _build_replacements(
-        graph=graph,
-        communities=communities,
-        remove_node_ids=remove_node_ids,
-        audit_records=audit_records,
-        pruned_catalog=pruned_catalog,
-        export_id=export_id,
-        generated=timestamp,
-    ) if apply else {}
+    replacements = (
+        _build_replacements(
+            graph=graph,
+            communities=communities,
+            remove_node_ids=remove_node_ids,
+            audit_records=audit_records,
+            pruned_catalog=pruned_catalog,
+            export_id=export_id,
+            generated=timestamp,
+        )
+        if apply
+        else {}
+    )
 
     full_stats = _rewrite_tarball(
         full_tarball,
@@ -344,11 +346,14 @@ def _rewrite_tarball(
     staged = tarball.with_name(f"{tarball.name}.staged")
     reject_symlink_path(staged)
     skip_names = set(replacements)
-    with tarfile.open(tarball, "r:gz") as src, tarfile.open(
-        staged,
-        "w:gz",
-        compresslevel=GZIP_COMPRESSLEVEL,
-    ) as dst:
+    with (
+        tarfile.open(tarball, "r:gz") as src,
+        tarfile.open(
+            staged,
+            "w:gz",
+            compresslevel=GZIP_COMPRESSLEVEL,
+        ) as dst,
+    ):
         for member in src:
             safe_name = _safe_tar_name(member.name)
             if safe_name is None:
@@ -431,7 +436,9 @@ def _audit_bytes(records: Iterable[SkillSpectorAuditRecord]) -> bytes:
         json.dumps(record.to_json(), sort_keys=True, separators=(",", ":"))
         for record in sorted(records, key=lambda item: item.slug)
     ]
-    return gzip.compress(("\n".join(lines) + "\n").encode("utf-8"), compresslevel=GZIP_COMPRESSLEVEL)
+    return gzip.compress(
+        ("\n".join(lines) + "\n").encode("utf-8"), compresslevel=GZIP_COMPRESSLEVEL
+    )
 
 
 def _dashboard_index_bytes(graph: dict[str, Any]) -> bytes:
@@ -471,18 +478,20 @@ def _render_report(
 ) -> str:
     nodes, edges = _graph_counts(graph)
     total_communities = int(communities.get("total_communities") or 0)
-    return "\n".join([
-        "# Graph Report",
-        "",
-        f"> Generated: {generated}",
-        f"> Export ID: {export_id}",
-        f"> Nodes: {nodes} | Edges: {edges} | Communities: {total_communities}",
-        "",
-        "## SkillSpector Prune",
-        "",
-        f"- Removed skill nodes: {removed}",
-        "",
-    ])
+    return "\n".join(
+        [
+            "# Graph Report",
+            "",
+            f"> Generated: {generated}",
+            f"> Export ID: {export_id}",
+            f"> Nodes: {nodes} | Edges: {edges} | Communities: {total_communities}",
+            "",
+            "## SkillSpector Prune",
+            "",
+            f"- Removed skill nodes: {removed}",
+            "",
+        ]
+    )
 
 
 def _render_manifest(
@@ -560,14 +569,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Prune SkillSpector removal candidates from graph/wiki artifacts.",
     )
-    parser.add_argument("--audit", type=Path, default=REPO_ROOT / "graph/skillspector-audit.jsonl.gz")
+    parser.add_argument(
+        "--audit", type=Path, default=REPO_ROOT / "graph/skillspector-audit.jsonl.gz"
+    )
     parser.add_argument("--full-tarball", type=Path, default=REPO_ROOT / "graph/wiki-graph.tar.gz")
     parser.add_argument(
         "--runtime-tarball",
         type=Path,
         default=REPO_ROOT / "graph/wiki-graph-runtime.tar.gz",
     )
-    parser.add_argument("--catalog", type=Path, default=REPO_ROOT / "graph/skills-sh-catalog.json.gz")
+    parser.add_argument(
+        "--catalog", type=Path, default=REPO_ROOT / "graph/skills-sh-catalog.json.gz"
+    )
     parser.add_argument("--communities", type=Path, default=REPO_ROOT / "graph/communities.json")
     parser.add_argument("--graph-dir", type=Path, default=REPO_ROOT / "graph")
     parser.add_argument("--apply", action="store_true", help="Rewrite artifacts in place")

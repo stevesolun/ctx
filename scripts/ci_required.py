@@ -57,16 +57,13 @@ def failed_required_jobs(
     for name in sorted(REQUIRED_JOBS - set(needs)):
         failures[name] = "missing"
     docs_only_pr = (
-        event_name == "pull_request"
-        and _job_output(needs, "classify", "docs_only") == "true"
+        event_name == "pull_request" and _job_output(needs, "classify", "docs_only") == "true"
     )
     docs_changed_pr = (
-        event_name == "pull_request"
-        and _job_output(needs, "classify", "docs_changed") == "true"
+        event_name == "pull_request" and _job_output(needs, "classify", "docs_changed") == "true"
     )
     graph_only_pr = (
-        event_name == "pull_request"
-        and _job_output(needs, "classify", "graph_only") == "true"
+        event_name == "pull_request" and _job_output(needs, "classify", "graph_only") == "true"
     )
     graph_artifact_changed_pr = (
         event_name == "pull_request"

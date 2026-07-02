@@ -114,16 +114,18 @@ def test_pack_compaction_cli_emits_json_for_staged_pack_sets(
     _write_active_pack_sets(wiki)
     staging_dir = tmp_path / "staged-compaction"
 
-    result = pack_compaction.main([
-        "compact",
-        "--wiki-path",
-        str(wiki),
-        "--base-export-id",
-        "export-2",
-        "--staging-dir",
-        str(staging_dir),
-        "--json",
-    ])
+    result = pack_compaction.main(
+        [
+            "compact",
+            "--wiki-path",
+            str(wiki),
+            "--base-export-id",
+            "export-2",
+            "--staging-dir",
+            str(staging_dir),
+            "--json",
+        ]
+    )
 
     assert result == 0
     payload = json.loads(capsys.readouterr().out)
@@ -172,14 +174,16 @@ def test_pack_compaction_cli_status_emits_json(
     wiki = tmp_path / "wiki"
     _write_active_pack_sets(wiki)
 
-    rc = pack_compaction.main([
-        "status",
-        "--wiki-path",
-        str(wiki),
-        "--overlay-threshold",
-        "2",
-        "--json",
-    ])
+    rc = pack_compaction.main(
+        [
+            "status",
+            "--wiki-path",
+            str(wiki),
+            "--overlay-threshold",
+            "2",
+            "--json",
+        ]
+    )
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -219,7 +223,9 @@ def test_promote_staged_pack_sets_replaces_graph_and_wiki_with_backups(
     backup_graph = load_merged_pack_graph(tmp_path / "graph-packs.backup")
     assert "skill:old" not in backup_graph
     assert backup_graph.has_edge("skill:new", "skill:keep")
-    assert [entry.manifest.pack_id for entry in discover_pack_manifests(tmp_path / "graph-packs.backup")] == [
+    assert [
+        entry.manifest.pack_id for entry in discover_pack_manifests(tmp_path / "graph-packs.backup")
+    ] == [
         "base-export-1",
         "overlay-new",
     ]
@@ -227,7 +233,10 @@ def test_promote_staged_pack_sets_replaces_graph_and_wiki_with_backups(
         "entities/skills/keep.md": "# Keep\n",
         "entities/skills/new.md": "# New\n",
     }
-    assert [entry.manifest.pack_id for entry in discover_wiki_pack_manifests(tmp_path / "wiki-packs.backup")] == [
+    assert [
+        entry.manifest.pack_id
+        for entry in discover_wiki_pack_manifests(tmp_path / "wiki-packs.backup")
+    ] == [
         "base-export-1",
         "overlay-new",
     ]
@@ -251,20 +260,22 @@ def test_pack_compaction_cli_promotes_staged_pack_sets(
         staging_dir=tmp_path / "staged-compaction",
     )
 
-    rc = pack_compaction.main([
-        "promote",
-        "--wiki-path",
-        str(wiki),
-        "--staged-graph-packs-dir",
-        str(staged.staged_graph_packs_dir),
-        "--staged-wiki-packs-dir",
-        str(staged.staged_wiki_packs_dir),
-        "--graph-backup-packs-dir",
-        str(tmp_path / "graph-packs.backup"),
-        "--wiki-backup-packs-dir",
-        str(tmp_path / "wiki-packs.backup"),
-        "--json",
-    ])
+    rc = pack_compaction.main(
+        [
+            "promote",
+            "--wiki-path",
+            str(wiki),
+            "--staged-graph-packs-dir",
+            str(staged.staged_graph_packs_dir),
+            "--staged-wiki-packs-dir",
+            str(staged.staged_wiki_packs_dir),
+            "--graph-backup-packs-dir",
+            str(tmp_path / "graph-packs.backup"),
+            "--wiki-backup-packs-dir",
+            str(tmp_path / "wiki-packs.backup"),
+            "--json",
+        ]
+    )
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -283,22 +294,24 @@ def test_pack_compaction_cli_compact_promote_one_shot(
     staging_dir = tmp_path / "staged-one-shot"
     store_path = tmp_path / "graph-store.sqlite3"
 
-    rc = pack_compaction.main([
-        "compact-promote",
-        "--wiki-path",
-        str(wiki),
-        "--base-export-id",
-        "export-2",
-        "--staging-dir",
-        str(staging_dir),
-        "--graph-backup-packs-dir",
-        str(tmp_path / "graph-packs.backup"),
-        "--wiki-backup-packs-dir",
-        str(tmp_path / "wiki-packs.backup"),
-        "--graph-store-db",
-        str(store_path),
-        "--json",
-    ])
+    rc = pack_compaction.main(
+        [
+            "compact-promote",
+            "--wiki-path",
+            str(wiki),
+            "--base-export-id",
+            "export-2",
+            "--staging-dir",
+            str(staging_dir),
+            "--graph-backup-packs-dir",
+            str(tmp_path / "graph-packs.backup"),
+            "--wiki-backup-packs-dir",
+            str(tmp_path / "wiki-packs.backup"),
+            "--graph-store-db",
+            str(store_path),
+            "--json",
+        ]
+    )
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -318,12 +331,14 @@ def test_pack_compaction_cli_validates_active_pack_sets(
     wiki = tmp_path / "wiki"
     _write_active_pack_sets(wiki)
 
-    rc = pack_compaction.main([
-        "validate",
-        "--wiki-path",
-        str(wiki),
-        "--json",
-    ])
+    rc = pack_compaction.main(
+        [
+            "validate",
+            "--wiki-path",
+            str(wiki),
+            "--json",
+        ]
+    )
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -349,15 +364,17 @@ def test_pack_compaction_cli_validates_staged_pack_sets_with_manifest(
         staging_dir=tmp_path / "staged-compaction",
     )
 
-    rc = pack_compaction.main([
-        "validate",
-        "--staged-graph-packs-dir",
-        str(staged.staged_graph_packs_dir),
-        "--staged-wiki-packs-dir",
-        str(staged.staged_wiki_packs_dir),
-        "--require-compaction-manifest",
-        "--json",
-    ])
+    rc = pack_compaction.main(
+        [
+            "validate",
+            "--staged-graph-packs-dir",
+            str(staged.staged_graph_packs_dir),
+            "--staged-wiki-packs-dir",
+            str(staged.staged_wiki_packs_dir),
+            "--require-compaction-manifest",
+            "--json",
+        ]
+    )
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -383,12 +400,14 @@ def test_pack_compaction_validate_rejects_stale_entity_wikilinks(
         tombstones=[],
     )
 
-    rc = pack_compaction.main([
-        "validate",
-        "--wiki-path",
-        str(wiki),
-        "--json",
-    ])
+    rc = pack_compaction.main(
+        [
+            "validate",
+            "--wiki-path",
+            str(wiki),
+            "--json",
+        ]
+    )
 
     assert rc == 1
     assert "stale wiki links: 1" in capsys.readouterr().err
@@ -414,11 +433,15 @@ def test_promote_staged_pack_sets_rejects_invalid_staged_wiki_before_graph_swap(
             staged_wiki_packs_dir=staged.staged_wiki_packs_dir,
         )
 
-    assert [entry.manifest.pack_id for entry in discover_pack_manifests(wiki / "graphify-out" / "packs")] == [
+    assert [
+        entry.manifest.pack_id for entry in discover_pack_manifests(wiki / "graphify-out" / "packs")
+    ] == [
         "base-export-1",
         "overlay-new",
     ]
-    assert [entry.manifest.pack_id for entry in discover_wiki_pack_manifests(wiki / "wiki-packs")] == [
+    assert [
+        entry.manifest.pack_id for entry in discover_wiki_pack_manifests(wiki / "wiki-packs")
+    ] == [
         "base-export-1",
         "overlay-new",
     ]
@@ -441,11 +464,7 @@ def test_promote_staged_pack_sets_rejects_graph_wiki_entity_mismatch(
         for line in pages_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    page_rows = [
-        row
-        for row in page_rows
-        if row["path"] != "entities/skills/new.md"
-    ]
+    page_rows = [row for row in page_rows if row["path"] != "entities/skills/new.md"]
     pages_path.write_text(
         "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in page_rows),
         encoding="utf-8",
@@ -454,7 +473,9 @@ def test_promote_staged_pack_sets_rejects_graph_wiki_entity_mismatch(
     wiki_manifest = json.loads(wiki_manifest_path.read_text(encoding="utf-8"))
     wiki_manifest["page_count"] = len(page_rows)
     wiki_manifest["checksums"]["pages.jsonl"] = _sha256_file(pages_path)
-    wiki_manifest_path.write_text(json.dumps(wiki_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    wiki_manifest_path.write_text(
+        json.dumps(wiki_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     compaction_manifest = json.loads(staged.manifest_path.read_text(encoding="utf-8"))
     compaction_manifest["wiki"] = wiki_manifest
     staged.manifest_path.write_text(
@@ -469,7 +490,9 @@ def test_promote_staged_pack_sets_rejects_graph_wiki_entity_mismatch(
             staged_wiki_packs_dir=staged.staged_wiki_packs_dir,
         )
 
-    assert [entry.manifest.pack_id for entry in discover_pack_manifests(wiki / "graphify-out" / "packs")] == [
+    assert [
+        entry.manifest.pack_id for entry in discover_pack_manifests(wiki / "graphify-out" / "packs")
+    ] == [
         "base-export-1",
         "overlay-new",
     ]
@@ -494,7 +517,9 @@ def test_promote_staged_pack_sets_rejects_missing_compaction_manifest(
             staged_wiki_packs_dir=staged.staged_wiki_packs_dir,
         )
 
-    assert [entry.manifest.pack_id for entry in discover_pack_manifests(wiki / "graphify-out" / "packs")] == [
+    assert [
+        entry.manifest.pack_id for entry in discover_pack_manifests(wiki / "graphify-out" / "packs")
+    ] == [
         "base-export-1",
         "overlay-new",
     ]

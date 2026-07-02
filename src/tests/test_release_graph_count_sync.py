@@ -143,22 +143,29 @@ def test_public_docs_and_readmes_expose_current_graph_counts() -> None:
     )
     assert (
         "| Hydrated skill semantic incident edges | "
-        f"**{derived['hydrated_semantic_incident_edges']:,}** |"
-        in knowledge_graph
+        f"**{derived['hydrated_semantic_incident_edges']:,}** |" in knowledge_graph
     )
     assert f"| Communities | **{communities:,}** (Louvain) |" in knowledge_graph
     assert f"semantic {counts['semantic_edges']:,}" in knowledge_graph
     assert f"tag {derived['tag_edges']:,}" in knowledge_graph
     assert f"token {derived['token_edges']:,}" in knowledge_graph
-    assert f"| Cross-type edges (skill <-> agent) | ~{derived['cross_skill_agent_edges']:,} |" in knowledge_graph
-    assert f"| Cross-type edges (skill <-> MCP) | ~{derived['cross_skill_mcp_edges']:,} |" in knowledge_graph
-    assert f"| Cross-type edges (agent <-> MCP) | ~{derived['cross_agent_mcp_edges']:,} |" in knowledge_graph
+    assert (
+        f"| Cross-type edges (skill <-> agent) | ~{derived['cross_skill_agent_edges']:,} |"
+        in knowledge_graph
+    )
+    assert (
+        f"| Cross-type edges (skill <-> MCP) | ~{derived['cross_skill_mcp_edges']:,} |"
+        in knowledge_graph
+    )
+    assert (
+        f"| Cross-type edges (agent <-> MCP) | ~{derived['cross_agent_mcp_edges']:,} |"
+        in knowledge_graph
+    )
     assert f"| Harness edges | **{derived['harness_edges']:,}** |" in knowledge_graph
     assert (
         f"**{communities:,} Louvain communities**, "
         f"**{counts['semantic_edges']:,} semantic edges**, "
-        f"**{derived['tag_edges']:,} tag edges**"
-        in knowledge_graph
+        f"**{derived['tag_edges']:,} tag edges**" in knowledge_graph
     )
 
     graph_readme = Path("graph/README.md").read_text(encoding="utf-8")

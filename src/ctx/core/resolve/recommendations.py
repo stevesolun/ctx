@@ -12,16 +12,59 @@ from pathlib import Path
 from typing import Any
 
 
-_TAG_STOPWORDS: frozenset[str] = frozenset({
-    # Tiny stoplist for query-to-tags tokenisation. This is intentionally
-    # lightweight; callers needing precision can pass explicit graph seeds.
-    "the", "a", "an", "and", "or", "but", "for", "with", "of", "to",
-    "on", "in", "at", "by", "as", "is", "are", "was", "were", "be",
-    "how", "what", "when", "where", "why", "which", "who", "can",
-    "i", "you", "me", "my", "your", "our", "we", "they", "their",
-    "help", "please", "need", "want", "use", "using", "find",
-    "looking", "looking-for", "task",
-})
+_TAG_STOPWORDS: frozenset[str] = frozenset(
+    {
+        # Tiny stoplist for query-to-tags tokenisation. This is intentionally
+        # lightweight; callers needing precision can pass explicit graph seeds.
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "but",
+        "for",
+        "with",
+        "of",
+        "to",
+        "on",
+        "in",
+        "at",
+        "by",
+        "as",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "how",
+        "what",
+        "when",
+        "where",
+        "why",
+        "which",
+        "who",
+        "can",
+        "i",
+        "you",
+        "me",
+        "my",
+        "your",
+        "our",
+        "we",
+        "they",
+        "their",
+        "help",
+        "please",
+        "need",
+        "want",
+        "use",
+        "using",
+        "find",
+        "looking",
+        "looking-for",
+        "task",
+    }
+)
 
 
 _SLUG_TOKEN_RE = re.compile(r"[-_/]+")
@@ -54,9 +97,7 @@ def _truthy_flag(value: object) -> bool:
 # every query would be wasteful (one pass over 100K+ labels). A weak-key
 # cache avoids stale hits when CPython reuses an object id after a graph
 # fixture is collected.
-_idf_cache: weakref.WeakKeyDictionary[Any, dict[str, float]] = (
-    weakref.WeakKeyDictionary()
-)
+_idf_cache: weakref.WeakKeyDictionary[Any, dict[str, float]] = weakref.WeakKeyDictionary()
 
 
 # Cache the (vec_matrix, node_ids, model_id) tuple per live graph object.
@@ -69,7 +110,8 @@ _semantic_cache: weakref.WeakKeyDictionary[Any, tuple[Any, tuple[str, ...], str]
 
 
 def _load_semantic_index(
-    graph: Any, cache_dir: Path | None,
+    graph: Any,
+    cache_dir: Path | None,
 ) -> tuple[Any, tuple[str, ...], str] | None:
     """Build a node-id → vector index from the graphify embedding cache.
 
@@ -86,6 +128,7 @@ def _load_semantic_index(
     if cache_dir is None:
         try:
             from ctx_config import cfg  # noqa: PLC0415
+
             cache_dir = cfg.graph_semantic_cache_dir
         except Exception:
             _semantic_cache[graph] = None
@@ -98,18 +141,14 @@ def _load_semantic_index(
         return None
     try:
         import numpy as np  # noqa: PLC0415
+
         data = np.load(npz, allow_pickle=False)
-        hashes = [
-            h.decode("utf-8") if isinstance(h, bytes) else str(h)
-            for h in data["hashes"]
-        ]
+        hashes = [h.decode("utf-8") if isinstance(h, bytes) else str(h) for h in data["hashes"]]
         vecs = data["vecs"]
         model_arr = data["model"] if "model" in data.files else None
         model_id = ""
         if model_arr is not None and model_arr.size:
-            model_id = (
-                str(model_arr.item()) if model_arr.ndim == 0 else str(model_arr[0])
-            )
+            model_id = str(model_arr.item()) if model_arr.ndim == 0 else str(model_arr[0])
         state_raw = json.loads(state.read_text(encoding="utf-8"))
         nodes_map = state_raw.get("nodes", {})
         if not isinstance(nodes_map, dict):
@@ -164,6 +203,7 @@ def _embed_query(query: str, model_id: str) -> Any | None:
         else:
             backend, model_name = "sentence-transformers", model_id
         import numpy as np  # noqa: PLC0415
+
         if backend in {"sentence-transformers", "st", "sbert"}:
             from sentence_transformers import (  # type: ignore[import-not-found]  # noqa: PLC0415
                 SentenceTransformer,
@@ -346,6 +386,7 @@ def recommend_by_tags(
             if qv is not None:
                 try:
                     import numpy as np  # noqa: PLC0415
+
                     sims = mat @ qv  # (N,) cosines in [-1, 1]
                     # Floor at 0 — negative cosines just mean "not at all
                     # similar" and shouldn't pull score down.
@@ -418,26 +459,28 @@ def recommend_by_tags(
         normalized_score = round(score / top_score, 4) if top_score else 0.0
         if normalized_score < min_score:
             continue
-        graph_results.append({
-            "name": _public_label(label),
-            "type": node_data.get("type", "skill"),
-            "score": round(score, 1),
-            "normalized_score": normalized_score,
-            "matching_tags": sorted(matching_tags),
-            "external": node_data.get("external", False),
-            "external_catalog": node_data.get("external_catalog"),
-            "source_catalog": _public_source_catalog(node_data.get("source_catalog")),
-            "status": _public_status(node_data.get("status")),
-            "never_load": _truthy_flag(node_data.get("never_load")),
-            "source": node_data.get("source"),
-            "skill_id": node_data.get("skill_id"),
-            "installs": _safe_int(node_data.get("installs")),
-            "detail_url": node_data.get("detail_url"),
-            "install_command": node_data.get("install_command"),
-            "category": node_data.get("category"),
-            "invoke_command": node_data.get("invoke_command"),
-            "security_review": node_data.get("security_review"),
-        })
+        graph_results.append(
+            {
+                "name": _public_label(label),
+                "type": node_data.get("type", "skill"),
+                "score": round(score, 1),
+                "normalized_score": normalized_score,
+                "matching_tags": sorted(matching_tags),
+                "external": node_data.get("external", False),
+                "external_catalog": node_data.get("external_catalog"),
+                "source_catalog": _public_source_catalog(node_data.get("source_catalog")),
+                "status": _public_status(node_data.get("status")),
+                "never_load": _truthy_flag(node_data.get("never_load")),
+                "source": node_data.get("source"),
+                "skill_id": node_data.get("skill_id"),
+                "installs": _safe_int(node_data.get("installs")),
+                "detail_url": node_data.get("detail_url"),
+                "install_command": node_data.get("install_command"),
+                "category": node_data.get("category"),
+                "invoke_command": node_data.get("invoke_command"),
+                "security_review": node_data.get("security_review"),
+            }
+        )
         if len(graph_results) >= top_n:
             break
     external_results: list[dict[str, Any]] = []
@@ -487,7 +530,9 @@ def _graph_has_external_catalog_nodes(graph: Any, catalog_name: str) -> bool:
 
 
 @functools.lru_cache(maxsize=8)
-def _load_external_catalog_cached(path_str: str, mtime_ns: int, size: int) -> tuple[dict[str, Any], ...]:
+def _load_external_catalog_cached(
+    path_str: str, mtime_ns: int, size: int
+) -> tuple[dict[str, Any], ...]:
     del mtime_ns, size  # cache-key salt; the values are not needed inside the loader.
     path = Path(path_str)
     try:
@@ -612,7 +657,7 @@ def _public_source_catalog(value: Any) -> Any:
 def _public_label(value: Any) -> str:
     label = str(value)
     if label.lower().startswith("skills-sh-"):
-        return label[len("skills-sh-"):]
+        return label[len("skills-sh-") :]
     return label
 
 

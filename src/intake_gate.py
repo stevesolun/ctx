@@ -193,87 +193,96 @@ def _parse_candidate(raw_md: str) -> _Parsed:
     return _Parsed(frontmatter=fm, body=body, has_frontmatter=has_fm)
 
 
-def _check_structure(
-    parsed: _Parsed, config: IntakeConfig
-) -> list[IntakeFinding]:
+def _check_structure(parsed: _Parsed, config: IntakeConfig) -> list[IntakeFinding]:
     out: list[IntakeFinding] = []
     if not parsed.has_frontmatter or not parsed.frontmatter:
-        out.append(IntakeFinding(
-            code="FRONTMATTER_MISSING",
-            severity="fail",
-            message="candidate has no parseable YAML frontmatter block",
-        ))
+        out.append(
+            IntakeFinding(
+                code="FRONTMATTER_MISSING",
+                severity="fail",
+                message="candidate has no parseable YAML frontmatter block",
+            )
+        )
         # Without a frontmatter we cannot check field presence, so
         # return early with the single blocking finding.
         return out
 
     name = parsed.frontmatter.get("name")
     if not isinstance(name, str) or not name.strip():
-        out.append(IntakeFinding(
-            code="FRONTMATTER_FIELD_MISSING_NAME",
-            severity="fail",
-            message="frontmatter missing required field 'name'",
-        ))
+        out.append(
+            IntakeFinding(
+                code="FRONTMATTER_FIELD_MISSING_NAME",
+                severity="fail",
+                message="frontmatter missing required field 'name'",
+            )
+        )
 
     desc = parsed.frontmatter.get("description")
     if not isinstance(desc, str) or not desc.strip():
-        out.append(IntakeFinding(
-            code="FRONTMATTER_FIELD_MISSING_DESCRIPTION",
-            severity="fail",
-            message="frontmatter missing required field 'description'",
-        ))
+        out.append(
+            IntakeFinding(
+                code="FRONTMATTER_FIELD_MISSING_DESCRIPTION",
+                severity="fail",
+                message="frontmatter missing required field 'description'",
+            )
+        )
 
     body = parsed.body
     if not _H1_RE.search(body):
-        out.append(IntakeFinding(
-            code="BODY_MISSING_H1",
-            severity="fail",
-            message="body has no H1 heading (`# Title`)",
-        ))
+        out.append(
+            IntakeFinding(
+                code="BODY_MISSING_H1",
+                severity="fail",
+                message="body has no H1 heading (`# Title`)",
+            )
+        )
     if not _H2_RE.search(body):
-        out.append(IntakeFinding(
-            code="BODY_MISSING_H2",
-            severity="fail",
-            message="body has no H2 section (`## Section`)",
-        ))
+        out.append(
+            IntakeFinding(
+                code="BODY_MISSING_H2",
+                severity="fail",
+                message="body has no H2 section (`## Section`)",
+            )
+        )
     if len(body.strip()) < config.min_body_chars:
-        out.append(IntakeFinding(
-            code="BODY_TOO_SHORT",
-            severity="fail",
-            message=(
-                f"body has {len(body.strip())} chars; "
-                f"minimum is {config.min_body_chars}"
-            ),
-        ))
+        out.append(
+            IntakeFinding(
+                code="BODY_TOO_SHORT",
+                severity="fail",
+                message=(f"body has {len(body.strip())} chars; minimum is {config.min_body_chars}"),
+            )
+        )
     return out
 
 
-def _check_similarity(
-    top: list[RankedMatch], config: IntakeConfig
-) -> list[IntakeFinding]:
+def _check_similarity(top: list[RankedMatch], config: IntakeConfig) -> list[IntakeFinding]:
     if not top:
         return []
     best = top[0]
     if best.score >= config.dup_threshold:
-        return [IntakeFinding(
-            code="DUPLICATE",
-            severity="fail",
-            message=(
-                f"near-identical match: {best.subject_id!r} "
-                f"scores {best.score:.3f} "
-                f"(>= dup threshold {config.dup_threshold:.2f})"
-            ),
-        )]
+        return [
+            IntakeFinding(
+                code="DUPLICATE",
+                severity="fail",
+                message=(
+                    f"near-identical match: {best.subject_id!r} "
+                    f"scores {best.score:.3f} "
+                    f"(>= dup threshold {config.dup_threshold:.2f})"
+                ),
+            )
+        ]
     if best.score >= config.near_dup_threshold:
-        return [IntakeFinding(
-            code="NEAR_DUPLICATE",
-            severity="warn",
-            message=(
-                f"similar subject exists: {best.subject_id!r} "
-                f"scores {best.score:.3f} "
-                f"(>= near-dup threshold {config.near_dup_threshold:.2f})"
-            ),
-        )]
+        return [
+            IntakeFinding(
+                code="NEAR_DUPLICATE",
+                severity="warn",
+                message=(
+                    f"similar subject exists: {best.subject_id!r} "
+                    f"scores {best.score:.3f} "
+                    f"(>= near-dup threshold {config.near_dup_threshold:.2f})"
+                ),
+            )
+        ]
     return []
 
 
@@ -286,20 +295,19 @@ def _check_connectivity(
     # definition — don't punish early adopters. Skip silently.
     if corpus_size < config.min_neighbors:
         return []
-    qualified = sum(
-        1 for m in top[: config.min_neighbors]
-        if m.score >= config.min_neighbor_score
-    )
+    qualified = sum(1 for m in top[: config.min_neighbors] if m.score >= config.min_neighbor_score)
     if qualified < config.min_neighbors:
-        return [IntakeFinding(
-            code="LOW_CONNECTIVITY",
-            severity="warn",
-            message=(
-                f"only {qualified} of required {config.min_neighbors} "
-                f"neighbors scored >= {config.min_neighbor_score:.2f}; "
-                "candidate may land as an orphan in the wiki graph"
-            ),
-        )]
+        return [
+            IntakeFinding(
+                code="LOW_CONNECTIVITY",
+                severity="warn",
+                message=(
+                    f"only {qualified} of required {config.min_neighbors} "
+                    f"neighbors scored >= {config.min_neighbor_score:.2f}; "
+                    "candidate may land as an orphan in the wiki graph"
+                ),
+            )
+        ]
     return []
 
 
@@ -344,9 +352,7 @@ def run_intake_gate(
     text = compose_corpus_text(raw_md)
     vec = embedder.embed([text])
     if vec.shape[0] != 1 or vec.ndim != 2:
-        raise RuntimeError(
-            f"embedder returned unexpected shape {vec.shape}; expected (1, dim)"
-        )
+        raise RuntimeError(f"embedder returned unexpected shape {vec.shape}; expected (1, dim)")
     query = np.ascontiguousarray(vec[0], dtype=np.float32)
     if query.shape[0] != ranker.dim:
         raise ValueError(

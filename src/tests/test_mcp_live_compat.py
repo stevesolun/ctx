@@ -138,8 +138,7 @@ def _string_list(payload: dict[str, Any], key: str) -> list[str]:
 def _string_dict(payload: dict[str, Any], key: str) -> dict[str, str]:
     value = payload.get(key, {})
     if not isinstance(value, dict) or not all(
-        isinstance(k, str) and isinstance(v, str)
-        for k, v in value.items()
+        isinstance(k, str) and isinstance(v, str) for k, v in value.items()
     ):
         raise AssertionError(f"live MCP config field {key!r} must be a string map")
     return dict(value)
@@ -160,8 +159,5 @@ def _expand_placeholders(value: Any, tmp_path: Path) -> Any:
     if isinstance(value, list):
         return [_expand_placeholders(item, tmp_path) for item in value]
     if isinstance(value, dict):
-        return {
-            str(key): _expand_placeholders(item, tmp_path)
-            for key, item in value.items()
-        }
+        return {str(key): _expand_placeholders(item, tmp_path) for key, item in value.items()}
     return value

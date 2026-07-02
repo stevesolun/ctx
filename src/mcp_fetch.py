@@ -129,7 +129,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Bypass the local raw cache and fetch fresh upstream content",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="count",
         default=0,
         help=(
@@ -152,6 +153,7 @@ def _configure_logging(verbosity: int) -> None:
     if verbosity <= 0:
         return
     import logging  # noqa: PLC0415 — local import keeps cold-path cost off imports
+
     level = logging.DEBUG if verbosity >= 2 else logging.INFO
     logging.basicConfig(
         level=level,

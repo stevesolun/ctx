@@ -70,26 +70,28 @@ _PRIVATE_FILE_MODE = 0o600
 _MAX_META_KEYS = 20
 _MAX_META_VALUE_LEN = 512
 _META_SCALAR_TYPES: tuple[type, ...] = (str, int, float, bool, type(None))
-_HASHED_META_KEYS = frozenset({
-    "command",
-    "cwd",
-    "goal",
-    "input",
-    "output",
-    "path",
-    "prompt",
-    "query",
-    "raw_input",
-    "raw_prompt",
-    "repo",
-    "response",
-    "stderr",
-    "stdout",
-    "task",
-    "tool_args",
-    "tool_input",
-    "tool_output",
-})
+_HASHED_META_KEYS = frozenset(
+    {
+        "command",
+        "cwd",
+        "goal",
+        "input",
+        "output",
+        "path",
+        "prompt",
+        "query",
+        "raw_input",
+        "raw_prompt",
+        "repo",
+        "response",
+        "stderr",
+        "stdout",
+        "task",
+        "tool_args",
+        "tool_input",
+        "tool_output",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -151,21 +153,16 @@ def _validate_meta(meta: Mapping[str, Any]) -> None:
     are almost always doing something they should think twice about.
     """
     if len(meta) > _MAX_META_KEYS:
-        raise ValueError(
-            f"meta has {len(meta)} keys; max {_MAX_META_KEYS}"
-        )
+        raise ValueError(f"meta has {len(meta)} keys; max {_MAX_META_KEYS}")
     for k, v in meta.items():
         if not isinstance(k, str):
             raise TypeError(f"meta key must be str: {k!r}")
         if not isinstance(v, _META_SCALAR_TYPES):
             raise TypeError(
-                f"meta value for {k!r} must be str/int/float/bool/None, "
-                f"got {type(v).__name__}"
+                f"meta value for {k!r} must be str/int/float/bool/None, got {type(v).__name__}"
             )
         if isinstance(v, str) and len(v) > _MAX_META_VALUE_LEN:
-            raise ValueError(
-                f"meta value for {k!r} exceeds {_MAX_META_VALUE_LEN} chars"
-            )
+            raise ValueError(f"meta value for {k!r} exceeds {_MAX_META_VALUE_LEN} chars")
 
 
 def _sanitize_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
@@ -242,9 +239,7 @@ def _resolve_events_path(
     try:
         resolved.relative_to(trusted_root)
     except ValueError:
-        raise ValueError(
-            f"path escapes trusted root {trusted_root}: {path}"
-        )
+        raise ValueError(f"path escapes trusted root {trusted_root}: {path}")
     return target
 
 
@@ -329,16 +324,13 @@ def read_events(
                     event_id=obj["event_id"],
                     meta=obj.get("meta", {}),
                     skill_hash=obj.get("skill_hash") or hash_identifier(str(obj["skill"])),
-                    session_hash=obj.get("session_hash") or hash_identifier(
-                        str(obj["session_id"])
-                    ),
+                    session_hash=obj.get("session_hash") or hash_identifier(str(obj["session_id"])),
                     entity_type=obj.get("entity_type"),
                     schema_version=obj.get("schema_version", SCHEMA_VERSION),
                 )
             except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
                 msg = (
-                    f"skill_telemetry: skipping malformed event at line {ln} "
-                    f"({type(exc).__name__})"
+                    f"skill_telemetry: skipping malformed event at line {ln} ({type(exc).__name__})"
                 )
                 _logger.warning(msg)
                 # Also emit to stderr so CLI users see it without needing
@@ -393,7 +385,5 @@ def is_retained(
     delta = (t1 - t0).total_seconds()
     if delta < 0:
         raise ValueError("unload_ts must be >= load_ts")
-    window = retention_window_seconds(
-        session_seconds, fraction=fraction, min_minutes=min_minutes
-    )
+    window = retention_window_seconds(session_seconds, fraction=fraction, min_minutes=min_minutes)
     return delta >= window

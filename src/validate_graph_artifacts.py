@@ -203,18 +203,14 @@ def _validate_root_entity_overlay(path: Path) -> None:
         for index, node in enumerate(nodes, 1):
             if not isinstance(node, dict) or not isinstance(node.get("id"), str):
                 raise GraphArtifactError(
-                    f"graph/entity-overlays.jsonl line {lineno} node {index} "
-                    "must contain id",
+                    f"graph/entity-overlays.jsonl line {lineno} node {index} must contain id",
                 )
         for index, edge in enumerate(edges, 1):
             if not isinstance(edge, dict):
                 raise GraphArtifactError(
-                    f"graph/entity-overlays.jsonl line {lineno} edge {index} "
-                    "must be an object",
+                    f"graph/entity-overlays.jsonl line {lineno} edge {index} must be an object",
                 )
-            if not isinstance(edge.get("source"), str) or not isinstance(
-                edge.get("target"), str
-            ):
+            if not isinstance(edge.get("source"), str) or not isinstance(edge.get("target"), str):
                 raise GraphArtifactError(
                     f"graph/entity-overlays.jsonl line {lineno} edge {index} "
                     "must contain source/target",
@@ -325,8 +321,7 @@ def _validate_wiki_pack_payload(
     base_export_id = entries[0].manifest.base_export_id
     if base_export_id != expected_export_id:
         raise GraphArtifactError(
-            "wiki pack export_id mismatch: expected "
-            f"{expected_export_id}, got {base_export_id}",
+            f"wiki pack export_id mismatch: expected {expected_export_id}, got {base_export_id}",
         )
     if "index.md" not in pages:
         raise GraphArtifactError("wiki pack payload is missing index.md")
@@ -472,8 +467,7 @@ def _validate_dashboard_index(
             missing_columns = sorted(expected_columns - columns)
             if missing_columns:
                 raise GraphArtifactError(
-                    f"{context} dashboard index table {table} missing columns: "
-                    f"{missing_columns}",
+                    f"{context} dashboard index table {table} missing columns: {missing_columns}",
                 )
         meta_rows = conn.execute("SELECT key,value FROM meta").fetchall()
         meta = {str(row["key"]): json.loads(str(row["value"])) for row in meta_rows}
@@ -490,7 +484,10 @@ def _validate_dashboard_index(
         nodes_count = int(meta.get("nodes_count") or 0)
         if nodes_count != int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]):
             raise GraphArtifactError(f"{context} dashboard index nodes_count mismatch")
-        if nodes_count > 0 and int(conn.execute("SELECT COUNT(*) FROM slug_index").fetchone()[0]) == 0:
+        if (
+            nodes_count > 0
+            and int(conn.execute("SELECT COUNT(*) FROM slug_index").fetchone()[0]) == 0
+        ):
             raise GraphArtifactError(f"{context} dashboard index slug_index is empty")
         payload = conn.execute("SELECT payload FROM neighbors LIMIT 1").fetchone()
         if payload is not None:
@@ -507,12 +504,7 @@ def _validate_dashboard_index(
 
 def _safe_tar_name(raw_name: str) -> str:
     name = raw_name.replace("\\", "/")
-    if (
-        not name
-        or name.startswith("/")
-        or _WINDOWS_DRIVE_RE.match(name)
-        or "\x00" in name
-    ):
+    if not name or name.startswith("/") or _WINDOWS_DRIVE_RE.match(name) or "\x00" in name:
         raise GraphArtifactError(f"unsafe archive member path: {raw_name}")
     while name.startswith("./"):
         name = name[2:]
@@ -581,21 +573,18 @@ def _scan_graph_json(stream: IO[bytes]) -> tuple[int, int, int, int, int, str | 
         _validate_graph_edge_score_fields(data)
         _validate_graph_edge_weight_drift(data)
         if export_id is None:
-            graph_probe = (graph_probe + chunk)[-1024 * 1024:]
+            graph_probe = (graph_probe + chunk)[-1024 * 1024 :]
             export_id = _extract_graph_export_id(graph_probe)
         nodes += len(_NODE_ID_RE.findall(data)) - len(_NODE_ID_RE.findall(old_tail))
         edges += len(_EDGE_TARGET_RE.findall(data)) - len(_EDGE_TARGET_RE.findall(old_tail))
-        semantic_edges += (
-            _count_nonzero_semantic_matches(data)
-            - _count_nonzero_semantic_matches(old_tail)
+        semantic_edges += _count_nonzero_semantic_matches(data) - _count_nonzero_semantic_matches(
+            old_tail
         )
-        skills_sh_nodes += (
-            len(_SOURCE_SKILLS_SH_RE.findall(data))
-            - len(_SOURCE_SKILLS_SH_RE.findall(old_tail))
+        skills_sh_nodes += len(_SOURCE_SKILLS_SH_RE.findall(data)) - len(
+            _SOURCE_SKILLS_SH_RE.findall(old_tail)
         )
-        harness_nodes += (
-            len(_HARNESS_TYPE_RE.findall(data))
-            - len(_HARNESS_TYPE_RE.findall(old_tail))
+        harness_nodes += len(_HARNESS_TYPE_RE.findall(data)) - len(
+            _HARNESS_TYPE_RE.findall(old_tail)
         )
         tail = data[-65536:]
     return nodes, edges, semantic_edges, skills_sh_nodes, harness_nodes, export_id
@@ -627,7 +616,7 @@ def _extract_graph_export_id(payload: bytes) -> str | None:
 
 
 def _json_object_end(payload: bytes, start: int) -> int | None:
-    if start >= len(payload) or payload[start:start + 1] != b"{":
+    if start >= len(payload) or payload[start : start + 1] != b"{":
         return None
     depth = 0
     in_string = False
@@ -849,8 +838,7 @@ def validate_graph_artifacts(
     ]
     if body_unavailable:
         raise GraphArtifactError(
-            "Skills.sh catalog contains body-unavailable records: "
-            f"{body_unavailable[:5]}",
+            f"Skills.sh catalog contains body-unavailable records: {body_unavailable[:5]}",
         )
     available_converted_paths = {
         str(item.get("converted_path") or "")
@@ -858,9 +846,7 @@ def validate_graph_artifacts(
         if item.get("body_available") and str(item.get("converted_path") or "")
     }
     required_skill_pages = {
-        str(item.get("entity_path") or "")
-        for item in skills
-        if str(item.get("entity_path") or "")
+        str(item.get("entity_path") or "") for item in skills if str(item.get("entity_path") or "")
     }
 
     names: set[str] = set()
@@ -1016,11 +1002,13 @@ def validate_graph_artifacts(
         payload = text.encode("utf-8")
         if _is_converted_skill_page(page_name):
             for ref in _iter_skill_bundle_refs(payload):
-                skill_bundle_refs.append((
-                    page_name,
-                    ref,
-                    _skill_bundle_target_name(page_name, ref),
-                ))
+                skill_bundle_refs.append(
+                    (
+                        page_name,
+                        ref,
+                        _skill_bundle_target_name(page_name, ref),
+                    )
+                )
         if deep and page_name.startswith("converted/skills-sh-"):
             if page_name.endswith("/SKILL.md") or "/references/" in page_name:
                 lines = _count_lines(payload)
@@ -1365,8 +1353,7 @@ def _validate_graph_export_manifest(
     expected_keys = {"graph", *expected}
     if set(artifacts) != expected_keys:
         raise GraphArtifactError(
-            "graph export manifest artifacts map must contain exactly "
-            f"{sorted(expected_keys)}",
+            f"graph export manifest artifacts map must contain exactly {sorted(expected_keys)}",
         )
     graph_artifact = artifacts.get("graph")
     if graph_artifact == "graph.json":
@@ -1397,11 +1384,7 @@ def _validate_graph_export_manifest(
 
 
 def _validate_export_ids(export_ids: dict[str, str], *, expected: str) -> None:
-    mismatches = {
-        key: value
-        for key, value in sorted(export_ids.items())
-        if value != expected
-    }
+    mismatches = {key: value for key, value in sorted(export_ids.items()) if value != expected}
     if mismatches:
         raise GraphArtifactError(
             f"graph export_id mismatch: expected {expected}, mismatches={mismatches}",

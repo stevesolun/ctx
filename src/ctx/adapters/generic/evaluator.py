@@ -180,11 +180,11 @@ class EvaluationLoopResult:
 class EvaluationRound:
     """One Generator→Evaluator pair inside ``run_with_evaluation``."""
 
-    index: int                    # 1-based
+    index: int  # 1-based
     loop_result: LoopResult
     evaluation: EvaluationResult
-    revision_task: str            # the revision prompt fed into this round
-                                   # (empty for round 1)
+    revision_task: str  # the revision prompt fed into this round
+    # (empty for round 1)
 
 
 # ── Evaluator ──────────────────────────────────────────────────────────────
@@ -204,9 +204,7 @@ class Evaluator:
         max_tokens: int = 1000,
     ) -> None:
         self._provider = provider
-        self._criteria: tuple[str, ...] = (
-            tuple(criteria) if criteria else _DEFAULT_CRITERIA
-        )
+        self._criteria: tuple[str, ...] = tuple(criteria) if criteria else _DEFAULT_CRITERIA
         self._model = model
         self._system_prompt = system_prompt
         self._temperature = temperature
@@ -217,7 +215,8 @@ class Evaluator:
         return self._criteria
 
     def with_criteria(
-        self, criteria: tuple[str, ...] | list[str],
+        self,
+        criteria: tuple[str, ...] | list[str],
     ) -> "Evaluator":
         """Return a fresh Evaluator with different criteria (same provider + model)."""
         return Evaluator(
@@ -254,7 +253,10 @@ class Evaluator:
     # ── internals ────────────────────────────────────────────────────────
 
     def _format_user_turn(
-        self, task: str, answer: str, context: str,
+        self,
+        task: str,
+        answer: str,
+        context: str,
     ) -> str:
         parts = [
             f"TASK:\n{task.strip()}",
@@ -263,13 +265,12 @@ class Evaluator:
         if context.strip():
             parts.append(f"CONTEXT:\n{context.strip()}")
         parts.append(f"ANSWER:\n{answer.strip() or '(empty)'}")
-        parts.append(
-            "Respond with ONLY the JSON verdict per the system-prompt schema."
-        )
+        parts.append("Respond with ONLY the JSON verdict per the system-prompt schema.")
         return "\n\n".join(parts)
 
     def _parse_response(
-        self, response: CompletionResponse,
+        self,
+        response: CompletionResponse,
     ) -> EvaluationResult:
         raw = response.content or ""
         extracted = _extract_json(raw)
@@ -376,11 +377,10 @@ def run_with_evaluation(
     if contract_builder is not None:
         contract = contract_builder.build(task, plan=plan)
         if contract.criteria:
-            active_evaluator = evaluator.with_criteria(
-                contract.as_evaluator_criteria()
-            )
+            active_evaluator = evaluator.with_criteria(contract.as_evaluator_criteria())
             augmented_prompt = augmented_system_prompt_with_contract(
-                system_prompt, contract,
+                system_prompt,
+                contract,
             )
 
     # Total usage starts with the planner's + contract builder's cost.
@@ -432,8 +432,7 @@ def run_with_evaluation(
                 overall_score=0.0,
                 criterion_results=(),
                 summary_feedback=(
-                    f"Generator stopped with {loop_result.stop_reason}; "
-                    f"{loop_result.detail}"
+                    f"Generator stopped with {loop_result.stop_reason}; {loop_result.detail}"
                 ),
                 revision_directive="",
                 usage=Usage(),
@@ -547,9 +546,7 @@ def _empty_loop_result(task: str) -> LoopResult:
     )
 
 
-_CODE_FENCE_RE = re.compile(
-    r"^```(?:json)?\s*\n(.*?)\n```\s*$", re.MULTILINE | re.DOTALL
-)
+_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n(.*?)\n```\s*$", re.MULTILINE | re.DOTALL)
 
 
 def _extract_json(text: str) -> tuple[dict[str, Any], bool] | None:

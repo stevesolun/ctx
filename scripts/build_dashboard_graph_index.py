@@ -128,11 +128,7 @@ def build_dashboard_index(graph_json: Path, output: Path, *, top_k: int = 40) ->
             neighbor_rows = []
             for source, rows in neighbors.items():
                 slim = [
-                    {
-                        key: value
-                        for key, value in row.items()
-                        if value not in (None, [], "")
-                    }
+                    {key: value for key, value in row.items() if value not in (None, [], "")}
                     for row in rows
                 ]
                 payload = zlib.compress(

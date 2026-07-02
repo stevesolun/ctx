@@ -114,16 +114,18 @@ def test_build_graph_carries_never_load_flag(tmp_path, monkeypatch) -> None:
     blocked = skills_dir / "blocked.md"
     blocked.parent.mkdir(parents=True, exist_ok=True)
     blocked.write_text(
-        "\n".join([
-            "---",
-            "title: blocked",
-            "type: skill",
-            "never_load: true",
-            "tags:",
-            "  - python",
-            "---",
-            "# blocked",
-        ]),
+        "\n".join(
+            [
+                "---",
+                "title: blocked",
+                "type: skill",
+                "never_load: true",
+                "tags:",
+                "  - python",
+                "---",
+                "# blocked",
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -161,13 +163,15 @@ def _write_quality_sidecar(
 ) -> None:
     sidecar_dir.mkdir(parents=True, exist_ok=True)
     (sidecar_dir / f"{slug}.json").write_text(
-        json.dumps({
-            "slug": slug,
-            "subject_type": subject_type,
-            "score": score,
-            "grade": "A",
-            "signals": {"telemetry": {"score": telemetry}},
-        }),
+        json.dumps(
+            {
+                "slug": slug,
+                "subject_type": subject_type,
+                "score": score,
+                "grade": "A",
+                "signals": {"telemetry": {"score": telemetry}},
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -204,6 +208,7 @@ def test_dense_tag_threshold_is_at_least_500() -> None:
     ``src/config.json`` fail here.
     """
     from ctx_config import cfg  # noqa: PLC0415
+
     value = cfg.graph_dense_tag_threshold
     assert value >= 500, (
         f"graph.tag_edges.dense_tag_threshold={value} will silently "
@@ -238,8 +243,7 @@ def test_slug_token_pseudo_tags_are_indexed() -> None:
     # Stop-word filter must remain — without it, tokens like 'pro'
     # and 'skill' would over-connect the graph.
     assert hasattr(wg, "SLUG_STOP"), (
-        "SLUG_STOP filter removed — slug tokens like 'pro' and 'skill' "
-        "will over-connect the graph"
+        "SLUG_STOP filter removed — slug tokens like 'pro' and 'skill' will over-connect the graph"
     )
     # Sanity behaviour check: "fastapi-pro" yields "fastapi" (not the
     # stopped "pro"), and at least one real token.
@@ -317,10 +321,18 @@ def test_build_graph_produces_edges_on_small_fixture(tmp_path, monkeypatch) -> N
             encoding="utf-8",
         )
 
-    write(wiki / "entities" / "skills" / "fastapi-pro.md",     "fastapi-pro",     ["python", "web"])
-    write(wiki / "entities" / "skills" / "python-patterns.md", "python-patterns", ["python", "patterns"])
-    write(wiki / "entities" / "skills" / "react-patterns.md",  "react-patterns",  ["javascript", "patterns"])
-    write(wiki / "entities" / "agents" / "code-reviewer.md",   "code-reviewer",   ["review", "python"])
+    write(wiki / "entities" / "skills" / "fastapi-pro.md", "fastapi-pro", ["python", "web"])
+    write(
+        wiki / "entities" / "skills" / "python-patterns.md",
+        "python-patterns",
+        ["python", "patterns"],
+    )
+    write(
+        wiki / "entities" / "skills" / "react-patterns.md",
+        "react-patterns",
+        ["javascript", "patterns"],
+    )
+    write(wiki / "entities" / "agents" / "code-reviewer.md", "code-reviewer", ["review", "python"])
 
     monkeypatch.setattr(wg, "SKILL_ENTITIES", wiki / "entities" / "skills")
     monkeypatch.setattr(wg, "AGENT_ENTITIES", wiki / "entities" / "agents")
@@ -343,16 +355,12 @@ def test_build_graph_produces_edges_on_small_fixture(tmp_path, monkeypatch) -> N
     # python-patterns, code-reviewer) so we expect a triangle at minimum.
     assert G.number_of_nodes() == 4
     assert G.number_of_edges() >= 3, (
-        f"expected at least 3 edges (python triangle + patterns pair), "
-        f"got {G.number_of_edges()}"
+        f"expected at least 3 edges (python triangle + patterns pair), got {G.number_of_edges()}"
     )
 
     # At least one skill<->agent edge must exist (code-reviewer shares
     # "python" with fastapi-pro + python-patterns).
-    cross = sum(
-        1 for u, v in G.edges()
-        if G.nodes[u].get("type") != G.nodes[v].get("type")
-    )
+    cross = sum(1 for u, v in G.edges() if G.nodes[u].get("type") != G.nodes[v].get("type"))
     assert cross >= 1, (
         "no skill<->agent edges produced — recommendation walk will "
         "never surface agents from a skill seed"
@@ -425,10 +433,18 @@ def test_direct_links_quality_usage_type_and_adamic_are_explainable(
         tags=["shared-a", "shared-b"],
     )
     _write_quality_sidecar(
-        sidecars, slug="alpha-skill", subject_type="skill", score=0.90, telemetry=0.80,
+        sidecars,
+        slug="alpha-skill",
+        subject_type="skill",
+        score=0.90,
+        telemetry=0.80,
     )
     _write_quality_sidecar(
-        sidecars, slug="beta-agent", subject_type="agent", score=0.70, telemetry=0.60,
+        sidecars,
+        slug="beta-agent",
+        subject_type="agent",
+        score=0.70,
+        telemetry=0.60,
     )
 
     graph, _ = wg.build_graph(incremental=False)
@@ -469,10 +485,18 @@ def test_quality_usage_and_type_affinity_do_not_create_edges_without_base_eviden
         tags=["beta"],
     )
     _write_quality_sidecar(
-        sidecars, slug="alphaonly", subject_type="skill", score=1.0, telemetry=1.0,
+        sidecars,
+        slug="alphaonly",
+        subject_type="skill",
+        score=1.0,
+        telemetry=1.0,
     )
     _write_quality_sidecar(
-        sidecars, slug="betatwo", subject_type="agent", score=1.0, telemetry=1.0,
+        sidecars,
+        slug="betatwo",
+        subject_type="agent",
+        score=1.0,
+        telemetry=1.0,
     )
 
     graph, _ = wg.build_graph(incremental=False)
@@ -548,18 +572,20 @@ def test_patch_path_force_full_when_prior_lacks_semantic(tmp_path, monkeypatch) 
     prior.add_node("skill:a", type="skill", tags=["python"], label="a")
     prior.add_node("skill:b", type="skill", tags=["python"], label="b")
     prior.add_edge(
-        "skill:a", "skill:b",
-        semantic_sim=0.0, tag_sim=0.5, token_sim=0.0,
-        final_weight=0.075, weight=0.075,
-        shared_tags=["python"], shared_tokens=[],
+        "skill:a",
+        "skill:b",
+        semantic_sim=0.0,
+        tag_sim=0.5,
+        token_sim=0.0,
+        final_weight=0.075,
+        weight=0.075,
+        shared_tags=["python"],
+        shared_tokens=[],
     )
 
     sem_pairs: dict[tuple[str, str], float] = {("skill:a", "skill:b"): 0.7}
 
-    prior_with_sem = sum(
-        1 for _, _, d in prior.edges(data=True)
-        if d.get("semantic_sim", 0.0) > 0
-    )
+    prior_with_sem = sum(1 for _, _, d in prior.edges(data=True) if d.get("semantic_sim", 0.0) > 0)
     assert prior_with_sem == 0, "test fixture must have no semantic edges"
     guard_should_fire = len(sem_pairs) > 0 and prior_with_sem == 0
     assert guard_should_fire, (
@@ -570,13 +596,16 @@ def test_patch_path_force_full_when_prior_lacks_semantic(tmp_path, monkeypatch) 
     # Negative case: prior with semantic edges already present — guard must NOT fire
     healthy = nx.Graph()
     healthy.add_edge(
-        "skill:a", "skill:b",
-        semantic_sim=0.7, tag_sim=0.5, token_sim=0.0,
-        final_weight=0.5, weight=0.5,
+        "skill:a",
+        "skill:b",
+        semantic_sim=0.7,
+        tag_sim=0.5,
+        token_sim=0.0,
+        final_weight=0.5,
+        weight=0.5,
     )
     healthy_with_sem = sum(
-        1 for _, _, d in healthy.edges(data=True)
-        if d.get("semantic_sim", 0.0) > 0
+        1 for _, _, d in healthy.edges(data=True) if d.get("semantic_sim", 0.0) > 0
     )
     assert not (len(sem_pairs) > 0 and healthy_with_sem == 0), (
         "guard must NOT fire when prior already has semantic edges — "

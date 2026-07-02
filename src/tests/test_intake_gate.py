@@ -199,15 +199,10 @@ def test_empty_frontmatter_block_fails() -> None:
 
 def test_missing_name_field_fails() -> None:
     emb, ranker = _empty_gate()
-    raw = (
-        "---\ndescription: something\n---\n# T\n\n## S\n\n"
-        + ("body content " * 20)
-    )
+    raw = "---\ndescription: something\n---\n# T\n\n## S\n\n" + ("body content " * 20)
     decision = ig.run_intake_gate(raw, embedder=emb, ranker=ranker)
     assert decision.allow is False
-    assert any(
-        f.code == "FRONTMATTER_FIELD_MISSING_NAME" for f in decision.failures
-    )
+    assert any(f.code == "FRONTMATTER_FIELD_MISSING_NAME" for f in decision.failures)
 
 
 def test_missing_description_field_fails() -> None:
@@ -215,18 +210,12 @@ def test_missing_description_field_fails() -> None:
     raw = "---\nname: x\n---\n# T\n\n## S\n\n" + ("body content " * 20)
     decision = ig.run_intake_gate(raw, embedder=emb, ranker=ranker)
     assert decision.allow is False
-    assert any(
-        f.code == "FRONTMATTER_FIELD_MISSING_DESCRIPTION"
-        for f in decision.failures
-    )
+    assert any(f.code == "FRONTMATTER_FIELD_MISSING_DESCRIPTION" for f in decision.failures)
 
 
 def test_missing_h1_fails() -> None:
     emb, ranker = _empty_gate()
-    raw = (
-        "---\nname: x\ndescription: y\n---\n## Section\n\n"
-        + ("body content " * 20)
-    )
+    raw = "---\nname: x\ndescription: y\n---\n## Section\n\n" + ("body content " * 20)
     decision = ig.run_intake_gate(raw, embedder=emb, ranker=ranker)
     assert decision.allow is False
     assert any(f.code == "BODY_MISSING_H1" for f in decision.failures)
@@ -234,10 +223,7 @@ def test_missing_h1_fails() -> None:
 
 def test_missing_h2_fails() -> None:
     emb, ranker = _empty_gate()
-    raw = (
-        "---\nname: x\ndescription: y\n---\n# Title\n\n"
-        + ("body content " * 20)
-    )
+    raw = "---\nname: x\ndescription: y\n---\n# Title\n\n" + ("body content " * 20)
     decision = ig.run_intake_gate(raw, embedder=emb, ranker=ranker)
     assert decision.allow is False
     assert any(f.code == "BODY_MISSING_H2" for f in decision.failures)
@@ -269,13 +255,13 @@ def test_structural_failure_short_circuits_embedding() -> None:
             _CountingEmbedder.calls += 1
             return np.zeros((1, 4), dtype=np.float32)
 
-    ranker = _make_ranker({
-        "existing": _unit(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)),
-    })
-    raw = "no frontmatter here\n\njust body"
-    decision = ig.run_intake_gate(
-        raw, embedder=_CountingEmbedder(), ranker=ranker
+    ranker = _make_ranker(
+        {
+            "existing": _unit(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)),
+        }
     )
+    raw = "no frontmatter here\n\njust body"
+    decision = ig.run_intake_gate(raw, embedder=_CountingEmbedder(), ranker=ranker)
     assert decision.allow is False
     assert _CountingEmbedder.calls == 0
 
@@ -286,10 +272,12 @@ def test_structural_failure_short_circuits_embedding() -> None:
 
 
 def _corpus_with_exact_match() -> cr.CosineRanker:
-    return _make_ranker({
-        "existing-skill": _unit(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)),
-        "other-skill": _unit(np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)),
-    })
+    return _make_ranker(
+        {
+            "existing-skill": _unit(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)),
+            "other-skill": _unit(np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)),
+        }
+    )
 
 
 def test_duplicate_fails_at_or_above_threshold() -> None:
@@ -377,9 +365,11 @@ def test_connectivity_passes_when_neighbor_qualified() -> None:
 def test_connectivity_skipped_for_small_corpus() -> None:
     # Corpus size = 1 but min_neighbors = 2 → skip silently, don't
     # punish the second subject to ever land in the system.
-    ranker = _make_ranker({
-        "existing": _unit(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)),
-    })
+    ranker = _make_ranker(
+        {
+            "existing": _unit(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)),
+        }
+    )
     q = np.array([0.0, 0.0, 1.0, 0.0], dtype=np.float32)
     emb = _FakeEmbedder(vector=q)
     cfg = ig.IntakeConfig(min_neighbors=2, min_neighbor_score=0.30)
@@ -394,9 +384,11 @@ def test_connectivity_skipped_for_small_corpus() -> None:
 
 
 def test_embedder_dim_mismatch_raises() -> None:
-    ranker = _make_ranker({
-        "existing": _unit(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)),
-    })
+    ranker = _make_ranker(
+        {
+            "existing": _unit(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)),
+        }
+    )
     # Embedder yields a 3-D vector, corpus is 4-D
     emb = _FakeEmbedder(vector=_unit(np.array([1.0, 0.0, 0.0], dtype=np.float32)))
     with pytest.raises(ValueError, match="does not match corpus dim"):

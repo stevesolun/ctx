@@ -93,7 +93,9 @@ def apply_plan(plan: list[tuple[Path, Path]], verbose: bool) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--apply", action="store_true", help="actually copy files (default: dry run)")
+    parser.add_argument(
+        "--apply", action="store_true", help="actually copy files (default: dry run)"
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="print each action")
     parser.add_argument(
         "--agents-dir",

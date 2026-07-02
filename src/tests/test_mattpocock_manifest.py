@@ -7,7 +7,9 @@ from typing import Any, cast
 
 
 def _load_builder() -> ModuleType:
-    path = Path(__file__).resolve().parents[2] / "imported-skills" / "mattpocock" / "build_manifest.py"
+    path = (
+        Path(__file__).resolve().parents[2] / "imported-skills" / "mattpocock" / "build_manifest.py"
+    )
     spec = importlib.util.spec_from_file_location("mattpocock_build_manifest", path)
     assert spec is not None
     assert spec.loader is not None

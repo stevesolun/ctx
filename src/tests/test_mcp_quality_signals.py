@@ -73,9 +73,7 @@ class TestPopularity:
         assert r.score == pytest.approx(1.0)
 
     def test_monotonic_across_common_values(self) -> None:
-        scores = [
-            mqs.popularity_signal(stars=s).score for s in [10, 100, 1000]
-        ]
+        scores = [mqs.popularity_signal(stars=s).score for s in [10, 100, 1000]]
         assert scores[0] < scores[1] < scores[2]
 
     def test_above_saturation_clamped_to_one(self) -> None:
@@ -208,17 +206,11 @@ class TestGraph:
         assert r.evidence["isolated"] is False
 
     def test_monotonic_in_degree(self) -> None:
-        scores = [
-            mqs.graph_signal(degree=d, cross_type_degree=0).score
-            for d in [0, 5, 10, 20]
-        ]
+        scores = [mqs.graph_signal(degree=d, cross_type_degree=0).score for d in [0, 5, 10, 20]]
         assert scores[0] < scores[1] < scores[2] <= scores[3]
 
     def test_monotonic_in_cross_type_degree(self) -> None:
-        scores = [
-            mqs.graph_signal(degree=5, cross_type_degree=c).score
-            for c in [0, 1, 3, 5]
-        ]
+        scores = [mqs.graph_signal(degree=5, cross_type_degree=c).score for c in [0, 1, 3, 5]]
         assert scores[0] < scores[1] < scores[2] <= scores[3]
 
 

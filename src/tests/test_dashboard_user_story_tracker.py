@@ -49,13 +49,11 @@ def test_dashboard_user_story_tracker_has_valid_rows() -> None:
         if row["status"] in FIX_STATUSES:
             for key in ("error_id", "error_summary", "fix_status"):
                 assert row[key].strip(), (
-                    f"{row.get('dashboard_id', '<unknown>')} has "
-                    f"{row['status']} without {key}"
+                    f"{row.get('dashboard_id', '<unknown>')} has {row['status']} without {key}"
                 )
         if row["status"] in VALIDATION_STATUSES:
             assert row["notes"].strip(), (
-                f"{row.get('dashboard_id', '<unknown>')} needs validation "
-                "without a validation note"
+                f"{row.get('dashboard_id', '<unknown>')} needs validation without a validation note"
             )
 
 

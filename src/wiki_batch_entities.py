@@ -28,6 +28,7 @@ TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 try:
     from ctx_config import cfg as _cfg
+
     SKILLS_DIR = _cfg.skills_dir
     AGENTS_DIR = _cfg.agents_dir
     WIKI_DIR = _cfg.wiki_dir
@@ -109,7 +110,7 @@ def extract_description(content: str) -> str:
 
 def extract_name_field(content: str) -> str:
     """Extract name from YAML frontmatter."""
-    match = re.search(r'^name:\s*(.+)$', content, re.MULTILINE)
+    match = re.search(r"^name:\s*(.+)$", content, re.MULTILINE)
     return match.group(1).strip().strip('"').strip("'") if match else ""
 
 
@@ -146,7 +147,10 @@ def generate_skill_page(skill_name: str) -> str:
         try:
             original_content = original_file.read_text(encoding="utf-8", errors="replace")
         except Exception as exc:
-            print(f"Warning: failed to read original skill file {original_file}: {exc}", file=sys.stderr)
+            print(
+                f"Warning: failed to read original skill file {original_file}: {exc}",
+                file=sys.stderr,
+            )
             original_content = ""
 
     # Use original content for description if available (it's the unmodified version)
@@ -177,9 +181,9 @@ created: {TODAY}
 updated: {TODAY}
 type: skill
 status: installed
-tags: [{', '.join(tags)}]
-has_original: {'true' if has_original else 'false'}
-has_transformed: {'true' if has_transformed else 'false'}
+tags: [{", ".join(tags)}]
+has_original: {"true" if has_original else "false"}
+has_transformed: {"true" if has_transformed else "false"}
 preferred_version: {preferred}
 original_path: {orig_path}
 transformed_path: {trans_path}
@@ -187,9 +191,9 @@ original_lines: {original_lines}
 use_count: 0
 session_count: 0
 last_used: {TODAY}
-has_pipeline: {'true' if has_pipeline else 'false'}
-pipeline_path: {'converted/' + skill_name + '/' if has_pipeline else ''}
-pipeline_converted: {TODAY if has_pipeline else ''}
+has_pipeline: {"true" if has_pipeline else "false"}
+pipeline_path: {"converted/" + skill_name + "/" if has_pipeline else ""}
+pipeline_converted: {TODAY if has_pipeline else ""}
 ---
 
 # {skill_name}
@@ -224,7 +228,7 @@ def generate_agent_page(agent_name: str, agent_file: Path | None = None) -> str:
     line_count = count_lines(agent_file)
 
     # Extract model field
-    model_match = re.search(r'^model:\s*(.+)$', content, re.MULTILINE)
+    model_match = re.search(r"^model:\s*(.+)$", content, re.MULTILINE)
     model = model_match.group(1).strip() if model_match else "inherit"
 
     page = f"""---
@@ -233,7 +237,7 @@ created: {TODAY}
 updated: {TODAY}
 type: agent
 status: installed
-tags: [{', '.join(tags)}]
+tags: [{", ".join(tags)}]
 source_path: {agent_file}
 lines: {line_count}
 model: {model}
@@ -290,14 +294,10 @@ def generate_mcp_page(record: McpRecord) -> str:
     sources_body = "\n".join(source_lines) if source_lines else "- (none)"
 
     # Tags section
-    tags_body = (
-        " · ".join(f"`{t}`" for t in record.tags) if record.tags else "(none)"
-    )
+    tags_body = " · ".join(f"`{t}`" for t in record.tags) if record.tags else "(none)"
 
     # Transports section
-    transports_body = (
-        ", ".join(record.transports) if record.transports else "Unknown"
-    )
+    transports_body = ", ".join(record.transports) if record.transports else "Unknown"
 
     return (
         frontmatter_block

@@ -14,9 +14,9 @@ def test_docs_refresh_github_repo_stats_at_runtime() -> None:
     assert "repo_name: stevesolun/ctx" in mkdocs_config
     assert "assets/javascripts/repo-stats-refresh.js" in mkdocs_config
 
-    script = (
-        ROOT / "docs" / "assets" / "javascripts" / "repo-stats-refresh.js"
-    ).read_text(encoding="utf-8")
+    script = (ROOT / "docs" / "assets" / "javascripts" / "repo-stats-refresh.js").read_text(
+        encoding="utf-8"
+    )
 
     assert "https://api.github.com/repos/stevesolun/ctx" in script
     assert "__source" in script

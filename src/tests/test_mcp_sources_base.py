@@ -176,9 +176,7 @@ class TestFetchTextSecurity:
         with pytest.raises(Exception, match="(?i)(https|scheme|not allowed|forbidden)"):
             fetch_text("ftp://raw.githubusercontent.com/example/repo/main/README.md")
 
-    def test_caps_response_body_size(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_caps_response_body_size(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Regression: an allowlisted host that streams more than
         # MAX_RESPONSE_BYTES must raise rather than silently accept.
         from mcp_sources.base import MAX_RESPONSE_BYTES  # noqa: PLC0415
@@ -186,7 +184,8 @@ class TestFetchTextSecurity:
         oversized = b"x" * (MAX_RESPONSE_BYTES + 100)
         fake_opener = _make_fake_opener(oversized, status=200)
         monkeypatch.setattr(
-            "mcp_sources.base._build_opener", lambda: fake_opener,
+            "mcp_sources.base._build_opener",
+            lambda: fake_opener,
         )
         with pytest.raises(Exception, match="(?i)(too large|exceeded)"):
             fetch_text(_allowed_url())
@@ -225,9 +224,7 @@ class TestCachePathTraversalGuard:
 
 
 class TestFetchTextHappyPath:
-    def test_returns_text_from_allowed_host(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_text_from_allowed_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fake_body = b"# Hello from mock\n"
 
         # The implementation builds its own opener (build_opener with a
@@ -236,21 +233,21 @@ class TestFetchTextHappyPath:
         # actual call site and let real HTTP through.
         fake_opener = _make_fake_opener(fake_body, status=200)
         monkeypatch.setattr(
-            "mcp_sources.base._build_opener", lambda: fake_opener,
+            "mcp_sources.base._build_opener",
+            lambda: fake_opener,
         )
 
         result = fetch_text(_allowed_url())
         assert result == fake_body.decode()
 
-    def test_passes_timeout_to_urlopen(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_passes_timeout_to_urlopen(self, monkeypatch: pytest.MonkeyPatch) -> None:
         received: list[float] = []
         fake_body = b"data"
 
         fake_opener = _make_fake_opener(fake_body, status=200, timeout_capture=received)
         monkeypatch.setattr(
-            "mcp_sources.base._build_opener", lambda: fake_opener,
+            "mcp_sources.base._build_opener",
+            lambda: fake_opener,
         )
 
         fetch_text(_allowed_url(), timeout=5.0)
@@ -284,9 +281,7 @@ class TestSourceProtocol:
             name: str = "fake"
             homepage: str = "https://example.com"
 
-            def fetch(
-                self, *, limit: int | None = None, refresh: bool = False
-            ) -> Iterator[dict]:  # type: ignore[override]
+            def fetch(self, *, limit: int | None = None, refresh: bool = False) -> Iterator[dict]:  # type: ignore[override]
                 return iter([])
 
         instance = _FakeSource()

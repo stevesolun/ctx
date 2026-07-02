@@ -69,19 +69,25 @@ def find_dual_version_skills(skills_dir: Path) -> list[dict]:
         original_md = d / "SKILL.md.original"
         if skill_md.exists() and original_md.exists():
             try:
-                transformed_lines = len(skill_md.read_text(encoding="utf-8", errors="replace").splitlines())
-                original_lines = len(original_md.read_text(encoding="utf-8", errors="replace").splitlines())
+                transformed_lines = len(
+                    skill_md.read_text(encoding="utf-8", errors="replace").splitlines()
+                )
+                original_lines = len(
+                    original_md.read_text(encoding="utf-8", errors="replace").splitlines()
+                )
             except Exception as exc:
                 print(f"Warning: failed to read skill files in {d.name}: {exc}", file=sys.stderr)
                 transformed_lines = original_lines = 0
 
-            results.append({
-                "name": d.name,
-                "transformed_path": str(skill_md),
-                "original_path": str(original_md),
-                "transformed_lines": transformed_lines,
-                "original_lines": original_lines,
-            })
+            results.append(
+                {
+                    "name": d.name,
+                    "transformed_path": str(skill_md),
+                    "original_path": str(original_md),
+                    "transformed_lines": transformed_lines,
+                    "original_lines": original_lines,
+                }
+            )
 
     return results
 

@@ -167,7 +167,10 @@ class TestBackfillFile:
 
     def test_respects_existing_category(self, tmp_path: Path) -> None:
         p = _make_skill(
-            tmp_path, "py-testing", ["python", "testing"], category="meta",
+            tmp_path,
+            "py-testing",
+            ["python", "testing"],
+            category="meta",
         )
         result = sc.backfill_file(p, dry_run=False)
         assert result == "already-set"
@@ -199,11 +202,13 @@ class TestBackfillCorpus:
         _make_agent(agents, "devops", ["docker", "kubernetes"])
 
         summary = sc.backfill_corpus(
-            skills_dir=skills, agents_dir=agents, dry_run=False,
+            skills_dir=skills,
+            agents_dir=agents,
+            dry_run=False,
         )
         c = summary["counts"]
-        assert c["filled"] == 3         # py-testing, react-state, devops agent
-        assert c["already-set"] == 1    # pinned
+        assert c["filled"] == 3  # py-testing, react-state, devops agent
+        assert c["already-set"] == 1  # pinned
         assert c["unresolved"] == 1
         cat = summary["category_counts"]
         assert cat.get("language") == 1
@@ -216,7 +221,9 @@ class TestBackfillCorpus:
         _make_skill(skills, "_demoted", ["python"])
         _make_skill(skills, "real", ["python"])
         summary = sc.backfill_corpus(
-            skills_dir=skills, agents_dir=tmp_path / "agents", dry_run=False,
+            skills_dir=skills,
+            agents_dir=tmp_path / "agents",
+            dry_run=False,
         )
         assert summary["total_files"] == 1
 
@@ -228,7 +235,8 @@ class TestBackfillCorpus:
 
 class TestCLI:
     def test_infer_prints_category(
-        self, capsys: pytest.CaptureFixture,
+        self,
+        capsys: pytest.CaptureFixture,
     ) -> None:
         rc = sc.main(["infer", "python,testing"])
         out = capsys.readouterr().out.strip()
@@ -236,14 +244,17 @@ class TestCLI:
         assert out == "language"
 
     def test_infer_unresolved_returns_nonzero(
-        self, capsys: pytest.CaptureFixture,
+        self,
+        capsys: pytest.CaptureFixture,
     ) -> None:
         rc = sc.main(["infer", "zzz-nope"])
         assert rc == 1
         assert "unresolved" in capsys.readouterr().out
 
     def test_backfill_cli_dry_run(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture,
     ) -> None:
         skills = tmp_path / "skills"
@@ -255,6 +266,7 @@ class TestCLI:
             agents_dir = agents
 
         import ctx_config
+
         monkeypatch.setattr(ctx_config, "cfg", _FakeCfg(), raising=True)
 
         rc = sc.main(["backfill", "--dry-run", "--json"])

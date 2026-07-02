@@ -94,12 +94,14 @@ def test_finding_from_dict_unknown_level_normalises_to_low() -> None:
 
 
 def test_finding_from_dict_filters_non_dict_evidence() -> None:
-    f = tv.Finding.from_dict({
-        "id": "abc",
-        "level": "HIGH",
-        "title": "t",
-        "evidence": [{"file": "a.py"}, "garbage", None],
-    })
+    f = tv.Finding.from_dict(
+        {
+            "id": "abc",
+            "level": "HIGH",
+            "title": "t",
+            "evidence": [{"file": "a.py"}, "garbage", None],
+        }
+    )
     assert len(f.evidence) == 1
     assert f.evidence[0].file == "a.py"
 
@@ -164,8 +166,11 @@ def test_record_finding_merges_by_id_refining_previous() -> None:
     tv.record_finding("plan-2", f1, now=1.0)
     # Same id (same level|agent|title), now upgraded rationale.
     f2 = tv.build_finding(
-        level="LOW", title="possible leak", agent="sec",
-        rationale="confirmed after deeper trace", now=2.0,
+        level="LOW",
+        title="possible leak",
+        agent="sec",
+        rationale="confirmed after deeper trace",
+        now=2.0,
     )
     v = tv.record_finding("plan-2", f2, now=2.0)
     assert len(v.findings) == 1
@@ -174,18 +179,14 @@ def test_record_finding_merges_by_id_refining_previous() -> None:
 
 def test_record_finding_escalates_to_max_level() -> None:
     tv.record_finding("plan-3", tv.build_finding(level="LOW", title="a"), now=1.0)
-    v = tv.record_finding(
-        "plan-3", tv.build_finding(level="CRITICAL", title="b"), now=2.0
-    )
+    v = tv.record_finding("plan-3", tv.build_finding(level="CRITICAL", title="b"), now=2.0)
     assert v.level == "CRITICAL"
     assert v.blocks is True
 
 
 def test_record_finding_preserves_created_at_on_update() -> None:
     tv.record_finding("plan-4", tv.build_finding(level="LOW", title="a"), now=10.0)
-    v = tv.record_finding(
-        "plan-4", tv.build_finding(level="HIGH", title="b"), now=20.0
-    )
+    v = tv.record_finding("plan-4", tv.build_finding(level="HIGH", title="b"), now=20.0)
     assert v.created_at == 10.0
     assert v.updated_at == 20.0
 
@@ -230,9 +231,7 @@ def test_load_verdict_missing_returns_none() -> None:
 
 def test_load_verdict_corrupt_json_returns_none(isolate_runs_dir: Path) -> None:
     isolate_runs_dir.mkdir(parents=True, exist_ok=True)
-    (isolate_runs_dir / "bad.verdict.json").write_text(
-        "not json {{{", encoding="utf-8"
-    )
+    (isolate_runs_dir / "bad.verdict.json").write_text("not json {{{", encoding="utf-8")
     assert tv.load_verdict("bad") is None
 
 
@@ -257,18 +256,14 @@ def test_recent_verdicts_sorted_by_updated_desc() -> None:
 
 def test_recent_verdicts_respects_limit() -> None:
     for i in range(5):
-        tv.record_finding(
-            f"plan-{i}", tv.build_finding(level="LOW", title=f"t{i}"), now=float(i)
-        )
+        tv.record_finding(f"plan-{i}", tv.build_finding(level="LOW", title=f"t{i}"), now=float(i))
     assert len(tv.recent_verdicts(limit=2)) == 2
 
 
 def test_recent_verdicts_filters_by_min_level() -> None:
     tv.record_finding("plan-low", tv.build_finding(level="LOW", title="l"), now=1.0)
     tv.record_finding("plan-hi", tv.build_finding(level="HIGH", title="h"), now=2.0)
-    tv.record_finding(
-        "plan-crit", tv.build_finding(level="CRITICAL", title="c"), now=3.0
-    )
+    tv.record_finding("plan-crit", tv.build_finding(level="CRITICAL", title="c"), now=3.0)
     hashes = [v.plan_hash for v in tv.recent_verdicts(min_level="HIGH")]
     assert hashes == ["plan-crit", "plan-hi"]
 
@@ -318,9 +313,7 @@ def test_format_retro_empty_message() -> None:
 
 
 def test_format_retro_marks_blocking() -> None:
-    tv.record_finding(
-        "plan-block", tv.build_finding(level="CRITICAL", title="c"), now=1.0
-    )
+    tv.record_finding("plan-block", tv.build_finding(level="CRITICAL", title="c"), now=1.0)
     tv.record_finding("plan-ok", tv.build_finding(level="LOW", title="l"), now=2.0)
     out = tv.format_retro(tv.recent_verdicts())
     assert "BLOCK" in out
@@ -345,15 +338,23 @@ def test_verdict_path_matches_hook_lookup(isolate_runs_dir: Path) -> None:
 
 
 def test_cli_record_prints_verdict_json(capsys: pytest.CaptureFixture) -> None:
-    rc = tv.main([
-        "record",
-        "--plan-hash", "cli-1",
-        "--level", "HIGH",
-        "--title", "bad thing",
-        "--agent", "reviewer",
-        "--evidence", "src/a.py:10",
-        "--rationale", "because",
-    ])
+    rc = tv.main(
+        [
+            "record",
+            "--plan-hash",
+            "cli-1",
+            "--level",
+            "HIGH",
+            "--title",
+            "bad thing",
+            "--agent",
+            "reviewer",
+            "--evidence",
+            "src/a.py:10",
+            "--rationale",
+            "because",
+        ]
+    )
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["plan_hash"] == "cli-1"
@@ -364,12 +365,17 @@ def test_cli_record_prints_verdict_json(capsys: pytest.CaptureFixture) -> None:
 def test_cli_record_rejects_bad_level(capsys: pytest.CaptureFixture) -> None:
     # argparse's choices= rejects before our code runs -> exits 2 itself.
     with pytest.raises(SystemExit) as exc:
-        tv.main([
-            "record",
-            "--plan-hash", "cli-2",
-            "--level", "INFO",
-            "--title", "t",
-        ])
+        tv.main(
+            [
+                "record",
+                "--plan-hash",
+                "cli-2",
+                "--level",
+                "INFO",
+                "--title",
+                "t",
+            ]
+        )
     assert exc.value.code == 2
 
 
@@ -381,9 +387,7 @@ def test_cli_show_missing_returns_1(capsys: pytest.CaptureFixture) -> None:
 
 
 def test_cli_show_json_roundtrip(capsys: pytest.CaptureFixture) -> None:
-    tv.record_finding(
-        "cli-3", tv.build_finding(level="LOW", title="t"), now=1.0
-    )
+    tv.record_finding("cli-3", tv.build_finding(level="LOW", title="t"), now=1.0)
     rc = tv.main(["show", "--plan-hash", "cli-3", "--json"])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -392,7 +396,8 @@ def test_cli_show_json_roundtrip(capsys: pytest.CaptureFixture) -> None:
 
 def test_cli_show_default_is_explain(capsys: pytest.CaptureFixture) -> None:
     tv.record_finding(
-        "cli-4", tv.build_finding(level="HIGH", title="explain-me", agent="a"),
+        "cli-4",
+        tv.build_finding(level="HIGH", title="explain-me", agent="a"),
         now=1.0,
     )
     rc = tv.main(["show", "--plan-hash", "cli-4"])
@@ -403,9 +408,7 @@ def test_cli_show_default_is_explain(capsys: pytest.CaptureFixture) -> None:
 
 
 def test_cli_retro_json(capsys: pytest.CaptureFixture) -> None:
-    tv.record_finding(
-        "cli-5", tv.build_finding(level="LOW", title="t"), now=1.0
-    )
+    tv.record_finding("cli-5", tv.build_finding(level="LOW", title="t"), now=1.0)
     rc = tv.main(["retro", "--limit", "5", "--json"])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)

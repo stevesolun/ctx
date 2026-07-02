@@ -35,7 +35,7 @@ def render_wiki_inline(text: str, *, wiki_link_href: WikiLinkFn) -> str:
     out: list[str] = []
     last = 0
     for match in _WIKI_INLINE_RE.finditer(text):
-        out.append(html.escape(text[last:match.start()]))
+        out.append(html.escape(text[last : match.start()]))
         token = match.group(0)
         if token.startswith("`"):
             out.append(f"<code>{html.escape(token[1:-1])}</code>")

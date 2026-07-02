@@ -79,11 +79,7 @@ def _split_commands(raw: object) -> tuple[str, ...]:
 
 
 def _normalize_tag_values(raw: object) -> tuple[str, ...]:
-    tags = {
-        normalize_slug(tag)
-        for tag in _split_values(raw)
-        if tag.strip()
-    }
+    tags = {normalize_slug(tag) for tag in _split_values(raw) if tag.strip()}
     return tuple(sorted(tags)) or ("harness", "llm")
 
 

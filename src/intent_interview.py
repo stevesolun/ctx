@@ -125,7 +125,7 @@ class RepoState:
     is_git_repo: bool
     commit_count: int
     tracked_file_count: int
-    top_languages: tuple[tuple[str, int], ...]   # (signal, weight)
+    top_languages: tuple[tuple[str, int], ...]  # (signal, weight)
     has_toolbox_config: bool
     existing_active: tuple[str, ...]
     detected_markers: tuple[str, ...]
@@ -310,50 +310,57 @@ def _suggestion_choices(profile: BehaviorProfile | None) -> tuple[tuple[str, str
     return tuple(out)
 
 
-def build_questions(state: RepoState,
-                    profile: BehaviorProfile | None) -> tuple[InterviewQuestion, ...]:
+def build_questions(
+    state: RepoState, profile: BehaviorProfile | None
+) -> tuple[InterviewQuestion, ...]:
     questions: list[InterviewQuestion] = []
 
     # Q1: which starter toolboxes to activate?
     default_starters = "ship-it,security-sweep" if state.is_blank else ""
-    questions.append(InterviewQuestion(
-        id="starters",
-        prompt=(
-            "Which starter toolboxes should be activated? "
-            "Comma-separated list or blank to skip."
-        ),
-        choices=_starter_choices(state.existing_active),
-        multi=True,
-        default=default_starters or None,
-    ))
+    questions.append(
+        InterviewQuestion(
+            id="starters",
+            prompt=(
+                "Which starter toolboxes should be activated? "
+                "Comma-separated list or blank to skip."
+            ),
+            choices=_starter_choices(state.existing_active),
+            multi=True,
+            default=default_starters or None,
+        )
+    )
 
     # Q2: which mined suggestions to accept (skipped if profile empty)
     sugg = _suggestion_choices(profile)
     if sugg:
-        questions.append(InterviewQuestion(
-            id="suggestions",
-            prompt=(
-                "Accept any behaviour-miner suggestions? "
-                "Comma-separated indices (1-based) or blank."
-            ),
-            choices=sugg,
-            multi=True,
-            default=None,
-        ))
+        questions.append(
+            InterviewQuestion(
+                id="suggestions",
+                prompt=(
+                    "Accept any behaviour-miner suggestions? "
+                    "Comma-separated indices (1-based) or blank."
+                ),
+                choices=sugg,
+                multi=True,
+                default=None,
+            )
+        )
 
     # Q3: scope preference \u2014 drives scope.analysis on newly-added toolboxes
-    questions.append(InterviewQuestion(
-        id="analysis",
-        prompt="Default analysis mode for new toolboxes?",
-        choices=(
-            ("dynamic", "dynamic   (diff \u2192 graph \u2192 full, recommended)"),
-            ("diff", "diff      (changed files only)"),
-            ("graph-blast", "graph-blast  (changed files + graph neighbours)"),
-            ("full", "full      (every tracked file)"),
-        ),
-        multi=False,
-        default="dynamic",
-    ))
+    questions.append(
+        InterviewQuestion(
+            id="analysis",
+            prompt="Default analysis mode for new toolboxes?",
+            choices=(
+                ("dynamic", "dynamic   (diff \u2192 graph \u2192 full, recommended)"),
+                ("diff", "diff      (changed files only)"),
+                ("graph-blast", "graph-blast  (changed files + graph neighbours)"),
+                ("full", "full      (every tracked file)"),
+            ),
+            multi=False,
+            default="dynamic",
+        )
+    )
 
     return tuple(questions)
 
@@ -396,12 +403,14 @@ def compose_result(
     skipped: bool = False,
 ) -> InterviewResult:
     if skipped:
-        return InterviewResult(activated=(), accepted_suggestions=(),
-                               skipped=True, notes=("user skipped interview",))
+        return InterviewResult(
+            activated=(), accepted_suggestions=(), skipped=True, notes=("user skipped interview",)
+        )
 
     starters = _filter_known_starters(_parse_list(answers.get("starters")))
     suggestions = _resolve_suggestion_indices(
-        _parse_list(answers.get("suggestions")), profile,
+        _parse_list(answers.get("suggestions")),
+        profile,
     )
     notes: list[str] = []
 
@@ -414,9 +423,7 @@ def compose_result(
     if suggestions:
         # Patch the proposed analysis mode into every accepted suggestion
         # so they honour the user's chosen default.
-        suggestions = tuple(
-            _apply_analysis_override(s, analysis) for s in suggestions
-        )
+        suggestions = tuple(_apply_analysis_override(s, analysis) for s in suggestions)
 
     return InterviewResult(
         activated=starters,
@@ -460,8 +467,7 @@ def run_interactive(
     questions = build_questions(state, profile)
     answers: dict[str, str | None] = {}
 
-    print("[toolbox] Intent interview \u2014 type 'skip' on any prompt to abort.",
-          file=stream)
+    print("[toolbox] Intent interview \u2014 type 'skip' on any prompt to abort.", file=stream)
     print(f"  repo: {state.repo_root}", file=stream)
     print(
         f"  state: {'blank' if state.is_blank else 'populated'} "
@@ -477,7 +483,9 @@ def run_interactive(
             raw = ""
         if raw.lower() == "skip":
             return InterviewResult(
-                activated=(), accepted_suggestions=(), skipped=True,
+                activated=(),
+                accepted_suggestions=(),
+                skipped=True,
                 notes=(f"user typed 'skip' at question {q.id!r}",),
             )
         answers[q.id] = raw or q.default
@@ -615,8 +623,10 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     if args.skip:
         result = InterviewResult(
-            activated=(), accepted_suggestions=(),
-            skipped=True, notes=("--skip passed",),
+            activated=(),
+            accepted_suggestions=(),
+            skipped=True,
+            notes=("--skip passed",),
         )
     elif args.non_interactive or args.preset:
         answers: dict[str, str | None] = dict(_parse_accept_args(args.accept))
@@ -662,33 +672,41 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("init", help="Run the intent interview")
     sp.add_argument("--repo", help="Repo root (default: cwd)")
     sp.add_argument(
-        "--non-interactive", action="store_true",
+        "--non-interactive",
+        action="store_true",
         help="Do not prompt; use --accept/--preset to supply answers.",
     )
     sp.add_argument(
-        "--skip", action="store_true",
+        "--skip",
+        action="store_true",
         help="Skip the interview; emit an empty result.",
     )
     sp.add_argument(
-        "--preset", choices=sorted(_PRESETS),
+        "--preset",
+        choices=sorted(_PRESETS),
         help="Use a canned answer set (implies --non-interactive).",
     )
     sp.add_argument(
-        "--accept", nargs="*", metavar="KEY=VALUE",
+        "--accept",
+        nargs="*",
+        metavar="KEY=VALUE",
         help="Structured answers in key=value form.",
     )
     sp.add_argument("--starters", help="Comma-separated starter names.")
     sp.add_argument("--suggestions", help="Comma-separated 1-based indices.")
     sp.add_argument(
-        "--analysis", choices=("dynamic", "diff", "graph-blast", "full"),
+        "--analysis",
+        choices=("dynamic", "diff", "graph-blast", "full"),
         help="Default analysis mode for new toolboxes.",
     )
     sp.add_argument(
-        "--mine", action="store_true",
+        "--mine",
+        action="store_true",
         help="Mine behaviour first if no user profile exists on disk.",
     )
     sp.add_argument(
-        "--apply", action="store_true",
+        "--apply",
+        action="store_true",
         help="Persist the resulting ToolboxSet to the global config.",
     )
     sp.set_defaults(func=cmd_init)

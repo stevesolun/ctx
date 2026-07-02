@@ -60,15 +60,17 @@ class TriggerEmission:
     guardrail: bool
 
     def to_line(self) -> str:
-        return json.dumps({
-            "trigger": self.trigger,
-            "toolbox": self.toolbox,
-            "plan_file": self.plan_file,
-            "agents": list(self.agents),
-            "files": list(self.files),
-            "source": self.source,
-            "guardrail": self.guardrail,
-        })
+        return json.dumps(
+            {
+                "trigger": self.trigger,
+                "toolbox": self.toolbox,
+                "plan_file": self.plan_file,
+                "agents": list(self.agents),
+                "files": list(self.files),
+                "source": self.source,
+                "guardrail": self.guardrail,
+            }
+        )
 
 
 def _trigger_matches(tb: Toolbox, event: str, file_path: str | None) -> bool:
@@ -92,8 +94,7 @@ def _trigger_matches(tb: Toolbox, event: str, file_path: str | None) -> bool:
     return False
 
 
-def _select_toolboxes(event: str, file_path: str | None,
-                      repo_root: Path | None) -> list[Toolbox]:
+def _select_toolboxes(event: str, file_path: str | None, repo_root: Path | None) -> list[Toolbox]:
     tset = merged(repo_root=repo_root)
     out: list[Toolbox] = []
     for name in tset.active:
@@ -105,10 +106,9 @@ def _select_toolboxes(event: str, file_path: str | None,
     return out
 
 
-def run_trigger(event: str,
-                file_path: str | None = None,
-                repo_root: Path | None = None,
-                stream=None) -> int:
+def run_trigger(
+    event: str, file_path: str | None = None, repo_root: Path | None = None, stream=None
+) -> int:
     """
     Entry point for all trigger events. Returns process exit code.
     Emits one JSON line per matching toolbox.

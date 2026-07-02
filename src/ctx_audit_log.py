@@ -60,24 +60,44 @@ __all__ = [
 
 
 # Canonical event names. Keep this list in sync with the docstring above.
-EVENT_TYPES: frozenset[str] = frozenset({
-    # lifecycle
-    "skill.added", "skill.installed", "skill.converted",
-    "skill.loaded", "skill.unloaded", "skill.used",
-    "skill.watched", "skill.demoted",
-    "skill.archived", "skill.deleted", "skill.restored",
-    "skill.score_updated", "skill.sidecar_rewritten",
-    # agent variants (same semantics)
-    "agent.added", "agent.installed",
-    "agent.loaded", "agent.unloaded", "agent.used",
-    "agent.watched", "agent.demoted",
-    "agent.archived", "agent.deleted", "agent.restored",
-    "agent.score_updated", "agent.sidecar_rewritten",
-    # meta
-    "session.started", "session.ended",
-    "backup.snapshot", "backup.prune",
-    "toolbox.triggered", "toolbox.verdict",
-})
+EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        # lifecycle
+        "skill.added",
+        "skill.installed",
+        "skill.converted",
+        "skill.loaded",
+        "skill.unloaded",
+        "skill.used",
+        "skill.watched",
+        "skill.demoted",
+        "skill.archived",
+        "skill.deleted",
+        "skill.restored",
+        "skill.score_updated",
+        "skill.sidecar_rewritten",
+        # agent variants (same semantics)
+        "agent.added",
+        "agent.installed",
+        "agent.loaded",
+        "agent.unloaded",
+        "agent.used",
+        "agent.watched",
+        "agent.demoted",
+        "agent.archived",
+        "agent.deleted",
+        "agent.restored",
+        "agent.score_updated",
+        "agent.sidecar_rewritten",
+        # meta
+        "session.started",
+        "session.ended",
+        "backup.snapshot",
+        "backup.prune",
+        "toolbox.triggered",
+        "toolbox.verdict",
+    }
+)
 
 
 SubjectType = Literal["skill", "agent", "session", "backup", "toolbox"]
@@ -99,6 +119,7 @@ def audit_log_path() -> Path:
     """
     try:
         from ctx_config import cfg  # local import — avoid cost on test import
+
         raw = cfg.get("paths", {}) or {}
         configured = raw.get("audit_log") if isinstance(raw, dict) else None
         if isinstance(configured, str) and configured.strip():
@@ -110,9 +131,7 @@ def audit_log_path() -> Path:
 
 def _now_iso() -> str:
     """ISO-8601 UTC timestamp, seconds precision, trailing ``Z``."""
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
-        "+00:00", "Z"
-    )
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _json_safe(value: Any, *, depth: int = 0, seen: set[int] | None = None) -> Any:
@@ -131,8 +150,9 @@ def _json_safe(value: Any, *, depth: int = 0, seen: set[int] | None = None) -> A
         seen.add(ident)
         try:
             return {
-                str(_json_safe(k, depth=depth + 1, seen=seen)):
-                _json_safe(v, depth=depth + 1, seen=seen)
+                str(_json_safe(k, depth=depth + 1, seen=seen)): _json_safe(
+                    v, depth=depth + 1, seen=seen
+                )
                 for k, v in value.items()
             }
         finally:
@@ -140,10 +160,7 @@ def _json_safe(value: Any, *, depth: int = 0, seen: set[int] | None = None) -> A
     if isinstance(value, (list, tuple, set, frozenset)):
         seen.add(ident)
         try:
-            return [
-                _json_safe(item, depth=depth + 1, seen=seen)
-                for item in value
-            ]
+            return [_json_safe(item, depth=depth + 1, seen=seen) for item in value]
         finally:
             seen.discard(ident)
     isoformat = getattr(value, "isoformat", None)
@@ -174,6 +191,7 @@ def log(
     """
     if event not in EVENT_TYPES:
         import sys as _sys
+
         print(
             f"[ctx-audit] warning: unknown event {event!r}; consider adding "
             f"to ctx_audit_log.EVENT_TYPES",
@@ -230,8 +248,7 @@ def log_skill_event(
     meta: dict[str, Any] | None = None,
 ) -> None:
     """Log a ``skill.*`` event by slug."""
-    log(event, subject_type="skill", subject=slug, actor=actor,
-        session_id=session_id, meta=meta)
+    log(event, subject_type="skill", subject=slug, actor=actor, session_id=session_id, meta=meta)
 
 
 def log_agent_event(
@@ -243,8 +260,7 @@ def log_agent_event(
     meta: dict[str, Any] | None = None,
 ) -> None:
     """Log an ``agent.*`` event by slug."""
-    log(event, subject_type="agent", subject=slug, actor=actor,
-        session_id=session_id, meta=meta)
+    log(event, subject_type="agent", subject=slug, actor=actor, session_id=session_id, meta=meta)
 
 
 def log_session_event(
@@ -255,8 +271,14 @@ def log_session_event(
     meta: dict[str, Any] | None = None,
 ) -> None:
     """Log a ``session.*`` event."""
-    log(event, subject_type="session", subject=session_id, actor=actor,
-        session_id=session_id, meta=meta)
+    log(
+        event,
+        subject_type="session",
+        subject=session_id,
+        actor=actor,
+        session_id=session_id,
+        meta=meta,
+    )
 
 
 def log_backup_event(
@@ -267,8 +289,7 @@ def log_backup_event(
     meta: dict[str, Any] | None = None,
 ) -> None:
     """Log a ``backup.*`` event (snapshot id or prune set id)."""
-    log(event, subject_type="backup", subject=snapshot_id, actor=actor,
-        meta=meta)
+    log(event, subject_type="backup", subject=snapshot_id, actor=actor, meta=meta)
 
 
 # ─── Log rotation (call at session-end / Stop hook) ─────────────────────────

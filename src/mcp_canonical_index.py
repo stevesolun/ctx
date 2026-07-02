@@ -161,10 +161,12 @@ def load_index(mcp_dir: Path) -> CanonicalIndex:
         # error; silently quarantine it and keep the rest of the
         # index useful.
         import logging  # noqa: PLC0415
+
         logging.getLogger(__name__).warning(
             "mcp_canonical_index: dropped %d malformed/unsafe entries "
             "(likely poisoned relpath) from %s",
-            dropped, _index_path(mcp_dir),
+            dropped,
+            _index_path(mcp_dir),
         )
     return {
         "version": INDEX_VERSION,
@@ -229,6 +231,7 @@ def upsert(
     # otherwise a caller could insert an unsafe relpath that survives
     # in-process lookups until the next load filters it out.
     from ctx.utils._safe_name import validate_relpath  # noqa: PLC0415
+
     validate_relpath(mcp_dir, relpath, field="relpath")
 
     idx = index if index is not None else load_index(mcp_dir)
@@ -268,7 +271,7 @@ def _iter_entity_pages(mcp_dir: Path) -> list[tuple[str, str, str | None]]:
         for full_relpath, text in sorted(load_merged_wiki_pages(packs_dir).items()):
             if not full_relpath.startswith(prefix) or not full_relpath.endswith(".md"):
                 continue
-            relpath = full_relpath[len(prefix):]
+            relpath = full_relpath[len(prefix) :]
             rows.append((relpath, Path(relpath).stem, text))
         return rows
 

@@ -246,9 +246,7 @@ class TestComputeQuality:
 
 
 class TestExtractSignalsForSlug:
-    def test_full_frontmatter_returns_all_six_signals(
-        self, tmp_path: Path
-    ) -> None:
+    def test_full_frontmatter_returns_all_six_signals(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         _write_entity(wiki_dir, "github")
 
@@ -256,30 +254,22 @@ class TestExtractSignalsForSlug:
 
         assert set(sigs.keys()) == set(_SIGNAL_NAMES)
         for name, result in sigs.items():
-            assert isinstance(result, SignalResult), (
-                f"signal '{name}' is not a SignalResult"
-            )
+            assert isinstance(result, SignalResult), f"signal '{name}' is not a SignalResult"
 
     def test_no_graph_index_graph_signal_isolated(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         _write_entity(wiki_dir, "github")
 
-        sigs = mq.extract_signals_for_slug(
-            "github", wiki_dir=wiki_dir, graph_index=None
-        )
+        sigs = mq.extract_signals_for_slug("github", wiki_dir=wiki_dir, graph_index=None)
 
         assert sigs["graph"].evidence.get("isolated") is True
 
     def test_graph_index_propagates_degree(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         _write_entity(wiki_dir, "github")
-        graph_index = {
-            "mcp-server:github": {"degree": 12, "cross_type_degree": 3}
-        }
+        graph_index = {"mcp-server:github": {"degree": 12, "cross_type_degree": 3}}
 
-        sigs = mq.extract_signals_for_slug(
-            "github", wiki_dir=wiki_dir, graph_index=graph_index
-        )
+        sigs = mq.extract_signals_for_slug("github", wiki_dir=wiki_dir, graph_index=graph_index)
 
         assert sigs["graph"].evidence.get("degree") == 12
         assert sigs["graph"].evidence.get("isolated") is False
@@ -423,17 +413,13 @@ class TestPersistQuality:
 
 
 class TestLoadGraphIndex:
-    def test_missing_graph_json_returns_empty_dict(
-        self, tmp_path: Path
-    ) -> None:
+    def test_missing_graph_json_returns_empty_dict(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
         result = mq.load_graph_index(wiki_dir)
         assert result == {}
 
-    def test_single_mcp_server_node_returns_degree(
-        self, tmp_path: Path
-    ) -> None:
+    def test_single_mcp_server_node_returns_degree(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         graph_dir = wiki_dir / "graphify-out"
         graph_dir.mkdir(parents=True)
@@ -451,9 +437,7 @@ class TestLoadGraphIndex:
                 {"source": "mcp-server:github", "target": "skill:git"},
             ],
         }
-        (graph_dir / "graph.json").write_text(
-            json.dumps(graph_data), encoding="utf-8"
-        )
+        (graph_dir / "graph.json").write_text(json.dumps(graph_data), encoding="utf-8")
 
         index = mq.load_graph_index(wiki_dir)
         assert "mcp-server:github" in index
@@ -461,9 +445,7 @@ class TestLoadGraphIndex:
         assert node["degree"] == 1
         assert node["cross_type_degree"] == 1
 
-    def test_multiple_cross_type_edges_counted_correctly(
-        self, tmp_path: Path
-    ) -> None:
+    def test_multiple_cross_type_edges_counted_correctly(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         graph_dir = wiki_dir / "graphify-out"
         graph_dir.mkdir(parents=True)
@@ -486,9 +468,7 @@ class TestLoadGraphIndex:
                 {"source": "mcp-server:github", "target": "mcp-server:other"},
             ],
         }
-        (graph_dir / "graph.json").write_text(
-            json.dumps(graph_data), encoding="utf-8"
-        )
+        (graph_dir / "graph.json").write_text(json.dumps(graph_data), encoding="utf-8")
 
         index = mq.load_graph_index(wiki_dir)
         node = index["mcp-server:github"]
@@ -497,26 +477,26 @@ class TestLoadGraphIndex:
         # Cross-type = 2 (skill + agent only)
         assert node["cross_type_degree"] == 2
 
-    def test_active_graph_packs_override_stale_graph_json(
-        self, tmp_path: Path
-    ) -> None:
+    def test_active_graph_packs_override_stale_graph_json(self, tmp_path: Path) -> None:
         wiki_dir = tmp_path / "wiki"
         graph_dir = wiki_dir / "graphify-out"
         packs_dir = graph_dir / "packs"
         graph_dir.mkdir(parents=True)
         (graph_dir / "graph.json").write_text(
-            json.dumps({
-                "directed": False,
-                "multigraph": False,
-                "graph": {},
-                "nodes": [
-                    {"id": "mcp-server:github", "type": "mcp-server"},
-                    {"id": "mcp-server:stale", "type": "mcp-server"},
-                ],
-                "edges": [
-                    {"source": "mcp-server:github", "target": "mcp-server:stale"},
-                ],
-            }),
+            json.dumps(
+                {
+                    "directed": False,
+                    "multigraph": False,
+                    "graph": {},
+                    "nodes": [
+                        {"id": "mcp-server:github", "type": "mcp-server"},
+                        {"id": "mcp-server:stale", "type": "mcp-server"},
+                    ],
+                    "edges": [
+                        {"source": "mcp-server:github", "target": "mcp-server:stale"},
+                    ],
+                }
+            ),
             encoding="utf-8",
         )
         graph = nx.Graph()
@@ -586,8 +566,9 @@ class TestCLI:
         fake_home = tmp_path / "home"
         monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
         monkeypatch.setattr(
-            sys, "argv", ["mcp_quality", "recompute", "--slug", "github",
-                           "--wiki-dir", str(wiki_dir)]
+            sys,
+            "argv",
+            ["mcp_quality", "recompute", "--slug", "github", "--wiki-dir", str(wiki_dir)],
         )
         mq.main()
         sidecar = fake_home / ".claude" / "skill-quality" / "mcp" / "github.json"
@@ -605,15 +586,15 @@ class TestCLI:
 
         # First recompute so sidecar exists.
         monkeypatch.setattr(
-            sys, "argv", ["mcp_quality", "recompute", "--slug", "github",
-                           "--wiki-dir", str(wiki_dir)]
+            sys,
+            "argv",
+            ["mcp_quality", "recompute", "--slug", "github", "--wiki-dir", str(wiki_dir)],
         )
         mq.main()
         capsys.readouterr()
 
         monkeypatch.setattr(
-            sys, "argv", ["mcp_quality", "show", "github",
-                           "--wiki-dir", str(wiki_dir), "--json"]
+            sys, "argv", ["mcp_quality", "show", "github", "--wiki-dir", str(wiki_dir), "--json"]
         )
         mq.main()
         out = capsys.readouterr().out
@@ -634,16 +615,14 @@ class TestCLI:
         monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
 
         monkeypatch.setattr(
-            sys, "argv", ["mcp_quality", "recompute", "--slug", "github",
-                           "--wiki-dir", str(wiki_dir)]
+            sys,
+            "argv",
+            ["mcp_quality", "recompute", "--slug", "github", "--wiki-dir", str(wiki_dir)],
         )
         mq.main()
         capsys.readouterr()
 
-        monkeypatch.setattr(
-            sys, "argv", ["mcp_quality", "list",
-                           "--wiki-dir", str(wiki_dir)]
-        )
+        monkeypatch.setattr(sys, "argv", ["mcp_quality", "list", "--wiki-dir", str(wiki_dir)])
         mq.main()
         captured = capsys.readouterr()
         out = captured.out
@@ -674,9 +653,10 @@ class TestCLI:
 
 
 class TestDefaultSidecarDirHonorsPathHome:
-
     def test_configured_path_expands_via_path_home(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         import ctx_config
 
@@ -701,7 +681,9 @@ class TestDefaultSidecarDirHonorsPathHome:
         assert result == fake_home / ".claude" / "skill-quality" / "mcp"
 
     def test_unconfigured_path_falls_back_to_path_home(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """When config has no mcp_quality.paths.sidecar_dir, the
         fallback path is Path.home()/.claude/skill-quality/mcp —

@@ -58,7 +58,9 @@ def render_attribution_header(entry: dict, manifest: dict) -> str:
 _SAFE_CATEGORY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
-def _validate_manifest_field(field: str, value: object, *, regex: re.Pattern[str] | None = None) -> str:
+def _validate_manifest_field(
+    field: str, value: object, *, regex: re.Pattern[str] | None = None
+) -> str:
     """Reject manifest values that could escape the intended trust boundary."""
     if not isinstance(value, str) or not value:
         raise ValueError(f"{field}: expected non-empty string, got {type(value).__name__}")
@@ -83,9 +85,7 @@ def _resolve_within(root: Path, candidate_rel: str, *, field: str) -> Path:
     try:
         resolved.relative_to(root_resolved)
     except ValueError as exc:
-        raise ValueError(
-            f"{field}: {candidate_rel!r} resolves outside import root"
-        ) from exc
+        raise ValueError(f"{field}: {candidate_rel!r} resolves outside import root") from exc
     return resolved
 
 
@@ -110,9 +110,7 @@ def deploy_entry(entry: dict, manifest: dict, target_dir: Path, dry_run: bool) -
     try:
         dest_resolved.relative_to(target_resolved)
     except ValueError as exc:
-        raise ValueError(
-            f"skill dir {skill_dir} resolves outside target_dir"
-        ) from exc
+        raise ValueError(f"skill dir {skill_dir} resolves outside target_dir") from exc
     dest = skill_dir / "SKILL.md"
 
     header = render_attribution_header(entry, manifest)
@@ -172,7 +170,9 @@ def main() -> None:
     mode = "dry-run" if args.dry_run else "install"
     print()
     print(f"Mode: {mode}  target: {target_dir}")
-    print(f"Entries: {len(manifest['entries'])}  new/updated: {created + updated}  unchanged: {unchanged}")
+    print(
+        f"Entries: {len(manifest['entries'])}  new/updated: {created + updated}  unchanged: {unchanged}"
+    )
 
     if args.install:
         print()

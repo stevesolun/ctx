@@ -83,7 +83,8 @@ def test_scope_graph_blast_expands_one_hop():
 
 def test_scope_dynamic_falls_back_to_full_when_no_diff(seeded_tset, tmp_path):
     tb = tc.Toolbox(
-        name="t", post=("x",),
+        name="t",
+        post=("x",),
         scope=tc.Scope(analysis="dynamic"),
     )
     files, mode = cr.resolve_scope(tb, repo_root=tmp_path)
@@ -101,7 +102,8 @@ def test_hash_plan_is_stable():
 def test_build_plan_persists_and_dedups(seeded_tset, tmp_runs, monkeypatch):
     # Force resolve_scope to return a known set so we don't depend on git
     monkeypatch.setattr(
-        cr, "resolve_scope",
+        cr,
+        "resolve_scope",
         lambda tb, repo_root, explicit_files=None, graph_edges=None: (["a.py"], "diff"),
     )
     plan1 = cr.build_plan("ship-it", now=1000.0)
@@ -118,7 +120,8 @@ def test_build_plan_persists_and_dedups(seeded_tset, tmp_runs, monkeypatch):
 
 def test_build_plan_cache_expires_outside_window(seeded_tset, tmp_runs, monkeypatch):
     monkeypatch.setattr(
-        cr, "resolve_scope",
+        cr,
+        "resolve_scope",
         lambda tb, repo_root, explicit_files=None, graph_edges=None: (["a.py"], "diff"),
     )
     plan1 = cr.build_plan("ship-it", now=1000.0)
@@ -133,7 +136,8 @@ def test_build_plan_cache_expires_outside_window(seeded_tset, tmp_runs, monkeypa
 
 def test_fresh_policy_never_caches(seeded_tset, tmp_runs, monkeypatch):
     monkeypatch.setattr(
-        cr, "resolve_scope",
+        cr,
+        "resolve_scope",
         lambda tb, repo_root, explicit_files=None, graph_edges=None: (["a.py"], "full"),
     )
     # fresh-box has policy="fresh" \u2014 should never return cached
@@ -150,7 +154,8 @@ def test_unknown_toolbox_raises(seeded_tset):
 
 def test_persist_plan_atomic_on_crash(seeded_tset, tmp_runs, monkeypatch):
     monkeypatch.setattr(
-        cr, "resolve_scope",
+        cr,
+        "resolve_scope",
         lambda tb, repo_root, explicit_files=None, graph_edges=None: (["a.py"], "diff"),
     )
     plan = cr.build_plan("ship-it", now=1000.0)
@@ -171,13 +176,15 @@ def test_persist_plan_atomic_on_crash(seeded_tset, tmp_runs, monkeypatch):
 def test_cmd_history_filters_by_toolbox(seeded_tset, tmp_runs, monkeypatch, capsys):
     # Persist two plans for different toolboxes
     monkeypatch.setattr(
-        cr, "resolve_scope",
+        cr,
+        "resolve_scope",
         lambda tb, repo_root, explicit_files=None, graph_edges=None: (["a.py"], "diff"),
     )
     p1 = cr.build_plan("ship-it", now=1000.0)
     cr.persist_plan(p1)
     monkeypatch.setattr(
-        cr, "resolve_scope",
+        cr,
+        "resolve_scope",
         lambda tb, repo_root, explicit_files=None, graph_edges=None: (["a.py"], "full"),
     )
     p2 = cr.build_plan("fresh-box", now=2000.0)

@@ -49,9 +49,7 @@ def _is_tracked(path: Path, claude_home: Path) -> bool:
 
     cfg = from_ctx_config()
     try:
-        rel = path.resolve(strict=False).relative_to(
-            claude_home.resolve(strict=False)
-        )
+        rel = path.resolve(strict=False).relative_to(claude_home.resolve(strict=False))
     except (OSError, ValueError):
         return False
 

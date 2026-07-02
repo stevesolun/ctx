@@ -176,9 +176,7 @@ class TestWikiIndexEntries:
         assert _entity_types.normalize_entity_type("mcp") == "mcp-server"
         assert _mt.DASHBOARD_ENTITY_SOURCES == _entity_types.entity_source_specs()
         path = _mt.wiki_entity_path("anthropic-python-sdk")
-        assert path == (
-            wiki_3type / "entities" / "mcp-servers" / "a" / "anthropic-python-sdk.md"
-        )
+        assert path == (wiki_3type / "entities" / "mcp-servers" / "a" / "anthropic-python-sdk.md")
 
     def test_wiki_entity_path_resolves_harness_pages(self, wiki_3type):
         path = _mt.wiki_entity_path("langgraph", entity_type="harness")
@@ -315,11 +313,7 @@ def test_wiki_entity_page_marks_truncated_body_and_frontmatter(
     long_description = "x" * 160
     long_body = "body-line\n" * 1400
     (wiki_3type / "entities" / "skills" / "long-page.md").write_text(
-        "---\n"
-        f"description: {long_description}\n"
-        "type: skill\n"
-        "---\n"
-        f"{long_body}",
+        f"---\ndescription: {long_description}\ntype: skill\n---\n{long_body}",
         encoding="utf-8",
     )
 
@@ -336,7 +330,9 @@ class TestRenderHome3Type:
         monkeypatch.setattr(_mt, "read_manifest", lambda: {"load": [], "unload": []})
         monkeypatch.setattr(_mt, "summarize_sessions", lambda: [])
         monkeypatch.setattr(_mt, "grade_distribution", lambda: {})
-        monkeypatch.setattr(_mt, "graph_stats", lambda: {"nodes": 0, "edges": 0, "available": False})
+        monkeypatch.setattr(
+            _mt, "graph_stats", lambda: {"nodes": 0, "edges": 0, "available": False}
+        )
         monkeypatch.setattr(_mt, "audit_log_path", lambda: wiki_3type / "no-audit.log")
         monkeypatch.setattr(_mt, "read_jsonl", lambda *a, **k: [])
 
@@ -387,12 +383,15 @@ class TestSessionSummaries3Type:
             encoding="utf-8",
         )
         (claude / "skill-events.jsonl").write_text(
-            json.dumps({
-                "timestamp": "2026-05-02T10:03:00Z",
-                "event": "load",
-                "agent": "code-reviewer",
-                "session_id": "S1",
-            }) + "\n",
+            json.dumps(
+                {
+                    "timestamp": "2026-05-02T10:03:00Z",
+                    "event": "load",
+                    "agent": "code-reviewer",
+                    "session_id": "S1",
+                }
+            )
+            + "\n",
             encoding="utf-8",
         )
 
@@ -406,18 +405,24 @@ class TestSessionSummaries3Type:
         assert session["mcps_unloaded"] == ["anthropic-python-sdk"]
 
     def test_sessions_index_renders_agent_and_mcp_columns(self, monkeypatch):
-        monkeypatch.setattr(_mt, "summarize_sessions", lambda: [{
-            "session_id": "S1",
-            "first_seen": "2026-05-02T10:00:00Z",
-            "last_seen": "2026-05-02T10:02:00Z",
-            "skills_loaded": [],
-            "skills_unloaded": [],
-            "agents_loaded": [],
-            "agents_unloaded": ["code-reviewer"],
-            "mcps_loaded": ["anthropic-python-sdk"],
-            "mcps_unloaded": ["anthropic-python-sdk"],
-            "lifecycle_transitions": 0,
-        }])
+        monkeypatch.setattr(
+            _mt,
+            "summarize_sessions",
+            lambda: [
+                {
+                    "session_id": "S1",
+                    "first_seen": "2026-05-02T10:00:00Z",
+                    "last_seen": "2026-05-02T10:02:00Z",
+                    "skills_loaded": [],
+                    "skills_unloaded": [],
+                    "agents_loaded": [],
+                    "agents_unloaded": ["code-reviewer"],
+                    "mcps_loaded": ["anthropic-python-sdk"],
+                    "mcps_unloaded": ["anthropic-python-sdk"],
+                    "lifecycle_transitions": 0,
+                }
+            ],
+        )
 
         html = _mt.render_sessions_index()
 
@@ -462,8 +467,7 @@ class TestRenderWikiIndex3Type:
 
 class TestRenderLoaded3Type:
     def test_heading_names_all_three_types(self, monkeypatch):
-        monkeypatch.setattr(_mt, "read_manifest",
-                            lambda: {"load": [], "unload": []})
+        monkeypatch.setattr(_mt, "read_manifest", lambda: {"load": [], "unload": []})
         html = _mt.render_loaded()
         assert "skills, agents, MCPs &amp; harnesses" in html or (
             "skills, agents, MCPs & harnesses" in html
@@ -472,14 +476,15 @@ class TestRenderLoaded3Type:
     def test_loaded_entries_split_by_entity_type(self, monkeypatch):
         manifest = {
             "load": [
-                {"skill": "python-patterns", "entity_type": "skill",
-                 "source": "ctx-skill-install"},
-                {"skill": "code-reviewer", "entity_type": "agent",
-                 "source": "ctx-agent-install"},
-                {"skill": "anthropic-python-sdk", "entity_type": "mcp-server",
-                 "source": "ctx-mcp-install", "command": "npx -y @anthropic/sdk"},
-                {"skill": "langgraph", "entity_type": "harness",
-                 "source": "ctx-harness-install"},
+                {"skill": "python-patterns", "entity_type": "skill", "source": "ctx-skill-install"},
+                {"skill": "code-reviewer", "entity_type": "agent", "source": "ctx-agent-install"},
+                {
+                    "skill": "anthropic-python-sdk",
+                    "entity_type": "mcp-server",
+                    "source": "ctx-mcp-install",
+                    "command": "npx -y @anthropic/sdk",
+                },
+                {"skill": "langgraph", "entity_type": "harness", "source": "ctx-harness-install"},
             ],
             "unload": [],
         }
@@ -521,8 +526,9 @@ class TestRenderLoaded3Type:
         """Pre-install_utils manifest entries had no entity_type field.
         Those must default to skill (what the implicit contract was)
         and still render in the Skills section without crashing."""
-        monkeypatch.setattr(_mt, "read_manifest",
-                            lambda: {"load": [{"skill": "legacy"}], "unload": []})
+        monkeypatch.setattr(
+            _mt, "read_manifest", lambda: {"load": [{"skill": "legacy"}], "unload": []}
+        )
         html = _mt.render_loaded()
         assert "legacy" in html
         assert "data-etype='skill'" in html
@@ -542,10 +548,7 @@ class TestRenderLoaded3Type:
         monkeypatch.setattr(_mt, "read_manifest", lambda: manifest)
         html = _mt.render_loaded()
         assert "data-slug='code-reviewer' data-etype='agent'" in html
-        assert (
-            "data-slug='anthropic-python-sdk' data-etype='mcp-server'"
-            in html
-        )
+        assert "data-slug='anthropic-python-sdk' data-etype='mcp-server'" in html
         assert "data-command='npx -y @anthropic/sdk'" in html
         assert "id='load-type'" in html
 
@@ -565,8 +568,8 @@ class TestPerformUnloadByEntityType:
             return slugs
 
         from ctx.adapters.claude_code.install import skill_unload
-        monkeypatch.setattr(skill_unload, "unload_from_session",
-                            fake_unload_from_session)
+
+        monkeypatch.setattr(skill_unload, "unload_from_session", fake_unload_from_session)
         ok, msg = _mt.perform_unload("python-patterns", entity_type="skill")
         assert ok
         assert calls["slugs"] == ["python-patterns"]
@@ -591,10 +594,10 @@ class TestPerformUnloadByEntityType:
             return _FakeResult(slug=slug, status="uninstalled", message="ok")
 
         from ctx.adapters.claude_code.install import mcp_install
+
         monkeypatch.setattr(mcp_install, "uninstall_mcp", fake_uninstall)
 
-        ok, msg = _mt.perform_unload("anthropic-python-sdk",
-                                       entity_type="mcp-server")
+        ok, msg = _mt.perform_unload("anthropic-python-sdk", entity_type="mcp-server")
         assert ok
         assert calls["slug"] == "anthropic-python-sdk"
         assert calls["kw"].get("force") in (None, False)
@@ -608,24 +611,26 @@ class TestPerformUnloadByEntityType:
         claude.mkdir()
         monkeypatch.setattr(_mt, "claude_dir", lambda: claude)
         (claude / "skill-manifest.json").write_text(
-            json.dumps({
-                "load": [{
-                    "skill": "code-reviewer",
-                    "entity_type": "agent",
-                    "source": "ctx-agent-install",
-                }],
-                "unload": [],
-                "warnings": [],
-            }),
+            json.dumps(
+                {
+                    "load": [
+                        {
+                            "skill": "code-reviewer",
+                            "entity_type": "agent",
+                            "source": "ctx-agent-install",
+                        }
+                    ],
+                    "unload": [],
+                    "warnings": [],
+                }
+            ),
             encoding="utf-8",
         )
 
         ok, msg = _mt.perform_unload("code-reviewer", entity_type="agent")
 
         assert ok, msg
-        manifest = json.loads(
-            (claude / "skill-manifest.json").read_text(encoding="utf-8")
-        )
+        manifest = json.loads((claude / "skill-manifest.json").read_text(encoding="utf-8"))
         assert manifest["load"] == []
         assert manifest["unload"][0]["entity_type"] == "agent"
         audit = (claude / "ctx-audit.jsonl").read_text(encoding="utf-8")
@@ -641,10 +646,13 @@ class TestPerformUnloadByEntityType:
             message: str = ""
 
         from ctx.adapters.claude_code.install import mcp_install
+
         monkeypatch.setattr(
-            mcp_install, "uninstall_mcp",
-            lambda slug, **kw: _FakeResult(slug=slug, status="claude-cli-failed",
-                                           message="claude mcp remove failed"),
+            mcp_install,
+            "uninstall_mcp",
+            lambda slug, **kw: _FakeResult(
+                slug=slug, status="claude-cli-failed", message="claude mcp remove failed"
+            ),
         )
 
         ok, msg = _mt.perform_unload("bad-mcp", entity_type="mcp-server")
@@ -664,6 +672,7 @@ class TestPerformUnloadByEntityType:
         claude.mkdir()
         monkeypatch.setattr(_mt, "claude_dir", lambda: claude)
         from ctx.adapters.claude_code.install import mcp_install
+
         monkeypatch.setattr(
             mcp_install,
             "uninstall_mcp",
@@ -764,6 +773,7 @@ class TestPerformLoadByEntityType:
             return _FakeResult(slug=slug, status="installed", message="ok")
 
         from ctx.adapters.claude_code.install import skill_install
+
         monkeypatch.setattr(skill_install, "install_skill", fake_install)
 
         ok, msg = _mt.perform_load("python-patterns", entity_type="skill")
@@ -790,6 +800,7 @@ class TestPerformLoadByEntityType:
             return _FakeResult(slug=slug, status="installed", message="ok")
 
         from ctx.adapters.claude_code.install import agent_install
+
         monkeypatch.setattr(agent_install, "install_agent", fake_install)
 
         ok, msg = _mt.perform_load("code-reviewer", entity_type="agent")
@@ -816,10 +827,10 @@ class TestPerformLoadByEntityType:
             return _FakeResult(slug=slug, status="installed", message="ok")
 
         from ctx.adapters.claude_code.install import mcp_install
+
         monkeypatch.setattr(mcp_install, "install_mcp", fake_install)
 
-        ok, msg = _mt.perform_load("anthropic-python-sdk",
-                                    entity_type="mcp-server")
+        ok, msg = _mt.perform_load("anthropic-python-sdk", entity_type="mcp-server")
 
         assert ok
         assert msg == "ok"
@@ -843,6 +854,7 @@ class TestPerformLoadByEntityType:
             return _FakeResult(slug=slug, status="installed", message="ok")
 
         from ctx.adapters.claude_code.install import mcp_install
+
         monkeypatch.setattr(mcp_install, "install_mcp", fake_install)
 
         ok, msg = _mt.perform_load(
@@ -869,6 +881,7 @@ class TestPerformLoadByEntityType:
         claude.mkdir()
         monkeypatch.setattr(_mt, "claude_dir", lambda: claude)
         from ctx.adapters.claude_code.install import mcp_install
+
         monkeypatch.setattr(
             mcp_install,
             "install_mcp",
@@ -896,8 +909,9 @@ class TestPerformLoadByEntityType:
 
 class TestRenderGraphSidebar:
     def test_sidebar_type_checkboxes_include_mcp_server(self, monkeypatch):
-        monkeypatch.setattr(_mt, "graph_stats",
-                            lambda: {"nodes": 10, "edges": 20, "available": True})
+        monkeypatch.setattr(
+            _mt, "graph_stats", lambda: {"nodes": 10, "edges": 20, "available": True}
+        )
         monkeypatch.setattr(_mt, "top_degree_seeds", lambda **_: [])
         html = _mt.render_graph()
         # Four type checkboxes: skill, agent, mcp-server, harness.
@@ -907,8 +921,9 @@ class TestRenderGraphSidebar:
         assert "class='graph-type-filter' value='harness'" in html
 
     def test_sidebar_has_tag_filter(self, monkeypatch):
-        monkeypatch.setattr(_mt, "graph_stats",
-                            lambda: {"nodes": 0, "edges": 0, "available": False})
+        monkeypatch.setattr(
+            _mt, "graph_stats", lambda: {"nodes": 0, "edges": 0, "available": False}
+        )
         monkeypatch.setattr(_mt, "top_degree_seeds", lambda **_: [])
         html = _mt.render_graph()
         assert "id='tag-filter'" in html
@@ -917,22 +932,21 @@ class TestRenderGraphSidebar:
 
     def test_graph_list_styles_mcp_and_harness_nodes_distinctly(self, monkeypatch):
         """The graph list view shows four types; each must be visually distinct."""
-        monkeypatch.setattr(_mt, "graph_stats",
-                            lambda: {"nodes": 0, "edges": 0, "available": False})
+        monkeypatch.setattr(
+            _mt, "graph_stats", lambda: {"nodes": 0, "edges": 0, "available": False}
+        )
         monkeypatch.setattr(_mt, "top_degree_seeds", lambda **_: [])
         html = _mt.render_graph()
         assert ".entity-type-skill" in html
         assert ".entity-type-agent" in html
         assert ".entity-type-mcp-server" in html
         assert ".entity-type-harness" in html
-        assert (
-            "const typeKey = ['skill', 'agent', 'mcp-server', 'harness']"
-            in html
-        )
+        assert "const typeKey = ['skill', 'agent', 'mcp-server', 'harness']" in html
 
     def test_graph_filters_fallback_rows_and_connected_edges(self, monkeypatch):
-        monkeypatch.setattr(_mt, "graph_stats",
-                            lambda: {"nodes": 0, "edges": 0, "available": False})
+        monkeypatch.setattr(
+            _mt, "graph_stats", lambda: {"nodes": 0, "edges": 0, "available": False}
+        )
         monkeypatch.setattr(_mt, "top_degree_seeds", lambda **_: [])
         html = _mt.render_graph()
 
@@ -944,8 +958,9 @@ class TestRenderGraphSidebar:
     def test_tap_handler_strips_mcp_server_prefix(self, monkeypatch):
         """Clicking an MCP node must route to /wiki/<slug> — the
         prefix-stripping regex has to know all four types."""
-        monkeypatch.setattr(_mt, "graph_stats",
-                            lambda: {"nodes": 0, "edges": 0, "available": False})
+        monkeypatch.setattr(
+            _mt, "graph_stats", lambda: {"nodes": 0, "edges": 0, "available": False}
+        )
         monkeypatch.setattr(_mt, "top_degree_seeds", lambda **_: [])
         html = _mt.render_graph()
         # Regex should include mcp-server and harness in the prefix alternation.

@@ -48,9 +48,7 @@ MCP_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 # Subset of the MCP spec's transport tags we consider meaningful. Any
 # fetcher input outside this set is silently dropped — see
 # ``_normalize_transports``.
-ALLOWED_TRANSPORTS: frozenset[str] = frozenset(
-    {"stdio", "http", "sse", "websocket"}
-)
+ALLOWED_TRANSPORTS: frozenset[str] = frozenset({"stdio", "http", "sse", "websocket"})
 
 # GitHub URL matcher. Accepts http/https, optional ``www.``, trailing
 # ``.git`` / slash, and captures org + repo for canonical reassembly.

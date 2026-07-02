@@ -30,14 +30,14 @@ URL = "https://raw.githubusercontent.com/punkpeye/awesome-mcp-servers/main/READM
 # Language emoji -> language name map (from the README legend)
 # ---------------------------------------------------------------------------
 _LANG_EMOJI: dict[str, str] = {
-    "\U0001f40d": "python",        # 🐍
-    "\U0001f4c7": "typescript",    # 📇 (card index dividers — TS/JS)
-    "\U0001f3ce\ufe0f": "go",      # 🏎️
-    "\U0001f980": "rust",          # 🦀
-    "#\ufe0f\u20e3": "csharp",     # #️⃣
-    "\u2615": "java",              # ☕
-    "\U0001f30a": "c/c++",         # 🌊
-    "\U0001f48e": "ruby",          # 💎
+    "\U0001f40d": "python",  # 🐍
+    "\U0001f4c7": "typescript",  # 📇 (card index dividers — TS/JS)
+    "\U0001f3ce\ufe0f": "go",  # 🏎️
+    "\U0001f980": "rust",  # 🦀
+    "#\ufe0f\u20e3": "csharp",  # #️⃣
+    "\u2615": "java",  # ☕
+    "\U0001f30a": "c/c++",  # 🌊
+    "\U0001f48e": "ruby",  # 💎
 }
 
 # Badge image markup: [![alt](img-url)](link-url) — strip entirely
@@ -198,7 +198,7 @@ def _parse_readme(text: str) -> list[dict]:  # noqa: C901 — complexity justifi
 
         desc_match = _DESC_SEP_RE.search(tail)
         if desc_match:
-            description: str | None = tail[desc_match.end():].strip()
+            description: str | None = tail[desc_match.end() :].strip()
             if not description:
                 description = None
         else:

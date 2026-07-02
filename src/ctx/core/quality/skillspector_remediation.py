@@ -68,8 +68,7 @@ def decide_record(record: SkillSpectorAuditRecord) -> RemediationDecision:
     elif record.status in REVIEW_STATUSES:
         action = "remove"
         reason = (
-            "SkillSpector finding remains unresolved; remove until remediated "
-            "and rescanned cleanly"
+            "SkillSpector finding remains unresolved; remove until remediated and rescanned cleanly"
         )
     elif record.status in KEEP_STATUSES:
         action = "keep"
@@ -120,9 +119,7 @@ def build_remediation_plan(
                 {"rule": rule, "count": count} for rule, count in rule_counts.most_common(25)
             ],
         },
-        "remove_slugs": [
-            decision.slug for decision in decisions if decision.action == "remove"
-        ],
+        "remove_slugs": [decision.slug for decision in decisions if decision.action == "remove"],
         "review_slugs": [
             decision.slug
             for decision in decisions

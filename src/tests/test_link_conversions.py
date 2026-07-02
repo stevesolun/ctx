@@ -46,6 +46,7 @@ from link_conversions import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_wiki(tmp_path: Path) -> Path:
     """Create minimal wiki directory structure."""
     wiki = tmp_path / "wiki"
@@ -71,6 +72,7 @@ def _make_converted_skill(wiki: Path, name: str, skill_md_content: str = "") -> 
 # ---------------------------------------------------------------------------
 # _set_field
 # ---------------------------------------------------------------------------
+
 
 class TestSetField:
     def test_replaces_existing_field(self):
@@ -103,6 +105,7 @@ class TestSetField:
 # _inject_pipeline_fields
 # ---------------------------------------------------------------------------
 
+
 class TestInjectPipelineFields:
     def test_sets_all_three_fields(self):
         content = "---\ntitle: test\n---\n# body\n"
@@ -120,6 +123,7 @@ class TestInjectPipelineFields:
 # ---------------------------------------------------------------------------
 # scan_converted
 # ---------------------------------------------------------------------------
+
 
 class TestScanConverted:
     def test_finds_converted_dirs(self, tmp_path):
@@ -161,6 +165,7 @@ class TestScanConverted:
 # _infer_tags
 # ---------------------------------------------------------------------------
 
+
 class TestInferTags:
     def test_python_detected(self):
         assert "python" in _infer_tags("python-testing")
@@ -186,11 +191,13 @@ class TestInferTags:
 # _read_pipeline_description
 # ---------------------------------------------------------------------------
 
+
 class TestReadPipelineDescription:
     def test_reads_description_from_skill_md(self, tmp_path):
         wiki = _make_wiki(tmp_path)
-        skill = _make_converted_skill(wiki, "myskill",
-            '---\ndescription: "Test description"\n---\n# myskill\n')
+        skill = _make_converted_skill(
+            wiki, "myskill", '---\ndescription: "Test description"\n---\n# myskill\n'
+        )
         desc = _read_pipeline_description(skill)
         assert desc == "Test description"
 
@@ -210,6 +217,7 @@ class TestReadPipelineDescription:
 # ---------------------------------------------------------------------------
 # _build_new_entity_page
 # ---------------------------------------------------------------------------
+
 
 class TestBuildNewEntityPage:
     def test_contains_skill_name(self, tmp_path):
@@ -247,6 +255,7 @@ class TestBuildNewEntityPage:
 # upsert_entity_page
 # ---------------------------------------------------------------------------
 
+
 class TestUpsertEntityPage:
     def test_creates_new_page(self, tmp_path):
         wiki = _make_wiki(tmp_path)
@@ -262,7 +271,9 @@ class TestUpsertEntityPage:
         skill = _make_converted_skill(wiki, "react")
         # Pre-create entity page without pipeline fields
         existing = wiki / "entities" / "skills" / "react.md"
-        existing.write_text("---\ntitle: react\nhas_pipeline: false\n---\n# react\n", encoding="utf-8")
+        existing.write_text(
+            "---\ntitle: react\nhas_pipeline: false\n---\n# react\n", encoding="utf-8"
+        )
         skills_dir = tmp_path / "skills"
         is_new = upsert_entity_page(wiki, skill, skills_dir)
         assert is_new is False
@@ -282,6 +293,7 @@ class TestUpsertEntityPage:
 # ---------------------------------------------------------------------------
 # update_index
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateIndex:
     def test_adds_new_skill_entry(self, tmp_path):
@@ -328,6 +340,7 @@ class TestUpdateIndexSubjectAware:
         # untouched — that is the function the existing TestUpdateIndex
         # class still validates.
         from ctx.core.wiki.wiki_sync import update_index as _ws_ui  # noqa: PLC0415
+
         _ws_ui(*args, **kwargs)
 
     def _wiki_with_all_sections(self, tmp_path: Path) -> Path:
@@ -406,6 +419,7 @@ class TestUpdateIndexSubjectAware:
 # append_log
 # ---------------------------------------------------------------------------
 
+
 class TestAppendLog:
     def test_creates_log_entry(self, tmp_path):
         wiki = _make_wiki(tmp_path)
@@ -427,6 +441,7 @@ class TestAppendLog:
 # ---------------------------------------------------------------------------
 # generate_converted_index
 # ---------------------------------------------------------------------------
+
 
 class TestGenerateConvertedIndex:
     def test_creates_index_file(self, tmp_path):
@@ -459,6 +474,7 @@ class TestGenerateConvertedIndex:
 # ---------------------------------------------------------------------------
 # run()
 # ---------------------------------------------------------------------------
+
 
 class TestRun:
     def test_missing_wiki_returns_error(self, tmp_path):
@@ -535,15 +551,22 @@ class TestRun:
 # main()
 # ---------------------------------------------------------------------------
 
+
 class TestMain:
     def test_runs_with_valid_wiki(self, tmp_path, monkeypatch, capsys):
         wiki = _make_wiki(tmp_path)
         _make_converted_skill(wiki, "react")
-        monkeypatch.setattr(sys, "argv", [
-            "link_conversions.py",
-            "--wiki", str(wiki),
-            "--skills-dir", str(tmp_path / "skills"),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "link_conversions.py",
+                "--wiki",
+                str(wiki),
+                "--skills-dir",
+                str(tmp_path / "skills"),
+            ],
+        )
         _lc.main()
         out = capsys.readouterr().out
         assert "Done." in out
@@ -554,11 +577,17 @@ class TestMain:
         # Corrupt the entity page to trigger an error path
         # We inject a bad upsert by removing entity dir permissions is too platform-specific,
         # so instead test with missing wiki — run() returns error
-        monkeypatch.setattr(sys, "argv", [
-            "link_conversions.py",
-            "--wiki", str(tmp_path / "no-wiki"),
-            "--skills-dir", str(tmp_path / "skills"),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "link_conversions.py",
+                "--wiki",
+                str(tmp_path / "no-wiki"),
+                "--skills-dir",
+                str(tmp_path / "skills"),
+            ],
+        )
         with pytest.raises(SystemExit) as exc:
             _lc.main()
         assert exc.value.code == 1

@@ -73,16 +73,16 @@ _GITHUB_MCP_CREDENTIAL_ENV = (
 # back to this table. Users can override with --api-key-env explicitly.
 _PROVIDER_KEY_ENV: dict[str, str] = {
     "openrouter": "OPENROUTER_API_KEY",
-    "anthropic":  "ANTHROPIC_API_KEY",
-    "openai":     "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
     "huggingface": "HF_TOKEN",
-    "gemini":     "GEMINI_API_KEY",
-    "mistral":    "MISTRAL_API_KEY",
-    "deepseek":   "DEEPSEEK_API_KEY",
-    "together":   "TOGETHER_API_KEY",
-    "groq":       "GROQ_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "groq": "GROQ_API_KEY",
     # Ollama: no key needed (local)
-    "ollama":     "",
+    "ollama": "",
 }
 
 
@@ -93,10 +93,12 @@ def _model_provider_prefix(model: str) -> str:
 
 
 def _resolve_api_key_env(
-    explicit: str | None, model: str, provider: str | None,
+    explicit: str | None,
+    model: str,
+    provider: str | None,
 ) -> str | None:
     if explicit is not None:
-        return explicit if explicit else None   # empty → None (Ollama)
+        return explicit if explicit else None  # empty → None (Ollama)
     prefix = provider or _model_provider_prefix(model)
     key = _PROVIDER_KEY_ENV.get(prefix)
     return key if key else None
@@ -311,14 +313,10 @@ def _apply_mcp_env_overlays(
         server = server.strip()
         env_name = env_name.strip()
         if not sep or not server or not env_name:
-            raise SystemExit(
-                "malformed --mcp-env spec; expected SERVER:ENVVAR"
-            )
+            raise SystemExit("malformed --mcp-env spec; expected SERVER:ENVVAR")
         cfg = by_name.get(server)
         if cfg is None:
-            raise SystemExit(
-                f"--mcp-env references unknown MCP server {server!r}"
-            )
+            raise SystemExit(f"--mcp-env references unknown MCP server {server!r}")
         credential_env = tuple(dict.fromkeys((*cfg.credential_env, env_name)))
         try:
             by_name[server] = replace(cfg, credential_env=credential_env)
@@ -401,13 +399,15 @@ def _mcp_configs_from_metadata(meta: dict) -> list[McpServerConfig]:
         if not isinstance(credential_env, list):
             credential_env = []
         try:
-            out.append(McpServerConfig(
-                name=name,
-                command=command,
-                args=tuple(str(a) for a in args),
-                env={str(k): str(v) for k, v in env.items()} if env else {},
-                credential_env=tuple(str(v) for v in credential_env),
-            ))
+            out.append(
+                McpServerConfig(
+                    name=name,
+                    command=command,
+                    args=tuple(str(a) for a in args),
+                    env={str(k): str(v) for k, v in env.items()} if env else {},
+                    credential_env=tuple(str(v) for v in credential_env),
+                )
+            )
         except (TypeError, ValueError):
             continue
     return out
@@ -661,15 +661,13 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     r.add_argument(
-        "--task", required=True,
+        "--task",
+        required=True,
         help="The task for the agent (user-turn content).",
     )
     r.add_argument(
         "--system-prompt",
-        help=(
-            "Override the default system prompt. Pass '-' to read "
-            "from stdin."
-        ),
+        help=("Override the default system prompt. Pass '-' to read from stdin."),
     )
     r.add_argument(
         "--mcp",
@@ -710,15 +708,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override provider base URL (e.g. Ollama host).",
     )
     r.add_argument(
-        "--temperature", type=float, default=0.7,
+        "--temperature",
+        type=float,
+        default=0.7,
         help="Sampling temperature (default 0.7).",
     )
     r.add_argument(
-        "--max-iterations", type=_positive_int, default=25,
+        "--max-iterations",
+        type=_positive_int,
+        default=25,
         help="Hard cap on agent loop iterations (default 25).",
     )
     r.add_argument(
-        "--max-tokens", type=_positive_int, default=None,
+        "--max-tokens",
+        type=_positive_int,
+        default=None,
         help="Max tokens per provider call (default: provider default).",
     )
     r.add_argument(
@@ -728,11 +732,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Wall-clock timeout in seconds for each provider call (default 120).",
     )
     r.add_argument(
-        "--budget-usd", type=_positive_float, default=None,
+        "--budget-usd",
+        type=_positive_float,
+        default=None,
         help="Stop when cumulative cost exceeds this many USD.",
     )
     r.add_argument(
-        "--budget-tokens", type=_positive_int, default=None,
+        "--budget-tokens",
+        type=_positive_int,
+        default=None,
         help="Stop when input+output tokens exceed this total.",
     )
     r.add_argument(
@@ -769,9 +777,7 @@ def _build_parser() -> argparse.ArgumentParser:
     r.add_argument(
         "--planner-model",
         default=None,
-        help=(
-            "Model override for the planner. Default: same as --model."
-        ),
+        help=("Model override for the planner. Default: same as --model."),
     )
     r.add_argument(
         "--evaluator",
@@ -787,9 +793,7 @@ def _build_parser() -> argparse.ArgumentParser:
     r.add_argument(
         "--evaluator-model",
         default=None,
-        help=(
-            "Model override for the evaluator. Default: same as --model."
-        ),
+        help=("Model override for the evaluator. Default: same as --model."),
     )
     r.add_argument(
         "--evaluator-rounds",
@@ -818,11 +822,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Model override for the contract-refinement call.",
     )
     r.add_argument(
-        "--quiet", action="store_true",
+        "--quiet",
+        action="store_true",
         help="Suppress status lines; only print the final message.",
     )
     r.add_argument(
-        "--json", action="store_true",
+        "--json",
+        action="store_true",
         help="Emit the LoopResult as JSON instead of text.",
     )
 
@@ -833,7 +839,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     rz.add_argument("session_id", help="The session id to resume.")
     rz.add_argument(
-        "--task", required=True,
+        "--task",
+        required=True,
         help="The follow-up task to run against the replayed session.",
     )
     rz.add_argument(
@@ -868,7 +875,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Provider-call timeout in seconds. Default: recorded value, then 120.",
     )
     rz.add_argument(
-        "--sessions-dir", default=None,
+        "--sessions-dir",
+        default=None,
         help="Override sessions directory.",
     )
     rz.add_argument(
@@ -882,10 +890,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_tool_policy_args(rz)
     rz.add_argument(
-        "--quiet", action="store_true",
+        "--quiet",
+        action="store_true",
     )
     rz.add_argument(
-        "--json", action="store_true",
+        "--json",
+        action="store_true",
     )
 
     # sessions
@@ -894,15 +904,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="List saved sessions or inspect one by id.",
     )
     ls.add_argument(
-        "--sessions-dir", default=None,
+        "--sessions-dir",
+        default=None,
         help="Override sessions directory.",
     )
     ls.add_argument(
-        "session_id", nargs="?", default=None,
+        "session_id",
+        nargs="?",
+        default=None,
         help="If given, print that session's summary metadata.",
     )
     ls.add_argument(
-        "--json", action="store_true",
+        "--json",
+        action="store_true",
     )
 
     return p
@@ -1114,13 +1128,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 )
                 contract_builder = (
                     ContractBuilder(
-                        provider, model=args.contract_model or args.model,
+                        provider,
+                        model=args.contract_model or args.model,
                     )
                     if args.contract
                     else None
                 )
                 evaluator_agent = Evaluator(
-                    provider, model=args.evaluator_model or args.model,
+                    provider,
+                    model=args.evaluator_model or args.model,
                 )
                 eval_outcome = run_with_evaluation(
                     provider=provider,
@@ -1238,8 +1254,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             error_kind=error_kind,
         )
         return _emit_result(
-            result, session_id,
-            as_json=args.json, quiet=args.quiet,
+            result,
+            session_id,
+            as_json=args.json,
+            quiet=args.quiet,
             evaluator_rounds=evaluator_rounds,
         )
 
@@ -1266,8 +1284,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     model = args.model or meta.get("model")
     if not model:
         print(
-            f"error: session {args.session_id!r} has no recorded model; "
-            "pass --model explicitly.",
+            f"error: session {args.session_id!r} has no recorded model; pass --model explicitly.",
             file=sys.stderr,
         )
         return 1
@@ -1340,19 +1357,14 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             if mcp_configs:
                 bits.append(f"{len(mcp_configs)} MCP server(s)")
             elif recorded_mcp_configs:
-                bits.append(
-                    f"{len(recorded_mcp_configs)} recorded MCP server(s) skipped"
-                )
+                bits.append(f"{len(recorded_mcp_configs)} recorded MCP server(s) skipped")
             if use_ctx_tools:
                 bits.append("ctx-core tools")
             if allow_tools or deny_tools:
-                bits.append(
-                    f"tool policy allow={len(allow_tools)} deny={len(deny_tools)}"
-                )
+                bits.append(f"tool policy allow={len(allow_tools)} deny={len(deny_tools)}")
             suffix = f" + {', '.join(bits)}" if bits else ""
             print(
-                f"[ctx] resuming {args.session_id} "
-                f"({len(state.messages)} prior messages{suffix})",
+                f"[ctx] resuming {args.session_id} ({len(state.messages)} prior messages{suffix})",
                 file=sys.stderr,
             )
             if mcp_configs:
@@ -1505,20 +1517,26 @@ def _cmd_sessions(args: argparse.Namespace) -> int:
 # ── Result emission ────────────────────────────────────────────────────────
 
 
-_ERROR_STOP_REASONS = frozenset({
-    "content_filter",
-    "empty_response",
-    "length",
-    "provider_error",
-    "provider_other",
-    "provider_timeout",
-    "tool_denied",
-    "tool_error",
-})
+_ERROR_STOP_REASONS = frozenset(
+    {
+        "content_filter",
+        "empty_response",
+        "length",
+        "provider_error",
+        "provider_other",
+        "provider_timeout",
+        "tool_denied",
+        "tool_error",
+    }
+)
 
 
 def _emit_result(
-    result: Any, session_id: str, *, as_json: bool, quiet: bool,
+    result: Any,
+    session_id: str,
+    *,
+    as_json: bool,
+    quiet: bool,
     evaluator_rounds: list[dict[str, Any]] | None = None,
 ) -> int:
     if as_json:

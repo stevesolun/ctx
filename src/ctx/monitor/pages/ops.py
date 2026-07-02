@@ -54,27 +54,33 @@ def render_kpi(
         for state in ("active", "watch", "demote", "archive")
     )
 
-    floor_rows = "".join(
-        f"<tr><td><code>{html.escape(reason)}</code></td><td>{count}</td></tr>"
-        for reason, count in sorted(
-            summary.hard_floor_counts.items(),
-            key=lambda kv: (-kv[1], kv[0]),
+    floor_rows = (
+        "".join(
+            f"<tr><td><code>{html.escape(reason)}</code></td><td>{count}</td></tr>"
+            for reason, count in sorted(
+                summary.hard_floor_counts.items(),
+                key=lambda kv: (-kv[1], kv[0]),
+            )
         )
-    ) or "<tr><td colspan='2' class='muted'>No hard floors active.</td></tr>"
+        or "<tr><td colspan='2' class='muted'>No hard floors active.</td></tr>"
+    )
 
-    category_rows = "".join(
-        "<tr>"
-        f"<td>{html.escape(c['category'])}</td>"
-        f"<td>{c['count']}</td>"
-        f"<td class='muted'>{c['avg_score']:.3f}</td>"
-        f"<td><span class='pill grade-A'>{c['grade_mix'].get('A', 0)}</span></td>"
-        f"<td><span class='pill grade-B'>{c['grade_mix'].get('B', 0)}</span></td>"
-        f"<td><span class='pill grade-C'>{c['grade_mix'].get('C', 0)}</span></td>"
-        f"<td><span class='pill grade-D'>{c['grade_mix'].get('D', 0)}</span></td>"
-        f"<td><span class='pill grade-F'>{c['grade_mix'].get('F', 0)}</span></td>"
-        "</tr>"
-        for c in summary.category_breakdown
-    ) or "<tr><td colspan='8' class='muted'>No categorized entities.</td></tr>"
+    category_rows = (
+        "".join(
+            "<tr>"
+            f"<td>{html.escape(c['category'])}</td>"
+            f"<td>{c['count']}</td>"
+            f"<td class='muted'>{c['avg_score']:.3f}</td>"
+            f"<td><span class='pill grade-A'>{c['grade_mix'].get('A', 0)}</span></td>"
+            f"<td><span class='pill grade-B'>{c['grade_mix'].get('B', 0)}</span></td>"
+            f"<td><span class='pill grade-C'>{c['grade_mix'].get('C', 0)}</span></td>"
+            f"<td><span class='pill grade-D'>{c['grade_mix'].get('D', 0)}</span></td>"
+            f"<td><span class='pill grade-F'>{c['grade_mix'].get('F', 0)}</span></td>"
+            "</tr>"
+            for c in summary.category_breakdown
+        )
+        or "<tr><td colspan='8' class='muted'>No categorized entities.</td></tr>"
+    )
 
     def detail_href(slug: str, entity_type: str) -> str:
         normalized = normalize_entity_type(entity_type)
@@ -99,21 +105,24 @@ def render_kpi(
         "</td></tr>"
     )
 
-    archived_rows = "".join(
-        "<tr>"
-        f"<td><a href='{detail_href(a['slug'], a['subject_type'])}'><code>{html.escape(a['slug'])}</code></a></td>"
-        f"<td class='muted'>{html.escape(a['subject_type'])}</td>"
-        f"<td class='muted'>{html.escape(a['category'])}</td>"
-        f"<td class='muted'>{html.escape(a.get('last_grade') or '—')}</td>"
-        f"<td class='muted'>{html.escape(a.get('computed_at') or '—')}</td>"
-        "</tr>"
-        for a in summary.archived
-    ) or "<tr><td colspan='5' class='muted'>None.</td></tr>"
+    archived_rows = (
+        "".join(
+            "<tr>"
+            f"<td><a href='{detail_href(a['slug'], a['subject_type'])}'><code>{html.escape(a['slug'])}</code></a></td>"
+            f"<td class='muted'>{html.escape(a['subject_type'])}</td>"
+            f"<td class='muted'>{html.escape(a['category'])}</td>"
+            f"<td class='muted'>{html.escape(a.get('last_grade') or '—')}</td>"
+            f"<td class='muted'>{html.escape(a.get('computed_at') or '—')}</td>"
+            "</tr>"
+            for a in summary.archived
+        )
+        or "<tr><td colspan='5' class='muted'>None.</td></tr>"
+    )
 
     by_subject = summary.by_subject
-    subject_blurb = " &middot; ".join(
-        f"{html.escape(s)}: {n}" for s, n in sorted(by_subject.items())
-    ) or "—"
+    subject_blurb = (
+        " &middot; ".join(f"{html.escape(s)}: {n}" for s, n in sorted(by_subject.items())) or "—"
+    )
 
     body = (
         "<h1>KPIs</h1>"
@@ -131,29 +140,25 @@ def render_kpi(
         "</div>"
         "<div style='display:grid; grid-template-columns:1fr 1fr; gap:1rem;'>"
         "<div class='card'><strong>Grade distribution</strong>"
-        "<table><tr><th>Grade</th><th>Count</th><th>Share</th></tr>"
-        + grade_rows + "</table></div>"
+        "<table><tr><th>Grade</th><th>Count</th><th>Share</th></tr>" + grade_rows + "</table></div>"
         "<div class='card'><strong>Lifecycle tiers</strong>"
-        "<table><tr><th>State</th><th>Count</th></tr>"
-        + lifecycle_rows + "</table></div>"
+        "<table><tr><th>State</th><th>Count</th></tr>" + lifecycle_rows + "</table></div>"
         "</div>"
         "<div class='card'><strong>Hard floors active</strong>"
-        "<table><tr><th>Reason</th><th>Count</th></tr>"
-        + floor_rows + "</table></div>"
+        "<table><tr><th>Reason</th><th>Count</th></tr>" + floor_rows + "</table></div>"
         "<div class='card'><strong>By category</strong>"
         "<table><tr><th>Category</th><th>Count</th><th>Avg score</th>"
-        "<th>A</th><th>B</th><th>C</th><th>D</th><th>F</th></tr>"
-        + category_rows + "</table></div>"
+        "<th>A</th><th>B</th><th>C</th><th>D</th><th>F</th></tr>" + category_rows + "</table></div>"
         "<div class='card'><strong>Top demotion candidates</strong> "
         "<span class='muted'>(active or watch &middot; grade D/F &middot; "
         "sorted by D-streak desc, score asc)</span>"
         "<table><tr><th>Slug</th><th>Type</th><th>Category</th><th>Grade</th>"
         "<th>Score</th><th>State</th><th>D-streak</th><th>Hard floor</th></tr>"
-        + demotion_rows + "</table></div>"
+        + demotion_rows
+        + "</table></div>"
         "<div class='card'><strong>Archived</strong>"
         "<table><tr><th>Slug</th><th>Type</th><th>Category</th>"
-        "<th>Last grade</th><th>Computed at</th></tr>"
-        + archived_rows + "</table></div>"
+        "<th>Last grade</th><th>Computed at</th></tr>" + archived_rows + "</table></div>"
     )
     return layout("KPIs", body)
 
@@ -174,18 +179,21 @@ def render_status(
         for name in queue_status_names
     )
 
-    job_rows = "".join(
-        "<tr>"
-        f"<td>{job.get('id')}</td>"
-        f"<td><code>{html.escape(str(job.get('kind') or ''))}</code></td>"
-        f"<td><span class='pill'>{html.escape(str(job.get('status') or ''))}</span></td>"
-        f"<td>{job.get('attempts')}/{job.get('max_attempts')}</td>"
-        f"<td class='muted'>{html.escape(str(job.get('source') or ''))}</td>"
-        f"<td class='muted'>{html.escape(str(job.get('worker_id') or ''))}</td>"
-        f"<td class='muted'>{html.escape(str(job.get('last_error') or ''))[:120]}</td>"
-        "</tr>"
-        for job in queue.get("recent_jobs", [])
-    ) or "<tr><td colspan='7' class='muted'>No queue jobs recorded.</td></tr>"
+    job_rows = (
+        "".join(
+            "<tr>"
+            f"<td>{job.get('id')}</td>"
+            f"<td><code>{html.escape(str(job.get('kind') or ''))}</code></td>"
+            f"<td><span class='pill'>{html.escape(str(job.get('status') or ''))}</span></td>"
+            f"<td>{job.get('attempts')}/{job.get('max_attempts')}</td>"
+            f"<td class='muted'>{html.escape(str(job.get('source') or ''))}</td>"
+            f"<td class='muted'>{html.escape(str(job.get('worker_id') or ''))}</td>"
+            f"<td class='muted'>{html.escape(str(job.get('last_error') or ''))[:120]}</td>"
+            "</tr>"
+            for job in queue.get("recent_jobs", [])
+        )
+        or "<tr><td colspan='7' class='muted'>No queue jobs recorded.</td></tr>"
+    )
 
     artifact_keys = (
         ("graph_json", "graph.json"),
@@ -209,15 +217,18 @@ def render_status(
         for key, label in artifact_keys
     )
 
-    promotion_rows = "".join(
-        "<tr>"
-        f"<td><span class='pill'>{html.escape(str(row.get('status') or ''))}</span></td>"
-        f"<td class='muted'>{html.escape(str(row.get('promoted_at') or row.get('started_at') or ''))}</td>"
-        f"<td class='muted'><code>{html.escape(str(row.get('current_sha256') or row.get('candidate_sha256') or ''))[:16]}</code></td>"
-        f"<td class='muted'>{html.escape(str(row.get('target') or ''))}</td>"
-        "</tr>"
-        for row in artifacts.get("promotions", [])
-    ) or "<tr><td colspan='4' class='muted'>No promotion metadata recorded.</td></tr>"
+    promotion_rows = (
+        "".join(
+            "<tr>"
+            f"<td><span class='pill'>{html.escape(str(row.get('status') or ''))}</span></td>"
+            f"<td class='muted'>{html.escape(str(row.get('promoted_at') or row.get('started_at') or ''))}</td>"
+            f"<td class='muted'><code>{html.escape(str(row.get('current_sha256') or row.get('candidate_sha256') or ''))[:16]}</code></td>"
+            f"<td class='muted'>{html.escape(str(row.get('target') or ''))}</td>"
+            "</tr>"
+            for row in artifacts.get("promotions", [])
+        )
+        or "<tr><td colspan='4' class='muted'>No promotion metadata recorded.</td></tr>"
+    )
 
     queue_error = queue.get("error")
     if queue_error:
@@ -227,8 +238,7 @@ def render_status(
     else:
         availability = f"not initialized ({html.escape(str(queue.get('db_path') or ''))})"
     queue_error_html = (
-        "<p class='error'>Queue DB error: "
-        f"{html.escape(str(queue_error))}</p>"
+        f"<p class='error'>Queue DB error: {html.escape(str(queue_error))}</p>"
         if queue_error
         else ""
     )
@@ -246,9 +256,7 @@ def render_status(
         f"{telemetry_html}"
         "<div class='card'><strong>Recent queue jobs</strong>"
         "<table><tr><th>ID</th><th>Kind</th><th>Status</th><th>Attempts</th>"
-        "<th>Source</th><th>Worker</th><th>Last error</th></tr>"
-        + job_rows
-        + "</table></div>"
+        "<th>Source</th><th>Worker</th><th>Last error</th></tr>" + job_rows + "</table></div>"
         "<div class='card'><strong>Artifact versions</strong>"
         "<table><tr><th>Artifact</th><th>Exists</th><th>Bytes</th><th>Details</th><th>Path</th></tr>"
         + artifact_rows

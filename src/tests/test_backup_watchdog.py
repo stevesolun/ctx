@@ -50,14 +50,17 @@ def test_watchdog_executes_single_tick(fake_home):
 
     def fake_snap(reason: str | None = None):
         calls.append(reason or "")
+
         # Return a stub that looks like SnapshotIfChangedResult.
         class R:
             snapshot_path = None
             report = None
+
         return R()
 
     # Patch snapshot_if_changed at import time inside the watchdog.
     import backup_mirror as bm_mod
+
     original = bm_mod.snapshot_if_changed
     bm_mod.snapshot_if_changed = fake_snap
     try:
@@ -82,12 +85,15 @@ def test_watchdog_respects_max_iterations(fake_home):
     def fake_snap(reason: str | None = None):
         nonlocal count
         count += 1
+
         class R:
             snapshot_path = None
             report = None
+
         return R()
 
     import backup_mirror as bm_mod
+
     original = bm_mod.snapshot_if_changed
     bm_mod.snapshot_if_changed = fake_snap
     try:
@@ -109,6 +115,7 @@ def test_watchdog_counts_errors_but_does_not_crash(fake_home):
         raise RuntimeError("boom")
 
     import backup_mirror as bm_mod
+
     original = bm_mod.snapshot_if_changed
     bm_mod.snapshot_if_changed = broken_snap
     try:
@@ -134,9 +141,11 @@ def test_watchdog_records_snapshot_id_on_success(fake_home):
         class R:
             snapshot_path = _FakePath()
             report = None
+
         return R()
 
     import backup_mirror as bm_mod
+
     original = bm_mod.snapshot_if_changed
     bm_mod.snapshot_if_changed = fake_snap
     try:
@@ -164,6 +173,7 @@ def test_watchdog_interval_clamped_low(fake_home):
         seen.append(sec)
 
     import backup_mirror as bm_mod
+
     original = bm_mod.snapshot_if_changed
 
     def fake_snapshot_if_changed(reason: str | None = None) -> Any:
@@ -188,6 +198,7 @@ def test_watchdog_interval_clamped_low(fake_home):
 def test_watchdog_interval_clamped_high(fake_home):
     seen: list[float] = []
     import backup_mirror as bm_mod
+
     original = bm_mod.snapshot_if_changed
 
     def fake_snapshot_if_changed(reason: str | None = None) -> Any:

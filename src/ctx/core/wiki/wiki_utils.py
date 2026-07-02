@@ -47,6 +47,7 @@ def validate_skill_name(name: str) -> str:
     # normalization rule that _safe_name.is_safe_source_name uses so
     # the two validators stay aligned.
     from ctx.utils._safe_name import _is_windows_reserved  # noqa: PLC0415
+
     if _is_windows_reserved(name):
         raise ValueError(
             f"Invalid skill name {name!r}: Windows reserved device names "
@@ -112,8 +113,9 @@ def parse_frontmatter(text: str) -> dict[str, Any]:
                 collected.append(" ".join(current_parts))
             fm[key] = collected
             continue
-        if (val.startswith('"') and val.endswith('"')) or \
-           (val.startswith("'") and val.endswith("'")):
+        if (val.startswith('"') and val.endswith('"')) or (
+            val.startswith("'") and val.endswith("'")
+        ):
             val = val[1:-1]
         fm[key] = val
         i += 1
@@ -130,7 +132,7 @@ def parse_frontmatter_and_body(text: str) -> tuple[dict[str, Any], str]:
     if not m:
         return {}, text
     fm = parse_frontmatter(text)
-    body = text[m.end():].strip()
+    body = text[m.end() :].strip()
     return fm, body
 
 

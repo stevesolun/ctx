@@ -58,9 +58,7 @@ def _make_bench_tree(tmp_path: Path) -> sq.SignalSources:
     for slug in slugs:
         skill_dir = skills_dir / slug
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(
-            _SKILL_MD.format(slug=slug), encoding="utf-8"
-        )
+        (skill_dir / "SKILL.md").write_text(_SKILL_MD.format(slug=slug), encoding="utf-8")
 
     # Create JSONL with events spread evenly across slugs.
     ts = _NOW.isoformat(timespec="seconds")

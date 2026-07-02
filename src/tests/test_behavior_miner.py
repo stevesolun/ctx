@@ -34,12 +34,17 @@ def git_repo(tmp_path: Path) -> Path:
     """Create a real git repo with a controlled commit history."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    env = {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
     subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True, env=env)
     # Disable the repo's own hooks so init-time hooks don't interfere.
-    subprocess.run(["git", "-C", str(repo), "config", "core.hooksPath",
-                    "/dev/null"], check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "core.hooksPath", "/dev/null"], check=True, env=env
+    )
 
     messages = [
         "feat: add login",
@@ -54,12 +59,11 @@ def git_repo(tmp_path: Path) -> Path:
     for i, msg in enumerate(messages):
         f = repo / f"f{i}.txt"
         f.write_text(str(i), encoding="utf-8")
-        subprocess.run(["git", "-C", str(repo), "add", f.name],
-                       check=True, env=env)
+        subprocess.run(["git", "-C", str(repo), "add", f.name], check=True, env=env)
         subprocess.run(
-            ["git", "-C", str(repo), "commit", "-q",
-             "--no-verify", "--allow-empty", "-m", msg],
-            check=True, env=env,
+            ["git", "-C", str(repo), "commit", "-q", "--no-verify", "--allow-empty", "-m", msg],
+            check=True,
+            env=env,
         )
     return repo
 
@@ -86,16 +90,21 @@ def intent_log(tmp_path: Path) -> Path:
 @pytest.fixture()
 def skill_manifest(tmp_path: Path) -> Path:
     p = tmp_path / "skill-manifest.json"
-    p.write_text(json.dumps({
-        "load": [
-            {"skill": "python-patterns", "source": "user"},
-            {"skill": "python-patterns", "source": "user"},
-            {"skill": "python-patterns", "source": "user"},
-        ],
-        "unload": [
-            {"skill": "fastapi-pro", "source": "user"},
-        ],
-    }), encoding="utf-8")
+    p.write_text(
+        json.dumps(
+            {
+                "load": [
+                    {"skill": "python-patterns", "source": "user"},
+                    {"skill": "python-patterns", "source": "user"},
+                    {"skill": "python-patterns", "source": "user"},
+                ],
+                "unload": [
+                    {"skill": "fastapi-pro", "source": "user"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     return p
 
 
@@ -260,8 +269,7 @@ def test_build_profile_full(intent_log, skill_manifest, git_repo):
 # ── Persistence ─────────────────────────────────────────────────────────────
 
 
-def test_save_and_load_profile_roundtrip(tmp_path: Path,
-                                         intent_log, skill_manifest, git_repo):
+def test_save_and_load_profile_roundtrip(tmp_path: Path, intent_log, skill_manifest, git_repo):
     profile = bm.build_profile(
         repo_root=git_repo,
         intent_log=intent_log,
@@ -318,9 +326,13 @@ def test_save_profile_is_atomic_on_crash(tmp_path: Path, monkeypatch):
 
 def test_format_digest_empty_environment():
     profile = bm.BehaviorProfile(
-        total_intent_events=0, total_commits=0,
-        co_invocation_pairs=(), skill_cadence=(),
-        file_types=(), commit_types=(), suggestions=(),
+        total_intent_events=0,
+        total_commits=0,
+        co_invocation_pairs=(),
+        skill_cadence=(),
+        file_types=(),
+        commit_types=(),
+        suggestions=(),
         generated_at=0,
     )
     out = bm.format_digest(profile)
@@ -329,9 +341,13 @@ def test_format_digest_empty_environment():
 
 def test_format_digest_no_new_suggestions():
     profile = bm.BehaviorProfile(
-        total_intent_events=100, total_commits=10,
-        co_invocation_pairs=(), skill_cadence=(),
-        file_types=(), commit_types=(), suggestions=(),
+        total_intent_events=100,
+        total_commits=10,
+        co_invocation_pairs=(),
+        skill_cadence=(),
+        file_types=(),
+        commit_types=(),
+        suggestions=(),
         generated_at=0,
     )
     out = bm.format_digest(profile)
@@ -340,15 +356,20 @@ def test_format_digest_no_new_suggestions():
 
 def test_format_digest_caps_limit():
     suggestions = tuple(
-        bm.Suggestion(kind="file-type", rationale=f"r{i}",
-                      evidence=10 - i, proposed={"name": f"t{i}"})
+        bm.Suggestion(
+            kind="file-type", rationale=f"r{i}", evidence=10 - i, proposed={"name": f"t{i}"}
+        )
         for i in range(7)
     )
     profile = bm.BehaviorProfile(
-        total_intent_events=100, total_commits=0,
-        co_invocation_pairs=(), skill_cadence=(),
-        file_types=(), commit_types=(),
-        suggestions=suggestions, generated_at=0,
+        total_intent_events=100,
+        total_commits=0,
+        co_invocation_pairs=(),
+        skill_cadence=(),
+        file_types=(),
+        commit_types=(),
+        suggestions=suggestions,
+        generated_at=0,
     )
     out = bm.format_digest(profile, limit=3)
     assert out.count("  - ") == 3

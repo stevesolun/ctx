@@ -18,25 +18,27 @@ def _write_harness(path: Path, *, tags: list[str] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tags = tags or ["cad", "urdf", "viewer", "validation"]
     path.write_text(
-        "\n".join([
-            "---",
-            "title: text-to-cad",
-            "type: harness",
-            "status: cataloged",
-            "harness_kind: domain-workbench",
-            "model_modes: [api, local]",
-            "tools: [filesystem, python, viewer]",
-            "verification: [cad-snapshot, urdf-validation]",
-            "install_risk: medium",
-            "execution_policy: user-confirmed",
-            "tags:",
-            *[f"  - {tag}" for tag in tags],
-            "---",
-            "",
-            "# text-to-cad",
-            "",
-            "CAD and URDF generation harness with local viewer verification.",
-        ]),
+        "\n".join(
+            [
+                "---",
+                "title: text-to-cad",
+                "type: harness",
+                "status: cataloged",
+                "harness_kind: domain-workbench",
+                "model_modes: [api, local]",
+                "tools: [filesystem, python, viewer]",
+                "verification: [cad-snapshot, urdf-validation]",
+                "install_risk: medium",
+                "execution_policy: user-confirmed",
+                "tags:",
+                *[f"  - {tag}" for tag in tags],
+                "---",
+                "",
+                "# text-to-cad",
+                "",
+                "CAD and URDF generation harness with local viewer verification.",
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -57,11 +59,15 @@ def test_ctx_core_wiki_get_disambiguates_harness(tmp_path: Path) -> None:
     _write_harness(wiki / "entities" / "harnesses" / "text-to-cad.md")
     toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=tmp_path / "missing.json")
 
-    result = json.loads(toolbox.dispatch(ToolCall(
-        id="c1",
-        name="ctx__wiki_get",
-        arguments={"slug": "text-to-cad", "entity_type": "harness"},
-    )))
+    result = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__wiki_get",
+                arguments={"slug": "text-to-cad", "entity_type": "harness"},
+            )
+        )
+    )
 
     assert result["entity_type"] == "harness"
     assert result["wikilink"] == "[[entities/harnesses/text-to-cad]]"
@@ -82,11 +88,15 @@ def test_ctx_core_graph_query_walks_from_harness_seed(tmp_path: Path) -> None:
     graph_path.write_text(json.dumps(node_link_data(graph, edges="edges")), encoding="utf-8")
     toolbox = CtxCoreToolbox(wiki_dir=tmp_path / "wiki", graph_path=graph_path)
 
-    result = json.loads(toolbox.dispatch(ToolCall(
-        id="c1",
-        name="ctx__graph_query",
-        arguments={"seeds": ["text-to-cad"], "max_hops": 1},
-    )))
+    result = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__graph_query",
+                arguments={"seeds": ["text-to-cad"], "max_hops": 1},
+            )
+        )
+    )
 
     assert result["results"][0]["name"] == "cad-review"
     assert result["results"][0]["type"] == "skill"
@@ -116,10 +126,6 @@ def test_wiki_graphify_includes_harness_nodes(
 
     assert graph.nodes["harness:text-to-cad"]["type"] == "harness"
     assert "cad" in graph.nodes["harness:text-to-cad"]["tags"]
-    assert wg._entity_page_path("harness", "text-to-cad") == (
-        harness_dir / "text-to-cad.md"
-    )
-    assert wg._entity_wikilink("harness", "text-to-cad") == (
-        "[[entities/harnesses/text-to-cad]]"
-    )
+    assert wg._entity_page_path("harness", "text-to-cad") == (harness_dir / "text-to-cad.md")
+    assert wg._entity_wikilink("harness", "text-to-cad") == ("[[entities/harnesses/text-to-cad]]")
     assert wg._related_section_header("harness") == "## Related Harnesses"

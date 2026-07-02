@@ -39,6 +39,7 @@ TEST_TODAY = "2030-01-02"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_entity_page(entities_dir: Path, name: str, extra_fields: dict | None = None) -> Path:
     """Write a minimal wiki entity page."""
     fields = {
@@ -66,13 +67,17 @@ def _write_intent_log(path: Path, entries: list[dict]) -> None:
 # read_today_signals
 # ---------------------------------------------------------------------------
 
+
 class TestReadTodaySignals:
     def test_happy_path(self, tmp_path, monkeypatch):
         log = tmp_path / "intent.jsonl"
-        _write_intent_log(log, [
-            {"date": TEST_TODAY, "signals": ["react", "docker"]},
-            {"date": TEST_TODAY, "signals": ["react"]},
-        ])
+        _write_intent_log(
+            log,
+            [
+                {"date": TEST_TODAY, "signals": ["react", "docker"]},
+                {"date": TEST_TODAY, "signals": ["react"]},
+            ],
+        )
         monkeypatch.setattr(_ut, "INTENT_LOG", log)
         monkeypatch.setattr(_ut, "_today", lambda: TEST_TODAY)
         result = read_today_signals()
@@ -93,7 +98,7 @@ class TestReadTodaySignals:
     def test_skips_malformed_lines(self, tmp_path, monkeypatch):
         log = tmp_path / "intent.jsonl"
         log.write_text(
-            f'bad-json\n{json.dumps({"date": TEST_TODAY, "signals": ["fastapi"]})}\n',
+            f"bad-json\n{json.dumps({'date': TEST_TODAY, 'signals': ['fastapi']})}\n",
         )
         monkeypatch.setattr(_ut, "INTENT_LOG", log)
         monkeypatch.setattr(_ut, "_today", lambda: TEST_TODAY)
@@ -110,6 +115,7 @@ class TestReadTodaySignals:
 # ---------------------------------------------------------------------------
 # signals_to_skills
 # ---------------------------------------------------------------------------
+
 
 class TestSignalsToSkills:
     def test_known_signal_mapped(self):
@@ -155,6 +161,7 @@ class TestSignalsToSkills:
         test, then the original immutable view restores automatically.
         """
         import usage_tracker as _ut_mod
+
         override = dict(_ut_mod.SIGNAL_SKILL_MAP)
         override["tmp-signal"] = []
         monkeypatch.setattr(_ut_mod, "SIGNAL_SKILL_MAP", override)
@@ -164,6 +171,7 @@ class TestSignalsToSkills:
 # ---------------------------------------------------------------------------
 # read_loaded_skills
 # ---------------------------------------------------------------------------
+
 
 class TestReadLoadedSkills:
     def test_happy_path(self, tmp_path, monkeypatch):
@@ -213,6 +221,7 @@ class TestReadLoadedSkills:
 # _set_frontmatter_field
 # ---------------------------------------------------------------------------
 
+
 class TestSetFrontmatterField:
     def test_replaces_existing_field(self):
         content = "---\nuse_count: 0\nstatus: installed\n---\n# body\n"
@@ -248,6 +257,7 @@ class TestSetFrontmatterField:
 # ---------------------------------------------------------------------------
 # update_skill_page
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateSkillPage:
     def test_used_true_increments_use_count(self, tmp_path, monkeypatch):
@@ -319,10 +329,14 @@ class TestUpdateSkillPage:
         entities = tmp_path / "entities" / "skills"
         entities.mkdir(parents=True)
         # session_count at threshold, use_count=0
-        _make_entity_page(entities, "old-skill", {
-            "session_count": str(_ut.STALE_THRESHOLD),
-            "use_count": "0",
-        })
+        _make_entity_page(
+            entities,
+            "old-skill",
+            {
+                "session_count": str(_ut.STALE_THRESHOLD),
+                "use_count": "0",
+            },
+        )
         monkeypatch.setattr(_ut, "ENTITIES_DIR", entities)
         monkeypatch.setattr(_ut, "PENDING_UNLOAD", tmp_path / "pending.json")
         updated, queued = update_skill_page("old-skill", used=False)
@@ -334,10 +348,14 @@ class TestUpdateSkillPage:
     def test_stale_threshold_uses_incremented_session_count(self, tmp_path, monkeypatch):
         entities = tmp_path / "entities" / "skills"
         entities.mkdir(parents=True)
-        _make_entity_page(entities, "almost-old-skill", {
-            "session_count": str(_ut.STALE_THRESHOLD - 1),
-            "use_count": "0",
-        })
+        _make_entity_page(
+            entities,
+            "almost-old-skill",
+            {
+                "session_count": str(_ut.STALE_THRESHOLD - 1),
+                "use_count": "0",
+            },
+        )
         monkeypatch.setattr(_ut, "ENTITIES_DIR", entities)
         monkeypatch.setattr(_ut, "PENDING_UNLOAD", tmp_path / "pending.json")
 
@@ -374,6 +392,7 @@ class TestUpdateSkillPage:
 # ---------------------------------------------------------------------------
 # append_wiki_log
 # ---------------------------------------------------------------------------
+
 
 class TestAppendWikiLog:
     def test_appends_to_existing_log(self, tmp_path, monkeypatch):
@@ -430,6 +449,7 @@ class TestAppendWikiLog:
 # truncate_intent_log
 # ---------------------------------------------------------------------------
 
+
 class TestTruncateIntentLog:
     def test_keeps_last_n_dates(self, tmp_path, monkeypatch):
         log = tmp_path / "intent.jsonl"
@@ -450,7 +470,7 @@ class TestTruncateIntentLog:
 
     def test_malformed_lines_skipped(self, tmp_path, monkeypatch):
         log = tmp_path / "intent.jsonl"
-        log.write_text(f'not-json\n{json.dumps({"date": TEST_TODAY, "signals": []})}\n')
+        log.write_text(f"not-json\n{json.dumps({'date': TEST_TODAY, 'signals': []})}\n")
         monkeypatch.setattr(_ut, "INTENT_LOG", log)
         monkeypatch.setattr(_ut, "KEEP_DAYS", 5)
         truncate_intent_log()
@@ -463,11 +483,14 @@ class TestTruncateIntentLog:
 # main() integration
 # ---------------------------------------------------------------------------
 
+
 class TestMain:
     def test_sync_without_wiki_exits_0(self, tmp_path, monkeypatch, capsys):
         """When wiki dir doesn't exist, main exits 0 silently."""
         monkeypatch.setattr(_ut, "WIKI_DIR", tmp_path / "no-wiki")
-        monkeypatch.setattr(sys, "argv", ["usage_tracker.py", "--sync", "--wiki", str(tmp_path / "no-wiki")])
+        monkeypatch.setattr(
+            sys, "argv", ["usage_tracker.py", "--sync", "--wiki", str(tmp_path / "no-wiki")]
+        )
         with pytest.raises(SystemExit) as exc:
             _ut.main()
         assert exc.value.code == 0
@@ -482,6 +505,7 @@ class TestMain:
 # ---------------------------------------------------------------------------
 # TODAY freshness regression (code-reviewer HIGH)
 # ---------------------------------------------------------------------------
+
 
 class TestTodayIsFresh:
     """``_today()`` computes the date at call-time, not at import.
@@ -502,6 +526,7 @@ class TestTodayIsFresh:
 
         class _FakeDT:
             """Minimal datetime stand-in returning a fixed UTC date."""
+
             @classmethod
             def now(cls, tz=None):
                 # Return 2027-06-15 UTC regardless of the real clock.
@@ -539,7 +564,9 @@ class TestTodayIsFresh:
         assert before != after
 
     def test_read_today_signals_uses_fresh_date(
-        self, tmp_path, monkeypatch,
+        self,
+        tmp_path,
+        monkeypatch,
     ):
         """The log reader must filter on the CURRENT date, not the
         frozen-at-import one. If a caller writes an entry timestamped
@@ -552,8 +579,9 @@ class TestTodayIsFresh:
         log = tmp_path / "intent.jsonl"
         # Two entries: one "today" (day 1), one "tomorrow" (day 2).
         log.write_text(
-            json.dumps({"date": "2027-06-15", "signals": ["docker"]}) + "\n" +
-            json.dumps({"date": "2027-06-16", "signals": ["kubernetes"]}),
+            json.dumps({"date": "2027-06-15", "signals": ["docker"]})
+            + "\n"
+            + json.dumps({"date": "2027-06-16", "signals": ["kubernetes"]}),
             encoding="utf-8",
         )
         monkeypatch.setattr(_ut_mod, "INTENT_LOG", log)

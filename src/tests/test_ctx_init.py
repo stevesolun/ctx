@@ -106,8 +106,7 @@ def test_seed_user_config_respects_force(tmp_path: Path) -> None:
     assert "skill-system-config.json" in target.read_text()
 
 
-def test_main_creates_everything_in_dry_mode(tmp_path: Path, monkeypatch,
-                                              capsys) -> None:
+def test_main_creates_everything_in_dry_mode(tmp_path: Path, monkeypatch, capsys) -> None:
     """End-to-end: ``ctx-init`` (no flags) creates dirs + config + toolboxes
     without touching hooks or graph."""
     monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
@@ -154,10 +153,7 @@ def test_main_treats_existing_toolboxes_as_idempotent_skip(
     class _FakeResult:
         returncode = 1
         stdout = ""
-        stderr = (
-            "Global config already has 5 toolbox(es). "
-            "Use --force to overwrite."
-        )
+        stderr = "Global config already has 5 toolbox(es). Use --force to overwrite."
 
     monkeypatch.setattr(ci.subprocess, "run", lambda *_args, **_kwargs: _FakeResult())
 
@@ -182,24 +178,26 @@ def test_main_auto_wizard_in_terminal_configures_custom_model(
         lambda goal, top_k=5, model_provider=None, model=None: [],
     )
 
-    answers = iter([
-        "y",                  # hooks
-        "enriched",           # knowledge mode
-        "n",                  # graph
-        "custom",             # model mode
-        "openai/gpt-5.5",     # model
-        "",                   # provider default: openai
-        "",                   # api key env default: OPENAI_API_KEY
-        "",                   # base URL
-        "build CAD artifacts",
-        "windows python",      # runtime / OS
-        "supervised",          # autonomy
-        "filesystem shell",    # allowed tools
-        "pytest ruff",         # verification
-        "private repo",        # privacy / network
-        "mcp",                 # attach mode
-        "n",                  # validate model
-    ])
+    answers = iter(
+        [
+            "y",  # hooks
+            "enriched",  # knowledge mode
+            "n",  # graph
+            "custom",  # model mode
+            "openai/gpt-5.5",  # model
+            "",  # provider default: openai
+            "",  # api key env default: OPENAI_API_KEY
+            "",  # base URL
+            "build CAD artifacts",
+            "windows python",  # runtime / OS
+            "supervised",  # autonomy
+            "filesystem shell",  # allowed tools
+            "pytest ruff",  # verification
+            "private repo",  # privacy / network
+            "mcp",  # attach mode
+            "n",  # validate model
+        ]
+    )
     monkeypatch.setattr(builtins, "input", lambda _prompt: next(answers))
     calls: list[list[str]] = []
 
@@ -249,12 +247,14 @@ def test_wizard_flag_prompts_without_tty(tmp_path: Path, monkeypatch) -> None:
         lambda goal, top_k=5, model_provider=None, model=None: [],
     )
 
-    answers = iter([
-        "n",                  # hooks
-        "local",              # knowledge mode
-        "claude-code",        # model mode
-        "maintain FastAPI services",
-    ])
+    answers = iter(
+        [
+            "n",  # hooks
+            "local",  # knowledge mode
+            "claude-code",  # model mode
+            "maintain FastAPI services",
+        ]
+    )
     monkeypatch.setattr(builtins, "input", lambda _prompt: next(answers))
 
     rc = ci.main(["--wizard"])
@@ -334,16 +334,18 @@ def _write_graph_archive(
         encoding="utf-8",
     )
     (graph_out / "graph-export-manifest.json").write_text(
-        json.dumps({
-            "version": 1,
-            "export_id": "test-export",
-            "artifacts": {
-                "graph": "graph.json",
-                "delta": "graph-delta.json",
-                "communities": "communities.json",
-                "report": "graph-report.md",
-            },
-        }),
+        json.dumps(
+            {
+                "version": 1,
+                "export_id": "test-export",
+                "artifacts": {
+                    "graph": "graph.json",
+                    "delta": "graph-delta.json",
+                    "communities": "communities.json",
+                    "report": "graph-report.md",
+                },
+            }
+        ),
         encoding="utf-8",
     )
     _write_dashboard_index(graph_out / "dashboard-neighborhoods.sqlite3")
@@ -573,9 +575,7 @@ def test_main_with_graph_flag_installs_prebuilt_graph(
     graph_json = claude / "skill-wiki" / "graphify-out" / "graph.json"
     graph_payload = json.loads(graph_json.read_text(encoding="utf-8"))
     assert graph_payload["graph"]["export_id"] == "test-export"
-    assert not (
-        claude / "skill-wiki" / "entities" / "skills" / "current.md"
-    ).exists()
+    assert not (claude / "skill-wiki" / "entities" / "skills" / "current.md").exists()
     assert not any("ctx.core.wiki.wiki_graphify" in c for c in calls)
     assert not any(c == "wiki_graphify" for call in calls for c in call)
 
@@ -588,21 +588,23 @@ def test_graph_install_copies_local_entity_overlay(
     archive = _write_graph_archive(tmp_path)
     overlay = tmp_path / "entity-overlays.jsonl"
     overlay.write_text(
-        json.dumps({
-            "overlay_id": "test-overlay",
-            "nodes": [{"id": "harness:mirage", "type": "harness"}],
-            "edges": [
-                {
-                    "source": "harness:mirage",
-                    "target": "skill:codex-review",
-                    "weight": 0.5,
-                    "similarity_score": 0.5,
-                    "method": "manual_direct_overlay_v1",
-                    "rank": 1,
-                    "provenance": "manual_overlay_v1",
-                }
-            ],
-        })
+        json.dumps(
+            {
+                "overlay_id": "test-overlay",
+                "nodes": [{"id": "harness:mirage", "type": "harness"}],
+                "edges": [
+                    {
+                        "source": "harness:mirage",
+                        "target": "skill:codex-review",
+                        "weight": 0.5,
+                        "similarity_score": 0.5,
+                        "method": "manual_direct_overlay_v1",
+                        "rank": 1,
+                        "provenance": "manual_overlay_v1",
+                    }
+                ],
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -630,18 +632,20 @@ def test_graph_overlay_validation_rejects_out_of_range_similarity_fields(
 ) -> None:
     overlay = tmp_path / "entity-overlays.jsonl"
     overlay.write_text(
-        json.dumps({
-            "nodes": [{"id": "skill:a"}],
-            "edges": [
-                {
-                    "source": "skill:a",
-                    "target": "skill:b",
-                    "weight": 0.5,
-                    "final_weight": 0.5,
-                    field: 2.0,
-                },
-            ],
-        })
+        json.dumps(
+            {
+                "nodes": [{"id": "skill:a"}],
+                "edges": [
+                    {
+                        "source": "skill:a",
+                        "target": "skill:b",
+                        "weight": 0.5,
+                        "final_weight": 0.5,
+                        field: 2.0,
+                    },
+                ],
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -655,17 +659,19 @@ def test_graph_overlay_validation_rejects_weight_final_weight_drift(
 ) -> None:
     overlay = tmp_path / "entity-overlays.jsonl"
     overlay.write_text(
-        json.dumps({
-            "nodes": [{"id": "skill:a"}],
-            "edges": [
-                {
-                    "source": "skill:a",
-                    "target": "skill:b",
-                    "weight": 0.7,
-                    "final_weight": 0.5,
-                },
-            ],
-        })
+        json.dumps(
+            {
+                "nodes": [{"id": "skill:a"}],
+                "edges": [
+                    {
+                        "source": "skill:a",
+                        "target": "skill:b",
+                        "weight": 0.7,
+                        "final_weight": 0.5,
+                    },
+                ],
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -683,11 +689,13 @@ def test_runtime_graph_install_extracts_harness_pages_after_required_files(
         _tar_text(
             tf,
             "graphify-out/graph.json",
-            json.dumps({
-                "graph": {"export_id": "test-export"},
-                "nodes": [{"id": "harness:text-to-cad", "type": "harness"}],
-                "links": [],
-            }),
+            json.dumps(
+                {
+                    "graph": {"export_id": "test-export"},
+                    "nodes": [{"id": "harness:text-to-cad", "type": "harness"}],
+                    "links": [],
+                }
+            ),
         )
         _tar_text(
             tf,
@@ -703,16 +711,18 @@ def test_runtime_graph_install_extracts_harness_pages_after_required_files(
         _tar_text(
             tf,
             "graphify-out/graph-export-manifest.json",
-            json.dumps({
-                "version": 1,
-                "export_id": "test-export",
-                "artifacts": {
-                    "graph": "graph.json",
-                    "delta": "graph-delta.json",
-                    "communities": "communities.json",
-                    "report": "graph-report.md",
-                },
-            }),
+            json.dumps(
+                {
+                    "version": 1,
+                    "export_id": "test-export",
+                    "artifacts": {
+                        "graph": "graph.json",
+                        "delta": "graph-delta.json",
+                        "communities": "communities.json",
+                        "report": "graph-report.md",
+                    },
+                }
+            ),
         )
         index_path = tmp_path / "runtime-dashboard-neighborhoods.sqlite3"
         _write_dashboard_index(index_path)
@@ -735,12 +745,8 @@ def test_runtime_graph_install_extracts_harness_pages_after_required_files(
     monkeypatch.setattr(ci, "_verify_local_graph_archive", lambda *_a, **_k: None)
 
     assert ci.build_graph(claude) == 0
-    assert (
-        claude / "skill-wiki" / "entities" / "harnesses" / "text-to-cad.md"
-    ).is_file()
-    assert not (
-        claude / "skill-wiki" / "entities" / "skills" / "not-runtime.md"
-    ).exists()
+    assert (claude / "skill-wiki" / "entities" / "harnesses" / "text-to-cad.md").is_file()
+    assert not (claude / "skill-wiki" / "entities" / "skills" / "not-runtime.md").exists()
 
 
 def test_runtime_graph_install_preserves_existing_non_harness_entities(
@@ -825,16 +831,18 @@ def test_graph_install_validation_does_not_parse_full_graph_json(
         encoding="utf-8",
     )
     (graph_out / "graph-export-manifest.json").write_text(
-        json.dumps({
-            "version": 1,
-            "export_id": "test-export",
-            "artifacts": {
-                "graph": "graph.json",
-                "delta": "graph-delta.json",
-                "communities": "communities.json",
-                "report": "graph-report.md",
-            },
-        }),
+        json.dumps(
+            {
+                "version": 1,
+                "export_id": "test-export",
+                "artifacts": {
+                    "graph": "graph.json",
+                    "delta": "graph-delta.json",
+                    "communities": "communities.json",
+                    "report": "graph-report.md",
+                },
+            }
+        ),
         encoding="utf-8",
     )
     _write_dashboard_index(graph_out / "dashboard-neighborhoods.sqlite3")
@@ -897,16 +905,18 @@ def test_graph_install_validation_accepts_base_pack_without_graph_json(
         encoding="utf-8",
     )
     (graph_out / "graph-export-manifest.json").write_text(
-        json.dumps({
-            "version": 1,
-            "export_id": "test-export",
-            "artifacts": {
-                "graph": "graph.json",
-                "delta": "graph-delta.json",
-                "communities": "communities.json",
-                "report": "graph-report.md",
-            },
-        }),
+        json.dumps(
+            {
+                "version": 1,
+                "export_id": "test-export",
+                "artifacts": {
+                    "graph": "graph.json",
+                    "delta": "graph-delta.json",
+                    "communities": "communities.json",
+                    "report": "graph-report.md",
+                },
+            }
+        ),
         encoding="utf-8",
     )
     _write_dashboard_index(graph_out / "dashboard-neighborhoods.sqlite3")
@@ -1074,12 +1084,19 @@ def test_graph_install_force_prunes_stale_generated_files(
     )
     monkeypatch.setattr(ci, "_verify_local_graph_archive", lambda *_a, **_k: None)
 
-    assert ci.main([
-        "--graph",
-        "--graph-install-mode", "full",
-        "--force",
-        "--model-mode", "skip",
-    ]) == 0
+    assert (
+        ci.main(
+            [
+                "--graph",
+                "--graph-install-mode",
+                "full",
+                "--force",
+                "--model-mode",
+                "skip",
+            ]
+        )
+        == 0
+    )
     out = capsys.readouterr().out
     assert "full graph install expands the markdown LLM-wiki" in out
     assert "runtime mode is enough for recommendations" in out
@@ -1111,9 +1128,7 @@ def test_graph_install_rejects_path_traversal_archive(
     assert not (claude / "evil.txt").exists()
 
 
-def test_main_with_requested_hook_failure_exits_nonzero(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_main_with_requested_hook_failure_exits_nonzero(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(ci, "_claude_dir", lambda: tmp_path)
 
     class _FakeResult:
@@ -1148,12 +1163,14 @@ def test_main_custom_model_writes_profile_and_recommends_harness(
         model_provider: str | None = None,
         model: str | None = None,
     ) -> list[dict[str, object]]:
-        recommendation_calls.append({
-            "goal": goal,
-            "top_k": top_k,
-            "model_provider": model_provider,
-            "model": model,
-        })
+        recommendation_calls.append(
+            {
+                "goal": goal,
+                "top_k": top_k,
+                "model_provider": model_provider,
+                "model": model,
+            }
+        )
         return [{"name": "text-to-cad", "type": "harness", "score": 0.8}]
 
     monkeypatch.setattr(
@@ -1162,11 +1179,16 @@ def test_main_custom_model_writes_profile_and_recommends_harness(
         fake_recommend,
     )
 
-    rc = ci.main([
-        "--model-mode", "custom",
-        "--model", "openai/gpt-5.5",
-        "--goal", "turn text prompts into CAD",
-    ])
+    rc = ci.main(
+        [
+            "--model-mode",
+            "custom",
+            "--model",
+            "openai/gpt-5.5",
+            "--goal",
+            "turn text prompts into CAD",
+        ]
+    )
 
     assert rc == 0
     profile = json.loads((tmp_path / "ctx-model-profile.json").read_text())
@@ -1193,27 +1215,40 @@ def test_main_custom_model_records_structured_harness_requirements(
         model_provider: str | None = None,
         model: str | None = None,
     ) -> list[dict[str, object]]:
-        recommendation_calls.append({
-            "goal": goal,
-            "top_k": top_k,
-            "model_provider": model_provider,
-            "model": model,
-        })
+        recommendation_calls.append(
+            {
+                "goal": goal,
+                "top_k": top_k,
+                "model_provider": model_provider,
+                "model": model,
+            }
+        )
         return []
 
     monkeypatch.setattr(ci, "recommend_harnesses", fake_recommend)
 
-    rc = ci.main([
-        "--model-mode", "custom",
-        "--model", "openai/gpt-5.5",
-        "--goal", "build a code agent",
-        "--harness-runtime", "windows python",
-        "--harness-autonomy", "supervised",
-        "--harness-tools", "filesystem shell browser",
-        "--harness-verify", "pytest ruff",
-        "--harness-privacy", "private repo no secrets",
-        "--harness-attach-mode", "mcp",
-    ])
+    rc = ci.main(
+        [
+            "--model-mode",
+            "custom",
+            "--model",
+            "openai/gpt-5.5",
+            "--goal",
+            "build a code agent",
+            "--harness-runtime",
+            "windows python",
+            "--harness-autonomy",
+            "supervised",
+            "--harness-tools",
+            "filesystem shell browser",
+            "--harness-verify",
+            "pytest ruff",
+            "--harness-privacy",
+            "private repo no secrets",
+            "--harness-attach-mode",
+            "mcp",
+        ]
+    )
 
     assert rc == 0
     profile = json.loads((tmp_path / "ctx-model-profile.json").read_text())
@@ -1242,28 +1277,39 @@ def test_main_custom_model_no_fit_points_to_harness_plan(
     monkeypatch.setattr(ci, "seed_toolboxes", lambda force=False: 0)
     monkeypatch.setattr(ci, "recommend_harnesses", lambda *args, **kwargs: [])
 
-    rc = ci.main([
-        "--model-mode", "custom",
-        "--model", "ollama/llama3.1",
-        "--model-provider", "ollama",
-        "--goal", "private local CAD workflow",
-        "--harness-runtime", "linux server",
-        "--harness-tools", "filesystem shell",
-        "--harness-verify", "pytest",
-        "--harness-privacy", "offline source code",
-        "--harness-attach-mode", "mcp",
-    ])
+    rc = ci.main(
+        [
+            "--model-mode",
+            "custom",
+            "--model",
+            "ollama/llama3.1",
+            "--model-provider",
+            "ollama",
+            "--goal",
+            "private local CAD workflow",
+            "--harness-runtime",
+            "linux server",
+            "--harness-tools",
+            "filesystem shell",
+            "--harness-verify",
+            "pytest",
+            "--harness-privacy",
+            "offline source code",
+            "--harness-attach-mode",
+            "mcp",
+        ]
+    )
 
     assert rc == 0
     output = capsys.readouterr().out
     assert "no harness recommendations matched yet" in output
     assert "ctx-harness-install --recommend" in output
-    assert "--model-provider \"ollama\"" in output
-    assert "--harness-runtime \"linux server\"" in output
-    assert "--harness-tools \"filesystem shell\"" in output
-    assert "--harness-verify \"pytest\"" in output
-    assert "--harness-privacy \"offline source code\"" in output
-    assert "--harness-attach-mode \"mcp\"" in output
+    assert '--model-provider "ollama"' in output
+    assert '--harness-runtime "linux server"' in output
+    assert '--harness-tools "filesystem shell"' in output
+    assert '--harness-verify "pytest"' in output
+    assert '--harness-privacy "offline source code"' in output
+    assert '--harness-attach-mode "mcp"' in output
     assert "--plan-on-no-fit" in output
 
 
@@ -1593,15 +1639,21 @@ def test_validate_model_flag_invokes_connection_check(
 
     monkeypatch.setattr(ci, "validate_model_connection", fake_validate)
 
-    rc = ci.main([
-        "--model-mode", "custom",
-        "--model", "ollama/llama3.1",
-        "--validate-model",
-    ])
+    rc = ci.main(
+        [
+            "--model-mode",
+            "custom",
+            "--model",
+            "ollama/llama3.1",
+            "--validate-model",
+        ]
+    )
 
     assert rc == 0
-    assert calls == [{
-        "model": "ollama/llama3.1",
-        "api_key_env": None,
-        "base_url": None,
-    }]
+    assert calls == [
+        {
+            "model": "ollama/llama3.1",
+            "api_key_env": None,
+            "base_url": None,
+        }
+    ]

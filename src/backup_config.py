@@ -28,13 +28,15 @@ from typing import Any
 # Files we refuse to ever copy, even if the user lists them. These
 # contain live auth tokens or ephemeral machine state that would either
 # leak credentials or become stale the moment a snapshot is taken.
-ALWAYS_EXCLUDE: frozenset[str] = frozenset({
-    ".credentials.json",
-    "mcp-needs-auth-cache.json",
-    "stats-cache.json",
-    "claude.json",
-    ".claude.json",
-})
+ALWAYS_EXCLUDE: frozenset[str] = frozenset(
+    {
+        ".credentials.json",
+        "mcp-needs-auth-cache.json",
+        "stats-cache.json",
+        "claude.json",
+        ".claude.json",
+    }
+)
 
 _ALLOWED_SCOPES: frozenset[str] = frozenset({"full", "incremental", "hybrid"})
 
@@ -46,7 +48,7 @@ _ALLOWED_SCOPES: frozenset[str] = frozenset({"full", "incremental", "hybrid"})
 class BackupTree:
     """A directory tree to mirror into each snapshot."""
 
-    src: str   # relative to claude_home, e.g. "agents"
+    src: str  # relative to claude_home, e.g. "agents"
     dest: str  # relative to snapshot root, e.g. "agents"
 
 
@@ -102,34 +104,21 @@ class BackupConfig:
 
     def __post_init__(self) -> None:
         if self.scope not in _ALLOWED_SCOPES:
-            raise ValueError(
-                f"scope must be one of {sorted(_ALLOWED_SCOPES)}, "
-                f"got {self.scope!r}"
-            )
+            raise ValueError(f"scope must be one of {sorted(_ALLOWED_SCOPES)}, got {self.scope!r}")
         if self.max_file_bytes < 0:
-            raise ValueError(
-                f"max_file_bytes must be >= 0, got {self.max_file_bytes}"
-            )
+            raise ValueError(f"max_file_bytes must be >= 0, got {self.max_file_bytes}")
         if self.retention.keep_latest < 0:
             raise ValueError(
-                f"retention.keep_latest must be >= 0, "
-                f"got {self.retention.keep_latest}"
+                f"retention.keep_latest must be >= 0, got {self.retention.keep_latest}"
             )
         if self.retention.keep_daily < 0:
-            raise ValueError(
-                f"retention.keep_daily must be >= 0, "
-                f"got {self.retention.keep_daily}"
-            )
+            raise ValueError(f"retention.keep_daily must be >= 0, got {self.retention.keep_daily}")
         if "{timestamp}" not in self.name_format:
-            raise ValueError(
-                f"name_format must contain '{{timestamp}}', "
-                f"got {self.name_format!r}"
-            )
+            raise ValueError(f"name_format must contain '{{timestamp}}', got {self.name_format!r}")
         # Silently drop ALWAYS_EXCLUDE names from top_files. frozen
         # dataclass requires object.__setattr__ for the rewrite.
         filtered_top = tuple(
-            name for name in self.top_files
-            if Path(name).name not in ALWAYS_EXCLUDE
+            name for name in self.top_files if Path(name).name not in ALWAYS_EXCLUDE
         )
         if filtered_top != self.top_files:
             object.__setattr__(self, "top_files", filtered_top)
@@ -202,6 +191,7 @@ def _coerce_trees(raw: Any, default: tuple[BackupTree, ...]) -> tuple[BackupTree
             # silently degrade to the default (that would obscure a
             # misconfig). Write to stderr so the CLI flags it.
             import sys as _sys  # local import avoids top-level noise
+
             print(f"[backup-config] ignoring tree entry: {exc}", file=_sys.stderr)
             continue
         out.append(BackupTree(src=src, dest=dest))
@@ -238,9 +228,7 @@ def load_backup_config(raw: dict[str, Any] | None = None) -> BackupConfig:
     return BackupConfig(
         snapshot_dir=str(raw.get("snapshot_dir", defaults.snapshot_dir)),
         name_format=str(raw.get("name_format", defaults.name_format)),
-        timestamp_format=str(
-            raw.get("timestamp_format", defaults.timestamp_format)
-        ),
+        timestamp_format=str(raw.get("timestamp_format", defaults.timestamp_format)),
         scope=str(raw.get("scope", defaults.scope)),
         max_file_bytes=int(raw.get("max_file_bytes", defaults.max_file_bytes)),
         top_files=top_files,
@@ -254,11 +242,7 @@ def load_backup_config(raw: dict[str, Any] | None = None) -> BackupConfig:
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> None:
     """Merge override into base in-place, recursive for nested dicts."""
     for key, value in override.items():
-        if (
-            key in base
-            and isinstance(base[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
             _deep_merge(base[key], value)
         else:
             base[key] = value
@@ -277,6 +261,7 @@ def from_ctx_config() -> BackupConfig:
     """
     try:
         from ctx_config import cfg  # noqa: PLC0415
+
         base_raw = cfg.get("backup") or {}
     except Exception:
         base_raw = {}

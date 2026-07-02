@@ -182,10 +182,7 @@ class ToolboxSet:
         if not isinstance(tbs_raw, dict):
             raise ValueError("'toolboxes' must be a mapping of name -> config")
 
-        toolboxes = {
-            name: Toolbox.from_dict(name, body)
-            for name, body in tbs_raw.items()
-        }
+        toolboxes = {name: Toolbox.from_dict(name, body) for name, body in tbs_raw.items()}
         active_raw = raw.get("active", []) or []
         active = tuple(a for a in active_raw if a in toolboxes)
         return ToolboxSet(toolboxes=toolboxes, active=active, version=version)
@@ -224,6 +221,7 @@ class ToolboxSet:
 
 # ── Path resolution ─────────────────────────────────────────────────────────
 
+
 def global_config_path() -> Path:
     """~/.claude/toolboxes.json \u2014 user-personal, global across all repos."""
     return Path(os.path.expanduser("~/.claude/toolboxes.json"))
@@ -236,6 +234,7 @@ def repo_config_path(repo_root: Path | None = None) -> Path:
 
 
 # ── Loading ─────────────────────────────────────────────────────────────────
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
@@ -277,8 +276,7 @@ def load_repo(repo_root: Path | None = None) -> ToolboxSet:
     return ToolboxSet.from_dict(raw)
 
 
-def merged(repo_root: Path | None = None,
-           global_path: Path | None = None) -> ToolboxSet:
+def merged(repo_root: Path | None = None, global_path: Path | None = None) -> ToolboxSet:
     """
     Global + per-repo merge. Per-repo toolboxes override global toolboxes of
     the same name. Active list is the union (repo preferences take precedence).

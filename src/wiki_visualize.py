@@ -45,6 +45,7 @@ def _safe_json_for_script(obj) -> str:
     """
     return json.dumps(obj).replace("</", "<\\/")
 
+
 try:
     import networkx as nx
     from networkx.readwrite import node_link_graph
@@ -69,17 +70,29 @@ COMMUNITIES_PATH = WIKI_DIR / "graphify-out" / "communities.json"
 
 # Node colors by type
 TYPE_COLORS = {
-    "skill": "#6366f1",   # indigo
-    "agent": "#f59e0b",   # amber
+    "skill": "#6366f1",  # indigo
+    "agent": "#f59e0b",  # amber
     "mcp-server": "#06b6d4",  # cyan
     "harness": "#22c55e",  # green
 }
 
 # Community color palette
 COMMUNITY_COLORS = [
-    "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4",
-    "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f43f5e",
-    "#84cc16", "#0ea5e9", "#a855f7", "#e11d48", "#10b981",
+    "#ef4444",
+    "#f97316",
+    "#eab308",
+    "#22c55e",
+    "#06b6d4",
+    "#3b82f6",
+    "#8b5cf6",
+    "#ec4899",
+    "#14b8a6",
+    "#f43f5e",
+    "#84cc16",
+    "#0ea5e9",
+    "#a855f7",
+    "#e11d48",
+    "#10b981",
 ]
 
 
@@ -153,10 +166,7 @@ def extract_subgraph(
         nodes = set(comm_data.get("members", []))
 
     elif tag_filter:
-        nodes = {
-            nid for nid, data in G.nodes(data=True)
-            if tag_filter in data.get("tags", [])
-        }
+        nodes = {nid for nid, data in G.nodes(data=True) if tag_filter in data.get("tags", [])}
 
     else:
         nodes = set(G.nodes())
@@ -171,10 +181,7 @@ def extract_subgraph(
 
     # Filter edges by min_weight
     if min_weight > 0:
-        weak_edges = [
-            (u, v) for u, v, d in sub.edges(data=True)
-            if d.get("weight", 1) < min_weight
-        ]
+        weak_edges = [(u, v) for u, v, d in sub.edges(data=True) if d.get("weight", 1) < min_weight]
         sub.remove_edges_from(weak_edges)
 
     # Remove isolated nodes after edge filtering
@@ -188,7 +195,9 @@ def compute_layout(G: nx.Graph) -> dict[str, tuple[float, float]]:
     """Compute node positions using spring layout."""
     if G.number_of_nodes() == 0:
         return {}
-    return nx.spring_layout(G, k=2.0 / math.sqrt(max(G.number_of_nodes(), 1)), iterations=50, seed=42)
+    return nx.spring_layout(
+        G, k=2.0 / math.sqrt(max(G.number_of_nodes(), 1)), iterations=50, seed=42
+    )
 
 
 def build_html_with_filters(
@@ -226,27 +235,38 @@ def build_html_with_filters(
         for t in tags:
             if t != "uncategorized":
                 tag_counts[t] += 1
-        nodes_data.append({
-            "id": nid, "label": label, "type": node_type,
-            "x": round(pos[nid][0], 4), "y": round(pos[nid][1], 4),
-            "degree": degree, "tags": tags, "community": cid,
-            "size": max(6, min(35, degree * 0.4 + 4)),
-        })
+        nodes_data.append(
+            {
+                "id": nid,
+                "label": label,
+                "type": node_type,
+                "x": round(pos[nid][0], 4),
+                "y": round(pos[nid][1], 4),
+                "degree": degree,
+                "tags": tags,
+                "community": cid,
+                "size": max(6, min(35, degree * 0.4 + 4)),
+            }
+        )
 
     edges_data = []
     for u, v, d in G.edges(data=True):
         if u in pos and v in pos:
-            edges_data.append({
-                "source": u, "target": v,
-                "weight": d.get("weight", 1),
-            })
+            edges_data.append(
+                {
+                    "source": u,
+                    "target": v,
+                    "weight": d.get("weight", 1),
+                }
+            )
 
     top_tags = sorted(tag_counts.items(), key=lambda x: -x[1])[:25]
     safe_title = html.escape(title)
     export_id = str(metadata.get("export_id") or "")
     export_meta = (
         f'<meta name="ctx-graph-export-id" content="{html.escape(export_id, quote=True)}">'
-        if export_id else ""
+        if export_id
+        else ""
     )
 
     return f"""<!DOCTYPE html>
@@ -285,7 +305,7 @@ def build_html_with_filters(
   <div id="title">{safe_title}</div>
   <div class="stat" id="stat-line">Loading...</div>
   <div class="legend">
-    {''.join(f'<div class="legend-item"><div class="legend-dot" style="background:{html.escape(color)}"></div>{html.escape(node_type)}</div>' for node_type, color in TYPE_COLORS.items())}
+    {"".join(f'<div class="legend-item"><div class="legend-dot" style="background:{html.escape(color)}"></div>{html.escape(node_type)}</div>' for node_type, color in TYPE_COLORS.items())}
   </div>
 
   <h2>Search</h2>
@@ -296,7 +316,7 @@ def build_html_with_filters(
 
   <h2>Node Type</h2>
   <div class="filter-group">
-    {''.join(f'<label><input type="checkbox" class="type-filter" data-type="{html.escape(node_type, quote=True)}" checked onchange="applyFilters()"> {html.escape(node_type)}</label>' for node_type in TYPE_COLORS)}
+    {"".join(f'<label><input type="checkbox" class="type-filter" data-type="{html.escape(node_type, quote=True)}" checked onchange="applyFilters()"> {html.escape(node_type)}</label>' for node_type in TYPE_COLORS)}
   </div>
 
   <h2>Min Connections: <span id="deg-val">1</span></h2>
@@ -306,7 +326,7 @@ def build_html_with_filters(
 
   <h2>Tags</h2>
   <div class="filter-group" id="tag-filters">
-    {''.join(f'<span class="tag-btn" onclick="toggleTag(this)" data-tag="{html.escape(t, quote=True)}">{html.escape(t)} ({c})</span>' for t, c in top_tags)}
+    {"".join(f'<span class="tag-btn" onclick="toggleTag(this)" data-tag="{html.escape(t, quote=True)}">{html.escape(t)} ({c})</span>' for t, c in top_tags)}
   </div>
 
   <h2>Labels</h2>
@@ -463,7 +483,8 @@ def build_figure(G: nx.Graph, pos: dict, title: str = "Knowledge Graph") -> Any:
             edge_y.extend([y0, y1, None])
 
     edge_trace = go.Scatter(
-        x=edge_x, y=edge_y,
+        x=edge_x,
+        y=edge_y,
         line=dict(width=0.3, color="#cbd5e1"),
         hoverinfo="none",
         mode="lines",
@@ -506,7 +527,8 @@ def build_figure(G: nx.Graph, pos: dict, title: str = "Knowledge Graph") -> Any:
         node_labels = [G.nodes[n].get("label", n.split(":", 1)[-1]) for n in type_nodes]
 
         trace = go.Scatter(
-            x=node_x, y=node_y,
+            x=node_x,
+            y=node_y,
             mode="markers+text",
             name=f"{node_type}s ({len(type_nodes)})",
             marker=dict(
@@ -587,7 +609,9 @@ The full graph is too large to render. Choose a view:
     output = None
 
     if choice == "1":
-        print("\nAvailable example seeds: fastapi-pro, docker-expert, python-pro, exploitation-validator")
+        print(
+            "\nAvailable example seeds: fastapi-pro, docker-expert, python-pro, exploitation-validator"
+        )
         seed_input = input("Enter skill/agent name(s) (comma-separated): ").strip()
         if not seed_input:
             print("No seed provided.")
@@ -695,8 +719,12 @@ def main() -> None:
         epilog="The full graph is too large to render. Use boundaries to focus on a region.",
     )
     parser.add_argument("--seed", help="Comma-separated skill/agent names to center on")
-    parser.add_argument("--hops", type=int, default=1, help="Neighborhood depth from seeds (default 1)")
-    parser.add_argument("--min-weight", type=float, default=0.0, help="Minimum edge weight to include (default 0)")
+    parser.add_argument(
+        "--hops", type=int, default=1, help="Neighborhood depth from seeds (default 1)"
+    )
+    parser.add_argument(
+        "--min-weight", type=float, default=0.0, help="Minimum edge weight to include (default 0)"
+    )
     parser.add_argument("--community", type=int, help="Show a specific community by ID")
     parser.add_argument("--tag", help="Show only nodes with this tag")
     parser.add_argument("--top", type=int, help="Show only the top-N most connected nodes")
@@ -747,7 +775,10 @@ def main() -> None:
     print(f"Subgraph: {sub.number_of_nodes()} nodes, {sub.number_of_edges()} edges")
 
     if sub.number_of_nodes() > 500:
-        print(f"Warning: {sub.number_of_nodes()} nodes is large. Consider tighter boundaries.", file=sys.stderr)
+        print(
+            f"Warning: {sub.number_of_nodes()} nodes is large. Consider tighter boundaries.",
+            file=sys.stderr,
+        )
         print("  Add --top 100 or --min-weight 3 to reduce.", file=sys.stderr)
 
     # Build title
@@ -783,6 +814,7 @@ def main() -> None:
 
     if not args.output:
         import webbrowser
+
         webbrowser.open(str(Path(output_path).resolve()))
 
 

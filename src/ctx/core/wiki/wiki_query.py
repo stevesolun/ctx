@@ -104,11 +104,13 @@ def _parse_page_text(
 ) -> SkillPage:
     """Parse one entity page from markdown text."""
     fields, body = _extract_frontmatter(content)
+
     def _int(key: str) -> int:
         try:
             return int(fields.get(key, "0"))
         except ValueError:
             return 0
+
     return SkillPage(
         name=path.stem,
         path=path,
@@ -128,6 +130,7 @@ def _parse_page_text(
 
 
 # --- Wiki loading ---
+
 
 def _wikilink(entity_type: str, slug: str) -> str:
     return entity_wikilink(entity_type, slug) or f"[[entities/skills/{slug}]]"
@@ -218,9 +221,31 @@ def load_all_pages(wiki: Path) -> list[SkillPage]:
 # --- Scoring / search ---
 
 _STOP_WORDS = {
-    "what", "which", "skills", "skill", "for", "the", "a", "an", "do", "does",
-    "handle", "handles", "how", "to", "and", "or", "with", "that", "are", "is",
-    "in", "of", "on", "use", "used",
+    "what",
+    "which",
+    "skills",
+    "skill",
+    "for",
+    "the",
+    "a",
+    "an",
+    "do",
+    "does",
+    "handle",
+    "handles",
+    "how",
+    "to",
+    "and",
+    "or",
+    "with",
+    "that",
+    "are",
+    "is",
+    "in",
+    "of",
+    "on",
+    "use",
+    "used",
 }
 
 
@@ -255,7 +280,12 @@ def search_by_query(pages: list[SkillPage], query: str, top_n: int = 15) -> list
     keywords = [w for w in re.split(r"\W+", query.lower()) if w and w not in _STOP_WORDS]
     if not keywords:
         keywords = query.lower().split()
-    scored = [page for page in pages if (s := _score_keyword(page, keywords)) > 0 and setattr(page, "score", s) is None]  # type: ignore[func-returns-value]
+    scored: list[SkillPage] = []
+    for page in pages:
+        score = _score_keyword(page, keywords)
+        if score > 0:
+            page.score = score
+            scored.append(page)
     scored.sort(key=lambda p: p.score, reverse=True)
     return scored[:top_n]
 
@@ -289,6 +319,7 @@ def find_related(pages: list[SkillPage], skill_name: str, top_n: int = 12) -> li
 
 # --- Stats ---
 
+
 def compute_stats(wiki: Path, pages: list[SkillPage]) -> dict:
     """Aggregate wiki-wide statistics."""
     tag_counts: dict[str, int] = {}
@@ -296,7 +327,8 @@ def compute_stats(wiki: Path, pages: list[SkillPage]) -> dict:
         for tag in page.tags:
             tag_counts[tag] = tag_counts.get(tag, 0) + 1
     extra = sum(
-        1 for sec in ("concepts", "comparisons", "queries")
+        1
+        for sec in ("concepts", "comparisons", "queries")
         for _ in (wiki / sec).glob("*.md")
         if (wiki / sec).exists()
     )
@@ -315,6 +347,7 @@ def compute_stats(wiki: Path, pages: list[SkillPage]) -> dict:
 
 
 # --- Output rendering ---
+
 
 def _excerpt(page: SkillPage, max_chars: int = 120) -> str:
     lines = [ln for ln in page.body.strip().splitlines() if ln.strip() and not ln.startswith("#")]
@@ -378,6 +411,7 @@ def render_stats_markdown(stats: dict) -> str:
 
 
 # --- Wiki persistence ---
+
 
 def _read_wiki_page(wiki: Path, relpath: str) -> str | None:
     packs_dir = wiki / "wiki-packs"
@@ -447,20 +481,23 @@ def save_query_page(wiki: Path, query: str, content: str) -> Path:
 
 # --- CLI ---
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Query the skill wiki (Karpathy wiki pattern)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--wiki", default=str(cfg.wiki_dir),
-                        help=f"Wiki root path (default: {cfg.wiki_dir})")
+    parser.add_argument(
+        "--wiki", default=str(cfg.wiki_dir), help=f"Wiki root path (default: {cfg.wiki_dir})"
+    )
     parser.add_argument("--query", "-q", help="Keyword query: searches name, tags, and body")
-    parser.add_argument("--tag",   "-t", help="Filter skills by tag")
+    parser.add_argument("--tag", "-t", help="Filter skills by tag")
     parser.add_argument("--related", "-r", help="Find skills related to a given skill name")
     parser.add_argument("--stats", "-s", action="store_true", help="Show wiki statistics")
-    parser.add_argument("--save", action="store_true",
-                        help="Save --query results as a new page in queries/")
+    parser.add_argument(
+        "--save", action="store_true", help="Save --query results as a new page in queries/"
+    )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--top", type=int, default=15, help="Max results (default: 15)")
     args = parser.parse_args()
@@ -496,22 +533,34 @@ def main() -> None:
     if args.query:
         results = search_by_query(pages, args.query, top_n=args.top)
         heading = f'Skills matching "{args.query}"'
-        _append_log(wiki, "query", args.query, [
-            f"Query: {args.query}",
-            f"Results: {len(results)}",
-            f"Top match: {results[0].name if results else 'none'}",
-        ])
+        _append_log(
+            wiki,
+            "query",
+            args.query,
+            [
+                f"Query: {args.query}",
+                f"Results: {len(results)}",
+                f"Top match: {results[0].name if results else 'none'}",
+            ],
+        )
     elif args.tag:
-        results = sorted(filter_by_tag(pages, args.tag), key=lambda p: p.use_count, reverse=True)[:args.top]
+        results = sorted(filter_by_tag(pages, args.tag), key=lambda p: p.use_count, reverse=True)[
+            : args.top
+        ]
         heading = f'Skills tagged "{args.tag}"'
         _append_log(wiki, "tag-filter", args.tag, [f"Results: {len(results)}"])
     elif args.related:
         results = find_related(pages, args.related, top_n=args.top)
-        heading = f'Skills related to [[entities/skills/{args.related}]]'
-        _append_log(wiki, "related", args.related, [
-            f"Related found: {len(results)}",
-            f"Top: {results[0].name if results else 'none'}",
-        ])
+        heading = f"Skills related to [[entities/skills/{args.related}]]"
+        _append_log(
+            wiki,
+            "related",
+            args.related,
+            [
+                f"Related found: {len(results)}",
+                f"Top: {results[0].name if results else 'none'}",
+            ],
+        )
 
     if not results:
         print(json.dumps({"results": [], "total": 0}) if args.json else "No matching skills found.")
@@ -520,18 +569,31 @@ def main() -> None:
     query_results = [_to_result(r) for r in results]
 
     if args.json:
-        print(json.dumps({
-            "query": args.query or args.tag or args.related,
-            "mode": "query" if args.query else ("tag" if args.tag else "related"),
-            "total": len(query_results),
-            "results": [
-                {"name": r.name, "score": r.score, "tags": r.tags, "status": r.status,
-                 "use_count": r.use_count, "has_pipeline": r.has_pipeline,
-                 "description": r.description, "excerpt": r.excerpt, "wikilink": r.wikilink,
-                 "entity_type": r.entity_type}
-                for r in query_results
-            ],
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "query": args.query or args.tag or args.related,
+                    "mode": "query" if args.query else ("tag" if args.tag else "related"),
+                    "total": len(query_results),
+                    "results": [
+                        {
+                            "name": r.name,
+                            "score": r.score,
+                            "tags": r.tags,
+                            "status": r.status,
+                            "use_count": r.use_count,
+                            "has_pipeline": r.has_pipeline,
+                            "description": r.description,
+                            "excerpt": r.excerpt,
+                            "wikilink": r.wikilink,
+                            "entity_type": r.entity_type,
+                        }
+                        for r in query_results
+                    ],
+                },
+                indent=2,
+            )
+        )
         return
 
     cited = [r.wikilink for r in query_results]

@@ -14,8 +14,12 @@ import ctx_audit_log as cal
 def test_log_writes_single_line(tmp_path: Path) -> None:
     target = tmp_path / "audit.jsonl"
     cal.log(
-        "skill.added", subject_type="skill", subject="python-patterns",
-        actor="cli", session_id="s1", meta={"source": "test"},
+        "skill.added",
+        subject_type="skill",
+        subject="python-patterns",
+        actor="cli",
+        session_id="s1",
+        meta={"source": "test"},
         path=target,
     )
     lines = target.read_text(encoding="utf-8").splitlines()
@@ -34,7 +38,9 @@ def test_log_is_append_only(tmp_path: Path) -> None:
     target = tmp_path / "audit.jsonl"
     for i in range(5):
         cal.log(
-            "skill.loaded", subject_type="skill", subject=f"skill-{i}",
+            "skill.loaded",
+            subject_type="skill",
+            subject=f"skill-{i}",
             path=target,
         )
     lines = target.read_text(encoding="utf-8").splitlines()
@@ -49,8 +55,11 @@ def test_log_concurrent_writers_no_corruption(tmp_path: Path) -> None:
 
     def writer(i: int) -> None:
         cal.log(
-            "skill.score_updated", subject_type="skill",
-            subject=f"t-{i}", meta={"idx": i}, path=target,
+            "skill.score_updated",
+            subject_type="skill",
+            subject=f"t-{i}",
+            meta={"idx": i},
+            path=target,
         )
 
     threads = [threading.Thread(target=writer, args=(i,)) for i in range(16)]
@@ -72,7 +81,10 @@ def test_log_unknown_event_still_writes_but_warns(
 ) -> None:
     target = tmp_path / "audit.jsonl"
     cal.log(
-        "skill.mystery_verb", subject_type="skill", subject="x", path=target,
+        "skill.mystery_verb",
+        subject_type="skill",
+        subject="x",
+        path=target,
     )
     err = capsys.readouterr().err
     assert "unknown event" in err
@@ -90,7 +102,9 @@ def test_log_never_raises_on_unwritable_path(tmp_path: Path) -> None:
     (tmp_path / "dir").mkdir()
     # Append to the dir path; OSError swallowed.
     cal.log(
-        "skill.loaded", subject_type="skill", subject="x",
+        "skill.loaded",
+        subject_type="skill",
+        subject="x",
         path=tmp_path / "dir",
     )
 
@@ -130,8 +144,9 @@ def test_log_never_raises_on_circular_meta(tmp_path: Path) -> None:
 def test_log_skill_event_wrapper(tmp_path: Path, monkeypatch) -> None:
     target = tmp_path / "audit.jsonl"
     monkeypatch.setattr(cal, "audit_log_path", lambda: target)
-    cal.log_skill_event("skill.loaded", "python-patterns",
-                        actor="hook", session_id="abc", meta={"via": "test"})
+    cal.log_skill_event(
+        "skill.loaded", "python-patterns", actor="hook", session_id="abc", meta={"via": "test"}
+    )
     record = json.loads(target.read_text().splitlines()[0])
     assert record["event"] == "skill.loaded"
     assert record["subject"] == "python-patterns"

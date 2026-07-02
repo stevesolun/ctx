@@ -48,10 +48,12 @@ def test_empty_corpus_has_size_zero() -> None:
 
 def test_from_vectors_rejects_mismatched_dims() -> None:
     with pytest.raises(ValueError, match="expected \\(4,\\)"):
-        cr.CosineRanker.from_vectors({
-            "a": _unit(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)),
-            "b": _unit(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
-        })
+        cr.CosineRanker.from_vectors(
+            {
+                "a": _unit(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)),
+                "b": _unit(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+            }
+        )
 
 
 def test_from_vectors_rejects_2d() -> None:
@@ -77,12 +79,14 @@ def test_direct_constructor_rejects_non_2d_matrix() -> None:
 def _build_small_corpus() -> cr.CosineRanker:
     # 4-dim axis-aligned unit vectors — cosine similarity is the
     # inner product so scores are trivially checkable.
-    return cr.CosineRanker.from_vectors({
-        "x_axis": _unit(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)),
-        "y_axis": _unit(np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)),
-        "z_axis": _unit(np.array([0.0, 0.0, 1.0, 0.0], dtype=np.float32)),
-        "w_axis": _unit(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)),
-    })
+    return cr.CosineRanker.from_vectors(
+        {
+            "x_axis": _unit(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)),
+            "y_axis": _unit(np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)),
+            "z_axis": _unit(np.array([0.0, 0.0, 1.0, 0.0], dtype=np.float32)),
+            "w_axis": _unit(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)),
+        }
+    )
 
 
 def test_topk_orders_descending_by_score() -> None:
@@ -192,10 +196,12 @@ class _FakeCache:
 
 
 def test_from_cache_uses_load_all() -> None:
-    fake = _FakeCache({
-        "a": _unit(np.array([1.0, 0.0], dtype=np.float32)),
-        "b": _unit(np.array([0.0, 1.0], dtype=np.float32)),
-    })
+    fake = _FakeCache(
+        {
+            "a": _unit(np.array([1.0, 0.0], dtype=np.float32)),
+            "b": _unit(np.array([0.0, 1.0], dtype=np.float32)),
+        }
+    )
     r = cr.CosineRanker.from_cache(fake)
     assert r.size == 2
     assert isinstance(fake, cr.CorpusCacheLike)

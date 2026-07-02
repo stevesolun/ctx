@@ -47,10 +47,7 @@ def run_shadow_validation(
         requested=node_ids,
     )
     row_by_node = {node_id: idx for idx, node_id in enumerate(index.node_ids)}
-    totals = {
-        k: {"expected": 0, "predicted": 0, "overlap": 0}
-        for k in top_ks
-    }
+    totals = {k: {"expected": 0, "predicted": 0, "overlap": 0} for k in top_ks}
     score_deltas: list[float] = []
     bad_examples: list[dict[str, Any]] = []
 
@@ -108,10 +105,7 @@ def run_shadow_validation(
                 }
             )
 
-    metrics = {
-        f"top_{k}": _metric_summary(totals[k])
-        for k in top_ks
-    }
+    metrics = {f"top_{k}": _metric_summary(totals[k]) for k in top_ks}
     gate_metric = metrics[f"top_{max_k}"]["recall"]
     return {
         "sampled_nodes": len(sampled),

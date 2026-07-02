@@ -81,15 +81,17 @@ _SESSION_ID: str = uuid.uuid4().hex
 # frontmatter is under file-system control and must be treated as
 # untrusted. Bespoke runtimes should go through ``--cmd-json`` which
 # passes the entire config to claude mcp add-json without argv splitting.
-_ALLOWED_CMD_EXECS: frozenset[str] = frozenset({
-    "npx",
-    "uvx",
-    "node",
-    "python",
-    "python3",
-    "deno",
-    "bunx",
-})
+_ALLOWED_CMD_EXECS: frozenset[str] = frozenset(
+    {
+        "npx",
+        "uvx",
+        "node",
+        "python",
+        "python3",
+        "deno",
+        "bunx",
+    }
+)
 
 # Code-execution argument patterns per-executable. Strix vuln-0002:
 # the executable allowlist alone is not enough — ``python -c "..."``,
@@ -102,11 +104,10 @@ _ALLOWED_CMD_EXECS: frozenset[str] = frozenset({
 # by refusing the eval forms. Package launchers stay unrestricted
 # because their whole job is to run packages.
 _BANNED_INTERPRETER_ARGS: dict[str, frozenset[str]] = {
-    "python":   frozenset({"-c", "-m", "-"}),
-    "python3":  frozenset({"-c", "-m", "-"}),
-    "node":     frozenset({"-e", "--eval", "-p", "--print",
-                           "--input-type", "-"}),
-    "deno":     frozenset({"eval", "repl"}),
+    "python": frozenset({"-c", "-m", "-"}),
+    "python3": frozenset({"-c", "-m", "-"}),
+    "node": frozenset({"-e", "--eval", "-p", "--print", "--input-type", "-"}),
+    "deno": frozenset({"eval", "repl"}),
     # npx / uvx / bunx intentionally unrestricted — they ARE the
     # package-launcher pattern MCP servers are expected to use.
 }
@@ -179,7 +180,8 @@ def _find_json_inline_secret_arg(parsed_config: object) -> str | None:
 
 
 def _json_config_manifest_summary(
-    json_config: str, parsed_config: object,
+    json_config: str,
+    parsed_config: object,
 ) -> dict[str, str]:
     extra = {
         "json_config_sha256": hashlib.sha256(
@@ -247,8 +249,8 @@ def _safe_manifest_command(command: object) -> str | None:
 class InstallResult:
     slug: str
     status: str  # "installed" | "would-install" | "skipped-existing" | "aborted"
-                 # | "not-in-wiki" | "no-command" | "invalid-cmd"
-                 # | "claude-cli-failed"
+    # | "not-in-wiki" | "no-command" | "invalid-cmd"
+    # | "claude-cli-failed"
     command: str | None
     message: str = ""
 
@@ -257,7 +259,7 @@ class InstallResult:
 class UninstallResult:
     slug: str
     status: str  # "uninstalled" | "would-uninstall" | "not-installed"
-                 # | "claude-cli-failed" | "failed"
+    # | "claude-cli-failed" | "failed"
     message: str = ""
 
 
@@ -327,7 +329,10 @@ def _run_claude_mcp(args: list[str]) -> tuple[int, str, str]:
     try:
         proc = subprocess.run(
             ["claude", "mcp", *args],
-            capture_output=True, text=True, check=False, timeout=60,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
         )
         return proc.returncode, proc.stdout, proc.stderr
     except FileNotFoundError:
@@ -366,10 +371,7 @@ def render_card(
     if fm.get("stars"):
         lines.append(f"  stars:       {fm['stars']}")
     if fm.get("quality_grade") and fm.get("quality_score"):
-        lines.append(
-            f"  quality:     grade {fm['quality_grade']} "
-            f"(score {fm['quality_score']})"
-        )
+        lines.append(f"  quality:     grade {fm['quality_grade']} (score {fm['quality_score']})")
     if fm.get("author"):
         lines.append(f"  author:      {fm['author']}")
     if command:
@@ -412,7 +414,9 @@ def install_mcp(
         validate_skill_name(slug)
     except ValueError as exc:
         return InstallResult(
-            slug=slug, status="not-in-wiki", command=None,
+            slug=slug,
+            status="not-in-wiki",
+            command=None,
             message=f"invalid slug: {exc}",
         )
 
@@ -421,12 +425,16 @@ def install_mcp(
         reject_symlink_path(entity)
     except ValueError as exc:
         return InstallResult(
-            slug=slug, status="failed", command=None,
+            slug=slug,
+            status="failed",
+            command=None,
             message=f"unsafe symlinked wiki entity: {exc}",
         )
     if not entity.is_file():
         return InstallResult(
-            slug=slug, status="not-in-wiki", command=None,
+            slug=slug,
+            status="not-in-wiki",
+            command=None,
             message=f"no wiki entity at {entity}",
         )
 
@@ -445,7 +453,9 @@ def install_mcp(
             extra=skipped_extra,
         )
         return InstallResult(
-            slug=slug, status="skipped-existing", command=None,
+            slug=slug,
+            status="skipped-existing",
+            command=None,
             message="already installed; pass --force to reinstall",
         )
 
@@ -455,7 +465,9 @@ def install_mcp(
     effective_cmd: str | None = command or fm.get("install_cmd") or None
     if not effective_cmd and not json_config and not dry_run:
         return InstallResult(
-            slug=slug, status="no-command", command=None,
+            slug=slug,
+            status="no-command",
+            command=None,
             message=(
                 "no install command. Either pass --cmd '<invocation>' "
                 "or --cmd-json '<json>', or look up "
@@ -473,13 +485,17 @@ def install_mcp(
             parsed_json_config = json.loads(json_config)
         except json.JSONDecodeError as exc:
             return InstallResult(
-                slug=slug, status="invalid-cmd", command=None,
+                slug=slug,
+                status="invalid-cmd",
+                command=None,
                 message=f"--cmd-json is not valid JSON: {exc}",
             )
         inline_secret_path = _find_inline_secret(parsed_json_config)
         if inline_secret_path is not None:
             return InstallResult(
-                slug=slug, status="invalid-cmd", command=None,
+                slug=slug,
+                status="invalid-cmd",
+                command=None,
                 message=(
                     f"--cmd-json field {inline_secret_path!r} looks like an inline "
                     "secret; pass an environment variable reference instead."
@@ -488,7 +504,9 @@ def install_mcp(
         inline_secret_arg = _find_json_inline_secret_arg(parsed_json_config)
         if inline_secret_arg is not None:
             return InstallResult(
-                slug=slug, status="invalid-cmd", command=None,
+                slug=slug,
+                status="invalid-cmd",
+                command=None,
                 message=(
                     f"--cmd-json argument {inline_secret_arg!r} looks like an "
                     "inline secret; pass an environment variable reference instead."
@@ -501,13 +519,17 @@ def install_mcp(
             command_tokens = _split_install_command(effective_cmd)
         except ValueError as exc:
             return InstallResult(
-                slug=slug, status="invalid-cmd", command=effective_cmd,
+                slug=slug,
+                status="invalid-cmd",
+                command=effective_cmd,
                 message=f"could not parse --cmd/install_cmd: {exc}",
             )
         inline_secret_arg = _find_inline_secret_arg(command_tokens)
         if inline_secret_arg is not None:
             return InstallResult(
-                slug=slug, status="invalid-cmd", command=None,
+                slug=slug,
+                status="invalid-cmd",
+                command=None,
                 message=(
                     f"--cmd/install_cmd argument {inline_secret_arg!r} looks like "
                     "an inline secret; pass an environment variable reference instead."
@@ -515,21 +537,24 @@ def install_mcp(
             )
 
     json_summary = (
-        _json_config_card_summary(parsed_json_config)
-        if parsed_json_config is not None else None
+        _json_config_card_summary(parsed_json_config) if parsed_json_config is not None else None
     )
     card = render_card(fm, slug, command=effective_cmd, json_summary=json_summary)
     print(card)
 
     if dry_run:
         return InstallResult(
-            slug=slug, status="would-install", command=effective_cmd,
+            slug=slug,
+            status="would-install",
+            command=effective_cmd,
             message="dry-run: no install performed",
         )
 
     if not auto and not _prompt_confirm(f"\nInstall {slug}?"):
         return InstallResult(
-            slug=slug, status="aborted", command=effective_cmd,
+            slug=slug,
+            status="aborted",
+            command=effective_cmd,
             message="user declined",
         )
 
@@ -538,10 +563,14 @@ def install_mcp(
         rc, stdout, stderr = _run_claude_mcp(["add-json", slug, json_config])
     else:
         assert effective_cmd is not None  # narrowed by dry_run branch above
-        tokens = command_tokens if command_tokens is not None else _split_install_command(effective_cmd)
+        tokens = (
+            command_tokens if command_tokens is not None else _split_install_command(effective_cmd)
+        )
         if not tokens:
             return InstallResult(
-                slug=slug, status="invalid-cmd", command=effective_cmd,
+                slug=slug,
+                status="invalid-cmd",
+                command=effective_cmd,
                 message="empty install command",
             )
         # Executable allowlist. install_cmd can flow from frontmatter
@@ -551,7 +580,9 @@ def install_mcp(
         executable = _normalized_executable(tokens[0])
         if executable not in _ALLOWED_CMD_EXECS:
             return InstallResult(
-                slug=slug, status="invalid-cmd", command=effective_cmd,
+                slug=slug,
+                status="invalid-cmd",
+                command=effective_cmd,
                 message=(
                     f"executable {tokens[0]!r} not in allowlist "
                     f"{sorted(_ALLOWED_CMD_EXECS)}; use --cmd-json for "
@@ -564,7 +595,9 @@ def install_mcp(
         banned_reason = _rejects_banned_args(tokens)
         if banned_reason is not None:
             return InstallResult(
-                slug=slug, status="invalid-cmd", command=effective_cmd,
+                slug=slug,
+                status="invalid-cmd",
+                command=effective_cmd,
                 message=banned_reason,
             )
         rc, stdout, stderr = _run_claude_mcp(["add", slug, "--", *tokens])
@@ -572,7 +605,9 @@ def install_mcp(
     if rc != 0:
         detail = _redact_output(stderr.strip() or stdout.strip())
         return InstallResult(
-            slug=slug, status="claude-cli-failed", command=effective_cmd,
+            slug=slug,
+            status="claude-cli-failed",
+            command=effective_cmd,
             message=f"claude mcp add failed (rc={rc}): {detail}",
         )
 
@@ -598,7 +633,9 @@ def install_mcp(
     )
 
     return InstallResult(
-        slug=slug, status="installed", command=effective_cmd,
+        slug=slug,
+        status="installed",
+        command=effective_cmd,
         message=_redact_output(stdout.strip()) or "registered",
     )
 
@@ -618,7 +655,11 @@ def _strip_surrounding_quotes(value: str) -> str:
 
 
 def uninstall_mcp(
-    slug: str, *, wiki_dir: Path, force: bool = False, dry_run: bool = False,
+    slug: str,
+    *,
+    wiki_dir: Path,
+    force: bool = False,
+    dry_run: bool = False,
 ) -> UninstallResult:
     """Uninstall one MCP.
 
@@ -631,7 +672,8 @@ def uninstall_mcp(
         validate_skill_name(slug)
     except ValueError as exc:
         return UninstallResult(
-            slug=slug, status="not-installed",
+            slug=slug,
+            status="not-installed",
             message=f"invalid slug: {exc}",
         )
 
@@ -647,19 +689,17 @@ def uninstall_mcp(
     manifest_entry = _manifest_load_entry(slug)
     if entity.is_file():
         fm = _parse_entity_frontmatter(entity)
-        if (
-            fm.get("status", "") != "installed"
-            and manifest_entry is None
-            and not force
-        ):
+        if fm.get("status", "") != "installed" and manifest_entry is None and not force:
             return UninstallResult(
-                slug=slug, status="not-installed",
+                slug=slug,
+                status="not-installed",
                 message="entity status is not 'installed'; pass --force to run claude mcp remove anyway",
             )
 
     if dry_run:
         return UninstallResult(
-            slug=slug, status="would-uninstall",
+            slug=slug,
+            status="would-uninstall",
             message="dry-run: would run `claude mcp remove`",
         )
 
@@ -667,7 +707,8 @@ def uninstall_mcp(
     if rc != 0 and not force:
         detail = _redact_output(stderr.strip() or stdout.strip())
         return UninstallResult(
-            slug=slug, status="claude-cli-failed",
+            slug=slug,
+            status="claude-cli-failed",
             message=f"claude mcp remove failed (rc={rc}): {detail}",
         )
 
@@ -675,12 +716,14 @@ def uninstall_mcp(
     # the user asked us to.
     if entity.is_file():
         bump_entity_status(
-            entity, status="cataloged",
+            entity,
+            status="cataloged",
         )
     record_uninstall(slug, entity_type="mcp-server", source="ctx-mcp-uninstall")
 
     return UninstallResult(
-        slug=slug, status="uninstalled",
+        slug=slug,
+        status="uninstalled",
         message=_redact_output(stdout.strip()) or "removed",
     )
 
@@ -688,10 +731,7 @@ def uninstall_mcp(
 def _manifest_load_entry(slug: str) -> dict | None:
     manifest = load_manifest()
     for entry in manifest.get("load", []):
-        if (
-            entry.get("skill") == slug
-            and entry.get("entity_type", "skill") == "mcp-server"
-        ):
+        if entry.get("skill") == slug and entry.get("entity_type", "skill") == "mcp-server":
             return entry
     return None
 
@@ -712,14 +752,20 @@ def _build_install_parser() -> argparse.ArgumentParser:
     group.add_argument("--cmd", help="Stdio command invocation, e.g. 'npx -y @pkg'")
     group.add_argument("--cmd-json", help="Full JSON config for claude mcp add-json")
     parser.add_argument("--auto", action="store_true", help="Skip the y/N confirmation")
-    parser.add_argument("--force", action="store_true",
-                        help="Reinstall even when entity status is already 'installed'")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Render the card and exit without installing")
-    parser.add_argument("--wiki-dir", default=str(cfg.wiki_dir),
-                        help="Wiki root (default: cfg.wiki_dir)")
-    parser.add_argument("--json", action="store_true",
-                        help="Emit the result as JSON instead of text")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Reinstall even when entity status is already 'installed'",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Render the card and exit without installing"
+    )
+    parser.add_argument(
+        "--wiki-dir", default=str(cfg.wiki_dir), help="Wiki root (default: cfg.wiki_dir)"
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="Emit the result as JSON instead of text"
+    )
     return parser
 
 
@@ -727,15 +773,16 @@ def _build_uninstall_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ctx-mcp-uninstall",
         description=(
-            "Uninstall an MCP server. Runs `claude mcp remove` and "
-            "resets the wiki entity status."
+            "Uninstall an MCP server. Runs `claude mcp remove` and resets the wiki entity status."
         ),
     )
     parser.add_argument("slug", help="MCP slug")
-    parser.add_argument("--force", action="store_true",
-                        help="Continue past claude-cli errors and reset local state")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Report intent without calling claude mcp remove")
+    parser.add_argument(
+        "--force", action="store_true", help="Continue past claude-cli errors and reset local state"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Report intent without calling claude mcp remove"
+    )
     parser.add_argument("--wiki-dir", default=str(cfg.wiki_dir))
     parser.add_argument("--json", action="store_true")
     return parser
@@ -772,9 +819,17 @@ def install_main() -> None:
         tag = "[OK]" if result.status == "installed" else f"[{result.status.upper()}]"
         suffix = f" -- {result.message}" if result.message else ""
         print(f"{tag} {result.slug}{suffix}")
-    sys.exit(0 if result.status in (
-        "installed", "would-install", "skipped-existing", "aborted",
-    ) else 1)
+    sys.exit(
+        0
+        if result.status
+        in (
+            "installed",
+            "would-install",
+            "skipped-existing",
+            "aborted",
+        )
+        else 1
+    )
 
 
 def uninstall_main() -> None:

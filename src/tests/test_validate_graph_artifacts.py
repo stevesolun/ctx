@@ -99,7 +99,16 @@ def _dashboard_index_bytes(graph_dir: Path, *, export_id: str) -> bytes:
         conn.executemany(
             "INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?)",
             [
-                ("skill:skills-sh-example-skill", "skills-sh-example-skill", "skill", "[]", "", None, None, 1),
+                (
+                    "skill:skills-sh-example-skill",
+                    "skills-sh-example-skill",
+                    "skill",
+                    "[]",
+                    "",
+                    None,
+                    None,
+                    1,
+                ),
                 ("harness:langgraph", "langgraph", "harness", "[]", "", None, None, 1),
             ],
         )
@@ -113,8 +122,16 @@ def _dashboard_index_bytes(graph_dir: Path, *, export_id: str) -> bytes:
         conn.executemany(
             "INSERT INTO neighbors VALUES(?,?)",
             [
-                ("skill:skills-sh-example-skill", zlib.compress(json.dumps([{"target": "harness:langgraph"}]).encode("utf-8"))),
-                ("harness:langgraph", zlib.compress(json.dumps([{"target": "skill:skills-sh-example-skill"}]).encode("utf-8"))),
+                (
+                    "skill:skills-sh-example-skill",
+                    zlib.compress(json.dumps([{"target": "harness:langgraph"}]).encode("utf-8")),
+                ),
+                (
+                    "harness:langgraph",
+                    zlib.compress(
+                        json.dumps([{"target": "skill:skills-sh-example-skill"}]).encode("utf-8")
+                    ),
+                ),
             ],
         )
         conn.commit()
@@ -241,17 +258,19 @@ def _write_runtime_archive(
             _add_text(
                 tf,
                 "graphify-out/graph-export-manifest.json",
-                json.dumps({
-                    "version": 1,
-                    "export_id": manifest_export_id,
-                    "artifacts": {
-                        "graph": graph_artifact,
-                        "delta": "graph-delta.json",
-                        "communities": "communities.json",
-                        "report": "graph-report.md",
-                    },
-                    "counts": {"nodes": 2, "edges": 1, "communities": 1},
-                }),
+                json.dumps(
+                    {
+                        "version": 1,
+                        "export_id": manifest_export_id,
+                        "artifacts": {
+                            "graph": graph_artifact,
+                            "delta": "graph-delta.json",
+                            "communities": "communities.json",
+                            "report": "graph-report.md",
+                        },
+                        "counts": {"nodes": 2, "edges": 1, "communities": 1},
+                    }
+                ),
             )
         _add_bytes(
             tf,
@@ -351,17 +370,19 @@ def _write_archive(
             _add_text(
                 tf,
                 "./graphify-out/graph-export-manifest.json",
-                json.dumps({
-                    "version": 1,
-                    "export_id": manifest_export_id,
-                    "artifacts": {
-                        "graph": graph_artifact,
-                        "delta": "graph-delta.json",
-                        "communities": "communities.json",
-                        "report": "graph-report.md",
-                    },
-                    "counts": {"nodes": 2, "edges": 1, "communities": 1},
-                }),
+                json.dumps(
+                    {
+                        "version": 1,
+                        "export_id": manifest_export_id,
+                        "artifacts": {
+                            "graph": graph_artifact,
+                            "delta": "graph-delta.json",
+                            "communities": "communities.json",
+                            "report": "graph-report.md",
+                        },
+                        "counts": {"nodes": 2, "edges": 1, "communities": 1},
+                    }
+                ),
             )
         _add_bytes(
             tf,
@@ -383,19 +404,23 @@ def _write_archive(
             _add_text(tf, "./.ctx/wiki-queue.sqlite3", "not a shipped artifact\n")
     for preview in _PREVIEW_HTML_FILES:
         (graph_dir / preview).write_text(
-            "\n".join([
-                "<!DOCTYPE html>",
-                "<html><head>",
-                f'<meta name="ctx-graph-export-id" content="{manifest_export_id}">',
-                "</head><body>",
-                "const CTX_GRAPH_METADATA = "
-                + json.dumps({
-                    "export_id": manifest_export_id,
-                    "source_graph_nodes": 2,
-                    "source_graph_edges": 1,
-                }),
-                "</body></html>",
-            ]),
+            "\n".join(
+                [
+                    "<!DOCTYPE html>",
+                    "<html><head>",
+                    f'<meta name="ctx-graph-export-id" content="{manifest_export_id}">',
+                    "</head><body>",
+                    "const CTX_GRAPH_METADATA = "
+                    + json.dumps(
+                        {
+                            "export_id": manifest_export_id,
+                            "source_graph_nodes": 2,
+                            "source_graph_edges": 1,
+                        }
+                    ),
+                    "</body></html>",
+                ]
+            ),
             encoding="utf-8",
         )
     _write_runtime_archive(
@@ -761,21 +786,25 @@ def test_validate_graph_artifacts_rejects_corrupt_dashboard_index(
         _add_text(tf, "graphify-out/graph.json", json.dumps(graph, separators=(",", ":")))
         _add_text(tf, "graphify-out/graph-delta.json", json.dumps({"export_id": "export-test"}))
         _add_text(tf, "graphify-out/communities.json", json.dumps({"export_id": "export-test"}))
-        _add_text(tf, "graphify-out/graph-report.md", "# Graph Report\n\n> Export ID: export-test\n")
+        _add_text(
+            tf, "graphify-out/graph-report.md", "# Graph Report\n\n> Export ID: export-test\n"
+        )
         _add_text(
             tf,
             "graphify-out/graph-export-manifest.json",
-            json.dumps({
-                "version": 1,
-                "export_id": "export-test",
-                "artifacts": {
-                    "graph": "graph.json",
-                    "delta": "graph-delta.json",
-                    "communities": "communities.json",
-                    "report": "graph-report.md",
-                },
-                "counts": {"nodes": 2, "edges": 1, "communities": 1},
-            }),
+            json.dumps(
+                {
+                    "version": 1,
+                    "export_id": "export-test",
+                    "artifacts": {
+                        "graph": "graph.json",
+                        "delta": "graph-delta.json",
+                        "communities": "communities.json",
+                        "report": "graph-report.md",
+                    },
+                    "counts": {"nodes": 2, "edges": 1, "communities": 1},
+                }
+            ),
         )
         _add_text(tf, "graphify-out/dashboard-neighborhoods.sqlite3", "not sqlite\n")
         _add_text(tf, "external-catalogs/skills-sh/catalog.json", "{}")
@@ -821,17 +850,19 @@ def test_validate_graph_artifacts_rejects_stale_dashboard_index(
         _add_text(
             tf,
             "graphify-out/graph-export-manifest.json",
-            json.dumps({
-                "version": 1,
-                "export_id": "new-export",
-                "artifacts": {
-                    "graph": "graph.json",
-                    "delta": "graph-delta.json",
-                    "communities": "communities.json",
-                    "report": "graph-report.md",
-                },
-                "counts": {"nodes": 2, "edges": 1, "communities": 1},
-            }),
+            json.dumps(
+                {
+                    "version": 1,
+                    "export_id": "new-export",
+                    "artifacts": {
+                        "graph": "graph.json",
+                        "delta": "graph-delta.json",
+                        "communities": "communities.json",
+                        "report": "graph-report.md",
+                    },
+                    "counts": {"nodes": 2, "edges": 1, "communities": 1},
+                }
+            ),
         )
         _add_bytes(
             tf,
@@ -979,8 +1010,7 @@ def test_validate_graph_artifacts_rejects_missing_skill_bundle_reference(
     _write_archive(
         tmp_path,
         converted_skill_text=(
-            "# Example\n\n"
-            "Use `resources/implementation-playbook.md` for the implementation flow.\n"
+            "# Example\n\nUse `resources/implementation-playbook.md` for the implementation flow.\n"
         ),
     )
 
@@ -1018,11 +1048,13 @@ def test_validate_graph_artifacts_rejects_invalid_entity_overlay(tmp_path: Path)
     )
     _write_archive(tmp_path)
     (tmp_path / "entity-overlays.jsonl").write_text(
-        json.dumps({
-            "overlay_id": "bad-overlay",
-            "nodes": [{"id": "skill:bad"}],
-            "edges": [{"source": "skill:bad", "target": "skill:other", "weight": 2}],
-        })
+        json.dumps(
+            {
+                "overlay_id": "bad-overlay",
+                "nodes": [{"id": "skill:bad"}],
+                "edges": [{"source": "skill:bad", "target": "skill:other", "weight": 2}],
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -1304,18 +1336,20 @@ def test_overlay_validation_rejects_out_of_range_similarity_fields(
     field: str,
 ) -> None:
     (tmp_path / "entity-overlays.jsonl").write_text(
-        json.dumps({
-            "nodes": [{"id": "skill:a"}],
-            "edges": [
-                {
-                    "source": "skill:a",
-                    "target": "skill:b",
-                    "weight": 0.5,
-                    "final_weight": 0.5,
-                    field: 2.0,
-                },
-            ],
-        })
+        json.dumps(
+            {
+                "nodes": [{"id": "skill:a"}],
+                "edges": [
+                    {
+                        "source": "skill:a",
+                        "target": "skill:b",
+                        "weight": 0.5,
+                        "final_weight": 0.5,
+                        field: 2.0,
+                    },
+                ],
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -1326,17 +1360,19 @@ def test_overlay_validation_rejects_out_of_range_similarity_fields(
 
 def test_overlay_validation_rejects_weight_final_weight_drift(tmp_path: Path) -> None:
     (tmp_path / "entity-overlays.jsonl").write_text(
-        json.dumps({
-            "nodes": [{"id": "skill:a"}],
-            "edges": [
-                {
-                    "source": "skill:a",
-                    "target": "skill:b",
-                    "weight": 0.7,
-                    "final_weight": 0.5,
-                },
-            ],
-        })
+        json.dumps(
+            {
+                "nodes": [{"id": "skill:a"}],
+                "edges": [
+                    {
+                        "source": "skill:a",
+                        "target": "skill:b",
+                        "weight": 0.7,
+                        "final_weight": 0.5,
+                    },
+                ],
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -1347,21 +1383,23 @@ def test_overlay_validation_rejects_weight_final_weight_drift(tmp_path: Path) ->
 
 def test_overlay_validation_rejects_score_component_drift(tmp_path: Path) -> None:
     (tmp_path / "entity-overlays.jsonl").write_text(
-        json.dumps({
-            "nodes": [{"id": "skill:a"}],
-            "edges": [
-                {
-                    "source": "skill:a",
-                    "target": "skill:b",
-                    "weight": 0.8,
-                    "final_weight": 0.8,
-                    "score_components": {
-                        "semantic": 0.4,
-                        "type_affinity": 0.1,
+        json.dumps(
+            {
+                "nodes": [{"id": "skill:a"}],
+                "edges": [
+                    {
+                        "source": "skill:a",
+                        "target": "skill:b",
+                        "weight": 0.8,
+                        "final_weight": 0.8,
+                        "score_components": {
+                            "semantic": 0.4,
+                            "type_affinity": 0.1,
+                        },
                     },
-                },
-            ],
-        })
+                ],
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -1376,21 +1414,23 @@ def test_overlay_validation_rejects_out_of_range_score_components(
     value: float,
 ) -> None:
     (tmp_path / "entity-overlays.jsonl").write_text(
-        json.dumps({
-            "nodes": [{"id": "skill:a"}],
-            "edges": [
-                {
-                    "source": "skill:a",
-                    "target": "skill:b",
-                    "weight": 0.5,
-                    "final_weight": 0.5,
-                    "score_components": {
-                        "semantic": value,
-                        "tag": 0.5 - value,
+        json.dumps(
+            {
+                "nodes": [{"id": "skill:a"}],
+                "edges": [
+                    {
+                        "source": "skill:a",
+                        "target": "skill:b",
+                        "weight": 0.5,
+                        "final_weight": 0.5,
+                        "score_components": {
+                            "semantic": value,
+                            "tag": 0.5 - value,
+                        },
                     },
-                },
-            ],
-        })
+                ],
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -1439,22 +1479,18 @@ def test_scan_graph_json_ignores_node_level_export_id() -> None:
 
 
 def test_graph_only_workflow_uses_preflight_graph_contract() -> None:
-    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(
-        encoding="utf-8"
-    ))
+    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
     steps = workflow["jobs"]["graph-check"]["steps"]
     validate_step = next(
         step for step in steps if step.get("name") == "Validate shipped graph artifacts"
     )
     command = " ".join(
-        line.rstrip("\\").strip()
-        for line in validate_step["run"].splitlines()
-        if line.strip()
+        line.rstrip("\\").strip() for line in validate_step["run"].splitlines() if line.strip()
     )
     argv = command.split()
 
     script_index = argv.index("src/validate_graph_artifacts.py")
-    args = argv[script_index + 1:]
+    args = argv[script_index + 1 :]
     parsed: dict[str, str | bool] = {}
     i = 0
     while i < len(args):
@@ -1466,7 +1502,7 @@ def test_graph_only_workflow_uses_preflight_graph_contract() -> None:
             parsed[flag] = args[i + 1]
             i += 2
 
-    assert argv[:script_index + 1] == ["python", "src/validate_graph_artifacts.py"]
+    assert argv[: script_index + 1] == ["python", "src/validate_graph_artifacts.py"]
     expected: dict[str, str | bool] = {}
     expected_args = GRAPH_VALIDATE_ARGS[1:]
     i = 0
@@ -1501,13 +1537,10 @@ def test_validator_default_floors_match_preflight_contract() -> None:
 
 
 def test_graph_only_workflow_waits_for_release_asset_upload() -> None:
-    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(
-        encoding="utf-8"
-    ))
+    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
     steps = workflow["jobs"]["graph-check"]["steps"]
     resolve_step = next(
-        step for step in steps
-        if step.get("name") == "Resolve graph artifacts from release assets"
+        step for step in steps if step.get("name") == "Resolve graph artifacts from release assets"
     )
     script = resolve_step["run"]
 

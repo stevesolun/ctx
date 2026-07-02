@@ -35,10 +35,7 @@ def read_jsonl(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
 
 def lifecycle_events(path: Path, limit: int | None = 200) -> list[dict[str, Any]]:
     events = read_jsonl(path, limit=limit)
-    return [
-        event for event in events
-        if event.get("action") in {"validation", "escalation"}
-    ]
+    return [event for event in events if event.get("action") in {"validation", "escalation"}]
 
 
 def summarize_sessions(
@@ -143,19 +140,21 @@ def summarize_sessions(
 
     summaries: list[dict[str, Any]] = []
     for row in by_session.values():
-        summaries.append({
-            "session_id": row["session_id"],
-            "first_seen": row["first_seen"],
-            "last_seen": row["last_seen"],
-            "skills_loaded": sorted(row["skills_loaded"]),
-            "skills_unloaded": sorted(row["skills_unloaded"]),
-            "agents_loaded": sorted(row["agents_loaded"]),
-            "agents_unloaded": sorted(row["agents_unloaded"]),
-            "mcps_loaded": sorted(row["mcps_loaded"]),
-            "mcps_unloaded": sorted(row["mcps_unloaded"]),
-            "score_updates": row["score_updates"],
-            "lifecycle_transitions": row["lifecycle_transitions"],
-        })
+        summaries.append(
+            {
+                "session_id": row["session_id"],
+                "first_seen": row["first_seen"],
+                "last_seen": row["last_seen"],
+                "skills_loaded": sorted(row["skills_loaded"]),
+                "skills_unloaded": sorted(row["skills_unloaded"]),
+                "agents_loaded": sorted(row["agents_loaded"]),
+                "agents_unloaded": sorted(row["agents_unloaded"]),
+                "mcps_loaded": sorted(row["mcps_loaded"]),
+                "mcps_unloaded": sorted(row["mcps_unloaded"]),
+                "score_updates": row["score_updates"],
+                "lifecycle_transitions": row["lifecycle_transitions"],
+            }
+        )
     summaries.sort(key=lambda r: r.get("last_seen") or "", reverse=True)
     return summaries
 
@@ -167,12 +166,8 @@ def session_detail(
 ) -> dict[str, Any]:
     return {
         "session_id": session_id,
-        "audit_entries": [
-            record for record in audit if record.get("session_id") == session_id
-        ],
-        "load_events": [
-            event for event in events if event.get("session_id") == session_id
-        ],
+        "audit_entries": [record for record in audit if record.get("session_id") == session_id],
+        "load_events": [event for event in events if event.get("session_id") == session_id],
     }
 
 
@@ -182,19 +177,14 @@ def escalation_key(event: dict[str, Any]) -> str:
         if value:
             return str(value)
     return "\0".join(
-        str(event.get(field) or "")
-        for field in ("session_id", "trigger", "reason", "severity")
+        str(event.get(field) or "") for field in ("session_id", "trigger", "reason", "severity")
     )
 
 
 def lifecycle_summary(path: Path, limit: int = 200) -> dict[str, Any]:
     events = lifecycle_events(path, limit=None)
-    validations = [
-        event for event in events if event.get("action") == "validation"
-    ]
-    escalations = [
-        event for event in events if event.get("action") == "escalation"
-    ]
+    validations = [event for event in events if event.get("action") == "validation"]
+    escalations = [event for event in events if event.get("action") == "escalation"]
     open_by_key: dict[str, dict[str, Any]] = {}
     for event in escalations:
         key = escalation_key(event)
@@ -205,14 +195,13 @@ def lifecycle_summary(path: Path, limit: int = 200) -> dict[str, Any]:
             open_by_key.pop(key, None)
     open_escalations = list(open_by_key.values())
     validation_failures = [
-        event for event in validations
+        event
+        for event in validations
         if str(event.get("status") or "").lower() in {"failed", "error"}
     ]
-    sessions = sorted({
-        str(event.get("session_id") or "")
-        for event in events
-        if event.get("session_id")
-    })
+    sessions = sorted(
+        {str(event.get("session_id") or "") for event in events if event.get("session_id")}
+    )
     return {
         "path": str(path),
         "events_total": len(events),

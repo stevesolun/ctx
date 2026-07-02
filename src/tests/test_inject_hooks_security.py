@@ -101,16 +101,10 @@ class TestNoShellInjectionVars:
         _run_inject(ctx_dir, settings_path)
 
         raw = settings_path.read_text(encoding="utf-8")
-        assert "$CLAUDE_TOOL_INPUT" not in raw, (
-            "$CLAUDE_TOOL_INPUT found in written settings.json"
-        )
-        assert "$CLAUDE_TOOL_NAME" not in raw, (
-            "$CLAUDE_TOOL_NAME found in written settings.json"
-        )
+        assert "$CLAUDE_TOOL_INPUT" not in raw, "$CLAUDE_TOOL_INPUT found in written settings.json"
+        assert "$CLAUDE_TOOL_NAME" not in raw, "$CLAUDE_TOOL_NAME found in written settings.json"
 
-    def test_from_stdin_flag_present_in_posttooluse_commands(
-        self, tmp_path: Path
-    ) -> None:
+    def test_from_stdin_flag_present_in_posttooluse_commands(self, tmp_path: Path) -> None:
         """PostToolUse commands that replaced env-var args must use --from-stdin."""
         ctx_dir = str(tmp_path / "ctx")
         hooks = make_hooks(ctx_dir)
@@ -120,7 +114,8 @@ class TestNoShellInjectionVars:
         # context_monitor and skill_add_detector commands must carry --from-stdin
         sub_hooks = post_tool_entries[0].get("hooks", [])
         cmds_with_stdin = [
-            h["command"] for h in sub_hooks
+            h["command"]
+            for h in sub_hooks
             if isinstance(h, dict) and "--from-stdin" in h.get("command", "")
         ]
         assert len(cmds_with_stdin) >= 2, (
@@ -188,9 +183,10 @@ class TestStopHooks:
         ctx_dir = str(tmp_path / "ctx")
         hooks = make_hooks(ctx_dir)
         stop_cmds = self._stop_commands(hooks)
-        assert any("ctx.adapters.claude_code.hooks.lifecycle_hooks quality-on-session-end" in c for c in stop_cmds), (
-            f"quality hook module not found in Stop hooks: {stop_cmds}"
-        )
+        assert any(
+            "ctx.adapters.claude_code.hooks.lifecycle_hooks quality-on-session-end" in c
+            for c in stop_cmds
+        ), f"quality hook module not found in Stop hooks: {stop_cmds}"
 
     def test_stop_contains_both_in_generated_settings(self, tmp_path: Path) -> None:
         settings_path = tmp_path / "settings.json"
@@ -203,9 +199,10 @@ class TestStopHooks:
         assert any("-m usage_tracker" in c for c in stop_cmds), (
             f"usage_tracker module missing from persisted Stop hooks: {stop_cmds}"
         )
-        assert any("ctx.adapters.claude_code.hooks.lifecycle_hooks quality-on-session-end" in c for c in stop_cmds), (
-            f"quality hook module missing from persisted Stop hooks: {stop_cmds}"
-        )
+        assert any(
+            "ctx.adapters.claude_code.hooks.lifecycle_hooks quality-on-session-end" in c
+            for c in stop_cmds
+        ), f"quality hook module missing from persisted Stop hooks: {stop_cmds}"
 
     def test_stop_hook_count_is_two(self, tmp_path: Path) -> None:
         """Both Stop hook commands must be present (usage_tracker + quality)."""
@@ -239,6 +236,7 @@ class TestCtxDirQuoting:
     def test_path_with_dollar_is_safe(self, tmp_path: Path) -> None:
         """A ctx_dir with a literal $ must be quoted so the shell doesn't expand it."""
         import shlex as _shlex
+
         ctx_dir = "/home/user/$HOME/ctx"
         hooks = make_hooks(ctx_dir)
         cmds = _all_commands(hooks)
@@ -246,9 +244,7 @@ class TestCtxDirQuoting:
         for cmd in cmds:
             if ctx_dir in cmd or quoted in cmd:
                 # The raw unquoted path must not appear unless it's the quoted form
-                assert f" {ctx_dir}/" not in cmd, (
-                    f"Unquoted $ path found in: {cmd!r}"
-                )
+                assert f" {ctx_dir}/" not in cmd, f"Unquoted $ path found in: {cmd!r}"
 
     def test_windows_python_path_with_spaces_uses_windows_quoting(
         self,
@@ -268,9 +264,7 @@ class TestCtxDirQuoting:
 
 
 class TestPackagedHookCommands:
-    def test_commands_use_importable_modules_not_repo_paths(
-        self, tmp_path: Path
-    ) -> None:
+    def test_commands_use_importable_modules_not_repo_paths(self, tmp_path: Path) -> None:
         hooks = make_hooks(str(tmp_path / "ctx"))
         cmds = _all_commands(hooks)
 

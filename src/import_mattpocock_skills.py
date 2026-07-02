@@ -68,7 +68,9 @@ def render_attribution_header(manifest: dict) -> str:
     )
 
 
-def deploy_entry(entry: dict, manifest: dict, target_dir: Path, dry_run: bool) -> tuple[Path, bool, list[Path]]:
+def deploy_entry(
+    entry: dict, manifest: dict, target_dir: Path, dry_run: bool
+) -> tuple[Path, bool, list[Path]]:
     slug = _validate("slug", entry.get("slug"), regex=_SAFE_SLUG_RE)
     source_path_raw = _validate("source_path", entry.get("source_path"))
     source = _resolve_within(IMPORT_ROOT, source_path_raw, field="source_path")
@@ -152,7 +154,9 @@ def main() -> None:
     mode = "dry-run" if args.dry_run else "install"
     print()
     print(f"Mode: {mode}  target: {target_dir}")
-    print(f"Entries: {len(manifest['entries'])}  new/updated: {new_or_updated}  unchanged: {unchanged}")
+    print(
+        f"Entries: {len(manifest['entries'])}  new/updated: {new_or_updated}  unchanged: {unchanged}"
+    )
     if args.install:
         print()
         print("Next steps:")

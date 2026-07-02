@@ -105,9 +105,7 @@ def test_install_copies_local_source_and_writes_manifest(tmp_path: Path) -> None
 
     assert result.status == "installed"
     assert (tmp_path / "installs" / "text-to-cad" / "README.md").exists()
-    manifest = json.loads(
-        (tmp_path / "manifests" / "text-to-cad.json").read_text(encoding="utf-8")
-    )
+    manifest = json.loads((tmp_path / "manifests" / "text-to-cad.json").read_text(encoding="utf-8"))
     assert manifest["slug"] == "text-to-cad"
     assert manifest["status"] == "installed"
     assert {Path(path).as_posix() for path in manifest["attach_files"]} == {
@@ -324,22 +322,14 @@ def test_remote_install_fetches_pinned_commit_and_records_manifest(
     assert git_calls[0][:2] == ["clone", "--no-checkout"]
     assert git_calls[0][2] == "--"
     assert any(
-        call[0] == "-C"
-        and call[2:6] == ["fetch", "--depth", "1", "origin"]
-        and call[-1] == commit
+        call[0] == "-C" and call[2:6] == ["fetch", "--depth", "1", "origin"] and call[-1] == commit
         for call in git_calls
     )
     assert any(
-        call[0] == "-C" and call[2:] == ["checkout", "--detach", "FETCH_HEAD"]
-        for call in git_calls
+        call[0] == "-C" and call[2:] == ["checkout", "--detach", "FETCH_HEAD"] for call in git_calls
     )
-    assert any(
-        call[0] == "-C" and call[2:] == ["rev-parse", "HEAD"]
-        for call in git_calls
-    )
-    manifest = json.loads(
-        (tmp_path / "manifests" / "text-to-cad.json").read_text(encoding="utf-8")
-    )
+    assert any(call[0] == "-C" and call[2:] == ["rev-parse", "HEAD"] for call in git_calls)
+    manifest = json.loads((tmp_path / "manifests" / "text-to-cad.json").read_text(encoding="utf-8"))
     assert manifest["repo_ref"] == commit
     assert manifest["resolved_commit"] == commit
 
@@ -948,23 +938,27 @@ def test_recommend_mode_prints_install_handoff(
 
     def fake_recommend(**kwargs: Any) -> list[dict[str, object]]:
         calls.append(kwargs)
-        return [{
-            "name": "text-to-cad",
-            "normalized_score": 0.91,
-            "reason": "cad tag match",
-        }]
+        return [
+            {
+                "name": "text-to-cad",
+                "normalized_score": 0.91,
+                "reason": "cad tag match",
+            }
+        ]
 
     monkeypatch.setattr(harness_install, "recommend_harnesses_for_cli", fake_recommend)
 
-    rc = harness_install.main([
-        "--recommend",
-        "--goal",
-        "generate CAD from text",
-        "--model-provider",
-        "openai",
-        "--model",
-        "openai/gpt-5.5",
-    ])
+    rc = harness_install.main(
+        [
+            "--recommend",
+            "--goal",
+            "generate CAD from text",
+            "--model-provider",
+            "openai",
+            "--model",
+            "openai/gpt-5.5",
+        ]
+    )
 
     assert rc == 0
     assert calls[0]["model_provider"] == "openai"
@@ -985,27 +979,29 @@ def test_recommend_mode_passes_structured_harness_requirements(
 
     monkeypatch.setattr(harness_install, "recommend_harnesses_for_cli", fake_recommend)
 
-    rc = harness_install.main([
-        "--recommend",
-        "--goal",
-        "build a code agent",
-        "--model",
-        "openai/gpt-5.5",
-        "--api-key-env",
-        "OPENAI_API_KEY",
-        "--harness-runtime",
-        "windows python",
-        "--harness-autonomy",
-        "supervised",
-        "--harness-tools",
-        "filesystem shell browser",
-        "--harness-verify",
-        "pytest ruff",
-        "--harness-privacy",
-        "private repo no secrets",
-        "--harness-attach-mode",
-        "mcp",
-    ])
+    rc = harness_install.main(
+        [
+            "--recommend",
+            "--goal",
+            "build a code agent",
+            "--model",
+            "openai/gpt-5.5",
+            "--api-key-env",
+            "OPENAI_API_KEY",
+            "--harness-runtime",
+            "windows python",
+            "--harness-autonomy",
+            "supervised",
+            "--harness-tools",
+            "filesystem shell browser",
+            "--harness-verify",
+            "pytest ruff",
+            "--harness-privacy",
+            "private repo no secrets",
+            "--harness-attach-mode",
+            "mcp",
+        ]
+    )
 
     assert rc == 0
     assert calls[0]["harness_requirements"] == {
@@ -1032,12 +1028,14 @@ def test_recommend_cli_query_includes_structured_harness_requirements(
         model_provider: str | None = None,
         model: str | None = None,
     ) -> list[dict[str, object]]:
-        calls.append({
-            "goal": goal,
-            "top_k": top_k,
-            "model_provider": model_provider,
-            "model": model,
-        })
+        calls.append(
+            {
+                "goal": goal,
+                "top_k": top_k,
+                "model_provider": model_provider,
+                "model": model,
+            }
+        )
         return []
 
     monkeypatch.setattr(ctx_init, "recommend_harnesses", fake_recommend)
@@ -1070,24 +1068,26 @@ def test_recommend_no_fit_prints_custom_harness_plan(
 ) -> None:
     monkeypatch.setattr(harness_install, "recommend_harnesses_for_cli", lambda **_: [])
 
-    rc = harness_install.main([
-        "--recommend",
-        "--goal",
-        "build a private CAD workflow with a local model",
-        "--model-provider",
-        "ollama",
-        "--model",
-        "ollama/llama3.1",
-        "--harness-runtime",
-        "linux server",
-        "--harness-tools",
-        "filesystem shell",
-        "--harness-verify",
-        "pytest",
-        "--harness-privacy",
-        "offline source code",
-        "--plan-on-no-fit",
-    ])
+    rc = harness_install.main(
+        [
+            "--recommend",
+            "--goal",
+            "build a private CAD workflow with a local model",
+            "--model-provider",
+            "ollama",
+            "--model",
+            "ollama/llama3.1",
+            "--harness-runtime",
+            "linux server",
+            "--harness-tools",
+            "filesystem shell",
+            "--harness-verify",
+            "pytest",
+            "--harness-privacy",
+            "offline source code",
+            "--plan-on-no-fit",
+        ]
+    )
 
     assert rc == 0
     output = capsys.readouterr().out
@@ -1108,18 +1108,20 @@ def test_recommend_mode_accepts_huggingface_api_key_env(
 ) -> None:
     monkeypatch.setattr(harness_install, "recommend_harnesses_for_cli", lambda **_: [])
 
-    rc = harness_install.main([
-        "--recommend",
-        "--goal",
-        "build a code review harness for a small hosted model",
-        "--model-provider",
-        "huggingface",
-        "--model",
-        "HuggingFaceTB/SmolLM2-135M-Instruct",
-        "--api-key-env",
-        "HF_TOKEN",
-        "--plan-on-no-fit",
-    ])
+    rc = harness_install.main(
+        [
+            "--recommend",
+            "--goal",
+            "build a code review harness for a small hosted model",
+            "--model-provider",
+            "huggingface",
+            "--model",
+            "HuggingFaceTB/SmolLM2-135M-Instruct",
+            "--api-key-env",
+            "HF_TOKEN",
+            "--plan-on-no-fit",
+        ]
+    )
 
     assert rc == 0
     output = capsys.readouterr().out
@@ -1136,16 +1138,18 @@ def test_recommend_no_fit_writes_custom_harness_plan(
     monkeypatch.setattr(harness_install, "recommend_harnesses_for_cli", lambda **_: [])
     target = tmp_path / "custom-harness.md"
 
-    rc = harness_install.main([
-        "--recommend",
-        "--goal",
-        "repair a legacy Python service",
-        "--model",
-        "openrouter/openai/gpt-5.5",
-        "--plan-on-no-fit",
-        "--plan-output",
-        str(target),
-    ])
+    rc = harness_install.main(
+        [
+            "--recommend",
+            "--goal",
+            "repair a legacy Python service",
+            "--model",
+            "openrouter/openai/gpt-5.5",
+            "--plan-on-no-fit",
+            "--plan-output",
+            str(target),
+        ]
+    )
 
     assert rc == 0
     assert f"Custom harness plan: {target}" in capsys.readouterr().out

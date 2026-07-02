@@ -76,6 +76,7 @@ def _build_mcp_graph() -> nx.Graph:
 def _serialise_graph(G: nx.Graph, *, edges_key: str = "edges") -> dict:
     """Return node-link dict using the requested edges key name."""
     from networkx.readwrite import node_link_data
+
     data = node_link_data(G, edges=edges_key)
     return data
 
@@ -124,7 +125,9 @@ class TestLoadGraph:
     def test_unicode_decode_error_returns_empty_graph(self, tmp_path: Path) -> None:
         p = tmp_path / "graph.json"
         # Write valid JSON bytes then corrupt with latin-1 sequence
-        p.write_bytes(b'{"nodes": [], "edges": [], "graph": {}, "multigraph": false, "directed": false}\xff\xfe')
+        p.write_bytes(
+            b'{"nodes": [], "edges": [], "graph": {}, "multigraph": false, "directed": false}\xff\xfe'
+        )
         G = resolve_graph.load_graph(p)
         # The file may parse as valid JSON if utf-8 happens to decode it,
         # OR it triggers UnicodeDecodeError — either way we get an empty
@@ -154,15 +157,17 @@ class TestLoadGraph:
         base_dir.mkdir(parents=True)
         overlay_dir.mkdir()
         (base_dir / "graph.json").write_text(
-            json.dumps({
-                "nodes": [
-                    {"id": "skill:A", "type": "skill", "tags": ["python"]},
-                    {"id": "mcp-server:github", "type": "mcp-server", "tags": ["github"]},
-                ],
-                "edges": [
-                    {"source": "skill:A", "target": "mcp-server:github", "weight": 0.5},
-                ],
-            }),
+            json.dumps(
+                {
+                    "nodes": [
+                        {"id": "skill:A", "type": "skill", "tags": ["python"]},
+                        {"id": "mcp-server:github", "type": "mcp-server", "tags": ["github"]},
+                    ],
+                    "edges": [
+                        {"source": "skill:A", "target": "mcp-server:github", "weight": 0.5},
+                    ],
+                }
+            ),
             encoding="utf-8",
         )
         (overlay_dir / "nodes.jsonl").write_text(
@@ -170,7 +175,8 @@ class TestLoadGraph:
             encoding="utf-8",
         )
         (overlay_dir / "edges.jsonl").write_text(
-            json.dumps({"source": "skill:review", "target": "mcp-server:github", "weight": 0.8}) + "\n",
+            json.dumps({"source": "skill:review", "target": "mcp-server:github", "weight": 0.8})
+            + "\n",
             encoding="utf-8",
         )
         write_pack_manifest(
@@ -217,10 +223,12 @@ class TestLoadGraph:
         p = graph_dir / "graph.json"
         p.write_text(json.dumps(_serialise_graph(_build_simple_graph())), encoding="utf-8")
         (base_dir / "graph.json").write_text(
-            json.dumps({
-                "nodes": [{"id": "skill:pack-only"}],
-                "edges": [],
-            }),
+            json.dumps(
+                {
+                    "nodes": [{"id": "skill:pack-only"}],
+                    "edges": [],
+                }
+            ),
             encoding="utf-8",
         )
         write_pack_manifest(
@@ -287,17 +295,22 @@ class TestLoadGraph:
         p = graph_dir / "graph.json"
         p.write_text(json.dumps(_serialise_graph(_build_simple_graph())), encoding="utf-8")
         (base_dir / "graph.json").write_text(
-            json.dumps({
-                "nodes": [{"id": "skill:A", "type": "skill", "tags": ["python"]}],
-                "edges": [],
-            }),
+            json.dumps(
+                {
+                    "nodes": [{"id": "skill:A", "type": "skill", "tags": ["python"]}],
+                    "edges": [],
+                }
+            ),
             encoding="utf-8",
         )
         (graph_dir / "entity-overlays.jsonl").write_text(
-            json.dumps({
-                "nodes": [{"id": "harness:mirage", "type": "harness", "tags": ["sandbox"]}],
-                "edges": [{"source": "harness:mirage", "target": "skill:A", "weight": 0.4}],
-            }) + "\n",
+            json.dumps(
+                {
+                    "nodes": [{"id": "harness:mirage", "type": "harness", "tags": ["sandbox"]}],
+                    "edges": [{"source": "harness:mirage", "target": "skill:A", "weight": 0.4}],
+                }
+            )
+            + "\n",
             encoding="utf-8",
         )
         write_pack_manifest(
@@ -359,31 +372,33 @@ class TestLoadGraph:
         p = tmp_path / "graph.json"
         p.write_text(json.dumps(_serialise_graph(source)), encoding="utf-8")
         (tmp_path / "entity-overlays.jsonl").write_text(
-            json.dumps({
-                "nodes": [
-                    {
-                        "id": "harness:mirage",
-                        "type": "harness",
-                        "label": "mirage",
-                        "tags": ["harness", "sandbox"],
-                        "quality_score": 0.82,
-                    },
-                ],
-                "edges": [
-                    {
-                        "source": "harness:mirage",
-                        "target": "skill:A",
-                        "weight": 0.18,
-                        "final_weight": 0.18,
-                        "shared_tags": ["harness"],
-                    },
-                    {
-                        "source": "harness:mirage",
-                        "target": "missing:node",
-                        "weight": 0.18,
-                    },
-                ],
-            })
+            json.dumps(
+                {
+                    "nodes": [
+                        {
+                            "id": "harness:mirage",
+                            "type": "harness",
+                            "label": "mirage",
+                            "tags": ["harness", "sandbox"],
+                            "quality_score": 0.82,
+                        },
+                    ],
+                    "edges": [
+                        {
+                            "source": "harness:mirage",
+                            "target": "skill:A",
+                            "weight": 0.18,
+                            "final_weight": 0.18,
+                            "shared_tags": ["harness"],
+                        },
+                        {
+                            "source": "harness:mirage",
+                            "target": "missing:node",
+                            "weight": 0.18,
+                        },
+                    ],
+                }
+            )
             + "\n",
             encoding="utf-8",
         )
@@ -523,31 +538,33 @@ class TestLoadGraph:
         p = tmp_path / "graph.json"
         p.write_text(json.dumps(_serialise_graph(source)), encoding="utf-8")
         (tmp_path / "entity-overlays.jsonl").write_text(
-            json.dumps({
-                "kind": "ann_attach",
-                "attach_key": "ann:v1:model:skill:A:updated",
-                "replace_scope": "ann:v1:model:skill:A",
-                "node_id": "skill:A",
-                "nodes": [
-                    {
-                        "id": "skill:A",
-                        "type": "skill",
-                        "label": "Updated Alpha",
-                        "content_hash": "updated",
-                    },
-                ],
-                "edges": [
-                    {
-                        "source": "skill:A",
-                        "target": "skill:B",
-                        "weight": 0.2,
-                        "final_weight": 0.2,
-                        "semantic_sim": 0.8,
-                        "similarity_score": 0.8,
-                        "method": "ann_attach_v1",
-                    },
-                ],
-            })
+            json.dumps(
+                {
+                    "kind": "ann_attach",
+                    "attach_key": "ann:v1:model:skill:A:updated",
+                    "replace_scope": "ann:v1:model:skill:A",
+                    "node_id": "skill:A",
+                    "nodes": [
+                        {
+                            "id": "skill:A",
+                            "type": "skill",
+                            "label": "Updated Alpha",
+                            "content_hash": "updated",
+                        },
+                    ],
+                    "edges": [
+                        {
+                            "source": "skill:A",
+                            "target": "skill:B",
+                            "weight": 0.2,
+                            "final_weight": 0.2,
+                            "semantic_sim": 0.8,
+                            "similarity_score": 0.8,
+                            "method": "ann_attach_v1",
+                        },
+                    ],
+                }
+            )
             + "\n",
             encoding="utf-8",
         )
@@ -570,18 +587,20 @@ class TestLoadGraph:
         p = tmp_path / "graph.json"
         p.write_text(json.dumps(_serialise_graph(source)), encoding="utf-8")
         (tmp_path / "entity-overlays.jsonl").write_text(
-            json.dumps({
-                "attach_key": "manual:weak",
-                "nodes": [],
-                "edges": [
-                    {
-                        "source": "skill:A",
-                        "target": "skill:B",
-                        "weight": 0.1,
-                        "shared_tags": ["overlay"],
-                    },
-                ],
-            })
+            json.dumps(
+                {
+                    "attach_key": "manual:weak",
+                    "nodes": [],
+                    "edges": [
+                        {
+                            "source": "skill:A",
+                            "target": "skill:B",
+                            "weight": 0.1,
+                            "shared_tags": ["overlay"],
+                        },
+                    ],
+                }
+            )
             + "\n",
             encoding="utf-8",
         )
@@ -612,16 +631,18 @@ class TestLoadGraph:
         for name in ("graph-delta.json", "communities.json", "graph-report.md"):
             (tmp_path / name).write_text("{}", encoding="utf-8")
         (tmp_path / "graph-export-manifest.json").write_text(
-            json.dumps({
-                "version": 1,
-                "export_id": "old-export",
-                "artifacts": {
-                    "graph": "graph.json",
-                    "delta": "graph-delta.json",
-                    "communities": "communities.json",
-                    "report": "graph-report.md",
-                },
-            }),
+            json.dumps(
+                {
+                    "version": 1,
+                    "export_id": "old-export",
+                    "artifacts": {
+                        "graph": "graph.json",
+                        "delta": "graph-delta.json",
+                        "communities": "communities.json",
+                        "report": "graph-report.md",
+                    },
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -629,7 +650,9 @@ class TestLoadGraph:
 
         assert G.number_of_nodes() == 0
 
-    def test_default_path_used_when_arg_is_none(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_default_path_used_when_arg_is_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Passing path=None falls back to GRAPH_PATH."""
         source = _build_simple_graph()
         data = _serialise_graph(source)
@@ -639,7 +662,9 @@ class TestLoadGraph:
         G = resolve_graph.load_graph(None)
         assert G.number_of_nodes() == 3
 
-    def test_networkx_deserialise_error_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_networkx_deserialise_error_returns_empty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Trigger the KeyError/TypeError/NetworkXError branch via monkeypatching."""
         p = tmp_path / "graph.json"
         # Write a syntactically valid node-link dict so the schema check passes,
@@ -746,9 +771,7 @@ class TestResolveBySeeds:
         G.add_edge("skill:Y", "skill:Z", weight=1.0, shared_tags=[])
         G.add_edge("skill:Z", "skill:X", weight=1.0, shared_tags=[])
         # seed is X; with exclude_seeds=False, X can appear as neighbor of Z
-        results = resolve_graph.resolve_by_seeds(
-            G, ["X"], max_hops=2, exclude_seeds=False
-        )
+        results = resolve_graph.resolve_by_seeds(G, ["X"], max_hops=2, exclude_seeds=False)
         names = [r["name"] for r in results]
         assert "X" in names
 
@@ -834,9 +857,7 @@ class TestResolveBySeeds:
         When both A and B are seeds, C should list both in its 'via'.
         """
         G = _build_simple_graph()
-        results = resolve_graph.resolve_by_seeds(
-            G, ["A", "B"], max_hops=1, exclude_seeds=True
-        )
+        results = resolve_graph.resolve_by_seeds(G, ["A", "B"], max_hops=1, exclude_seeds=True)
         c_result = next((r for r in results if r["name"] == "Gamma"), None)
         assert c_result is not None
         via_set = set(c_result["via"])
@@ -873,8 +894,8 @@ class TestResolveBySeeds:
     def test_label_fallback_to_nid_suffix(self) -> None:
         """Nodes without 'label' attr fall back to nid.split(':')[-1]."""
         G = nx.Graph()
-        G.add_node("skill:seed", type="skill", tags=[])      # no label
-        G.add_node("skill:target", type="skill", tags=[])    # no label
+        G.add_node("skill:seed", type="skill", tags=[])  # no label
+        G.add_node("skill:target", type="skill", tags=[])  # no label
         G.add_edge("skill:seed", "skill:target", weight=1.0, shared_tags=[])
         results = resolve_graph.resolve_by_seeds(G, ["seed"], max_hops=1)
         assert results[0]["name"] == "target"
@@ -903,11 +924,14 @@ class TestResolveBySeeds:
         results = resolve_graph.resolve_by_seeds(G, ["fastapi", "github"], max_hops=1)
         assert len(results) > 0
 
-    @pytest.mark.parametrize("seeds,expected_empty", [
-        ([], True),
-        (["does-not-exist"], True),
-        (["A"], False),
-    ])
+    @pytest.mark.parametrize(
+        "seeds,expected_empty",
+        [
+            ([], True),
+            (["does-not-exist"], True),
+            (["A"], False),
+        ],
+    )
     def test_seeds_parametrized(self, seeds: list[str], expected_empty: bool) -> None:
         G = _build_simple_graph()
         results = resolve_graph.resolve_by_seeds(G, seeds)
@@ -1010,11 +1034,14 @@ class TestResolveByTags:
         results = resolve_graph.resolve_by_tags(G, ["python"])
         assert results[0]["name"] == "nolabel"
 
-    @pytest.mark.parametrize("tags,min_results", [
-        (["python"], 2),    # both A and B have python tag in _build_simple_graph
-        (["api"], 2),       # A and C have api tag
-        (["docker"], 1),    # only B and C have docker, both should appear
-    ])
+    @pytest.mark.parametrize(
+        "tags,min_results",
+        [
+            (["python"], 2),  # both A and B have python tag in _build_simple_graph
+            (["api"], 2),  # A and C have api tag
+            (["docker"], 1),  # only B and C have docker, both should appear
+        ],
+    )
     def test_parametrized_tag_counts(self, tags: list[str], min_results: int) -> None:
         G = _build_simple_graph()
         results = resolve_graph.resolve_by_tags(G, tags)
@@ -1034,14 +1061,18 @@ def _graph_file(tmp_path: Path, G: nx.Graph | None = None) -> Path:
 
 
 class TestMainCLI:
-    def test_no_args_exits_1(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    def test_no_args_exits_1(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
         """No --matched and no --tags should print help and exit 1."""
         monkeypatch.setattr(sys, "argv", ["resolve_graph"])
         with pytest.raises(SystemExit) as exc:
             resolve_graph.main()
         assert exc.value.code == 1
 
-    def test_matched_flag_runs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    def test_matched_flag_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
         p = _graph_file(tmp_path)
         monkeypatch.setattr(resolve_graph, "GRAPH_PATH", p)
         monkeypatch.setattr(sys, "argv", ["resolve_graph", "--matched", "A"])
@@ -1049,7 +1080,9 @@ class TestMainCLI:
         out = capsys.readouterr().out
         assert "graph-walk" in out
 
-    def test_tags_flag_runs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    def test_tags_flag_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
         p = _graph_file(tmp_path)
         monkeypatch.setattr(resolve_graph, "GRAPH_PATH", p)
         monkeypatch.setattr(sys, "argv", ["resolve_graph", "--tags", "python"])
@@ -1057,7 +1090,9 @@ class TestMainCLI:
         out = capsys.readouterr().out
         assert "tag-search" in out
 
-    def test_json_flag_outputs_valid_json(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    def test_json_flag_outputs_valid_json(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
         p = _graph_file(tmp_path)
         monkeypatch.setattr(resolve_graph, "GRAPH_PATH", p)
         monkeypatch.setattr(sys, "argv", ["resolve_graph", "--matched", "A", "--json"])
@@ -1068,7 +1103,9 @@ class TestMainCLI:
         assert "results" in parsed
         assert parsed["mode"] == "graph-walk"
 
-    def test_json_flag_tags_mode(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    def test_json_flag_tags_mode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
         p = _graph_file(tmp_path)
         monkeypatch.setattr(resolve_graph, "GRAPH_PATH", p)
         monkeypatch.setattr(sys, "argv", ["resolve_graph", "--tags", "python", "--json"])
@@ -1077,7 +1114,9 @@ class TestMainCLI:
         parsed = json.loads(out)
         assert parsed["mode"] == "tag-search"
 
-    def test_missing_graph_json_exits_1(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_missing_graph_json_exits_1(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         absent = tmp_path / "graph.json"
         monkeypatch.setattr(resolve_graph, "GRAPH_PATH", absent)
         monkeypatch.setattr(sys, "argv", ["resolve_graph", "--matched", "A"])
@@ -1085,7 +1124,9 @@ class TestMainCLI:
             resolve_graph.main()
         assert exc.value.code == 1
 
-    def test_top_flag_is_respected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    def test_top_flag_is_respected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
         """--top 1 should produce at most 1 result line."""
         G = nx.Graph()
         G.add_node("skill:seed", type="skill", label="seed", tags=[])
@@ -1094,13 +1135,17 @@ class TestMainCLI:
             G.add_edge("skill:seed", f"skill:n{i}", weight=float(i + 1), shared_tags=[])
         p = _graph_file(tmp_path, G)
         monkeypatch.setattr(resolve_graph, "GRAPH_PATH", p)
-        monkeypatch.setattr(sys, "argv", ["resolve_graph", "--matched", "seed", "--top", "1", "--json"])
+        monkeypatch.setattr(
+            sys, "argv", ["resolve_graph", "--matched", "seed", "--top", "1", "--json"]
+        )
         resolve_graph.main()
         out = capsys.readouterr().out
         parsed = json.loads(out)
         assert len(parsed["results"]) <= 1
 
-    def test_hops_flag_is_respected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    def test_hops_flag_is_respected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
         """--hops 1 should not reach 2-hop-only nodes."""
         G = nx.Graph()
         G.add_node("skill:A", type="skill", label="A", tags=[])
@@ -1110,14 +1155,18 @@ class TestMainCLI:
         G.add_edge("skill:B", "skill:C", weight=1.0, shared_tags=[])
         p = _graph_file(tmp_path, G)
         monkeypatch.setattr(resolve_graph, "GRAPH_PATH", p)
-        monkeypatch.setattr(sys, "argv", ["resolve_graph", "--matched", "A", "--hops", "1", "--json"])
+        monkeypatch.setattr(
+            sys, "argv", ["resolve_graph", "--matched", "A", "--hops", "1", "--json"]
+        )
         resolve_graph.main()
         out = capsys.readouterr().out
         parsed = json.loads(out)
         names = [r["name"] for r in parsed["results"]]
         assert "C" not in names
 
-    def test_multi_seed_comma_separated(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    def test_multi_seed_comma_separated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
         p = _graph_file(tmp_path)
         monkeypatch.setattr(resolve_graph, "GRAPH_PATH", p)
         monkeypatch.setattr(sys, "argv", ["resolve_graph", "--matched", "A,B", "--json"])
@@ -1126,7 +1175,9 @@ class TestMainCLI:
         parsed = json.loads(out)
         assert isinstance(parsed["results"], list)
 
-    def test_multi_tag_comma_separated(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    def test_multi_tag_comma_separated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
         p = _graph_file(tmp_path)
         monkeypatch.setattr(resolve_graph, "GRAPH_PATH", p)
         monkeypatch.setattr(sys, "argv", ["resolve_graph", "--tags", "python,docker", "--json"])

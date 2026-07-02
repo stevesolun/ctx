@@ -39,9 +39,7 @@ def make_hooks(ctx_dir: str) -> dict:
     # Tool input is delivered by Claude Code on stdin as JSON; --from-stdin reads it
     # from there instead of interpolating $CLAUDE_TOOL_INPUT into argv (which would
     # allow shell injection via malicious tool-input blobs).
-    monitor_cmd = _module_cmd(
-        "ctx.adapters.claude_code.hooks.context_monitor", "--from-stdin"
-    )
+    monitor_cmd = _module_cmd("ctx.adapters.claude_code.hooks.context_monitor", "--from-stdin")
     tracker_cmd = _module_cmd("usage_tracker", "--sync")
     quality_cmd = _module_cmd(
         "ctx.adapters.claude_code.hooks.lifecycle_hooks",
@@ -136,8 +134,11 @@ def _remove_stale_hooks(settings: dict) -> dict:
                 if any(pat in cmd for pat in _STALE_PATTERNS):
                     continue
                 if sub_hooks:
-                    sub_hooks = [h for h in sub_hooks
-                                 if not any(pat in h.get("command", "") for pat in _STALE_PATTERNS)]
+                    sub_hooks = [
+                        h
+                        for h in sub_hooks
+                        if not any(pat in h.get("command", "") for pat in _STALE_PATTERNS)
+                    ]
                     if not sub_hooks:
                         continue
                     entry["hooks"] = sub_hooks
@@ -175,7 +176,8 @@ def merge_hooks(existing: dict, new_hooks: dict) -> dict:
 
                 if isinstance(new_hooks_list, list) and new_hooks_list:
                     missing_hooks = [
-                        hook for hook in new_hooks_list
+                        hook
+                        for hook in new_hooks_list
                         if isinstance(hook, dict)
                         and hook.get("command")
                         and hook.get("command") not in existing_commands
@@ -185,7 +187,8 @@ def merge_hooks(existing: dict, new_hooks: dict) -> dict:
                     matcher = new_entry.get("matcher")
                     target_entry = next(
                         (
-                            entry for entry in existing_list
+                            entry
+                            for entry in existing_list
                             if isinstance(entry, dict)
                             and entry.get("matcher") == matcher
                             and isinstance(entry.get("hooks"), list)
@@ -199,7 +202,8 @@ def merge_hooks(existing: dict, new_hooks: dict) -> dict:
                         entry["hooks"] = missing_hooks
                         existing_list.append(entry)
                     existing_commands.update(
-                        hook["command"] for hook in missing_hooks
+                        hook["command"]
+                        for hook in missing_hooks
                         if isinstance(hook.get("command"), str)
                     )
                     continue

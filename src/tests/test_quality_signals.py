@@ -399,9 +399,7 @@ class TestIntakeSignalEdges:
             (6, 1.0),
         ],
     )
-    def test_score_equals_passed_over_total(
-        self, passed_count: int, expected_score: float
-    ) -> None:
+    def test_score_equals_passed_over_total(self, passed_count: int, expected_score: float) -> None:
         """Score is always passed/6; verify each count individually."""
         # Build bodies/frontmatter so exactly `passed_count` checks pass.
         # Checks in order: has_frontmatter, has_name, has_description, has_h1, has_h2, body_long_enough
@@ -468,7 +466,7 @@ class TestGraphSignalEdges:
         scores = [qs.graph_signal(degree=d).score for d in degrees]
         for i in range(len(scores) - 1):
             assert scores[i] <= scores[i + 1], (
-                f"score[{degrees[i]}]={scores[i]} > score[{degrees[i+1]}]={scores[i+1]}"
+                f"score[{degrees[i]}]={scores[i]} > score[{degrees[i + 1]}]={scores[i + 1]}"
             )
 
     def test_degree_above_saturation_clamped_to_one(self) -> None:
@@ -540,9 +538,7 @@ class TestRoutingSignalEdges:
 
     def test_zero_hits_from_sufficient_observations(self) -> None:
         """Zero picks out of enough considered yields score=0."""
-        r = qs.routing_signal(
-            considered=qs._ROUTING_MIN_OBSERVATIONS + 2, picked=0
-        )
+        r = qs.routing_signal(considered=qs._ROUTING_MIN_OBSERVATIONS + 2, picked=0)
         assert r.score == pytest.approx(0.0)
         assert r.evidence["hit_rate"] == pytest.approx(0.0)
 

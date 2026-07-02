@@ -121,7 +121,9 @@ class LiteLLMProvider:
 
         raw = litellm.completion(**params)
         return _normalise_response(
-            raw, provider=self.name, model=effective_model,
+            raw,
+            provider=self.name,
+            model=effective_model,
         )
 
 
@@ -173,7 +175,10 @@ def _tool_def_to_litellm(tool: ToolDefinition) -> dict[str, Any]:
 
 
 def _normalise_response(
-    raw: Any, *, provider: str, model: str,
+    raw: Any,
+    *,
+    provider: str,
+    model: str,
 ) -> CompletionResponse:
     """Convert a LiteLLM response object into ``CompletionResponse``.
 
@@ -277,12 +282,12 @@ def _extract_usage(raw_dict: dict[str, Any]) -> Usage:
 
 _FINISH_ALIASES: dict[str, FinishReason] = {
     "stop": "stop",
-    "end_turn": "stop",           # Anthropic
-    "function_call": "tool_calls", # OpenAI legacy
+    "end_turn": "stop",  # Anthropic
+    "function_call": "tool_calls",  # OpenAI legacy
     "tool_calls": "tool_calls",
-    "tool_use": "tool_calls",     # Anthropic
+    "tool_use": "tool_calls",  # Anthropic
     "length": "length",
-    "max_tokens": "length",       # Anthropic
+    "max_tokens": "length",  # Anthropic
     "content_filter": "content_filter",
 }
 

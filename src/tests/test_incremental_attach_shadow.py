@@ -129,14 +129,21 @@ def test_shadow_cli_returns_nonzero_when_gate_fails(tmp_path: Path, capsys) -> N
 
     graph_path.write_text(json.dumps(node_link_data(graph, edges="edges")), encoding="utf-8")
 
-    rc = main([
-        "--index-dir", str(index_dir),
-        "--graph", str(graph_path),
-        "--node", "skill:alpha",
-        "--top-k", "1",
-        "--min-score", "0.95",
-        "--json",
-    ])
+    rc = main(
+        [
+            "--index-dir",
+            str(index_dir),
+            "--graph",
+            str(graph_path),
+            "--node",
+            "skill:alpha",
+            "--top-k",
+            "1",
+            "--min-score",
+            "0.95",
+            "--json",
+        ]
+    )
 
     assert rc == 2
     assert '"gate_passed": false' in capsys.readouterr().out
@@ -163,14 +170,21 @@ def test_shadow_cli_accepts_pack_only_graph_dir(tmp_path: Path, capsys) -> None:
         graph=graph,
     )
 
-    rc = main([
-        "--index-dir", str(index_dir),
-        "--graph-dir", str(graph_dir),
-        "--node", "skill:alpha",
-        "--top-k", "1",
-        "--min-score", "0.5",
-        "--json",
-    ])
+    rc = main(
+        [
+            "--index-dir",
+            str(index_dir),
+            "--graph-dir",
+            str(graph_dir),
+            "--node",
+            "skill:alpha",
+            "--top-k",
+            "1",
+            "--min-score",
+            "0.5",
+            "--json",
+        ]
+    )
 
     assert rc == 0
     output = capsys.readouterr().out
@@ -225,8 +239,7 @@ def _write_entity(path: Path, slug: str, tags: list[str]) -> None:
 def _node_snapshot(G: nx.Graph) -> dict[str, dict[str, Any]]:
     keys = {"label", "type", "tags", "never_load"}
     return {
-        node_id: {key: G.nodes[node_id].get(key) for key in keys}
-        for node_id in sorted(G.nodes)
+        node_id: {key: G.nodes[node_id].get(key) for key in keys} for node_id in sorted(G.nodes)
     }
 
 

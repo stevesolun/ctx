@@ -29,10 +29,7 @@ def reset_caches() -> None:
 
 def sidecar_entity_type(sidecar: dict, fallback: str = "skill") -> str:
     raw = str(
-        sidecar.get("entity_type")
-        or sidecar.get("subject_type")
-        or sidecar.get("type")
-        or fallback
+        sidecar.get("entity_type") or sidecar.get("subject_type") or sidecar.get("type") or fallback
     )
     return {
         "skills": "skill",
@@ -142,9 +139,9 @@ def sidecar_files(sidecar_dir: Path) -> list[Path]:
         if not root.is_dir():
             continue
         files.extend(
-            p for p in sorted(root.glob("*.json"))
-            if not p.name.startswith(".")
-            and not p.name.endswith(".lifecycle.json")
+            p
+            for p in sorted(root.glob("*.json"))
+            if not p.name.startswith(".") and not p.name.endswith(".lifecycle.json")
         )
     return files
 
@@ -206,11 +203,7 @@ def skills_page_int(
 
 
 def skills_query_values(raw: str | None, allowed: set[str]) -> set[str]:
-    values = {
-        item.strip()
-        for item in str(raw or "").split(",")
-        if item.strip()
-    }
+    values = {item.strip() for item in str(raw or "").split(",") if item.strip()}
     return {item for item in values if item in allowed}
 
 
@@ -247,11 +240,13 @@ def sidecar_filter_signature(
             stat = path.stat()
         except OSError:
             continue
-        signature.append((
-            str(path.resolve()),
-            int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
-            int(stat.st_size),
-        ))
+        signature.append(
+            (
+                str(path.resolve()),
+                int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
+                int(stat.st_size),
+            )
+        )
     if signature:
         return tuple(signature)
     roots = (sidecar_dir, sidecar_dir / "mcp")
@@ -260,11 +255,13 @@ def sidecar_filter_signature(
             signature.append((str(root.resolve()), 0, 0))
             continue
         stat = root.stat()
-        signature.append((
-            str(root.resolve()),
-            int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
-            0,
-        ))
+        signature.append(
+            (
+                str(root.resolve()),
+                int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))),
+                0,
+            )
+        )
     return tuple(signature)
 
 
@@ -275,10 +272,7 @@ def sidecar_candidate_files(
     types: set[str],
 ) -> list[Path]:
     q_lower = q.lower()
-    candidates = [
-        path for path in files
-        if not q_lower or q_lower in path.stem.lower()
-    ]
+    candidates = [path for path in files if not q_lower or q_lower in path.stem.lower()]
     if not types:
         return candidates
     if types == {"mcp-server"}:
@@ -377,7 +371,10 @@ def sidecar_page_payload(
     types = skills_query_values(qs.get("type"), set(entity_types))
     grades = skills_query_values(qs.get("grade"), {"A", "B", "C", "D", "F"})
     hide_floor = str(qs.get("hide_floor") or "").strip().lower() in {
-        "1", "true", "yes", "on",
+        "1",
+        "true",
+        "yes",
+        "on",
     }
 
     files = sidecar_files(sidecar_dir)
@@ -394,15 +391,13 @@ def sidecar_page_payload(
         )
         total = len(sidecars)
         start = (page - 1) * limit
-        page_sidecars = sidecars[start:start + limit]
+        page_sidecars = sidecars[start : start + limit]
     else:
         total = catalog_total
         start = (page - 1) * limit
-        selected_files = files[start:start + limit]
+        selected_files = files[start : start + limit]
         page_sidecars = [
-            sidecar
-            for path in selected_files
-            if (sidecar := read_sidecar_file(path)) is not None
+            sidecar for path in selected_files if (sidecar := read_sidecar_file(path)) is not None
         ]
         if catalog_total <= limit:
             page_sidecars.sort(key=sidecar_sort_key)

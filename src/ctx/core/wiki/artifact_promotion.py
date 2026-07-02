@@ -44,10 +44,7 @@ def promote_staged_artifact(
     """
     staged = Path(staged_path)
     target = Path(target_path)
-    metadata = (
-        Path(metadata_path) if metadata_path is not None
-        else _default_metadata_path(target)
-    )
+    metadata = Path(metadata_path) if metadata_path is not None else _default_metadata_path(target)
     if not staged.is_file():
         recovered = _recover_completed_promotion(
             target=target,

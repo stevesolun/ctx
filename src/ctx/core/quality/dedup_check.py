@@ -65,27 +65,30 @@ DEDUP_STATE_VERSION = 1
 @dataclass(frozen=True)
 class EntityRef:
     """One indexed entity. ``node_id`` is canonicalised as ``type:slug``."""
-    node_id: str            # "skill:tdd", "agent:foo", "mcp-server:bar"
-    type: str               # "skill" | "agent" | "mcp-server"
+
+    node_id: str  # "skill:tdd", "agent:foo", "mcp-server:bar"
+    type: str  # "skill" | "agent" | "mcp-server"
     slug: str
-    path: Path              # source markdown path
-    description: str        # frontmatter description (first 250 chars)
+    path: Path  # source markdown path
+    description: str  # frontmatter description (first 250 chars)
     tags: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class DedupPair:
     """One similarity ≥ threshold pair surfaced by the gate."""
+
     a: EntityRef
     b: EntityRef
-    similarity: float       # cosine in [threshold, 1.0]
+    similarity: float  # cosine in [threshold, 1.0]
     shared_tags: tuple[str, ...]
-    reason: str = ""        # "auto: above threshold" | "allowlisted: <reason>"
+    reason: str = ""  # "auto: above threshold" | "allowlisted: <reason>"
 
 
 @dataclass
 class DedupReport:
     """Aggregate output of one run."""
+
     threshold: float
     model_id: str
     total_entities: int
@@ -114,7 +117,8 @@ def load_allowlist(path: Path) -> set[tuple[str, str]]:
         parts = line.split()
         if len(parts) < 2:
             _logger.warning(
-                "dedup-allowlist: ignoring malformed line %r", raw,
+                "dedup-allowlist: ignoring malformed line %r",
+                raw,
             )
             continue
         a, b = sorted((parts[0].strip(), parts[1].strip()))
@@ -128,11 +132,12 @@ def load_allowlist(path: Path) -> set[tuple[str, str]]:
 @dataclass
 class DedupState:
     """On-disk state for incremental runs."""
+
     version: int
     model_id: str
     threshold: float
     entity_hashes: dict[str, str]  # node_id -> sha256(text)
-    last_findings: list[dict]      # serialised DedupPair list
+    last_findings: list[dict]  # serialised DedupPair list
 
     @classmethod
     def empty(cls, *, model_id: str, threshold: float) -> "DedupState":
@@ -278,14 +283,16 @@ def discover_entities(wiki_dir: Path) -> list[EntityRef]:
             if not isinstance(tags, list):
                 tags = []
             tags_t = tuple(str(t) for t in tags if t)
-            entities.append(EntityRef(
-                node_id=f"{entity_type}:{slug}",
-                type=entity_type,
-                slug=slug,
-                path=path,
-                description=desc,
-                tags=tags_t,
-            ))
+            entities.append(
+                EntityRef(
+                    node_id=f"{entity_type}:{slug}",
+                    type=entity_type,
+                    slug=slug,
+                    path=path,
+                    description=desc,
+                    tags=tags_t,
+                )
+            )
     entities.sort(key=lambda e: e.node_id)
     return entities
 
@@ -301,12 +308,14 @@ def _discover_pack_entities(wiki_dir: Path) -> list[EntityRef] | None:
             continue
         entity_type, slug = parsed
         fm = _frontmatter_from_text(text)
-        entities.append(_entity_ref_from_frontmatter(
-            entity_type=entity_type,
-            slug=slug,
-            path=wiki_dir / relpath,
-            fm=fm,
-        ))
+        entities.append(
+            _entity_ref_from_frontmatter(
+                entity_type=entity_type,
+                slug=slug,
+                path=wiki_dir / relpath,
+                fm=fm,
+            )
+        )
     entities.sort(key=lambda e: e.node_id)
     return entities
 
@@ -393,17 +402,12 @@ def load_vectors(
         raise RuntimeError(f"Malformed topk-state.json at {state_path}")
 
     data = np.load(npz_path, allow_pickle=False)
-    hashes = [
-        h.decode("utf-8") if isinstance(h, bytes) else str(h)
-        for h in data["hashes"]
-    ]
+    hashes = [h.decode("utf-8") if isinstance(h, bytes) else str(h) for h in data["hashes"]]
     vecs = data["vecs"]
     model_arr = data["model"] if "model" in data.files else None
     model_id = ""
     if model_arr is not None and model_arr.size:
-        model_id = (
-            str(model_arr.item()) if model_arr.ndim == 0 else str(model_arr[0])
-        )
+        model_id = str(model_arr.item()) if model_arr.ndim == 0 else str(model_arr[0])
 
     hash_to_idx = {h: i for i, h in enumerate(hashes)}
 
@@ -534,8 +538,7 @@ def run_dedup_check(
 
     if incremental and state.entity_hashes:
         unchanged_ids = {
-            nid for nid, h in current_hashes.items()
-            if state.entity_hashes.get(nid) == h
+            nid for nid, h in current_hashes.items() if state.entity_hashes.get(nid) == h
         }
     else:
         unchanged_ids = set()
@@ -548,27 +551,36 @@ def run_dedup_check(
             a_id = raw.get("a")
             b_id = raw.get("b")
             sim = raw.get("similarity")
-            if (a_id in unchanged_ids and b_id in unchanged_ids
-                    and a_id in matched_by_id and b_id in matched_by_id
-                    and isinstance(sim, (int, float))
-                    and sim >= threshold):
+            if (
+                a_id in unchanged_ids
+                and b_id in unchanged_ids
+                and a_id in matched_by_id
+                and b_id in matched_by_id
+                and isinstance(sim, (int, float))
+                and sim >= threshold
+            ):
                 a = matched_by_id[a_id]
                 b = matched_by_id[b_id]
                 shared = tuple(sorted(set(a.tags) & set(b.tags)))
-                carried.append(DedupPair(
-                    a=a, b=b, similarity=float(sim), shared_tags=shared,
-                ))
+                carried.append(
+                    DedupPair(
+                        a=a,
+                        b=b,
+                        similarity=float(sim),
+                        shared_tags=shared,
+                    )
+                )
 
     # Compute fresh pairs only for entities that changed or are new.
     # If incremental is off (or there's no usable state), the changed
     # set is "everyone" and we run the full pass — same as before.
     if incremental and unchanged_ids and len(unchanged_ids) < len(matched):
-        changed_indices = [
-            i for i, e in enumerate(matched)
-            if e.node_id not in unchanged_ids
-        ]
+        changed_indices = [i for i, e in enumerate(matched) if e.node_id not in unchanged_ids]
         raw_pairs = _find_pairs_for_changed(
-            matched, vecs, changed_indices, threshold=threshold,
+            matched,
+            vecs,
+            changed_indices,
+            threshold=threshold,
         )
         skipped_unchanged_pair_count = (
             len(matched) * (len(matched) - 1) // 2
@@ -590,7 +602,10 @@ def run_dedup_check(
         slug_pair = tuple(sorted([a.slug, b.slug]))
         shared = tuple(sorted(set(a.tags) & set(b.tags)))
         pair = DedupPair(
-            a=a, b=b, similarity=score, shared_tags=shared,
+            a=a,
+            b=b,
+            similarity=score,
+            shared_tags=shared,
         )
         if slug_pair in allowlist:
             allowlisted.append(pair)
@@ -617,8 +632,7 @@ def run_dedup_check(
         threshold=threshold,
         entity_hashes=current_hashes,
         last_findings=[
-            {"a": p.a.node_id, "b": p.b.node_id, "similarity": p.similarity}
-            for p in findings
+            {"a": p.a.node_id, "b": p.b.node_id, "similarity": p.similarity} for p in findings
         ],
     )
     try:
@@ -660,7 +674,7 @@ def _find_pairs_for_changed(
     out_seen: set[tuple[int, int]] = set()
     out: list[tuple[int, int, float]] = []
     for chunk_start in range(0, len(changed_indices), chunk_size):
-        chunk_idx = changed_indices[chunk_start: chunk_start + chunk_size]
+        chunk_idx = changed_indices[chunk_start : chunk_start + chunk_size]
         chunk = vecs[chunk_idx]
         sims = chunk @ vecs.T
         for local_i, abs_i in enumerate(chunk_idx):
@@ -716,17 +730,18 @@ def render_markdown(report: DedupReport, *, top_n: int = 100) -> str:
                 b["0.90-0.95"] += 1
             else:
                 b["0.85-0.90"] += 1
-        out.append("- **By similarity bucket**: " + ", ".join(
-            f"{k} → {v:,}" for k, v in b.items() if v
-        ))
+        out.append(
+            "- **By similarity bucket**: " + ", ".join(f"{k} → {v:,}" for k, v in b.items() if v)
+        )
         # Type-pair distribution
         tp: dict[str, int] = {}
         for p in report.findings:
             key = " ↔ ".join(sorted([p.a.type, p.b.type]))
             tp[key] = tp.get(key, 0) + 1
-        out.append("- **By type pair**: " + ", ".join(
-            f"{k} → {v:,}" for k, v in sorted(tp.items(), key=lambda x: -x[1])
-        ))
+        out.append(
+            "- **By type pair**: "
+            + ", ".join(f"{k} → {v:,}" for k, v in sorted(tp.items(), key=lambda x: -x[1]))
+        )
     out.append("")
     if not report.findings:
         out.append("✓ No actionable findings. Catalog is clean at this threshold.")
@@ -777,9 +792,11 @@ def render_json(report: DedupReport) -> str:
         "pairs_evaluated": report.pairs_evaluated,
         "findings": [
             {
-                "a": p.a.node_id, "b": p.b.node_id,
+                "a": p.a.node_id,
+                "b": p.b.node_id,
                 "similarity": p.similarity,
-                "a_type": p.a.type, "b_type": p.b.type,
+                "a_type": p.a.type,
+                "b_type": p.b.type,
                 "shared_tags": list(p.shared_tags),
                 "a_path": str(p.a.path),
                 "b_path": str(p.b.path),
@@ -802,38 +819,50 @@ def main(argv: Iterable[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--threshold", type=float, default=0.85,
+        "--threshold",
+        type=float,
+        default=0.85,
         help="Cosine similarity threshold in (0, 1) (default: 0.85)",
     )
     parser.add_argument(
-        "--wiki", type=Path,
+        "--wiki",
+        type=Path,
         default=Path.home() / ".claude" / "skill-wiki",
         help="Wiki directory (default: ~/.claude/skill-wiki)",
     )
     parser.add_argument(
-        "--cache", type=Path,
+        "--cache",
+        type=Path,
         default=None,
         help="Embedding cache dir (default: <wiki>/.embedding-cache/graph)",
     )
     parser.add_argument(
-        "--report", type=Path, default=Path("graph") / "dedup-report.md",
+        "--report",
+        type=Path,
+        default=Path("graph") / "dedup-report.md",
         help="Markdown report output path (default: graph/dedup-report.md)",
     )
     parser.add_argument(
-        "--report-json", type=Path, default=Path("graph") / "dedup-report.json",
+        "--report-json",
+        type=Path,
+        default=Path("graph") / "dedup-report.json",
         help="JSON report output path (default: graph/dedup-report.json)",
     )
     parser.add_argument(
-        "--allowlist", type=Path,
+        "--allowlist",
+        type=Path,
         default=Path(".dedup-allowlist.txt"),
         help="Allowlist file (default: ./.dedup-allowlist.txt)",
     )
     parser.add_argument(
-        "--exit-on-findings", action="store_true",
+        "--exit-on-findings",
+        action="store_true",
         help="Exit with non-zero if any actionable findings exist (CI gate).",
     )
     parser.add_argument(
-        "--full", dest="incremental", action="store_false",
+        "--full",
+        dest="incremental",
+        action="store_false",
         help=(
             "Force full pairwise re-check (ignore prior dedup-state). "
             "Use after large catalog changes or when changing what counts "
@@ -866,8 +895,12 @@ def main(argv: Iterable[str] | None = None) -> int:
     # the artifact stays git-friendly while still being machine-readable.
     if args.report_json.suffix == ".gz" or len(json_text) > 1 * 1024 * 1024:
         import gzip  # noqa: PLC0415
-        gz_path = args.report_json if args.report_json.suffix == ".gz" \
+
+        gz_path = (
+            args.report_json
+            if args.report_json.suffix == ".gz"
             else args.report_json.with_suffix(args.report_json.suffix + ".gz")
+        )
         with gzip.open(gz_path, "wt", encoding="utf-8") as f:
             f.write(json_text)
         if gz_path != args.report_json and args.report_json.exists():

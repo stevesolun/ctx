@@ -140,33 +140,27 @@ def build_skillspector_audit_payload(
     all_rows.sort(key=_row_sort_key)
 
     filtered = [
-        row for row in all_rows
+        row
+        for row in all_rows
         if _row_matches(row, query=query, status=status, severity=severity, tag=tag, family=family)
     ]
     capped_limit = max(1, min(int(limit), 500))
     status_counts = Counter(str(row["status"]) for row in all_rows)
     severity_counts = Counter(str(row["risk_severity"]) for row in all_rows)
-    tag_counts = Counter(
-        tag_value
-        for row in all_rows
-        for tag_value in row.get("tags", [])
-    )
-    family_counts = Counter(
-        str(row["family"])
-        for row in all_rows
-        if row.get("family")
-    )
+    tag_counts = Counter(tag_value for row in all_rows for tag_value in row.get("tags", []))
+    family_counts = Counter(str(row["family"]) for row in all_rows if row.get("family"))
     return {
         "summary": {
             "total": len(all_rows),
             "visible": len(filtered),
             "returned": min(len(filtered), capped_limit),
             "problematic": sum(
-                count for status_name, count in status_counts.items()
-                if status_name != "passed"
+                count for status_name, count in status_counts.items() if status_name != "passed"
             ),
             "statuses": dict(sorted(status_counts.items(), key=lambda item: _status_rank(item[0]))),
-            "severities": dict(sorted(severity_counts.items(), key=lambda item: _severity_rank(item[0]))),
+            "severities": dict(
+                sorted(severity_counts.items(), key=lambda item: _severity_rank(item[0]))
+            ),
         },
         "filters": {
             "query": query,
@@ -230,7 +224,11 @@ def _row_matches(
     if status_filter and status_filter != "all" and str(row["status"]).lower() != status_filter:
         return False
     severity_filter = severity.strip().upper()
-    if severity_filter and severity_filter != "ALL" and str(row["risk_severity"]).upper() != severity_filter:
+    if (
+        severity_filter
+        and severity_filter != "ALL"
+        and str(row["risk_severity"]).upper() != severity_filter
+    ):
         return False
     tag_filter = tag.strip().lower()
     if tag_filter:
@@ -248,18 +246,20 @@ def _row_matches(
     terms = [term for term in re.split(r"\s+", query.lower().strip()) if term]
     if not terms:
         return True
-    haystack = " ".join([
-        str(row.get("slug") or ""),
-        str(row.get("title") or ""),
-        str(row.get("description") or ""),
-        str(row.get("family") or ""),
-        str(row.get("status") or ""),
-        str(row.get("risk_severity") or ""),
-        str(row.get("recommendation") or ""),
-        str(row.get("error") or ""),
-        " ".join(str(tag_value) for tag_value in row.get("tags", [])),
-        " ".join(str(rule) for rule in row.get("issue_rules", [])),
-    ]).lower()
+    haystack = " ".join(
+        [
+            str(row.get("slug") or ""),
+            str(row.get("title") or ""),
+            str(row.get("description") or ""),
+            str(row.get("family") or ""),
+            str(row.get("status") or ""),
+            str(row.get("risk_severity") or ""),
+            str(row.get("recommendation") or ""),
+            str(row.get("error") or ""),
+            " ".join(str(tag_value) for tag_value in row.get("tags", [])),
+            " ".join(str(rule) for rule in row.get("issue_rules", [])),
+        ]
+    ).lower()
     return all(term in haystack for term in terms)
 
 

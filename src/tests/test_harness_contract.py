@@ -93,40 +93,44 @@ def _resp(content: str) -> CompletionResponse:
     )
 
 
-_VALID_CONTRACT_JSON = json.dumps({
-    "summary": "Ensure input validation on the submit endpoint.",
-    "criteria": [
-        {
-            "name": "empty-input-returns-422",
-            "description": "Empty input must not silently succeed.",
-            "pass_condition": "POST with empty body returns HTTP 422.",
-            "fail_condition": "POST with empty body returns anything other than 422.",
-        },
-        {
-            "name": "latency-under-200ms",
-            "description": "Happy path must stay under 200ms p95.",
-            "pass_condition": "p95 latency is under 200ms over 100 requests.",
-            "fail_condition": "p95 latency exceeds 200ms.",
-            "metric": "p95_latency_ms",
-            "threshold": "< 200",
-        },
-    ],
-    "scope_in": ["POST /submit handler", "input validation layer"],
-    "scope_out": ["frontend forms", "unrelated endpoints"],
-    "approach": "Add a Pydantic validator at the entrypoint.",
-})
+_VALID_CONTRACT_JSON = json.dumps(
+    {
+        "summary": "Ensure input validation on the submit endpoint.",
+        "criteria": [
+            {
+                "name": "empty-input-returns-422",
+                "description": "Empty input must not silently succeed.",
+                "pass_condition": "POST with empty body returns HTTP 422.",
+                "fail_condition": "POST with empty body returns anything other than 422.",
+            },
+            {
+                "name": "latency-under-200ms",
+                "description": "Happy path must stay under 200ms p95.",
+                "pass_condition": "p95 latency is under 200ms over 100 requests.",
+                "fail_condition": "p95 latency exceeds 200ms.",
+                "metric": "p95_latency_ms",
+                "threshold": "< 200",
+            },
+        ],
+        "scope_in": ["POST /submit handler", "input validation layer"],
+        "scope_out": ["frontend forms", "unrelated endpoints"],
+        "approach": "Add a Pydantic validator at the entrypoint.",
+    }
+)
 
 
-_VALID_PLAN_JSON = json.dumps({
-    "summary": "Add validation to /submit",
-    "success_criteria": [
-        "Empty input should be rejected",
-        "Latency should stay reasonable",
-    ],
-    "approach": "Add a validator",
-    "out_of_scope": [],
-    "risks": [],
-})
+_VALID_PLAN_JSON = json.dumps(
+    {
+        "summary": "Add validation to /submit",
+        "success_criteria": [
+            "Empty input should be rejected",
+            "Latency should stay reasonable",
+        ],
+        "approach": "Add a validator",
+        "out_of_scope": [],
+        "risks": [],
+    }
+)
 
 
 # ── ContractCriterion ──────────────────────────────────────────────────────
@@ -135,14 +139,18 @@ _VALID_PLAN_JSON = json.dumps({
 class TestContractCriterion:
     def test_frozen(self) -> None:
         c = ContractCriterion(
-            name="n", description="d", pass_condition="p",
+            name="n",
+            description="d",
+            pass_condition="p",
         )
         with pytest.raises(Exception):
             c.name = "m"  # type: ignore[misc]
 
     def test_defaults(self) -> None:
         c = ContractCriterion(
-            name="n", description="d", pass_condition="p",
+            name="n",
+            description="d",
+            pass_condition="p",
         )
         assert c.fail_condition == ""
         assert c.metric == ""
@@ -150,13 +158,16 @@ class TestContractCriterion:
 
     def test_as_evaluator_criterion_basic(self) -> None:
         c = ContractCriterion(
-            name="x", description="d", pass_condition="returns 422",
+            name="x",
+            description="d",
+            pass_condition="returns 422",
         )
         assert c.as_evaluator_criterion() == "returns 422"
 
     def test_as_evaluator_criterion_with_metric(self) -> None:
         c = ContractCriterion(
-            name="x", description="d",
+            name="x",
+            description="d",
             pass_condition="p95 fast enough",
             metric="p95_latency_ms",
         )
@@ -166,7 +177,8 @@ class TestContractCriterion:
 
     def test_as_evaluator_criterion_with_threshold(self) -> None:
         c = ContractCriterion(
-            name="x", description="d",
+            name="x",
+            description="d",
             pass_condition="fast",
             metric="latency",
             threshold="< 200",
@@ -178,7 +190,9 @@ class TestContractCriterion:
     def test_as_evaluator_criterion_falls_back_to_description(self) -> None:
         # Empty pass_condition → use description.
         c = ContractCriterion(
-            name="x", description="desc-text", pass_condition="",
+            name="x",
+            description="desc-text",
+            pass_condition="",
         )
         assert c.as_evaluator_criterion() == "desc-text"
 
@@ -197,12 +211,17 @@ class TestContract:
             summary="s",
             criteria=(
                 ContractCriterion(
-                    name="a", description="d1", pass_condition="p1",
+                    name="a",
+                    description="d1",
+                    pass_condition="p1",
                     fail_condition="f1",
                 ),
                 ContractCriterion(
-                    name="b", description="d2", pass_condition="p2",
-                    metric="m", threshold=">=0.8",
+                    name="b",
+                    description="d2",
+                    pass_condition="p2",
+                    metric="m",
+                    threshold=">=0.8",
                 ),
             ),
             scope_in=("in1",),
@@ -253,9 +272,14 @@ class TestContract:
 
     def test_to_markdown_empty_sections(self) -> None:
         c = Contract(
-            task="t", summary="", criteria=(),
-            scope_in=(), scope_out=(), approach="",
-            usage=Usage(), raw_json="",
+            task="t",
+            summary="",
+            criteria=(),
+            scope_in=(),
+            scope_out=(),
+            approach="",
+            usage=Usage(),
+            raw_json="",
         )
         md = c.to_markdown()
         assert "_(no summary)_" in md
@@ -306,9 +330,7 @@ class TestContractBuilder:
         )
         provider = _Scripted([_resp(_VALID_CONTRACT_JSON)])
         ContractBuilder(provider).build("task", plan=plan)
-        user_msg = next(
-            m for m in provider.calls[0]["messages"] if m.role == "user"
-        )
+        user_msg = next(m for m in provider.calls[0]["messages"] if m.role == "user")
         assert "plan-summary-marker" in user_msg.content
 
     def test_unstructured_fallback(self) -> None:
@@ -349,30 +371,39 @@ class TestParseCriteriaList:
         assert _parse_criteria_list(None) == ()
 
     def test_skips_non_dict_items(self) -> None:
-        out = _parse_criteria_list([
-            {"name": "a", "description": "d", "pass_condition": "p"},
-            "garbage",
-            42,
-        ])
+        out = _parse_criteria_list(
+            [
+                {"name": "a", "description": "d", "pass_condition": "p"},
+                "garbage",
+                42,
+            ]
+        )
         assert len(out) == 1
         assert out[0].name == "a"
 
     def test_synthesises_missing_name(self) -> None:
-        out = _parse_criteria_list([
-            {"description": "d", "pass_condition": "p"},
-            {"description": "d", "pass_condition": "p"},
-        ])
+        out = _parse_criteria_list(
+            [
+                {"description": "d", "pass_condition": "p"},
+                {"description": "d", "pass_condition": "p"},
+            ]
+        )
         assert out[0].name == "criterion-1"
         assert out[1].name == "criterion-2"
 
     def test_all_fields_preserved(self) -> None:
-        out = _parse_criteria_list([
-            {
-                "name": "n", "description": "d",
-                "pass_condition": "p", "fail_condition": "f",
-                "metric": "m", "threshold": "< 100",
-            }
-        ])
+        out = _parse_criteria_list(
+            [
+                {
+                    "name": "n",
+                    "description": "d",
+                    "pass_condition": "p",
+                    "fail_condition": "f",
+                    "metric": "m",
+                    "threshold": "< 100",
+                }
+            ]
+        )
         c = out[0]
         assert c.name == "n"
         assert c.pass_condition == "p"
@@ -405,15 +436,20 @@ class TestSafeStrTuple:
 class TestAugmentedSystemPromptWithContract:
     def test_contract_embedded(self) -> None:
         contract = Contract(
-            task="t", summary="the contract summary",
+            task="t",
+            summary="the contract summary",
             criteria=(
                 ContractCriterion(
-                    name="n", description="d",
+                    name="n",
+                    description="d",
                     pass_condition="MUST return 422",
                 ),
             ),
-            scope_in=(), scope_out=(), approach="",
-            usage=Usage(), raw_json="",
+            scope_in=(),
+            scope_out=(),
+            approach="",
+            usage=Usage(),
+            raw_json="",
         )
         out = augmented_system_prompt_with_contract("base", contract)
         assert "base" in out
@@ -429,18 +465,24 @@ class TestAugmentedSystemPromptWithContract:
 class TestRunWithContract:
     def test_contract_criteria_used_by_evaluator(self) -> None:
         # Response order: planner, contract, generator, evaluator
-        provider = _Scripted([
-            _resp(_VALID_PLAN_JSON),
-            _resp(_VALID_CONTRACT_JSON),
-            _resp("generator answer"),
-            _resp(json.dumps({
-                "verdict": "pass",
-                "overall_score": 1.0,
-                "criteria": [],
-                "summary_feedback": "good",
-                "revision_directive": "",
-            })),
-        ])
+        provider = _Scripted(
+            [
+                _resp(_VALID_PLAN_JSON),
+                _resp(_VALID_CONTRACT_JSON),
+                _resp("generator answer"),
+                _resp(
+                    json.dumps(
+                        {
+                            "verdict": "pass",
+                            "overall_score": 1.0,
+                            "criteria": [],
+                            "summary_feedback": "good",
+                            "revision_directive": "",
+                        }
+                    )
+                ),
+            ]
+        )
         outcome = run_with_evaluation(
             provider=provider,
             system_prompt="sys",
@@ -456,21 +498,28 @@ class TestRunWithContract:
         assert outcome.contract.summary.startswith("Ensure")
         # Evaluator call (4th) should see contract-derived criteria.
         evaluator_call = provider.calls[3]
-        user_content = next(
-            m.content for m in evaluator_call["messages"] if m.role == "user"
-        )
+        user_content = next(m.content for m in evaluator_call["messages"] if m.role == "user")
         assert "POST with empty body returns HTTP 422" in user_content
 
     def test_contract_prompt_injected_into_generator(self) -> None:
-        provider = _Scripted([
-            _resp(_VALID_PLAN_JSON),
-            _resp(_VALID_CONTRACT_JSON),
-            _resp("gen answer"),
-            _resp(json.dumps({
-                "verdict": "pass", "overall_score": 1.0, "criteria": [],
-                "summary_feedback": "", "revision_directive": "",
-            })),
-        ])
+        provider = _Scripted(
+            [
+                _resp(_VALID_PLAN_JSON),
+                _resp(_VALID_CONTRACT_JSON),
+                _resp("gen answer"),
+                _resp(
+                    json.dumps(
+                        {
+                            "verdict": "pass",
+                            "overall_score": 1.0,
+                            "criteria": [],
+                            "summary_feedback": "",
+                            "revision_directive": "",
+                        }
+                    )
+                ),
+            ]
+        )
         run_with_evaluation(
             provider=provider,
             system_prompt="base-prompt",
@@ -482,9 +531,7 @@ class TestRunWithContract:
         )
         # Generator call (3rd) should see contract markdown in system prompt.
         generator_call = provider.calls[2]
-        sys_content = next(
-            m.content for m in generator_call["messages"] if m.role == "system"
-        )
+        sys_content = next(m.content for m in generator_call["messages"] if m.role == "system")
         assert "# Sprint Contract" in sys_content
         assert "non-negotiable" in sys_content
         # Plan's narrative still present too (base + contract embeds).
@@ -492,15 +539,24 @@ class TestRunWithContract:
 
     def test_total_usage_includes_contract_cost(self) -> None:
         # Each response reports 10 input + 20 output → 40 total input.
-        provider = _Scripted([
-            _resp(_VALID_PLAN_JSON),        # planner
-            _resp(_VALID_CONTRACT_JSON),    # contract
-            _resp("g"),                     # generator
-            _resp(json.dumps({
-                "verdict": "pass", "overall_score": 1.0, "criteria": [],
-                "summary_feedback": "", "revision_directive": "",
-            })),                             # evaluator
-        ])
+        provider = _Scripted(
+            [
+                _resp(_VALID_PLAN_JSON),  # planner
+                _resp(_VALID_CONTRACT_JSON),  # contract
+                _resp("g"),  # generator
+                _resp(
+                    json.dumps(
+                        {
+                            "verdict": "pass",
+                            "overall_score": 1.0,
+                            "criteria": [],
+                            "summary_feedback": "",
+                            "revision_directive": "",
+                        }
+                    )
+                ),  # evaluator
+            ]
+        )
         outcome = run_with_evaluation(
             provider=provider,
             system_prompt="s",
@@ -515,14 +571,23 @@ class TestRunWithContract:
 
     def test_contract_without_planner_also_works(self) -> None:
         """Contract can run without a plan — library escape hatch."""
-        provider = _Scripted([
-            _resp(_VALID_CONTRACT_JSON),
-            _resp("g"),
-            _resp(json.dumps({
-                "verdict": "pass", "overall_score": 1.0, "criteria": [],
-                "summary_feedback": "", "revision_directive": "",
-            })),
-        ])
+        provider = _Scripted(
+            [
+                _resp(_VALID_CONTRACT_JSON),
+                _resp("g"),
+                _resp(
+                    json.dumps(
+                        {
+                            "verdict": "pass",
+                            "overall_score": 1.0,
+                            "criteria": [],
+                            "summary_feedback": "",
+                            "revision_directive": "",
+                        }
+                    )
+                ),
+            ]
+        )
         outcome = run_with_evaluation(
             provider=provider,
             system_prompt="s",
@@ -540,19 +605,33 @@ class TestRunWithContract:
     ) -> None:
         """When the contract builder produces no criteria (bad JSON),
         the evaluator still runs with its default criteria set."""
-        empty_contract_json = json.dumps({
-            "summary": "stub", "criteria": [],
-            "scope_in": [], "scope_out": [], "approach": "",
-        })
-        provider = _Scripted([
-            _resp(_VALID_PLAN_JSON),
-            _resp(empty_contract_json),
-            _resp("g"),
-            _resp(json.dumps({
-                "verdict": "pass", "overall_score": 1.0, "criteria": [],
-                "summary_feedback": "", "revision_directive": "",
-            })),
-        ])
+        empty_contract_json = json.dumps(
+            {
+                "summary": "stub",
+                "criteria": [],
+                "scope_in": [],
+                "scope_out": [],
+                "approach": "",
+            }
+        )
+        provider = _Scripted(
+            [
+                _resp(_VALID_PLAN_JSON),
+                _resp(empty_contract_json),
+                _resp("g"),
+                _resp(
+                    json.dumps(
+                        {
+                            "verdict": "pass",
+                            "overall_score": 1.0,
+                            "criteria": [],
+                            "summary_feedback": "",
+                            "revision_directive": "",
+                        }
+                    )
+                ),
+            ]
+        )
         outcome = run_with_evaluation(
             provider=provider,
             system_prompt="s",
@@ -568,9 +647,7 @@ class TestRunWithContract:
         # Evaluator call saw the planner's success_criteria (since
         # the contract had nothing to replace them with).
         evaluator_call = provider.calls[3]
-        user_content = next(
-            m.content for m in evaluator_call["messages"] if m.role == "user"
-        )
+        user_content = next(m.content for m in evaluator_call["messages"] if m.role == "user")
         # Planner criteria survive.
         assert "Empty input should be rejected" in user_content
 
@@ -585,9 +662,7 @@ def fake_litellm_contract(monkeypatch: pytest.MonkeyPatch):
 
     def _mk(content: str) -> dict[str, Any]:
         return {
-            "choices": [
-                {"message": {"content": content}, "finish_reason": "stop"}
-            ],
+            "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 5, "completion_tokens": 10},
         }
 
@@ -596,10 +671,17 @@ def fake_litellm_contract(monkeypatch: pytest.MonkeyPatch):
         _mk(_VALID_PLAN_JSON),
         _mk(_VALID_CONTRACT_JSON),
         _mk("done"),
-        _mk(json.dumps({
-            "verdict": "pass", "overall_score": 1.0, "criteria": [],
-            "summary_feedback": "fine", "revision_directive": "",
-        })),
+        _mk(
+            json.dumps(
+                {
+                    "verdict": "pass",
+                    "overall_score": 1.0,
+                    "criteria": [],
+                    "summary_feedback": "fine",
+                    "revision_directive": "",
+                }
+            )
+        ),
     ]
 
     def completion(**kwargs):
@@ -609,8 +691,8 @@ def fake_litellm_contract(monkeypatch: pytest.MonkeyPatch):
         return fake._responses.pop(0)  # type: ignore[attr-defined]
 
     fake.completion = completion  # type: ignore[attr-defined]
-    fake._calls = calls           # type: ignore[attr-defined]
-    fake._mk = _mk                 # type: ignore[attr-defined]
+    fake._calls = calls  # type: ignore[attr-defined]
+    fake._mk = _mk  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "litellm", fake)
     return fake
 
@@ -623,9 +705,12 @@ class TestCliContract:
             main(
                 [
                     "run",
-                    "--model", "ollama/x",
-                    "--task", "t",
-                    "--sessions-dir", str(tmp_path),
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "t",
+                    "--sessions-dir",
+                    str(tmp_path),
                     "--evaluator",
                     "--contract",
                     "--no-ctx-tools",
@@ -634,7 +719,8 @@ class TestCliContract:
             )
 
     def test_contract_without_evaluator_rejected(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """--contract is only meaningful with --evaluator + --planner."""
         # Without --evaluator the contract flag is silently ignored
@@ -652,9 +738,7 @@ class TestCliContract:
 
         def _mk(content: str) -> dict[str, Any]:
             return {
-                "choices": [
-                    {"message": {"content": content}, "finish_reason": "stop"}
-                ],
+                "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1},
             }
 
@@ -668,15 +752,19 @@ class TestCliContract:
 
         fake.completion = completion  # type: ignore[attr-defined]
         import sys as _sys
+
         _sys.modules["litellm"] = fake
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "t",
-                "--sessions-dir", str(tmp_path),
-                "--planner",       # planner enabled but evaluator isn't
-                "--contract",       # contract solo path doesn't reach run_with_eval
+                "--model",
+                "ollama/x",
+                "--task",
+                "t",
+                "--sessions-dir",
+                str(tmp_path),
+                "--planner",  # planner enabled but evaluator isn't
+                "--contract",  # contract solo path doesn't reach run_with_eval
                 "--no-ctx-tools",
                 "--quiet",
             ]
@@ -684,17 +772,23 @@ class TestCliContract:
         assert exit_code == 0
 
     def test_contract_persisted_in_jsonl(
-        self, fake_litellm_contract: Any, tmp_path: Path,
+        self,
+        fake_litellm_contract: Any,
+        tmp_path: Path,
     ) -> None:
         from ctx.cli.run import main
 
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "add validation",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "cn-run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "add validation",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "cn-run",
                 "--planner",
                 "--evaluator",
                 "--contract",
@@ -719,18 +813,25 @@ class TestCliContract:
         assert first["contract_used"] is True
 
     def test_contract_model_override(
-        self, fake_litellm_contract: Any, tmp_path: Path,
+        self,
+        fake_litellm_contract: Any,
+        tmp_path: Path,
     ) -> None:
         from ctx.cli.run import main
 
         main(
             [
                 "run",
-                "--model", "ollama/main",
-                "--contract-model", "ollama/contract",
-                "--task", "t",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "cn-override",
+                "--model",
+                "ollama/main",
+                "--contract-model",
+                "ollama/contract",
+                "--task",
+                "t",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "cn-override",
                 "--planner",
                 "--evaluator",
                 "--contract",

@@ -38,6 +38,7 @@ def loader_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("USERPROFILE", str(home))  # Windows
 
     from ctx.adapters.claude_code import skill_loader
+
     importlib.reload(skill_loader)
     return skill_loader, home
 

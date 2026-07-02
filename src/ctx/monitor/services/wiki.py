@@ -231,9 +231,7 @@ def read_entity_text(
 ) -> str | None:
     pack_pages = wiki_pack_pages(wiki_dir)
     if pack_pages is not None:
-        entity_types = (
-            [entity_type] if entity_type is not None else list(_DASHBOARD_ENTITY_TYPES)
-        )
+        entity_types = [entity_type] if entity_type is not None else list(_DASHBOARD_ENTITY_TYPES)
         for current_type in entity_types:
             relpath = core_entity_types.entity_relpath(current_type, slug)
             if relpath is not None and relpath.as_posix() in pack_pages:
@@ -413,19 +411,21 @@ def search_entities_from_index(
             tags = []
         if not isinstance(tags, list):
             tags = []
-        results.append({
-            "slug": slug,
-            "display_slug": display_slug(slug),
-            "type": current_type,
-            "title": display_label(label, fallback_slug=slug),
-            "description": str(description or ""),
-            "tags": [str(tag) for tag in tags[:12]],
-            "path": "",
-            "href": entity_wiki_href(slug, current_type),
-            "quality_score": quality,
-            "usage_score": usage,
-            "degree": int(degree or 0),
-        })
+        results.append(
+            {
+                "slug": slug,
+                "display_slug": display_slug(slug),
+                "type": current_type,
+                "title": display_label(label, fallback_slug=slug),
+                "description": str(description or ""),
+                "tags": [str(tag) for tag in tags[:12]],
+                "path": "",
+                "href": entity_wiki_href(slug, current_type),
+                "quality_score": quality,
+                "usage_score": usage,
+                "degree": int(degree or 0),
+            }
+        )
     return results
 
 
@@ -466,14 +466,16 @@ def index_entries(
                 frontmatter_text(meta.get("description", "")),
                 200,
             )
-            out.append({
-                "slug": slug,
-                "display_slug": display_slug(slug),
-                "type": entity_type,
-                "tags": all_tags[:6],
-                "search_tags": all_tags,
-                "description": description,
-            })
+            out.append(
+                {
+                    "slug": slug,
+                    "display_slug": display_slug(slug),
+                    "type": entity_type,
+                    "tags": all_tags[:6],
+                    "search_tags": all_tags,
+                    "description": description,
+                }
+            )
             seen_for_type += 1
     return out
 
@@ -511,34 +513,29 @@ def index_entries_from_dashboard_index(
                     quality_score,
                 ) in rows:
                     node_id_text = str(node_id)
-                    slug = (
-                        node_id_text.split(":", 1)[1]
-                        if ":" in node_id_text
-                        else str(label)
-                    )
+                    slug = node_id_text.split(":", 1)[1] if ":" in node_id_text else str(label)
                     if not is_safe_slug(slug):
                         continue
                     try:
                         parsed_tags = json.loads(str(tags_raw or "[]"))
                     except json.JSONDecodeError:
                         parsed_tags = []
-                    all_tags = [
-                        str(tag) for tag in parsed_tags
-                        if isinstance(tag, str)
-                    ]
+                    all_tags = [str(tag) for tag in parsed_tags if isinstance(tag, str)]
                     description, _truncated = truncate_text(
                         frontmatter_text(description_raw),
                         200,
                     )
-                    out.append({
-                        "slug": slug,
-                        "display_slug": display_slug(str(label or slug)),
-                        "type": str(row_type or entity_type),
-                        "tags": all_tags[:6],
-                        "search_tags": all_tags,
-                        "description": description,
-                        "grade": grade_from_quality_score(quality_score),
-                    })
+                    out.append(
+                        {
+                            "slug": slug,
+                            "display_slug": display_slug(str(label or slug)),
+                            "type": str(row_type or entity_type),
+                            "tags": all_tags[:6],
+                            "search_tags": all_tags,
+                            "description": description,
+                            "grade": grade_from_quality_score(quality_score),
+                        }
+                    )
         finally:
             conn.close()
     except (OSError, sqlite3.Error, ValueError, TypeError):

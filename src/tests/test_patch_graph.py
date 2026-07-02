@@ -29,9 +29,9 @@ def _make_prior(
     edges: list[tuple[str, str, dict[str, Any]]] | None = None,
 ) -> nx.Graph:
     G = nx.Graph()
-    for nid, attrs in (nodes or []):
+    for nid, attrs in nodes or []:
         G.add_node(nid, **attrs)
-    for u, v, attrs in (edges or []):
+    for u, v, attrs in edges or []:
         G.add_edge(u, v, **attrs)
     return G
 
@@ -70,9 +70,7 @@ class TestNodeDelta:
 
     def test_existing_node_attrs_refreshed(self) -> None:
         """Tags may have changed between runs — patch must refresh."""
-        prior = _make_prior(
-            [("skill:a", {"label": "a", "type": "skill", "tags": ["old"]})]
-        )
+        prior = _make_prior([("skill:a", {"label": "a", "type": "skill", "tags": ["old"]})])
         current = {"skill:a": _info("a", "skill", ["new"])}
         patch_graph(
             prior,
@@ -94,9 +92,7 @@ class TestNodeDelta:
 
     def test_type_preserved_when_info_omits_it(self) -> None:
         """Refresh on existing node should preserve the prior type if new info has none."""
-        prior = _make_prior(
-            [("skill:a", {"label": "a", "type": "skill", "tags": []})]
-        )
+        prior = _make_prior([("skill:a", {"label": "a", "type": "skill", "tags": []})])
         patch_graph(
             prior,
             current_node_info={"skill:a": {"label": "a", "tags": []}},
@@ -312,8 +308,7 @@ class TestFullCycle:
     def test_no_op_when_nothing_changes(self) -> None:
         """Idempotent: same inputs twice should leave the graph identical."""
         prior = _make_prior(
-            [("skill:a", _info("a", tags=["py"])),
-             ("skill:b", _info("b", tags=["py"]))],
+            [("skill:a", _info("a", tags=["py"])), ("skill:b", _info("b", tags=["py"]))],
             [("skill:a", "skill:b", {"weight": 0.5})],
         )
         current = {

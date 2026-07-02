@@ -48,9 +48,7 @@ class _FakeSource:
         ]
         self._raise_on_fetch = raise_on_fetch
 
-    def fetch(
-        self, *, limit: int | None = None, refresh: bool = False
-    ) -> Iterator[dict]:
+    def fetch(self, *, limit: int | None = None, refresh: bool = False) -> Iterator[dict]:
         if self._raise_on_fetch is not None:
             raise self._raise_on_fetch
         records = self._records
@@ -59,9 +57,7 @@ class _FakeSource:
         return iter(records)
 
 
-def _patch_sources(
-    monkeypatch: pytest.MonkeyPatch, fake: _FakeSource
-) -> None:
+def _patch_sources(monkeypatch: pytest.MonkeyPatch, fake: _FakeSource) -> None:
     """Inject a single fake source into mcp_fetch.SOURCES."""
     monkeypatch.setattr(mcp_fetch, "SOURCES", {fake.name: fake})
 
@@ -168,9 +164,7 @@ class TestJsonlOutput:
         captured = capsys.readouterr()
         assert captured.err == ""
         lines = [ln for ln in captured.out.splitlines() if ln.strip()]
-        assert len(lines) == 2, (
-            f"Expected 2 JSONL lines, got {len(lines)}: {captured.out!r}"
-        )
+        assert len(lines) == 2, f"Expected 2 JSONL lines, got {len(lines)}: {captured.out!r}"
 
     def test_output_lines_are_valid_json(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -191,7 +185,6 @@ class TestJsonlOutput:
                 records.append(json.loads(line))
             except json.JSONDecodeError as exc:
                 pytest.fail(f"Output line is not valid JSON: {line!r} — {exc}")
-
 
         assert [record["name"] for record in records] == ["tool-0", "tool-1"]
 
@@ -226,9 +219,7 @@ class TestFetchError:
             raise_on_fetch=RuntimeError("simulated fetch failure"),
         )
         _patch_sources(monkeypatch, bad_source)
-        monkeypatch.setattr(
-            sys, "argv", ["ctx-mcp-fetch", "--source", "bad-source"]
-        )
+        monkeypatch.setattr(sys, "argv", ["ctx-mcp-fetch", "--source", "bad-source"])
         with pytest.raises(SystemExit) as exc_info:
             mcp_fetch.main()
         assert exc_info.value.code != 0
@@ -241,9 +232,7 @@ class TestFetchError:
             raise_on_fetch=RuntimeError("simulated fetch failure"),
         )
         _patch_sources(monkeypatch, bad_source)
-        monkeypatch.setattr(
-            sys, "argv", ["ctx-mcp-fetch", "--source", "bad-source"]
-        )
+        monkeypatch.setattr(sys, "argv", ["ctx-mcp-fetch", "--source", "bad-source"])
         with pytest.raises(SystemExit):
             mcp_fetch.main()
         captured = capsys.readouterr()
@@ -261,16 +250,13 @@ class TestVerboseFlag:
         # Zero verbosity must not touch basicConfig (avoid polluting
         # other tests' logging state).
         import logging  # noqa: PLC0415
+
         before = len(logging.getLogger().handlers)
         mcp_fetch._configure_logging(0)
         after = len(logging.getLogger().handlers)
-        assert before == after, (
-            "verbosity=0 must not add logging handlers"
-        )
+        assert before == after, "verbosity=0 must not add logging handlers"
 
-    def test_configure_logging_v1_sets_info_level(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_configure_logging_v1_sets_info_level(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import logging  # noqa: PLC0415
 
         captured: dict[str, object] = {}
@@ -282,9 +268,7 @@ class TestVerboseFlag:
         mcp_fetch._configure_logging(1)
         assert captured.get("level") == logging.INFO
 
-    def test_configure_logging_v2_sets_debug_level(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_configure_logging_v2_sets_debug_level(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import logging  # noqa: PLC0415
 
         captured: dict[str, object] = {}

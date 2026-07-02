@@ -148,7 +148,8 @@ def _write_disk_cache_payload(
                 },
                 ensure_ascii=False,
                 sort_keys=sort_keys,
-            ) + "\n",
+            )
+            + "\n",
             encoding="utf-8",
         )
     except (OSError, TypeError, ValueError):
@@ -227,12 +228,14 @@ def docs_index_entries(roots: Sequence[Path]) -> list[dict[str, Any]]:
                 continue
             text = strip_doc_frontmatter(text)
             title = doc_title(text, path.stem.replace("-", " ").title())
-            entries.append({
-                "title": title,
-                "path": rel,
-                "summary": doc_summary(text),
-                "body": text,
-            })
+            entries.append(
+                {
+                    "title": title,
+                    "path": rel,
+                    "summary": doc_summary(text),
+                    "body": text,
+                }
+            )
     return sorted(entries, key=lambda row: str(row["path"]))
 
 
@@ -282,11 +285,13 @@ def docs_nav_from_mkdocs(
                 if path in entries_by_path
             ]
             if pages:
-                tabs.append({
-                    "label": str(label),
-                    "slug": doc_anchor(str(label)),
-                    "pages": pages,
-                })
+                tabs.append(
+                    {
+                        "label": str(label),
+                        "slug": doc_anchor(str(label)),
+                        "pages": pages,
+                    }
+                )
     return tabs
 
 
@@ -312,9 +317,7 @@ def docs_tabs(entries: list[dict[str, Any]], roots: Sequence[Path]) -> list[dict
         used.update(str(page["path"]) for page in repo_pages)
 
     other_pages = [
-        entry
-        for entry in entries
-        if entry["path"] not in used and entry["path"] != "docs/SKILL.md"
+        entry for entry in entries if entry["path"] not in used and entry["path"] != "docs/SKILL.md"
     ]
     if other_pages:
         tabs.append({"label": "Other", "slug": "other", "pages": other_pages})
@@ -445,9 +448,9 @@ def rewrite_docs_links(
             return match.group(0)
         dashboard_href, target_tab, target_anchor = resolved
         return (
-            f"<a{before}href=\"{html.escape(dashboard_href, quote=True)}\""
-            f" data-doc-tab=\"{html.escape(target_tab, quote=True)}\""
-            f" data-doc-target=\"{html.escape(target_anchor, quote=True)}\"{after}>"
+            f'<a{before}href="{html.escape(dashboard_href, quote=True)}"'
+            f' data-doc-tab="{html.escape(target_tab, quote=True)}"'
+            f' data-doc-target="{html.escape(target_anchor, quote=True)}"{after}>'
         )
 
     return re.sub(r"<a([^>]*?)href=\"([^\"]+)\"([^>]*)>", replace_link, rendered_html)
@@ -465,33 +468,35 @@ def render_docs_markdown(
     try:
         import markdown as markdown_lib  # type: ignore[import-untyped]
 
-        rendered = str(markdown_lib.markdown(
-            markdown_text,
-            extensions=[
-                "admonition",
-                "attr_list",
-                "def_list",
-                "fenced_code",
-                "footnotes",
-                "md_in_html",
-                "tables",
-                "toc",
-                "pymdownx.details",
-                "pymdownx.superfences",
-                "pymdownx.tabbed",
-                "pymdownx.tasklist",
-                "pymdownx.inlinehilite",
-            ],
-            extension_configs={
-                "toc": {
-                    "permalink": True,
-                    "slugify": lambda value, separator: f"{page_anchor}-{doc_anchor(value)}",
+        rendered = str(
+            markdown_lib.markdown(
+                markdown_text,
+                extensions=[
+                    "admonition",
+                    "attr_list",
+                    "def_list",
+                    "fenced_code",
+                    "footnotes",
+                    "md_in_html",
+                    "tables",
+                    "toc",
+                    "pymdownx.details",
+                    "pymdownx.superfences",
+                    "pymdownx.tabbed",
+                    "pymdownx.tasklist",
+                    "pymdownx.inlinehilite",
+                ],
+                extension_configs={
+                    "toc": {
+                        "permalink": True,
+                        "slugify": lambda value, separator: f"{page_anchor}-{doc_anchor(value)}",
+                    },
+                    "pymdownx.tabbed": {"alternate_style": True},
+                    "pymdownx.tasklist": {"custom_checkbox": True},
                 },
-                "pymdownx.tabbed": {"alternate_style": True},
-                "pymdownx.tasklist": {"custom_checkbox": True},
-            },
-            output_format="html5",
-        ))
+                output_format="html5",
+            )
+        )
         return sanitize_docs_html(rendered)
     except Exception:
         return fallback_renderer(markdown_text)
@@ -668,7 +673,9 @@ def render_docs_page(
     )[1]
     source_url = f"https://github.com/stevesolun/ctx/blob/main/{quote(str(entry['path']))}"
     body_html = render_markdown_func(str(entry["body"]), page_anchor)
-    body_html = rewrite_docs_links(body_html, str(entry["path"]), tab_slug, page_anchor, page_anchors)
+    body_html = rewrite_docs_links(
+        body_html, str(entry["path"]), tab_slug, page_anchor, page_anchors
+    )
     return (
         f"<article id='{html.escape(page_anchor)}' class='docs-page wiki-body' "
         f"data-doc-page='{html.escape(docs_search_text(entry))}'>"
@@ -715,6 +722,7 @@ def render_docs(
     entries = index_entries() if index_entries is not None else docs_index_entries(roots)
     tabs = tabs_for_entries(entries) if tabs_for_entries is not None else docs_tabs(entries, roots)
     if render_markdown_func is None:
+
         def default_render_markdown(text: str, anchor: str) -> str:
             return render_docs_markdown(
                 text,
@@ -748,13 +756,15 @@ def render_docs(
     for tab in tabs:
         tab_slug = str(tab["slug"])
         for page in list(tab["pages"]):
-            page_anchors[str(page["path"])] = (tab_slug, docs_page_anchor(tab_slug, str(page["path"])))
+            page_anchors[str(page["path"])] = (
+                tab_slug,
+                docs_page_anchor(tab_slug, str(page["path"])),
+            )
     for idx, tab in enumerate(tabs):
         tab_slug = str(tab["slug"])
         pages = list(tab["pages"])
         page_links = "".join(
-            render_docs_sidebar_page(page, tab_slug, page_anchors)
-            for page in pages
+            render_docs_sidebar_page(page, tab_slug, page_anchors) for page in pages
         )
         page_bodies = "".join(
             render_docs_page(

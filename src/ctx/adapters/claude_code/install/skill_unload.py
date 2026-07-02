@@ -160,7 +160,6 @@ def _sync_graph_pack_never_load(node_id: str, value: bool) -> bool:
     return False
 
 
-
 def _sanitize_yaml_value(value: str) -> str:
     """Strip newlines/CRs so a value can't inject extra YAML keys."""
     return value.replace("\r", " ").replace("\n", " ").strip()
@@ -204,13 +203,15 @@ def _iter_entity_page_refs(*, entity_type: str | None = None) -> list[EntityPage
                 and path.parts[1] in subjects
                 and path.suffix == ".md"
             ):
-                refs.append(EntityPageRef(
-                    name=path.stem,
-                    subject_type=path.parts[1],
-                    path=WIKI_DIR / relpath,
-                    relpath=relpath,
-                    content=content,
-                ))
+                refs.append(
+                    EntityPageRef(
+                        name=path.stem,
+                        subject_type=path.parts[1],
+                        path=WIKI_DIR / relpath,
+                        relpath=relpath,
+                        content=content,
+                    )
+                )
         return refs
 
     legacy_refs: list[EntityPageRef] = []
@@ -224,13 +225,15 @@ def _iter_entity_page_refs(*, entity_type: str | None = None) -> list[EntityPage
             except OSError as exc:
                 print(f"Warning: entity page read error for {page.stem}: {exc}", file=sys.stderr)
                 continue
-            legacy_refs.append(EntityPageRef(
-                name=page.stem,
-                subject_type=subject_type,
-                path=page,
-                relpath=_entity_relpath(subject_type, page.stem),
-                content=content,
-            ))
+            legacy_refs.append(
+                EntityPageRef(
+                    name=page.stem,
+                    subject_type=subject_type,
+                    path=page,
+                    relpath=_entity_relpath(subject_type, page.stem),
+                    content=content,
+                )
+            )
     return legacy_refs
 
 
@@ -357,10 +360,7 @@ def unload_from_session(
         remaining = []
         for entry in manifest.get("load", []):
             entry_type = entry.get("entity_type", "skill")
-            if (
-                entry["skill"] in names_set
-                and (entity_type is None or entry_type == entity_type)
-            ):
+            if entry["skill"] in names_set and (entity_type is None or entry_type == entity_type):
                 removed.append(entry["skill"])
                 removed_entries.append(dict(entry))
                 manifest.setdefault("unload", []).append(entry)
@@ -376,6 +376,7 @@ def unload_from_session(
         session_id = os.environ.get("CTX_SESSION_ID") or f"unload-{uuid.uuid4().hex[:8]}"
         try:
             import skill_telemetry
+
             for entry in removed_entries:
                 slug = str(entry.get("skill") or "")
                 skill_telemetry.log_event(
@@ -391,12 +392,15 @@ def unload_from_session(
             print(f"Warning: failed to log unload events: {exc}", file=sys.stderr)
         try:
             from ctx_audit_log import log_skill_event
+
             for entry in removed_entries:
                 slug = str(entry.get("skill") or "")
                 entry_type = str(entry.get("entity_type") or "skill")
                 log_skill_event(
-                    f"{entry_type}.unloaded", slug,
-                    actor="cli", session_id=session_id,
+                    f"{entry_type}.unloaded",
+                    slug,
+                    actor="cli",
+                    session_id=session_id,
                     meta={"via": "skill_unload"},
                 )
         except Exception:  # noqa: BLE001 — audit best-effort
@@ -458,7 +462,8 @@ def list_loaded(*, entity_type: str | None = None) -> None:
     """Show currently loaded skills/agents."""
     manifest = load_manifest()
     loaded = [
-        entry for entry in manifest.get("load", [])
+        entry
+        for entry in manifest.get("load", [])
         if entity_type is None or entry.get("entity_type", "skill") == entity_type
     ]
     if not loaded:
@@ -486,17 +491,23 @@ def list_never_load(*, entity_type: str | None = None) -> None:
 
 
 def main(argv: list[str] | None = None, *, default_entity_type: str | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Unload skills/agents from session or suppress permanently")
+    parser = argparse.ArgumentParser(
+        description="Unload skills/agents from session or suppress permanently"
+    )
     # ``--slug`` is an alias for ``--name`` so docs/playbooks that say
     # "slug" (the canonical vocabulary everywhere else in ctx) work
     # without the user remembering that this one CLI uses "name".
-    parser.add_argument("--name", "--slug", dest="name",
-                        help="Skill or agent slug to unload")
+    parser.add_argument("--name", "--slug", dest="name", help="Skill or agent slug to unload")
     parser.add_argument("--names", help="Comma-separated slugs to unload")
-    parser.add_argument("--session-id", dest="session_id",
-                        help="Override CTX_SESSION_ID env for the emitted "
-                             "unload events (default: env var or synthetic id)")
-    parser.add_argument("--permanent", action="store_true", help="Set never_load: true (won't be recommended again)")
+    parser.add_argument(
+        "--session-id",
+        dest="session_id",
+        help="Override CTX_SESSION_ID env for the emitted "
+        "unload events (default: env var or synthetic id)",
+    )
+    parser.add_argument(
+        "--permanent", action="store_true", help="Set never_load: true (won't be recommended again)"
+    )
     parser.add_argument(
         "--entity-type",
         choices=("skill", "agent"),
@@ -506,7 +517,9 @@ def main(argv: list[str] | None = None, *, default_entity_type: str | None = Non
     parser.add_argument("--stale", action="store_true", help="Unload all stale skills")
     parser.add_argument("--restore", help="Remove never_load flag from a skill/agent")
     parser.add_argument("--list-loaded", action="store_true", help="Show currently loaded skills")
-    parser.add_argument("--list-never", action="store_true", help="Show permanently suppressed skills")
+    parser.add_argument(
+        "--list-never", action="store_true", help="Show permanently suppressed skills"
+    )
     args = parser.parse_args(argv)
     entity_type = args.entity_type
 

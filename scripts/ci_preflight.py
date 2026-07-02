@@ -127,6 +127,10 @@ def select_checks(
     if source_required:
         checks.extend(
             [
+                Check(
+                    "ruff format",
+                    (python, "-m", "ruff", "format", "--check", "src", "hooks", "scripts"),
+                ),
                 Check("ruff", (python, "-m", "ruff", "check", "src", "hooks", "scripts")),
                 Check("mypy", (python, "-m", "mypy", "src")),
                 Check("pip check", (python, "-m", "pip", "check")),

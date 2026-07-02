@@ -150,6 +150,7 @@ class TestSlugNormalization:
         record = McpRecord.from_dict({**_minimal_data(), "name": "Foo & Bar (v2)"})
         # Result must contain only [a-z0-9-]
         import re
+
         assert re.fullmatch(r"[a-z0-9][a-z0-9\-]*[a-z0-9]?", record.slug) is not None
 
 

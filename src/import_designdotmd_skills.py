@@ -118,11 +118,14 @@ def _inject_tags(text: str, tags: list[str]) -> str:
         insert_at = len(lines)
     new_lines = lines[:insert_at] + [tags_line] + lines[insert_at:]
     new_fm = "\n".join(new_lines)
-    return text[:m.start(1)] + new_fm + text[m.end(1):]
+    return text[: m.start(1)] + new_fm + text[m.end(1) :]
 
 
 def deploy_entry(
-    entry: dict, manifest: dict, target_dir: Path, dry_run: bool,
+    entry: dict,
+    manifest: dict,
+    target_dir: Path,
+    dry_run: bool,
 ) -> tuple[Path, bool]:
     slug = _validate("slug", entry.get("slug"), regex=_SAFE_SLUG_RE)
     source_rel = _validate("source_path", entry.get("source_path"))
@@ -199,7 +202,9 @@ def main() -> None:
     mode = "dry-run" if args.dry_run else "install"
     print()
     print(f"Mode: {mode}  target: {target_dir}")
-    print(f"Entries: {len(manifest['entries'])}  new/updated: {new_or_updated}  unchanged: {unchanged}")
+    print(
+        f"Entries: {len(manifest['entries'])}  new/updated: {new_or_updated}  unchanged: {unchanged}"
+    )
     if args.install:
         print()
         print("Next steps:")

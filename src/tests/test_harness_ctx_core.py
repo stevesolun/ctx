@@ -44,16 +44,19 @@ def _build_synthetic_graph(tmp_path: Path) -> Path:
     G = nx.Graph()
     G.graph["external_catalog_nodes"] = {"skills.sh": 1}
     G.graph["source_catalog_nodes"] = {"skills.sh": 1}
-    G.add_node("skill:python-patterns", label="python-patterns", type="skill",
-               tags=["python", "patterns"])
-    G.add_node("skill:fastapi-pro", label="fastapi-pro", type="skill",
-               tags=["python", "api", "web"])
-    G.add_node("skill:django-pro", label="django-pro", type="skill",
-               tags=["python", "web"])
-    G.add_node("agent:code-reviewer", label="code-reviewer", type="agent",
-               tags=["python", "review"])
-    G.add_node("mcp-server:filesystem", label="filesystem", type="mcp-server",
-               tags=["filesystem", "io"])
+    G.add_node(
+        "skill:python-patterns", label="python-patterns", type="skill", tags=["python", "patterns"]
+    )
+    G.add_node(
+        "skill:fastapi-pro", label="fastapi-pro", type="skill", tags=["python", "api", "web"]
+    )
+    G.add_node("skill:django-pro", label="django-pro", type="skill", tags=["python", "web"])
+    G.add_node(
+        "agent:code-reviewer", label="code-reviewer", type="agent", tags=["python", "review"]
+    )
+    G.add_node(
+        "mcp-server:filesystem", label="filesystem", type="mcp-server", tags=["filesystem", "io"]
+    )
     G.add_node(
         "skill:no-mistakes",
         label="no-mistakes",
@@ -63,12 +66,9 @@ def _build_synthetic_graph(tmp_path: Path) -> Path:
         invoke_command='no-mistakes axi run --intent "<intent>"',
         security_review="external-gate",
     )
-    G.add_edge("skill:python-patterns", "skill:fastapi-pro",
-               weight=0.8, shared_tags=["python"])
-    G.add_edge("skill:python-patterns", "agent:code-reviewer",
-               weight=0.6, shared_tags=["python"])
-    G.add_edge("skill:fastapi-pro", "skill:django-pro",
-               weight=0.4, shared_tags=["python", "web"])
+    G.add_edge("skill:python-patterns", "skill:fastapi-pro", weight=0.8, shared_tags=["python"])
+    G.add_edge("skill:python-patterns", "agent:code-reviewer", weight=0.6, shared_tags=["python"])
+    G.add_edge("skill:fastapi-pro", "skill:django-pro", weight=0.4, shared_tags=["python", "web"])
 
     out_dir = tmp_path / "graphify-out"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -174,18 +174,26 @@ def test_graph_cache_reloads_when_graph_json_changes(tmp_path: Path) -> None:
 
     write_graph("old-target")
     toolbox = CtxCoreToolbox(wiki_dir=tmp_path / "wiki", graph_path=graph_path)
-    first = json.loads(toolbox.dispatch(ToolCall(
-        id="c1",
-        name="ctx__graph_query",
-        arguments={"seeds": ["seed"], "max_hops": 1},
-    )))
+    first = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__graph_query",
+                arguments={"seeds": ["seed"], "max_hops": 1},
+            )
+        )
+    )
 
     write_graph("new-target")
-    second = json.loads(toolbox.dispatch(ToolCall(
-        id="c2",
-        name="ctx__graph_query",
-        arguments={"seeds": ["seed"], "max_hops": 1},
-    )))
+    second = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="c2",
+                name="ctx__graph_query",
+                arguments={"seeds": ["seed"], "max_hops": 1},
+            )
+        )
+    )
 
     assert first["results"][0]["name"] == "old-target"
     assert second["results"][0]["name"] == "new-target"
@@ -209,11 +217,15 @@ def test_graph_cache_reloads_when_graph_pack_overlay_changes(tmp_path: Path) -> 
     )
     toolbox = CtxCoreToolbox(wiki_dir=tmp_path / "wiki", graph_path=graph_path)
 
-    first = json.loads(toolbox.dispatch(ToolCall(
-        id="c1",
-        name="ctx__graph_query",
-        arguments={"seeds": ["seed"], "max_hops": 1},
-    )))
+    first = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__graph_query",
+                arguments={"seeds": ["seed"], "max_hops": 1},
+            )
+        )
+    )
     write_overlay_pack(
         pack_dir=packs_dir / "overlay-new-target",
         pack_id="overlay-new-target",
@@ -225,11 +237,15 @@ def test_graph_cache_reloads_when_graph_pack_overlay_changes(tmp_path: Path) -> 
         edges=[{"source": "skill:seed", "target": "skill:new-target", "weight": 1.0}],
         tombstones=[],
     )
-    second = json.loads(toolbox.dispatch(ToolCall(
-        id="c2",
-        name="ctx__graph_query",
-        arguments={"seeds": ["seed"], "max_hops": 1},
-    )))
+    second = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="c2",
+                name="ctx__graph_query",
+                arguments={"seeds": ["seed"], "max_hops": 1},
+            )
+        )
+    )
 
     first_names = {item["name"] for item in first["results"]}
     second_names = {item["name"] for item in second["results"]}
@@ -257,11 +273,15 @@ def test_graph_cache_uses_wiki_packs_when_explicit_graph_path_is_missing(
     assert not (wiki / "graphify-out" / "graph.json").exists()
 
     toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=tmp_path / "missing.json")
-    result = json.loads(toolbox.dispatch(ToolCall(
-        id="c1",
-        name="ctx__graph_query",
-        arguments={"seeds": ["seed"], "max_hops": 1},
-    )))
+    result = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__graph_query",
+                arguments={"seeds": ["seed"], "max_hops": 1},
+            )
+        )
+    )
 
     assert [row["name"] for row in result["results"]] == ["pack-target"]
 
@@ -290,21 +310,29 @@ def test_graph_file_signature_detects_same_size_rewrite(
 def test_wiki_page_cache_reloads_when_entity_page_changes(tmp_path: Path) -> None:
     wiki = _build_synthetic_wiki(tmp_path)
     toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=tmp_path / "missing.json")
-    first = json.loads(toolbox.dispatch(ToolCall(
-        id="c1",
-        name="ctx__wiki_search",
-        arguments={"query": "newunique"},
-    )))
+    first = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__wiki_search",
+                arguments={"query": "newunique"},
+            )
+        )
+    )
 
     (wiki / "entities" / "skills" / "new-skill.md").write_text(
         "---\nname: new-skill\ntags: [newunique]\n---\n# New Skill\n",
         encoding="utf-8",
     )
-    second = json.loads(toolbox.dispatch(ToolCall(
-        id="c2",
-        name="ctx__wiki_search",
-        arguments={"query": "newunique"},
-    )))
+    second = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="c2",
+                name="ctx__wiki_search",
+                arguments={"query": "newunique"},
+            )
+        )
+    )
 
     assert first["results"] == []
     assert second["results"][0]["slug"] == "new-skill"
@@ -320,11 +348,15 @@ def test_wiki_page_cache_reloads_when_wiki_pack_overlay_changes(tmp_path: Path) 
         pages={"entities/skills/old-skill.md": "# Old\n"},
     )
     toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=tmp_path / "missing.json")
-    first = json.loads(toolbox.dispatch(ToolCall(
-        id="c1",
-        name="ctx__wiki_search",
-        arguments={"query": "packunique"},
-    )))
+    first = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__wiki_search",
+                arguments={"query": "packunique"},
+            )
+        )
+    )
 
     write_wiki_overlay_pack(
         pack_dir=packs_dir / "overlay-packunique",
@@ -333,20 +365,20 @@ def test_wiki_page_cache_reloads_when_wiki_pack_overlay_changes(tmp_path: Path) 
         parent_export_id="wiki-export-1",
         pages={
             "entities/skills/pack-skill.md": (
-                "---\n"
-                "name: pack-skill\n"
-                "tags: [packunique]\n"
-                "---\n"
-                "# Pack Skill\n"
+                "---\nname: pack-skill\ntags: [packunique]\n---\n# Pack Skill\n"
             ),
         },
         tombstones=[],
     )
-    second = json.loads(toolbox.dispatch(ToolCall(
-        id="c2",
-        name="ctx__wiki_search",
-        arguments={"query": "packunique"},
-    )))
+    second = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="c2",
+                name="ctx__wiki_search",
+                arguments={"query": "packunique"},
+            )
+        )
+    )
 
     assert first["results"] == []
     assert second["results"][0]["slug"] == "pack-skill"
@@ -404,17 +436,11 @@ class TestToolDefinitions:
             assert "properties" in td.parameters
 
     def test_recommend_requires_query(self, toolbox: CtxCoreToolbox) -> None:
-        td = next(
-            d for d in toolbox.tool_definitions()
-            if d.name == "ctx__recommend_bundle"
-        )
+        td = next(d for d in toolbox.tool_definitions() if d.name == "ctx__recommend_bundle")
         assert td.parameters["required"] == ["query"]
 
     def test_graph_query_requires_seeds(self, toolbox: CtxCoreToolbox) -> None:
-        td = next(
-            d for d in toolbox.tool_definitions()
-            if d.name == "ctx__graph_query"
-        )
+        td = next(d for d in toolbox.tool_definitions() if d.name == "ctx__graph_query")
         assert td.parameters["required"] == ["seeds"]
 
     def test_read_tools_expose_optional_response_format(
@@ -458,11 +484,13 @@ class TestDispatchRouting:
             toolbox.dispatch(ToolCall(id="c1", name="ctx__bogus", arguments={}))
 
     def test_read_tools_default_to_json(self, toolbox: CtxCoreToolbox) -> None:
-        raw = toolbox.dispatch(ToolCall(
-            id="c1",
-            name="ctx__wiki_search",
-            arguments={"query": "python", "top_n": 1},
-        ))
+        raw = toolbox.dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__wiki_search",
+                arguments={"query": "python", "top_n": 1},
+            )
+        )
 
         payload = json.loads(raw)
         assert payload["query"] == "python"
@@ -477,21 +505,21 @@ class TestDispatchRouting:
             sys.modules,
             "gcf",
             SimpleNamespace(
-                encode_generic=lambda data: (
-                    f"GCF profile=generic\nquery={data['query']}"
-                )
+                encode_generic=lambda data: f"GCF profile=generic\nquery={data['query']}"
             ),
         )
 
-        raw = toolbox.dispatch(ToolCall(
-            id="c1",
-            name="ctx__wiki_search",
-            arguments={
-                "query": "python",
-                "top_n": 1,
-                "_response_format": "gcf",
-            },
-        ))
+        raw = toolbox.dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__wiki_search",
+                arguments={
+                    "query": "python",
+                    "top_n": 1,
+                    "_response_format": "gcf",
+                },
+            )
+        )
 
         assert raw.startswith("GCF profile=generic\n")
         assert "query=python" in raw
@@ -505,21 +533,21 @@ class TestDispatchRouting:
             sys.modules,
             "gcf",
             SimpleNamespace(
-                encode_generic=lambda data: (
-                    f"GCF profile=generic\nquery={data['query']}"
-                )
+                encode_generic=lambda data: f"GCF profile=generic\nquery={data['query']}"
             ),
         )
 
-        raw = toolbox.dispatch(ToolCall(
-            id="c1",
-            name="ctx__wiki_search",
-            arguments={
-                "query": "python",
-                "top_n": 1,
-                "output_format": "gcf",
-            },
-        ))
+        raw = toolbox.dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__wiki_search",
+                arguments={
+                    "query": "python",
+                    "top_n": 1,
+                    "output_format": "gcf",
+                },
+            )
+        )
 
         assert raw.startswith("GCF profile=generic\n")
         assert "query=python" in raw
@@ -531,15 +559,17 @@ class TestDispatchRouting:
     ) -> None:
         monkeypatch.setitem(sys.modules, "gcf", None)
 
-        raw = toolbox.dispatch(ToolCall(
-            id="c1",
-            name="ctx__wiki_search",
-            arguments={
-                "query": "python",
-                "top_n": 1,
-                "_response_format": "gcf",
-            },
-        ))
+        raw = toolbox.dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__wiki_search",
+                arguments={
+                    "query": "python",
+                    "top_n": 1,
+                    "_response_format": "gcf",
+                },
+            )
+        )
 
         payload = json.loads(raw)
         assert "gcf-python" in payload["error"]
@@ -564,15 +594,17 @@ class TestRuntimeLifecycle:
         monkeypatch.setattr(runtime_lifecycle, "record_event", capture_record_event)
 
         result = json.loads(
-            toolbox.dispatch(ToolCall(
-                id="c1",
-                name="ctx__load_entity",
-                arguments={
-                    "session_id": "s-1",
-                    "entity_type": "skill",
-                    "slug": "fastapi-pro",
-                },
-            ))
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__load_entity",
+                    arguments={
+                        "session_id": "s-1",
+                        "entity_type": "skill",
+                        "slug": "fastapi-pro",
+                    },
+                )
+            )
         )
 
         assert result["ok"] is True
@@ -592,55 +624,71 @@ class TestRuntimeLifecycle:
         tmp_path: Path,
     ) -> None:
         calls: list[tuple[str, dict[str, Any]]] = [
-            ("ctx__observe_dev_event", {
-                "session_id": "s-1",
-                "event_type": "task",
-                "payload": {"goal": "ship api"},
-            }),
-            ("ctx__load_entity", {
-                "session_id": "s-1",
-                "entity_type": "skill",
-                "slug": "fastapi-pro",
-            }),
-            ("ctx__mark_entity_used", {
-                "session_id": "s-1",
-                "entity_type": "skill",
-                "slug": "fastapi-pro",
-                "evidence": "used in implementation",
-            }),
-            ("ctx__record_validation", {
-                "session_id": "s-1",
-                "check_name": "pytest",
-                "status": "passed",
-                "command": "python -m pytest",
-                "summary": "all tests passed",
-            }),
-            ("ctx__record_escalation", {
-                "session_id": "s-1",
-                "trigger": "destructive-action",
-                "reason": "delete requires user approval",
-                "severity": "blocking",
-            }),
-            ("ctx__unload_entity", {
-                "session_id": "s-1",
-                "entity_type": "skill",
-                "slug": "fastapi-pro",
-                "reason": "not needed",
-            }),
+            (
+                "ctx__observe_dev_event",
+                {
+                    "session_id": "s-1",
+                    "event_type": "task",
+                    "payload": {"goal": "ship api"},
+                },
+            ),
+            (
+                "ctx__load_entity",
+                {
+                    "session_id": "s-1",
+                    "entity_type": "skill",
+                    "slug": "fastapi-pro",
+                },
+            ),
+            (
+                "ctx__mark_entity_used",
+                {
+                    "session_id": "s-1",
+                    "entity_type": "skill",
+                    "slug": "fastapi-pro",
+                    "evidence": "used in implementation",
+                },
+            ),
+            (
+                "ctx__record_validation",
+                {
+                    "session_id": "s-1",
+                    "check_name": "pytest",
+                    "status": "passed",
+                    "command": "python -m pytest",
+                    "summary": "all tests passed",
+                },
+            ),
+            (
+                "ctx__record_escalation",
+                {
+                    "session_id": "s-1",
+                    "trigger": "destructive-action",
+                    "reason": "delete requires user approval",
+                    "severity": "blocking",
+                },
+            ),
+            (
+                "ctx__unload_entity",
+                {
+                    "session_id": "s-1",
+                    "entity_type": "skill",
+                    "slug": "fastapi-pro",
+                    "reason": "not needed",
+                },
+            ),
             ("ctx__session_end", {"session_id": "s-1", "status": "complete"}),
         ]
 
         for name, arguments in calls:
-            result = json.loads(
-                toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments))
-            )
+            result = json.loads(toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments)))
             assert result["ok"] is True
 
         events = [
             json.loads(line)
-            for line in (tmp_path / "runtime" / "events.jsonl").read_text(
-                encoding="utf-8"
-            ).splitlines()
+            for line in (tmp_path / "runtime" / "events.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
         ]
         assert [event["action"] for event in events] == [
             "dev_event",
@@ -678,26 +726,38 @@ class TestRuntimeLifecycle:
             assert "session_id" not in definition.parameters["properties"]
             assert "session_id" not in definition.parameters.get("required", [])
 
-        loaded = json.loads(toolbox.dispatch(ToolCall(
-            id="c1",
-            name="ctx__load_entity",
-            arguments={"entity_type": "skill", "slug": "fastapi-pro"},
-        )))
+        loaded = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__load_entity",
+                    arguments={"entity_type": "skill", "slug": "fastapi-pro"},
+                )
+            )
+        )
         assert loaded["ok"] is True
 
-        state = json.loads(toolbox.dispatch(ToolCall(
-            id="c2",
-            name="ctx__session_state",
-            arguments={},
-        )))
+        state = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c2",
+                    name="ctx__session_state",
+                    arguments={},
+                )
+            )
+        )
         assert state["ok"] is True
         assert state["session_id"] == "host-session"
 
-        mismatch = json.loads(toolbox.dispatch(ToolCall(
-            id="c3",
-            name="ctx__session_state",
-            arguments={"session_id": "attacker-session"},
-        )))
+        mismatch = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c3",
+                    name="ctx__session_state",
+                    arguments={"session_id": "attacker-session"},
+                )
+            )
+        )
         assert mismatch == {
             "ok": False,
             "error": "session_id is host-bound and cannot be overridden",
@@ -708,15 +768,17 @@ class TestRuntimeLifecycle:
         toolbox: CtxCoreToolbox,
     ) -> None:
         result = json.loads(
-            toolbox.dispatch(ToolCall(
-                id="c1",
-                name="ctx__load_entity",
-                arguments={
-                    "session_id": "s-1",
-                    "entity_type": "bogus",
-                    "slug": "fastapi-pro",
-                },
-            ))
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__load_entity",
+                    arguments={
+                        "session_id": "s-1",
+                        "entity_type": "bogus",
+                        "slug": "fastapi-pro",
+                    },
+                )
+            )
         )
 
         assert result["ok"] is False
@@ -727,15 +789,17 @@ class TestRuntimeLifecycle:
         toolbox: CtxCoreToolbox,
     ) -> None:
         result = json.loads(
-            toolbox.dispatch(ToolCall(
-                id="c1",
-                name="ctx__load_entity",
-                arguments={
-                    "session_id": "s-scan",
-                    "entity_type": "skill",
-                    "slug": "fastapi-pro",
-                },
-            ))
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__load_entity",
+                    arguments={
+                        "session_id": "s-scan",
+                        "entity_type": "skill",
+                        "slug": "fastapi-pro",
+                    },
+                )
+            )
         )
 
         assert result["ok"] is True
@@ -746,11 +810,13 @@ class TestRuntimeLifecycle:
         )
 
         state = json.loads(
-            toolbox.dispatch(ToolCall(
-                id="c2",
-                name="ctx__session_state",
-                arguments={"session_id": "s-scan"},
-            ))
+            toolbox.dispatch(
+                ToolCall(
+                    id="c2",
+                    name="ctx__session_state",
+                    arguments={"session_id": "s-scan"},
+                )
+            )
         )
         assert state["loaded"][0]["security_scan"]["status"] == "not_provided"
 
@@ -759,26 +825,28 @@ class TestRuntimeLifecycle:
         toolbox: CtxCoreToolbox,
     ) -> None:
         result = json.loads(
-            toolbox.dispatch(ToolCall(
-                id="c1",
-                name="ctx__load_entity",
-                arguments={
-                    "session_id": "s-scan-proof",
-                    "entity_type": "skill",
-                    "slug": "fastapi-pro",
-                    "security_scan": {
-                        "status": "passed",
-                        "required": True,
-                        "command": [
-                            "skillspector",
-                            "scan",
-                            "fastapi-pro",
-                            "--no-llm",
-                        ],
-                        "output": "clean",
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__load_entity",
+                    arguments={
+                        "session_id": "s-scan-proof",
+                        "entity_type": "skill",
+                        "slug": "fastapi-pro",
+                        "security_scan": {
+                            "status": "passed",
+                            "required": True,
+                            "command": [
+                                "skillspector",
+                                "scan",
+                                "fastapi-pro",
+                                "--no-llm",
+                            ],
+                            "output": "clean",
+                        },
                     },
-                },
-            ))
+                )
+            )
         )
 
         assert result["ok"] is True
@@ -791,11 +859,13 @@ class TestRuntimeLifecycle:
         }
 
         state = json.loads(
-            toolbox.dispatch(ToolCall(
-                id="c2",
-                name="ctx__session_state",
-                arguments={"session_id": "s-scan-proof"},
-            ))
+            toolbox.dispatch(
+                ToolCall(
+                    id="c2",
+                    name="ctx__session_state",
+                    arguments={"session_id": "s-scan-proof"},
+                )
+            )
         )
         assert state["loaded"][0]["security_scan"]["status"] == "passed"
 
@@ -804,16 +874,18 @@ class TestRuntimeLifecycle:
         toolbox: CtxCoreToolbox,
     ) -> None:
         result = json.loads(
-            toolbox.dispatch(ToolCall(
-                id="c1",
-                name="ctx__load_entity",
-                arguments={
-                    "session_id": "s-scan",
-                    "entity_type": "skill",
-                    "slug": "fastapi-pro",
-                    "security_scan": {"status": "unknown"},
-                },
-            ))
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__load_entity",
+                    arguments={
+                        "session_id": "s-scan",
+                        "entity_type": "skill",
+                        "slug": "fastapi-pro",
+                        "security_scan": {"status": "unknown"},
+                    },
+                )
+            )
         )
 
         assert result["ok"] is False
@@ -824,31 +896,42 @@ class TestRuntimeLifecycle:
         toolbox: CtxCoreToolbox,
     ) -> None:
         for name, arguments in [
-            ("ctx__load_entity", {
-                "session_id": "s-2",
-                "entity_type": "skill",
-                "slug": "fastapi-pro",
-            }),
-            ("ctx__load_entity", {
-                "session_id": "s-2",
-                "entity_type": "agent",
-                "slug": "code-reviewer",
-            }),
-            ("ctx__mark_entity_used", {
-                "session_id": "s-2",
-                "entity_type": "agent",
-                "slug": "code-reviewer",
-                "evidence": "reviewed diff",
-            }),
+            (
+                "ctx__load_entity",
+                {
+                    "session_id": "s-2",
+                    "entity_type": "skill",
+                    "slug": "fastapi-pro",
+                },
+            ),
+            (
+                "ctx__load_entity",
+                {
+                    "session_id": "s-2",
+                    "entity_type": "agent",
+                    "slug": "code-reviewer",
+                },
+            ),
+            (
+                "ctx__mark_entity_used",
+                {
+                    "session_id": "s-2",
+                    "entity_type": "agent",
+                    "slug": "code-reviewer",
+                    "evidence": "reviewed diff",
+                },
+            ),
         ]:
             toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments))
 
         result = json.loads(
-            toolbox.dispatch(ToolCall(
-                id="c1",
-                name="ctx__session_state",
-                arguments={"session_id": "s-2"},
-            ))
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__session_state",
+                    arguments={"session_id": "s-2"},
+                )
+            )
         )
 
         assert result["ok"] is True
@@ -867,53 +950,63 @@ class TestRuntimeValidationLedger:
         toolbox: CtxCoreToolbox,
     ) -> None:
         for name, arguments in [
-            ("ctx__record_validation", {
-                "session_id": "s-ledger",
+            (
+                "ctx__record_validation",
+                {
+                    "session_id": "s-ledger",
+                    "check_name": "mypy",
+                    "status": "failed",
+                    "command": "python -m mypy src",
+                    "summary": "type gate failed",
+                    "payload": {"errors": 3},
+                },
+            ),
+            (
+                "ctx__record_escalation",
+                {
+                    "session_id": "s-ledger",
+                    "trigger": "validation-failed",
+                    "reason": "mypy failed after retry",
+                    "severity": "blocking",
+                    "payload": {"check_name": "mypy"},
+                },
+            ),
+        ]:
+            result = json.loads(toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments)))
+            assert result["ok"] is True
+
+        state = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__session_state",
+                    arguments={"session_id": "s-ledger"},
+                )
+            )
+        )
+
+        assert state["validations"] == [
+            {
                 "check_name": "mypy",
                 "status": "failed",
                 "command": "python -m mypy src",
                 "summary": "type gate failed",
+                "entity_type": None,
+                "slug": None,
                 "payload": {"errors": 3},
-            }),
-            ("ctx__record_escalation", {
-                "session_id": "s-ledger",
+            }
+        ]
+        assert state["escalations"] == [
+            {
                 "trigger": "validation-failed",
                 "reason": "mypy failed after retry",
                 "severity": "blocking",
+                "status": "open",
+                "entity_type": None,
+                "slug": None,
                 "payload": {"check_name": "mypy"},
-            }),
-        ]:
-            result = json.loads(
-                toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments))
-            )
-            assert result["ok"] is True
-
-        state = json.loads(
-            toolbox.dispatch(ToolCall(
-                id="c1",
-                name="ctx__session_state",
-                arguments={"session_id": "s-ledger"},
-            ))
-        )
-
-        assert state["validations"] == [{
-            "check_name": "mypy",
-            "status": "failed",
-            "command": "python -m mypy src",
-            "summary": "type gate failed",
-            "entity_type": None,
-            "slug": None,
-            "payload": {"errors": 3},
-        }]
-        assert state["escalations"] == [{
-            "trigger": "validation-failed",
-            "reason": "mypy failed after retry",
-            "severity": "blocking",
-            "status": "open",
-            "entity_type": None,
-            "slug": None,
-            "payload": {"check_name": "mypy"},
-        }]
+            }
+        ]
         assert state["latest_validation_status"] == "failed"
         assert state["open_escalations"] == state["escalations"]
 
@@ -922,15 +1015,17 @@ class TestRuntimeValidationLedger:
         toolbox: CtxCoreToolbox,
     ) -> None:
         result = json.loads(
-            toolbox.dispatch(ToolCall(
-                id="c1",
-                name="ctx__record_validation",
-                arguments={
-                    "session_id": "s-ledger",
-                    "check_name": "pytest",
-                    "status": "maybe",
-                },
-            ))
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__record_validation",
+                    arguments={
+                        "session_id": "s-ledger",
+                        "check_name": "pytest",
+                        "status": "maybe",
+                    },
+                )
+            )
         )
 
         assert result["ok"] is False
@@ -950,42 +1045,55 @@ def test_session_state_suppresses_current_dev_window_unloads(
     monkeypatch.setattr(runtime_lifecycle.time, "time", lambda: next(timestamps))
 
     for name, arguments in [
-        ("ctx__observe_dev_event", {
-            "session_id": "s-window",
-            "event_type": "task",
-        }),
-        ("ctx__load_entity", {
-            "session_id": "s-window",
-            "entity_type": "skill",
-            "slug": "fastapi-pro",
-        }),
+        (
+            "ctx__observe_dev_event",
+            {
+                "session_id": "s-window",
+                "event_type": "task",
+            },
+        ),
+        (
+            "ctx__load_entity",
+            {
+                "session_id": "s-window",
+                "entity_type": "skill",
+                "slug": "fastapi-pro",
+            },
+        ),
     ]:
         toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments))
 
     current_window = json.loads(
-        toolbox.dispatch(ToolCall(
-            id="c1",
-            name="ctx__session_state",
-            arguments={"session_id": "s-window"},
-        ))
+        toolbox.dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__session_state",
+                arguments={"session_id": "s-window"},
+            )
+        )
     )
     assert current_window["unload_candidates"] == []
 
     for name, arguments in [
         ("ctx__session_end", {"session_id": "s-window"}),
-        ("ctx__observe_dev_event", {
-            "session_id": "s-window",
-            "event_type": "resume",
-        }),
+        (
+            "ctx__observe_dev_event",
+            {
+                "session_id": "s-window",
+                "event_type": "resume",
+            },
+        ),
     ]:
         toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments))
 
     next_window = json.loads(
-        toolbox.dispatch(ToolCall(
-            id="c1",
-            name="ctx__session_state",
-            arguments={"session_id": "s-window"},
-        ))
+        toolbox.dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__session_state",
+                arguments={"session_id": "s-window"},
+            )
+        )
     )
     assert [entry["slug"] for entry in next_window["unload_candidates"]] == [
         "fastapi-pro",
@@ -1029,9 +1137,7 @@ class TestRecommendBundle:
         assert payload["ctx.result.count"] == len(result["results"])
         assert raw_query not in json.dumps(payload)
 
-    def test_happy_path_ranks_by_tag_overlap(
-        self, toolbox: CtxCoreToolbox
-    ) -> None:
+    def test_happy_path_ranks_by_tag_overlap(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(
             toolbox.dispatch(
                 ToolCall(
@@ -1064,21 +1170,25 @@ class TestRecommendBundle:
             model_provider: str | None = None,
             model: str | None = None,
         ) -> list[dict[str, Any]]:
-            calls.append({
-                "goal": goal,
-                "top_k": top_k,
-                "model_provider": model_provider,
-                "model": model,
-            })
-            return [{
-                "name": "langgraph",
-                "fit_score": 0.92,
-                "normalized_score": 0.88,
-                "matching_tags": ["agents"],
-                "provider_match": "openai",
-                "detail_url": "https://example.test/langgraph",
-                "install_command": "ctx-harness-install langgraph",
-            }]
+            calls.append(
+                {
+                    "goal": goal,
+                    "top_k": top_k,
+                    "model_provider": model_provider,
+                    "model": model,
+                }
+            )
+            return [
+                {
+                    "name": "langgraph",
+                    "fit_score": 0.92,
+                    "normalized_score": 0.88,
+                    "matching_tags": ["agents"],
+                    "provider_match": "openai",
+                    "detail_url": "https://example.test/langgraph",
+                    "install_command": "ctx-harness-install langgraph",
+                }
+            ]
 
         monkeypatch.setattr(ctx_init, "recommend_harnesses", fake_recommend_harnesses)
 
@@ -1097,23 +1207,27 @@ class TestRecommendBundle:
             )
         )
 
-        assert calls == [{
-            "goal": "python agent workflow",
-            "top_k": 5,
-            "model_provider": "openai",
-            "model": "openai/gpt-5.5",
-        }]
+        assert calls == [
+            {
+                "goal": "python agent workflow",
+                "top_k": 5,
+                "model_provider": "openai",
+                "model": "openai/gpt-5.5",
+            }
+        ]
         assert all(row["type"] != "harness" for row in result["results"])
-        assert result["companion_harnesses"] == [{
-            "name": "langgraph",
-            "type": "harness",
-            "fit_score": 0.92,
-            "normalized_score": 0.88,
-            "matching_tags": ["agents"],
-            "provider_match": "openai",
-            "detail_url": "https://example.test/langgraph",
-            "install_command": "ctx-harness-install langgraph",
-        }]
+        assert result["companion_harnesses"] == [
+            {
+                "name": "langgraph",
+                "type": "harness",
+                "fit_score": 0.92,
+                "normalized_score": 0.88,
+                "matching_tags": ["agents"],
+                "provider_match": "openai",
+                "detail_url": "https://example.test/langgraph",
+                "install_command": "ctx-harness-install langgraph",
+            }
+        ]
 
     def test_companion_harnesses_can_be_empty(
         self,
@@ -1156,21 +1270,17 @@ class TestRecommendBundle:
             )
         )
 
-        no_mistakes = next(
-            row for row in result["results"] if row["name"] == "no-mistakes"
-        )
+        no_mistakes = next(row for row in result["results"] if row["name"] == "no-mistakes")
         assert no_mistakes["category"] == "workflow"
-        assert (
-            no_mistakes["invoke_command"]
-            == 'no-mistakes axi run --intent "<intent>"'
-        )
+        assert no_mistakes["invoke_command"] == 'no-mistakes axi run --intent "<intent>"'
         assert no_mistakes["security_review"] == "external-gate"
 
     def test_empty_query(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(
             toolbox.dispatch(
                 ToolCall(
-                    id="c1", name="ctx__recommend_bundle",
+                    id="c1",
+                    name="ctx__recommend_bundle",
                     arguments={"query": ""},
                 )
             )
@@ -1209,8 +1319,7 @@ class TestRecommendBundle:
         )
         result = json.loads(
             toolbox.dispatch(
-                ToolCall(id="c1", name="ctx__recommend_bundle",
-                         arguments={"query": "python"})
+                ToolCall(id="c1", name="ctx__recommend_bundle", arguments={"query": "python"})
             )
         )
         assert "error" in result
@@ -1239,18 +1348,14 @@ class TestGraphQuery:
 
     def test_missing_seeds(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(
-            toolbox.dispatch(
-                ToolCall(id="c1", name="ctx__graph_query",
-                         arguments={"seeds": []})
-            )
+            toolbox.dispatch(ToolCall(id="c1", name="ctx__graph_query", arguments={"seeds": []}))
         )
         assert "error" in result
 
     def test_seeds_not_list(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(
             toolbox.dispatch(
-                ToolCall(id="c1", name="ctx__graph_query",
-                         arguments={"seeds": "python-patterns"})
+                ToolCall(id="c1", name="ctx__graph_query", arguments={"seeds": "python-patterns"})
             )
         )
         assert "error" in result
@@ -1281,7 +1386,8 @@ class TestWikiSearch:
         result = json.loads(
             toolbox.dispatch(
                 ToolCall(
-                    id="c1", name="ctx__wiki_search",
+                    id="c1",
+                    name="ctx__wiki_search",
                     arguments={"query": "FastAPI patterns"},
                 )
             )
@@ -1293,10 +1399,7 @@ class TestWikiSearch:
 
     def test_empty_query(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(
-            toolbox.dispatch(
-                ToolCall(id="c1", name="ctx__wiki_search",
-                         arguments={"query": ""})
-            )
+            toolbox.dispatch(ToolCall(id="c1", name="ctx__wiki_search", arguments={"query": ""}))
         )
         assert "error" in result
 
@@ -1304,7 +1407,8 @@ class TestWikiSearch:
         result = json.loads(
             toolbox.dispatch(
                 ToolCall(
-                    id="c1", name="ctx__wiki_search",
+                    id="c1",
+                    name="ctx__wiki_search",
                     arguments={"query": "python"},
                 )
             )
@@ -1312,15 +1416,22 @@ class TestWikiSearch:
         if result["results"]:
             row = result["results"][0]
             assert {
-                "slug", "title", "entity_type", "wikilink",
-                "excerpt", "tags", "status", "score",
+                "slug",
+                "title",
+                "entity_type",
+                "wikilink",
+                "excerpt",
+                "tags",
+                "status",
+                "score",
             } <= set(row)
 
     def test_search_includes_agents_and_mcps(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(
             toolbox.dispatch(
                 ToolCall(
-                    id="c1", name="ctx__wiki_search",
+                    id="c1",
+                    name="ctx__wiki_search",
                     arguments={"query": "filesystem review", "top_n": 10},
                 )
             )
@@ -1340,8 +1451,7 @@ class TestWikiGet:
     def test_happy_path(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(
             toolbox.dispatch(
-                ToolCall(id="c1", name="ctx__wiki_get",
-                         arguments={"slug": "python-patterns"})
+                ToolCall(id="c1", name="ctx__wiki_get", arguments={"slug": "python-patterns"})
             )
         )
         assert "error" not in result
@@ -1351,18 +1461,15 @@ class TestWikiGet:
         assert "Python Patterns" in result["body"]
 
     def test_missing_slug(self, toolbox: CtxCoreToolbox) -> None:
-        result = json.loads(
-            toolbox.dispatch(
-                ToolCall(id="c1", name="ctx__wiki_get", arguments={})
-            )
-        )
+        result = json.loads(toolbox.dispatch(ToolCall(id="c1", name="ctx__wiki_get", arguments={})))
         assert "error" in result
 
     def test_invalid_slug_rejected(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(
             toolbox.dispatch(
                 ToolCall(
-                    id="c1", name="ctx__wiki_get",
+                    id="c1",
+                    name="ctx__wiki_get",
                     arguments={"slug": "../../etc/passwd"},
                 )
             )
@@ -1373,8 +1480,7 @@ class TestWikiGet:
     def test_nonexistent_slug(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(
             toolbox.dispatch(
-                ToolCall(id="c1", name="ctx__wiki_get",
-                         arguments={"slug": "does-not-exist"})
+                ToolCall(id="c1", name="ctx__wiki_get", arguments={"slug": "does-not-exist"})
             )
         )
         assert "error" in result
@@ -1411,9 +1517,7 @@ class TestWikiGet:
         assert result["wikilink"] == "[[entities/mcp-servers/f/filesystem]]"
         assert "Filesystem MCP" in result["body"]
 
-    def test_reads_entity_page_from_wiki_pack_before_stale_file(
-        self, tmp_path: Path
-    ) -> None:
+    def test_reads_entity_page_from_wiki_pack_before_stale_file(self, tmp_path: Path) -> None:
         wiki = _build_synthetic_wiki(tmp_path)
         (wiki / "entities" / "skills" / "python-patterns.md").write_text(
             "---\n"
@@ -1538,16 +1642,15 @@ class TestMakeToolExecutor:
         exe = make_tool_executor(toolbox, fallback=fallback)
         out = exe(
             ToolCall(
-                id="c1", name="ctx__recommend_bundle",
+                id="c1",
+                name="ctx__recommend_bundle",
                 arguments={"query": "python", "top_k": 3},
             )
         )
         data = json.loads(out)
         assert "results" in data
 
-    def test_non_ctx_call_delegates_to_fallback(
-        self, toolbox: CtxCoreToolbox
-    ) -> None:
+    def test_non_ctx_call_delegates_to_fallback(self, toolbox: CtxCoreToolbox) -> None:
         calls = []
 
         def fallback(call):
@@ -1559,9 +1662,7 @@ class TestMakeToolExecutor:
         assert out == "fallback-handled:fs__read_file"
         assert calls and calls[0].name == "fs__read_file"
 
-    def test_no_fallback_raises_on_non_ctx(
-        self, toolbox: CtxCoreToolbox
-    ) -> None:
+    def test_no_fallback_raises_on_non_ctx(self, toolbox: CtxCoreToolbox) -> None:
         exe = make_tool_executor(toolbox, fallback=None)
         with pytest.raises(ValueError, match="no executor"):
             exe(ToolCall(id="c1", name="anything__else", arguments={}))

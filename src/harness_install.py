@@ -236,9 +236,7 @@ def render_plan(record: HarnessRecord, *, target: Path) -> str:
     if record.verify_commands:
         lines.append("Verify commands:")
         lines.extend(f"  - {cmd}" for cmd in record.verify_commands)
-    lines.append(
-        "Commands are not executed unless --approve-commands/--run-verify are set."
-    )
+    lines.append("Commands are not executed unless --approve-commands/--run-verify are set.")
     return "\n".join(lines)
 
 
@@ -309,7 +307,7 @@ def _materialize_source(
         if not allow_local_sources:
             raise ValueError(
                 "local harness repo_url requires --allow-local-source; "
-            "cataloged harnesses should normally use https:// repositories"
+                "cataloged harnesses should normally use https:// repositories"
             )
         raw_local_source = local_source.expanduser()
         _reject_symlink_tree(raw_local_source)
@@ -323,14 +321,13 @@ def _materialize_source(
 
     if record.repo_ref and not _is_full_commit_sha(record.repo_ref):
         raise ValueError(
-            "harness repo_ref/commit_sha must be a full commit SHA; "
-            f"got {record.repo_ref!r}"
+            f"harness repo_ref/commit_sha must be a full commit SHA; got {record.repo_ref!r}"
         )
     if not record.repo_ref and not allow_mutable_repo_head:
         raise ValueError(
             "remote harness repo_url is not pinned to a commit; add commit_sha "
             "to the catalog page or pass --allow-mutable-repo-head explicitly"
-    )
+        )
 
     if record.repo_ref:
         proc = _run_git(["clone", "--no-checkout", "--", record.repo_url, str(target)])
@@ -562,9 +559,7 @@ def _write_manifest(
         "repo_url": record.repo_url,
         "target": str(target),
         "installed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "attach_files": [
-            str(path.relative_to(target)) for path in (attach_files or [])
-        ],
+        "attach_files": [str(path.relative_to(target)) for path in (attach_files or [])],
         "setup_commands_run": setup_runs,
         "verify_commands_run": verify_runs,
     }
@@ -742,17 +737,20 @@ The attachment files do not run setup commands and do not contain secrets.
 
 
 def _render_mcp_attach_config() -> str:
-    return json.dumps(
-        {
-            "mcpServers": {
-                "ctx-wiki": {
-                    "command": "ctx-mcp-server",
-                    "args": [],
+    return (
+        json.dumps(
+            {
+                "mcpServers": {
+                    "ctx-wiki": {
+                        "command": "ctx-mcp-server",
+                        "args": [],
+                    }
                 }
-            }
-        },
-        indent=2,
-    ) + "\n"
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
 
 def _render_python_attach_snippet() -> str:
@@ -938,13 +936,15 @@ def recommend_harnesses_for_cli(
     from ctx_init import _harness_requirements_text, recommend_harnesses  # noqa: PLC0415
 
     query = " ".join(
-        part for part in [
+        part
+        for part in [
             goal,
             _harness_requirements_text(harness_requirements or {}),
             model_provider or "",
             model or "",
             "harness",
-        ] if part
+        ]
+        if part
     )
     return recommend_harnesses(
         query,
@@ -966,60 +966,65 @@ def render_no_fit_harness_plan(
     model_name = model or "unspecified model"
     goal_text = goal.strip() or "unspecified development goal"
     requirement_lines = _format_harness_requirement_lines(harness_requirements or {})
-    return "\n".join([
-        "# Custom Harness PRD",
-        "",
-        "ctx did not find a catalog harness above the configured fit score.",
-        "Use this handoff to build an attachable harness for your local/API model.",
-        "",
-        "## Inputs",
-        "",
-        f"- Goal: {goal_text}",
-        f"- Model provider: {provider}",
-        f"- Model: {model_name}",
-        "- Target operating systems: Windows, macOS, and Linux unless narrowed by the user",
-        *requirement_lines,
-        "",
-        "## Required Interview Before Building",
-        "",
-        "- Confirm the exact model, API base URL or local runtime, context window, and tool-call support.",
-        "- Confirm the user's goal, repository type, stack, expected autonomy, and time horizon.",
-        "- Confirm filesystem, shell, browser, network, secret, and package-manager access.",
-        "- Confirm verification commands: tests, lint, type check, build, smoke, and dashboard/browser checks.",
-        "- Confirm approval policy for destructive commands, network calls, dependency installs, and secret use.",
-        "",
-        "## Harness Architecture",
-        "",
-        "- Instructions: short root instructions plus deeper task, quality, safety, and verification docs.",
-        "- State: durable session file, active task summary, loaded ctx entities, and handoff/progress log.",
-        "- Scope: explicit allow/deny tool registry, cwd boundaries, environment allowlist, and secret redaction.",
-        "- Verification: every completion requires runnable evidence captured in the session log.",
-        "- Lifecycle: start session, observe dev events, request ctx recommendations, mark use, propose unload, end session.",
-        "",
-        "## ctx Attachment Contract",
-        "",
-        "- MCP mode: start `ctx-mcp-server` and expose ctx tools to the host.",
-        "- Python mode: call `ctx.recommend_bundle`, `ctx.wiki_get`, `ctx.wiki_search`, and `ctx.graph_query`.",
-        "- CLI mode: use `ctx run --model <model> --task <task>` when the user wants ctx to own the loop.",
-        "- Each dev window sends the current goal, stack, touched files, errors, and verification state to ctx.",
-        "- ctx returns at most five skills/agents/MCPs. The harness asks before loading or unloading anything.",
-        "",
-        "## Acceptance Tests",
-        "",
-        "- Fresh install on Windows, macOS, and Linux can start the harness without secrets printed in logs.",
-        "- A sample task triggers no more than five ctx skill/agent/MCP recommendations.",
-        "- A selected recommendation is recorded as used with evidence.",
-        "- An unused loaded entity produces an unload proposal and respects a user skip.",
-        "- A failing verification command prevents the harness from reporting completion.",
-        "",
-        "## Prompt For A Strong LLM",
-        "",
-        "Build the harness described above. Keep ctx integration attachable through MCP or Python. "
-        "Do not hard-code secrets. Implement cross-platform startup and verification commands. "
-        "Produce a minimal working harness first, then add durable state and unload lifecycle.",
-        "",
-        "Design reference: https://github.com/walkinglabs/learn-harness-engineering",
-    ]) + "\n"
+    return (
+        "\n".join(
+            [
+                "# Custom Harness PRD",
+                "",
+                "ctx did not find a catalog harness above the configured fit score.",
+                "Use this handoff to build an attachable harness for your local/API model.",
+                "",
+                "## Inputs",
+                "",
+                f"- Goal: {goal_text}",
+                f"- Model provider: {provider}",
+                f"- Model: {model_name}",
+                "- Target operating systems: Windows, macOS, and Linux unless narrowed by the user",
+                *requirement_lines,
+                "",
+                "## Required Interview Before Building",
+                "",
+                "- Confirm the exact model, API base URL or local runtime, context window, and tool-call support.",
+                "- Confirm the user's goal, repository type, stack, expected autonomy, and time horizon.",
+                "- Confirm filesystem, shell, browser, network, secret, and package-manager access.",
+                "- Confirm verification commands: tests, lint, type check, build, smoke, and dashboard/browser checks.",
+                "- Confirm approval policy for destructive commands, network calls, dependency installs, and secret use.",
+                "",
+                "## Harness Architecture",
+                "",
+                "- Instructions: short root instructions plus deeper task, quality, safety, and verification docs.",
+                "- State: durable session file, active task summary, loaded ctx entities, and handoff/progress log.",
+                "- Scope: explicit allow/deny tool registry, cwd boundaries, environment allowlist, and secret redaction.",
+                "- Verification: every completion requires runnable evidence captured in the session log.",
+                "- Lifecycle: start session, observe dev events, request ctx recommendations, mark use, propose unload, end session.",
+                "",
+                "## ctx Attachment Contract",
+                "",
+                "- MCP mode: start `ctx-mcp-server` and expose ctx tools to the host.",
+                "- Python mode: call `ctx.recommend_bundle`, `ctx.wiki_get`, `ctx.wiki_search`, and `ctx.graph_query`.",
+                "- CLI mode: use `ctx run --model <model> --task <task>` when the user wants ctx to own the loop.",
+                "- Each dev window sends the current goal, stack, touched files, errors, and verification state to ctx.",
+                "- ctx returns at most five skills/agents/MCPs. The harness asks before loading or unloading anything.",
+                "",
+                "## Acceptance Tests",
+                "",
+                "- Fresh install on Windows, macOS, and Linux can start the harness without secrets printed in logs.",
+                "- A sample task triggers no more than five ctx skill/agent/MCP recommendations.",
+                "- A selected recommendation is recorded as used with evidence.",
+                "- An unused loaded entity produces an unload proposal and respects a user skip.",
+                "- A failing verification command prevents the harness from reporting completion.",
+                "",
+                "## Prompt For A Strong LLM",
+                "",
+                "Build the harness described above. Keep ctx integration attachable through MCP or Python. "
+                "Do not hard-code secrets. Implement cross-platform startup and verification commands. "
+                "Produce a minimal working harness first, then add durable state and unload lifecycle.",
+                "",
+                "Design reference: https://github.com/walkinglabs/learn-harness-engineering",
+            ]
+        )
+        + "\n"
+    )
 
 
 def _provider_from_model_slug(model: str | None) -> str | None:
@@ -1042,9 +1047,7 @@ def _format_harness_requirement_lines(
         "api_key_env": "API key env var",
     }
     return [
-        f"- {label}: {requirements[key]}"
-        for key, label in labels.items()
-        if requirements.get(key)
+        f"- {label}: {requirements[key]}" for key, label in labels.items() if requirements.get(key)
     ]
 
 
@@ -1217,12 +1220,15 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Custom harness plan: {path}")
             else:
                 print()
-                print(render_no_fit_harness_plan(
-                    goal=goal,
-                    model_provider=args.model_provider,
-                    model=args.model,
-                    harness_requirements=harness_requirements,
-                ), end="")
+                print(
+                    render_no_fit_harness_plan(
+                        goal=goal,
+                        model_provider=args.model_provider,
+                        model=args.model,
+                        harness_requirements=harness_requirements,
+                    ),
+                    end="",
+                )
         elif not results:
             print("Use --plan-on-no-fit to generate a custom harness PRD.")
         return 0

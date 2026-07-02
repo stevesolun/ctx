@@ -47,16 +47,16 @@ python -m pytest -q --no-cov \
 Both **ruff** and **mypy** must pass before a PR is merged.
 
 ```bash
-ruff check src/          # linting
-ruff format --check src/ # formatting check
+ruff check src hooks scripts          # linting
+ruff format --check src hooks scripts # formatting check
 mypy src/                # type checking
 ```
 
 Fix formatting in one shot:
 
 ```bash
-ruff format src/
-ruff check --fix src/
+ruff format src hooks scripts
+ruff check --fix src hooks scripts
 ```
 
 ## No-mistakes runner

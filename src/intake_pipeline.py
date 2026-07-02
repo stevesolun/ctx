@@ -85,8 +85,7 @@ def reset_cache() -> None:
 def _require_subject_type(subject_type: str) -> None:
     if subject_type not in _SUBJECT_TYPES:
         raise ValueError(
-            f"subject_type must be one of {sorted(_SUBJECT_TYPES)!r}; "
-            f"got {subject_type!r}"
+            f"subject_type must be one of {sorted(_SUBJECT_TYPES)!r}; got {subject_type!r}"
         )
 
 
@@ -128,9 +127,7 @@ def check_intake(raw_md: str, subject_type: str) -> IntakeDecision:
     )
 
 
-def record_embedding(
-    *, subject_id: str, raw_md: str, subject_type: str
-) -> None:
+def record_embedding(*, subject_id: str, raw_md: str, subject_type: str) -> None:
     """Embed ``raw_md`` and store the vector under ``subject_id``.
 
     No-op when intake is disabled. Empty corpus text (candidate with no
@@ -147,9 +144,7 @@ def record_embedding(
     embedder = _embedder()
     vecs = embedder.embed([text])
     if vecs.shape[0] != 1:
-        raise RuntimeError(
-            f"embedder returned {vecs.shape[0]} rows for a single-text batch"
-        )
+        raise RuntimeError(f"embedder returned {vecs.shape[0]} rows for a single-text batch")
     _cache_for(embedder, subject_type).put(subject_id, text, vecs[0])
 
 

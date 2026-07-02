@@ -43,19 +43,21 @@ PAGE_ROUTES: frozenset[str] = frozenset(href for _key, _label, href in NAV_ROUTE
     "/live",
 }
 
-GET_API_ROUTES: frozenset[str] = frozenset({
-    "/api/sessions.json",
-    "/api/manifest.json",
-    "/api/status.json",
-    "/api/kpi.json",
-    "/api/grades.json",
-    "/api/sidecars.json",
-    "/api/runtime.json",
-    "/api/skillspector.json",
-    "/api/config.json",
-    "/api/entities/search.json",
-    "/api/events.stream",
-})
+GET_API_ROUTES: frozenset[str] = frozenset(
+    {
+        "/api/sessions.json",
+        "/api/manifest.json",
+        "/api/status.json",
+        "/api/kpi.json",
+        "/api/grades.json",
+        "/api/sidecars.json",
+        "/api/runtime.json",
+        "/api/skillspector.json",
+        "/api/config.json",
+        "/api/entities/search.json",
+        "/api/events.stream",
+    }
+)
 
 GET_API_PATTERNS: tuple[str, ...] = (
     "/api/entity/<slug>.json",
@@ -63,13 +65,15 @@ GET_API_PATTERNS: tuple[str, ...] = (
     "/api/graph/<slug>.json",
 )
 
-POST_API_ROUTES: frozenset[str] = frozenset({
-    "/api/load",
-    "/api/unload",
-    "/api/config",
-    "/api/entity/upsert",
-    "/api/entity/delete",
-})
+POST_API_ROUTES: frozenset[str] = frozenset(
+    {
+        "/api/load",
+        "/api/unload",
+        "/api/config",
+        "/api/entity/upsert",
+        "/api/entity/delete",
+    }
+)
 
 
 _GET_EXACT_ROUTES: dict[str, str] = {
@@ -116,11 +120,7 @@ _POST_EXACT_ROUTES: dict[str, str] = {
 
 def parse_request_target(request_path: str) -> ParsedRequestTarget:
     raw_path, _, raw_query = request_path.partition("?")
-    query = {
-        key: values[0]
-        for key, values in parse_qs(raw_query).items()
-        if values
-    }
+    query = {key: values[0] for key, values in parse_qs(raw_query).items() if values}
     return ParsedRequestTarget(path=raw_path, query=query)
 
 
@@ -136,17 +136,17 @@ def match_get_route(path: str) -> RouteMatch | None:
     if path.startswith("/api/entity/") and path.endswith(".json"):
         return RouteMatch(
             "api_entity",
-            {"slug": unquote(path[len("/api/entity/"): -len(".json")])},
+            {"slug": unquote(path[len("/api/entity/") : -len(".json")])},
         )
     if path.startswith("/api/skill/") and path.endswith(".json"):
         return RouteMatch(
             "api_skill",
-            {"slug": unquote(path[len("/api/skill/"): -len(".json")])},
+            {"slug": unquote(path[len("/api/skill/") : -len(".json")])},
         )
     if path.startswith("/api/graph/") and path.endswith(".json"):
         return RouteMatch(
             "api_graph",
-            {"slug": unquote(path[len("/api/graph/"): -len(".json")])},
+            {"slug": unquote(path[len("/api/graph/") : -len(".json")])},
         )
     return None
 

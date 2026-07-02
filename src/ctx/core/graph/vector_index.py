@@ -539,9 +539,7 @@ def _normalize_query_vectors(vectors: np.ndarray, *, expected_dim: int) -> np.nd
     queries = _normalize(vectors)
     actual_dim = int(queries.shape[1])
     if actual_dim != expected_dim:
-        raise ValueError(
-            f"query vector dim {actual_dim} does not match index dim {expected_dim}"
-        )
+        raise ValueError(f"query vector dim {actual_dim} does not match index dim {expected_dim}")
     return queries
 
 

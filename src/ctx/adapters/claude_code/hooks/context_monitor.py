@@ -21,6 +21,7 @@ from ctx.utils._fs_utils import atomic_write_text as _atomic_write_text
 
 try:
     from ctx_config import cfg as _cfg
+
     CLAUDE_DIR = _cfg.claude_dir
     INTENT_LOG = _cfg.intent_log
     PENDING_SKILLS = _cfg.pending_skills
@@ -190,7 +191,9 @@ def count_recent_unmatched(signals: list[str], loaded_skills: set[str]) -> list[
 
 
 def graph_suggest(
-    unmatched_tags: list[str], *, top_k: int | None = None,
+    unmatched_tags: list[str],
+    *,
+    top_k: int | None = None,
 ) -> list[dict]:
     """Walk the knowledge graph for a BUNDLE recommendation across all 3 types.
 
@@ -217,6 +220,7 @@ def graph_suggest(
         # minimal-env test where the full config chain isn't wired.
         try:
             from ctx_config import cfg  # noqa: PLC0415
+
             configured_top_k = int(cfg.recommendation_top_k)
             min_score = float(cfg.recommendation_min_normalized_score)
         except Exception:
@@ -226,6 +230,7 @@ def graph_suggest(
     else:
         try:
             from ctx_config import cfg  # noqa: PLC0415
+
             configured_top_k = int(cfg.recommendation_top_k)
             min_score = float(cfg.recommendation_min_normalized_score)
         except Exception:
@@ -240,6 +245,7 @@ def graph_suggest(
     try:
         from ctx.core.graph.resolve_graph import load_graph  # noqa: PLC0415
         from ctx.core.resolve.recommendations import recommend_by_tags  # noqa: PLC0415
+
         graph = load_graph(graph_path)
         if graph.number_of_nodes() == 0:
             return []
@@ -270,9 +276,7 @@ def write_pending_skills(unmatched: list[str]) -> None:
     """
     graph_suggestions = graph_suggest(unmatched)  # already top-K capped
     suggestion_names = [s["name"] for s in graph_suggestions]
-    suggestion_text = (
-        f"Detected {len(unmatched)} stack signals not covered by loaded skills: {', '.join(unmatched)}"
-    )
+    suggestion_text = f"Detected {len(unmatched)} stack signals not covered by loaded skills: {', '.join(unmatched)}"
     if suggestion_names:
         suggestion_text += f". Graph suggests: {', '.join(suggestion_names)}"
 
@@ -337,7 +341,7 @@ def main() -> None:
         "--from-stdin",
         action="store_true",
         help="Read tool_name and tool_input from the JSON payload on stdin "
-             "(safe alternative to --tool/--input that avoids shell injection)",
+        "(safe alternative to --tool/--input that avoids shell injection)",
     )
     args = parser.parse_args()
 

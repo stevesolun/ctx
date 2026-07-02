@@ -88,18 +88,18 @@ GRAPH_SCORING_SIGNATURE_KEY = "ctx_graph_scoring_signature"
 # ``quality_grade`` attached when a matching sidecar exists.
 QUALITY_SIDECAR_DIR = Path(os.path.expanduser("~/.claude/skill-quality"))
 DEFAULT_WIKI_DIR = Path(os.path.expanduser("~/.claude/skill-wiki")).resolve()
-DEFAULT_GRAPH_SEMANTIC_CACHE_DIR = (
-    DEFAULT_WIKI_DIR / ".embedding-cache" / "graph"
-).resolve()
-WIKI_PACK_EXCLUDED_DIRS = frozenset({
-    ".ctx",
-    ".embedding-cache",
-    ".obsidian",
-    "graphify-out",
-    "wiki-packs",
-    "wiki-packs.staged",
-    "wiki-packs.rollback",
-})
+DEFAULT_GRAPH_SEMANTIC_CACHE_DIR = (DEFAULT_WIKI_DIR / ".embedding-cache" / "graph").resolve()
+WIKI_PACK_EXCLUDED_DIRS = frozenset(
+    {
+        ".ctx",
+        ".embedding-cache",
+        ".obsidian",
+        "graphify-out",
+        "wiki-packs",
+        "wiki-packs.staged",
+        "wiki-packs.rollback",
+    }
+)
 
 
 def configure_wiki_dir(wiki_dir: Path) -> None:
@@ -329,7 +329,9 @@ def _graph_scoring_signature(config: object) -> dict[str, float | int | str]:
         "shared_token_saturation": int(getattr(config, "graph_shared_token_saturation")),
         "dense_source_threshold": int(getattr(config, "graph_dense_source_threshold")),
         "boost_direct_link": round(float(getattr(config, "graph_edge_boost_direct_link")), 10),
-        "boost_source_overlap": round(float(getattr(config, "graph_edge_boost_source_overlap")), 10),
+        "boost_source_overlap": round(
+            float(getattr(config, "graph_edge_boost_source_overlap")), 10
+        ),
         "boost_adamic_adar": round(float(getattr(config, "graph_edge_boost_adamic_adar")), 10),
         "boost_type_affinity": round(float(getattr(config, "graph_edge_boost_type_affinity")), 10),
         "boost_usage": round(float(getattr(config, "graph_edge_boost_usage")), 10),
@@ -428,7 +430,8 @@ def _pairs_from_index(
 
 
 def build_graph(
-    *, incremental: bool = True,
+    *,
+    incremental: bool = True,
     persist_semantic_cache: bool = True,
     semantic_vector_index: str = "off",
     ann_enabled_above_nodes: int = 250_000,
@@ -470,6 +473,7 @@ def build_graph(
     lists, ``edge_reasons``, and weighted ``score_components``.
     """
     from ctx_config import cfg as _cfg  # noqa: PLC0415 — local to avoid
+
     # a config read at module-import time (tests patch cfg).
     from ctx.core.graph import semantic_edges as _sem  # noqa: PLC0415
 
@@ -507,10 +511,12 @@ def build_graph(
                 never_load=_frontmatter_bool(meta.get("never_load")),
             )
             entities[node_id] = meta
-            embed_nodes.append(_sem.SemanticNode(
-                node_id=node_id,
-                text=_load_full_body(meta, slug, entity_type),
-            ))
+            embed_nodes.append(
+                _sem.SemanticNode(
+                    node_id=node_id,
+                    text=_load_full_body(meta, slug, entity_type),
+                )
+            )
 
     # ── Phase 2: tag + slug-token indices (cheap) ────────────────────
     tag_index: dict[str, list[str]] = defaultdict(list)
@@ -595,11 +601,7 @@ def build_graph(
     w_quality = _cfg.graph_edge_boost_quality
 
     all_pairs: set[tuple[str, str]] = (
-        set(sem_pairs)
-        | set(tag_counts)
-        | set(token_counts)
-        | set(source_counts)
-        | direct_pairs
+        set(sem_pairs) | set(tag_counts) | set(token_counts) | set(source_counts) | direct_pairs
     )
     quality_usage = _quality_usage_signals(QUALITY_SIDECAR_DIR)
     for nid, data in G.nodes(data=True):
@@ -687,9 +689,7 @@ def build_graph(
             "shared_sources": source_shared.get(pair, []),
             "edge_reasons": reasons,
             "score_components": {
-                key: round(value, 4)
-                for key, value in components.items()
-                if value > 0.0
+                key: round(value, 4) for key, value in components.items() if value > 0.0
             },
         }
 
@@ -714,8 +714,7 @@ def build_graph(
     # patch path cannot reconcile this without rebuilding every edge.
     if prior_graph is not None and len(sem_pairs) > 0:
         prior_with_sem = sum(
-            1 for _, _, d in prior_graph.edges(data=True)
-            if d.get("semantic_sim", 0.0) > 0
+            1 for _, _, d in prior_graph.edges(data=True) if d.get("semantic_sim", 0.0) > 0
         )
         if prior_with_sem == 0:
             print(
@@ -729,8 +728,7 @@ def build_graph(
         prior_signature = prior_graph.graph.get(GRAPH_SCORING_SIGNATURE_KEY)
         if prior_signature != scoring_signature:
             print(
-                "graphify: graph scoring config changed since prior export — "
-                "forcing full rebuild.",
+                "graphify: graph scoring config changed since prior export — forcing full rebuild.",
                 flush=True,
             )
             prior_graph = None
@@ -833,19 +831,13 @@ def _metadata_affected_nodes(
         if set(prior.get("tags", []) or []) != set(info.get("tags", []) or []):
             affected.add(nid)
             continue
-        if _frontmatter_bool(prior.get("never_load")) != _frontmatter_bool(
-            info.get("never_load")
-        ):
+        if _frontmatter_bool(prior.get("never_load")) != _frontmatter_bool(info.get("never_load")):
             affected.add(nid)
             continue
-        if set(prior.get("source_keys", []) or []) != set(
-            info.get("source_keys", []) or []
-        ):
+        if set(prior.get("source_keys", []) or []) != set(info.get("source_keys", []) or []):
             affected.add(nid)
             continue
-        if set(prior.get("direct_targets", []) or []) != set(
-            info.get("direct_targets", []) or []
-        ):
+        if set(prior.get("direct_targets", []) or []) != set(info.get("direct_targets", []) or []):
             affected.add(nid)
             continue
         if prior.get("quality_signal") != info.get("quality_signal"):
@@ -907,8 +899,7 @@ def load_prior_graph() -> nx.Graph | None:
             manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             print(
-                f"wiki_graphify: graph export manifest unreadable ({exc}); "
-                "full rebuild",
+                f"wiki_graphify: graph export manifest unreadable ({exc}); full rebuild",
                 flush=True,
             )
             return None
@@ -921,8 +912,7 @@ def load_prior_graph() -> nx.Graph | None:
         manifest_export_id = manifest_data.get("export_id")
         if graph_export_id != manifest_export_id:
             print(
-                "wiki_graphify: graph.json export id does not match manifest; "
-                "full rebuild",
+                "wiki_graphify: graph.json export id does not match manifest; full rebuild",
                 flush=True,
             )
             return None
@@ -943,8 +933,7 @@ def load_prior_graph() -> nx.Graph | None:
                 return None
             if not (GRAPH_OUT / artifact_name).is_file():
                 print(
-                    f"wiki_graphify: graph export artifact {artifact_name} missing; "
-                    "full rebuild",
+                    f"wiki_graphify: graph export artifact {artifact_name} missing; full rebuild",
                     flush=True,
                 )
                 return None
@@ -967,8 +956,7 @@ def load_prior_graph() -> nx.Graph | None:
             graph = nx.node_link_graph(legacy_data)
     except (KeyError, TypeError, ValueError) as exc:
         print(
-            f"wiki_graphify: prior graph.json rejected by node_link_graph "
-            f"({exc}); full rebuild",
+            f"wiki_graphify: prior graph.json rejected by node_link_graph ({exc}); full rebuild",
             flush=True,
         )
         return None
@@ -1374,7 +1362,9 @@ def detect_communities(G: nx.Graph) -> dict[int, list[str]]:
     algo = os.environ.get("CTX_GRAPH_COMMUNITY", "louvain").lower()
     if algo == "cnm":
         communities_iter = greedy_modularity_communities(
-            G, weight="weight", resolution=1.2,
+            G,
+            weight="weight",
+            resolution=1.2,
         )
     else:
         # Louvain returns list[set[node]] directly. Resolution=1.2 to
@@ -1382,7 +1372,10 @@ def detect_communities(G: nx.Graph) -> dict[int, list[str]]:
         # granularity is comparable.
         # seed=42 fixed so output is reproducible across runs.
         communities_iter = louvain_communities(
-            G, weight="weight", resolution=1.2, seed=42,
+            G,
+            weight="weight",
+            resolution=1.2,
+            seed=42,
         )
 
     communities: dict[int, list[str]] = {}
@@ -1414,9 +1407,7 @@ def _community_tags(G: nx.Graph, members: list[str], *, limit: int = 5) -> list[
     counts: Counter[str] = Counter()
     for nid in members:
         counts.update(
-            str(tag)
-            for tag in G.nodes[nid].get("tags", [])
-            if tag and tag != "uncategorized"
+            str(tag) for tag in G.nodes[nid].get("tags", []) if tag and tag != "uncategorized"
         )
     return [tag for tag, _count in counts.most_common(limit)]
 
@@ -1437,8 +1428,7 @@ def _reconcile_generated_concept_pages(
         except OSError:
             continue
         generated = (
-            CONCEPT_GENERATED_MARKER in content
-            or "*Generated by wiki_graphify.py" in content
+            CONCEPT_GENERATED_MARKER in content or "*Generated by wiki_graphify.py" in content
         )
         if not generated:
             continue
@@ -1521,7 +1511,7 @@ updated: {TODAY}
 type: concept
 community_id: {cid}
 member_count: {len(members)}
-tags: [{', '.join(tags)}]
+tags: [{", ".join(tags)}]
 ---
 
 {CONCEPT_GENERATED_MARKER}
@@ -1533,11 +1523,11 @@ tags: [{', '.join(tags)}]
 ## Key Members
 
 {member_links}
-{f'*... and {remaining} more*' if remaining > 0 else ''}
+{f"*... and {remaining} more*" if remaining > 0 else ""}
 
 ## Cross-Community Connections
 
-{cross_links if cross_links else '*No strong cross-community connections*'}
+{cross_links if cross_links else "*No strong cross-community connections*"}
 
 ---
 
@@ -1702,13 +1692,18 @@ def export_graph(
 
     _stage_and_promote_graph_artifact(
         "communities.json",
-        json.dumps({
-            "export_id": export_id,
-            "communities": {str(cid): {"label": labels[cid], "members": members}
-                           for cid, members in communities.items()},
-            "total_communities": len(communities),
-            "generated": TODAY,
-        }, indent=2),
+        json.dumps(
+            {
+                "export_id": export_id,
+                "communities": {
+                    str(cid): {"label": labels[cid], "members": members}
+                    for cid, members in communities.items()
+                },
+                "total_communities": len(communities),
+                "generated": TODAY,
+            },
+            indent=2,
+        ),
         validate=lambda path: validate_json_artifact(
             path,
             required_keys=("export_id", "communities", "total_communities"),
@@ -1729,7 +1724,9 @@ def export_graph(
     ]
     for nid in god_nodes:
         d = G.nodes[nid]
-        report_lines.append(f"- **{d.get('label', nid)}** ({G.degree(nid)} connections) — {d.get('type', '?')}")
+        report_lines.append(
+            f"- **{d.get('label', nid)}** ({G.degree(nid)} connections) — {d.get('type', '?')}"
+        )
 
     report_lines += ["", "## Communities (by size)", ""]
     for cid, members in sorted(communities.items(), key=lambda x: -len(x[1])):
@@ -1741,22 +1738,25 @@ def export_graph(
     )
     _stage_and_promote_graph_artifact(
         GRAPH_EXPORT_MANIFEST,
-        json.dumps({
-            "version": 1,
-            "export_id": export_id,
-            "generated": TODAY,
-            "artifacts": {
-                "graph": "graph.json",
-                "delta": "graph-delta.json",
-                "communities": "communities.json",
-                "report": "graph-report.md",
+        json.dumps(
+            {
+                "version": 1,
+                "export_id": export_id,
+                "generated": TODAY,
+                "artifacts": {
+                    "graph": "graph.json",
+                    "delta": "graph-delta.json",
+                    "communities": "communities.json",
+                    "report": "graph-report.md",
+                },
+                "counts": {
+                    "nodes": G.number_of_nodes(),
+                    "edges": G.number_of_edges(),
+                    "communities": len(communities),
+                },
             },
-            "counts": {
-                "nodes": G.number_of_nodes(),
-                "edges": G.number_of_edges(),
-                "communities": len(communities),
-            },
-        }, indent=2),
+            indent=2,
+        ),
         validate=lambda path: validate_json_artifact(
             path,
             required_keys=("version", "export_id", "artifacts", "counts"),
@@ -1795,12 +1795,16 @@ def main() -> None:
     # model/text change).
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
-        "--incremental", dest="incremental", action="store_true",
+        "--incremental",
+        dest="incremental",
+        action="store_true",
         default=True,
         help="Reuse prior top-K for unchanged nodes (default)",
     )
     mode.add_argument(
-        "--full", dest="incremental", action="store_false",
+        "--full",
+        dest="incremental",
+        action="store_false",
         help="Force a full top-K recompute for every node",
     )
     parser.add_argument(

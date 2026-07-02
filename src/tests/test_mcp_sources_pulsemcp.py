@@ -183,15 +183,11 @@ class TestParseListing:
 
 class TestFetch:
     @pytest.fixture(autouse=True)
-    def _isolated_wiki(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def _isolated_wiki(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         # Cache writes must go to tmp_path, not the user's real wiki.
         _isolate_wiki(monkeypatch, tmp_path)
 
-    def test_single_page_yields_three_records(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_single_page_yields_three_records(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Page 1 returns the excerpt (3 cards), page 2+ returns empty
         # so the loop terminates.
         fake_opener = _make_paginated_opener([_excerpt_bytes()])
@@ -202,9 +198,7 @@ class TestFetch:
 
         assert len(records) == 3
 
-    def test_two_pages_yield_six_records(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_two_pages_yield_six_records(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Two non-empty pages followed by empty page → 3+3=6 records
         fake_opener = _make_paginated_opener([_excerpt_bytes(), _excerpt_bytes()])
         monkeypatch.setattr("mcp_sources.base._build_opener", lambda: fake_opener)
@@ -214,9 +208,7 @@ class TestFetch:
 
         assert len(records) == 6
 
-    def test_limit_short_circuits_within_first_page(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_limit_short_circuits_within_first_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fake_opener = _make_paginated_opener([_excerpt_bytes()])
         monkeypatch.setattr("mcp_sources.base._build_opener", lambda: fake_opener)
 
@@ -227,9 +219,7 @@ class TestFetch:
         # Only one HTTP call — second page never fetched
         assert fake_opener.open.call_count == 1
 
-    def test_empty_first_page_returns_no_records(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_first_page_returns_no_records(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fake_opener = _make_paginated_opener([b"<html><body></body></html>"])
         monkeypatch.setattr("mcp_sources.base._build_opener", lambda: fake_opener)
 

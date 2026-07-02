@@ -33,11 +33,11 @@ from typing import Any, Literal, Protocol
 
 MessageRole = Literal["system", "user", "assistant", "tool"]
 FinishReason = Literal[
-    "stop",            # model decided it was done
-    "tool_calls",      # model requested tool execution
-    "length",          # hit max_tokens
+    "stop",  # model decided it was done
+    "tool_calls",  # model requested tool execution
+    "length",  # hit max_tokens
     "content_filter",  # provider policy filter
-    "other",           # catch-all for provider-specific reasons
+    "other",  # catch-all for provider-specific reasons
 ]
 
 

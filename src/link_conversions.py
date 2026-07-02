@@ -148,10 +148,28 @@ def scan_converted(wiki: Path) -> list[ConvertedSkill]:
 def _infer_tags(name: str) -> list[str]:
     """Infer rough tags from a skill name."""
     tag_keywords = [
-        "python", "javascript", "typescript", "react", "docker",
-        "fastapi", "django", "langchain", "mcp", "testing", "rust",
-        "go", "java", "ruby", "swift", "sql", "redis", "kafka",
-        "security", "llm", "agents", "api",
+        "python",
+        "javascript",
+        "typescript",
+        "react",
+        "docker",
+        "fastapi",
+        "django",
+        "langchain",
+        "mcp",
+        "testing",
+        "rust",
+        "go",
+        "java",
+        "ruby",
+        "swift",
+        "sql",
+        "redis",
+        "kafka",
+        "security",
+        "llm",
+        "agents",
+        "api",
     ]
     lowered = name.lower().replace("-", " ").replace("_", " ")
     found = [t for t in tag_keywords if t in lowered]

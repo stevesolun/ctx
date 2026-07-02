@@ -283,9 +283,7 @@ def trust_signal(
         ``SignalResult`` with evidence
         ``{"official_or_org", "has_license", "has_author"}``.
     """
-    official_or_org: bool = (
-        "official" in record.tags or record.author_type == "org"
-    )
+    official_or_org: bool = "official" in record.tags or record.author_type == "org"
     has_license: bool = bool(record.license)
     has_author: bool = bool(record.author)
 

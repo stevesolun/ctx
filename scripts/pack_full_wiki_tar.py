@@ -90,11 +90,14 @@ def _rewrite_tar_with_pack(
     removed = 0
     written_names: set[str] = set()
     try:
-        with tarfile.open(source, "r:gz") as src, tarfile.open(
-            tmp_target,
-            "w:gz",
-            compresslevel=9,
-        ) as dst:
+        with (
+            tarfile.open(source, "r:gz") as src,
+            tarfile.open(
+                tmp_target,
+                "w:gz",
+                compresslevel=9,
+            ) as dst,
+        ):
             for member in src:
                 name = _safe_tar_name(member.name)
                 if name.startswith("wiki-packs/"):

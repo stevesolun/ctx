@@ -125,9 +125,7 @@ class CommandRunner:
             stderr=result.stderr,
         )
         if check and result.returncode != 0:
-            raise SystemExit(
-                f"command failed with exit {result.returncode}: {' '.join(args)}"
-            )
+            raise SystemExit(f"command failed with exit {result.returncode}: {' '.join(args)}")
         return completed
 
 
@@ -166,22 +164,20 @@ def assert_inside(path: Path, root: Path) -> None:
 
 
 def isolated_env(paths: ContractPaths, *, extra_pythonpath: Path | None = None) -> dict[str, str]:
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if key in _CLEAN_HOST_PLATFORM_ENV
-    }
-    env.update({
-        "HOME": str(paths.home),
-        "USERPROFILE": str(paths.home),
-        "APPDATA": str(paths.appdata),
-        "LOCALAPPDATA": str(paths.localappdata),
-        "XDG_CONFIG_HOME": str(paths.xdg_config),
-        "XDG_CACHE_HOME": str(paths.xdg_cache),
-        "PIP_CACHE_DIR": str(paths.pip_cache),
-        "CTX_ALLOW_MISSING_GRAPH": "1",
-        "PYTHONUTF8": "1",
-    })
+    env = {key: value for key, value in os.environ.items() if key in _CLEAN_HOST_PLATFORM_ENV}
+    env.update(
+        {
+            "HOME": str(paths.home),
+            "USERPROFILE": str(paths.home),
+            "APPDATA": str(paths.appdata),
+            "LOCALAPPDATA": str(paths.localappdata),
+            "XDG_CONFIG_HOME": str(paths.xdg_config),
+            "XDG_CACHE_HOME": str(paths.xdg_cache),
+            "PIP_CACHE_DIR": str(paths.pip_cache),
+            "CTX_ALLOW_MISSING_GRAPH": "1",
+            "PYTHONUTF8": "1",
+        }
+    )
     if extra_pythonpath is not None:
         env["PYTHONPATH"] = str(extra_pythonpath)
     return env
@@ -202,15 +198,17 @@ def live_claude_env(paths: ContractPaths) -> dict[str, str]:
             or key.startswith(_LIVE_CLAUDE_AUTH_PREFIX_ENV)
         ):
             env[key] = value
-    env.update({
-        "HOME": str(paths.home),
-        "USERPROFILE": str(paths.home),
-        "APPDATA": str(paths.appdata),
-        "LOCALAPPDATA": str(paths.localappdata),
-        "XDG_CONFIG_HOME": str(paths.xdg_config),
-        "XDG_CACHE_HOME": str(paths.xdg_cache),
-        "PYTHONUTF8": "1",
-    })
+    env.update(
+        {
+            "HOME": str(paths.home),
+            "USERPROFILE": str(paths.home),
+            "APPDATA": str(paths.appdata),
+            "LOCALAPPDATA": str(paths.localappdata),
+            "XDG_CONFIG_HOME": str(paths.xdg_config),
+            "XDG_CACHE_HOME": str(paths.xdg_cache),
+            "PYTHONUTF8": "1",
+        }
+    )
     env.pop("CLAUDE_HOME", None)
     return env
 
@@ -369,9 +367,9 @@ def write_tiny_repo(path: Path) -> None:
     (path / "tests").mkdir(parents=True, exist_ok=True)
     (path / "pyproject.toml").write_text(
         "[project]\n"
-        "name = \"tiny-fastapi-contract\"\n"
-        "version = \"0.1.0\"\n"
-        "dependencies = [\"fastapi\", \"pytest\"]\n",
+        'name = "tiny-fastapi-contract"\n'
+        'version = "0.1.0"\n'
+        'dependencies = ["fastapi", "pytest"]\n',
         encoding="utf-8",
     )
     (path / "app" / "main.py").write_text(
@@ -383,8 +381,7 @@ def write_tiny_repo(path: Path) -> None:
         encoding="utf-8",
     )
     (path / "tests" / "test_health.py").write_text(
-        "def test_contract_fixture():\n"
-        "    assert True\n",
+        "def test_contract_fixture():\n    assert True\n",
         encoding="utf-8",
     )
 
@@ -422,9 +419,7 @@ def _assert_fake_claude_hook_output(stdout: str) -> None:
     if hook_commands < 5:
         raise AssertionError(f"expected at least 5 generated hook commands, got {hook_commands}")
     rendered = "\n".join(
-        str(row.get("command", ""))
-        for row in result.get("commands", [])
-        if isinstance(row, dict)
+        str(row.get("command", "")) for row in result.get("commands", []) if isinstance(row, dict)
     )
     for expected in (
         "ctx.adapters.claude_code.hooks.context_monitor",
@@ -490,29 +485,37 @@ def _append_live_claude_sentinel_hooks(
 ) -> None:
     settings = json.loads(settings_json.read_text(encoding="utf-8"))
     hooks = settings.setdefault("hooks", {})
-    post_command = _quote_command((
-        python_bin,
-        sentinel_script,
-        "--event",
-        "PostToolUse",
-        "--out",
-        sentinel_jsonl,
-    ))
-    stop_command = _quote_command((
-        python_bin,
-        sentinel_script,
-        "--event",
-        "Stop",
-        "--out",
-        sentinel_jsonl,
-    ))
-    hooks.setdefault("PostToolUse", []).append({
-        "matcher": ".*",
-        "hooks": [{"type": "command", "command": post_command}],
-    })
-    hooks.setdefault("Stop", []).append({
-        "hooks": [{"type": "command", "command": stop_command}],
-    })
+    post_command = _quote_command(
+        (
+            python_bin,
+            sentinel_script,
+            "--event",
+            "PostToolUse",
+            "--out",
+            sentinel_jsonl,
+        )
+    )
+    stop_command = _quote_command(
+        (
+            python_bin,
+            sentinel_script,
+            "--event",
+            "Stop",
+            "--out",
+            sentinel_jsonl,
+        )
+    )
+    hooks.setdefault("PostToolUse", []).append(
+        {
+            "matcher": ".*",
+            "hooks": [{"type": "command", "command": post_command}],
+        }
+    )
+    hooks.setdefault("Stop", []).append(
+        {
+            "hooks": [{"type": "command", "command": stop_command}],
+        }
+    )
     tmp_path = settings_json.with_name(f"{settings_json.name}.live.tmp")
     tmp_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp_path, settings_json)
@@ -793,8 +796,7 @@ def run_contract(
     )
     if denied.returncode != 2 or '"tool_denied"' not in denied.stdout:
         raise AssertionError(
-            "expected denied tool run to exit 2 with tool_denied JSON; "
-            f"got rc={denied.returncode}"
+            f"expected denied tool run to exit 2 with tool_denied JSON; got rc={denied.returncode}"
         )
 
     if not fast:

@@ -467,9 +467,7 @@ class TestLoadSnapshotHashes:
             {"dest": "b.md", "sha256": "hash-b"},
             {"dest": "c.md", "sha256": "hash-c"},
         ]
-        (snap / "manifest.json").write_text(
-            _manifest_json(entries), encoding="utf-8"
-        )
+        (snap / "manifest.json").write_text(_manifest_json(entries), encoding="utf-8")
         result = change_detector._load_snapshot_hashes(snap)
         assert len(result) == 3
         assert result["b.md"] == "hash-b"
@@ -504,9 +502,7 @@ class TestSnapshotId:
     def test_falls_back_to_dir_name_when_snapshot_id_absent(self, tmp_path: Path) -> None:
         snap = tmp_path / "dir-name-fallback"
         snap.mkdir()
-        (snap / "manifest.json").write_text(
-            json.dumps({"entries": []}), encoding="utf-8"
-        )
+        (snap / "manifest.json").write_text(json.dumps({"entries": []}), encoding="utf-8")
         assert change_detector._snapshot_id(snap) == "dir-name-fallback"
 
     def test_snapshot_id_none_falls_back_to_dir_name(self, tmp_path: Path) -> None:
@@ -537,9 +533,7 @@ class TestDetectChanges:
         snapshot_id: str = "baseline-snap",
     ) -> None:
         snap.mkdir(parents=True, exist_ok=True)
-        (snap / "manifest.json").write_text(
-            _manifest_json(entries, snapshot_id), encoding="utf-8"
-        )
+        (snap / "manifest.json").write_text(_manifest_json(entries, snapshot_id), encoding="utf-8")
 
     # -- No baseline --
 
@@ -562,9 +556,7 @@ class TestDetectChanges:
         assert report.has_changes is False
         assert report.baseline_snapshot is None
 
-    def test_nonexistent_snapshot_dir_treated_as_no_baseline(
-        self, tmp_path: Path
-    ) -> None:
+    def test_nonexistent_snapshot_dir_treated_as_no_baseline(self, tmp_path: Path) -> None:
         claude_home = tmp_path / "home"
         claude_home.mkdir()
         (claude_home / "CLAUDE.md").write_text("hi", encoding="utf-8")
@@ -651,11 +643,14 @@ class TestDetectChanges:
         # removed — in baseline, not on disk
 
         snap = tmp_path / "snap"
-        self._write_manifest(snap, [
-            {"dest": "changed.json", "sha256": "stale-hash"},
-            {"dest": "same.json",    "sha256": same_digest},
-            {"dest": "removed.json", "sha256": "any-hash"},
-        ])
+        self._write_manifest(
+            snap,
+            [
+                {"dest": "changed.json", "sha256": "stale-hash"},
+                {"dest": "same.json", "sha256": same_digest},
+                {"dest": "removed.json", "sha256": "any-hash"},
+            ],
+        )
         cfg = _default_cfg(top_files=("new.json", "changed.json", "same.json", "removed.json"))
         report = change_detector.detect_changes(cfg, claude_home, snap)
 
@@ -844,9 +839,7 @@ class TestDetectChanges:
 
     # -- total_current property via detect_changes --
 
-    def test_total_current_counts_new_changed_unchanged_not_removed(
-        self, tmp_path: Path
-    ) -> None:
+    def test_total_current_counts_new_changed_unchanged_not_removed(self, tmp_path: Path) -> None:
         claude_home = tmp_path / "home"
         claude_home.mkdir()
         # 2 new files
@@ -858,11 +851,14 @@ class TestDetectChanges:
         # 1 changed
         (claude_home / "d.json").write_bytes(b"new")
         snap = tmp_path / "snap"
-        self._write_manifest(snap, [
-            {"dest": "c.json", "sha256": same_d},
-            {"dest": "d.json", "sha256": "old-hash"},
-            {"dest": "removed.json", "sha256": "r-hash"},
-        ])
+        self._write_manifest(
+            snap,
+            [
+                {"dest": "c.json", "sha256": same_d},
+                {"dest": "d.json", "sha256": "old-hash"},
+                {"dest": "removed.json", "sha256": "r-hash"},
+            ],
+        )
         cfg = _default_cfg(top_files=("a.json", "b.json", "c.json", "d.json"))
         report = change_detector.detect_changes(cfg, claude_home, snap)
         # new=2, changed=1, unchanged=1  → total_current=4

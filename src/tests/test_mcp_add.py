@@ -114,15 +114,11 @@ def patched_mcp_add(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 class TestAddMcpNewRecord:
-    def test_new_record_creates_entity_file(
-        self, patched_mcp_add: Any, wiki_dir: Path
-    ) -> None:
+    def test_new_record_creates_entity_file(self, patched_mcp_add: Any, wiki_dir: Path) -> None:
         record = _make_record(name="github-mcp")
         patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
 
-        expected = (
-            wiki_dir / "entities" / "mcp-servers" / "g" / "github-mcp.md"
-        )
+        expected = wiki_dir / "entities" / "mcp-servers" / "g" / "github-mcp.md"
         assert expected.exists(), f"Entity file not found at {expected}"
 
     def test_new_record_returns_is_new_page_true(
@@ -132,16 +128,12 @@ class TestAddMcpNewRecord:
         result = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
         assert result["is_new_page"] is True
 
-    def test_new_record_result_contains_slug(
-        self, patched_mcp_add: Any, wiki_dir: Path
-    ) -> None:
+    def test_new_record_result_contains_slug(self, patched_mcp_add: Any, wiki_dir: Path) -> None:
         record = _make_record(name="github-mcp")
         result = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
         assert result["slug"] == record.slug
 
-    def test_new_record_result_contains_path(
-        self, patched_mcp_add: Any, wiki_dir: Path
-    ) -> None:
+    def test_new_record_result_contains_path(self, patched_mcp_add: Any, wiki_dir: Path) -> None:
         record = _make_record(name="github-mcp")
         result = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
         assert "path" in result
@@ -295,18 +287,14 @@ class TestAddMcpExistingReview:
 
 
 class TestAddMcpDryRun:
-    def test_dry_run_does_not_create_file(
-        self, patched_mcp_add: Any, wiki_dir: Path
-    ) -> None:
+    def test_dry_run_does_not_create_file(self, patched_mcp_add: Any, wiki_dir: Path) -> None:
         record = _make_record(name="dry-run-mcp")
         patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir, dry_run=True)
 
         expected = wiki_dir / "entities" / "mcp-servers" / "d" / "dry-run-mcp.md"
         assert not expected.exists(), "dry_run=True must not create the entity file"
 
-    def test_dry_run_returns_result_dict(
-        self, patched_mcp_add: Any, wiki_dir: Path
-    ) -> None:
+    def test_dry_run_returns_result_dict(self, patched_mcp_add: Any, wiki_dir: Path) -> None:
         record = _make_record(name="dry-run-mcp")
         result = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir, dry_run=True)
 
@@ -381,6 +369,7 @@ class TestExistenceBypassesIntakeOnMerge:
 
         def _counting_intake(*args: Any, **_kwargs: Any) -> Any:
             from intake_gate import IntakeDecision  # noqa: PLC0415
+
             intake_calls.append("called")
             return IntakeDecision(allow=True)
 
@@ -418,13 +407,13 @@ class TestExistenceBypassesIntakeOnMerge:
 
         def _allow_then_reject(*args: Any, **_kwargs: Any) -> Any:
             from intake_gate import IntakeDecision, IntakeFinding  # noqa: PLC0415
+
             call_count[0] += 1
             if call_count[0] == 1:
                 return IntakeDecision(allow=True)
             return IntakeDecision(
                 allow=False,
-                findings=(IntakeFinding(code="DUPLICATE", severity="fail",
-                                        message="cosine 1.0"),),
+                findings=(IntakeFinding(code="DUPLICATE", severity="fail", message="cosine 1.0"),),
             )
 
         monkeypatch.setattr("mcp_add.check_intake", _allow_then_reject)
@@ -471,9 +460,7 @@ class TestExistenceBypassesIntakeOnMerge:
         assert embed_calls == ["no-reembed-mcp"]
 
         mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
-        assert embed_calls == ["no-reembed-mcp"], (
-            "embedding must not be re-recorded on merge"
-        )
+        assert embed_calls == ["no-reembed-mcp"], "embedding must not be re-recorded on merge"
 
 
 # ---------------------------------------------------------------------------
@@ -496,9 +483,9 @@ class TestCrossSourceCanonicalKeyDedup:
     def test_normalize_github_url_strips_trailing_slash_and_lowercases(self) -> None:
         from mcp_add import _normalize_github_url  # noqa: PLC0415
 
-        assert _normalize_github_url(
-            "https://GitHub.com/Org/Repo/"
-        ) == "https://github.com/org/repo"
+        assert (
+            _normalize_github_url("https://GitHub.com/Org/Repo/") == "https://github.com/org/repo"
+        )
 
     def test_normalize_returns_none_for_non_github(self) -> None:
         from mcp_add import _normalize_github_url  # noqa: PLC0415
@@ -512,9 +499,9 @@ class TestCrossSourceCanonicalKeyDedup:
         from mcp_add import _find_existing_by_github_url  # noqa: PLC0415
 
         # Directory doesn't exist → None (no scan needed)
-        assert _find_existing_by_github_url(
-            tmp_path / "missing", "https://github.com/foo/bar"
-        ) is None
+        assert (
+            _find_existing_by_github_url(tmp_path / "missing", "https://github.com/foo/bar") is None
+        )
 
     def test_find_existing_matches_by_canonical_url(
         self, patched_mcp_add: Any, wiki_dir: Path
@@ -530,9 +517,7 @@ class TestCrossSourceCanonicalKeyDedup:
 
         # Search for the same URL with different casing + trailing slash
         mcp_dir = wiki_dir / "entities" / "mcp-servers"
-        match = _find_existing_by_github_url(
-            mcp_dir, "https://GITHUB.com/org/repo/"
-        )
+        match = _find_existing_by_github_url(mcp_dir, "https://GITHUB.com/org/repo/")
         assert match is not None
         assert match.name == "awesome-cataloged-repo.md"
 
@@ -546,9 +531,7 @@ class TestCrossSourceCanonicalKeyDedup:
             github_url="https://github.com/modelcontextprotocol/servers",
             sources=["awesome-mcp"],
         )
-        first_path = (
-            wiki_dir / "entities" / "mcp-servers" / record_awesome.entity_relpath()
-        )
+        first_path = wiki_dir / "entities" / "mcp-servers" / record_awesome.entity_relpath()
         packs_dir = wiki_dir / "wiki-packs"
         write_wiki_base_pack(
             pack_dir=packs_dir / "base-export-1",
@@ -578,9 +561,9 @@ class TestCrossSourceCanonicalKeyDedup:
 
         jobs = wiki_queue.list_jobs(wiki_queue.queue_db_path(wiki_dir))
         assert jobs[-1].payload["slug"] == first_path.stem
-        assert jobs[-1].payload["entity_path"] == str(
-            first_path.relative_to(wiki_dir)
-        ).replace("\\", "/")
+        assert jobs[-1].payload["entity_path"] == str(first_path.relative_to(wiki_dir)).replace(
+            "\\", "/"
+        )
 
         # And only ONE logical MCP page exists in the merged wiki.
         merged_pages = {
@@ -794,9 +777,7 @@ class TestAddMcpNumericSharding:
         patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
 
         expected = wiki_dir / "entities" / "mcp-servers" / "0-9" / "007-mcp.md"
-        assert expected.exists(), (
-            f"Numeric-slug entity file not found at {expected}"
-        )
+        assert expected.exists(), f"Numeric-slug entity file not found at {expected}"
 
     def test_numeric_slug_result_is_new_page_true(
         self, patched_mcp_add: Any, wiki_dir: Path
@@ -815,18 +796,14 @@ class TestAddMcpNumericSharding:
 
 
 class TestAddMcpFromFixtures:
-    def test_github_fixture_can_be_added(
-        self, patched_mcp_add: Any, wiki_dir: Path
-    ) -> None:
+    def test_github_fixture_can_be_added(self, patched_mcp_add: Any, wiki_dir: Path) -> None:
         fixture_path = Path(__file__).parent / "fixtures" / "mcp_github.json"
         data = json.loads(fixture_path.read_text(encoding="utf-8"))
         record = McpRecord.from_dict(data)
         result = patched_mcp_add.add_mcp(record=record, wiki_path=wiki_dir)
         assert result["is_new_page"] is True
 
-    def test_pulsemcp_fixture_can_be_added(
-        self, patched_mcp_add: Any, wiki_dir: Path
-    ) -> None:
+    def test_pulsemcp_fixture_can_be_added(self, patched_mcp_add: Any, wiki_dir: Path) -> None:
         fixture_path = Path(__file__).parent / "fixtures" / "mcp_pulsemcp.json"
         data = json.loads(fixture_path.read_text(encoding="utf-8"))
         record = McpRecord.from_dict(data)
@@ -857,11 +834,17 @@ class TestAddMcpCliInput:
             encoding="utf-8",
         )
         wiki = tmp_path / "wiki"
-        monkeypatch.setattr(sys, "argv", [
-            "mcp_add.py",
-            "--from-json", str(record_path),
-            "--wiki", str(wiki),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "mcp_add.py",
+                "--from-json",
+                str(record_path),
+                "--wiki",
+                str(wiki),
+            ],
+        )
         monkeypatch.setattr("mcp_add.check_intake", _fake_allow)
         monkeypatch.setattr("mcp_add.record_embedding", _fake_record_embedding)
         monkeypatch.setattr("mcp_add.update_index", lambda *a, **k: None)
@@ -869,9 +852,7 @@ class TestAddMcpCliInput:
 
         mcp_add.main()
 
-        assert (
-            wiki / "entities" / "mcp-servers" / "b" / "bom-json-mcp.md"
-        ).exists()
+        assert (wiki / "entities" / "mcp-servers" / "b" / "bom-json-mcp.md").exists()
 
     def test_from_stdin_accepts_utf8_bom(
         self,
@@ -882,11 +863,16 @@ class TestAddMcpCliInput:
         import mcp_add  # noqa: PLC0415
 
         wiki = tmp_path / "wiki"
-        monkeypatch.setattr(sys, "argv", [
-            "mcp_add.py",
-            "--from-stdin",
-            "--wiki", str(wiki),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "mcp_add.py",
+                "--from-stdin",
+                "--wiki",
+                str(wiki),
+            ],
+        )
         monkeypatch.setattr(
             sys,
             "stdin",
@@ -895,9 +881,7 @@ class TestAddMcpCliInput:
                 + json.dumps(
                     {
                         "name": "bom-stdin-mcp",
-                        "description": (
-                            "MCP loaded from a Windows UTF-8 BOM stdin stream."
-                        ),
+                        "description": ("MCP loaded from a Windows UTF-8 BOM stdin stream."),
                         "sources": ["test"],
                         "github_url": "https://github.com/example/bom-stdin-mcp",
                         "tags": ["testing"],
@@ -913,9 +897,7 @@ class TestAddMcpCliInput:
 
         mcp_add.main()
 
-        assert (
-            wiki / "entities" / "mcp-servers" / "b" / "bom-stdin-mcp.md"
-        ).exists()
+        assert (wiki / "entities" / "mcp-servers" / "b" / "bom-stdin-mcp.md").exists()
 
     def test_rejected_batch_exits_nonzero(
         self,
@@ -937,11 +919,17 @@ class TestAddMcpCliInput:
             ),
             encoding="utf-8",
         )
-        monkeypatch.setattr(sys, "argv", [
-            "mcp_add.py",
-            "--from-json", str(record_path),
-            "--wiki", str(tmp_path / "wiki"),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "mcp_add.py",
+                "--from-json",
+                str(record_path),
+                "--wiki",
+                str(tmp_path / "wiki"),
+            ],
+        )
         monkeypatch.setattr("mcp_add.check_intake", _fake_reject)
         monkeypatch.setattr("mcp_add.record_embedding", _fake_record_embedding)
 

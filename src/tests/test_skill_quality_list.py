@@ -77,9 +77,7 @@ class TestCmdListFiltersLifecycleSidecars:
         # The lifecycle sidecar must not appear as a separate row.
         # One row for quality sidecar means exactly one slug mention in stdout.
         lines = [ln for ln in captured.out.splitlines() if "my-skill" in ln]
-        assert len(lines) == 1, (
-            f"Expected 1 row for my-skill, got {len(lines)}: {lines}"
-        )
+        assert len(lines) == 1, f"Expected 1 row for my-skill, got {len(lines)}: {lines}"
 
     def test_lifecycle_sidecar_absent_from_json_output(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch

@@ -95,15 +95,19 @@ class Config:
         self.wiki_dir = Path(_expand(paths.get("wiki_dir", "~/.claude/skill-wiki")))
         self.skills_dir = Path(_expand(paths.get("skills_dir", "~/.claude/skills")))
         self.agents_dir = Path(_expand(paths.get("agents_dir", "~/.claude/agents")))
-        self.skill_manifest = Path(_expand(paths.get("skill_manifest", "~/.claude/skill-manifest.json")))
+        self.skill_manifest = Path(
+            _expand(paths.get("skill_manifest", "~/.claude/skill-manifest.json"))
+        )
         self.intent_log = Path(_expand(paths.get("intent_log", "~/.claude/intent-log.jsonl")))
-        self.pending_skills = Path(_expand(paths.get("pending_skills", "~/.claude/pending-skills.json")))
-        self.skill_registry = Path(_expand(paths.get("skill_registry", "~/.claude/skill-registry.json")))
+        self.pending_skills = Path(
+            _expand(paths.get("pending_skills", "~/.claude/pending-skills.json"))
+        )
+        self.skill_registry = Path(
+            _expand(paths.get("skill_registry", "~/.claude/skill-registry.json"))
+        )
         stack_profile_tmp = paths.get("stack_profile_tmp")
         self.stack_profile_tmp = (
-            Path(_expand(stack_profile_tmp))
-            if stack_profile_tmp
-            else _default_stack_profile_tmp()
+            Path(_expand(stack_profile_tmp)) if stack_profile_tmp else _default_stack_profile_tmp()
         )
         self.catalog = Path(_expand(paths.get("catalog", "~/.claude/skill-wiki/catalog.md")))
 
@@ -119,8 +123,7 @@ class Config:
         self.meta_skills: list[str] = resolver.get("meta_skills", ["skill-router", "file-reading"])
         if not (1 <= self.recommendation_top_k <= 5):
             raise ValueError(
-                f"resolver.recommendation_top_k must be in [1, 5] "
-                f"(got {self.recommendation_top_k})"
+                f"resolver.recommendation_top_k must be in [1, 5] (got {self.recommendation_top_k})"
             )
         if not (0.0 <= self.recommendation_min_normalized_score <= 1.0):
             raise ValueError(
@@ -151,8 +154,7 @@ class Config:
             value = float(raw_reliability_weights.get(dimension, default))
             if value < 0:
                 raise ValueError(
-                    f"harness.reliability_weights.{dimension} must be >= 0 "
-                    f"(got {value})"
+                    f"harness.reliability_weights.{dimension} must be >= 0 (got {value})"
                 )
             self.harness_reliability_weights[dimension] = value
         reliability_weight_total = sum(self.harness_reliability_weights.values())
@@ -183,10 +185,7 @@ class Config:
 
         # ── Skill Transformer ──────────────────────────────────────────────
         raw_line_threshold = transformer.get("line_threshold", 180)
-        if (
-            isinstance(raw_line_threshold, bool)
-            or not isinstance(raw_line_threshold, int)
-        ):
+        if isinstance(raw_line_threshold, bool) or not isinstance(raw_line_threshold, int):
             raise ValueError(
                 "skill_transformer.line_threshold must be an integer >= 1 "
                 f"(got {raw_line_threshold!r})"
@@ -210,17 +209,66 @@ class Config:
         ]
 
         # ── Tag Taxonomy ──────────────────────────────────────────────────
-        self.all_tags: list[str] = raw.get("tags", [
-            "python", "javascript", "typescript", "rust", "go", "java", "ruby", "swift", "kotlin",
-            "react", "vue", "angular", "nextjs", "fastapi", "django", "express", "flask",
-            "docker", "kubernetes", "terraform", "ci-cd", "aws", "gcp", "azure",
-            "sql", "nosql", "redis", "kafka", "spark", "dbt", "airflow",
-            "llm", "agents", "mcp", "langchain", "embeddings", "fine-tuning", "rag",
-            "testing", "linting", "typing", "security", "performance",
-            "documentation", "api-spec", "markdown", "diagrams",
-            "comparison", "decision", "pattern", "troubleshooting",
-            "marketplace", "registry", "versioning", "compatibility",
-        ])
+        self.all_tags: list[str] = raw.get(
+            "tags",
+            [
+                "python",
+                "javascript",
+                "typescript",
+                "rust",
+                "go",
+                "java",
+                "ruby",
+                "swift",
+                "kotlin",
+                "react",
+                "vue",
+                "angular",
+                "nextjs",
+                "fastapi",
+                "django",
+                "express",
+                "flask",
+                "docker",
+                "kubernetes",
+                "terraform",
+                "ci-cd",
+                "aws",
+                "gcp",
+                "azure",
+                "sql",
+                "nosql",
+                "redis",
+                "kafka",
+                "spark",
+                "dbt",
+                "airflow",
+                "llm",
+                "agents",
+                "mcp",
+                "langchain",
+                "embeddings",
+                "fine-tuning",
+                "rag",
+                "testing",
+                "linting",
+                "typing",
+                "security",
+                "performance",
+                "documentation",
+                "api-spec",
+                "markdown",
+                "diagrams",
+                "comparison",
+                "decision",
+                "pattern",
+                "troubleshooting",
+                "marketplace",
+                "registry",
+                "versioning",
+                "compatibility",
+            ],
+        )
 
         # ── Intake Gate ────────────────────────────────────────────────────
         # Phase 2 similarity/structure gate for skill_add / agent_add.
@@ -228,29 +276,21 @@ class Config:
         # thresholds here only apply when ``intake_enabled`` is True.
         self.intake_enabled: bool = bool(intake.get("enabled", True))
         self.intake_dup_threshold: float = float(intake.get("dup_threshold", 0.93))
-        self.intake_near_dup_threshold: float = float(
-            intake.get("near_dup_threshold", 0.80)
-        )
+        self.intake_near_dup_threshold: float = float(intake.get("near_dup_threshold", 0.80))
         self.intake_min_neighbors: int = int(intake.get("min_neighbors", 0))
-        self.intake_min_neighbor_score: float = float(
-            intake.get("min_neighbor_score", 0.30)
-        )
+        self.intake_min_neighbor_score: float = float(intake.get("min_neighbor_score", 0.30))
         self.intake_min_body_chars: int = int(intake.get("min_body_chars", 120))
         self.intake_cache_root: Path = Path(
             _expand(intake.get("cache_root", "~/.claude/skills/_embeddings"))
         )
-        self.intake_backend: str = str(
-            intake_emb.get("backend", "sentence-transformers")
-        )
+        self.intake_backend: str = str(intake_emb.get("backend", "sentence-transformers"))
         # ``None``-valued keys flow through unchanged so downstream
         # factories can distinguish "use backend default" (None) from
         # "forced empty string" (never).
         model = intake_emb.get("model")
         self.intake_model: str | None = model if isinstance(model, str) else None
         base_url = intake_emb.get("base_url")
-        self.intake_base_url: str | None = (
-            base_url if isinstance(base_url, str) else None
-        )
+        self.intake_base_url: str | None = base_url if isinstance(base_url, str) else None
         self.intake_allow_remote: bool = bool(intake_emb.get("allow_remote", False))
 
         # ── Babysitter ─────────────────────────────────────────────────────
@@ -275,9 +315,9 @@ class Config:
         self.graph_semantic_build_floor: float = float(sem.get("build_floor", 0.50))
         self.graph_semantic_min_cosine: float = float(sem.get("min_cosine", 0.80))
         self.graph_semantic_batch_size: int = int(sem.get("batch_size", 128))
-        self.graph_semantic_cache_dir: Path = Path(_expand(
-            sem.get("cache_dir", "~/.claude/skill-wiki/.embedding-cache/graph")
-        ))
+        self.graph_semantic_cache_dir: Path = Path(
+            _expand(sem.get("cache_dir", "~/.claude/skill-wiki/.embedding-cache/graph"))
+        )
         # Strict (0, 1) open interval on both thresholds. 0 would
         # include every pair (N^2 explosion); 1 would only match
         # exact duplicates (floating-point drift means even identical
@@ -313,7 +353,11 @@ class Config:
         se = graph.get("source_edges", {}) if isinstance(graph.get("source_edges"), dict) else {}
         self.graph_dense_source_threshold: int = int(se.get("dense_source_threshold", 50))
 
-        pc = graph.get("pack_compaction", {}) if isinstance(graph.get("pack_compaction"), dict) else {}
+        pc = (
+            graph.get("pack_compaction", {})
+            if isinstance(graph.get("pack_compaction"), dict)
+            else {}
+        )
         raw_overlay_threshold = pc.get("overlay_threshold", 25)
         if isinstance(raw_overlay_threshold, bool) or not isinstance(raw_overlay_threshold, int):
             raise ValueError(
@@ -351,13 +395,10 @@ class Config:
             ("slug_tokens", self.graph_edge_weight_tokens),
         ):
             if val < 0.0:
-                raise ValueError(
-                    f"graph.edge_weights.{name} must be >= 0 (got {val})"
-                )
+                raise ValueError(f"graph.edge_weights.{name} must be >= 0 (got {val})")
         if not (0.0 <= self.graph_edge_min_weight <= 1.0):
             raise ValueError(
-                "graph.min_edge_weight must be in [0, 1] "
-                f"(got {self.graph_edge_min_weight})"
+                f"graph.min_edge_weight must be in [0, 1] (got {self.graph_edge_min_weight})"
             )
         if self.graph_dense_source_threshold < 1:
             raise ValueError(
@@ -378,9 +419,7 @@ class Config:
             ("quality", self.graph_edge_boost_quality),
         ):
             if val < 0.0:
-                raise ValueError(
-                    f"graph.edge_boosts.{name} must be >= 0 (got {val})"
-                )
+                raise ValueError(f"graph.edge_boosts.{name} must be >= 0 (got {val})")
 
     def get(self, key: str, default: Any = None) -> Any:
         """Raw key access (dot-separated: 'paths.wiki_dir')."""
@@ -405,6 +444,7 @@ class Config:
         dependency graph when callers don't need the intake gate.
         """
         from intake_gate import IntakeConfig  # noqa: PLC0415
+
         return IntakeConfig(
             dup_threshold=self.intake_dup_threshold,
             near_dup_threshold=self.intake_near_dup_threshold,
@@ -420,6 +460,7 @@ class Config:
         Callers pay the heavy-model cost only when they ask for it.
         """
         from embedding_backend import get_embedder  # noqa: PLC0415
+
         return get_embedder(
             backend=self.intake_backend,
             model=self.intake_model,

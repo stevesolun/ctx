@@ -149,9 +149,7 @@ class TestDefaultSessionsDir:
         p = default_sessions_dir()
         assert p == tmp_path / ".ctx" / "sessions"
 
-    def test_not_created_by_call(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_not_created_by_call(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
         p = default_sessions_dir()
@@ -166,7 +164,8 @@ class TestSessionStore:
     def test_create_makes_parent_dir(self, tmp_path: Path) -> None:
         nested = tmp_path / "deeply" / "nested"
         store = SessionStore.create(
-            session_id="abc", sessions_dir=nested,
+            session_id="abc",
+            sessions_dir=nested,
         )
         try:
             assert nested.is_dir()
@@ -202,7 +201,8 @@ class TestSessionStore:
         assert path.read_text(encoding="utf-8") == "sentinel\n"
 
     def test_create_can_overwrite_existing_session_explicitly(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         path = tmp_path / "s1.jsonl"
         path.write_text("sentinel\n", encoding="utf-8")
@@ -215,7 +215,8 @@ class TestSessionStore:
         assert path.read_text(encoding="utf-8") == ""
 
     def test_create_overwrite_rejects_symlinked_session_log(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         outside = tmp_path / "outside.jsonl"
         outside.write_text("sentinel\n", encoding="utf-8")
@@ -302,8 +303,9 @@ class TestConvenienceWriters:
                 )
             )
         events = [
-            json.loads(line) for line in
-            (tmp_path / "s.jsonl").read_text(encoding="utf-8").splitlines() if line
+            json.loads(line)
+            for line in (tmp_path / "s.jsonl").read_text(encoding="utf-8").splitlines()
+            if line
         ]
         assert events[0]["role"] == "user"
         assert events[1]["tool_calls"][0]["arguments"] == {"x": 1}
@@ -383,8 +385,12 @@ class TestLoadSession:
             store.write_message(Message(role="assistant", content="hello back"))
             store.write_stop(
                 LoopResult(
-                    stop_reason="completed", final_message="hello back",
-                    iterations=1, usage=Usage(), messages=(), detail="",
+                    stop_reason="completed",
+                    final_message="hello back",
+                    iterations=1,
+                    usage=Usage(),
+                    messages=(),
+                    detail="",
                 )
             )
         state = load_session("s", sessions_dir=tmp_path)
@@ -410,9 +416,7 @@ class TestLoadSession:
         with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
             store.write_message(Message(role="user", content="go"))
             tc = ToolCall(id="c1", name="srv__fetch", arguments={"url": "https://x"})
-            store.write_message(
-                Message(role="assistant", content="", tool_calls=(tc,))
-            )
+            store.write_message(Message(role="assistant", content="", tool_calls=(tc,)))
             store.write_message(
                 Message(role="tool", content="ok", tool_call_id="c1", name="srv__fetch")
             )
@@ -444,12 +448,24 @@ class TestLoadSession:
     def test_malformed_line_is_skipped_not_fatal(self, tmp_path: Path) -> None:
         path = tmp_path / "s.jsonl"
         path.write_text(
-            '\n'.join([
-                json.dumps({"type": "session_start", "ts": "t", "session_id": "s", "task": "hi"}),
-                "this is not json at all",
-                json.dumps({"type": "message", "ts": "t", "session_id": "s",
-                            "role": "user", "content": "ok"}),
-            ]) + "\n",
+            "\n".join(
+                [
+                    json.dumps(
+                        {"type": "session_start", "ts": "t", "session_id": "s", "task": "hi"}
+                    ),
+                    "this is not json at all",
+                    json.dumps(
+                        {
+                            "type": "message",
+                            "ts": "t",
+                            "session_id": "s",
+                            "role": "user",
+                            "content": "ok",
+                        }
+                    ),
+                ]
+            )
+            + "\n",
             encoding="utf-8",
         )
         state = load_session("s", sessions_dir=tmp_path)
@@ -462,8 +478,9 @@ class TestLoadSession:
         path.write_text(
             json.dumps({"type": "session_start", "ts": "t", "session_id": "s", "task": "hi"})
             + "\n\n\n"
-            + json.dumps({"type": "message", "ts": "t", "session_id": "s",
-                          "role": "user", "content": "hi"})
+            + json.dumps(
+                {"type": "message", "ts": "t", "session_id": "s", "role": "user", "content": "hi"}
+            )
             + "\n",
             encoding="utf-8",
         )
@@ -528,9 +545,7 @@ class TestJsonlObserverRoundTrip:
         state = load_session("trip1", sessions_dir=tmp_path)
         # Replay must match the live conversation byte-for-byte (for
         # roles + content).
-        live = [
-            (m.role, m.content) for m in result.messages
-        ]
+        live = [(m.role, m.content) for m in result.messages]
         replayed = [(m.role, m.content) for m in state.messages]
         assert live == replayed
         assert state.metadata["task"] == "smoke-test"
@@ -539,9 +554,7 @@ class TestJsonlObserverRoundTrip:
 
     def test_tool_call_round_trip(self, tmp_path: Path) -> None:
         tc = ToolCall(id="c1", name="srv__echo", arguments={"text": "hi"})
-        provider = _Scripted(
-            [_tool_response(tc), _stop_response("seen hi")]
-        )
+        provider = _Scripted([_tool_response(tc), _stop_response("seen hi")])
         store = SessionStore.create(session_id="trip2", sessions_dir=tmp_path)
         observer = JsonlObserver(store, session_metadata={"task": "go"})
         try:
@@ -620,7 +633,10 @@ class TestJsonlObserverRoundTrip:
         observer = JsonlObserver(store, session_metadata={"task": "t"})
         try:
             run_loop(
-                provider=provider, system_prompt="sys", task="t", observer=observer,
+                provider=provider,
+                system_prompt="sys",
+                task="t",
+                observer=observer,
             )
         finally:
             store.close()
@@ -637,17 +653,23 @@ class TestJsonlObserverRoundTrip:
         provider = _Scripted([_stop_response("ok")])
         store = SessionStore.create(session_id="noe", sessions_dir=tmp_path)
         observer = JsonlObserver(
-            store, session_metadata={"task": "t"}, emit_session_start=False,
+            store,
+            session_metadata={"task": "t"},
+            emit_session_start=False,
         )
         try:
             run_loop(
-                provider=provider, system_prompt="", task="t", observer=observer,
+                provider=provider,
+                system_prompt="",
+                task="t",
+                observer=observer,
             )
         finally:
             store.close()
         events = [
-            json.loads(line) for line in
-            (tmp_path / "noe.jsonl").read_text(encoding="utf-8").splitlines() if line
+            json.loads(line)
+            for line in (tmp_path / "noe.jsonl").read_text(encoding="utf-8").splitlines()
+            if line
         ]
         types = [e["type"] for e in events]
         assert "session_start" not in types
@@ -659,16 +681,14 @@ class TestJsonlObserverRoundTrip:
         observer = JsonlObserver(store, session_metadata={"task": "t"})
         try:
             run_loop(
-                provider=provider, system_prompt="", task="t", observer=observer,
+                provider=provider,
+                system_prompt="",
+                task="t",
+                observer=observer,
             )
         finally:
             store.close()
-        last_line = (
-            (tmp_path / "stop.jsonl")
-            .read_text(encoding="utf-8")
-            .strip()
-            .split("\n")[-1]
-        )
+        last_line = (tmp_path / "stop.jsonl").read_text(encoding="utf-8").strip().split("\n")[-1]
         event = json.loads(last_line)
         assert event["type"] == "stop"
         assert event["stop_reason"] == "completed"

@@ -97,42 +97,49 @@ def _resp(content: str) -> CompletionResponse:
     )
 
 
-_PASS_JSON = json.dumps({
-    "verdict": "pass",
-    "overall_score": 0.9,
-    "criteria": [
-        {"name": "addresses task", "passed": True, "score": 1.0, "note": "yes"},
-    ],
-    "summary_feedback": "Complete and correct.",
-    "revision_directive": "",
-})
+_PASS_JSON = json.dumps(
+    {
+        "verdict": "pass",
+        "overall_score": 0.9,
+        "criteria": [
+            {"name": "addresses task", "passed": True, "score": 1.0, "note": "yes"},
+        ],
+        "summary_feedback": "Complete and correct.",
+        "revision_directive": "",
+    }
+)
 
-_NEEDS_REVISION_JSON = json.dumps({
-    "verdict": "needs_revision",
-    "overall_score": 0.5,
-    "criteria": [
-        {"name": "addresses task", "passed": False, "score": 0.4,
-         "note": "missed edge case"},
-    ],
-    "summary_feedback": "Partial answer; missed the empty-input case.",
-    "revision_directive": "Handle the empty-input case explicitly.",
-})
+_NEEDS_REVISION_JSON = json.dumps(
+    {
+        "verdict": "needs_revision",
+        "overall_score": 0.5,
+        "criteria": [
+            {"name": "addresses task", "passed": False, "score": 0.4, "note": "missed edge case"},
+        ],
+        "summary_feedback": "Partial answer; missed the empty-input case.",
+        "revision_directive": "Handle the empty-input case explicitly.",
+    }
+)
 
-_FAIL_JSON = json.dumps({
-    "verdict": "fail",
-    "overall_score": 0.1,
-    "criteria": [],
-    "summary_feedback": "Off-topic.",
-    "revision_directive": "Re-read the task.",
-})
+_FAIL_JSON = json.dumps(
+    {
+        "verdict": "fail",
+        "overall_score": 0.1,
+        "criteria": [],
+        "summary_feedback": "Off-topic.",
+        "revision_directive": "Re-read the task.",
+    }
+)
 
-_PLAN_JSON = json.dumps({
-    "summary": "Add input validation",
-    "success_criteria": ["Reject empty input", "Return error code 422"],
-    "approach": "Add a guard at function entry",
-    "out_of_scope": [],
-    "risks": [],
-})
+_PLAN_JSON = json.dumps(
+    {
+        "summary": "Add input validation",
+        "success_criteria": ["Reject empty input", "Return error code 422"],
+        "approach": "Add a guard at function entry",
+        "out_of_scope": [],
+        "risks": [],
+    }
+)
 
 
 # ── Data-shape pinning ─────────────────────────────────────────────────────
@@ -148,9 +155,7 @@ class TestDataShapes:
         r = EvaluationResult(
             verdict="pass",
             overall_score=0.95,
-            criterion_results=(
-                CriterionResult(name="a", passed=True, score=1.0, note="ok"),
-            ),
+            criterion_results=(CriterionResult(name="a", passed=True, score=1.0, note="ok"),),
             summary_feedback="fine",
             revision_directive="",
             usage=Usage(input_tokens=5, output_tokens=10),
@@ -167,13 +172,21 @@ class TestDataShapes:
         r = EvaluationRound(
             index=1,
             loop_result=LoopResult(
-                stop_reason="completed", final_message="done", iterations=1,
-                usage=Usage(), messages=(), detail="",
+                stop_reason="completed",
+                final_message="done",
+                iterations=1,
+                usage=Usage(),
+                messages=(),
+                detail="",
             ),
             evaluation=EvaluationResult(
-                verdict="pass", overall_score=1.0, criterion_results=(),
-                summary_feedback="", revision_directive="",
-                usage=Usage(), raw_json="",
+                verdict="pass",
+                overall_score=1.0,
+                criterion_results=(),
+                summary_feedback="",
+                revision_directive="",
+                usage=Usage(),
+                raw_json="",
             ),
             revision_task="",
         )
@@ -214,8 +227,8 @@ class TestCoerceScore:
         [
             (0.5, 0.5),
             ("0.7", 0.7),
-            (1.5, 1.0),        # clamp high
-            (-0.3, 0.0),       # clamp low
+            (1.5, 1.0),  # clamp high
+            (-0.3, 0.0),  # clamp low
             (None, 0.0),
             ("garbage", 0.0),
         ],
@@ -236,10 +249,12 @@ class TestParseCriteria:
         assert len(result) == 1
 
     def test_happy_path(self) -> None:
-        result = _parse_criteria([
-            {"name": "a", "passed": True, "score": 1.0, "note": "ok"},
-            {"name": "b", "passed": False, "score": 0.2, "note": "nope"},
-        ])
+        result = _parse_criteria(
+            [
+                {"name": "a", "passed": True, "score": 1.0, "note": "ok"},
+                {"name": "b", "passed": False, "score": 0.2, "note": "nope"},
+            ]
+        )
         assert len(result) == 2
         assert result[0].name == "a"
         assert result[1].passed is False
@@ -287,28 +302,24 @@ class TestEvaluator:
         provider = _Scripted([_resp(_PASS_JSON)])
         ev = Evaluator(provider, criteria=["be concise", "be factual"])
         ev.evaluate(task="t", answer="a")
-        user_msg = next(
-            m for m in provider.calls[0]["messages"] if m.role == "user"
-        )
+        user_msg = next(m for m in provider.calls[0]["messages"] if m.role == "user")
         assert "be concise" in user_msg.content
         assert "be factual" in user_msg.content
 
     def test_context_threaded(self) -> None:
         provider = _Scripted([_resp(_PASS_JSON)])
         Evaluator(provider).evaluate(
-            task="t", answer="a", context="project background",
+            task="t",
+            answer="a",
+            context="project background",
         )
-        user_msg = next(
-            m for m in provider.calls[0]["messages"] if m.role == "user"
-        )
+        user_msg = next(m for m in provider.calls[0]["messages"] if m.role == "user")
         assert "project background" in user_msg.content
 
     def test_empty_answer_handled(self) -> None:
         provider = _Scripted([_resp(_FAIL_JSON)])
         result = Evaluator(provider).evaluate(task="t", answer="")
-        user_msg = next(
-            m for m in provider.calls[0]["messages"] if m.role == "user"
-        )
+        user_msg = next(m for m in provider.calls[0]["messages"] if m.role == "user")
         assert "(empty)" in user_msg.content
         assert result.verdict == "fail"
 
@@ -341,7 +352,8 @@ class TestBuildRevisionTask:
 
     def test_both_present(self) -> None:
         out = _build_revision_task(
-            "original", self._eval("missed edge case", "handle empty input"),
+            "original",
+            self._eval("missed edge case", "handle empty input"),
         )
         assert "missed edge case" in out
         assert "handle empty input" in out
@@ -350,14 +362,16 @@ class TestBuildRevisionTask:
 
     def test_feedback_only(self) -> None:
         out = _build_revision_task(
-            "original", self._eval("not detailed enough", ""),
+            "original",
+            self._eval("not detailed enough", ""),
         )
         assert "not detailed enough" in out
         assert "Directive" not in out
 
     def test_directive_only(self) -> None:
         out = _build_revision_task(
-            "original", self._eval("", "add a test for edge case"),
+            "original",
+            self._eval("", "add a test for edge case"),
         )
         assert "add a test for edge case" in out
         assert "Feedback" not in out
@@ -409,12 +423,14 @@ class TestRunWithEvaluation:
 
     def test_needs_revision_triggers_second_round(self) -> None:
         # Round 1: gen -> evaluator (needs_revision). Round 2: gen -> eval (pass).
-        provider = _Scripted([
-            _resp("first attempt"),
-            _resp(_NEEDS_REVISION_JSON),
-            _resp("revised attempt"),
-            _resp(_PASS_JSON),
-        ])
+        provider = _Scripted(
+            [
+                _resp("first attempt"),
+                _resp(_NEEDS_REVISION_JSON),
+                _resp("revised attempt"),
+                _resp(_PASS_JSON),
+            ]
+        )
         outcome = run_with_evaluation(
             provider=provider,
             system_prompt="sys",
@@ -430,12 +446,14 @@ class TestRunWithEvaluation:
     def test_max_rounds_cap(self) -> None:
         # Every evaluator call says needs_revision.
         # With max_rounds=2, we expect 2 gen + 2 eval = 4 calls total.
-        provider = _Scripted([
-            _resp("try 1"),
-            _resp(_NEEDS_REVISION_JSON),
-            _resp("try 2"),
-            _resp(_NEEDS_REVISION_JSON),
-        ])
+        provider = _Scripted(
+            [
+                _resp("try 1"),
+                _resp(_NEEDS_REVISION_JSON),
+                _resp("try 2"),
+                _resp(_NEEDS_REVISION_JSON),
+            ]
+        )
         outcome = run_with_evaluation(
             provider=provider,
             system_prompt="sys",
@@ -450,10 +468,12 @@ class TestRunWithEvaluation:
     def test_max_rounds_one_is_grade_only(self) -> None:
         # With max_rounds=1, a single gen+eval happens and the grade
         # is returned even if it's needs_revision — no extra gen call.
-        provider = _Scripted([
-            _resp("first"),
-            _resp(_NEEDS_REVISION_JSON),
-        ])
+        provider = _Scripted(
+            [
+                _resp("first"),
+                _resp(_NEEDS_REVISION_JSON),
+            ]
+        )
         outcome = run_with_evaluation(
             provider=provider,
             system_prompt="sys",
@@ -477,11 +497,13 @@ class TestRunWithEvaluation:
 
     def test_with_planner_replaces_evaluator_criteria(self) -> None:
         # Planner call → 1, Generator → 1, Evaluator → 1
-        provider = _Scripted([
-            _resp(_PLAN_JSON),
-            _resp("answer"),
-            _resp(_PASS_JSON),
-        ])
+        provider = _Scripted(
+            [
+                _resp(_PLAN_JSON),
+                _resp("answer"),
+                _resp(_PASS_JSON),
+            ]
+        )
         outcome = run_with_evaluation(
             provider=provider,
             system_prompt="sys",
@@ -495,9 +517,7 @@ class TestRunWithEvaluation:
         # Evaluator saw the plan's success_criteria. Check the
         # 3rd call (evaluator) used the plan criteria.
         evaluator_call = provider.calls[2]
-        user_content = next(
-            m.content for m in evaluator_call["messages"] if m.role == "user"
-        )
+        user_content = next(m.content for m in evaluator_call["messages"] if m.role == "user")
         assert "Reject empty input" in user_content
         assert "Return error code 422" in user_content
 
@@ -533,13 +553,15 @@ class TestRunWithEvaluation:
         assert len(provider.calls) == 1
 
     def test_total_usage_sums_across_agents(self) -> None:
-        provider = _Scripted([
-            _resp(_PLAN_JSON),        # planner
-            _resp("answer"),          # generator
-            _resp(_NEEDS_REVISION_JSON),  # evaluator round 1
-            _resp("revised"),         # generator round 2
-            _resp(_PASS_JSON),        # evaluator round 2
-        ])
+        provider = _Scripted(
+            [
+                _resp(_PLAN_JSON),  # planner
+                _resp("answer"),  # generator
+                _resp(_NEEDS_REVISION_JSON),  # evaluator round 1
+                _resp("revised"),  # generator round 2
+                _resp(_PASS_JSON),  # evaluator round 2
+            ]
+        )
         outcome = run_with_evaluation(
             provider=provider,
             system_prompt="sys",
@@ -554,12 +576,14 @@ class TestRunWithEvaluation:
         assert total.output_tokens == 100
 
     def test_revision_task_carries_conversation_forward(self) -> None:
-        provider = _Scripted([
-            _resp("first attempt"),
-            _resp(_NEEDS_REVISION_JSON),
-            _resp("revised attempt"),
-            _resp(_PASS_JSON),
-        ])
+        provider = _Scripted(
+            [
+                _resp("first attempt"),
+                _resp(_NEEDS_REVISION_JSON),
+                _resp("revised attempt"),
+                _resp(_PASS_JSON),
+            ]
+        )
         run_with_evaluation(
             provider=provider,
             system_prompt="sys",
@@ -574,8 +598,7 @@ class TestRunWithEvaluation:
         assert roles == ["system", "user", "assistant", "user"]
         # The revision prompt should mention the evaluator's feedback.
         revision_user = [
-            m for m in messages
-            if m.role == "user" and "evaluator" in m.content.lower()
+            m for m in messages if m.role == "user" and "evaluator" in m.content.lower()
         ]
         assert len(revision_user) >= 1
 
@@ -614,9 +637,7 @@ def fake_litellm_evaluator(monkeypatch: pytest.MonkeyPatch):
 
     def _mk(content: str) -> dict[str, Any]:
         return {
-            "choices": [
-                {"message": {"content": content}, "finish_reason": "stop"}
-            ],
+            "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 5, "completion_tokens": 10},
         }
 
@@ -628,37 +649,42 @@ def fake_litellm_evaluator(monkeypatch: pytest.MonkeyPatch):
             raise RuntimeError("fake_litellm: no more responses")
         return fake._responses.pop(0)  # type: ignore[attr-defined]
 
-    fake.completion = completion       # type: ignore[attr-defined]
-    fake._calls = calls                # type: ignore[attr-defined]
-    fake._mk = _mk                     # type: ignore[attr-defined]
+    fake.completion = completion  # type: ignore[attr-defined]
+    fake._calls = calls  # type: ignore[attr-defined]
+    fake._mk = _mk  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "litellm", fake)
     return fake
 
 
 class TestCliEvaluator:
     def test_evaluator_flag_runs_eval_and_persists(
-        self, fake_litellm_evaluator: Any, tmp_path: Path,
+        self,
+        fake_litellm_evaluator: Any,
+        tmp_path: Path,
     ) -> None:
         from ctx.cli.run import main
 
         exit_code = main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "fix the failing tests",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "ev-run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "fix the failing tests",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "ev-run",
                 "--evaluator",
-                "--evaluator-rounds", "2",
+                "--evaluator-rounds",
+                "2",
                 "--no-ctx-tools",
                 "--quiet",
             ]
         )
         assert exit_code == 0
         # session_start has evaluator_used=True.
-        first = json.loads(
-            (tmp_path / "ev-run.jsonl").read_text(encoding="utf-8").splitlines()[0]
-        )
+        first = json.loads((tmp_path / "ev-run.jsonl").read_text(encoding="utf-8").splitlines()[0])
         assert first["evaluator_used"] is True
         assert first["evaluator_max_rounds"] == 2
 
@@ -673,10 +699,14 @@ class TestCliEvaluator:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "t",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "ev-json",
+                "--model",
+                "ollama/x",
+                "--task",
+                "t",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "ev-json",
                 "--evaluator",
                 "--no-ctx-tools",
                 "--quiet",
@@ -702,10 +732,14 @@ class TestCliEvaluator:
         main(
             [
                 "run",
-                "--model", "ollama/x",
-                "--task", "t",
-                "--sessions-dir", str(tmp_path),
-                "--session-id", "no-ev",
+                "--model",
+                "ollama/x",
+                "--task",
+                "t",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "no-ev",
                 "--no-ctx-tools",
                 "--quiet",
                 "--json",

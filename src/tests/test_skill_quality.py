@@ -52,9 +52,7 @@ def _good_skill_body() -> str:
         "description: A demo skill used in tests.\n"
         "---\n"
         "# Demo\n\n"
-        "## Overview\n\n"
-        + ("Body content. " * 20)
-        + "\n"
+        "## Overview\n\n" + ("Body content. " * 20) + "\n"
     )
 
 
@@ -67,9 +65,7 @@ def live_layout(tmp_path: Path) -> dict[str, Path]:
     sidecar_dir = tmp_path / "quality"
 
     (skills_dir / "demo").mkdir(parents=True)
-    (skills_dir / "demo" / "SKILL.md").write_text(
-        _good_skill_body(), encoding="utf-8"
-    )
+    (skills_dir / "demo" / "SKILL.md").write_text(_good_skill_body(), encoding="utf-8")
 
     (agents_dir).mkdir(parents=True)
     (agents_dir / "agent-one.md").write_text(
@@ -78,9 +74,7 @@ def live_layout(tmp_path: Path) -> dict[str, Path]:
     )
 
     (wiki_dir / "entities" / "skills").mkdir(parents=True)
-    (wiki_dir / "entities" / "skills" / "demo.md").write_text(
-        _good_skill_body(), encoding="utf-8"
-    )
+    (wiki_dir / "entities" / "skills" / "demo.md").write_text(_good_skill_body(), encoding="utf-8")
     (wiki_dir / "entities" / "agents").mkdir(parents=True)
 
     events = tmp_path / "skill-events.jsonl"
@@ -326,16 +320,12 @@ def test_quality_config_defaults_valid() -> None:
 
 def test_quality_config_rejects_weight_sum_mismatch() -> None:
     with pytest.raises(ValueError):
-        sq.QualityConfig(
-            weights={"telemetry": 0.5, "intake": 0.5, "graph": 0.5, "routing": 0.5}
-        )
+        sq.QualityConfig(weights={"telemetry": 0.5, "intake": 0.5, "graph": 0.5, "routing": 0.5})
 
 
 def test_quality_config_rejects_missing_weight_key() -> None:
     with pytest.raises(ValueError):
-        sq.QualityConfig(
-            weights={"telemetry": 0.5, "intake": 0.25, "graph": 0.25}
-        )
+        sq.QualityConfig(weights={"telemetry": 0.5, "intake": 0.25, "graph": 0.25})
 
 
 def test_quality_config_rejects_inverted_thresholds() -> None:
@@ -355,23 +345,27 @@ def test_quality_config_rejects_bad_agent_weights_sum() -> None:
     with pytest.raises(ValueError):
         sq.QualityConfig(
             agent_weights={
-                "telemetry": 0.5, "intake": 0.5, "graph": 0.5, "routing": 0.5,
+                "telemetry": 0.5,
+                "intake": 0.5,
+                "graph": 0.5,
+                "routing": 0.5,
             }
         )
 
 
 def test_quality_config_rejects_missing_agent_weight_key() -> None:
     with pytest.raises(ValueError):
-        sq.QualityConfig(
-            agent_weights={"telemetry": 0.3, "intake": 0.3, "graph": 0.4}
-        )
+        sq.QualityConfig(agent_weights={"telemetry": 0.3, "intake": 0.3, "graph": 0.4})
 
 
 def test_quality_config_rejects_negative_agent_weight() -> None:
     with pytest.raises(ValueError):
         sq.QualityConfig(
             agent_weights={
-                "telemetry": -0.1, "intake": 0.4, "graph": 0.4, "routing": 0.3,
+                "telemetry": -0.1,
+                "intake": 0.4,
+                "graph": 0.4,
+                "routing": 0.3,
             }
         )
 
@@ -396,12 +390,8 @@ def _signals(
     never_loaded: bool = False,
 ) -> dict[str, qs.SignalResult]:
     return {
-        "telemetry": qs.SignalResult(
-            score=tel, evidence={"never_loaded": never_loaded}
-        ),
-        "intake": qs.SignalResult(
-            score=intake, evidence={"hard_fail": intake_hard_fail}
-        ),
+        "telemetry": qs.SignalResult(score=tel, evidence={"never_loaded": never_loaded}),
+        "intake": qs.SignalResult(score=intake, evidence={"hard_fail": intake_hard_fail}),
         "graph": qs.SignalResult(score=graph, evidence={}),
         "routing": qs.SignalResult(score=routing, evidence={}),
     }
@@ -446,9 +436,7 @@ def test_compute_never_loaded_does_not_upgrade_below_d() -> None:
     r = sq.compute_quality(
         slug="demo",
         subject_type="skill",
-        signals=_signals(
-            tel=0.0, intake=0.0, graph=0.0, routing=0.0, never_loaded=True
-        ),
+        signals=_signals(tel=0.0, intake=0.0, graph=0.0, routing=0.0, never_loaded=True),
         computed_at=_iso(NOW),
     )
     assert r.grade == "D"  # was already D, stays D
@@ -481,7 +469,9 @@ def test_compute_rejects_missing_signal_key() -> None:
     del sigs["graph"]
     with pytest.raises(ValueError):
         sq.compute_quality(
-            slug="demo", subject_type="skill", signals=sigs,
+            slug="demo",
+            subject_type="skill",
+            signals=sigs,
             computed_at=_iso(NOW),
         )
 
@@ -489,7 +479,9 @@ def test_compute_rejects_missing_signal_key() -> None:
 def test_compute_rejects_bad_subject_type() -> None:
     with pytest.raises(ValueError):
         sq.compute_quality(
-            slug="demo", subject_type="weapon", signals=_signals(),
+            slug="demo",
+            subject_type="weapon",
+            signals=_signals(),
             computed_at=_iso(NOW),
         )
 
@@ -567,11 +559,15 @@ def test_agent_weights_produce_higher_raw_than_skill_when_telemetry_zero() -> No
     agent_signals = _signals(tel=0.0, intake=1.0, graph=1.0, routing=1.0)
 
     skill_score = sq.compute_quality(
-        slug="demo", subject_type="skill", signals=skill_signals,
+        slug="demo",
+        subject_type="skill",
+        signals=skill_signals,
         computed_at=_iso(NOW),
     )
     agent_score = sq.compute_quality(
-        slug="demo", subject_type="agent", signals=agent_signals,
+        slug="demo",
+        subject_type="agent",
+        signals=agent_signals,
         computed_at=_iso(NOW),
     )
     assert agent_score.raw_score > skill_score.raw_score
@@ -593,9 +589,7 @@ def test_sidecar_path_rejects_absolute(tmp_path: Path) -> None:
 
 
 def test_sidecar_path_accepts_valid(tmp_path: Path) -> None:
-    assert sq.sidecar_path("demo-skill.1", sidecar_dir=tmp_path) == (
-        tmp_path / "demo-skill.1.json"
-    )
+    assert sq.sidecar_path("demo-skill.1", sidecar_dir=tmp_path) == (tmp_path / "demo-skill.1.json")
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -619,15 +613,17 @@ def test_extract_counts_load_events(live_layout: dict[str, Path]) -> None:
     recent = _iso(NOW - timedelta(days=1))
     older = _iso(NOW - timedelta(days=40))
     events.write_text(
-        json.dumps({"event": "load", "skill": "demo", "timestamp": recent}) + "\n"
-        + json.dumps({"event": "load", "skill": "demo", "timestamp": older}) + "\n"
-        + json.dumps({"event": "unload", "skill": "demo", "timestamp": recent}) + "\n"
-        + json.dumps({"event": "load", "skill": "other", "timestamp": recent}) + "\n",
+        json.dumps({"event": "load", "skill": "demo", "timestamp": recent})
+        + "\n"
+        + json.dumps({"event": "load", "skill": "demo", "timestamp": older})
+        + "\n"
+        + json.dumps({"event": "unload", "skill": "demo", "timestamp": recent})
+        + "\n"
+        + json.dumps({"event": "load", "skill": "other", "timestamp": recent})
+        + "\n",
         encoding="utf-8",
     )
-    subject, sigs = sq.extract_signals_for_slug(
-        "demo", sources=_sources(live_layout), now=NOW
-    )
+    subject, sigs = sq.extract_signals_for_slug("demo", sources=_sources(live_layout), now=NOW)
     ev = sigs["telemetry"].evidence
     assert ev["load_count"] == 2
     assert ev["recent_load_count"] == 1
@@ -640,14 +636,10 @@ def test_extract_skips_malformed_event_lines(
 ) -> None:
     events = live_layout["events"]
     events.write_text(
-        "not-json\n"
-        + "{\"event\": \"load\", \"skill\": \"demo\", \"timestamp\": \""
-        + _iso(NOW) + "\"}\n",
+        "not-json\n" + '{"event": "load", "skill": "demo", "timestamp": "' + _iso(NOW) + '"}\n',
         encoding="utf-8",
     )
-    _, sigs = sq.extract_signals_for_slug(
-        "demo", sources=_sources(live_layout), now=NOW
-    )
+    _, sigs = sq.extract_signals_for_slug("demo", sources=_sources(live_layout), now=NOW)
     assert sigs["telemetry"].evidence["load_count"] == 1
 
 
@@ -656,18 +648,10 @@ def test_extract_routing_trace_counts(live_layout: dict[str, Path]) -> None:
     trace.write_text(
         "\n".join(
             [
-                json.dumps(
-                    {"skill": "demo", "considered": True, "picked": True}
-                ),
-                json.dumps(
-                    {"skill": "demo", "considered": True, "picked": False}
-                ),
-                json.dumps(
-                    {"skill": "demo", "considered": True, "picked": True}
-                ),
-                json.dumps(
-                    {"skill": "other", "considered": True, "picked": True}
-                ),
+                json.dumps({"skill": "demo", "considered": True, "picked": True}),
+                json.dumps({"skill": "demo", "considered": True, "picked": False}),
+                json.dumps({"skill": "demo", "considered": True, "picked": True}),
+                json.dumps({"skill": "other", "considered": True, "picked": True}),
             ]
         )
         + "\n",
@@ -696,15 +680,11 @@ def test_extract_graph_index_lookup(live_layout: dict[str, Path]) -> None:
 
 def test_extract_unknown_slug_raises(live_layout: dict[str, Path]) -> None:
     with pytest.raises(FileNotFoundError):
-        sq.extract_signals_for_slug(
-            "does-not-exist", sources=_sources(live_layout), now=NOW
-        )
+        sq.extract_signals_for_slug("does-not-exist", sources=_sources(live_layout), now=NOW)
 
 
 def test_extract_agent_subject_type(live_layout: dict[str, Path]) -> None:
-    subject, _ = sq.extract_signals_for_slug(
-        "agent-one", sources=_sources(live_layout), now=NOW
-    )
+    subject, _ = sq.extract_signals_for_slug("agent-one", sources=_sources(live_layout), now=NOW)
     assert subject == "agent"
 
 
@@ -719,12 +699,12 @@ def test_persist_writes_sidecar_and_loads_back(
     src = _sources(live_layout)
     subject, sigs = sq.extract_signals_for_slug("demo", sources=src, now=NOW)
     score = sq.compute_quality(
-        slug="demo", subject_type=subject, signals=sigs,
+        slug="demo",
+        subject_type=subject,
+        signals=sigs,
         computed_at=_iso(NOW),
     )
-    written = sq.persist_quality(
-        score, sources=src, sidecar_dir=live_layout["sidecar"]
-    )
+    written = sq.persist_quality(score, sources=src, sidecar_dir=live_layout["sidecar"])
     assert "sidecar" in written
     assert written["sidecar"].is_file()
 
@@ -741,12 +721,12 @@ def test_persist_injects_wiki_quality_section(
     src = _sources(live_layout)
     subject, sigs = sq.extract_signals_for_slug("demo", sources=src, now=NOW)
     score = sq.compute_quality(
-        slug="demo", subject_type=subject, signals=sigs,
+        slug="demo",
+        subject_type=subject,
+        signals=sigs,
         computed_at=_iso(NOW),
     )
-    written = sq.persist_quality(
-        score, sources=src, sidecar_dir=live_layout["sidecar"]
-    )
+    written = sq.persist_quality(score, sources=src, sidecar_dir=live_layout["sidecar"])
     assert "wiki_body" in written
     page = written["wiki_body"].read_text(encoding="utf-8")
     assert "<!-- quality:begin -->" in page
@@ -763,18 +743,14 @@ def test_persist_wiki_section_is_idempotent(
     src = _sources(live_layout)
     subject, sigs = sq.extract_signals_for_slug("demo", sources=src, now=NOW)
     score = sq.compute_quality(
-        slug="demo", subject_type=subject, signals=sigs,
+        slug="demo",
+        subject_type=subject,
+        signals=sigs,
         computed_at=_iso(NOW),
     )
-    sq.persist_quality(
-        score, sources=src, sidecar_dir=live_layout["sidecar"]
-    )
-    sq.persist_quality(
-        score, sources=src, sidecar_dir=live_layout["sidecar"]
-    )
-    page = (
-        live_layout["wiki"] / "entities" / "skills" / "demo.md"
-    ).read_text(encoding="utf-8")
+    sq.persist_quality(score, sources=src, sidecar_dir=live_layout["sidecar"])
+    sq.persist_quality(score, sources=src, sidecar_dir=live_layout["sidecar"])
+    page = (live_layout["wiki"] / "entities" / "skills" / "demo.md").read_text(encoding="utf-8")
     assert page.count("<!-- quality:begin -->") == 1
     assert page.count("<!-- quality:end -->") == 1
     assert page.count("quality_score:") == 1
@@ -787,12 +763,12 @@ def test_persist_skips_missing_wiki_page(
     src = _sources(live_layout)
     subject, sigs = sq.extract_signals_for_slug("demo", sources=src, now=NOW)
     score = sq.compute_quality(
-        slug="demo", subject_type=subject, signals=sigs,
+        slug="demo",
+        subject_type=subject,
+        signals=sigs,
         computed_at=_iso(NOW),
     )
-    written = sq.persist_quality(
-        score, sources=src, sidecar_dir=live_layout["sidecar"]
-    )
+    written = sq.persist_quality(score, sources=src, sidecar_dir=live_layout["sidecar"])
     assert "sidecar" in written
     assert "frontmatter" not in written
     assert "wiki_body" not in written
@@ -807,29 +783,25 @@ def test_persist_updates_hard_floor_then_clears(
     # First: force intake_fail by mocking signals.
     bad_sigs = _signals(intake=0.5, intake_hard_fail=True)
     score_bad = sq.compute_quality(
-        slug="demo", subject_type="skill", signals=bad_sigs,
+        slug="demo",
+        subject_type="skill",
+        signals=bad_sigs,
         computed_at=_iso(NOW),
     )
-    sq.persist_quality(
-        score_bad, sources=src, sidecar_dir=live_layout["sidecar"]
-    )
-    page1 = (
-        live_layout["wiki"] / "entities" / "skills" / "demo.md"
-    ).read_text(encoding="utf-8")
+    sq.persist_quality(score_bad, sources=src, sidecar_dir=live_layout["sidecar"])
+    page1 = (live_layout["wiki"] / "entities" / "skills" / "demo.md").read_text(encoding="utf-8")
     assert "quality_hard_floor: intake_fail" in page1
 
     # Second: clean run.
     good_sigs = _signals()
     score_good = sq.compute_quality(
-        slug="demo", subject_type="skill", signals=good_sigs,
+        slug="demo",
+        subject_type="skill",
+        signals=good_sigs,
         computed_at=_iso(NOW),
     )
-    sq.persist_quality(
-        score_good, sources=src, sidecar_dir=live_layout["sidecar"]
-    )
-    page2 = (
-        live_layout["wiki"] / "entities" / "skills" / "demo.md"
-    ).read_text(encoding="utf-8")
+    sq.persist_quality(score_good, sources=src, sidecar_dir=live_layout["sidecar"])
+    page2 = (live_layout["wiki"] / "entities" / "skills" / "demo.md").read_text(encoding="utf-8")
     assert "quality_hard_floor: intake_fail" not in page2
 
 
@@ -854,9 +826,7 @@ def test_discover_enumerates_skills_and_agents(
 def test_discover_skips_agent_when_skill_shadows_it(
     live_layout: dict[str, Path],
 ) -> None:
-    (live_layout["agents"] / "demo.md").write_text(
-        _good_skill_body(), encoding="utf-8"
-    )
+    (live_layout["agents"] / "demo.md").write_text(_good_skill_body(), encoding="utf-8")
     src = _sources(live_layout)
     found = dict((slug, subject) for subject, slug in sq.discover_slugs(src))
     assert found["demo"] == "skill"  # skill wins over agent
@@ -878,9 +848,7 @@ def test_recompute_slug_writes_all_sinks(
     )
     assert score.slug == "demo"
     assert (live_layout["sidecar"] / "demo.json").is_file()
-    page = (
-        live_layout["wiki"] / "entities" / "skills" / "demo.md"
-    ).read_text(encoding="utf-8")
+    page = (live_layout["wiki"] / "entities" / "skills" / "demo.md").read_text(encoding="utf-8")
     assert "<!-- quality:begin -->" in page
 
 
@@ -896,7 +864,10 @@ def test_config_from_cfg_reads_agent_weights(
     import ctx_config as cc
 
     custom_agent_weights = {
-        "telemetry": 0.10, "intake": 0.40, "graph": 0.30, "routing": 0.20,
+        "telemetry": 0.10,
+        "intake": 0.40,
+        "graph": 0.30,
+        "routing": 0.20,
     }
 
     class FakeCfg:
@@ -952,9 +923,7 @@ def _cli_setup(
 
     monkeypatch.setattr(cc, "cfg", FakeCfg(), raising=True)
     # Reload the module's reference through sq._build_sources_from_config.
-    monkeypatch.setattr(
-        sq, "default_sidecar_dir", lambda: live_layout["sidecar"]
-    )
+    monkeypatch.setattr(sq, "default_sidecar_dir", lambda: live_layout["sidecar"])
     # Redirect the events path used by _build_sources_from_config.
     real_build = sq._build_sources_from_config
 

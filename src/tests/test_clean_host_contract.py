@@ -87,34 +87,42 @@ class RecordingRunner(CommandRunner):
             output = Path(call[call.index("--output") + 1])
             output.write_text("{}", encoding="utf-8")
         elif any(Path(part).name == "fake_claude.py" for part in call):
-            stdout = json.dumps({
-                "hook_commands": 5,
-                "failed": 0,
-                "commands": [
-                    {"command": "ctx.adapters.claude_code.hooks.context_monitor"},
-                    {"command": "skill_add_detector"},
-                    {"command": "ctx.adapters.claude_code.hooks.bundle_orchestrator"},
-                    {"command": "usage_tracker"},
-                    {"command": "ctx.adapters.claude_code.hooks.lifecycle_hooks"},
-                ],
-            })
+            stdout = json.dumps(
+                {
+                    "hook_commands": 5,
+                    "failed": 0,
+                    "commands": [
+                        {"command": "ctx.adapters.claude_code.hooks.context_monitor"},
+                        {"command": "skill_add_detector"},
+                        {"command": "ctx.adapters.claude_code.hooks.bundle_orchestrator"},
+                        {"command": "usage_tracker"},
+                        {"command": "ctx.adapters.claude_code.hooks.lifecycle_hooks"},
+                    ],
+                }
+            )
             return CompletedCommand(call, cwd, 0, stdout, "")
         elif call and Path(call[0]).name.startswith("claude"):
             if "-p" in call:
                 sentinel = self.venv.parent / "live-claude-hooks.jsonl"
                 sentinel.write_text(
-                    "\n".join([
-                        json.dumps({
-                            "event": "PostToolUse",
-                            "hook_event_name": "PostToolUse",
-                            "cwd": str(self.venv.parent / "tiny-fastapi-repo"),
-                        }),
-                        json.dumps({
-                            "event": "Stop",
-                            "hook_event_name": "Stop",
-                            "cwd": str(self.venv.parent / "tiny-fastapi-repo"),
-                        }),
-                    ]),
+                    "\n".join(
+                        [
+                            json.dumps(
+                                {
+                                    "event": "PostToolUse",
+                                    "hook_event_name": "PostToolUse",
+                                    "cwd": str(self.venv.parent / "tiny-fastapi-repo"),
+                                }
+                            ),
+                            json.dumps(
+                                {
+                                    "event": "Stop",
+                                    "hook_event_name": "Stop",
+                                    "cwd": str(self.venv.parent / "tiny-fastapi-repo"),
+                                }
+                            ),
+                        ]
+                    ),
                     encoding="utf-8",
                 )
             return CompletedCommand(call, cwd, 0, "claude preflight\n", "")
@@ -211,24 +219,28 @@ def test_fake_claude_cli_executes_post_tool_and_stop_hooks(tmp_path: Path) -> No
 
 
 def test_fake_claude_hook_output_requires_all_generated_hooks() -> None:
-    good = json.dumps({
-        "hook_commands": 5,
-        "failed": 0,
-        "commands": [
-            {"command": "ctx.adapters.claude_code.hooks.context_monitor"},
-            {"command": "skill_add_detector"},
-            {"command": "ctx.adapters.claude_code.hooks.bundle_orchestrator"},
-            {"command": "usage_tracker"},
-            {"command": "ctx.adapters.claude_code.hooks.lifecycle_hooks"},
-        ],
-    })
+    good = json.dumps(
+        {
+            "hook_commands": 5,
+            "failed": 0,
+            "commands": [
+                {"command": "ctx.adapters.claude_code.hooks.context_monitor"},
+                {"command": "skill_add_detector"},
+                {"command": "ctx.adapters.claude_code.hooks.bundle_orchestrator"},
+                {"command": "usage_tracker"},
+                {"command": "ctx.adapters.claude_code.hooks.lifecycle_hooks"},
+            ],
+        }
+    )
     _assert_fake_claude_hook_output(good)
 
-    missing = json.dumps({
-        "hook_commands": 4,
-        "failed": 0,
-        "commands": [{"command": "usage_tracker"}],
-    })
+    missing = json.dumps(
+        {
+            "hook_commands": 4,
+            "failed": 0,
+            "commands": [{"command": "usage_tracker"}],
+        }
+    )
     with pytest.raises(AssertionError):
         _assert_fake_claude_hook_output(missing)
 
@@ -279,10 +291,7 @@ def test_contract_command_sequence_without_real_build(tmp_path: Path, monkeypatc
         assert record.env["PIP_CACHE_DIR"] == str(paths.pip_cache)
         assert record.env.get("PYTHONPATH") in (None, str(paths.fake_modules))
         assert str(tmp_path / "real-pythonpath") not in record.env.values()
-    denied_records = [
-        record for record in runner.records
-        if "--deny-tool" in record.args
-    ]
+    denied_records = [record for record in runner.records if "--deny-tool" in record.args]
     assert denied_records
     assert denied_records[0].check is False
 
@@ -310,12 +319,14 @@ def test_live_claude_sentinel_hooks_are_appended_to_settings(tmp_path: Path) -> 
     sentinel_script = tmp_path / "live_sentinel.py"
     sentinel_jsonl = tmp_path / "live_sentinel.jsonl"
     settings_json.write_text(
-        json.dumps({
-            "hooks": {
-                "PostToolUse": [{"matcher": ".*", "hooks": []}],
-                "Stop": [{"hooks": []}],
+        json.dumps(
+            {
+                "hooks": {
+                    "PostToolUse": [{"matcher": ".*", "hooks": []}],
+                    "Stop": [{"hooks": []}],
+                }
             }
-        }),
+        ),
         encoding="utf-8",
     )
 
@@ -344,10 +355,12 @@ def test_live_claude_sentinel_hooks_are_appended_to_settings(tmp_path: Path) -> 
 def test_live_claude_sentinel_requires_post_tool_and_stop(tmp_path: Path) -> None:
     sentinel_jsonl = tmp_path / "sentinel.jsonl"
     sentinel_jsonl.write_text(
-        "\n".join([
-            json.dumps({"event": "PostToolUse", "cwd": str(tmp_path)}),
-            json.dumps({"event": "Stop", "cwd": str(tmp_path)}),
-        ]),
+        "\n".join(
+            [
+                json.dumps({"event": "PostToolUse", "cwd": str(tmp_path)}),
+                json.dumps({"event": "Stop", "cwd": str(tmp_path)}),
+            ]
+        ),
         encoding="utf-8",
     )
     _assert_live_claude_sentinel(sentinel_jsonl, expected_cwd=tmp_path)
@@ -378,10 +391,7 @@ def test_live_claude_ack_required_before_running_live_host(
             run_live_claude=True,
         )
 
-    assert not any(
-        call and Path(call[0]).name.startswith("claude")
-        for call in runner.calls
-    )
+    assert not any(call and Path(call[0]).name.startswith("claude") for call in runner.calls)
 
 
 def test_live_claude_gate_runs_only_when_acknowledged(
@@ -404,11 +414,7 @@ def test_live_claude_gate_runs_only_when_acknowledged(
         live_claude_bin=claude_bin,
     )
 
-    live_calls = [
-        call
-        for call in runner.calls
-        if call and Path(call[0]).name.startswith("claude")
-    ]
+    live_calls = [call for call in runner.calls if call and Path(call[0]).name.startswith("claude")]
     assert [call[1:] for call in live_calls[:2]] == [("--version",), ("auth", "status")]
     prompt_calls = [call for call in live_calls if "-p" in call]
     assert len(prompt_calls) == 1

@@ -103,9 +103,7 @@ def render_skill_detail(
         for row in audit[-100:]
     )
     hard_floor = sidecar.get("hard_floor")
-    hard_floor_html = (
-        f" &middot; floor {html.escape(str(hard_floor))}" if hard_floor else ""
-    )
+    hard_floor_html = f" &middot; floor {html.escape(str(hard_floor))}" if hard_floor else ""
     body = (
         f"<h1>{html.escape(slug)}</h1>"
         "<div class='card'>"
@@ -117,9 +115,7 @@ def render_skill_detail(
         "<h2>Sidecar</h2>"
         f"<pre>{html.escape(json.dumps(sidecar, indent=2)[:4000])}</pre>"
         f"<h2>Audit timeline ({len(audit)} entries)</h2>"
-        "<table><tr><th>ts</th><th>event</th><th>actor</th></tr>"
-        + audit_rows
-        + "</table>"
+        "<table><tr><th>ts</th><th>event</th><th>actor</th></tr>" + audit_rows + "</table>"
     )
     return layout(slug, body)
 

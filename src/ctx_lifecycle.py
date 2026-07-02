@@ -123,10 +123,10 @@ class LifecycleState:
     slug: str
     subject_type: str
     state: str = STATE_ACTIVE
-    state_since: str = ""                # ISO-8601 UTC; when state last changed
-    consecutive_d_count: int = 0         # resets to 0 on any non-negative grade
+    state_since: str = ""  # ISO-8601 UTC; when state last changed
+    consecutive_d_count: int = 0  # resets to 0 on any non-negative grade
     last_grade: str = ""
-    last_seen_computed_at: str = ""      # most recent score.computed_at we saw
+    last_seen_computed_at: str = ""  # most recent score.computed_at we saw
     history: tuple[dict[str, Any], ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
@@ -152,7 +152,7 @@ class Proposal:
     target_state: str
     reason: str
     requires_typed_confirmation: bool = False  # True for Delete only
-    auto_safe: bool = True                     # False for Archive + Delete
+    auto_safe: bool = True  # False for Archive + Delete
 
     def describe(self) -> str:
         return f"{self.current_state} → {self.target_state}  {self.slug}  ({self.reason})"
@@ -169,9 +169,7 @@ def lifecycle_sidecar_path(slug: str, *, sidecar_dir: Path | None = None) -> Pat
     return root / f"{slug}.lifecycle.json"
 
 
-def save_lifecycle_state(
-    state: LifecycleState, *, sidecar_dir: Path | None = None
-) -> Path:
+def save_lifecycle_state(state: LifecycleState, *, sidecar_dir: Path | None = None) -> Path:
     path = lifecycle_sidecar_path(state.slug, sidecar_dir=sidecar_dir)
     _atomic_write(
         path,
@@ -180,9 +178,7 @@ def save_lifecycle_state(
     return path
 
 
-def load_lifecycle_state(
-    slug: str, *, sidecar_dir: Path | None = None
-) -> LifecycleState | None:
+def load_lifecycle_state(slug: str, *, sidecar_dir: Path | None = None) -> LifecycleState | None:
     path = lifecycle_sidecar_path(slug, sidecar_dir=sidecar_dir)
     reject_symlink_path(path)
     if not path.is_file():
@@ -194,9 +190,7 @@ def load_lifecycle_state(
     if not isinstance(data, dict):
         return None
     history_raw = data.get("history", [])
-    history = tuple(
-        dict(e) for e in history_raw if isinstance(e, dict)
-    )
+    history = tuple(dict(e) for e in history_raw if isinstance(e, dict))
     return LifecycleState(
         slug=data.get("slug", slug),
         subject_type=data.get("subject_type", "skill"),
@@ -248,7 +242,7 @@ def _append_history(
     at: str | None = None,
 ) -> tuple[dict[str, Any], ...]:
     entry = {"at": at or _now_iso(), "event": event, "note": note}
-    trimmed = (state.history + (entry,))[-cfg.history_max:]
+    trimmed = (state.history + (entry,))[-cfg.history_max :]
     return trimmed
 
 
@@ -344,10 +338,7 @@ def classify_transition(
     if score is None:
         return None
 
-    if (
-        score.grade in _NEGATIVE_GRADES
-        and state.consecutive_d_count >= cfg.consecutive_d_to_demote
-    ):
+    if score.grade in _NEGATIVE_GRADES and state.consecutive_d_count >= cfg.consecutive_d_to_demote:
         return Proposal(
             slug=state.slug,
             subject_type=state.subject_type,
@@ -376,9 +367,7 @@ def classify_transition(
 # ────────────────────────────────────────────────────────────────────
 
 
-def _resolve_entity_root(
-    slug: str, subject_type: str, sources: LifecycleSources
-) -> Path | None:
+def _resolve_entity_root(slug: str, subject_type: str, sources: LifecycleSources) -> Path | None:
     """Return the canonical active location of the slug's source dir/file."""
     _ensure_safe_slug(slug)
     if subject_type == "skill":
@@ -429,9 +418,7 @@ def apply_proposal(
             state,
             state=STATE_WATCH,
             state_since=ts,
-            history=_append_history(
-                state, event="watch", note=proposal.reason, cfg=cfg, at=ts
-            ),
+            history=_append_history(state, event="watch", note=proposal.reason, cfg=cfg, at=ts),
         )
 
     if proposal.target_state == STATE_DEMOTE:
@@ -439,8 +426,7 @@ def apply_proposal(
         if entity is None:
             # Already demoted or archived elsewhere — just advance state.
             _logger.warning(
-                "demote: entity not at active location for %s; "
-                "advancing state only", proposal.slug
+                "demote: entity not at active location for %s; advancing state only", proposal.slug
             )
         else:
             target = sources.demoted_dir(cfg) / entity.name
@@ -449,9 +435,7 @@ def apply_proposal(
             state,
             state=STATE_DEMOTE,
             state_since=ts,
-            history=_append_history(
-                state, event="demote", note=proposal.reason, cfg=cfg, at=ts
-            ),
+            history=_append_history(state, event="demote", note=proposal.reason, cfg=cfg, at=ts),
         )
 
     if proposal.target_state == STATE_ARCHIVE:
@@ -464,9 +448,7 @@ def apply_proposal(
             src = demoted_root / f"{proposal.slug}.md"
         reject_symlink_path(src)
         if not src.exists():
-            _logger.warning(
-                "archive: source missing under %s; advancing state only", src
-            )
+            _logger.warning("archive: source missing under %s; advancing state only", src)
         else:
             target = sources.archive_dir(cfg) / src.name
             _safe_mv(src, target)
@@ -474,9 +456,7 @@ def apply_proposal(
             state,
             state=STATE_ARCHIVE,
             state_since=ts,
-            history=_append_history(
-                state, event="archive", note=proposal.reason, cfg=cfg, at=ts
-            ),
+            history=_append_history(state, event="archive", note=proposal.reason, cfg=cfg, at=ts),
         )
 
     if proposal.target_state == "deleted":
@@ -505,9 +485,7 @@ def apply_proposal(
             state,
             state="deleted",
             state_since=ts,
-            history=_append_history(
-                state, event="delete", note=proposal.reason, cfg=cfg, at=ts
-            ),
+            history=_append_history(state, event="delete", note=proposal.reason, cfg=cfg, at=ts),
         )
 
     raise ValueError(f"unknown target state: {proposal.target_state!r}")
@@ -565,11 +543,11 @@ def _iter_sidecars(sidecar_dir: Path) -> list[Path]:
     if not sidecar_dir.is_dir():
         return []
     return [
-        p for p in sorted(sidecar_dir.glob("*.json"))
+        p
+        for p in sorted(sidecar_dir.glob("*.json"))
         # Dotfiles (e.g. .hook-state.json) are internal state, not slugs;
         # lifecycle sidecars have their own iterator.
-        if not p.name.startswith(".")
-        and not p.name.endswith(".lifecycle.json")
+        if not p.name.startswith(".") and not p.name.endswith(".lifecycle.json")
     ]
 
 
@@ -662,7 +640,10 @@ def _partition(
     proposals: list[Proposal],
 ) -> dict[str, list[Proposal]]:
     buckets: dict[str, list[Proposal]] = {
-        STATE_WATCH: [], STATE_DEMOTE: [], STATE_ARCHIVE: [], "deleted": [],
+        STATE_WATCH: [],
+        STATE_DEMOTE: [],
+        STATE_ARCHIVE: [],
+        "deleted": [],
     }
     for p in proposals:
         buckets.setdefault(p.target_state, []).append(p)
@@ -690,8 +671,10 @@ def _git_diff_preview(path: Path, *, max_lines: int = 40) -> str:
         proc = subprocess.run(
             [
                 "git",
-                "-c", "diff.external=",
-                "-c", "core.attributesfile=" + (os.devnull or "/dev/null"),
+                "-c",
+                "diff.external=",
+                "-c",
+                "core.attributesfile=" + (os.devnull or "/dev/null"),
                 "log",
                 "-p",
                 "--no-textconv",
@@ -700,7 +683,10 @@ def _git_diff_preview(path: Path, *, max_lines: int = 40) -> str:
                 "--",
                 str(path),
             ],
-            capture_output=True, text=True, timeout=15, check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""
@@ -715,6 +701,7 @@ def _git_diff_preview(path: Path, *, max_lines: int = 40) -> str:
 
 def _build_sources() -> LifecycleSources:
     from ctx_config import cfg as app_cfg
+
     return LifecycleSources(
         skills_dir=app_cfg.skills_dir,
         agents_dir=app_cfg.agents_dir,
@@ -724,6 +711,7 @@ def _build_sources() -> LifecycleSources:
 
 def _build_config() -> LifecycleConfig:
     from ctx_config import cfg as app_cfg
+
     raw = app_cfg.get("quality", {}) or {}
     lc = raw.get("lifecycle", {}) if isinstance(raw, dict) else {}
     kwargs: dict[str, Any] = {}
@@ -746,9 +734,7 @@ def _build_config() -> LifecycleConfig:
 def cmd_review(args: argparse.Namespace) -> int:
     sources = _build_sources()
     cfg = _build_config()
-    proposals, observed = plan_review(
-        sources=sources, cfg=cfg, include_delete=False
-    )
+    proposals, observed = plan_review(sources=sources, cfg=cfg, include_delete=False)
 
     # Persist observed states regardless — folding the fresh D-streak
     # keeps the counter correct even if the user declines transitions.
@@ -756,14 +742,16 @@ def cmd_review(args: argparse.Namespace) -> int:
         save_lifecycle_state(state, sidecar_dir=sources.sidecar_dir)
 
     if args.json:
-        print(json.dumps(
-            {
-                "proposals": [p.__dict__ for p in proposals],
-                "state_count": len(observed),
-            },
-            indent=2,
-            default=str,
-        ))
+        print(
+            json.dumps(
+                {
+                    "proposals": [p.__dict__ for p in proposals],
+                    "state_count": len(observed),
+                },
+                indent=2,
+                default=str,
+            )
+        )
         return 0
 
     if not proposals:
@@ -784,8 +772,11 @@ def cmd_review(args: argparse.Namespace) -> int:
         return 0
 
     applied = _apply_buckets(
-        buckets, observed,
-        sources=sources, cfg=cfg, auto=args.auto,
+        buckets,
+        observed,
+        sources=sources,
+        cfg=cfg,
+        auto=args.auto,
     )
     print(f"\nApplied {applied} transition(s).")
     return 0
@@ -818,8 +809,7 @@ def _apply_buckets(
             # Log the candidate and defer — the user can run `review`
             # interactively to action it.
             _logger.info(
-                "auto mode: skipping archive prompt for %s; "
-                "run `review` interactively to apply",
+                "auto mode: skipping archive prompt for %s; run `review` interactively to apply",
                 p.slug,
             )
             print("  (auto: deferred — run review interactively to archive)")
@@ -839,9 +829,7 @@ def _apply_one(
 ) -> int:
     state = states.get(proposal.slug)
     if state is None:
-        state = _ensure_state(
-            proposal.slug, proposal.subject_type, sidecar_dir=sources.sidecar_dir
-        )
+        state = _ensure_state(proposal.slug, proposal.subject_type, sidecar_dir=sources.sidecar_dir)
     try:
         new_state = apply_proposal(proposal, state, sources=sources, cfg=cfg)
     except (FileNotFoundError, FileExistsError, ValueError, OSError) as exc:
@@ -857,6 +845,7 @@ def _apply_one(
     # case where target is active coming from archive.
     try:
         from ctx_audit_log import log
+
         verb_map = {
             "active": "restored" if proposal.current_state == "archive" else "added",
             "watch": "watched",
@@ -892,7 +881,8 @@ def cmd_demote(args: argparse.Namespace) -> int:
     slug = _ensure_safe_slug(args.slug)
     score = load_quality(slug, sidecar_dir=sources.sidecar_dir)
     state = _ensure_state(
-        slug, score.subject_type if score else "skill",
+        slug,
+        score.subject_type if score else "skill",
         sidecar_dir=sources.sidecar_dir,
     )
     proposal = Proposal(
@@ -905,9 +895,7 @@ def cmd_demote(args: argparse.Namespace) -> int:
     if not args.force and not _prompt_yes_no(f"Demote {slug}?"):
         print("Aborted.")
         return 1
-    return 0 if _apply_one(
-        proposal, {slug: state}, sources=sources, cfg=cfg
-    ) else 1
+    return 0 if _apply_one(proposal, {slug: state}, sources=sources, cfg=cfg) else 1
 
 
 def cmd_archive(args: argparse.Namespace) -> int:
@@ -916,8 +904,11 @@ def cmd_archive(args: argparse.Namespace) -> int:
     slug = _ensure_safe_slug(args.slug)
     state = load_lifecycle_state(slug, sidecar_dir=sources.sidecar_dir)
     if state is None or state.state != STATE_DEMOTE:
-        print(f"{slug}: cannot archive — not in demote state "
-              f"(current={state.state if state else 'active'})", file=sys.stderr)
+        print(
+            f"{slug}: cannot archive — not in demote state "
+            f"(current={state.state if state else 'active'})",
+            file=sys.stderr,
+        )
         return 1
     proposal = Proposal(
         slug=slug,
@@ -930,17 +921,13 @@ def cmd_archive(args: argparse.Namespace) -> int:
     if not args.force and not _prompt_yes_no(f"Archive {slug}?"):
         print("Aborted.")
         return 1
-    return 0 if _apply_one(
-        proposal, {slug: state}, sources=sources, cfg=cfg
-    ) else 1
+    return 0 if _apply_one(proposal, {slug: state}, sources=sources, cfg=cfg) else 1
 
 
 def cmd_purge(args: argparse.Namespace) -> int:
     sources = _build_sources()
     cfg = _build_config()
-    proposals, observed = plan_review(
-        sources=sources, cfg=cfg, include_delete=True
-    )
+    proposals, observed = plan_review(sources=sources, cfg=cfg, include_delete=True)
     delete_candidates = [p for p in proposals if p.target_state == "deleted"]
     if not delete_candidates:
         print("Nothing to purge.")
@@ -1008,10 +995,12 @@ def build_argparser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("review", help="Classify transitions for the whole corpus")
-    r.add_argument("--auto", action="store_true",
-                   help="auto-apply watch + demote without prompting")
-    r.add_argument("--dry-run", action="store_true",
-                   help="print proposals but do not apply anything")
+    r.add_argument(
+        "--auto", action="store_true", help="auto-apply watch + demote without prompting"
+    )
+    r.add_argument(
+        "--dry-run", action="store_true", help="print proposals but do not apply anything"
+    )
     r.add_argument("--json", action="store_true", help="emit JSON")
     r.set_defaults(func=cmd_review)
 
@@ -1028,12 +1017,13 @@ def build_argparser() -> argparse.ArgumentParser:
     pu = sub.add_parser("purge", help="Delete archived entries past the threshold")
     pu.set_defaults(func=cmd_purge)
 
-    ra = sub.add_parser("review-archived",
-                        help="List archived entries with optional diff + restore")
-    ra.add_argument("--show-diff", action="store_true",
-                    help="show git-log preview for each archived entry")
-    ra.add_argument("--restore", action="store_true",
-                    help="prompt for restore after each entry")
+    ra = sub.add_parser(
+        "review-archived", help="List archived entries with optional diff + restore"
+    )
+    ra.add_argument(
+        "--show-diff", action="store_true", help="show git-log preview for each archived entry"
+    )
+    ra.add_argument("--restore", action="store_true", help="prompt for restore after each entry")
     ra.add_argument("--json", action="store_true")
     ra.set_defaults(func=cmd_review_archived)
 

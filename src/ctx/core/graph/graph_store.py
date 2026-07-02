@@ -228,7 +228,9 @@ def search_nodes(db_path: Path, query: str, *, limit: int = 20) -> list[dict[str
     return [_node_result(row) for row in rows]
 
 
-def load_neighborhood(db_path: Path, node_id: str, *, limit: int = 50) -> dict[str, list[dict[str, Any]]]:
+def load_neighborhood(
+    db_path: Path, node_id: str, *, limit: int = 50
+) -> dict[str, list[dict[str, Any]]]:
     """Return a 1-hop neighborhood centered on *node_id*."""
     if limit <= 0:
         limit = 1
@@ -250,8 +252,7 @@ def load_neighborhood(db_path: Path, node_id: str, *, limit: int = 50) -> dict[s
             (node_id, node_id, limit),
         ).fetchall()
         neighbor_ids = {
-            row["target"] if row["source"] == node_id else row["source"]
-            for row in edge_rows
+            row["target"] if row["source"] == node_id else row["source"] for row in edge_rows
         }
         nodes = [_node_result(center)]
         if neighbor_ids:
@@ -304,7 +305,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Read a 1-hop neighborhood from a built SQLite graph store.",
     )
     neighborhood.add_argument("--db", required=True, help="SQLite database to query")
-    neighborhood.add_argument("--graph-dir", help="Require the store to be fresh for this graphify-out")
+    neighborhood.add_argument(
+        "--graph-dir", help="Require the store to be fresh for this graphify-out"
+    )
     neighborhood.add_argument("--node-id", required=True, help="Center node id")
     neighborhood.add_argument("--limit", type=int, default=50, help="Maximum edges to return")
 
@@ -381,10 +384,7 @@ def _metadata_rows(
         metadata[str(key)] = _metadata_value(value)
     if extra_metadata:
         metadata.update(extra_metadata)
-    return [
-        {"key": key, "value": value}
-        for key, value in sorted(metadata.items())
-    ]
+    return [{"key": key, "value": value} for key, value in sorted(metadata.items())]
 
 
 def _graph_dir_source_metadata(graph_dir: Path) -> dict[str, str]:

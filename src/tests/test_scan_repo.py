@@ -249,10 +249,13 @@ class TestReadTomlDeps:
     """test_read_toml_deps -- extracts dep names from pyproject.toml (tomllib-based)."""
 
     def test_extracts_bare_deps_lowercased(self, tmp_path: Path) -> None:
-        p = _write(tmp_path / "pyproject.toml", """
+        p = _write(
+            tmp_path / "pyproject.toml",
+            """
 [project]
 dependencies = ["FastAPI", "pydantic", "SQLAlchemy"]
-""")
+""",
+        )
         deps = sr.read_toml_deps(str(p))
         assert "fastapi" in deps
         assert "pydantic" in deps
@@ -260,10 +263,7 @@ dependencies = ["FastAPI", "pydantic", "SQLAlchemy"]
 
     def test_extracts_deps_from_utf8_bom_pyproject(self, tmp_path: Path) -> None:
         p = tmp_path / "pyproject.toml"
-        p.write_bytes(
-            b"\xef\xbb\xbf[project]\n"
-            b"dependencies = ['FastAPI', 'SQLAlchemy']\n"
-        )
+        p.write_bytes(b"\xef\xbb\xbf[project]\ndependencies = ['FastAPI', 'SQLAlchemy']\n")
 
         deps = sr.read_toml_deps(str(p))
 
@@ -271,7 +271,9 @@ dependencies = ["FastAPI", "pydantic", "SQLAlchemy"]
         assert "sqlalchemy" in deps
 
     def test_extracts_version_pinned_deps(self, tmp_path: Path) -> None:
-        p = _write(tmp_path / "pyproject.toml", """
+        p = _write(
+            tmp_path / "pyproject.toml",
+            """
 [project]
 dependencies = [
     "fastapi>=0.100",
@@ -280,7 +282,8 @@ dependencies = [
     "numpy[extra]>=1.20",
     'package-with-marker>=1.0; python_version>="3.10"',
 ]
-""")
+""",
+        )
         deps = sr.read_toml_deps(str(p))
         assert "fastapi" in deps
         assert "pydantic" in deps
@@ -289,14 +292,17 @@ dependencies = [
         assert "package-with-marker" in deps
 
     def test_extracts_optional_deps(self, tmp_path: Path) -> None:
-        p = _write(tmp_path / "pyproject.toml", """
+        p = _write(
+            tmp_path / "pyproject.toml",
+            """
 [project]
 dependencies = ["core-dep"]
 
 [project.optional-dependencies]
 test = ["pytest>=7", "pytest-cov"]
 dev = ["black"]
-""")
+""",
+        )
         deps = sr.read_toml_deps(str(p))
         assert "core-dep" in deps
         assert "pytest" in deps
@@ -304,20 +310,25 @@ dev = ["black"]
         assert "black" in deps
 
     def test_can_ignore_optional_deps_for_primary_stack(self, tmp_path: Path) -> None:
-        p = _write(tmp_path / "pyproject.toml", """
+        p = _write(
+            tmp_path / "pyproject.toml",
+            """
 [project]
 dependencies = ["core-dep"]
 
 [project.optional-dependencies]
 embeddings = ["torch>=2"]
-""")
+""",
+        )
 
         deps = sr.read_toml_deps(str(p), include_optional=False)
 
         assert deps == ["core-dep"]
 
     def test_extracts_poetry_deps(self, tmp_path: Path) -> None:
-        p = _write(tmp_path / "pyproject.toml", """
+        p = _write(
+            tmp_path / "pyproject.toml",
+            """
 [tool.poetry]
 name = "x"
 
@@ -328,7 +339,8 @@ pydantic = "^2.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.0"
-""")
+""",
+        )
         deps = sr.read_toml_deps(str(p))
         assert "fastapi" in deps
         assert "pydantic" in deps
@@ -358,12 +370,15 @@ class TestReadRequirements:
         assert deps == ["fastapi", "pydantic", "sqlalchemy"]
 
     def test_strips_version_specs(self, tmp_path: Path) -> None:
-        p = _write(tmp_path / "requirements.txt", """
+        p = _write(
+            tmp_path / "requirements.txt",
+            """
 fastapi>=0.100
 pydantic==2.5.0
 requests<3
 numpy[extra]>=1.20
-""")
+""",
+        )
         deps = sr.read_requirements(str(p))
         assert "fastapi" in deps
         assert "pydantic" in deps
@@ -371,13 +386,16 @@ numpy[extra]>=1.20
         assert "numpy" in deps
 
     def test_ignores_comments_and_dash_lines(self, tmp_path: Path) -> None:
-        p = _write(tmp_path / "requirements.txt", """\
+        p = _write(
+            tmp_path / "requirements.txt",
+            """\
 # this is a comment
 fastapi
 -r other.txt
 --index-url https://pypi.org
 pydantic
-""")
+""",
+        )
         deps = sr.read_requirements(str(p))
         assert "fastapi" in deps
         assert "pydantic" in deps
@@ -414,10 +432,14 @@ class TestDetectStackLanguages:
         assert ts["confidence"] >= 0.9
 
     def test_languages_sorted_by_count_desc(self, tmp_path: Path) -> None:
-        signals = _make_signals(files=[
-            ("a.py", ".py"),
-            ("b.go", ".go"), ("c.go", ".go"), ("d.go", ".go"),
-        ])
+        signals = _make_signals(
+            files=[
+                ("a.py", ".py"),
+                ("b.go", ".go"),
+                ("c.go", ".go"),
+                ("d.go", ".go"),
+            ]
+        )
         profile = sr.detect_stack(str(tmp_path), signals)
         assert profile["languages"][0]["name"] == "go"
 
@@ -431,10 +453,13 @@ class TestDetectStackFrameworks:
     """test_detect_stack_frameworks -- framework detection via deps and config files."""
 
     def test_fastapi_detected_from_pyproject(self, tmp_path: Path) -> None:
-        cfg = _write(tmp_path / "pyproject.toml", """
+        cfg = _write(
+            tmp_path / "pyproject.toml",
+            """
 [project]
 dependencies = ["fastapi>=0.100"]
-""")
+""",
+        )
         signals = _make_signals(config_files=[str(cfg)])
         profile = sr.detect_stack(str(tmp_path), signals)
         names = [f["name"] for f in profile["frameworks"]]
@@ -449,19 +474,29 @@ dependencies = ["fastapi>=0.100"]
         assert "openai-sdk" in names
 
     def test_react_detected_from_package_json(self, tmp_path: Path) -> None:
-        cfg = _write(tmp_path / "package.json", json.dumps({
-            "name": "app",
-            "dependencies": {"react": "^18"},
-        }))
+        cfg = _write(
+            tmp_path / "package.json",
+            json.dumps(
+                {
+                    "name": "app",
+                    "dependencies": {"react": "^18"},
+                }
+            ),
+        )
         signals = _make_signals(config_files=[str(cfg)])
         profile = sr.detect_stack(str(tmp_path), signals)
         names = [f["name"] for f in profile["frameworks"]]
         assert "react" in names
 
     def test_nextjs_config_merges_with_dep(self, tmp_path: Path) -> None:
-        pkg = _write(tmp_path / "package.json", json.dumps({
-            "dependencies": {"next": "^14"},
-        }))
+        pkg = _write(
+            tmp_path / "package.json",
+            json.dumps(
+                {
+                    "dependencies": {"next": "^14"},
+                }
+            ),
+        )
         nxt = _write(tmp_path / "next.config.js", "module.exports = {}")
         signals = _make_signals(config_files=[str(pkg), str(nxt)])
         profile = sr.detect_stack(str(tmp_path), signals)
@@ -526,9 +561,14 @@ class TestDetectStackDataStores:
         assert "sqlalchemy" in names
 
     def test_prisma_detected_from_package_json(self, tmp_path: Path) -> None:
-        cfg = _write(tmp_path / "package.json", json.dumps({
-            "dependencies": {"@prisma/client": "^5"},
-        }))
+        cfg = _write(
+            tmp_path / "package.json",
+            json.dumps(
+                {
+                    "dependencies": {"@prisma/client": "^5"},
+                }
+            ),
+        )
         signals = _make_signals(config_files=[str(cfg)])
         profile = sr.detect_stack(str(tmp_path), signals)
         names = [d["name"] for d in profile["data_stores"]]
@@ -536,9 +576,14 @@ class TestDetectStackDataStores:
 
     def test_redis_deduped_across_py_and_js(self, tmp_path: Path) -> None:
         py = _write(tmp_path / "requirements.txt", "redis\n")
-        js = _write(tmp_path / "package.json", json.dumps({
-            "dependencies": {"ioredis": "^5"},
-        }))
+        js = _write(
+            tmp_path / "package.json",
+            json.dumps(
+                {
+                    "dependencies": {"ioredis": "^5"},
+                }
+            ),
+        )
         signals = _make_signals(config_files=[str(py), str(js)])
         profile = sr.detect_stack(str(tmp_path), signals)
         redis = [d for d in profile["data_stores"] if d["name"] == "redis"]
@@ -632,10 +677,15 @@ class TestDetectStackMonorepo:
         assert profile["monorepo"] is True
 
     def test_workspaces_in_package_json_flags_monorepo(self, tmp_path: Path) -> None:
-        cfg = _write(tmp_path / "package.json", json.dumps({
-            "name": "root",
-            "workspaces": ["packages/*"],
-        }))
+        cfg = _write(
+            tmp_path / "package.json",
+            json.dumps(
+                {
+                    "name": "root",
+                    "workspaces": ["packages/*"],
+                }
+            ),
+        )
         signals = _make_signals(config_files=[str(cfg)])
         profile = sr.detect_stack(str(tmp_path), signals)
         assert profile["monorepo"] is True
@@ -656,17 +706,27 @@ class TestDetectStackProjectType:
     """test_detect_stack_project_type -- frontend/fullstack/api/ml/ai classification."""
 
     def test_frontend_only(self, tmp_path: Path) -> None:
-        cfg = _write(tmp_path / "package.json", json.dumps({
-            "dependencies": {"react": "^18"},
-        }))
+        cfg = _write(
+            tmp_path / "package.json",
+            json.dumps(
+                {
+                    "dependencies": {"react": "^18"},
+                }
+            ),
+        )
         signals = _make_signals(config_files=[str(cfg)])
         profile = sr.detect_stack(str(tmp_path), signals)
         assert profile["project_type"] == "frontend"
 
     def test_fullstack_when_front_and_back(self, tmp_path: Path) -> None:
-        pkg = _write(tmp_path / "package.json", json.dumps({
-            "dependencies": {"react": "^18"},
-        }))
+        pkg = _write(
+            tmp_path / "package.json",
+            json.dumps(
+                {
+                    "dependencies": {"react": "^18"},
+                }
+            ),
+        )
         py = _write(tmp_path / "requirements.txt", "fastapi\n")
         signals = _make_signals(config_files=[str(pkg), str(py)])
         profile = sr.detect_stack(str(tmp_path), signals)
@@ -685,13 +745,16 @@ class TestDetectStackProjectType:
         assert profile["project_type"] == "ml-project"
 
     def test_optional_torch_does_not_make_project_ml(self, tmp_path: Path) -> None:
-        py = _write(tmp_path / "pyproject.toml", """
+        py = _write(
+            tmp_path / "pyproject.toml",
+            """
 [project]
 dependencies = ["networkx"]
 
 [project.optional-dependencies]
 embeddings = ["torch>=2"]
-""")
+""",
+        )
         signals = _make_signals(config_files=[str(py)])
         profile = sr.detect_stack(str(tmp_path), signals)
 
@@ -725,10 +788,13 @@ class TestEndToEndFastApiRepo:
 
     def test_profile_matches_expected_stack(self, tmp_path: Path) -> None:
         repo = tmp_path / "fake-api"
-        _write(repo / "pyproject.toml", """
+        _write(
+            repo / "pyproject.toml",
+            """
 [project]
 dependencies = ["fastapi>=0.100", "sqlalchemy>=2", "pydantic>=2"]
-""")
+""",
+        )
         _write(repo / "Dockerfile", "FROM python:3.11")
         _write(repo / "pytest.ini", "[pytest]\n")
         _write(repo / "app" / "main.py", "from fastapi import FastAPI\napp = FastAPI()")

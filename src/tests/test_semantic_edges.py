@@ -364,11 +364,16 @@ class TestTopKPairs:
         assert pairs == {}
 
     def test_top_k_caps_non_orthogonal_rows(self) -> None:
-        vecs = _l2_normalize(np.array([
-            [1.0, 0.0],
-            [0.99, 0.01],
-            [0.5, 0.5],
-        ], dtype="float32"))
+        vecs = _l2_normalize(
+            np.array(
+                [
+                    [1.0, 0.0],
+                    [0.99, 0.01],
+                    [0.5, 0.5],
+                ],
+                dtype="float32",
+            )
+        )
         pairs = _topk_pairs(vecs, ["a", "b", "c"], top_k=1, min_cosine=0.0)
         assert pairs == {
             ("a", "b"): pytest.approx(float(vecs[0] @ vecs[1])),
@@ -428,13 +433,17 @@ class TestTopKPairsSubset:
         assert _topk_pairs_subset(vecs, ids, [0], top_k=1, min_cosine=0.999)
         assert not _topk_pairs_subset(vecs, ids, [0], top_k=1, min_cosine=1.1)
 
-
     def test_subset_top_k_caps_non_orthogonal_row(self) -> None:
-        vecs = _l2_normalize(np.array([
-            [1.0, 0.0],
-            [0.99, 0.01],
-            [0.5, 0.5],
-        ], dtype="float32"))
+        vecs = _l2_normalize(
+            np.array(
+                [
+                    [1.0, 0.0],
+                    [0.99, 0.01],
+                    [0.5, 0.5],
+                ],
+                dtype="float32",
+            )
+        )
         pairs = _topk_pairs_subset(vecs, ["a", "b", "c"], [0], top_k=1, min_cosine=0.0)
         assert pairs == {("a", "b"): pytest.approx(float(vecs[0] @ vecs[1]))}
 
@@ -571,63 +580,77 @@ class TestReusePriorPairs:
         return _make_state(nodes=nodes_data)
 
     def test_both_unchanged_pair_included(self) -> None:
-        prior = self._prior({
-            "a": {"top_k": [["b", 0.8]]},
-            "b": {"top_k": [["a", 0.8]]},
-        })
+        prior = self._prior(
+            {
+                "a": {"top_k": [["b", 0.8]]},
+                "b": {"top_k": [["a", 0.8]]},
+            }
+        )
         pairs = _reuse_prior_pairs(prior, {"a", "b"}, min_cosine=0.5)
         assert ("a", "b") in pairs
         assert abs(pairs[("a", "b")] - 0.8) < 1e-6
 
     def test_pair_excluded_when_neighbor_not_in_unchanged(self) -> None:
-        prior = self._prior({
-            "a": {"top_k": [["c", 0.9]]},  # c not in unchanged
-            "b": {"top_k": []},
-        })
+        prior = self._prior(
+            {
+                "a": {"top_k": [["c", 0.9]]},  # c not in unchanged
+                "b": {"top_k": []},
+            }
+        )
         pairs = _reuse_prior_pairs(prior, {"a", "b"}, min_cosine=0.0)
         assert pairs == {}
 
     def test_pair_excluded_below_min_cosine(self) -> None:
-        prior = self._prior({
-            "a": {"top_k": [["b", 0.3]]},
-            "b": {"top_k": [["a", 0.3]]},
-        })
+        prior = self._prior(
+            {
+                "a": {"top_k": [["b", 0.3]]},
+                "b": {"top_k": [["a", 0.3]]},
+            }
+        )
         pairs = _reuse_prior_pairs(prior, {"a", "b"}, min_cosine=0.5)
         assert pairs == {}
 
     def test_canonical_pair_key_ordering(self) -> None:
-        prior = self._prior({
-            "zz": {"top_k": [["aa", 0.9]]},
-            "aa": {"top_k": [["zz", 0.9]]},
-        })
+        prior = self._prior(
+            {
+                "zz": {"top_k": [["aa", 0.9]]},
+                "aa": {"top_k": [["zz", 0.9]]},
+            }
+        )
         pairs = _reuse_prior_pairs(prior, {"aa", "zz"}, min_cosine=0.0)
         assert ("aa", "zz") in pairs
 
     def test_empty_top_k_entry_skipped(self) -> None:
-        prior = self._prior({
-            "a": {"top_k": [[], None, ["b", 0.7]]},
-            "b": {"top_k": [["a", 0.7]]},
-        })
+        prior = self._prior(
+            {
+                "a": {"top_k": [[], None, ["b", 0.7]]},
+                "b": {"top_k": [["a", 0.7]]},
+            }
+        )
         # Defensive: empty entry [] is skipped; None should not crash.
         # Note: the code checks `if not tk: continue` so [] and None are skipped
         pairs = _reuse_prior_pairs(prior, {"a", "b"}, min_cosine=0.5)
         assert pairs == {("a", "b"): pytest.approx(0.7)}
 
     def test_missing_score_defaults_zero(self) -> None:
-        prior = self._prior({
-            "a": {"top_k": [["b"]]},  # entry with only neighbor_id, no score
-            "b": {"top_k": [["a"]]},
-        })
+        prior = self._prior(
+            {
+                "a": {"top_k": [["b"]]},  # entry with only neighbor_id, no score
+                "b": {"top_k": [["a"]]},
+            }
+        )
         pairs = _reuse_prior_pairs(prior, {"a", "b"}, min_cosine=-1.0)
         assert ("a", "b") in pairs
         assert pairs[("a", "b")] == 0.0
 
     def test_max_score_wins_on_duplicate_pair(self) -> None:
         # "a" sees b at 0.7, "b" sees a at 0.9 — 0.9 should win
-        prior = self._prior({
-            "a": {"top_k": [["b", 0.7]]},
-            "b": {"top_k": [["a", 0.9]]},
-        })
+        prior = self._prior(
+            {
+                "a": {"top_k": [["b", 0.7]]},
+                "b": {"top_k": [["a", 0.9]]},
+            }
+        )
         pairs = _reuse_prior_pairs(prior, {"a", "b"}, min_cosine=0.0)
         assert abs(pairs[("a", "b")] - 0.9) < 1e-6
 
@@ -702,8 +725,8 @@ class TestCacheRoundTrip:
     def test_load_cache_shape_mismatch_returns_empty(self, tmp_path: Path) -> None:
         """hashes.shape[0] != vecs.shape[0] → empty dict (line 279)."""
         path = tmp_path / "embeddings.npz"
-        hashes = np.asarray([b"abc"], dtype="S64")   # 1 hash
-        vecs = np.zeros((3, 4), dtype="float32")       # 3 vecs → mismatch
+        hashes = np.asarray([b"abc"], dtype="S64")  # 1 hash
+        vecs = np.zeros((3, 4), dtype="float32")  # 3 vecs → mismatch
         np.savez_compressed(
             str(path.with_suffix("")),
             model=np.asarray(["mymodel"]),
@@ -802,10 +825,12 @@ class TestPartitionForIncremental:
         h_a = _content_hash("text-a")
         h_b = _content_hash("text-b")
         nodes = [SemanticNode("a", "text-a"), SemanticNode("b", "text-b")]
-        prior = self._prior({
-            "a": {"content_hash": h_a, "top_k": [["b", 0.8]]},
-            "b": {"content_hash": h_b, "top_k": [["a", 0.8]]},
-        })
+        prior = self._prior(
+            {
+                "a": {"content_hash": h_a, "top_k": [["b", 0.8]]},
+                "b": {"content_hash": h_b, "top_k": [["a", 0.8]]},
+            }
+        )
         need, unchanged = _partition_for_incremental(nodes, prior)
         assert need == set()
         assert unchanged == {"a", "b"}
@@ -814,10 +839,12 @@ class TestPartitionForIncremental:
         h_a_old = _content_hash("old-text-a")
         h_b = _content_hash("text-b")
         nodes = [SemanticNode("a", "new-text-a"), SemanticNode("b", "text-b")]
-        prior = self._prior({
-            "a": {"content_hash": h_a_old, "top_k": []},
-            "b": {"content_hash": h_b, "top_k": [["a", 0.7]]},
-        })
+        prior = self._prior(
+            {
+                "a": {"content_hash": h_a_old, "top_k": []},
+                "b": {"content_hash": h_b, "top_k": [["a", 0.7]]},
+            }
+        )
         need, unchanged = _partition_for_incremental(nodes, prior)
         assert "a" in need
         # b has a as top_k neighbor and a changed → b contaminated
@@ -832,11 +859,13 @@ class TestPartitionForIncremental:
             SemanticNode("b", "text-b"),
             SemanticNode("c", "new-text-c"),
         ]
-        prior = self._prior({
-            "a": {"content_hash": h_a, "top_k": [["b", 0.8]]},
-            "b": {"content_hash": h_b, "top_k": [["c", 0.8]]},
-            "c": {"content_hash": h_c_old, "top_k": []},
-        })
+        prior = self._prior(
+            {
+                "a": {"content_hash": h_a, "top_k": [["b", 0.8]]},
+                "b": {"content_hash": h_b, "top_k": [["c", 0.8]]},
+                "c": {"content_hash": h_c_old, "top_k": []},
+            }
+        )
 
         need, unchanged = _partition_for_incremental(nodes, prior)
 
@@ -847,11 +876,13 @@ class TestPartitionForIncremental:
         h_a = _content_hash("text-a")
         h_b = _content_hash("text-b")
         # "c" was in the prior but not in current_nodes
-        prior = self._prior({
-            "a": {"content_hash": h_a, "top_k": []},
-            "b": {"content_hash": h_b, "top_k": [["c", 0.9]]},
-            "c": {"content_hash": _content_hash("text-c"), "top_k": []},
-        })
+        prior = self._prior(
+            {
+                "a": {"content_hash": h_a, "top_k": []},
+                "b": {"content_hash": h_b, "top_k": [["c", 0.9]]},
+                "c": {"content_hash": _content_hash("text-c"), "top_k": []},
+            }
+        )
         nodes = [SemanticNode("a", "text-a"), SemanticNode("b", "text-b")]
         need, unchanged = _partition_for_incremental(nodes, prior)
         # b's neighbor c is removed → b is contaminated
@@ -861,10 +892,12 @@ class TestPartitionForIncremental:
     def test_new_node_recomputes_all_rows_to_preserve_full_topk_parity(self) -> None:
         h_a = _content_hash("text-a")
         h_b = _content_hash("text-b")
-        prior = self._prior({
-            "a": {"content_hash": h_a, "top_k": [["b", 0.6]]},
-            "b": {"content_hash": h_b, "top_k": [["a", 0.6]]},
-        })
+        prior = self._prior(
+            {
+                "a": {"content_hash": h_a, "top_k": [["b", 0.6]]},
+                "b": {"content_hash": h_b, "top_k": [["a", 0.6]]},
+            }
+        )
         # Add new node "new" which was not in prior
         nodes = [
             SemanticNode("a", "text-a"),
@@ -877,9 +910,11 @@ class TestPartitionForIncremental:
 
     def test_empty_top_k_list_entry_skipped(self) -> None:
         h_a = _content_hash("ta")
-        prior = self._prior({
-            "a": {"content_hash": h_a, "top_k": [[]]},  # empty inner list
-        })
+        prior = self._prior(
+            {
+                "a": {"content_hash": h_a, "top_k": [[]]},  # empty inner list
+            }
+        )
         nodes = [SemanticNode("a", "ta")]
         need, unchanged = _partition_for_incremental(nodes, prior)
         assert "a" in unchanged
@@ -936,9 +971,7 @@ class TestEmbedMissing:
         assert embedder.embed.call_count >= 1
         # Total chunks fed to embed > 1 (long text → multiple chunks)
         total_texts_embedded = sum(
-            len(call.args[0])
-            for call in embedder.embed.call_args_list
-            if call.args
+            len(call.args[0]) for call in embedder.embed.call_args_list if call.args
         )
         assert total_texts_embedded > 1
 
@@ -962,9 +995,7 @@ class TestEmbedMissing:
         """When a chunk has 0 word-weight, pooling falls back to plain mean."""
         dim = 4
         embedder = MagicMock()
-        embedder.embed.return_value = np.array(
-            [[1.0, 0.0, 0.0, 0.0]], dtype="float32"
-        )
+        embedder.embed.return_value = np.array([[1.0, 0.0, 0.0, 0.0]], dtype="float32")
         # Empty string produces chunk [""] with word-count 0
         missing = [(0, "empty-node", "")]
         out = _embed_missing(missing, embedder, batch_size=32)
@@ -1017,7 +1048,9 @@ class TestComputeSemanticEdgesEmpty:
 
 
 class TestComputeSemanticEdgesDuplicateId:
-    def test_duplicate_node_id_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_duplicate_node_id_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Duplicate node_id must raise ValueError before any embedding."""
         mock_embedder = _fake_embedder()
         monkeypatch.setattr(
@@ -1026,7 +1059,10 @@ class TestComputeSemanticEdgesDuplicateId:
             raising=False,
         )
         # Patch the lazy import inside compute_semantic_edges
-        with patch.dict("sys.modules", {"embedding_backend": MagicMock(get_embedder=lambda *a, **kw: mock_embedder)}):
+        with patch.dict(
+            "sys.modules",
+            {"embedding_backend": MagicMock(get_embedder=lambda *a, **kw: mock_embedder)},
+        ):
             nodes = [
                 SemanticNode("dup", "text a"),
                 SemanticNode("dup", "text b"),
@@ -1042,9 +1078,7 @@ class TestComputeSemanticEdgesDuplicateId:
 
 
 class TestComputeSemanticEdgesBackendUnavailable:
-    def test_returns_empty_when_backend_raises_runtime(
-        self, tmp_path: Path
-    ) -> None:
+    def test_returns_empty_when_backend_raises_runtime(self, tmp_path: Path) -> None:
         """When get_embedder raises RuntimeError, graceful fallback to {}."""
         fake_eb = MagicMock()
         fake_eb.get_embedder.side_effect = RuntimeError("no backend")
@@ -1052,6 +1086,7 @@ class TestComputeSemanticEdgesBackendUnavailable:
             # Re-import to pick up patched module in lazy import path
             import importlib
             from ctx.core.graph import semantic_edges as se_mod
+
             importlib.reload(se_mod)
             nodes = [SemanticNode("a", "text")]
             result = se_mod.compute_semantic_edges(
@@ -1063,15 +1098,14 @@ class TestComputeSemanticEdgesBackendUnavailable:
             )
             assert result == {}
 
-    def test_returns_empty_when_backend_raises_import(
-        self, tmp_path: Path
-    ) -> None:
+    def test_returns_empty_when_backend_raises_import(self, tmp_path: Path) -> None:
         """When get_embedder raises ImportError, graceful fallback to {}."""
         fake_eb = MagicMock()
         fake_eb.get_embedder.side_effect = ImportError("no ST")
         with patch.dict("sys.modules", {"embedding_backend": fake_eb}):
             import importlib
             from ctx.core.graph import semantic_edges as se_mod
+
             importlib.reload(se_mod)
             nodes = [SemanticNode("a", "text")]
             result = se_mod.compute_semantic_edges(
@@ -1112,9 +1146,7 @@ class TestComputeSemanticEdgesWithFakeEmbedder:
 
         def _fake_embed_missing(missing, embedder, batch_size):
             # Return rows from embed_vecs aligned with missing indices
-            rows = np.array(
-                [embed_vecs[row_i] for row_i, _, _ in missing], dtype="float32"
-            )
+            rows = np.array([embed_vecs[row_i] for row_i, _, _ in missing], dtype="float32")
             call_index[0] += 1
             return rows
 
@@ -1127,6 +1159,7 @@ class TestComputeSemanticEdgesWithFakeEmbedder:
         with patch.dict("sys.modules", {"embedding_backend": fake_eb_module}):
             import importlib
             from ctx.core.graph import semantic_edges as se_mod
+
             importlib.reload(se_mod)
 
             with patch.object(se_mod, "_embed_missing", side_effect=_fake_embed_missing):
@@ -1147,9 +1180,7 @@ class TestComputeSemanticEdgesWithFakeEmbedder:
             SemanticNode("c", "text_c"),
         ]
         vecs = np.array(
-            [[1.0, 0.0, 0.0, 0.0],
-             [1.0, 0.0, 0.0, 0.0],
-             [0.0, 1.0, 0.0, 0.0]],
+            [[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]],
             dtype="float32",
         )
         pairs = self._run(nodes, tmp_path=tmp_path, embed_vecs=vecs, min_cosine=0.5)
@@ -1182,6 +1213,7 @@ class TestComputeSemanticEdgesWithFakeEmbedder:
         with patch.dict("sys.modules", {"embedding_backend": fake_eb_module}):
             import importlib
             from ctx.core.graph import semantic_edges as se_mod
+
             importlib.reload(se_mod)
 
             with patch.object(
@@ -1222,6 +1254,7 @@ class TestComputeSemanticEdgesWithFakeEmbedder:
         with patch.dict("sys.modules", {"embedding_backend": fake_eb_module}):
             import importlib
             from ctx.core.graph import semantic_edges as se_mod
+
             importlib.reload(se_mod)
 
             with (
@@ -1249,8 +1282,12 @@ class TestComputeSemanticEdgesWithFakeEmbedder:
         nodes = [SemanticNode("a", "ta"), SemanticNode("b", "tb")]
         vecs = np.array([[1.0, 0.0], [1.0, 0.0]], dtype="float32")
         pairs = self._run(
-            nodes, tmp_path=tmp_path, embed_vecs=vecs, dim=2,
-            min_cosine=0.5, incremental=False,
+            nodes,
+            tmp_path=tmp_path,
+            embed_vecs=vecs,
+            dim=2,
+            min_cosine=0.5,
+            incremental=False,
         )
         assert ("a", "b") in pairs
 
@@ -1274,9 +1311,7 @@ class TestComputeSemanticEdgesIncrementalPath:
         embed_vecs.shape[1]
 
         def _fake_embed_missing(missing, embedder, batch_size):
-            rows = np.array(
-                [embed_vecs[row_i] for row_i, _, _ in missing], dtype="float32"
-            )
+            rows = np.array([embed_vecs[row_i] for row_i, _, _ in missing], dtype="float32")
             return rows
 
         fake_embedder = MagicMock()
@@ -1288,6 +1323,7 @@ class TestComputeSemanticEdgesIncrementalPath:
         with patch.dict("sys.modules", {"embedding_backend": fake_eb_module}):
             import importlib
             from ctx.core.graph import semantic_edges as se_mod
+
             importlib.reload(se_mod)
 
             topk_patch = (
@@ -1441,6 +1477,7 @@ class TestComputeSemanticEdgesEmbedFailure:
         with patch.dict("sys.modules", {"embedding_backend": fake_eb}):
             import importlib
             from ctx.core.graph import semantic_edges as se_mod
+
             importlib.reload(se_mod)
 
             with patch.object(se_mod, "_embed_missing", side_effect=_raise_embed):
@@ -1466,6 +1503,7 @@ class TestComputeSemanticEdgesEmbedFailure:
         with patch.dict("sys.modules", {"embedding_backend": fake_eb}):
             import importlib
             from ctx.core.graph import semantic_edges as se_mod
+
             importlib.reload(se_mod)
 
             with patch.object(se_mod, "_embed_missing", side_effect=_raise_embed):

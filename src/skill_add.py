@@ -43,6 +43,7 @@ TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 # ── Tag inference ─────────────────────────────────────────────────────────────
 
+
 def infer_tags(name: str, content: str) -> list[str]:
     """Infer taxonomy tags from skill name and file content."""
     combined = f"{name} {content}".lower()
@@ -51,6 +52,7 @@ def infer_tags(name: str, content: str) -> list[str]:
 
 
 # ── Skills-dir helpers ────────────────────────────────────────────────────────
+
 
 def install_skill(source: Path, skills_dir: Path, name: str) -> Path:
     """Copy SKILL.md into skills_dir/<name>/SKILL.md. Returns the installed path."""
@@ -68,6 +70,7 @@ def mirror_install_body(installed_path: Path, name: str, converted_root: Path) -
 
 
 # ── Conversion ────────────────────────────────────────────────────────────────
+
 
 def maybe_convert(
     installed_path: Path,
@@ -103,6 +106,7 @@ def maybe_convert(
 
 # ── Wiki entity page ──────────────────────────────────────────────────────────
 
+
 def build_entity_page(
     *,
     name: str,
@@ -115,9 +119,7 @@ def build_entity_page(
     security_scan: SkillSpectorResult | None = None,
 ) -> str:
     """Render the full entity page markdown for a skill."""
-    pipeline_path_str = (
-        f"converted/{name}/" if has_pipeline else "null"
-    )
+    pipeline_path_str = f"converted/{name}/" if has_pipeline else "null"
 
     fm_dict: dict = {
         "title": name,
@@ -146,7 +148,9 @@ def build_entity_page(
         fm_dict["skillspector_exit_code"] = security_scan.exit_code
         fm_dict["skillspector_note"] = "ctx-run SkillSpector check; not NVIDIA endorsement"
 
-    frontmatter_body = yaml.safe_dump(fm_dict, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    frontmatter_body = yaml.safe_dump(
+        fm_dict, default_flow_style=False, allow_unicode=True, sort_keys=False
+    )
     frontmatter_block = f"---\n{frontmatter_body}---"
 
     related_links = "\n".join(f"- [[entities/skills/{r}]]" for r in related[:6])
@@ -169,7 +173,9 @@ SkillSpector status: `{security_scan.status}`.
 This is a ctx-run check, not NVIDIA endorsement or certification.
 """
 
-    return frontmatter_block + f"""
+    return (
+        frontmatter_block
+        + f"""
 
 # {name}
 
@@ -179,7 +185,7 @@ This is a ctx-run check, not NVIDIA endorsement or certification.
 
 ## Tags
 
-{', '.join(f'`{t}`' for t in tags)}
+{", ".join(f"`{t}`" for t in tags)}
 
 ## Related Skills
 
@@ -192,6 +198,7 @@ This is a ctx-run check, not NVIDIA endorsement or certification.
 | {TODAY} | Added | Ingested via skill_add.py |
 {security_section}
 """
+    )
 
 
 def write_entity_page(wiki_path: Path, name: str, content: str) -> bool:
@@ -252,6 +259,7 @@ def _load_skill_pages(wiki_path: Path) -> dict[str, str]:
 
 
 # ── Wikilink backfill ─────────────────────────────────────────────────────────
+
 
 def _tag_set_from_frontmatter(raw: object) -> set[str]:
     if raw is None:
@@ -346,6 +354,7 @@ def wire_backlinks(wiki_path: Path, name: str, related: list[str]) -> None:
 
 # ── Scan-source detection ─────────────────────────────────────────────────────
 
+
 def detect_scan_sources(wiki_path: Path, name: str) -> list[str]:
     """Return filenames in raw/scans/ that reference this skill name."""
     scans_dir = wiki_path / "raw" / "scans"
@@ -363,6 +372,7 @@ def detect_scan_sources(wiki_path: Path, name: str) -> list[str]:
 
 
 # ── Core orchestration ────────────────────────────────────────────────────────
+
 
 def add_skill(
     *,
@@ -399,10 +409,7 @@ def add_skill(
 
     installed_path = skills_dir / name / "SKILL.md"
     entity_page = wiki_path / "entities" / "skills" / f"{name}.md"
-    has_existing = (
-        installed_path.exists()
-        or _read_entity_page_text(wiki_path, name) is not None
-    )
+    has_existing = installed_path.exists() or _read_entity_page_text(wiki_path, name) is not None
     tags = infer_tags(name, content)
 
     if review_existing and has_existing and not update_existing:
@@ -478,9 +485,7 @@ def add_skill(
     scan_sources = detect_scan_sources(wiki_path, name)
 
     # Ensure at least 2 wikilinks (pad with first two related even if no tag match)
-    all_entity_pages = sorted(
-        slug for slug in _load_skill_pages(wiki_path) if slug != name
-    )
+    all_entity_pages = sorted(slug for slug in _load_skill_pages(wiki_path) if slug != name)
     while len(related) < 2 and len(all_entity_pages) > len(related):
         candidate = all_entity_pages[len(related)]
         if candidate not in related:
@@ -532,6 +537,7 @@ def add_skill(
     # per-subsystem log files. See src/ctx_audit_log.py.
     try:
         from ctx_audit_log import log_skill_event
+
         log_skill_event(
             "skill.added" if is_new else "skill.installed",
             name,
@@ -543,14 +549,14 @@ def add_skill(
                 "converted": converted,
                 "tags": tags,
                 "related": related,
-                "skillspector_status": (
-                    scan_result.status if scan_result is not None else None
-                ),
+                "skillspector_status": (scan_result.status if scan_result is not None else None),
             },
         )
         if converted:
             log_skill_event(
-                "skill.converted", name, actor="cli",
+                "skill.converted",
+                name,
+                actor="cli",
                 meta={"pipeline": str(pipeline_path)},
             )
     except Exception:  # noqa: BLE001 — audit is best-effort
@@ -570,12 +576,19 @@ def add_skill(
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Add new skills with wiki ingestion")
     parser.add_argument("--skill-path", help="Path to a single SKILL.md to add")
     parser.add_argument("--name", help="Skill name (required with --skill-path)")
-    parser.add_argument("--scan-dir", help="Directory of skills to batch-add (each subdir with SKILL.md)")
-    parser.add_argument("--skip-existing", action="store_true", help="Skip skills already installed (prevents overwrites)")
+    parser.add_argument(
+        "--scan-dir", help="Directory of skills to batch-add (each subdir with SKILL.md)"
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip skills already installed (prevents overwrites)",
+    )
     parser.add_argument(
         "--update-existing",
         action="store_true",
@@ -694,14 +707,12 @@ def main() -> None:
             status = (
                 "updated"
                 if not result["is_new_page"]
-                else "converted" if result["converted"] else "installed"
+                else "converted"
+                if result["converted"]
+                else "installed"
             )
             scan = result.get("security_scan")
-            scan_suffix = (
-                f"; SkillSpector: {scan.get('status')}"
-                if isinstance(scan, dict)
-                else ""
-            )
+            scan_suffix = f"; SkillSpector: {scan.get('status')}" if isinstance(scan, dict) else ""
             print(f"  [{i}/{total}] [{status}] {name}{scan_suffix}")
         except Exception as exc:
             errors += 1

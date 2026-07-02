@@ -18,16 +18,18 @@ def _write_skill(path: Path, slug: str, tags: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tag_lines = "\n".join(f"  - {tag}" for tag in tags)
     path.write_text(
-        "\n".join([
-            "---",
-            f"title: {slug}",
-            "type: skill",
-            "tags:",
-            tag_lines,
-            "---",
-            f"# {slug}",
-            "Body text.",
-        ])
+        "\n".join(
+            [
+                "---",
+                f"title: {slug}",
+                "type: skill",
+                "tags:",
+                tag_lines,
+                "---",
+                f"# {slug}",
+                "Body text.",
+            ]
+        )
         + "\n",
         encoding="utf-8",
     )

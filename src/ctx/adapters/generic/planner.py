@@ -220,10 +220,7 @@ class Planner:
         body = f"Task: {task}"
         if context.strip():
             body += f"\n\nAdditional context:\n{context.strip()}"
-        body += (
-            "\n\nRespond with ONLY the JSON spec per the schema in "
-            "the system prompt."
-        )
+        body += "\n\nRespond with ONLY the JSON spec per the schema in the system prompt."
         return body
 
     def _parse_response(
@@ -235,8 +232,7 @@ class Planner:
         extracted = _extract_json(raw)
         if extracted is None:
             _logger.warning(
-                "Planner: provider returned no parseable JSON; falling "
-                "back to raw text as summary"
+                "Planner: provider returned no parseable JSON; falling back to raw text as summary"
             )
             return PlanArtifact(
                 task=task,
@@ -266,9 +262,7 @@ class Planner:
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
-_CODE_FENCE_RE = re.compile(
-    r"^```(?:json)?\s*\n(.*?)\n```\s*$", re.MULTILINE | re.DOTALL
-)
+_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n(.*?)\n```\s*$", re.MULTILINE | re.DOTALL)
 
 
 def _extract_json(text: str) -> tuple[dict[str, Any], bool] | None:

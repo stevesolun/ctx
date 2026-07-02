@@ -71,6 +71,7 @@ def _start_monitor(
     monkeypatch.setattr(mt, "MONITOR_TOKEN", "browser-token")
     calls: list[tuple[str, str]] = []
     if fake_load:
+
         def perform_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
             calls.append((slug, entity_type))
             return True, "loaded"
@@ -164,8 +165,16 @@ def test_graph_page_uses_builtin_svg_renderer(
         usage_score=0.0,
     )
     G.add_node("harness:langgraph", label="langgraph", type="harness", tags=["agent"])
-    G.add_edge("skill:python-patterns", "agent:code-reviewer", weight=0.9, shared_tags=["review"], tag_sim=0.3333)
-    G.add_edge("skill:python-patterns", "mcp-server:github-mcp-server", weight=0.8, shared_tags=["github"])
+    G.add_edge(
+        "skill:python-patterns",
+        "agent:code-reviewer",
+        weight=0.9,
+        shared_tags=["review"],
+        tag_sim=0.3333,
+    )
+    G.add_edge(
+        "skill:python-patterns", "mcp-server:github-mcp-server", weight=0.8, shared_tags=["github"]
+    )
     G.add_edge("skill:python-patterns", "harness:langgraph", weight=0.7, shared_tags=["agent"])
     G.add_edge("skill:python-patterns", "skill:medium-graph-link", weight=0.43, tag_sim=0.0)
     G.add_edge("agent:code-reviewer", "skill:weak-graph-link", weight=0.05)
@@ -184,12 +193,18 @@ def test_graph_page_uses_builtin_svg_renderer(
         assert "Graph renderer unavailable" not in page.locator("#cy").inner_text()
         resize_handle = page.locator("[data-testid='graph-inspector-resize']")
         assert resize_handle.count() == 1
-        assert page.locator("[data-testid='graph-node-detail']").evaluate(
-            "node => getComputedStyle(node).overflowY",
-        ) == "auto"
-        assert page.locator("[data-testid='graph-edge-detail']").evaluate(
-            "node => node.parentElement?.getAttribute('data-testid')",
-        ) == "graph-node-detail"
+        assert (
+            page.locator("[data-testid='graph-node-detail']").evaluate(
+                "node => getComputedStyle(node).overflowY",
+            )
+            == "auto"
+        )
+        assert (
+            page.locator("[data-testid='graph-edge-detail']").evaluate(
+                "node => node.parentElement?.getAttribute('data-testid')",
+            )
+            == "graph-node-detail"
+        )
         before_resize = page.locator(".graph-inspector-grid").bounding_box()
         assert before_resize is not None
         node_detail_box = page.locator("[data-testid='graph-node-detail']").bounding_box()
@@ -269,12 +284,18 @@ def test_graph_page_uses_builtin_svg_renderer(
         page.locator("#match-filter-max").evaluate(
             "node => { node.value = '100'; node.dispatchEvent(new Event('input', {bubbles: true})); }",
         )
-        assert page.locator("[data-3d-node-id='skill:medium-graph-link']").evaluate(
-            "node => getComputedStyle(node).display",
-        ) == "none"
-        assert page.locator("[data-testid='graph-svg-edge'][data-edge-weight='0.4300']").evaluate(
-            "node => getComputedStyle(node).display",
-        ) == "none"
+        assert (
+            page.locator("[data-3d-node-id='skill:medium-graph-link']").evaluate(
+                "node => getComputedStyle(node).display",
+            )
+            == "none"
+        )
+        assert (
+            page.locator("[data-testid='graph-svg-edge'][data-edge-weight='0.4300']").evaluate(
+                "node => getComputedStyle(node).display",
+            )
+            == "none"
+        )
         page.locator("#match-filter-max").evaluate(
             "node => { node.value = '80'; node.dispatchEvent(new Event('input', {bubbles: true})); }",
         )
@@ -288,12 +309,18 @@ def test_graph_page_uses_builtin_svg_renderer(
             "() => document.getElementById('graph-match-count').textContent === '3 visible'",
             timeout=5.0,
         )
-        assert page.locator("[data-3d-node-id='agent:code-reviewer']").evaluate(
-            "node => getComputedStyle(node).display",
-        ) == "none"
-        assert page.locator("[data-testid='graph-svg-edge'][data-edge-weight='0.9000']").evaluate(
-            "node => getComputedStyle(node).display",
-        ) == "none"
+        assert (
+            page.locator("[data-3d-node-id='agent:code-reviewer']").evaluate(
+                "node => getComputedStyle(node).display",
+            )
+            == "none"
+        )
+        assert (
+            page.locator("[data-testid='graph-svg-edge'][data-edge-weight='0.9000']").evaluate(
+                "node => getComputedStyle(node).display",
+            )
+            == "none"
+        )
         page.locator("#match-filter-min").evaluate(
             "node => { node.value = '0'; node.dispatchEvent(new Event('input', {bubbles: true})); }",
         )
@@ -306,12 +333,18 @@ def test_graph_page_uses_builtin_svg_renderer(
             timeout=5.0,
         )
 
-        reviewer_radius = float(page.locator(
-            "[data-3d-node-id='agent:code-reviewer'] [data-testid='graph-svg-node']",
-        ).get_attribute("data-radius") or "0")
-        mcp_radius = float(page.locator(
-            "[data-3d-node-id='mcp-server:github-mcp-server'] [data-testid='graph-svg-node']",
-        ).get_attribute("data-radius") or "0")
+        reviewer_radius = float(
+            page.locator(
+                "[data-3d-node-id='agent:code-reviewer'] [data-testid='graph-svg-node']",
+            ).get_attribute("data-radius")
+            or "0"
+        )
+        mcp_radius = float(
+            page.locator(
+                "[data-3d-node-id='mcp-server:github-mcp-server'] [data-testid='graph-svg-node']",
+            ).get_attribute("data-radius")
+            or "0"
+        )
         assert reviewer_radius > mcp_radius
 
         center_node = page.locator(
@@ -393,7 +426,9 @@ def test_graph_page_uses_builtin_svg_renderer(
 
         page.select_option("#focus-type", "agent")
         page.fill("#focus", "code")
-        page.wait_for_selector("[data-testid='graph-live-results'] [data-live-slug='code-reviewer']", timeout=5000)
+        page.wait_for_selector(
+            "[data-testid='graph-live-results'] [data-live-slug='code-reviewer']", timeout=5000
+        )
         page.locator("[data-live-slug='code-reviewer']").click()
         _wait_for_browser_state(
             page,
@@ -407,7 +442,9 @@ def test_graph_page_uses_builtin_svg_renderer(
             "() => document.getElementById('graph-match-count').textContent === '2 visible'",
             timeout=5.0,
         )
-        page.locator("[data-testid='graph-node-detail-tree'] a[href='/wiki/code-reviewer?type=agent']").click()
+        page.locator(
+            "[data-testid='graph-node-detail-tree'] a[href='/wiki/code-reviewer?type=agent']"
+        ).click()
         page.wait_for_url("**/wiki/code-reviewer?type=agent", timeout=5000)
         assert "code-reviewer" in page.locator("h1").inner_text()
     finally:
@@ -532,7 +569,9 @@ def test_manage_page_supports_create_search_update_and_delete(
         page.fill("input[name='title']", "Custom Reviewer")
         page.fill("input[name='tags']", "python, review, policy")
         page.fill("input[name='description']", "Reviews Python changes with local policy.")
-        page.fill("textarea[name='body']", "# Custom Reviewer\n\nUse before merging Python changes.\n")
+        page.fill(
+            "textarea[name='body']", "# Custom Reviewer\n\nUse before merging Python changes.\n"
+        )
         page.locator("#entity-editor-form button[type='submit']").click()
         _wait_for_browser_state(
             page,
@@ -595,12 +634,16 @@ def test_config_and_harness_pages_support_browser_wizard_flows(
         "---\n"
         "# LangGraph harness\n",
     )
-    _write_quality_sidecar(fake_claude, "langgraph-harness", {
-        "slug": "langgraph",
-        "subject_type": "harness",
-        "grade": "A",
-        "raw_score": 0.93,
-    })
+    _write_quality_sidecar(
+        fake_claude,
+        "langgraph-harness",
+        {
+            "slug": "langgraph",
+            "subject_type": "harness",
+            "grade": "A",
+            "raw_score": 0.93,
+        },
+    )
 
     harness = _start_monitor(monkeypatch, fake_load=False)
     try:
@@ -631,7 +674,7 @@ def test_config_and_harness_pages_support_browser_wizard_flows(
             timeout=5.0,
         )
         command = page.locator("[data-testid='harness-command-output']").inner_text()
-        assert "--model \"HuggingFaceTB/SmolLM2-135M-Instruct\"" in command
+        assert '--model "HuggingFaceTB/SmolLM2-135M-Instruct"' in command
         assert "--plan-on-no-fit" in command
         assert page.locator(".harness-card[data-harness-slug='langgraph']").count() == 1
 
@@ -650,54 +693,67 @@ def test_sessions_kpi_and_runtime_pages_render_populated_browser_data(
     tmp_path: Path,
 ) -> None:
     (fake_claude / "ctx-audit.jsonl").write_text(
-        json.dumps({
-            "ts": "2026-06-16T10:00:00Z",
-            "event": "skill.loaded",
-            "subject": "python-patterns",
-            "subject_type": "skill",
-            "actor": "hook",
-            "session_id": "browser-session",
-        }) + "\n",
+        json.dumps(
+            {
+                "ts": "2026-06-16T10:00:00Z",
+                "event": "skill.loaded",
+                "subject": "python-patterns",
+                "subject_type": "skill",
+                "actor": "hook",
+                "session_id": "browser-session",
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     (fake_claude / "skill-events.jsonl").write_text(
-        json.dumps({
-            "timestamp": "2026-06-16T10:00:01Z",
-            "event": "load",
-            "skill": "python-patterns",
-            "session_id": "browser-session",
-        }) + "\n",
+        json.dumps(
+            {
+                "timestamp": "2026-06-16T10:00:01Z",
+                "event": "load",
+                "skill": "python-patterns",
+                "session_id": "browser-session",
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
-    _write_quality_sidecar(fake_claude, "alpha", {
-        "slug": "alpha",
-        "subject_type": "skill",
-        "grade": "A",
-        "raw_score": 0.92,
-        "score": 0.92,
-        "computed_at": "2026-06-16T10:00:00Z",
-    })
+    _write_quality_sidecar(
+        fake_claude,
+        "alpha",
+        {
+            "slug": "alpha",
+            "subject_type": "skill",
+            "grade": "A",
+            "raw_score": 0.92,
+            "score": 0.92,
+            "computed_at": "2026-06-16T10:00:00Z",
+        },
+    )
     runtime_path = tmp_path / "runtime" / "events.jsonl"
     monkeypatch.setattr(mt, "runtime_lifecycle_path", lambda: runtime_path)
-    _write_runtime_events(runtime_path, [
-        {
-            "action": "validation",
-            "session_id": "browser-session",
-            "check_name": "pytest",
-            "status": "failed",
-            "summary": "one failing test",
-            "created_at": "2026-06-16T10:02:00Z",
-        },
-        {
-            "action": "escalation",
-            "session_id": "browser-session",
-            "trigger": "validation-failed",
-            "reason": "pytest failed",
-            "status": "open",
-            "severity": "blocking",
-            "created_at": "2026-06-16T10:03:00Z",
-        },
-    ])
+    _write_runtime_events(
+        runtime_path,
+        [
+            {
+                "action": "validation",
+                "session_id": "browser-session",
+                "check_name": "pytest",
+                "status": "failed",
+                "summary": "one failing test",
+                "created_at": "2026-06-16T10:02:00Z",
+            },
+            {
+                "action": "escalation",
+                "session_id": "browser-session",
+                "trigger": "validation-failed",
+                "reason": "pytest failed",
+                "status": "open",
+                "severity": "blocking",
+                "created_at": "2026-06-16T10:03:00Z",
+            },
+        ],
+    )
 
     harness = _start_monitor(monkeypatch, fake_load=False)
     try:
@@ -730,12 +786,15 @@ def test_events_page_shows_backlog_and_appends_live_events(
 ) -> None:
     audit_path = fake_claude / "ctx-audit.jsonl"
     audit_path.write_text(
-        json.dumps({
-            "ts": "2026-04-28T00:00:00Z",
-            "event": "skill.loaded",
-            "subject": "python-patterns",
-            "session_id": "events-page-backlog",
-        }) + "\n",
+        json.dumps(
+            {
+                "ts": "2026-04-28T00:00:00Z",
+                "event": "skill.loaded",
+                "subject": "python-patterns",
+                "session_id": "events-page-backlog",
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     harness = _start_monitor(monkeypatch, fake_load=False)
@@ -746,12 +805,17 @@ def test_events_page_shows_backlog_and_appends_live_events(
         assert "events-page-backlog" in page.locator("#stream").inner_text()
 
         with audit_path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({
-                "ts": "2026-04-28T00:00:01Z",
-                "event": "agent.loaded",
-                "subject": "repo-reviewer",
-                "session_id": "events-page-live",
-            }) + "\n")
+            fh.write(
+                json.dumps(
+                    {
+                        "ts": "2026-04-28T00:00:01Z",
+                        "event": "agent.loaded",
+                        "subject": "repo-reviewer",
+                        "session_id": "events-page-live",
+                    }
+                )
+                + "\n"
+            )
         _wait_for_browser_state(
             page,
             "() => document.getElementById('stream').textContent.includes('events-page-live')",
@@ -898,12 +962,15 @@ def test_browser_sse_streams_do_not_block_json_requests(
             timeout=5.0,
         )
         audit_path.write_text(
-            json.dumps({
-                "ts": "2026-04-28T00:00:00Z",
-                "event": "skill.loaded",
-                "subject": "python-patterns",
-                "session_id": "browser-sse",
-            }) + "\n",
+            json.dumps(
+                {
+                    "ts": "2026-04-28T00:00:00Z",
+                    "event": "skill.loaded",
+                    "subject": "python-patterns",
+                    "session_id": "browser-sse",
+                }
+            )
+            + "\n",
             encoding="utf-8",
         )
         _wait_for_browser_state(

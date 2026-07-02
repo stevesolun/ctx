@@ -66,6 +66,7 @@ def _validate_plan_hash(raw: str) -> str:
         raise ValueError(f"invalid plan_hash: {raw!r}")
     return raw
 
+
 LEVELS = ("LOW", "MEDIUM", "HIGH", "CRITICAL")
 _LEVEL_RANK = {level: i for i, level in enumerate(LEVELS)}
 BLOCKING_LEVELS = frozenset({"HIGH", "CRITICAL"})
@@ -114,8 +115,7 @@ class Finding:
     @staticmethod
     def from_dict(raw: dict) -> Finding:
         evidence = tuple(
-            Evidence.from_dict(e) for e in raw.get("evidence", []) or []
-            if isinstance(e, dict)
+            Evidence.from_dict(e) for e in raw.get("evidence", []) or [] if isinstance(e, dict)
         )
         level = str(raw.get("level", "LOW")).upper()
         if level not in _LEVEL_RANK:
@@ -158,8 +158,7 @@ class Verdict:
     @staticmethod
     def from_dict(raw: dict) -> Verdict:
         findings = tuple(
-            Finding.from_dict(f) for f in raw.get("findings", []) or []
-            if isinstance(f, dict)
+            Finding.from_dict(f) for f in raw.get("findings", []) or [] if isinstance(f, dict)
         )
         level = str(raw.get("level", "LOW")).upper()
         if level not in _LEVEL_RANK:
@@ -212,7 +211,6 @@ def _runs_dir() -> Path:
 def verdict_path(plan_hash: str) -> Path:
     _validate_plan_hash(plan_hash)
     return _runs_dir() / f"{plan_hash}.verdict.json"
-
 
 
 def load_verdict(plan_hash: str) -> Verdict | None:
@@ -272,9 +270,7 @@ def build_finding(
 ) -> Finding:
     level_up = level.upper()
     if level_up not in _LEVEL_RANK:
-        raise ValueError(
-            f"level must be one of {list(LEVELS)}; got {level!r}"
-        )
+        raise ValueError(f"level must be one of {list(LEVELS)}; got {level!r}")
     parsed_evidence: list[Evidence] = []
     for item in evidence or ():
         if isinstance(item, Evidence):
@@ -342,9 +338,9 @@ def record_finding(
     return verdict
 
 
-def clear_finding(plan_hash: str, finding_id: str,
-                  now: float | None = None,
-                  persist: bool = True) -> Verdict | None:
+def clear_finding(
+    plan_hash: str, finding_id: str, now: float | None = None, persist: bool = True
+) -> Verdict | None:
     existing = load_verdict(plan_hash)
     if existing is None:
         return None
@@ -384,8 +380,7 @@ def iter_verdicts() -> Iterable[Verdict]:
     yield from entries
 
 
-def recent_verdicts(limit: int = 10,
-                    min_level: str | None = None) -> tuple[Verdict, ...]:
+def recent_verdicts(limit: int = 10, min_level: str | None = None) -> tuple[Verdict, ...]:
     out: list[Verdict] = []
     min_rank = _LEVEL_RANK.get((min_level or "LOW").upper(), 0)
     for v in iter_verdicts():
@@ -402,11 +397,9 @@ def recent_verdicts(limit: int = 10,
 
 def explain(verdict: Verdict) -> str:
     lines = [
-        f"[verdict] plan={verdict.plan_hash}  level={verdict.level}  "
-        f"{verdict.summary}",
+        f"[verdict] plan={verdict.plan_hash}  level={verdict.level}  {verdict.summary}",
     ]
-    for f in sorted(verdict.findings,
-                    key=lambda x: (-_LEVEL_RANK.get(x.level, 0), x.title)):
+    for f in sorted(verdict.findings, key=lambda x: (-_LEVEL_RANK.get(x.level, 0), x.title)):
         head = f"  - [{f.level}] {f.title}"
         if f.agent:
             head += f"  (agent: {f.agent})"
@@ -427,9 +420,7 @@ def format_retro(verdicts: Sequence[Verdict]) -> str:
     lines = [header]
     for v in verdicts:
         blocks = "BLOCK" if v.blocks else "ok"
-        lines.append(
-            f"  - {v.plan_hash}  {v.level:<8}  {blocks:<5}  {v.summary}"
-        )
+        lines.append(f"  - {v.plan_hash}  {v.level:<8}  {blocks:<5}  {v.summary}")
     return "\n".join(lines)
 
 
@@ -499,15 +490,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("record", help="Record (or refine) a finding")
     sp.add_argument("--plan-hash", required=True)
-    sp.add_argument("--level", required=True,
-                    choices=[lvl for lvl in LEVELS])
+    sp.add_argument("--level", required=True, choices=[lvl for lvl in LEVELS])
     sp.add_argument("--title", required=True)
     sp.add_argument("--agent", help="Agent that produced the finding")
-    sp.add_argument("--evidence", nargs="*",
-                    help="Evidence specs: file[:line[:note]]")
+    sp.add_argument("--evidence", nargs="*", help="Evidence specs: file[:line[:note]]")
     sp.add_argument("--rationale", help="Why this is a finding")
-    sp.add_argument("--id",
-                    help="Stable finding id (default: hash of level|agent|title)")
+    sp.add_argument("--id", help="Stable finding id (default: hash of level|agent|title)")
     sp.set_defaults(func=cmd_record)
 
     sp = sub.add_parser("show", help="Show a verdict")
@@ -517,8 +505,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("retro", help="Recent verdicts, most recent first")
     sp.add_argument("--limit", type=int, default=10)
-    sp.add_argument("--min-level",
-                    choices=[lvl for lvl in LEVELS])
+    sp.add_argument("--min-level", choices=[lvl for lvl in LEVELS])
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_retro)
 

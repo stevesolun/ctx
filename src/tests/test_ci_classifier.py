@@ -182,6 +182,7 @@ def test_no_test_policy_covers_ci_package_contract_files() -> None:
     workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
 
     assert "scripts/ci_no_test_policy.py" in workflow
+    assert "python -m ruff format --check src hooks scripts" in workflow
 
 
 def test_no_test_policy_treats_all_workflows_as_contract_files() -> None:

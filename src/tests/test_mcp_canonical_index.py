@@ -77,7 +77,13 @@ class TestLoadIndex:
 
     def test_wrong_version_returns_empty(self, tmp_path: Path) -> None:
         (tmp_path / mci.INDEX_FILENAME).write_text(
-            json.dumps({"version": 99, "updated": "x", "by_github_url": {"u": {"slug": "s", "relpath": "p"}}}),
+            json.dumps(
+                {
+                    "version": 99,
+                    "updated": "x",
+                    "by_github_url": {"u": {"slug": "s", "relpath": "p"}},
+                }
+            ),
             encoding="utf-8",
         )
         idx = mci.load_index(tmp_path)
@@ -232,18 +238,9 @@ class TestRebuild:
             base_export_id="wiki-export-1",
             pages={
                 "entities/mcp-servers/a/alpha.md": (
-                    "---\n"
-                    "name: alpha\n"
-                    "github_url: https://github.com/Org/Alpha\n"
-                    "---\n"
-                    "# alpha\n"
+                    "---\nname: alpha\ngithub_url: https://github.com/Org/Alpha\n---\n# alpha\n"
                 ),
-                "entities/mcp-servers/b/beta.md": (
-                    "---\n"
-                    "name: beta\n"
-                    "---\n"
-                    "# beta\n"
-                ),
+                "entities/mcp-servers/b/beta.md": ("---\nname: beta\n---\n# beta\n"),
             },
         )
 
@@ -270,18 +267,23 @@ class TestMcpAddIntegration:
         # Lazy import to keep this test file loadable when mcp_add's
         # heavier deps (yaml, wiki_sync) have a transient issue.
         from mcp_add import _find_existing_by_github_url  # noqa: PLC0415
+
         return _find_existing_by_github_url
 
     def test_cache_hit_with_file_present(self, tmp_path: Path) -> None:
         find = self._import_find()
         _write_entity(
-            tmp_path, "f", "foo-bar",
+            tmp_path,
+            "f",
+            "foo-bar",
             github_url="https://github.com/foo/bar",
         )
         # Prime the index.
         mci.upsert(
-            tmp_path, "https://github.com/foo/bar",
-            slug="foo-bar", relpath="f/foo-bar.md",
+            tmp_path,
+            "https://github.com/foo/bar",
+            slug="foo-bar",
+            relpath="f/foo-bar.md",
         )
         result = find(tmp_path, "https://github.com/foo/bar")
         assert result is not None
@@ -290,7 +292,9 @@ class TestMcpAddIntegration:
     def test_cache_miss_repairs_on_scan_hit(self, tmp_path: Path) -> None:
         find = self._import_find()
         _write_entity(
-            tmp_path, "f", "foo-bar",
+            tmp_path,
+            "f",
+            "foo-bar",
             github_url="https://github.com/foo/bar",
         )
         # Index empty — first call must scan, find it, and upsert.
@@ -304,8 +308,10 @@ class TestMcpAddIntegration:
         find = self._import_find()
         # Index claims there's an entity at ghost/repo but nothing exists.
         mci.upsert(
-            tmp_path, "https://github.com/ghost/repo",
-            slug="ghost-repo", relpath="g/ghost-repo.md",
+            tmp_path,
+            "https://github.com/ghost/repo",
+            slug="ghost-repo",
+            relpath="g/ghost-repo.md",
         )
         result = find(tmp_path, "https://github.com/ghost/repo")
         assert result is None
@@ -324,7 +330,9 @@ class TestMcpAddIntegration:
     def test_case_insensitive_match(self, tmp_path: Path) -> None:
         find = self._import_find()
         _write_entity(
-            tmp_path, "f", "foo-bar",
+            tmp_path,
+            "f",
+            "foo-bar",
             github_url="https://github.com/Foo/Bar",
         )
         # Normalized lookup with different casing still finds it.
@@ -345,6 +353,7 @@ _POSIX_ONLY = pytest.mark.skipif(
 def test_sidecar_file_is_0o600(tmp_path: Path) -> None:
     import os
     import stat
+
     mci.upsert(tmp_path, "https://github.com/a/b", slug="a-b", relpath="a/a-b.md")
     mode = stat.S_IMODE(os.stat(tmp_path / mci.INDEX_FILENAME).st_mode)
     assert mode == 0o600, f"sidecar must be owner-only; got {oct(mode)}"
@@ -369,20 +378,28 @@ class TestRelpathTraversalRegression:
 
     def test_load_index_drops_traversal_relpath(self, tmp_path: Path) -> None:
         import json as _json
+
         sidecar = tmp_path / mci.INDEX_FILENAME
-        sidecar.write_text(_json.dumps({
-            "version": 1,
-            "updated": "2026-04-22T00:00:00Z",
-            "by_github_url": {
-                "https://github.com/safe/ok": {"slug": "ok", "relpath": "o/ok.md"},
-                "https://github.com/evil/one": {
-                    "slug": "evil", "relpath": "../../../../hooks/backup_on_change.py",
-                },
-                "https://github.com/evil/two": {
-                    "slug": "evil2", "relpath": "/etc/passwd",
-                },
-            },
-        }), encoding="utf-8")
+        sidecar.write_text(
+            _json.dumps(
+                {
+                    "version": 1,
+                    "updated": "2026-04-22T00:00:00Z",
+                    "by_github_url": {
+                        "https://github.com/safe/ok": {"slug": "ok", "relpath": "o/ok.md"},
+                        "https://github.com/evil/one": {
+                            "slug": "evil",
+                            "relpath": "../../../../hooks/backup_on_change.py",
+                        },
+                        "https://github.com/evil/two": {
+                            "slug": "evil2",
+                            "relpath": "/etc/passwd",
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
 
         idx = mci.load_index(tmp_path)
         urls = set(idx["by_github_url"].keys())
@@ -394,14 +411,20 @@ class TestRelpathTraversalRegression:
     def test_load_index_drops_windows_drive_relative(self, tmp_path: Path) -> None:
         """``C:evil`` resolves against drive C's CWD on Windows — rejected."""
         import json as _json
+
         sidecar = tmp_path / mci.INDEX_FILENAME
-        sidecar.write_text(_json.dumps({
-            "version": 1,
-            "updated": "2026-04-22T00:00:00Z",
-            "by_github_url": {
-                "https://github.com/x/y": {"slug": "y", "relpath": "C:evil.md"},
-            },
-        }), encoding="utf-8")
+        sidecar.write_text(
+            _json.dumps(
+                {
+                    "version": 1,
+                    "updated": "2026-04-22T00:00:00Z",
+                    "by_github_url": {
+                        "https://github.com/x/y": {"slug": "y", "relpath": "C:evil.md"},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
         idx = mci.load_index(tmp_path)
         assert idx["by_github_url"] == {}
 
@@ -409,21 +432,27 @@ class TestRelpathTraversalRegression:
         """Write-side validation mirrors the read side."""
         with pytest.raises(ValueError, match="invalid relpath"):
             mci.upsert(
-                tmp_path, "https://github.com/x/y",
-                slug="y", relpath="../../../hooks/evil.py",
+                tmp_path,
+                "https://github.com/x/y",
+                slug="y",
+                relpath="../../../hooks/evil.py",
             )
 
     def test_upsert_rejects_absolute_relpath(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="invalid relpath"):
             mci.upsert(
-                tmp_path, "https://github.com/x/y",
-                slug="y", relpath="/etc/passwd",
+                tmp_path,
+                "https://github.com/x/y",
+                slug="y",
+                relpath="/etc/passwd",
             )
 
     def test_upsert_accepts_safe_relpath(self, tmp_path: Path) -> None:
         """Sanity: legitimate relpaths still work after the validator."""
         idx = mci.upsert(
-            tmp_path, "https://github.com/x/y",
-            slug="y", relpath="x/y.md",
+            tmp_path,
+            "https://github.com/x/y",
+            slug="y",
+            relpath="x/y.md",
         )
         assert "https://github.com/x/y" in idx["by_github_url"]

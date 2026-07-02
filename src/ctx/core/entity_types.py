@@ -30,8 +30,7 @@ SUBJECT_TYPE_FOR_ENTITY_TYPE: dict[str, str] = {
 }
 
 ENTITY_TYPE_FOR_SUBJECT_TYPE: dict[str, str] = {
-    subject: entity_type
-    for entity_type, subject in SUBJECT_TYPE_FOR_ENTITY_TYPE.items()
+    subject: entity_type for entity_type, subject in SUBJECT_TYPE_FOR_ENTITY_TYPE.items()
 }
 
 INDEX_SECTION_FOR_SUBJECT: dict[str, str] = {
@@ -131,4 +130,3 @@ def entity_wikilink(entity_type: str, slug: str) -> str | None:
     if relpath is None:
         return None
     return f"[[{relpath.with_suffix('').as_posix()}]]"
-

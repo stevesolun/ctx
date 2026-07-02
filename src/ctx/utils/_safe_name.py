@@ -40,11 +40,32 @@ _SOURCE_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_.\-]{0,1
 # ``lpt1.txt`` all still match the device. Reserved-name check must
 # normalize the candidate before comparing — strip trailing dots/
 # spaces, take the pre-dot basename, uppercase. Strix vuln-0003.
-_WINDOWS_RESERVED: Final[frozenset[str]] = frozenset({
-    "CON", "PRN", "AUX", "NUL",
-    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-})
+_WINDOWS_RESERVED: Final[frozenset[str]] = frozenset(
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM1",
+        "COM2",
+        "COM3",
+        "COM4",
+        "COM5",
+        "COM6",
+        "COM7",
+        "COM8",
+        "COM9",
+        "LPT1",
+        "LPT2",
+        "LPT3",
+        "LPT4",
+        "LPT5",
+        "LPT6",
+        "LPT7",
+        "LPT8",
+        "LPT9",
+    }
+)
 
 
 def _is_windows_reserved(name: str) -> bool:
@@ -147,6 +168,4 @@ def is_safe_relpath(root: Path, relpath: str) -> bool:
 def validate_relpath(root: Path, relpath: str, *, field: str = "relpath") -> None:
     """Raise ``ValueError`` when relpath fails :func:`is_safe_relpath`."""
     if not is_safe_relpath(root, relpath):
-        raise ValueError(
-            f"invalid {field}: {relpath!r} does not resolve safely under {root!r}"
-        )
+        raise ValueError(f"invalid {field}: {relpath!r} does not resolve safely under {root!r}")

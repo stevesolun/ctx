@@ -103,14 +103,7 @@ def _compose_md(entry: dict) -> str:
     name = entry["name"]
     description = entry["description"]
     body = entry["body"]
-    return (
-        "---\n"
-        f"name: {name}\n"
-        f"description: {description}\n"
-        "---\n"
-        f"# {name}\n\n"
-        f"{body}\n"
-    )
+    return f"---\nname: {name}\ndescription: {description}\n---\n# {name}\n\n{body}\n"
 
 
 def _load_pairs(filename: str) -> list[_Pair]:
@@ -126,13 +119,15 @@ def _load_pairs(filename: str) -> list[_Pair]:
             entry = json.loads(raw)
         except json.JSONDecodeError as exc:
             pytest.fail(f"{path}:{line_num} invalid JSON: {exc}")
-        pairs.append(_Pair(
-            id=entry["id"],
-            label=entry["label"],
-            a_md=_compose_md(entry["a"]),
-            b_md=_compose_md(entry["b"]),
-            note=entry.get("note", ""),
-        ))
+        pairs.append(
+            _Pair(
+                id=entry["id"],
+                label=entry["label"],
+                a_md=_compose_md(entry["a"]),
+                b_md=_compose_md(entry["b"]),
+                note=entry.get("note", ""),
+            )
+        )
     return pairs
 
 
@@ -177,8 +172,10 @@ def _evaluate_pair(pair: _Pair, embedder, cache_root: Path) -> _Outcome:
     flagged = "DUPLICATE" in codes or "NEAR_DUPLICATE" in codes
     top_score = decision.nearest[0].score if decision.nearest else 0.0
     top_code = (
-        "DUPLICATE" if "DUPLICATE" in codes
-        else "NEAR_DUPLICATE" if "NEAR_DUPLICATE" in codes
+        "DUPLICATE"
+        if "DUPLICATE" in codes
+        else "NEAR_DUPLICATE"
+        if "NEAR_DUPLICATE" in codes
         else ""
     )
     return _Outcome(pair=pair, flagged=flagged, top_score=float(top_score), top_code=top_code)
@@ -274,9 +271,7 @@ def test_similarity_precision_and_recall(_embedder, _tmp_cache_root):
     if misses:
         failure_lines.append(f"Missed duplicates ({len(misses)}):")
         for o in misses:
-            failure_lines.append(
-                f"  {o.pair.id}: top_score={o.top_score:.3f} label={o.pair.label}"
-            )
+            failure_lines.append(f"  {o.pair.id}: top_score={o.top_score:.3f} label={o.pair.label}")
     if false_pos:
         failure_lines.append(f"False positives ({len(false_pos)}):")
         for o in false_pos:

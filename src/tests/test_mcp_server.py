@@ -312,7 +312,8 @@ class TestToolsCall:
     def test_non_dict_arguments_yields_invalid_params(self) -> None:
         frames = _drive(
             _encode_request(
-                1, "tools/call",
+                1,
+                "tools/call",
                 {"name": "ctx__wiki_search", "arguments": "not a dict"},
             )
         )
@@ -321,7 +322,8 @@ class TestToolsCall:
     def test_non_ctx_tool_yields_method_not_found(self) -> None:
         frames = _drive(
             _encode_request(
-                1, "tools/call",
+                1,
+                "tools/call",
                 {"name": "fs__read_file", "arguments": {}},
             )
         )
@@ -331,7 +333,8 @@ class TestToolsCall:
         """An unknown ctx__* subtool is a data-level error, not RPC-level."""
         frames = _drive(
             _encode_request(
-                1, "tools/call",
+                1,
+                "tools/call",
                 {"name": "ctx__does_not_exist", "arguments": {}},
             )
         )
@@ -344,7 +347,8 @@ class TestToolsCall:
     def test_recommend_bundle_empty_query_surfaces_as_error(self) -> None:
         frames = _drive(
             _encode_request(
-                1, "tools/call",
+                1,
+                "tools/call",
                 {
                     "name": "ctx__recommend_bundle",
                     "arguments": {"query": ""},
@@ -360,7 +364,8 @@ class TestToolsCall:
     def test_wiki_get_invalid_slug_surfaces_as_error(self) -> None:
         frames = _drive(
             _encode_request(
-                1, "tools/call",
+                1,
+                "tools/call",
                 {
                     "name": "ctx__wiki_get",
                     "arguments": {"slug": "../../etc/passwd"},
@@ -509,7 +514,8 @@ class TestRoundTripWithH2Client:
             name="ctx_mcp",
             command=sys.executable,
             args=(
-                "-m", "ctx.mcp_server.server",
+                "-m",
+                "ctx.mcp_server.server",
             ),
             env=_mcp_subprocess_env(wiki, graph_path),
             startup_timeout=10.0,
@@ -536,7 +542,8 @@ class TestRoundTripWithH2Client:
             # ctx-core; client raises McpServerError.
             with pytest.raises(McpServerError):
                 client.call_tool(
-                    "ctx__recommend_bundle", {"query": ""},
+                    "ctx__recommend_bundle",
+                    {"query": ""},
                 )
 
     # ── synthetic-corpus helpers (copied from test_harness_ctx_core) ───
@@ -547,7 +554,9 @@ class TestRoundTripWithH2Client:
 
         G = nx.Graph()
         G.add_node(
-            "skill:python-patterns", label="python-patterns", type="skill",
+            "skill:python-patterns",
+            label="python-patterns",
+            type="skill",
             tags=["python", "patterns"],
         )
         out_dir = tmp_path / "graphify-out"
@@ -576,7 +585,9 @@ class TestRoundTripWithH2Client:
 class TestProtocolTables:
     def test_handlers_has_three_entries(self) -> None:
         assert set(_HANDLERS.keys()) == {
-            "initialize", "tools/list", "tools/call",
+            "initialize",
+            "tools/list",
+            "tools/call",
         }
 
     def test_notifications_set_covers_common(self) -> None:

@@ -63,10 +63,10 @@ DELIVER_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 REFERENCE_INDICATORS = re.compile(
-    r"(\|.*\|.*\|)|"           # markdown tables
-    r"(```[\s\S]{60,}```)|"    # long code blocks
-    r"(\bexample\b.*:)|"       # example sections
-    r"(^\s*[-*]\s+`[^`]+`\s*[-:])", # definition lists with code
+    r"(\|.*\|.*\|)|"  # markdown tables
+    r"(```[\s\S]{60,}```)|"  # long code blocks
+    r"(\bexample\b.*:)|"  # example sections
+    r"(^\s*[-*]\s+`[^`]+`\s*[-:])",  # definition lists with code
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -184,7 +184,11 @@ def extract_gate_questions(text: str) -> list[str]:
             continue
 
         # Convert "check X" patterns
-        m = re.match(r"^[-*]\s*(?:check|verify|validate|confirm)\s+(?:that\s+)?(.+)", line_stripped, re.IGNORECASE)
+        m = re.match(
+            r"^[-*]\s*(?:check|verify|validate|confirm)\s+(?:that\s+)?(.+)",
+            line_stripped,
+            re.IGNORECASE,
+        )
         if m:
             thing = m.group(1).rstrip(".")
             questions.append(f"Has {thing} been verified? YES/NO")
@@ -205,16 +209,18 @@ def parse_sections(content: str) -> tuple[list[dict], str]:
     frontmatter = ""
     if fm_match:
         frontmatter = fm_match.group(0)
-        content_stripped = content[fm_match.end():]
+        content_stripped = content[fm_match.end() :]
 
     for line in content_stripped.split("\n"):
         if re.match(r"^#{1,3}\s+", line):
             # Save previous section
             if current_header or current_body_lines:
-                sections.append({
-                    "header": current_header,
-                    "body": "\n".join(current_body_lines).strip(),
-                })
+                sections.append(
+                    {
+                        "header": current_header,
+                        "body": "\n".join(current_body_lines).strip(),
+                    }
+                )
             current_header = line
             current_body_lines = []
         else:
@@ -222,10 +228,12 @@ def parse_sections(content: str) -> tuple[list[dict], str]:
 
     # Last section
     if current_header or current_body_lines:
-        sections.append({
-            "header": current_header,
-            "body": "\n".join(current_body_lines).strip(),
-        })
+        sections.append(
+            {
+                "header": current_header,
+                "body": "\n".join(current_body_lines).strip(),
+            }
+        )
 
     return sections, frontmatter
 
@@ -270,10 +278,7 @@ def build_chunk_filename(index: int) -> str:
 def _fixed_line_chunks(text: str, max_lines: int) -> list[str]:
     """Split markdown into hard line-count chunks."""
     lines = text.strip().split("\n")
-    return [
-        "\n".join(lines[i:i + max_lines]).strip()
-        for i in range(0, len(lines), max_lines)
-    ]
+    return ["\n".join(lines[i : i + max_lines]).strip() for i in range(0, len(lines), max_lines)]
 
 
 def _stage_shard_path(path: Path, index: int) -> Path:
@@ -292,6 +297,7 @@ def _stage_shard_path(path: Path, index: int) -> Path:
 
 
 # ── Converter ─────────────────────────────────────────────────────────────────
+
 
 def convert_skill(
     skill_path: Path | str,
@@ -349,7 +355,9 @@ def convert_skill(
 
     # Extract description from frontmatter
     desc_match = re.search(r"description:\s*[\"']?(.+?)[\"']?\s*$", frontmatter, re.MULTILINE)
-    skill_description = desc_match.group(1) if desc_match else f"Converted from {skill_name} SKILL.md"
+    skill_description = (
+        desc_match.group(1) if desc_match else f"Converted from {skill_name} SKILL.md"
+    )
 
     for section in sections:
         category = classify_section(section["header"], section["body"])
@@ -373,7 +381,9 @@ def convert_skill(
 
     # Ensure no stage is empty — use fallback content
     if not scope_parts:
-        scope_parts.append(f"# Step 1: Scope\n\nExtract constraints from the request for {skill_name}.")
+        scope_parts.append(
+            f"# Step 1: Scope\n\nExtract constraints from the request for {skill_name}."
+        )
     if not plan_parts:
         plan_parts.append("# Step 2: Plan\n\nDesign the approach. Map components to constraints.")
     if not build_parts:
@@ -437,7 +447,7 @@ def convert_skill(
             build_files.append(f"references/{fname}")
 
     # 04-check.md
-    check_text = "# Step 4: Check\n\nHard gate. Assume there are problems. Find them.\nAnswer every question YES or NO. \"Mostly yes\" = NO.\n\n"
+    check_text = '# Step 4: Check\n\nHard gate. Assume there are problems. Find them.\nAnswer every question YES or NO. "Mostly yes" = NO.\n\n'
     check_text += "## Universal Checks\n\n"
     check_text += "1. Does the output match the deliverable from Step 1? YES/NO\n"
     check_text += "2. Are all constraints satisfied? YES/NO\n"
@@ -583,11 +593,17 @@ def _write_stage(path: Path, text: str) -> None:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(description="Batch convert skills to micro-skill pipeline")
     parser.add_argument("--scan", help="Directory to scan for SKILL.md files")
     parser.add_argument("--file", help="Single SKILL.md file to convert")
-    parser.add_argument("--min-lines", type=int, default=cfg.line_threshold, help=f"Minimum lines to convert (default: {cfg.line_threshold})")
+    parser.add_argument(
+        "--min-lines",
+        type=int,
+        default=cfg.line_threshold,
+        help=f"Minimum lines to convert (default: {cfg.line_threshold})",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Just count, don't convert")
     parser.add_argument("--extra-dirs", nargs="*", help="Additional directories to scan")
     args = parser.parse_args()
@@ -648,7 +664,9 @@ def main():
             if result["status"] == "converted":
                 converted += 1
                 if (i + 1) % 50 == 0:
-                    print(f"  [{i + 1}/{len(skill_files)}] converted: {result['skill']} ({result['original_lines']} -> {result['pipeline_files']} files, {result['gate_questions']} gates)")
+                    print(
+                        f"  [{i + 1}/{len(skill_files)}] converted: {result['skill']} ({result['original_lines']} -> {result['pipeline_files']} files, {result['gate_questions']} gates)"
+                    )
             else:
                 skipped += 1
         except Exception as e:

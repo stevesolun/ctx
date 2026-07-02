@@ -37,9 +37,9 @@ def test_readme_badges_have_public_click_targets() -> None:
 
 def test_public_catalog_page_does_not_link_to_local_dashboard() -> None:
     text = (repo_root / "docs" / "catalog.md").read_text(encoding="utf-8")
-    js_text = (
-        repo_root / "docs" / "assets" / "javascripts" / "catalog.js"
-    ).read_text(encoding="utf-8")
+    js_text = (repo_root / "docs" / "assets" / "javascripts" / "catalog.js").read_text(
+        encoding="utf-8"
+    )
     mkdocs_text = (repo_root / "mkdocs.yml").read_text(encoding="utf-8")
 
     assert "http://127.0.0.1" not in text
@@ -47,17 +47,15 @@ def test_public_catalog_page_does_not_link_to_local_dashboard() -> None:
     assert "ctxLocalWikiUrl" not in text
     assert "ctx-catalog-card" in text
     assert "Code review skills" in text
-    assert "data-search=\"code review" in text
+    assert 'data-search="code review' in text
     assert "assets/javascripts/catalog.js" in mkdocs_text
     assert "window.document$" in js_text
-    assert "queryInput.addEventListener(\"input\"" in js_text
+    assert 'queryInput.addEventListener("input"' in js_text
     assert "../dashboard/#catalog-badge-links" in text
 
 
 def test_docs_pages_workflow_uses_node24_pages_artifact_action() -> None:
-    text = (repo_root / ".github" / "workflows" / "docs.yml").read_text(
-        encoding="utf-8"
-    )
+    text = (repo_root / ".github" / "workflows" / "docs.yml").read_text(encoding="utf-8")
 
     assert "actions/upload-pages-artifact@v5" in text
     assert "actions/upload-artifact@v4" not in text

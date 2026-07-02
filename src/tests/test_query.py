@@ -33,17 +33,19 @@ def _entity_page_text(
     status: str = "installed",
 ) -> str:
     tags_str = "[" + ", ".join(tags) + "]"
-    return "\n".join([
-        "---",
-        f"title: {title}",
-        f"type: {entity_type}",
-        *([f"description: {description}"] if description else []),
-        f"tags: {tags_str}",
-        f"status: {status}",
-        "---",
-        "",
-        body,
-    ])
+    return "\n".join(
+        [
+            "---",
+            f"title: {title}",
+            f"type: {entity_type}",
+            *([f"description: {description}"] if description else []),
+            f"tags: {tags_str}",
+            f"status: {status}",
+            "---",
+            "",
+            body,
+        ]
+    )
 
 
 def _write_entity_page(
@@ -78,9 +80,13 @@ class TestQueryKeywordMatch:
 
     def test_query_keyword_match(self, tmp_path: Path) -> None:
         wiki = make_wiki(tmp_path)
-        make_entity_page(wiki, "docker-compose-pro", ["docker"], body="Use docker-compose for local dev.")
+        make_entity_page(
+            wiki, "docker-compose-pro", ["docker"], body="Use docker-compose for local dev."
+        )
         # status="" ensures this page scores exactly 0 for a "docker" query (no installed bonus).
-        make_entity_page(wiki, "python-basics", ["python"], body="Learn Python fundamentals.", status="")
+        make_entity_page(
+            wiki, "python-basics", ["python"], body="Learn Python fundamentals.", status=""
+        )
 
         pages = wq.load_all_pages(wiki)
         results = wq.search_by_query(pages, "docker")
@@ -278,7 +284,9 @@ class TestQueryTagFilter:
         wiki = make_wiki(tmp_path)
         make_entity_page(wiki, "fastapi-service", ["python", "fastapi"], body="FastAPI patterns.")
         make_entity_page(wiki, "docker-network", ["docker"], body="Docker networking tips.")
-        make_entity_page(wiki, "pytest-patterns", ["python", "testing"], body="Pytest best practices.")
+        make_entity_page(
+            wiki, "pytest-patterns", ["python", "testing"], body="Pytest best practices."
+        )
 
         pages = wq.load_all_pages(wiki)
         results = wq.filter_by_tag(pages, "python")

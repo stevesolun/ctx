@@ -121,6 +121,7 @@ def _export_manifest_allows_graph(graph_path: Path, data: dict) -> bool:
 def _configured_semantic_min_cosine() -> float | None:
     try:
         from ctx_config import cfg  # noqa: PLC0415
+
         return float(cfg.graph_semantic_min_cosine)
     except Exception:  # noqa: BLE001
         return None
@@ -131,8 +132,7 @@ def _filter_runtime_edges(G: nx.Graph, min_cosine: float | None) -> nx.Graph:
     if min_cosine is None:
         return G
     has_similarity_attrs = any(
-        _SIMILARITY_EDGE_KEYS & set(attrs)
-        for _, _, attrs in G.edges(data=True)
+        _SIMILARITY_EDGE_KEYS & set(attrs) for _, _, attrs in G.edges(data=True)
     )
     if not has_similarity_attrs:
         return G
@@ -228,9 +228,7 @@ def _apply_entity_overlays(G: nx.Graph, graph_path: Path) -> nx.Graph:
                 if source not in G or target not in G:
                     continue
                 attrs = {
-                    key: value
-                    for key, value in edge.items()
-                    if key not in {"source", "target"}
+                    key: value for key, value in edge.items() if key not in {"source", "target"}
                 }
                 authoritative_edge = source in authoritative_nodes or target in authoritative_nodes
                 if authoritative_edge:
@@ -439,14 +437,16 @@ def resolve_by_seeds(
         node_data = G.nodes.get(nid, {})
         entity_type = node_data.get("type", "skill")
         name = node_data.get("label", nid.split(":", 1)[-1])
-        results.append({
-            "name": name,
-            "type": entity_type,
-            "score": round(score, 2),
-            "normalized_score": round(score / max_score, 4),
-            "shared_tags": shared_tags_map.get(nid, [])[:8],
-            "via": via.get(nid, [])[:4],
-        })
+        results.append(
+            {
+                "name": name,
+                "type": entity_type,
+                "score": round(score, 2),
+                "normalized_score": round(score / max_score, 4),
+                "shared_tags": shared_tags_map.get(nid, [])[:8],
+                "via": via.get(nid, [])[:4],
+            }
+        )
 
     return results
 
@@ -477,19 +477,23 @@ def resolve_by_tags(
         entity_type = node_data.get("type", "skill")
         name = node_data.get("label", nid.split(":", 1)[-1])
         matching_tags = list(tag_set & set(node_data.get("tags", [])))
-        results.append({
-            "name": name,
-            "type": entity_type,
-            "score": round(score, 2),
-            "matching_tags": matching_tags,
-        })
+        results.append(
+            {
+                "name": name,
+                "type": entity_type,
+                "score": round(score, 2),
+                "matching_tags": matching_tags,
+            }
+        )
 
     return results
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Graph-based skill/agent discovery")
-    parser.add_argument("--matched", help="Comma-separated seed skill names (from resolve_skills.py)")
+    parser.add_argument(
+        "--matched", help="Comma-separated seed skill names (from resolve_skills.py)"
+    )
     parser.add_argument("--tags", help="Comma-separated tags to search for")
     parser.add_argument("--top", type=int, default=10, help="Number of results (default 10)")
     parser.add_argument("--hops", type=int, default=2, help="Max graph hops (default 2)")

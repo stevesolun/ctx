@@ -127,8 +127,7 @@ def _invoke_snapshot(reason: str) -> int:
         return 0
     try:
         result = subprocess.run(
-            [sys.executable, str(mirror), "snapshot-if-changed",
-             "--reason", reason],
+            [sys.executable, str(mirror), "snapshot-if-changed", "--reason", reason],
             capture_output=True,
             text=True,
             timeout=60,

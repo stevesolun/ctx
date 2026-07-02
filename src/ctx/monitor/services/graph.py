@@ -30,7 +30,9 @@ dashboard_index_meta = graph_artifacts.dashboard_index_meta
 dashboard_index_uncovered_overlay_nodes = graph_artifacts.dashboard_index_uncovered_overlay_nodes
 dashboard_overlay_index_coverage_key = graph_artifacts.dashboard_overlay_index_coverage_key
 dashboard_overlay_matches_known_release = graph_artifacts.dashboard_overlay_matches_known_release
-dashboard_uncovered_runtime_overlay_nodes = graph_artifacts.dashboard_uncovered_runtime_overlay_nodes
+dashboard_uncovered_runtime_overlay_nodes = (
+    graph_artifacts.dashboard_uncovered_runtime_overlay_nodes
+)
 dashboard_uncovered_runtime_overlay_nodes_for_wiki = (
     graph_artifacts.dashboard_uncovered_runtime_overlay_nodes_for_wiki
 )
@@ -152,8 +154,7 @@ def dashboard_index_graph_stats(index_path: Path) -> dict[str, Any] | None:
         conn = sqlite3.connect(f"file:{index_path.as_posix()}?mode=ro", uri=True)
         try:
             meta = {
-                row[0]: json.loads(row[1])
-                for row in conn.execute("SELECT key,value FROM meta")
+                row[0]: json.loads(row[1]) for row in conn.execute("SELECT key,value FROM meta")
             }
             nodes = int(meta.get("nodes_count") or 0)
             return {
@@ -193,10 +194,7 @@ def dashboard_index_wiki_stats(
         "harnesses": rows.get("harness", 0),
     }
     stats["total"] = (
-        int(stats["skills"])
-        + int(stats["agents"])
-        + int(stats["mcps"])
-        + int(stats["harnesses"])
+        int(stats["skills"]) + int(stats["agents"]) + int(stats["mcps"]) + int(stats["harnesses"])
     )
     stats["split_known"] = True
     return stats
@@ -241,12 +239,14 @@ def top_degree_seeds_from_graph(graph: Any, limit: int = 18) -> list[dict[str, A
             "harness": "harness",
             "agent": "agent",
         }.get(prefix, "skill")
-        out.append({
-            "slug": slug,
-            "type": seed_type,
-            "degree": int(degree),
-            "label": graph.nodes[node_id].get("label", slug),
-        })
+        out.append(
+            {
+                "slug": slug,
+                "type": seed_type,
+                "degree": int(degree),
+                "label": graph.nodes[node_id].get("label", slug),
+            }
+        )
     return out
 
 
@@ -315,9 +315,7 @@ def node_size_from_scores(
     quality_value = 0.35 if quality is None else float(quality)
     usage_value = 0.0 if usage is None else float(usage)
     popularity = (
-        math.log1p(max(0, degree)) / math.log1p(max(1, max_degree))
-        if max_degree > 0
-        else 0.0
+        math.log1p(max(0, degree)) / math.log1p(max(1, max_degree)) if max_degree > 0 else 0.0
     )
     signal = max(
         0.0,
@@ -327,8 +325,7 @@ def node_size_from_scores(
         "node_size": round(8.0 + signal * 16.0, 2),
         "size_signal": round(signal, 4),
         "size_reason": (
-            f"quality {quality_value:.3f}; usage {usage_value:.3f}; "
-            f"popularity {popularity:.3f}"
+            f"quality {quality_value:.3f}; usage {usage_value:.3f}; popularity {popularity:.3f}"
         ),
     }
 
@@ -449,9 +446,7 @@ def resolve_index_center(
             rank = 1
         elif any(normalized_query in h for h in haystacks):
             rank = 2
-        elif query_tokens and all(
-            any(token in h for h in haystacks) for token in query_tokens
-        ):
+        elif query_tokens and all(any(token in h for h in haystacks) for token in query_tokens):
             rank = 3
         if rank is None:
             continue
@@ -578,20 +573,22 @@ def dashboard_index_neighborhood(
                                 [],
                             )
                             tokens.extend(shared_tags)
-                        edges_out.append({
-                            "data": {
-                                "id": f"{edge_key[0]}__{edge_key[1]}",
-                                "source": node_id,
-                                "target": other,
-                                "weight": edge.get("weight", 1),
-                                "shared_tags": shared_tags,
-                                "reasons": edge.get("reasons", []),
-                                "semantic": edge.get("semantic"),
-                                "tag_sim": edge.get("tag_sim"),
-                                "slug_token_sim": edge.get("slug_token_sim"),
-                                "source_overlap": edge.get("source_overlap"),
-                            },
-                        })
+                        edges_out.append(
+                            {
+                                "data": {
+                                    "id": f"{edge_key[0]}__{edge_key[1]}",
+                                    "source": node_id,
+                                    "target": other,
+                                    "weight": edge.get("weight", 1),
+                                    "shared_tags": shared_tags,
+                                    "reasons": edge.get("reasons", []),
+                                    "semantic": edge.get("semantic"),
+                                    "tag_sim": edge.get("tag_sim"),
+                                    "slug_token_sim": edge.get("slug_token_sim"),
+                                    "source_overlap": edge.get("source_overlap"),
+                                },
+                            }
+                        )
                     if other not in seen:
                         seen.add(other)
                         next_frontier.append(other)
@@ -600,13 +597,16 @@ def dashboard_index_neighborhood(
             frontier = next_frontier
             if len(nodes_out) >= limit:
                 break
-        return dashboard_graph.enrich_neighborhood({
-            "nodes": list(nodes_out.values()),
-            "edges": edges_out,
-            "center": center,
-            "resolved": resolved or {"source": "dashboard-index"},
-            "suggestions": [],
-        }, source="dashboard-index")
+        return dashboard_graph.enrich_neighborhood(
+            {
+                "nodes": list(nodes_out.values()),
+                "edges": edges_out,
+                "center": center,
+                "resolved": resolved or {"source": "dashboard-index"},
+                "suggestions": [],
+            },
+            source="dashboard-index",
+        )
     except (OSError, sqlite3.Error, json.JSONDecodeError, zlib.error, KeyError, TypeError):
         return None
 
@@ -707,9 +707,8 @@ def graph_neighborhood(
         return stored
     index_path = deps.index_path()
     has_runtime_overlays = deps.has_runtime_overlays()
-    index_covers_overlays = (
-        not has_runtime_overlays
-        or deps.index_covers_runtime_overlays(index_path)
+    index_covers_overlays = not has_runtime_overlays or deps.index_covers_runtime_overlays(
+        index_path
     )
     if index_covers_overlays:
         indexed = deps.index_neighborhood(slug, hops, limit, normalized_entity_type)
@@ -812,20 +811,22 @@ def graph_neighborhood(
                             [],
                         )
                         tokens.extend(shared_tags)
-                    edges_out.append({
-                        "data": {
-                            "id": f"{edge_key[0]}__{edge_key[1]}",
-                            "source": node_id,
-                            "target": other,
-                            "weight": edata.get("weight", 1),
-                            "shared_tags": shared_tags,
-                            "reasons": edata.get("reasons", []),
-                            "semantic": edata.get("semantic"),
-                            "tag_sim": edata.get("tag_sim"),
-                            "slug_token_sim": edata.get("slug_token_sim"),
-                            "source_overlap": edata.get("source_overlap"),
-                        },
-                    })
+                    edges_out.append(
+                        {
+                            "data": {
+                                "id": f"{edge_key[0]}__{edge_key[1]}",
+                                "source": node_id,
+                                "target": other,
+                                "weight": edata.get("weight", 1),
+                                "shared_tags": shared_tags,
+                                "reasons": edata.get("reasons", []),
+                                "semantic": edata.get("semantic"),
+                                "tag_sim": edata.get("tag_sim"),
+                                "slug_token_sim": edata.get("slug_token_sim"),
+                                "source_overlap": edata.get("source_overlap"),
+                            },
+                        }
+                    )
                 if other not in seen:
                     seen.add(other)
                     next_frontier.append(other)
@@ -835,13 +836,16 @@ def graph_neighborhood(
         if len(nodes_out) >= limit:
             break
 
-    return dashboard_graph.enrich_neighborhood({
-        "nodes": list(nodes_out.values()),
-        "edges": edges_out,
-        "center": center,
-        "resolved": resolved,
-        "suggestions": suggestions,
-    }, source="networkx")
+    return dashboard_graph.enrich_neighborhood(
+        {
+            "nodes": list(nodes_out.values()),
+            "edges": edges_out,
+            "center": center,
+            "resolved": resolved,
+            "suggestions": suggestions,
+        },
+        source="networkx",
+    )
 
 
 def resolve_graph_center(
@@ -888,8 +892,7 @@ def resolve_graph_center(
         elif any(normalized_query in h for h in haystacks):
             rank = 2
         elif query_tokens and all(
-            any(token in haystack for haystack in haystacks)
-            for token in query_tokens
+            any(token in haystack for haystack in haystacks) for token in query_tokens
         ):
             rank = 3
         if rank is None:
@@ -1016,27 +1019,29 @@ def dashboard_payload_from_graph_store(
             degree=degree,
             max_degree=max_degree,
         )
-        nodes_out.append({
-            "data": {
-                "id": node_id,
-                "label": label,
-                "type": node_type,
-                "depth": 0 if node_id == center else 1,
-                "degree": degree,
-                "tags": tags[:6],
-                "description": "",
-                **score_payload("quality_score", None),
-                **score_payload("usage_score", None),
-                "filter_tokens": [
-                    node_id,
-                    label,
-                    node_slug,
-                    _display_slug(node_slug),
-                    *tags,
-                ],
-                **size_data,
-            },
-        })
+        nodes_out.append(
+            {
+                "data": {
+                    "id": node_id,
+                    "label": label,
+                    "type": node_type,
+                    "depth": 0 if node_id == center else 1,
+                    "degree": degree,
+                    "tags": tags[:6],
+                    "description": "",
+                    **score_payload("quality_score", None),
+                    **score_payload("usage_score", None),
+                    "filter_tokens": [
+                        node_id,
+                        label,
+                        node_slug,
+                        _display_slug(node_slug),
+                        *tags,
+                    ],
+                    **size_data,
+                },
+            }
+        )
 
     edges_out: list[dict[str, Any]] = []
     for edge in raw_edges:
@@ -1047,34 +1052,37 @@ def dashboard_payload_from_graph_store(
         edge_key = tuple(sorted((source, target)))
         raw_shared_tags = attrs.get("shared_tags")
         shared_tags = (
-            [str(tag) for tag in raw_shared_tags[:4]]
-            if isinstance(raw_shared_tags, list)
-            else []
+            [str(tag) for tag in raw_shared_tags[:4]] if isinstance(raw_shared_tags, list) else []
         )
         raw_reasons = attrs.get("reasons")
         reasons = [str(reason) for reason in raw_reasons] if isinstance(raw_reasons, list) else []
-        edges_out.append({
-            "data": {
-                "id": f"{edge_key[0]}__{edge_key[1]}",
-                "source": source,
-                "target": target,
-                "weight": edge.get("weight", attrs.get("weight", 1)),
-                "shared_tags": shared_tags,
-                "reasons": reasons,
-                "semantic": attrs.get("semantic", attrs.get("semantic_sim")),
-                "tag_sim": attrs.get("tag_sim"),
-                "slug_token_sim": attrs.get("slug_token_sim"),
-                "source_overlap": attrs.get("source_overlap"),
-            },
-        })
+        edges_out.append(
+            {
+                "data": {
+                    "id": f"{edge_key[0]}__{edge_key[1]}",
+                    "source": source,
+                    "target": target,
+                    "weight": edge.get("weight", attrs.get("weight", 1)),
+                    "shared_tags": shared_tags,
+                    "reasons": reasons,
+                    "semantic": attrs.get("semantic", attrs.get("semantic_sim")),
+                    "tag_sim": attrs.get("tag_sim"),
+                    "slug_token_sim": attrs.get("slug_token_sim"),
+                    "source_overlap": attrs.get("source_overlap"),
+                },
+            }
+        )
 
-    return dashboard_graph.enrich_neighborhood({
-        "nodes": nodes_out,
-        "edges": edges_out,
-        "center": center,
-        "resolved": resolved,
-        "suggestions": suggestions,
-    }, source="graph-store")
+    return dashboard_graph.enrich_neighborhood(
+        {
+            "nodes": nodes_out,
+            "edges": edges_out,
+            "center": center,
+            "resolved": resolved,
+            "suggestions": suggestions,
+        },
+        source="graph-store",
+    )
 
 
 def load_dashboard_graph(

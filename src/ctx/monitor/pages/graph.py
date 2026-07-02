@@ -26,11 +26,7 @@ def render_graph(
     """Interactive graph view backed by a dependency-free SVG renderer."""
     focus_slug = focus or ""
     gstats = graph_stats()
-    seeds = (
-        top_degree_seeds(allow_load=False)
-        if not focus_slug and gstats.get("available")
-        else []
-    )
+    seeds = top_degree_seeds(allow_load=False) if not focus_slug and gstats.get("available") else []
     initial_slug = focus_slug
     initial_type = focus_type or ""
     if not initial_slug and seeds:
@@ -46,7 +42,7 @@ def render_graph(
         chips = "".join(
             f"<a href='/graph?slug={html.escape(s['slug'])}&amp;type={html.escape(s['type'])}' "
             f"style='display:inline-block; margin:0.2rem 0.25rem; padding:0.25rem 0.6rem; "
-            f"border-radius:999px; background:{'#fef3c7' if s['type']=='agent' else '#fee2e2' if s['type']=='mcp-server' else '#dcfce7' if s['type']=='harness' else '#e0e7ff'}; "
+            f"border-radius:999px; background:{'#fef3c7' if s['type'] == 'agent' else '#fee2e2' if s['type'] == 'mcp-server' else '#dcfce7' if s['type'] == 'harness' else '#e0e7ff'}; "
             f"color:#111; font-size:0.82rem; text-decoration:none;'>"
             f"<code style='background:transparent;'>{html.escape(s['slug'])}</code> "
             f"<span class='muted' style='font-size:0.72rem;'>- deg {format_count(s['degree'])}</span>"
@@ -74,7 +70,7 @@ def render_graph(
         # type + tag without hitting the server so a user can carve out
         # a subgraph without rebuilding anything.
         + "<div style='display:grid; grid-template-columns:240px 1fr; "
-          "gap:1rem; align-items:start; margin-top:1rem;'>"
+        "gap:1rem; align-items:start; margin-top:1rem;'>"
         # Left sidebar
         "<aside style='position:sticky; top:1rem;'>"
         "<div class='card'><strong>Focus</strong>"

@@ -105,7 +105,11 @@ class TopKState:
     nodes: dict[str, dict]  # node_id -> {"content_hash": ..., "top_k": [[id, score], ...]}
 
     def is_compatible(
-        self, *, model_id: str, top_k: int, build_floor: float,
+        self,
+        *,
+        model_id: str,
+        top_k: int,
+        build_floor: float,
     ) -> bool:
         """True when a cached state can feed the current run as-is."""
         return (
@@ -200,9 +204,7 @@ def _partition_for_incremental(
     C, and A previously ranked B, both B and A are recomputed. That avoids
     preserving second-order stale top-K state after larger catalog updates.
     """
-    current_by_id: dict[str, str] = {
-        n.node_id: _content_hash(n.text) for n in current_nodes
-    }
+    current_by_id: dict[str, str] = {n.node_id: _content_hash(n.text) for n in current_nodes}
     prior_ids = set(prior.nodes.keys())
     current_ids = set(current_by_id.keys())
 
@@ -295,7 +297,8 @@ def _load_cache(cache_dir: Path, model_id: str) -> dict[str, "np.ndarray"]:
     if cached_model != model_id:
         _logger.info(
             "semantic_edges: cache model %r != requested %r; invalidating",
-            cached_model, model_id,
+            cached_model,
+            model_id,
         )
         return {}
 
@@ -481,8 +484,7 @@ def _embed_missing(
         batch_done = min(batch_start + batch_size, len(all_chunks))
         if batch_done == len(all_chunks) or batch_done % (batch_size * 50) == 0:
             print(
-                "semantic_edges: embedded chunks "
-                f"{batch_done:,}/{len(all_chunks):,}",
+                f"semantic_edges: embedded chunks {batch_done:,}/{len(all_chunks):,}",
                 flush=True,
             )
     if not chunk_embeddings:
@@ -564,8 +566,7 @@ def _topk_pairs(
             )
         if end == n or (start // chunk_size + 1) % 10 == 0:
             print(
-                "semantic_edges: top-k rows "
-                f"{end:,}/{n:,} pairs={len(out):,}",
+                f"semantic_edges: top-k rows {end:,}/{n:,} pairs={len(out):,}",
                 flush=True,
             )
     return out
@@ -663,7 +664,8 @@ def compute_semantic_edges(
         _logger.warning(
             "semantic_edges: embedding backend unavailable (%s) — "
             "skipping semantic pairs. Install the 'embeddings' extra "
-            "to enable semantic edges.", exc,
+            "to enable semantic edges.",
+            exc,
         )
         return {}
 
@@ -679,19 +681,22 @@ def compute_semantic_edges(
     if incremental:
         prior_state = _load_topk_state(cache_dir)
         if prior_state is not None and prior_state.is_compatible(
-            model_id=model_id, top_k=top_k, build_floor=min_cosine,
+            model_id=model_id,
+            top_k=top_k,
+            build_floor=min_cosine,
         ):
             need_recompute, unchanged = _partition_for_incremental(
-                node_list, prior_state,
+                node_list,
+                prior_state,
             )
             _logger.info(
                 "semantic_edges: incremental partition — recompute=%d, reuse=%d (of %d)",
-                len(need_recompute), len(unchanged), len(node_list),
+                len(need_recompute),
+                len(unchanged),
+                len(node_list),
             )
         else:
-            _logger.info(
-                "semantic_edges: no compatible prior state; full rebuild"
-            )
+            _logger.info("semantic_edges: no compatible prior state; full rebuild")
             prior_state = None  # force full rebuild path
 
     _logger.info(
@@ -720,7 +725,8 @@ def compute_semantic_edges(
     if missing:
         _logger.info(
             "semantic_edges: embedding %d uncached texts in batches of %d",
-            len(missing), batch_size,
+            len(missing),
+            batch_size,
         )
         try:
             new_vecs = _embed_missing(missing, embedder, batch_size)
@@ -734,7 +740,8 @@ def compute_semantic_edges(
             _logger.warning(
                 "semantic_edges: embedding failed (%s) — skipping semantic "
                 "pairs for this run. Install the 'embeddings' extra: "
-                "pip install \"claude-ctx[embeddings]\"", exc,
+                'pip install "claude-ctx[embeddings]"',
+                exc,
             )
             return {}
         if new_vecs.size:
@@ -751,9 +758,7 @@ def compute_semantic_edges(
 
     for i, v in enumerate(row_vecs):
         if v is None:
-            raise RuntimeError(
-                f"internal: node_id={node_list[i].node_id!r} has no embedding row"
-            )
+            raise RuntimeError(f"internal: node_id={node_list[i].node_id!r} has no embedding row")
 
     vecs = np.vstack([v for v in row_vecs if v is not None]).astype("float32")
     vecs = _l2_normalize(vecs)
@@ -764,9 +769,7 @@ def compute_semantic_edges(
     if prior_state is not None and unchanged:
         # Incremental path: compute fresh top-K only for ``need_recompute``;
         # reuse prior_state for ``unchanged`` nodes.
-        recompute_indices = [
-            i for i, nid in enumerate(node_ids) if nid in need_recompute
-        ]
+        recompute_indices = [i for i, nid in enumerate(node_ids) if nid in need_recompute]
         fresh_pairs = _topk_pairs_subset_with_optional_index(
             vecs,
             node_ids,
@@ -781,7 +784,9 @@ def compute_semantic_edges(
             persist_index=persist_cache,
         )
         reused_pairs = _reuse_prior_pairs(
-            prior_state, unchanged, min_cosine,
+            prior_state,
+            unchanged,
+            min_cosine,
         )
         # fresh_pairs always wins on overlap — it's computed against the
         # current full vector set, so any numeric drift from a changed
@@ -790,16 +795,23 @@ def compute_semantic_edges(
         pairs.update(fresh_pairs)
         _logger.info(
             "semantic_edges: incremental pairs — fresh=%d, reused=%d, total=%d",
-            len(fresh_pairs), len(reused_pairs), len(pairs),
+            len(fresh_pairs),
+            len(reused_pairs),
+            len(pairs),
         )
     else:
         # Full rebuild path.
         pairs = _topk_pairs(
-            vecs, node_ids, top_k=top_k, min_cosine=min_cosine,
+            vecs,
+            node_ids,
+            top_k=top_k,
+            min_cosine=min_cosine,
         )
         _logger.info(
             "semantic_edges: full-rebuild pairs — %d (top_k=%d, floor=%.2f)",
-            len(pairs), top_k, min_cosine,
+            len(pairs),
+            top_k,
+            min_cosine,
         )
 
     # ── Persist the fresh state for the next run's incremental pass ───
@@ -909,8 +921,12 @@ def _topk_pairs_subset_with_optional_index(
     """Incremental subset lookup, optionally routed through vector_index."""
     if vector_index_kind == "off":
         return _topk_pairs_subset(
-            vecs, node_ids, subset_indices,
-            top_k=top_k, min_cosine=min_cosine, chunk_size=chunk_size,
+            vecs,
+            node_ids,
+            subset_indices,
+            top_k=top_k,
+            min_cosine=min_cosine,
+            chunk_size=chunk_size,
         )
     if not subset_indices:
         return {}
@@ -957,8 +973,12 @@ def _topk_pairs_subset_with_optional_index(
             exc,
         )
         return _topk_pairs_subset(
-            vecs, node_ids, subset_indices,
-            top_k=top_k, min_cosine=min_cosine, chunk_size=chunk_size,
+            vecs,
+            node_ids,
+            subset_indices,
+            top_k=top_k,
+            min_cosine=min_cosine,
+            chunk_size=chunk_size,
         )
 
     out: dict[tuple[str, str], float] = {}

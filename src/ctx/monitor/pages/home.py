@@ -81,8 +81,7 @@ def render_home(
         "<a href='/logs'>view &rarr;</a> &middot; <a href='/events'>live &rarr;</a></div>"
         + "<div class='card'><div class='muted' style='font-size:0.8rem;'>Sessions</div>"
         f"<div style='font-size:1.6rem; font-weight:600;'>{format_count(len(sessions))}</div>"
-        "<a href='/sessions'>browse &rarr;</a></div>"
-        + "</div>"
+        "<a href='/sessions'>browse &rarr;</a></div>" + "</div>"
         "<div class='card'><strong>Skill quality grades:</strong> "
         + "".join(
             f"<span class='pill grade-{grade}' data-home-grade='{grade}'>{grade}: ...</span> "
@@ -99,7 +98,7 @@ def render_home(
         ".then(data => {"
         "const grades = data.grades || {};"
         "['A','B','C','D','F'].forEach(g => {"
-        "const el = document.querySelector(`[data-home-grade=\"${g}\"]`);"
+        'const el = document.querySelector(`[data-home-grade="${g}"]`);'
         "if (el) el.textContent = `${g}: ${fmt(grades[g] || 0)}`;"
         "});"
         "if (countEl) countEl.textContent = fmt(data.total || 0);"
@@ -115,9 +114,7 @@ def render_home(
         f"<div class='card'><strong>Recent sessions</strong> ({format_count(len(sessions))} total)"
         + (
             "<table><tr><th>Session</th><th>Last seen</th><th>Load</th>"
-            "<th>Unload</th><th>Agents</th><th>Scores</th></tr>"
-            + "".join(rows)
-            + "</table>"
+            "<th>Unload</th><th>Agents</th><th>Scores</th></tr>" + "".join(rows) + "</table>"
             if recent
             else (
                 "<p class='muted'>No sessions recorded yet. Hooks start logging "
@@ -127,9 +124,7 @@ def render_home(
         + "</div>"
         "<div class='card'><strong>Latest audit events</strong>"
         + (
-            "<table><tr><th>Time</th><th>Event</th><th>Subject</th></tr>"
-            + audit_rows
-            + "</table>"
+            "<table><tr><th>Time</th><th>Event</th><th>Subject</th></tr>" + audit_rows + "</table>"
             if recent_audit
             else "<p class='muted'>No audit events yet.</p>"
         )

@@ -101,8 +101,7 @@ def _write_state(now: datetime) -> None:
             encoding="utf-8",
         )
     except OSError as exc:
-        print(f"[quality_on_session_end] could not write state: {exc}",
-              file=sys.stderr)
+        print(f"[quality_on_session_end] could not write state: {exc}", file=sys.stderr)
 
 
 def _touched_slugs_since(cutoff: datetime, events_path: Path) -> list[str]:
@@ -157,8 +156,7 @@ def _invoke_recompute(slugs: list[str], session_id: str | None = None) -> int:
         env["CTX_SESSION_ID"] = session_id
     try:
         result = subprocess.run(
-            [sys.executable, str(script), "recompute",
-             "--slugs", ",".join(slugs)],
+            [sys.executable, str(script), "recompute", "--slugs", ",".join(slugs)],
             capture_output=True,
             text=True,
             timeout=120,
@@ -169,8 +167,7 @@ def _invoke_recompute(slugs: list[str], session_id: str | None = None) -> int:
             print(result.stderr.strip(), file=sys.stderr)
         return result.returncode
     except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"[quality_on_session_end] recompute failed: {exc}",
-              file=sys.stderr)
+        print(f"[quality_on_session_end] recompute failed: {exc}", file=sys.stderr)
         return 0
 
 
@@ -208,7 +205,9 @@ def main() -> int:
         # session_id resolved above — reuse it so the audit record
         # agrees with the CTX_SESSION_ID that score_updated rows carry.
         log_session_event(
-            "session.ended", session_id, actor="hook",
+            "session.ended",
+            session_id,
+            actor="hook",
             meta={"recomputed_slugs": len(slugs), "cutoff": cutoff.isoformat()},
         )
         rotate_if_needed()

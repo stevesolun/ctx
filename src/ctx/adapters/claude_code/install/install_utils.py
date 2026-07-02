@@ -133,6 +133,7 @@ def record_install(
     deduped on slug alone, which silently dropped the skill entry
     when an agent with the same slug already existed.)
     """
+
     def mutate(manifest: dict) -> None:
         entry: dict = {
             "skill": slug,
@@ -168,11 +169,9 @@ def record_install(
             manifest["load"].append(entry)
 
         manifest["unload"] = [
-            e for e in manifest["unload"]
-            if not (
-                e.get("skill") == slug
-                and e.get("entity_type", "skill") == entity_type
-            )
+            e
+            for e in manifest["unload"]
+            if not (e.get("skill") == slug and e.get("entity_type", "skill") == entity_type)
         ]
 
     _update_manifest(mutate)
@@ -184,27 +183,23 @@ def record_uninstall(slug: str, *, entity_type: EntityType, source: str) -> None
     The unload dedup also keys on (slug, entity_type); re-unloading
     the same pair doesn't produce duplicates.
     """
+
     def mutate(manifest: dict) -> None:
         removed_entry: dict | None = next(
             (
-                e for e in manifest["load"]
-                if (
-                    e.get("skill") == slug
-                    and e.get("entity_type", "skill") == entity_type
-                )
+                e
+                for e in manifest["load"]
+                if (e.get("skill") == slug and e.get("entity_type", "skill") == entity_type)
             ),
             None,
         )
         manifest["load"] = [
-            e for e in manifest["load"]
-            if not (
-                e.get("skill") == slug
-                and e.get("entity_type", "skill") == entity_type
-            )
+            e
+            for e in manifest["load"]
+            if not (e.get("skill") == slug and e.get("entity_type", "skill") == entity_type)
         ]
         unloaded: set[tuple[str, str]] = {
-            (e.get("skill"), e.get("entity_type", "skill"))
-            for e in manifest["unload"]
+            (e.get("skill"), e.get("entity_type", "skill")) for e in manifest["unload"]
         }
         preserved: dict[str, object] = {}
         if removed_entry:
@@ -222,10 +217,7 @@ def record_uninstall(slug: str, *, entity_type: EntityType, source: str) -> None
             manifest["unload"].append(entry)
         elif preserved:
             for entry in manifest["unload"]:
-                if (
-                    entry.get("skill") == slug
-                    and entry.get("entity_type", "skill") == entity_type
-                ):
+                if entry.get("skill") == slug and entry.get("entity_type", "skill") == entity_type:
                     for field, value in preserved.items():
                         entry.setdefault(field, value)
                     break
@@ -237,7 +229,10 @@ def record_uninstall(slug: str, *, entity_type: EntityType, source: str) -> None
 
 
 def bump_entity_status(
-    entity_path: Path, *, status: str, extra_fields: dict | None = None,
+    entity_path: Path,
+    *,
+    status: str,
+    extra_fields: dict | None = None,
 ) -> bool:
     """Flip the entity's ``status:`` frontmatter field (and optional extras).
 
@@ -258,7 +253,9 @@ def bump_entity_status(
     if extra_fields:
         for field, value in extra_fields.items():
             new_text = _replace_or_insert_field(
-                new_text, field, _render_scalar(value),
+                new_text,
+                field,
+                _render_scalar(value),
             )
     if new_text != text:
         _atomic_write_text(entity_path, new_text)

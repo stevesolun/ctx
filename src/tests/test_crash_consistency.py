@@ -57,8 +57,7 @@ def _wait_for_file(path: Path, proc: subprocess.Popen[str], timeout: float = 10.
     proc.kill()
     stdout, stderr = proc.communicate(timeout=5)
     pytest.fail(
-        f"timed out waiting for {path.name}\n"
-        f"rc={proc.returncode}\nstdout={stdout}\nstderr={stderr}"
+        f"timed out waiting for {path.name}\nrc={proc.returncode}\nstdout={stdout}\nstderr={stderr}"
     )
 
 
@@ -148,11 +147,13 @@ def test_manifest_lock_releases_after_killed_writer(
     manifest_path = home / ".claude" / "skill-manifest.json"
     manifest_path.parent.mkdir(parents=True)
     manifest_path.write_text(
-        json.dumps({
-            "load": [{"skill": "baseline", "entity_type": "skill"}],
-            "unload": [],
-            "warnings": [],
-        }),
+        json.dumps(
+            {
+                "load": [{"skill": "baseline", "entity_type": "skill"}],
+                "unload": [],
+                "warnings": [],
+            }
+        ),
         encoding="utf-8",
     )
     ready = tmp_path / "manifest-write.ready"

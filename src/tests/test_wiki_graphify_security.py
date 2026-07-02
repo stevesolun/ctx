@@ -52,16 +52,26 @@ def _make_sample_graph() -> nx.Graph:
     G.add_node("skill:b", label="b", type="skill", tags=["python"])
     G.add_node("mcp-server:c", label="c", type="mcp-server", tags=["official"])
     G.add_edge(
-        "skill:a", "skill:b",
-        semantic_sim=0.9, tag_sim=0.4, token_sim=0.0,
-        final_weight=0.72, weight=0.72,
-        shared_tags=["python"], shared_tokens=[],
+        "skill:a",
+        "skill:b",
+        semantic_sim=0.9,
+        tag_sim=0.4,
+        token_sim=0.0,
+        final_weight=0.72,
+        weight=0.72,
+        shared_tags=["python"],
+        shared_tokens=[],
     )
     G.add_edge(
-        "skill:a", "mcp-server:c",
-        semantic_sim=0.6, tag_sim=0.0, token_sim=0.0,
-        final_weight=0.42, weight=0.42,
-        shared_tags=[], shared_tokens=[],
+        "skill:a",
+        "mcp-server:c",
+        semantic_sim=0.6,
+        tag_sim=0.0,
+        token_sim=0.0,
+        final_weight=0.42,
+        weight=0.42,
+        shared_tags=[],
+        shared_tokens=[],
     )
     return G
 
@@ -100,7 +110,8 @@ def _touch_file(path: str) -> bool:
 
 
 def test_load_prior_graph_does_not_execute_pickle_payload(
-    graphify_out: Path, tmp_path: Path,
+    graphify_out: Path,
+    tmp_path: Path,
 ) -> None:
     """Writing a malicious pickle next to graph.json must NOT execute it.
 
@@ -132,7 +143,8 @@ def test_load_prior_graph_does_not_execute_pickle_payload(
 
 
 def test_load_prior_graph_ignores_pickle_when_only_pickle_exists(
-    graphify_out: Path, tmp_path: Path,
+    graphify_out: Path,
+    tmp_path: Path,
 ) -> None:
     """Even without a graph.json, a stray pickle must not be loaded.
 
@@ -295,7 +307,8 @@ def test_load_prior_graph_returns_none_on_wrong_schema(graphify_out: Path) -> No
     from ctx.core.wiki import wiki_graphify
 
     (graphify_out / "graph.json").write_text(
-        json.dumps({"not_a_graph": "nope"}), encoding="utf-8",
+        json.dumps({"not_a_graph": "nope"}),
+        encoding="utf-8",
     )
     assert wiki_graphify.load_prior_graph() is None
 
@@ -411,9 +424,7 @@ def test_export_graph_uses_atomic_writer_for_artifacts(
         "graph-report.md",
         "graph-export-manifest.json",
     ):
-        metadata = json.loads(
-            (graphify_out / f"{name}.promotion.json").read_text(encoding="utf-8")
-        )
+        metadata = json.loads((graphify_out / f"{name}.promotion.json").read_text(encoding="utf-8"))
         assert metadata["status"] == "promoted"
         assert metadata["target"].endswith(name)
         assert "last_good" in metadata
@@ -453,9 +464,10 @@ def test_load_prior_graph_rejects_post_graph_replace_crash(
     with pytest.raises(RuntimeError, match="simulated crash"):
         wiki_graphify.export_graph(new_graph, communities={})
 
-    assert json.loads(
-        (graphify_out / "graph-export-manifest.json").read_text(encoding="utf-8")
-    ) == old_manifest
+    assert (
+        json.loads((graphify_out / "graph-export-manifest.json").read_text(encoding="utf-8"))
+        == old_manifest
+    )
     assert wiki_graphify.load_prior_graph() is None
 
 
@@ -469,16 +481,18 @@ def test_inject_community_links_refreshes_generated_block(
     page = tmp_path / "wiki" / "entities" / "skills" / "a.md"
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text(
-        "\n".join([
-            "# a",
-            "",
-            "## Related Skills",
-            "<!-- ctx-graph-related:start -->",
-            "- [[entities/skills/old]]",
-            "<!-- ctx-graph-related:end -->",
-            "- [[entities/skills/manual]]",
-            "",
-        ]),
+        "\n".join(
+            [
+                "# a",
+                "",
+                "## Related Skills",
+                "<!-- ctx-graph-related:start -->",
+                "- [[entities/skills/old]]",
+                "<!-- ctx-graph-related:end -->",
+                "- [[entities/skills/manual]]",
+                "",
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -510,16 +524,24 @@ def test_main_dry_run_does_not_write_graph_or_concepts(
     def fail_export(*_args: object, **_kwargs: object) -> None:
         pytest.fail("dry-run must not export graph artifacts")
 
-    monkeypatch.setattr(sys, "argv", [
-        "ctx-wiki-graphify",
-        "--wiki-dir",
-        str(tmp_path / "wiki"),
-        "--dry-run",
-    ])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "ctx-wiki-graphify",
+            "--wiki-dir",
+            str(tmp_path / "wiki"),
+            "--dry-run",
+        ],
+    )
     monkeypatch.setattr(wiki_graphify, "build_graph", lambda **_kwargs: (G, {}))
-    monkeypatch.setattr(wiki_graphify, "detect_communities", lambda _graph: {
-        0: ["skill:a", "skill:b", "skill:d"],
-    })
+    monkeypatch.setattr(
+        wiki_graphify,
+        "detect_communities",
+        lambda _graph: {
+            0: ["skill:a", "skill:b", "skill:d"],
+        },
+    )
     monkeypatch.setattr(wiki_graphify, "export_graph", fail_export)
 
     try:
@@ -546,22 +568,28 @@ def test_main_writes_wiki_base_pack_after_page_updates(
     original_wiki = wiki_graphify.WIKI_DIR
     graph = _make_sample_graph()
 
-    monkeypatch.setattr(sys, "argv", [
-        "ctx-wiki-graphify",
-        "--wiki-dir",
-        str(wiki),
-    ])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "ctx-wiki-graphify",
+            "--wiki-dir",
+            str(wiki),
+        ],
+    )
     monkeypatch.setattr(wiki_graphify, "build_graph", lambda **_kwargs: (graph, {}))
-    monkeypatch.setattr(wiki_graphify, "detect_communities", lambda _graph: {
-        0: ["skill:a", "skill:b", "mcp-server:c"],
-    })
+    monkeypatch.setattr(
+        wiki_graphify,
+        "detect_communities",
+        lambda _graph: {
+            0: ["skill:a", "skill:b", "mcp-server:c"],
+        },
+    )
 
     try:
         wiki_graphify.main()
         graph_manifest = json.loads(
-            (wiki / "graphify-out" / "graph-export-manifest.json").read_text(
-                encoding="utf-8"
-            )
+            (wiki / "graphify-out" / "graph-export-manifest.json").read_text(encoding="utf-8")
         )
         entries = discover_wiki_pack_manifests(wiki / "wiki-packs")
         assert [entry.manifest.pack_id for entry in entries] == [

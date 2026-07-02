@@ -56,8 +56,8 @@ class MirrorResult:
 
     slug: str
     status: str  # "mirrored" | "unchanged" | "skipped-existing-pipeline"
-                 # | "skipped-too-long" | "skipped-invalid"
-                 # | "pruned" | "not-found"
+    # | "skipped-too-long" | "skipped-invalid"
+    # | "pruned" | "not-found"
     source_path: str | None
     dest_path: str | None
     body_lines: int | None = None
@@ -121,16 +121,20 @@ def mirror_one(
         validate_skill_name(slug)
     except ValueError as exc:
         return MirrorResult(
-            slug=slug, status="skipped-invalid",
-            source_path=None, dest_path=None,
+            slug=slug,
+            status="skipped-invalid",
+            source_path=None,
+            dest_path=None,
             message=f"invalid slug: {exc}",
         )
 
     source = skills_dir / slug / "SKILL.md"
     if not source.is_file():
         return MirrorResult(
-            slug=slug, status="not-found",
-            source_path=None, dest_path=None,
+            slug=slug,
+            status="not-found",
+            source_path=None,
+            dest_path=None,
             message=f"no local skill at {source}",
         )
 
@@ -138,8 +142,10 @@ def mirror_one(
         body = source.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         return MirrorResult(
-            slug=slug, status="skipped-invalid",
-            source_path=str(source), dest_path=None,
+            slug=slug,
+            status="skipped-invalid",
+            source_path=str(source),
+            dest_path=None,
             message=f"read failed: {exc}",
         )
     lines = _line_count(body)
@@ -148,8 +154,11 @@ def mirror_one(
         # Long skills go through batch_convert. Refusing them here
         # prevents a mirror from clobbering a legit pipeline.
         return MirrorResult(
-            slug=slug, status="skipped-too-long",
-            source_path=str(source), dest_path=None, body_lines=lines,
+            slug=slug,
+            status="skipped-too-long",
+            source_path=str(source),
+            dest_path=None,
+            body_lines=lines,
             message=(
                 f"{lines} lines > line_threshold={line_threshold}; "
                 "use ctx-skill-add / batch_convert for long skills"
@@ -170,28 +179,39 @@ def mirror_one(
                 existing = ""
             if existing == body:
                 return MirrorResult(
-                    slug=slug, status="unchanged",
-                    source_path=str(source), dest_path=str(dest),
+                    slug=slug,
+                    status="unchanged",
+                    source_path=str(source),
+                    dest_path=str(dest),
                     body_lines=lines,
                 )
         return MirrorResult(
-            slug=slug, status="skipped-existing-pipeline",
-            source_path=str(source), dest_path=str(dest), body_lines=lines,
+            slug=slug,
+            status="skipped-existing-pipeline",
+            source_path=str(source),
+            dest_path=str(dest),
+            body_lines=lines,
             message="converted/<slug>/ already exists; pass --force to overwrite",
         )
 
     if dry_run:
         return MirrorResult(
-            slug=slug, status="mirrored",
-            source_path=str(source), dest_path=str(dest), body_lines=lines,
+            slug=slug,
+            status="mirrored",
+            source_path=str(source),
+            dest_path=str(dest),
+            body_lines=lines,
             message="dry-run: no files written",
         )
 
     dest_dir.mkdir(parents=True, exist_ok=True)
     _atomic_write_text(dest, body)
     return MirrorResult(
-        slug=slug, status="mirrored",
-        source_path=str(source), dest_path=str(dest), body_lines=lines,
+        slug=slug,
+        status="mirrored",
+        source_path=str(source),
+        dest_path=str(dest),
+        body_lines=lines,
     )
 
 
@@ -210,10 +230,16 @@ def mirror_all(
     results: list[MirrorResult] = []
     for path in _iter_local_skill_dirs(skills_dir):
         slug = path.name
-        results.append(mirror_one(
-            slug, skills_dir=skills_dir, wiki_dir=wiki_dir,
-            line_threshold=line_threshold, force=force, dry_run=dry_run,
-        ))
+        results.append(
+            mirror_one(
+                slug,
+                skills_dir=skills_dir,
+                wiki_dir=wiki_dir,
+                line_threshold=line_threshold,
+                force=force,
+                dry_run=dry_run,
+            )
+        )
     return results
 
 
@@ -248,26 +274,38 @@ def prune_orphans(
         if contents and contents != {"SKILL.md"}:
             continue
         if dry_run:
-            results.append(MirrorResult(
-                slug=slug, status="pruned",
-                source_path=None, dest_path=str(conv_dir),
-                message="dry-run: would delete",
-            ))
+            results.append(
+                MirrorResult(
+                    slug=slug,
+                    status="pruned",
+                    source_path=None,
+                    dest_path=str(conv_dir),
+                    message="dry-run: would delete",
+                )
+            )
             continue
         try:
             for f in conv_dir.iterdir():
                 f.unlink()
             conv_dir.rmdir()
-            results.append(MirrorResult(
-                slug=slug, status="pruned",
-                source_path=None, dest_path=str(conv_dir),
-            ))
+            results.append(
+                MirrorResult(
+                    slug=slug,
+                    status="pruned",
+                    source_path=None,
+                    dest_path=str(conv_dir),
+                )
+            )
         except OSError as exc:
-            results.append(MirrorResult(
-                slug=slug, status="skipped-invalid",
-                source_path=None, dest_path=str(conv_dir),
-                message=f"unlink failed: {exc}",
-            ))
+            results.append(
+                MirrorResult(
+                    slug=slug,
+                    status="skipped-invalid",
+                    source_path=None,
+                    dest_path=str(conv_dir),
+                    message=f"unlink failed: {exc}",
+                )
+            )
     return results
 
 
@@ -293,27 +331,34 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--slug", help="Mirror a single slug")
     parser.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Rewrite mirrored files even when converted/<slug>/ exists",
     )
     parser.add_argument(
-        "--prune", action="store_true",
+        "--prune",
+        action="store_true",
         help="Delete short-skill mirror dirs whose local source vanished",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Report what would happen without writing",
     )
     parser.add_argument(
-        "--skills-dir", default=str(cfg.skills_dir),
+        "--skills-dir",
+        default=str(cfg.skills_dir),
         help="Live skills dir (default: cfg.skills_dir)",
     )
     parser.add_argument(
-        "--wiki-dir", default=str(cfg.wiki_dir),
+        "--wiki-dir",
+        default=str(cfg.wiki_dir),
         help="Wiki root (default: cfg.wiki_dir)",
     )
     parser.add_argument(
-        "--line-threshold", type=int, default=cfg.line_threshold,
+        "--line-threshold",
+        type=int,
+        default=cfg.line_threshold,
         help=(
             f"Max lines for a skill to qualify as short "
             f"(default {cfg.line_threshold}; skills above this belong "
@@ -321,7 +366,8 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--json", action="store_true",
+        "--json",
+        action="store_true",
         help="Emit results as JSON for automation",
     )
     return parser
@@ -336,22 +382,34 @@ def main() -> None:
 
     results: list[MirrorResult] = []
     if args.slug:
-        results.append(mirror_one(
-            args.slug, skills_dir=skills_dir, wiki_dir=wiki_dir,
-            line_threshold=args.line_threshold,
-            force=args.force, dry_run=args.dry_run,
-        ))
-    else:
-        results.extend(mirror_all(
-            skills_dir=skills_dir, wiki_dir=wiki_dir,
-            line_threshold=args.line_threshold,
-            force=args.force, dry_run=args.dry_run,
-        ))
-        if args.prune:
-            results.extend(prune_orphans(
-                skills_dir=skills_dir, wiki_dir=wiki_dir,
+        results.append(
+            mirror_one(
+                args.slug,
+                skills_dir=skills_dir,
+                wiki_dir=wiki_dir,
+                line_threshold=args.line_threshold,
+                force=args.force,
                 dry_run=args.dry_run,
-            ))
+            )
+        )
+    else:
+        results.extend(
+            mirror_all(
+                skills_dir=skills_dir,
+                wiki_dir=wiki_dir,
+                line_threshold=args.line_threshold,
+                force=args.force,
+                dry_run=args.dry_run,
+            )
+        )
+        if args.prune:
+            results.extend(
+                prune_orphans(
+                    skills_dir=skills_dir,
+                    wiki_dir=wiki_dir,
+                    dry_run=args.dry_run,
+                )
+            )
 
     if args.json:
         print(json.dumps([r.__dict__ for r in results], indent=2))
@@ -362,14 +420,18 @@ def main() -> None:
             print(f"  {status}: {counts[status]}")
         # Surface unexpected outcomes explicitly.
         for r in results:
-            if r.status not in ("mirrored", "unchanged", "skipped-too-long",
-                                "skipped-existing-pipeline"):
+            if r.status not in (
+                "mirrored",
+                "unchanged",
+                "skipped-too-long",
+                "skipped-existing-pipeline",
+            ):
                 print(f"  [{r.status}] {r.slug}: {r.message}")
 
     hard_failures = [
-        r for r in results
-        if r.status == "skipped-invalid"
-        and r.message.startswith(("read failed", "unlink failed"))
+        r
+        for r in results
+        if r.status == "skipped-invalid" and r.message.startswith(("read failed", "unlink failed"))
     ]
     sys.exit(1 if hard_failures else 0)
 

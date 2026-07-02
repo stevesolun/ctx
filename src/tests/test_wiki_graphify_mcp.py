@@ -141,7 +141,9 @@ class TestBuildGraphIncludesMcp:
     def test_mcp_entity_creates_node(self, tmp_wiki: Path) -> None:
         _make_entity_md(
             tmp_wiki / "entities" / "mcp-servers" / "g" / "github.md",
-            slug="github", etype="mcp-server", tags=["git", "github"],
+            slug="github",
+            etype="mcp-server",
+            tags=["git", "github"],
         )
         graph, entities = wg.build_graph(incremental=False)
         assert "mcp-server:github" in graph.nodes
@@ -151,7 +153,9 @@ class TestBuildGraphIncludesMcp:
     def test_mcp_node_picked_up_from_digit_shard(self, tmp_wiki: Path) -> None:
         _make_entity_md(
             tmp_wiki / "entities" / "mcp-servers" / "0-9" / "007-mcp.md",
-            slug="007-mcp", etype="mcp-server", tags=["security"],
+            slug="007-mcp",
+            etype="mcp-server",
+            tags=["security"],
         )
         graph, _ = wg.build_graph(incremental=False)
         assert "mcp-server:007-mcp" in graph.nodes
@@ -160,11 +164,15 @@ class TestBuildGraphIncludesMcp:
         # Skill and MCP both tagged 'github' — should connect.
         _make_entity_md(
             tmp_wiki / "entities" / "skills" / "github-ops.md",
-            slug="github-ops", etype="skill", tags=["github"],
+            slug="github-ops",
+            etype="skill",
+            tags=["github"],
         )
         _make_entity_md(
             tmp_wiki / "entities" / "mcp-servers" / "g" / "github.md",
-            slug="github", etype="mcp-server", tags=["github"],
+            slug="github",
+            etype="mcp-server",
+            tags=["github"],
         )
         graph, _ = wg.build_graph(incremental=False)
         assert graph.has_edge("skill:github-ops", "mcp-server:github")
@@ -179,7 +187,9 @@ class TestBuildGraphIncludesMcp:
 
         _make_entity_md(
             tmp_wiki / "entities" / "skills" / "alpha.md",
-            slug="alpha", etype="skill", tags=["python"],
+            slug="alpha",
+            etype="skill",
+            tags=["python"],
         )
         captured: dict[str, object] = {}
 
@@ -189,7 +199,9 @@ class TestBuildGraphIncludesMcp:
 
         monkeypatch.setattr(ctx_config.cfg, "graph_edge_weight_semantic", 1.0)
         monkeypatch.setattr(
-            semantic_edges, "compute_semantic_edges", _fake_semantic_edges,
+            semantic_edges,
+            "compute_semantic_edges",
+            _fake_semantic_edges,
         )
 
         wg.build_graph(
@@ -206,11 +218,15 @@ class TestBuildGraphIncludesMcp:
         # produce spurious nodes.
         _make_entity_md(
             tmp_wiki / "entities" / "skills" / "react.md",
-            slug="react", etype="skill", tags=["frontend"],
+            slug="react",
+            etype="skill",
+            tags=["frontend"],
         )
         _make_entity_md(
             tmp_wiki / "entities" / "agents" / "planner.md",
-            slug="planner", etype="agent", tags=["planning"],
+            slug="planner",
+            etype="agent",
+            tags=["planning"],
         )
         graph, _ = wg.build_graph(incremental=False)
         assert "skill:react" in graph.nodes
@@ -233,7 +249,9 @@ class TestBuildGraphIncludesMcp:
         monkeypatch.setattr(wg, "AGENT_ENTITIES", tmp_path / "entities" / "agents")
         monkeypatch.setattr(wg, "MCP_ENTITIES", tmp_path / "entities" / "mcp-servers")
         monkeypatch.setattr(
-            wg, "HARNESS_ENTITIES", tmp_path / "entities" / "harnesses",
+            wg,
+            "HARNESS_ENTITIES",
+            tmp_path / "entities" / "harnesses",
         )
         monkeypatch.setattr(wg, "GRAPH_OUT", tmp_path / "graphify-out")
         monkeypatch.setattr(wg, "QUALITY_SIDECAR_DIR", tmp_path / "skill-quality")
@@ -241,7 +259,9 @@ class TestBuildGraphIncludesMcp:
 
         _make_entity_md(
             skills_dir / "lonely.md",
-            slug="lonely", etype="skill", tags=["solo"],
+            slug="lonely",
+            etype="skill",
+            tags=["solo"],
         )
         graph, _ = wg.build_graph(incremental=False)
         assert "skill:lonely" in graph.nodes

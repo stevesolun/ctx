@@ -81,12 +81,12 @@ Body"""
 
     def test_quoted_scalar_values_have_quotes_stripped(self) -> None:
         """Strip surrounding quotes from quoted values."""
-        text = '''---
+        text = """---
 title: "My Title"
 description: 'Another Description'
 ---
 
-Body'''
+Body"""
         result = parse_frontmatter(text)
         assert result["title"] == "My Title"
         assert result["description"] == "Another Description"
@@ -383,30 +383,47 @@ class TestValidateSkillName:
     # the skill-name validator too (previously only the regex gate ran,
     # so `con`, `con.txt`, `aux.md`, `nul.`, `com1.log`, `lpt1.txt` all
     # passed — and those paths resolve to device endpoints on Windows).
-    @pytest.mark.parametrize("reserved", [
-        "con", "CON", "Con",
-        "con.txt", "CON.TXT", "aux.md", "prn.bak",
-        "nul", "nul.",
-        "com1", "com1.log", "COM9.cfg",
-        "lpt1", "lpt1.txt", "lpt9",
-    ])
+    @pytest.mark.parametrize(
+        "reserved",
+        [
+            "con",
+            "CON",
+            "Con",
+            "con.txt",
+            "CON.TXT",
+            "aux.md",
+            "prn.bak",
+            "nul",
+            "nul.",
+            "com1",
+            "com1.log",
+            "COM9.cfg",
+            "lpt1",
+            "lpt1.txt",
+            "lpt9",
+        ],
+    )
     def test_rejects_windows_reserved_device_names(self, reserved: str) -> None:
         with pytest.raises(ValueError, match="Windows reserved"):
             validate_skill_name(reserved)
 
     # And guard the non-regressions: legitimate names that *contain* a
     # reserved substring but aren't actually reserved must still pass.
-    @pytest.mark.parametrize("legit", [
-        "conductor",        # starts with 'con' but not 'con'/'con.*'
-        "concurrent-tasks",
-        "aux-helper",
-        "nullable-check",
-        "com1-wrapper",     # 'com1-*' is fine, only 'com1[.].*' is reserved
-        "lpt-stats",
-        "lptX.data",
-    ])
+    @pytest.mark.parametrize(
+        "legit",
+        [
+            "conductor",  # starts with 'con' but not 'con'/'con.*'
+            "concurrent-tasks",
+            "aux-helper",
+            "nullable-check",
+            "com1-wrapper",  # 'com1-*' is fine, only 'com1[.].*' is reserved
+            "lpt-stats",
+            "lptX.data",
+        ],
+    )
     def test_accepts_names_containing_reserved_substrings(
-        self, legit: str,
+        self,
+        legit: str,
     ) -> None:
         assert validate_skill_name(legit) == legit
 

@@ -326,36 +326,22 @@ class TestClientRobustness:
                 client.call_tool("echo", {"text": "x"})
             assert time.monotonic() - started < 1.5
 
-    def test_parent_env_is_not_inherited_by_default(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_parent_env_is_not_inherited_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("CTX_SECRET_SHOULD_NOT_LEAK", "leaked")
         with McpClient(_make_config()) as client:
-            assert client.call_tool(
-                "echo_env", {"name": "CTX_SECRET_SHOULD_NOT_LEAK"}
-            ) == ""
-        with McpClient(
-            _make_config(credential_env=("CTX_SECRET_SHOULD_NOT_LEAK",))
-        ) as client:
-            assert client.call_tool(
-                "echo_env", {"name": "CTX_SECRET_SHOULD_NOT_LEAK"}
-            ) == "leaked"
+            assert client.call_tool("echo_env", {"name": "CTX_SECRET_SHOULD_NOT_LEAK"}) == ""
+        with McpClient(_make_config(credential_env=("CTX_SECRET_SHOULD_NOT_LEAK",))) as client:
+            assert client.call_tool("echo_env", {"name": "CTX_SECRET_SHOULD_NOT_LEAK"}) == "leaked"
 
     def test_explicit_env_overlay_is_passed(self) -> None:
         cfg = _make_config(extra_env={"CTX_ALLOWED_FOR_TEST": "visible"})
         with McpClient(cfg) as client:
-            assert client.call_tool(
-                "echo_env", {"name": "CTX_ALLOWED_FOR_TEST"}
-            ) == "visible"
+            assert client.call_tool("echo_env", {"name": "CTX_ALLOWED_FOR_TEST"}) == "visible"
 
-    def test_full_env_inheritance_requires_opt_in(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_full_env_inheritance_requires_opt_in(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("CTX_LEGACY_INHERIT_TEST", "visible")
         with McpClient(_make_config(inherit_env=True)) as client:
-            assert client.call_tool(
-                "echo_env", {"name": "CTX_LEGACY_INHERIT_TEST"}
-            ) == "visible"
+            assert client.call_tool("echo_env", {"name": "CTX_LEGACY_INHERIT_TEST"}) == "visible"
 
 
 # ── McpRouter ─────────────────────────────────────────────────────────────────
@@ -496,13 +482,16 @@ class TestFlattenContent:
     def test_multi_text_concatenated(self) -> None:
         from ctx.adapters.generic.tools.mcp_router import _flatten_content
 
-        assert _flatten_content(
-            [
-                {"type": "text", "text": "a"},
-                {"type": "text", "text": "b"},
-                {"type": "text", "text": "c"},
-            ]
-        ) == "abc"
+        assert (
+            _flatten_content(
+                [
+                    {"type": "text", "text": "a"},
+                    {"type": "text", "text": "b"},
+                    {"type": "text", "text": "c"},
+                ]
+            )
+            == "abc"
+        )
 
     def test_image_block_summarised(self) -> None:
         from ctx.adapters.generic.tools.mcp_router import _flatten_content
@@ -513,9 +502,7 @@ class TestFlattenContent:
     def test_resource_block_summarised(self) -> None:
         from ctx.adapters.generic.tools.mcp_router import _flatten_content
 
-        out = _flatten_content([
-            {"type": "resource", "resource": {"uri": "file:///x.md"}}
-        ])
+        out = _flatten_content([{"type": "resource", "resource": {"uri": "file:///x.md"}}])
         assert "[resource: file:///x.md]" in out
 
     def test_unknown_type(self) -> None:

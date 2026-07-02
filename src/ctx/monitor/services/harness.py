@@ -58,7 +58,10 @@ def harness_wizard_sidecar(sidecar_dir: Path, slug: str) -> dict[str, Any] | Non
         sidecar = sidecar_service.read_sidecar_file(path)
         if sidecar is None:
             continue
-        if sidecar.get("slug") == slug and sidecar_service.sidecar_entity_type(sidecar) == "harness":
+        if (
+            sidecar.get("slug") == slug
+            and sidecar_service.sidecar_entity_type(sidecar) == "harness"
+        ):
             return sidecar
     return None
 
@@ -92,18 +95,17 @@ def harness_wizard_entries(
             260,
         )
         repo_url = frontmatter_text(
-            meta.get("repo_url")
-            or meta.get("github_url")
-            or meta.get("homepage_url")
-            or ""
+            meta.get("repo_url") or meta.get("github_url") or meta.get("homepage_url") or ""
         )
-        rows.append({
-            "slug": slug,
-            "title": frontmatter_text(meta.get("title") or meta.get("name") or slug),
-            "description": description,
-            "tags": tags[:12],
-            "score": score,
-            "grade": str(sidecar.get("grade") or ""),
-            "repo_url": repo_url,
-        })
+        rows.append(
+            {
+                "slug": slug,
+                "title": frontmatter_text(meta.get("title") or meta.get("name") or slug),
+                "description": description,
+                "tags": tags[:12],
+                "score": score,
+                "grade": str(sidecar.get("grade") or ""),
+                "repo_url": repo_url,
+            }
+        )
     return sorted(rows, key=lambda row: (-float(row["score"]), str(row["slug"])))

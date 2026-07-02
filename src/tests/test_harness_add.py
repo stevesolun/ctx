@@ -44,12 +44,12 @@ def _frontmatter_from_text(text: str) -> dict[str, Any]:
 
 def test_command_fields_preserve_commas() -> None:
     record = _record(
-        setup_commands=['python -c "print(\'setup, ok\')"'],
-        verify_commands=['python -c "print(\'verify, ok\')"'],
+        setup_commands=["python -c \"print('setup, ok')\""],
+        verify_commands=["python -c \"print('verify, ok')\""],
     )
 
-    assert record.setup_commands == ('python -c "print(\'setup, ok\')"',)
-    assert record.verify_commands == ('python -c "print(\'verify, ok\')"',)
+    assert record.setup_commands == ("python -c \"print('setup, ok')\"",)
+    assert record.verify_commands == ("python -c \"print('verify, ok')\"",)
 
 
 def test_add_harness_creates_page_index_and_log(tmp_path: Path) -> None:
@@ -65,12 +65,8 @@ def test_add_harness_creates_page_index_and_log(tmp_path: Path) -> None:
     assert fm["type"] == "harness"
     assert fm["repo_url"] == "https://github.com/earthtojake/text-to-cad"
     assert fm["setup_commands"] == ["pip install -e .", "python app.py"]
-    assert "[[entities/harnesses/text-to-cad]]" in (
-        wiki / "index.md"
-    ).read_text(encoding="utf-8")
-    assert "add-harness | text-to-cad" in (
-        wiki / "log.md"
-    ).read_text(encoding="utf-8")
+    assert "[[entities/harnesses/text-to-cad]]" in (wiki / "index.md").read_text(encoding="utf-8")
+    assert "add-harness | text-to-cad" in (wiki / "log.md").read_text(encoding="utf-8")
 
 
 def test_dry_run_does_not_write(tmp_path: Path) -> None:
@@ -163,11 +159,7 @@ def test_existing_harness_update_existing_applies_reviewed_change(
         pack_dir=packs_dir / "base-export-1",
         pack_id="base-export-1",
         base_export_id="wiki-export-1",
-        pages={
-            "entities/harnesses/text-to-cad.md": harness_add.generate_harness_page(
-                existing
-            )
-        },
+        pages={"entities/harnesses/text-to-cad.md": harness_add.generate_harness_page(existing)},
     )
 
     result = harness_add.add_harness(

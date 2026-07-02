@@ -39,10 +39,12 @@ class TestIdentity:
 
     def test_usage_tracker_import_points_at_shared(self):
         import usage_tracker
+
         assert usage_tracker.SIGNAL_SKILL_MAP is STACK_SKILL_MAP
 
     def test_resolve_skills_import_points_at_shared(self):
         from ctx.core.resolve import resolve_skills
+
         assert resolve_skills.STACK_SKILL_MAP is STACK_SKILL_MAP
 
 
@@ -71,13 +73,34 @@ class TestCoverageBaseline:
     map ever shrinks below this baseline, usage_tracker / resolver
     callers start silently dropping signals — fail the test loudly."""
 
-    _REQUIRED_STACKS = frozenset({
-        "fastapi", "django", "flask", "react", "nextjs", "vue",
-        "angular", "langchain", "pytorch", "openai-sdk", "anthropic-sdk",
-        "docker", "kubernetes", "terraform", "pytest", "jest",
-        "playwright", "prisma", "sqlalchemy", "cypress", "dbt",
-        "crewai", "huggingface", "github-actions",
-    })
+    _REQUIRED_STACKS = frozenset(
+        {
+            "fastapi",
+            "django",
+            "flask",
+            "react",
+            "nextjs",
+            "vue",
+            "angular",
+            "langchain",
+            "pytorch",
+            "openai-sdk",
+            "anthropic-sdk",
+            "docker",
+            "kubernetes",
+            "terraform",
+            "pytest",
+            "jest",
+            "playwright",
+            "prisma",
+            "sqlalchemy",
+            "cypress",
+            "dbt",
+            "crewai",
+            "huggingface",
+            "github-actions",
+        }
+    )
 
     def test_baseline_stacks_all_present(self):
         missing = self._REQUIRED_STACKS - set(STACK_SKILL_MAP)

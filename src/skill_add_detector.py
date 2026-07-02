@@ -33,6 +33,7 @@ from pathlib import Path
 
 try:
     from ctx_config import cfg as _cfg
+
     CLAUDE_DIR = _cfg.claude_dir
     WIKI_DIR = _cfg.wiki_dir
     REGISTRY_PATH = _cfg.skill_registry
@@ -66,8 +67,7 @@ def validate_user_supplied_slug(name: str) -> str:
     """
     if not isinstance(name, str) or not _SKILL_DIR_RE.match(name):
         raise ValueError(
-            f"invalid skill name extracted from path: {name!r} "
-            f"(must match {_SKILL_DIR_RE.pattern})"
+            f"invalid skill name extracted from path: {name!r} (must match {_SKILL_DIR_RE.pattern})"
         )
     return name
 
@@ -191,6 +191,7 @@ def _parse_stdin_payload() -> tuple[str, dict]:
 
 def main() -> None:
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--tool", default="unknown")
     parser.add_argument("--input", default="{}")
@@ -198,7 +199,7 @@ def main() -> None:
         "--from-stdin",
         action="store_true",
         help="Read tool_name and tool_input from the JSON payload on stdin "
-             "(safe alternative to --tool/--input that avoids shell injection)",
+        "(safe alternative to --tool/--input that avoids shell injection)",
     )
     args = parser.parse_args()
 

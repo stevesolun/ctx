@@ -32,7 +32,7 @@ def graph_with_hostile_labels() -> tuple[nx.Graph, dict]:
     G = nx.Graph()
     G.add_node(
         "skill:evil",
-        label='</script><script>window.__pwn=1</script>',
+        label="</script><script>window.__pwn=1</script>",
         type="skill",
         tags=['"><img src=x onerror="window.__tagpwn=1">'],
     )
@@ -70,6 +70,7 @@ def test_html_visualizer_imports_without_optional_plotly(monkeypatch):
 
 def test_title_is_html_escaped(graph_with_hostile_labels):
     import wiki_visualize as wv
+
     G, pos = graph_with_hostile_labels
     payload = '<img src=x onerror="window.__title_pwn=1">'
     html = wv.build_html_with_filters(G, pos, title=payload)
@@ -82,6 +83,7 @@ def test_title_is_html_escaped(graph_with_hostile_labels):
 
 def test_tag_names_are_html_escaped(graph_with_hostile_labels):
     import wiki_visualize as wv
+
     G, pos = graph_with_hostile_labels
     html = wv.build_html_with_filters(G, pos, title="safe")
     # Tag name payload should be escaped in both the attribute and the element text
@@ -92,6 +94,7 @@ def test_tag_names_are_html_escaped(graph_with_hostile_labels):
 
 def test_script_breakout_via_node_label_is_neutralized(graph_with_hostile_labels):
     import wiki_visualize as wv
+
     G, pos = graph_with_hostile_labels
     html = wv.build_html_with_filters(G, pos, title="safe")
     # The literal closing tag must not survive anywhere in the embedded NODES
@@ -108,6 +111,7 @@ def test_script_breakout_via_node_label_is_neutralized(graph_with_hostile_labels
 
 def test_benign_render_still_works():
     import wiki_visualize as wv
+
     G = nx.Graph()
     G.add_node("skill:a", label="alpha", type="skill", tags=["python"])
     G.add_node("skill:b", label="beta", type="skill", tags=["python"])
@@ -120,6 +124,7 @@ def test_benign_render_still_works():
 
 def test_default_min_weight_preserves_fractional_semantic_edges():
     import wiki_visualize as wv
+
     G = nx.Graph()
     G.add_node("skill:a", label="alpha", type="skill", tags=[])
     G.add_node("skill:b", label="beta", type="skill", tags=[])
@@ -132,6 +137,7 @@ def test_default_min_weight_preserves_fractional_semantic_edges():
 
 def test_visualizer_renders_mcp_and_harness_type_filters():
     import wiki_visualize as wv
+
     G = nx.Graph()
     G.add_node("mcp-server:filesystem", label="filesystem", type="mcp-server", tags=[])
     G.add_node("harness:text-to-cad", label="text-to-cad", type="harness", tags=[])
@@ -154,19 +160,29 @@ def test_visualizer_can_load_explicit_graph_and_communities(tmp_path):
 
     graph_path = tmp_path / "graph.json"
     communities_path = tmp_path / "communities.json"
-    graph_path.write_text(json.dumps({
-        "directed": False,
-        "multigraph": False,
-        "graph": {"export_id": "ctx-graph-test-2-1"},
-        "nodes": [
-            {"id": "skill:a", "label": "alpha", "type": "skill", "tags": ["python"]},
-            {"id": "harness:b", "label": "beta", "type": "harness", "tags": ["agent"]},
-        ],
-        "edges": [{"source": "skill:a", "target": "harness:b", "weight": 0.9}],
-    }), encoding="utf-8")
-    communities_path.write_text(json.dumps({
-        "communities": {"7": {"members": ["skill:a", "harness:b"]}},
-    }), encoding="utf-8")
+    graph_path.write_text(
+        json.dumps(
+            {
+                "directed": False,
+                "multigraph": False,
+                "graph": {"export_id": "ctx-graph-test-2-1"},
+                "nodes": [
+                    {"id": "skill:a", "label": "alpha", "type": "skill", "tags": ["python"]},
+                    {"id": "harness:b", "label": "beta", "type": "harness", "tags": ["agent"]},
+                ],
+                "edges": [{"source": "skill:a", "target": "harness:b", "weight": 0.9}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    communities_path.write_text(
+        json.dumps(
+            {
+                "communities": {"7": {"members": ["skill:a", "harness:b"]}},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     G = wv.load_graph(graph_path)
     communities = wv.load_communities(communities_path)

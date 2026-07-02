@@ -99,12 +99,14 @@ def test_credentials_dropped_from_top_files_even_if_listed():
     # A user could copy-paste the ~/.claude directory listing and
     # accidentally include .credentials.json. The config silently drops
     # it — this is the hard-exclude guarantee.
-    cfg = bc.BackupConfig(top_files=(
-        "settings.json",
-        ".credentials.json",
-        "mcp-needs-auth-cache.json",
-        "CLAUDE.md",
-    ))
+    cfg = bc.BackupConfig(
+        top_files=(
+            "settings.json",
+            ".credentials.json",
+            "mcp-needs-auth-cache.json",
+            "CLAUDE.md",
+        )
+    )
     assert ".credentials.json" not in cfg.top_files
     assert "mcp-needs-auth-cache.json" not in cfg.top_files
     assert "settings.json" in cfg.top_files
@@ -130,36 +132,44 @@ def test_load_returns_defaults_when_no_raw():
 
 
 def test_load_overrides_scalar_fields():
-    cfg = bc.load_backup_config({
-        "scope": "incremental",
-        "max_file_bytes": 1024,
-        "memory_glob": False,
-    })
+    cfg = bc.load_backup_config(
+        {
+            "scope": "incremental",
+            "max_file_bytes": 1024,
+            "memory_glob": False,
+        }
+    )
     assert cfg.scope == "incremental"
     assert cfg.max_file_bytes == 1024
     assert cfg.memory_glob is False
 
 
 def test_load_overrides_top_files_and_trees():
-    cfg = bc.load_backup_config({
-        "top_files": ["only-this.json"],
-        "trees": [{"src": "my-skills", "dest": "skills"}],
-    })
+    cfg = bc.load_backup_config(
+        {
+            "top_files": ["only-this.json"],
+            "trees": [{"src": "my-skills", "dest": "skills"}],
+        }
+    )
     assert cfg.top_files == ("only-this.json",)
     assert cfg.trees == (bc.BackupTree(src="my-skills", dest="skills"),)
 
 
 def test_load_tree_defaults_dest_to_src_when_missing():
-    cfg = bc.load_backup_config({
-        "trees": [{"src": "agents"}],
-    })
+    cfg = bc.load_backup_config(
+        {
+            "trees": [{"src": "agents"}],
+        }
+    )
     assert cfg.trees == (bc.BackupTree(src="agents", dest="agents"),)
 
 
 def test_load_ignores_malformed_trees():
-    cfg = bc.load_backup_config({
-        "trees": [{"src": ""}, "not-a-dict", {"src": "skills"}],
-    })
+    cfg = bc.load_backup_config(
+        {
+            "trees": [{"src": ""}, "not-a-dict", {"src": "skills"}],
+        }
+    )
     assert cfg.trees == (bc.BackupTree(src="skills", dest="skills"),)
 
 
@@ -187,9 +197,7 @@ def test_from_ctx_config_survives_malformed_user_override(monkeypatch, tmp_path)
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     claude_dir = tmp_path / ".claude"
     claude_dir.mkdir()
-    (claude_dir / "backup-config.json").write_text(
-        "{ not valid json", encoding="utf-8"
-    )
+    (claude_dir / "backup-config.json").write_text("{ not valid json", encoding="utf-8")
     cfg = bc.from_ctx_config()
     # Malformed JSON is swallowed rather than raised so a broken user
     # file never blocks a backup from happening.
@@ -202,10 +210,12 @@ def test_from_ctx_config_applies_user_override(monkeypatch, tmp_path):
     claude_dir = tmp_path / ".claude"
     claude_dir.mkdir()
     (claude_dir / "backup-config.json").write_text(
-        json.dumps({
-            "scope": "hybrid",
-            "retention": {"keep_latest": 77},
-        }),
+        json.dumps(
+            {
+                "scope": "hybrid",
+                "retention": {"keep_latest": 77},
+            }
+        ),
         encoding="utf-8",
     )
     cfg = bc.from_ctx_config()

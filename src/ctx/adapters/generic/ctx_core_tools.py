@@ -93,34 +93,40 @@ def _encode_response(data: Mapping[str, Any], response_format: str) -> str:
     if requested == "json":
         return json.dumps(data)
     if requested != "gcf":
-        return json.dumps({
-            "error": (
-                "unsupported response format "
-                f"{response_format!r}; expected one of "
-                f"{', '.join(SUPPORTED_RESPONSE_FORMATS)}"
-            ),
-            "response_format": "json",
-        })
+        return json.dumps(
+            {
+                "error": (
+                    "unsupported response format "
+                    f"{response_format!r}; expected one of "
+                    f"{', '.join(SUPPORTED_RESPONSE_FORMATS)}"
+                ),
+                "response_format": "json",
+            }
+        )
 
     try:
         from gcf import encode_generic  # type: ignore[import-not-found]
     except Exception:
-        return json.dumps({
-            "error": (
-                "GCF response format requires optional dependency "
-                "gcf-python. Install with `pip install "
-                "\"claude-ctx[gcf]\"`."
-            ),
-            "response_format": "json",
-        })
+        return json.dumps(
+            {
+                "error": (
+                    "GCF response format requires optional dependency "
+                    "gcf-python. Install with `pip install "
+                    '"claude-ctx[gcf]"`.'
+                ),
+                "response_format": "json",
+            }
+        )
 
     try:
         return str(encode_generic(dict(data)))
     except Exception as exc:  # noqa: BLE001
-        return json.dumps({
-            "error": f"GCF response encoding failed: {exc}",
-            "response_format": "json",
-        })
+        return json.dumps(
+            {
+                "error": f"GCF response encoding failed: {exc}",
+                "response_format": "json",
+            }
+        )
 
 
 def _duration_ms(started: float) -> float:
@@ -228,16 +234,18 @@ _CORE_EVENT_NAMES = {
     "wiki_search": "ctx.core.wiki_search",
     "wiki_get": "ctx.core.wiki_get",
 }
-_LIFECYCLE_LOCAL_NAMES = frozenset({
-    "observe_dev_event",
-    "load_entity",
-    "mark_entity_used",
-    "record_validation",
-    "record_escalation",
-    "unload_entity",
-    "session_end",
-    "session_state",
-})
+_LIFECYCLE_LOCAL_NAMES = frozenset(
+    {
+        "observe_dev_event",
+        "load_entity",
+        "mark_entity_used",
+        "record_validation",
+        "record_escalation",
+        "unload_entity",
+        "session_end",
+        "session_state",
+    }
+)
 
 
 class CtxCoreToolbox:
@@ -265,7 +273,7 @@ class CtxCoreToolbox:
         self._graph_path = graph_path
         self._lifecycle = RuntimeLifecycleStore(lifecycle_dir)
         self._bound_session_id = str(bound_session_id or "").strip() or None
-        self._graph: Any | None = None       # networkx.Graph
+        self._graph: Any | None = None  # networkx.Graph
         self._pages: list[Any] | None = None  # list[SkillPage]
         self._graph_signature: GraphSignature | None = None
         self._pages_signature: PageSignature | None = None
@@ -429,10 +437,8 @@ class CtxCoreToolbox:
         back on the next turn to reason about specific fields.
         """
         if not call.name.startswith(_NAMESPACE):
-            raise ValueError(
-                f"CtxCoreToolbox got a non-ctx call {call.name!r}"
-            )
-        local_name = call.name[len(_NAMESPACE):]
+            raise ValueError(f"CtxCoreToolbox got a non-ctx call {call.name!r}")
+        local_name = call.name[len(_NAMESPACE) :]
         args = call.arguments or {}
         started = time.perf_counter()
         event_name = _CORE_EVENT_NAMES.get(
@@ -516,17 +522,21 @@ class CtxCoreToolbox:
         tags = _query_to_tags(query)
         use_semantic_query = bool(args.get("use_semantic_query"))
         if not tags and not use_semantic_query:
-            return json.dumps({
-                "error": "query produced no usable tags",
-                "results": [],
-            })
+            return json.dumps(
+                {
+                    "error": "query produced no usable tags",
+                    "results": [],
+                }
+            )
 
         graph = self._ensure_graph()
         if graph.number_of_nodes() == 0:
-            return json.dumps({
-                "error": "knowledge graph not available; run ctx-wiki-graphify",
-                "results": [],
-            })
+            return json.dumps(
+                {
+                    "error": "knowledge graph not available; run ctx-wiki-graphify",
+                    "results": [],
+                }
+            )
 
         from ctx.core.resolve.recommendations import recommend_by_tags  # noqa: PLC0415
 
@@ -578,12 +588,15 @@ class CtxCoreToolbox:
             if model_provider or model
             else []
         )
-        return _encode_response({
-            "query": query,
-            "tags": tags,
-            "results": results,
-            "companion_harnesses": companion_harnesses,
-        }, _response_format_from_args(args))
+        return _encode_response(
+            {
+                "query": query,
+                "tags": tags,
+                "results": results,
+                "companion_harnesses": companion_harnesses,
+            },
+            _response_format_from_args(args),
+        )
 
     def _dispatch_graph_query(self, args: dict[str, Any]) -> str:
         seeds_raw = args.get("seeds") or []
@@ -597,10 +610,12 @@ class CtxCoreToolbox:
 
         graph = self._ensure_graph()
         if graph.number_of_nodes() == 0:
-            return json.dumps({
-                "error": "knowledge graph not available; run ctx-wiki-graphify",
-                "results": [],
-            })
+            return json.dumps(
+                {
+                    "error": "knowledge graph not available; run ctx-wiki-graphify",
+                    "results": [],
+                }
+            )
 
         from ctx.core.graph.resolve_graph import resolve_by_seeds  # noqa: PLC0415
 
@@ -629,10 +644,12 @@ class CtxCoreToolbox:
 
         pages = self._ensure_pages()
         if not pages:
-            return json.dumps({
-                "error": "wiki has no pages",
-                "results": [],
-            })
+            return json.dumps(
+                {
+                    "error": "wiki has no pages",
+                    "results": [],
+                }
+            )
 
         from ctx.core.wiki.wiki_query import search_by_query  # noqa: PLC0415
 
@@ -662,12 +679,13 @@ class CtxCoreToolbox:
             return json.dumps({"error": "slug must be non-empty"})
         entity_type = str(args.get("entity_type", "")).strip()
         if entity_type and entity_type not in RECOMMENDABLE_ENTITY_TYPES:
-            return json.dumps({
-                "error": (
-                    "entity_type must be one of "
-                    + ", ".join(RECOMMENDABLE_ENTITY_TYPES)
-                ),
-            })
+            return json.dumps(
+                {
+                    "error": (
+                        "entity_type must be one of " + ", ".join(RECOMMENDABLE_ENTITY_TYPES)
+                    ),
+                }
+            )
 
         # Validate — ctx-core's validator rejects traversal shapes.
         from ctx.core.wiki.wiki_utils import validate_skill_name  # noqa: PLC0415
@@ -708,10 +726,12 @@ class CtxCoreToolbox:
                     _response_format_from_args(args),
                 )
 
-        return json.dumps({
-            "error": f"no entity page found for slug {slug!r}",
-            "looked_in": [str(p) for _, p, _ in candidates],
-        })
+        return json.dumps(
+            {
+                "error": f"no entity page found for slug {slug!r}",
+                "looked_in": [str(p) for _, p, _ in candidates],
+            }
+        )
 
     def _dispatch_lifecycle(self, args: dict[str, Any], name: str) -> str:
         try:
@@ -731,9 +751,7 @@ class CtxCoreToolbox:
                     slug=str(args.get("slug") or ""),
                     reason=str(args.get("reason") or "") or None,
                     security_scan=(
-                        _dict_arg(args.get("security_scan"))
-                        if "security_scan" in args
-                        else None
+                        _dict_arg(args.get("security_scan")) if "security_scan" in args else None
                     ),
                 )
             elif name == "mark_entity_used":
@@ -825,14 +843,17 @@ class CtxCoreToolbox:
         from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body  # noqa: PLC0415
 
         fm, body = parse_frontmatter_and_body(text)
-        return _encode_response({
-            "slug": path.stem,
-            "entity_type": entity_type,
-            "wikilink": wikilink,
-            "path": str(path),
-            "frontmatter": fm,
-            "body": body,
-        }, response_format)
+        return _encode_response(
+            {
+                "slug": path.stem,
+                "entity_type": entity_type,
+                "wikilink": wikilink,
+                "path": str(path),
+                "frontmatter": fm,
+                "body": body,
+            },
+            response_format,
+        )
 
     # ── Lazy caches ─────────────────────────────────────────────────────
 
@@ -894,6 +915,7 @@ class CtxCoreToolbox:
             return self._wiki_dir
         try:
             from ctx_config import cfg  # noqa: PLC0415
+
             return Path(cfg.wiki_dir)
         except Exception:  # noqa: BLE001
             return None

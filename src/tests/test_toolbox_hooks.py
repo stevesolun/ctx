@@ -112,9 +112,7 @@ def isolate_profile_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ~/.claude/user-profile.json. The digest is informational; tests only
     need to verify it appears, not that it persists to the user's home.
     """
-    monkeypatch.setattr(
-        th, "save_profile", lambda profile, path=None: tmp_path / "p.json"
-    )
+    monkeypatch.setattr(th, "save_profile", lambda profile, path=None: tmp_path / "p.json")
 
 
 def _toolbox_emission_lines(output: str) -> list[dict]:
@@ -192,9 +190,7 @@ def test_run_trigger_unknown_event_returns_1(capsys):
     assert "Unknown trigger" in err
 
 
-def test_run_trigger_session_start_emits_matching_toolbox(
-    seeded_global, tmp_runs, force_scope
-):
+def test_run_trigger_session_start_emits_matching_toolbox(seeded_global, tmp_runs, force_scope):
     buf = io.StringIO()
     rc = th.run_trigger("session-start", stream=buf)
     assert rc == 0
@@ -210,9 +206,7 @@ def test_run_trigger_session_start_emits_matching_toolbox(
     assert Path(payload["plan_file"]).exists()
 
 
-def test_run_trigger_session_end_matches_only_flagged(
-    seeded_global, tmp_runs, force_scope
-):
+def test_run_trigger_session_end_matches_only_flagged(seeded_global, tmp_runs, force_scope):
     buf = io.StringIO()
     rc = th.run_trigger("session-end", stream=buf)
     assert rc == 0
@@ -221,9 +215,7 @@ def test_run_trigger_session_end_matches_only_flagged(
     assert payloads[0]["toolbox"] == "session-end-box"
 
 
-def test_run_trigger_session_end_emits_digest(
-    tmp_path, tmp_runs, monkeypatch, force_scope
-):
+def test_run_trigger_session_end_emits_digest(tmp_path, tmp_runs, monkeypatch, force_scope):
     """session-end should append a behaviour-miner digest line."""
     # Empty toolbox set => no council emissions, just the digest.
     empty = tc.ToolboxSet(toolboxes={}, active=())
@@ -236,9 +228,13 @@ def test_run_trigger_session_end_emits_digest(
     from behavior_miner import BehaviorProfile
 
     stub = BehaviorProfile(
-        total_intent_events=0, total_commits=0,
-        co_invocation_pairs=(), skill_cadence=(),
-        file_types=(), commit_types=(), suggestions=(),
+        total_intent_events=0,
+        total_commits=0,
+        co_invocation_pairs=(),
+        skill_cadence=(),
+        file_types=(),
+        commit_types=(),
+        suggestions=(),
         generated_at=0,
     )
     monkeypatch.setattr(th, "build_profile", lambda repo_root=None: stub)
@@ -250,9 +246,7 @@ def test_run_trigger_session_end_emits_digest(
     assert "[toolbox]" in out
 
 
-def test_run_trigger_pre_commit_emits_without_verdict(
-    seeded_global, tmp_runs, force_scope
-):
+def test_run_trigger_pre_commit_emits_without_verdict(seeded_global, tmp_runs, force_scope):
     """No verdict file on disk => no guardrail violation, rc == 0."""
     buf = io.StringIO()
     rc = th.run_trigger("pre-commit", stream=buf)
@@ -264,9 +258,7 @@ def test_run_trigger_pre_commit_emits_without_verdict(
     assert payload["guardrail"] is True
 
 
-def test_run_trigger_pre_commit_blocks_on_high_verdict(
-    seeded_global, tmp_runs, force_scope
-):
+def test_run_trigger_pre_commit_blocks_on_high_verdict(seeded_global, tmp_runs, force_scope):
     """Pre-existing verdict file flagged HIGH => rc == 2."""
     buf = io.StringIO()
     # First run seeds the plan file so we know where the verdict belongs
@@ -285,16 +277,12 @@ def test_run_trigger_pre_commit_blocks_on_high_verdict(
     assert rc == 2
 
 
-def test_run_trigger_pre_commit_ignores_low_verdict(
-    seeded_global, tmp_runs, force_scope
-):
+def test_run_trigger_pre_commit_ignores_low_verdict(seeded_global, tmp_runs, force_scope):
     buf = io.StringIO()
     th.run_trigger("pre-commit", stream=buf)
     payload = json.loads(buf.getvalue().splitlines()[0])
     verdict_file = Path(payload["plan_file"]).with_suffix(".verdict.json")
-    verdict_file.write_text(
-        json.dumps({"level": "LOW"}), encoding="utf-8"
-    )
+    verdict_file.write_text(json.dumps({"level": "LOW"}), encoding="utf-8")
 
     rc = th.run_trigger("pre-commit", stream=io.StringIO())
     assert rc == 0
@@ -313,9 +301,7 @@ def test_run_trigger_pre_commit_corrupt_verdict_does_not_block(
     assert rc == 0
 
 
-def test_run_trigger_file_save_matches_glob(
-    seeded_global, tmp_runs, force_scope
-):
+def test_run_trigger_file_save_matches_glob(seeded_global, tmp_runs, force_scope):
     buf = io.StringIO()
     rc = th.run_trigger("file-save", file_path="src/auth/jwt.py", stream=buf)
     assert rc == 0
@@ -325,9 +311,7 @@ def test_run_trigger_file_save_matches_glob(
     assert payload["toolbox"] == "auth-save-box"
 
 
-def test_run_trigger_file_save_without_path_emits_nothing(
-    seeded_global, tmp_runs, force_scope
-):
+def test_run_trigger_file_save_without_path_emits_nothing(seeded_global, tmp_runs, force_scope):
     buf = io.StringIO()
     rc = th.run_trigger("file-save", file_path=None, stream=buf)
     assert rc == 0
@@ -350,12 +334,14 @@ def test_run_trigger_multiple_matches_emit_multiple_lines(
     tset = tc.ToolboxSet(
         toolboxes={
             "a": tc.Toolbox(
-                name="a", post=("x",),
+                name="a",
+                post=("x",),
                 scope=tc.Scope(analysis="diff"),
                 trigger=tc.Trigger(session_end=True),
             ),
             "b": tc.Toolbox(
-                name="b", post=("y",),
+                name="b",
+                post=("y",),
                 scope=tc.Scope(analysis="diff"),
                 trigger=tc.Trigger(session_end=True),
             ),
@@ -375,19 +361,19 @@ def test_run_trigger_multiple_matches_emit_multiple_lines(
     assert names == {"a", "b"}
 
 
-def test_run_trigger_inactive_toolboxes_are_skipped(
-    tmp_path, tmp_runs, monkeypatch, force_scope
-):
+def test_run_trigger_inactive_toolboxes_are_skipped(tmp_path, tmp_runs, monkeypatch, force_scope):
     """A toolbox in the registry but not in `active` must not fire."""
     tset = tc.ToolboxSet(
         toolboxes={
             "live": tc.Toolbox(
-                name="live", post=("x",),
+                name="live",
+                post=("x",),
                 scope=tc.Scope(analysis="diff"),
                 trigger=tc.Trigger(session_end=True),
             ),
             "benched": tc.Toolbox(
-                name="benched", post=("y",),
+                name="benched",
+                post=("y",),
                 scope=tc.Scope(analysis="diff"),
                 trigger=tc.Trigger(session_end=True),
             ),
@@ -414,9 +400,7 @@ def test_cli_requires_event(capsys):
         th.main([])
 
 
-def test_cli_session_start_runs(
-    seeded_global, tmp_runs, force_scope, capsys
-):
+def test_cli_session_start_runs(seeded_global, tmp_runs, force_scope, capsys):
     rc = th.main(["session-start"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -429,9 +413,7 @@ def test_cli_file_save_requires_path(capsys):
         th.main(["file-save"])
 
 
-def test_cli_file_save_with_path(
-    seeded_global, tmp_runs, force_scope, capsys
-):
+def test_cli_file_save_with_path(seeded_global, tmp_runs, force_scope, capsys):
     rc = th.main(["file-save", "--path", "src/auth/x.py"])
     assert rc == 0
     out = capsys.readouterr().out

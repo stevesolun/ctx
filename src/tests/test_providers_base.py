@@ -106,7 +106,11 @@ class TestCompletionResponse:
 
     def test_raw_default_empty_dict(self) -> None:
         r = CompletionResponse(
-            content="", tool_calls=(), finish_reason="stop",
-            usage=Usage(), provider="x", model="y",
+            content="",
+            tool_calls=(),
+            finish_reason="stop",
+            usage=Usage(),
+            provider="x",
+            model="y",
         )
         assert r.raw == {}

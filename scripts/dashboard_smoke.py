@@ -47,7 +47,9 @@ DEFAULT_CHECKS = (
     CheckSpec("live", "/live", "Live events"),
     CheckSpec("catalog-page", "/catalog?type=skill&q=code", "Catalog"),
     CheckSpec("graph-api-cold", "/api/graph/github.json?type=mcp-server&limit=20", "nodes"),
-    CheckSpec("catalog-search", "/api/entities/search.json?q=code%20review&type=skill&limit=10", "results"),
+    CheckSpec(
+        "catalog-search", "/api/entities/search.json?q=code%20review&type=skill&limit=10", "results"
+    ),
     CheckSpec("entity-detail", "/api/entity/github.json?type=mcp-server", "frontmatter"),
 )
 
@@ -137,7 +139,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--base-url", default="http://127.0.0.1:8765")
     parser.add_argument("--timeout", type=float, default=60.0)
-    parser.add_argument("--warm", action="store_true", help="Repeat key routes after caches are warm.")
+    parser.add_argument(
+        "--warm", action="store_true", help="Repeat key routes after caches are warm."
+    )
     parser.add_argument(
         "--fail-on-slow",
         action="append",

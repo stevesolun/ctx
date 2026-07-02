@@ -48,57 +48,163 @@ CATEGORIES: tuple[str, ...] = (
 _CATEGORY_TAGS: tuple[tuple[str, frozenset[str]], ...] = (
     (
         "language",
-        frozenset({
-            "python", "javascript", "typescript", "rust", "go", "golang",
-            "java", "ruby", "swift", "kotlin", "c", "cpp", "c++", "csharp",
-            "c#", "php", "elixir", "scala", "haskell", "bash", "shell",
-            "sql", "html", "css", "dart",
-        }),
+        frozenset(
+            {
+                "python",
+                "javascript",
+                "typescript",
+                "rust",
+                "go",
+                "golang",
+                "java",
+                "ruby",
+                "swift",
+                "kotlin",
+                "c",
+                "cpp",
+                "c++",
+                "csharp",
+                "c#",
+                "php",
+                "elixir",
+                "scala",
+                "haskell",
+                "bash",
+                "shell",
+                "sql",
+                "html",
+                "css",
+                "dart",
+            }
+        ),
     ),
     (
         "framework",
-        frozenset({
-            "react", "vue", "angular", "svelte", "solid", "nextjs", "nuxt",
-            "remix", "astro", "fastapi", "django", "flask", "express",
-            "nestjs", "rails", "laravel", "spring", "spring-boot", "dotnet",
-            "aspnetcore", "pytorch", "tensorflow", "langchain", "llamaindex",
-            "tailwind",
-        }),
+        frozenset(
+            {
+                "react",
+                "vue",
+                "angular",
+                "svelte",
+                "solid",
+                "nextjs",
+                "nuxt",
+                "remix",
+                "astro",
+                "fastapi",
+                "django",
+                "flask",
+                "express",
+                "nestjs",
+                "rails",
+                "laravel",
+                "spring",
+                "spring-boot",
+                "dotnet",
+                "aspnetcore",
+                "pytorch",
+                "tensorflow",
+                "langchain",
+                "llamaindex",
+                "tailwind",
+            }
+        ),
     ),
     (
         "tool",
-        frozenset({
-            "docker", "kubernetes", "k8s", "terraform", "ansible", "helm",
-            "aws", "gcp", "azure", "git", "github-actions", "gitlab-ci",
-            "jenkins", "ci-cd", "linting", "pytest", "jest", "cypress",
-            "playwright", "webpack", "vite", "rollup", "esbuild",
-            "prometheus", "grafana", "redis", "postgres", "mysql", "kafka",
-            "rabbitmq", "elasticsearch", "mongodb", "sqlite", "dbt",
-            "airflow", "spark",
-        }),
+        frozenset(
+            {
+                "docker",
+                "kubernetes",
+                "k8s",
+                "terraform",
+                "ansible",
+                "helm",
+                "aws",
+                "gcp",
+                "azure",
+                "git",
+                "github-actions",
+                "gitlab-ci",
+                "jenkins",
+                "ci-cd",
+                "linting",
+                "pytest",
+                "jest",
+                "cypress",
+                "playwright",
+                "webpack",
+                "vite",
+                "rollup",
+                "esbuild",
+                "prometheus",
+                "grafana",
+                "redis",
+                "postgres",
+                "mysql",
+                "kafka",
+                "rabbitmq",
+                "elasticsearch",
+                "mongodb",
+                "sqlite",
+                "dbt",
+                "airflow",
+                "spark",
+            }
+        ),
     ),
     (
         "pattern",
-        frozenset({
-            "pattern", "testing", "security", "performance", "typing",
-            "troubleshooting", "comparison", "decision", "architecture",
-            "refactoring", "clean-code", "design-patterns",
-        }),
+        frozenset(
+            {
+                "pattern",
+                "testing",
+                "security",
+                "performance",
+                "typing",
+                "troubleshooting",
+                "comparison",
+                "decision",
+                "architecture",
+                "refactoring",
+                "clean-code",
+                "design-patterns",
+            }
+        ),
     ),
     (
         "workflow",
-        frozenset({
-            "documentation", "api-spec", "agents", "llm", "rag",
-            "fine-tuning", "embeddings", "mcp", "prompt-engineering",
-            "code-review", "release", "incident-response", "onboarding",
-        }),
+        frozenset(
+            {
+                "documentation",
+                "api-spec",
+                "agents",
+                "llm",
+                "rag",
+                "fine-tuning",
+                "embeddings",
+                "mcp",
+                "prompt-engineering",
+                "code-review",
+                "release",
+                "incident-response",
+                "onboarding",
+            }
+        ),
     ),
     (
         "meta",
-        frozenset({
-            "marketplace", "registry", "versioning", "compatibility",
-            "meta", "skill-router", "taxonomy",
-        }),
+        frozenset(
+            {
+                "marketplace",
+                "registry",
+                "versioning",
+                "compatibility",
+                "meta",
+                "skill-router",
+                "taxonomy",
+            }
+        ),
     ),
 )
 
@@ -122,7 +228,8 @@ def infer_category(tags: Iterable[str]) -> str | None:
 
 
 _CATEGORY_LINE_RE = re.compile(
-    r"^(?P<indent>[ \t]*)category:[ \t]*(?P<value>.*)$", re.MULTILINE,
+    r"^(?P<indent>[ \t]*)category:[ \t]*(?P<value>.*)$",
+    re.MULTILINE,
 )
 
 
@@ -162,9 +269,7 @@ def set_category(raw_md: str, category: str) -> tuple[str, bool]:
             return raw_md, False
         # Empty value — fill it in preserving indent.
         new_line = f"{match.group('indent')}category: {category}"
-        new_fm = (
-            fm_body[: match.start()] + new_line + fm_body[match.end():]
-        )
+        new_fm = fm_body[: match.start()] + new_line + fm_body[match.end() :]
         return head + new_fm + "---" + after, True
 
     # Append new line. Trim any trailing blank lines inside fm_body.
@@ -221,8 +326,7 @@ def _iter_skill_files(skills_dir: Path) -> list[Path]:
 def _iter_agent_files(agents_dir: Path) -> list[Path]:
     if not agents_dir.is_dir():
         return []
-    return [p for p in sorted(agents_dir.glob("*.md"))
-            if not p.name.startswith("_")]
+    return [p for p in sorted(agents_dir.glob("*.md")) if not p.name.startswith("_")]
 
 
 def backfill_file(path: Path, *, dry_run: bool) -> str:
@@ -291,6 +395,7 @@ def backfill_corpus(
 
 def cmd_backfill(args: argparse.Namespace) -> int:
     from ctx_config import cfg
+
     summary = backfill_corpus(
         skills_dir=cfg.skills_dir,
         agents_dir=cfg.agents_dir,
@@ -334,8 +439,7 @@ def build_argparser() -> argparse.ArgumentParser:
     b = sub.add_parser("backfill", help="Walk corpus and fill missing category fields")
     b.add_argument("--dry-run", action="store_true")
     b.add_argument("--json", action="store_true")
-    b.add_argument("--verbose", action="store_true",
-                   help="list unresolved files at the end")
+    b.add_argument("--verbose", action="store_true", help="list unresolved files at the end")
     b.set_defaults(func=cmd_backfill)
 
     i = sub.add_parser("infer", help="Infer a category from a comma-separated tag list")

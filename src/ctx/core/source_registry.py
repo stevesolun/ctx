@@ -145,13 +145,7 @@ def _optional_string(value: object) -> str | None:
 
 
 def _normalize_license(value: str) -> str:
-    return (
-        value.lower()
-        .replace("_", "-")
-        .replace(" ", "-")
-        .replace("license", "")
-        .strip("-")
-    )
+    return value.lower().replace("_", "-").replace(" ", "-").replace("license", "").strip("-")
 
 
 def _license_block_reason(record: ExternalSourceRecord) -> str | None:
@@ -214,7 +208,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--json", action="store_true", help="Emit records as JSON.")
     args = parser.parse_args(argv)
 
-    records = load_source_registry(args.registry) if args.registry else list(BUILTIN_EXTERNAL_SOURCES)
+    records = (
+        load_source_registry(args.registry) if args.registry else list(BUILTIN_EXTERNAL_SOURCES)
+    )
     for record in records:
         validate_import_plan(record)
 

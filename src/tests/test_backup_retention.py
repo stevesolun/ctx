@@ -53,10 +53,12 @@ def _force_retention(monkeypatch, *, keep_latest: int, keep_daily: int) -> None:
     else.
     """
     from dataclasses import replace
+
     new_cfg = replace(
         bm._CFG,
         retention=bc.BackupRetention(
-            keep_latest=keep_latest, keep_daily=keep_daily,
+            keep_latest=keep_latest,
+            keep_daily=keep_daily,
         ),
     )
     monkeypatch.setattr(bm, "_CFG", new_cfg)
@@ -73,12 +75,8 @@ def _day_ts(day_offset: int, *, hour: int = 12) -> float:
 
 
 def test_keep_latest_protects_n_newest():
-    snaps = [
-        FakeSnap(f"snap-{i}", _day_ts(i))
-        for i in range(10)
-    ]
-    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=3, keep_daily=0),
-                         now=_day_ts(0))
+    snaps = [FakeSnap(f"snap-{i}", _day_ts(i)) for i in range(10)]
+    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=3, keep_daily=0), now=_day_ts(0))
     assert plan.keep == ("snap-0", "snap-1", "snap-2")
     assert plan.delete == tuple(f"snap-{i}" for i in range(3, 10))
     assert plan.protected_by_latest == ("snap-0", "snap-1", "snap-2")
@@ -87,16 +85,14 @@ def test_keep_latest_protects_n_newest():
 
 def test_keep_latest_zero_prunes_all_when_daily_also_zero():
     snaps = [FakeSnap(f"snap-{i}", _day_ts(i)) for i in range(3)]
-    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=0, keep_daily=0),
-                         now=_day_ts(0))
+    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=0, keep_daily=0), now=_day_ts(0))
     assert plan.keep == ()
     assert set(plan.delete) == {"snap-0", "snap-1", "snap-2"}
 
 
 def test_keep_latest_larger_than_input_keeps_everything():
     snaps = [FakeSnap(f"snap-{i}", _day_ts(i)) for i in range(2)]
-    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=99, keep_daily=0),
-                         now=_day_ts(0))
+    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=99, keep_daily=0), now=_day_ts(0))
     assert set(plan.keep) == {"snap-0", "snap-1"}
     assert plan.delete == ()
 
@@ -108,14 +104,13 @@ def test_keep_daily_keeps_newest_per_day():
     # Three snapshots on day 0 (today), two on day 1, one on day 5.
     snaps = [
         FakeSnap("today-a", _day_ts(0, hour=9)),
-        FakeSnap("today-b", _day_ts(0, hour=15)),   # newest of today
+        FakeSnap("today-b", _day_ts(0, hour=15)),  # newest of today
         FakeSnap("today-c", _day_ts(0, hour=12)),
-        FakeSnap("yest-a",  _day_ts(1, hour=8)),
-        FakeSnap("yest-b",  _day_ts(1, hour=20)),   # newest of yesterday
-        FakeSnap("old",     _day_ts(5, hour=0)),    # outside 3-day window
+        FakeSnap("yest-a", _day_ts(1, hour=8)),
+        FakeSnap("yest-b", _day_ts(1, hour=20)),  # newest of yesterday
+        FakeSnap("old", _day_ts(5, hour=0)),  # outside 3-day window
     ]
-    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=0, keep_daily=3),
-                         now=_day_ts(0))
+    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=0, keep_daily=3), now=_day_ts(0))
     # keep_daily=3 covers today, yesterday, and one more — but day-2, day-3,
     # day-4 have no snapshots. "M most recent days that actually contain
     # snapshots" means we grab today + yesterday + day-5.
@@ -127,12 +122,11 @@ def test_keep_daily_keeps_newest_per_day():
 
 def test_keep_daily_ignores_future_dated_snapshots():
     snaps = [
-        FakeSnap("future", _day_ts(-2)),       # 2 days in the future
-        FakeSnap("today",  _day_ts(0)),
-        FakeSnap("yest",   _day_ts(1)),
+        FakeSnap("future", _day_ts(-2)),  # 2 days in the future
+        FakeSnap("today", _day_ts(0)),
+        FakeSnap("yest", _day_ts(1)),
     ]
-    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=0, keep_daily=2),
-                         now=_day_ts(0))
+    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=0, keep_daily=2), now=_day_ts(0))
     # Future-dated snapshots don't consume the keep_daily budget.
     assert "future" not in plan.protected_by_daily
     assert set(plan.protected_by_daily) == {"today", "yest"}
@@ -142,8 +136,7 @@ def test_keep_daily_ignores_future_dated_snapshots():
 
 def test_keep_daily_zero_keeps_nothing_on_its_own():
     snaps = [FakeSnap("a", _day_ts(0)), FakeSnap("b", _day_ts(1))]
-    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=0, keep_daily=0),
-                         now=_day_ts(0))
+    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=0, keep_daily=0), now=_day_ts(0))
     assert plan.protected_by_daily == ()
     assert plan.keep == ()
 
@@ -154,13 +147,12 @@ def test_keep_daily_zero_keeps_nothing_on_its_own():
 def test_protection_sets_union_not_intersect():
     # Newest-by-time AND newest-by-day both apply; union keeps both.
     snaps = [
-        FakeSnap("today",    _day_ts(0, hour=12)),   # newest of today, newest overall
+        FakeSnap("today", _day_ts(0, hour=12)),  # newest of today, newest overall
         FakeSnap("yest-old", _day_ts(1, hour=0)),
-        FakeSnap("yest-new", _day_ts(1, hour=23)),   # newest of yesterday
-        FakeSnap("older",    _day_ts(5, hour=0)),
+        FakeSnap("yest-new", _day_ts(1, hour=23)),  # newest of yesterday
+        FakeSnap("older", _day_ts(5, hour=0)),
     ]
-    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=1, keep_daily=2),
-                         now=_day_ts(0))
+    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=1, keep_daily=2), now=_day_ts(0))
     # keep_latest=1 -> {today}; keep_daily=2 -> {today, yest-new}
     # union = {today, yest-new}
     assert set(plan.keep) == {"today", "yest-new"}
@@ -174,12 +166,11 @@ def test_snapshots_with_zero_created_at_are_protected():
     # A malformed manifest gives created_at=0. We never delete those —
     # we can't place them in time, so operators get to see them.
     snaps = [
-        FakeSnap("dated",    _day_ts(0)),
-        FakeSnap("undated",  0.0),
+        FakeSnap("dated", _day_ts(0)),
+        FakeSnap("undated", 0.0),
         FakeSnap("negative", -1.0),
     ]
-    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=0, keep_daily=0),
-                         now=_day_ts(0))
+    plan = br.plan_prune(snaps, bc.BackupRetention(keep_latest=0, keep_daily=0), now=_day_ts(0))
     assert "undated" in plan.keep
     assert "negative" in plan.keep
     assert "dated" in plan.delete
@@ -210,20 +201,21 @@ def fake_home(tmp_path, monkeypatch):
     return home
 
 
-def _make_snapshot_at(fake_home: Path, created_at: float,
-                      snapshot_id: str) -> Path:
+def _make_snapshot_at(fake_home: Path, created_at: float, snapshot_id: str) -> Path:
     """Create a minimal fake snapshot folder with manifest.json."""
     backups = fake_home / "backups"
     backups.mkdir(exist_ok=True)
     snap = backups / snapshot_id
     snap.mkdir()
     (snap / "manifest.json").write_text(
-        json.dumps({
-            "snapshot_id": snapshot_id,
-            "created_at": created_at,
-            "claude_home": str(fake_home),
-            "entries": [],
-        }),
+        json.dumps(
+            {
+                "snapshot_id": snapshot_id,
+                "created_at": created_at,
+                "claude_home": str(fake_home),
+                "entries": [],
+            }
+        ),
         encoding="utf-8",
     )
     return snap

@@ -101,10 +101,7 @@ def graph_explanations(payload: dict[str, Any], *, source: str) -> dict[str, str
     resolved = payload.get("resolved")
     if isinstance(resolved, dict) and resolved.get("query") and resolved.get("slug"):
         if str(resolved.get("query")) != str(resolved.get("slug")):
-            focus = (
-                f"Focus search resolved {resolved['query']!r} to "
-                f"{resolved['slug']!r}."
-            )
+            focus = f"Focus search resolved {resolved['query']!r} to {resolved['slug']!r}."
         else:
             focus = f"Focus search matched {resolved['slug']!r}."
     else:

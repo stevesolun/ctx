@@ -39,21 +39,26 @@ def _mkfile(path: Path, content: str = "") -> Path:
 
 
 def _init_git(repo: Path, commits: int = 0) -> None:
-    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    env = {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
     subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True, env=env)
     subprocess.run(
         ["git", "-C", str(repo), "config", "core.hooksPath", "/dev/null"],
-        check=True, env=env,
+        check=True,
+        env=env,
     )
     for i in range(commits):
         f = repo / f"f{i}.txt"
         f.write_text(str(i), encoding="utf-8")
         subprocess.run(["git", "-C", str(repo), "add", f.name], check=True, env=env)
         subprocess.run(
-            ["git", "-C", str(repo), "commit", "-q", "--no-verify",
-             "-m", f"chore: c{i}"],
-            check=True, env=env,
+            ["git", "-C", str(repo), "commit", "-q", "--no-verify", "-m", f"chore: c{i}"],
+            check=True,
+            env=env,
         )
 
 
@@ -96,12 +101,17 @@ def python_repo(tmp_path: Path) -> Path:
     _mkfile(d / "Dockerfile", "FROM python:3.12\n")
     _init_git(d, commits=2)
     # Also track the pre-existing files
-    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    env = {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
     subprocess.run(["git", "-C", str(d), "add", "-A"], check=True, env=env)
     subprocess.run(
-        ["git", "-C", str(d), "commit", "-q", "--no-verify",
-         "-m", "feat: seed"], check=True, env=env,
+        ["git", "-C", str(d), "commit", "-q", "--no-verify", "-m", "feat: seed"],
+        check=True,
+        env=env,
     )
     return d
 
@@ -175,9 +185,9 @@ def test_detect_state_python_repo_is_populated(python_repo: Path):
     assert state.is_blank is False
 
 
-def test_detect_state_respects_existing_toolbox_config(python_repo: Path,
-                                                       tmp_path: Path,
-                                                       monkeypatch):
+def test_detect_state_respects_existing_toolbox_config(
+    python_repo: Path, tmp_path: Path, monkeypatch
+):
     cfg = tmp_path / "global.json"
     tset = tc.ToolboxSet(
         toolboxes={"x": tc.Toolbox(name="x")},
@@ -211,7 +221,8 @@ def test_build_questions_always_includes_starters(blank_repo: Path):
 
 
 def test_build_questions_includes_suggestions_when_profile_has_any(
-    blank_repo: Path, profile_with_suggestions: bm.BehaviorProfile,
+    blank_repo: Path,
+    profile_with_suggestions: bm.BehaviorProfile,
 ):
     state = ii.detect_state(blank_repo)
     qs = ii.build_questions(state, profile=profile_with_suggestions)
@@ -236,7 +247,8 @@ def test_starter_choices_marks_active_toolboxes():
 def test_compose_result_filters_unknown_starters(blank_repo: Path):
     state = ii.detect_state(blank_repo)
     result = ii.compose_result(
-        state, profile=None,
+        state,
+        profile=None,
         answers={"starters": "ship-it,bogus,security-sweep"},
     )
     assert result.activated == ("ship-it", "security-sweep")
@@ -252,11 +264,13 @@ def test_compose_result_skipped_short_circuits(blank_repo: Path):
 
 
 def test_compose_result_resolves_suggestion_indices(
-    blank_repo: Path, profile_with_suggestions: bm.BehaviorProfile,
+    blank_repo: Path,
+    profile_with_suggestions: bm.BehaviorProfile,
 ):
     state = ii.detect_state(blank_repo)
     result = ii.compose_result(
-        state, profile_with_suggestions,
+        state,
+        profile_with_suggestions,
         answers={"starters": "", "suggestions": "1,99", "analysis": "dynamic"},
     )
     # 1 valid index, 99 is out of range -> dropped silently
@@ -265,11 +279,13 @@ def test_compose_result_resolves_suggestion_indices(
 
 
 def test_compose_result_applies_analysis_override(
-    blank_repo: Path, profile_with_suggestions: bm.BehaviorProfile,
+    blank_repo: Path,
+    profile_with_suggestions: bm.BehaviorProfile,
 ):
     state = ii.detect_state(blank_repo)
     result = ii.compose_result(
-        state, profile_with_suggestions,
+        state,
+        profile_with_suggestions,
         answers={"starters": "", "suggestions": "2", "analysis": "full"},
     )
     assert result.accepted_suggestions[0]["scope"]["analysis"] == "full"
@@ -320,7 +336,8 @@ def test_run_interactive_handles_eof(blank_repo: Path):
 def test_run_noninteractive_passes_answers_through(blank_repo: Path):
     state = ii.detect_state(blank_repo)
     result = ii.run_noninteractive(
-        state, None,
+        state,
+        None,
         {"starters": "docs-review", "analysis": "diff"},
     )
     assert result.activated == ("docs-review",)
@@ -347,7 +364,10 @@ def test_preset_answers_unknown_raises():
 def test_apply_result_skipped_returns_base_unchanged():
     base = tc.ToolboxSet.empty()
     result = ii.InterviewResult(
-        activated=(), accepted_suggestions=(), skipped=True, notes=(),
+        activated=(),
+        accepted_suggestions=(),
+        skipped=True,
+        notes=(),
     )
     out = ii.apply_result(result, base)
     assert out is base
@@ -372,8 +392,7 @@ def test_apply_result_registers_new_suggestions():
     result = ii.InterviewResult(
         activated=(),
         accepted_suggestions=(
-            {"name": "a-b-bundle", "description": "x",
-             "scope": {"analysis": "dynamic"}},
+            {"name": "a-b-bundle", "description": "x", "scope": {"analysis": "dynamic"}},
         ),
         skipped=False,
     )
@@ -427,9 +446,7 @@ def test_cli_init_skip_emits_empty_result(blank_repo: Path, capsys):
 
 
 def test_cli_init_preset_writes_nothing_without_apply(blank_repo: Path, capsys):
-    code = ii.main(
-        ["init", "--repo", str(blank_repo), "--preset", "blank"]
-    )
+    code = ii.main(["init", "--repo", str(blank_repo), "--preset", "blank"])
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["applied"] is False
@@ -437,13 +454,23 @@ def test_cli_init_preset_writes_nothing_without_apply(blank_repo: Path, capsys):
 
 
 def test_cli_init_apply_persists_to_global_config(
-    blank_repo: Path, capsys, isolate_global_config: Path,
+    blank_repo: Path,
+    capsys,
+    isolate_global_config: Path,
 ):
-    code = ii.main([
-        "init", "--repo", str(blank_repo),
-        "--non-interactive", "--starters", "ship-it",
-        "--analysis", "dynamic", "--apply",
-    ])
+    code = ii.main(
+        [
+            "init",
+            "--repo",
+            str(blank_repo),
+            "--non-interactive",
+            "--starters",
+            "ship-it",
+            "--analysis",
+            "dynamic",
+            "--apply",
+        ]
+    )
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["applied"] is True

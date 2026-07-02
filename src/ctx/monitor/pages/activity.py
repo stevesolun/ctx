@@ -43,9 +43,7 @@ def render_sessions_index(
         "<tr><th>Session</th><th>First seen</th><th>Last seen</th>"
         "<th>Skills↑</th><th>Skills↓</th>"
         "<th>Agents↑</th><th>Agents↓</th>"
-        "<th>MCPs↑</th><th>MCPs↓</th><th>Lifecycle</th></tr>"
-        + "".join(rows)
-        + "</table>"
+        "<th>MCPs↑</th><th>MCPs↓</th><th>Lifecycle</th></tr>" + "".join(rows) + "</table>"
     )
     return layout("Sessions", body)
 
@@ -84,9 +82,7 @@ def render_session_detail(
         + audit_rows
         + "</table>"
         "<h2>Load/unload events</h2>"
-        "<table><tr><th>ts</th><th>event</th><th>subject</th></tr>"
-        + event_rows
-        + "</table>"
+        "<table><tr><th>ts</th><th>event</th><th>subject</th></tr>" + event_rows + "</table>"
     )
     return layout(f"Session {session_id}", body)
 
@@ -99,10 +95,7 @@ def render_events(
 ) -> str:
     """Render the SSE live-events page."""
     entries = read_jsonl(audit_log_path(), 200)
-    event_lines = [
-        json.dumps(entry, ensure_ascii=False, default=str)
-        for entry in entries
-    ]
+    event_lines = [json.dumps(entry, ensure_ascii=False, default=str) for entry in entries]
     initial_stream = "\n".join(event_lines)
     if not initial_stream:
         initial_stream = "-- no audit events recorded yet; waiting for new events --"
@@ -181,21 +174,17 @@ def render_runtime_lifecycle(
         "<div class='card'><strong>Recent validations</strong>"
         + (
             "<table><tr><th>Created</th><th>Check</th><th>Status</th>"
-            "<th>Session</th><th>Summary</th></tr>"
-            + validation_rows
-            + "</table>"
-            if validation_rows else
-            "<p class='muted'>No validation checks recorded yet.</p>"
+            "<th>Session</th><th>Summary</th></tr>" + validation_rows + "</table>"
+            if validation_rows
+            else "<p class='muted'>No validation checks recorded yet.</p>"
         )
         + "</div>"
         "<div class='card'><strong>Open escalations</strong>"
         + (
             "<table><tr><th>Created</th><th>Trigger</th><th>Severity</th>"
-            "<th>Session</th><th>Reason</th></tr>"
-            + escalation_rows
-            + "</table>"
-            if escalation_rows else
-            "<p class='muted'>No open escalations.</p>"
+            "<th>Session</th><th>Reason</th></tr>" + escalation_rows + "</table>"
+            if escalation_rows
+            else "<p class='muted'>No open escalations.</p>"
         )
         + "</div>"
     )

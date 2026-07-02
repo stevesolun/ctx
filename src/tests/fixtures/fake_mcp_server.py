@@ -148,32 +148,38 @@ def main() -> None:
             if os.environ.get("FAKE_MCP_IGNORE_INIT") == "1":
                 continue
             if os.environ.get("FAKE_MCP_FAIL_INIT") == "1":
-                _emit({
+                _emit(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {"code": -32603, "message": "init-forbidden"},
+                    }
+                )
+                continue
+            _emit(
+                {
                     "jsonrpc": "2.0",
                     "id": req_id,
-                    "error": {"code": -32603, "message": "init-forbidden"},
-                })
-                continue
-            _emit({
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "protocolVersion": _PROTOCOL_VERSION,
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "fake-mcp", "version": "0.1"},
-                },
-            })
+                    "result": {
+                        "protocolVersion": _PROTOCOL_VERSION,
+                        "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "fake-mcp", "version": "0.1"},
+                    },
+                }
+            )
             continue
 
         if method == "notifications/initialized":
             continue
 
         if method == "tools/list":
-            _emit({
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {"tools": _tool_defs()},
-            })
+            _emit(
+                {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {"tools": _tool_defs()},
+                }
+            )
             continue
 
         if method == "tools/call":
@@ -186,70 +192,80 @@ def main() -> None:
             args = params.get("arguments") or {}
 
             if os.environ.get("FAKE_MCP_EMIT_NOTIFICATION") == "1":
-                _emit({
-                    "jsonrpc": "2.0",
-                    "method": "notifications/progress",
-                    "params": {"progress": 0.5},
-                })
+                _emit(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "notifications/progress",
+                        "params": {"progress": 0.5},
+                    }
+                )
             if os.environ.get("FAKE_MCP_EMIT_STALE_RESPONSE") == "1":
-                _emit({
-                    "jsonrpc": "2.0",
-                    "id": "stale-response-id",
-                    "result": {
-                        "content": [
-                            {"type": "text", "text": "stale response"}
-                        ],
-                        "isError": False,
-                    },
-                })
+                _emit(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "stale-response-id",
+                        "result": {
+                            "content": [{"type": "text", "text": "stale response"}],
+                            "isError": False,
+                        },
+                    }
+                )
             if os.environ.get("FAKE_MCP_ONLY_STALE_RESPONSE") == "1":
-                _emit({
-                    "jsonrpc": "2.0",
-                    "id": "stale-response-id",
-                    "result": {
-                        "content": [
-                            {"type": "text", "text": "stale response"}
-                        ],
-                        "isError": False,
-                    },
-                })
+                _emit(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "stale-response-id",
+                        "result": {
+                            "content": [{"type": "text", "text": "stale response"}],
+                            "isError": False,
+                        },
+                    }
+                )
                 continue
 
             if os.environ.get("FAKE_MCP_TOOL_ERROR") == "1":
-                _emit({
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": {
-                        "content": [{"type": "text", "text": "forced error"}],
-                        "isError": True,
-                    },
-                })
+                _emit(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "result": {
+                            "content": [{"type": "text", "text": "forced error"}],
+                            "isError": True,
+                        },
+                    }
+                )
                 continue
 
             handler = TOOLS.get(name)
             if handler is None:
-                _emit({
+                _emit(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {
+                            "code": -32601,
+                            "message": f"unknown tool {name!r}",
+                        },
+                    }
+                )
+                continue
+            _emit(
+                {
                     "jsonrpc": "2.0",
                     "id": req_id,
-                    "error": {
-                        "code": -32601,
-                        "message": f"unknown tool {name!r}",
-                    },
-                })
-                continue
-            _emit({
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": handler(args),
-            })
+                    "result": handler(args),
+                }
+            )
             continue
 
         # Unknown method.
-        _emit({
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "error": {"code": -32601, "message": f"method not found: {method}"},
-        })
+        _emit(
+            {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32601, "message": f"method not found: {method}"},
+            }
+        )
 
 
 if __name__ == "__main__":

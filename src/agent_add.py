@@ -144,10 +144,7 @@ def add_agent(
     line_count = len(content.splitlines())
 
     installed_path = agents_dir / f"{name}.md"
-    has_existing = (
-        installed_path.exists()
-        or _read_entity_page_text(wiki_path, name) is not None
-    )
+    has_existing = installed_path.exists() or _read_entity_page_text(wiki_path, name) is not None
 
     if review_existing and has_existing and not update_existing:
         review = build_update_review(
@@ -208,9 +205,7 @@ def add_agent(
     ]
     warnings = decision.warnings if decision is not None else ()
     if warnings:
-        log_details.append(
-            "Warnings: " + "; ".join(f"{w.code}:{w.message}" for w in warnings)
-        )
+        log_details.append("Warnings: " + "; ".join(f"{w.code}:{w.message}" for w in warnings))
     append_log(str(wiki_path), "add-agent", name, log_details)
     queue_job = enqueue_entity_upsert(
         wiki_path,
@@ -233,6 +228,7 @@ def add_agent(
 
 
 # ── CLI ───────────────────────────────────────────────────────────────
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Add new agents with wiki ingestion")

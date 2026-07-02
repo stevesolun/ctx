@@ -266,7 +266,9 @@ class ContractBuilder:
     # ── internals ────────────────────────────────────────────────────────
 
     def _format_user_turn(
-        self, task: str, plan: PlanArtifact | None,
+        self,
+        task: str,
+        plan: PlanArtifact | None,
     ) -> str:
         body = f"TASK:\n{task.strip()}"
         if plan is not None:
@@ -279,7 +281,9 @@ class ContractBuilder:
         return body
 
     def _parse_response(
-        self, task: str, response: CompletionResponse,
+        self,
+        task: str,
+        response: CompletionResponse,
     ) -> Contract:
         raw = response.content or ""
         extracted = _extract_json(raw)

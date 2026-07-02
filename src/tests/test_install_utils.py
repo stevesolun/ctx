@@ -238,9 +238,7 @@ class TestRecordInstall:
         install_utils.record_uninstall("foo", entity_type="agent", source="a")
         install_utils.record_install("foo", entity_type="skill", source="s")
         m = install_utils.load_manifest()
-        assert any(
-            e["skill"] == "foo" and e["entity_type"] == "agent" for e in m["unload"]
-        )
+        assert any(e["skill"] == "foo" and e["entity_type"] == "agent" for e in m["unload"])
 
     def test_legacy_entry_without_entity_type_treated_as_skill(
         self, isolated_manifest: Path
@@ -285,9 +283,7 @@ class TestRecordUninstall:
     def test_appends_unload_entry(self, isolated_manifest: Path) -> None:
         install_utils.record_uninstall("foo", entity_type="skill", source="s")
         m = install_utils.load_manifest()
-        assert m["unload"] == [
-            {"skill": "foo", "entity_type": "skill", "source": "s"}
-        ]
+        assert m["unload"] == [{"skill": "foo", "entity_type": "skill", "source": "s"}]
 
     def test_duplicate_uninstall_dedups(self, isolated_manifest: Path) -> None:
         install_utils.record_uninstall("foo", entity_type="skill", source="s")
@@ -302,9 +298,7 @@ class TestRecordUninstall:
         assert len(m["load"]) == 1
         assert m["load"][0]["entity_type"] == "agent"
 
-    def test_uninstall_nonexistent_still_records_unload(
-        self, isolated_manifest: Path
-    ) -> None:
+    def test_uninstall_nonexistent_still_records_unload(self, isolated_manifest: Path) -> None:
         """Uninstalling something never installed still records the unload intent."""
         install_utils.record_uninstall("ghost", entity_type="skill", source="s")
         m = install_utils.load_manifest()
@@ -314,14 +308,15 @@ class TestRecordUninstall:
         self, isolated_manifest: Path, tmp_path: Path
     ) -> None:
         slugs = [f"parallel-{i}" for i in range(8)]
-        install_utils.save_manifest({
-            "load": [
-                {"skill": slug, "entity_type": "skill", "source": "seed"}
-                for slug in slugs
-            ],
-            "unload": [],
-            "warnings": [],
-        })
+        install_utils.save_manifest(
+            {
+                "load": [
+                    {"skill": slug, "entity_type": "skill", "source": "seed"} for slug in slugs
+                ],
+                "unload": [],
+                "warnings": [],
+            }
+        )
 
         _run_manifest_workers(
             isolated_manifest,
@@ -434,9 +429,7 @@ class TestBumpEntityStatus:
         path.write_text(text, encoding="utf-8")
 
     def test_nonexistent_file_returns_false(self, tmp_path: Path) -> None:
-        assert install_utils.bump_entity_status(
-            tmp_path / "nope.md", status="ready"
-        ) is False
+        assert install_utils.bump_entity_status(tmp_path / "nope.md", status="ready") is False
 
     def test_updates_existing_status_field(self, tmp_path: Path) -> None:
         f = tmp_path / "e.md"
@@ -471,9 +464,7 @@ class TestBumpEntityStatus:
     def test_extra_none_renders_yaml_null(self, tmp_path: Path) -> None:
         f = tmp_path / "e.md"
         self._write(f, "---\nstatus: stub\ninstall_cmd: x\n---\nbody\n")
-        install_utils.bump_entity_status(
-            f, status="ready", extra_fields={"install_cmd": None}
-        )
+        install_utils.bump_entity_status(f, status="ready", extra_fields={"install_cmd": None})
         text = f.read_text(encoding="utf-8")
         assert "install_cmd: null" in text
 
@@ -485,9 +476,7 @@ class TestBumpEntityStatus:
     def test_value_with_special_chars_quoted(self, tmp_path: Path) -> None:
         f = tmp_path / "e.md"
         self._write(f, "---\nstatus: stub\n---\nbody\n")
-        install_utils.bump_entity_status(
-            f, status="ready", extra_fields={"note": "key: value"}
-        )
+        install_utils.bump_entity_status(f, status="ready", extra_fields={"note": "key: value"})
         text = f.read_text(encoding="utf-8")
         assert 'note: "key: value"' in text
 
@@ -496,9 +485,7 @@ class TestBumpEntityStatus:
 
 
 class TestEmitLoadEvent:
-    def test_success_path_invokes_telemetry(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_success_path_invokes_telemetry(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls: list[tuple[str, str, str]] = []
 
         import skill_telemetry
@@ -510,9 +497,7 @@ class TestEmitLoadEvent:
         install_utils.emit_load_event("foo", "session-abc")
         assert calls == [("load", "foo", "session-abc")]
 
-    def test_telemetry_exception_swallowed(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_telemetry_exception_swallowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import skill_telemetry
 
         def boom(*_a: object, **_kw: object) -> None:
@@ -522,9 +507,7 @@ class TestEmitLoadEvent:
         # Must not raise.
         install_utils.emit_load_event("foo", "session-abc")
 
-    def test_import_failure_swallowed(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_import_failure_swallowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Even if skill_telemetry is unimportable, the install path must not crash."""
         import sys as _sys
 

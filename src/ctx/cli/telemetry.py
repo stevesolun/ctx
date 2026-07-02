@@ -58,10 +58,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--otlp-allowed-host",
         action="append",
         default=[],
-        help=(
-            "Allow one remote OTLP endpoint host for this run; repeat for "
-            "multiple hosts."
-        ),
+        help=("Allow one remote OTLP endpoint host for this run; repeat for multiple hosts."),
     )
     parser.add_argument(
         "--checkpoint",
@@ -250,10 +247,7 @@ def _export_summary(result: Any, *, signal: str, dry_run: bool) -> dict[str, Any
 def _print_export_human(payload: Mapping[str, Any], *, dry_run: bool) -> None:
     noun = "metric(s)" if payload["signal"] == "metrics" else "event(s)"
     if dry_run:
-        print(
-            f"Would export {payload['attempted']} telemetry {noun} "
-            f"to {payload['sink']}."
-        )
+        print(f"Would export {payload['attempted']} telemetry {noun} to {payload['sink']}.")
     else:
         print(
             "Exported "
@@ -265,9 +259,7 @@ def _print_export_human(payload: Mapping[str, Any], *, dry_run: bool) -> None:
     print(f"Export status: {payload['status']}")
     if payload["malformed_pending_records"]:
         print(
-            "Skipped "
-            f"{payload['malformed_pending_records']} pending malformed telemetry "
-            "record(s)."
+            f"Skipped {payload['malformed_pending_records']} pending malformed telemetry record(s)."
         )
     if payload.get("status_path"):
         print(f"Export status path: {payload['status_path']}")

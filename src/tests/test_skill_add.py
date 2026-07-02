@@ -35,8 +35,17 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 
 _FAKE_CFG = MagicMock()
 _FAKE_CFG.all_tags = [
-    "python", "javascript", "typescript", "react", "docker",
-    "fastapi", "django", "langchain", "testing", "api", "llm",
+    "python",
+    "javascript",
+    "typescript",
+    "react",
+    "docker",
+    "fastapi",
+    "django",
+    "langchain",
+    "testing",
+    "api",
+    "llm",
     "uncategorized",
 ]
 _FAKE_CFG.line_threshold = 180
@@ -100,10 +109,19 @@ from ctx.core.wiki.wiki_packs import load_merged_wiki_pages, write_wiki_base_pac
 # ctx.core.wiki.wiki_sync afresh gets the real module back. This
 # closes the cross-file pollution that broke test_link_conversions
 # and test_wiki_* whenever test_skill_add collected earlier.
-for _name in ("wiki_sync", "ctx.core.wiki.wiki_sync",
-              "batch_convert", "intake_pipeline", "ctx_config"):
-    if sys.modules.get(_name) in (_fake_wiki_sync, _fake_batch_convert,
-                                   _fake_intake, _fake_ctx_config):
+for _name in (
+    "wiki_sync",
+    "ctx.core.wiki.wiki_sync",
+    "batch_convert",
+    "intake_pipeline",
+    "ctx_config",
+):
+    if sys.modules.get(_name) in (
+        _fake_wiki_sync,
+        _fake_batch_convert,
+        _fake_intake,
+        _fake_ctx_config,
+    ):
         # Restore whatever was there before (None means "not loaded").
         original = _SAVED_MODULES.get(_name)
         if original is None:
@@ -114,6 +132,7 @@ for _name in ("wiki_sync", "ctx.core.wiki.wiki_sync",
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _symlink_to(target: Path, link: Path, *, target_is_directory: bool) -> None:
     try:
@@ -133,6 +152,7 @@ def _make_entity_page(wiki: Path, name: str, tags: list[str]) -> None:
 # ---------------------------------------------------------------------------
 # infer_tags
 # ---------------------------------------------------------------------------
+
 
 class TestInferTags:
     def test_tag_in_name(self):
@@ -161,6 +181,7 @@ class TestInferTags:
 # ---------------------------------------------------------------------------
 # install_skill
 # ---------------------------------------------------------------------------
+
 
 class TestInstallSkill:
     def test_copies_skill_md(self, tmp_path):
@@ -198,9 +219,11 @@ class TestInstallSkill:
         with pytest.raises(ValueError, match="symlinked source"):
             install_skill(link_source, tmp_path / "skills", "linked-source")
 
+
 # ---------------------------------------------------------------------------
 # maybe_convert
 # ---------------------------------------------------------------------------
+
 
 class TestMaybeConvert:
     def test_below_threshold_returns_false_none(self, tmp_path):
@@ -236,13 +259,16 @@ class TestMaybeConvert:
         installed.write_text("# skill\n")
         converted_root = tmp_path / "converted"
         # line_count == threshold → not converted (condition is > threshold)
-        was_converted, _ = maybe_convert(installed, "my-skill", converted_root, _FAKE_CFG.line_threshold)
+        was_converted, _ = maybe_convert(
+            installed, "my-skill", converted_root, _FAKE_CFG.line_threshold
+        )
         assert was_converted is False
 
 
 # ---------------------------------------------------------------------------
 # build_entity_page
 # ---------------------------------------------------------------------------
+
 
 class TestBuildEntityPage:
     def _call(self, **kwargs: Any) -> str:
@@ -302,6 +328,7 @@ class TestBuildEntityPage:
 # write_entity_page
 # ---------------------------------------------------------------------------
 
+
 class TestWriteEntityPage:
     def test_writes_new_page_returns_true(self, tmp_path):
         wiki = tmp_path / "wiki"
@@ -323,6 +350,7 @@ class TestWriteEntityPage:
 # ---------------------------------------------------------------------------
 # find_related_skills
 # ---------------------------------------------------------------------------
+
 
 class TestFindRelatedSkills:
     def test_finds_skill_with_shared_tag(self, tmp_path):
@@ -383,6 +411,7 @@ class TestFindRelatedSkills:
 # _add_backlink
 # ---------------------------------------------------------------------------
 
+
 class TestAddBacklink:
     def test_adds_link_under_related_section(self, tmp_path):
         wiki = tmp_path / "wiki"
@@ -417,6 +446,7 @@ class TestAddBacklink:
 # wire_backlinks
 # ---------------------------------------------------------------------------
 
+
 class TestWireBacklinks:
     def test_adds_backlinks_for_all_related(self, tmp_path):
         wiki = tmp_path / "wiki"
@@ -436,6 +466,7 @@ class TestWireBacklinks:
 # ---------------------------------------------------------------------------
 # detect_scan_sources
 # ---------------------------------------------------------------------------
+
 
 class TestDetectScanSources:
     def test_finds_scan_file_referencing_skill(self, tmp_path):
@@ -465,63 +496,100 @@ class TestDetectScanSources:
 # main()
 # ---------------------------------------------------------------------------
 
+
 class TestMain:
     def test_no_args_exits_1(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(sys, "argv", [
-            "skill_add.py",
-            "--wiki", str(tmp_path / "wiki"),
-            "--skills-dir", str(tmp_path / "skills"),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "skill_add.py",
+                "--wiki",
+                str(tmp_path / "wiki"),
+                "--skills-dir",
+                str(tmp_path / "skills"),
+            ],
+        )
         _fake_wiki_sync.ensure_wiki.return_value = None
         with pytest.raises(SystemExit) as exc:
             _sa.main()
         assert exc.value.code == 1
 
     def test_both_flags_exits_1(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(sys, "argv", [
-            "skill_add.py",
-            "--skill-path", str(tmp_path / "SKILL.md"),
-            "--scan-dir", str(tmp_path),
-            "--wiki", str(tmp_path / "wiki"),
-            "--skills-dir", str(tmp_path / "skills"),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "skill_add.py",
+                "--skill-path",
+                str(tmp_path / "SKILL.md"),
+                "--scan-dir",
+                str(tmp_path),
+                "--wiki",
+                str(tmp_path / "wiki"),
+                "--skills-dir",
+                str(tmp_path / "skills"),
+            ],
+        )
         _fake_wiki_sync.ensure_wiki.return_value = None
         with pytest.raises(SystemExit) as exc:
             _sa.main()
         assert exc.value.code == 1
 
     def test_skill_path_without_name_exits_1(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(sys, "argv", [
-            "skill_add.py",
-            "--skill-path", str(tmp_path / "SKILL.md"),
-            "--wiki", str(tmp_path / "wiki"),
-            "--skills-dir", str(tmp_path / "skills"),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "skill_add.py",
+                "--skill-path",
+                str(tmp_path / "SKILL.md"),
+                "--wiki",
+                str(tmp_path / "wiki"),
+                "--skills-dir",
+                str(tmp_path / "skills"),
+            ],
+        )
         _fake_wiki_sync.ensure_wiki.return_value = None
         with pytest.raises(SystemExit) as exc:
             _sa.main()
         assert exc.value.code == 1
 
     def test_skill_path_not_found_exits_1(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(sys, "argv", [
-            "skill_add.py",
-            "--skill-path", str(tmp_path / "nonexistent.md"),
-            "--name", "my-skill",
-            "--wiki", str(tmp_path / "wiki"),
-            "--skills-dir", str(tmp_path / "skills"),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "skill_add.py",
+                "--skill-path",
+                str(tmp_path / "nonexistent.md"),
+                "--name",
+                "my-skill",
+                "--wiki",
+                str(tmp_path / "wiki"),
+                "--skills-dir",
+                str(tmp_path / "skills"),
+            ],
+        )
         _fake_wiki_sync.ensure_wiki.return_value = None
         with pytest.raises(SystemExit) as exc:
             _sa.main()
         assert exc.value.code == 1
 
     def test_scan_dir_not_found_exits_1(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(sys, "argv", [
-            "skill_add.py",
-            "--scan-dir", str(tmp_path / "no-such-dir"),
-            "--wiki", str(tmp_path / "wiki"),
-            "--skills-dir", str(tmp_path / "skills"),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "skill_add.py",
+                "--scan-dir",
+                str(tmp_path / "no-such-dir"),
+                "--wiki",
+                str(tmp_path / "wiki"),
+                "--skills-dir",
+                str(tmp_path / "skills"),
+            ],
+        )
         _fake_wiki_sync.ensure_wiki.return_value = None
         with pytest.raises(SystemExit) as exc:
             _sa.main()
@@ -530,12 +598,19 @@ class TestMain:
     def test_scan_dir_with_no_skills_exits_0(self, tmp_path, monkeypatch, capsys):
         scan_dir = tmp_path / "scan"
         scan_dir.mkdir()
-        monkeypatch.setattr(sys, "argv", [
-            "skill_add.py",
-            "--scan-dir", str(scan_dir),
-            "--wiki", str(tmp_path / "wiki"),
-            "--skills-dir", str(tmp_path / "skills"),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "skill_add.py",
+                "--scan-dir",
+                str(scan_dir),
+                "--wiki",
+                str(tmp_path / "wiki"),
+                "--skills-dir",
+                str(tmp_path / "skills"),
+            ],
+        )
         _fake_wiki_sync.ensure_wiki.return_value = None
         with pytest.raises(SystemExit) as exc:
             _sa.main()
@@ -545,6 +620,7 @@ class TestMain:
 # ---------------------------------------------------------------------------
 # add_skill()
 # ---------------------------------------------------------------------------
+
 
 class TestAddSkill:
     """Tests for the core add_skill orchestration function.
@@ -654,9 +730,7 @@ class TestAddSkill:
         assert result["name"] == "myskill"
         assert result["is_new_page"] is True
 
-    def test_required_security_scan_blocks_before_install(
-        self, tmp_path, monkeypatch
-    ):
+    def test_required_security_scan_blocks_before_install(self, tmp_path, monkeypatch):
         wiki = self._setup_wiki(tmp_path)
         skills_dir = tmp_path / "skills"
         source = tmp_path / "candidate" / "SKILL.md"
@@ -687,9 +761,7 @@ class TestAddSkill:
         assert not (skills_dir / "myskill").exists()
         _fake_intake.check_intake.assert_not_called()
 
-    def test_security_scan_metadata_is_written_to_entity_page(
-        self, tmp_path, monkeypatch
-    ):
+    def test_security_scan_metadata_is_written_to_entity_page(self, tmp_path, monkeypatch):
         wiki = self._setup_wiki(tmp_path)
         skills_dir = tmp_path / "skills"
         source = tmp_path / "candidate" / "SKILL.md"
@@ -719,9 +791,7 @@ class TestAddSkill:
             security_scan_required=True,
         )
 
-        entity = (wiki / "entities" / "skills" / "myskill.md").read_text(
-            encoding="utf-8"
-        )
+        entity = (wiki / "entities" / "skills" / "myskill.md").read_text(encoding="utf-8")
         assert result["security_scan"]["status"] == "passed"
         assert "skillspector_checked: true" in entity
         assert "skillspector_status: passed" in entity
@@ -869,9 +939,7 @@ class TestAddSkill:
         )
         assert result["converted"] is True
 
-    def test_existing_skill_review_skips_without_mutating_files(
-        self, tmp_path, monkeypatch
-    ):
+    def test_existing_skill_review_skips_without_mutating_files(self, tmp_path, monkeypatch):
         wiki = self._setup_wiki(tmp_path)
         skills_dir = tmp_path / "skills"
         installed = skills_dir / "myskill" / "SKILL.md"
@@ -927,9 +995,7 @@ class TestAddSkill:
         _fake_intake.check_intake.assert_not_called()
 
     @pytest.mark.parametrize("existing_kind", ["installed", "entity"])
-    def test_existing_skill_review_rejects_symlinked_existing_paths(
-        self, tmp_path, existing_kind
-    ):
+    def test_existing_skill_review_rejects_symlinked_existing_paths(self, tmp_path, existing_kind):
         wiki = self._setup_wiki(tmp_path)
         skills_dir = tmp_path / "skills"
         outside = tmp_path / "outside.md"
@@ -954,9 +1020,7 @@ class TestAddSkill:
                 review_existing=True,
             )
 
-    def test_existing_skill_update_existing_applies_change(
-        self, tmp_path, monkeypatch
-    ):
+    def test_existing_skill_update_existing_applies_change(self, tmp_path, monkeypatch):
         wiki = self._setup_wiki(tmp_path)
         skills_dir = tmp_path / "skills"
         installed = skills_dir / "myskill" / "SKILL.md"
@@ -991,9 +1055,7 @@ class TestAddSkill:
         assert installed.read_text(encoding="utf-8") == updated_text
         assert entity.read_text(encoding="utf-8").startswith("---\n")
 
-    def test_short_skill_add_writes_converted_install_mirror(
-        self, tmp_path, monkeypatch
-    ):
+    def test_short_skill_add_writes_converted_install_mirror(self, tmp_path, monkeypatch):
         wiki = self._setup_wiki(tmp_path)
         skills_dir = tmp_path / "skills"
         source = tmp_path / "SKILL.md"
@@ -1086,21 +1148,26 @@ class TestAddSkill:
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text("# new version\n")
 
-        monkeypatch.setattr(sys, "argv", [
-            "skill_add.py",
-            "--scan-dir", str(scan_dir),
-            "--skip-existing",
-            "--wiki", str(wiki),
-            "--skills-dir", str(skills_dir),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "skill_add.py",
+                "--scan-dir",
+                str(scan_dir),
+                "--skip-existing",
+                "--wiki",
+                str(wiki),
+                "--skills-dir",
+                str(skills_dir),
+            ],
+        )
         _fake_wiki_sync.ensure_wiki.return_value = None
         _sa.main()
         out = capsys.readouterr().out
         assert "skipped" in out
 
-    def test_main_existing_skill_prints_update_review(
-        self, tmp_path, monkeypatch, capsys
-    ):
+    def test_main_existing_skill_prints_update_review(self, tmp_path, monkeypatch, capsys):
         skills_dir = tmp_path / "skills"
         wiki = self._setup_wiki(tmp_path)
         installed = skills_dir / "myskill" / "SKILL.md"
@@ -1114,12 +1181,19 @@ class TestAddSkill:
             encoding="utf-8",
         )
 
-        monkeypatch.setattr(sys, "argv", [
-            "skill_add.py",
-            "--scan-dir", str(scan_dir),
-            "--wiki", str(wiki),
-            "--skills-dir", str(skills_dir),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "skill_add.py",
+                "--scan-dir",
+                str(scan_dir),
+                "--wiki",
+                str(wiki),
+                "--skills-dir",
+                str(skills_dir),
+            ],
+        )
         _fake_wiki_sync.ensure_wiki.return_value = None
 
         _sa.main()

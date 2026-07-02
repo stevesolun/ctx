@@ -69,7 +69,7 @@ def fake_litellm(monkeypatch: pytest.MonkeyPatch):
         return response
 
     fake.completion = completion  # type: ignore[attr-defined]
-    fake._calls = calls           # type: ignore[attr-defined]
+    fake._calls = calls  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "litellm", fake)
     return fake
 
@@ -302,9 +302,7 @@ class TestNormaliseResponse:
 
     def test_usage_with_cost(self) -> None:
         raw = {
-            "choices": [
-                {"message": {"content": "hi"}, "finish_reason": "stop"}
-            ],
+            "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1},
             "response_cost": 0.0002,
         }
@@ -375,17 +373,13 @@ class TestFinishReasonAliasing:
 
 
 class TestCompleteWiring:
-    def test_default_model_passed_through(
-        self, fake_litellm: types.ModuleType
-    ) -> None:
+    def test_default_model_passed_through(self, fake_litellm: types.ModuleType) -> None:
         prov = LiteLLMProvider(default_model="ollama/llama3")
         prov.complete([Message(role="user", content="hi")])
         call_kwargs = fake_litellm._calls[0]  # type: ignore[attr-defined]
         assert call_kwargs["model"] == "ollama/llama3"
 
-    def test_per_call_model_override(
-        self, fake_litellm: types.ModuleType
-    ) -> None:
+    def test_per_call_model_override(self, fake_litellm: types.ModuleType) -> None:
         prov = LiteLLMProvider(default_model="ollama/llama3")
         prov.complete(
             [Message(role="user", content="hi")],
@@ -393,9 +387,7 @@ class TestCompleteWiring:
         )
         assert fake_litellm._calls[0]["model"] == "openrouter/anthropic/claude-opus-4.7"
 
-    def test_base_url_passed_as_api_base(
-        self, fake_litellm: types.ModuleType
-    ) -> None:
+    def test_base_url_passed_as_api_base(self, fake_litellm: types.ModuleType) -> None:
         prov = LiteLLMProvider(
             default_model="ollama/llama3",
             base_url="http://localhost:11434",
@@ -444,16 +436,12 @@ class TestCompleteWiring:
         call = fake_litellm._calls[0]
         assert call["tools"][0]["function"]["name"] == "fs_read"
 
-    def test_no_tools_omits_key(
-        self, fake_litellm: types.ModuleType
-    ) -> None:
+    def test_no_tools_omits_key(self, fake_litellm: types.ModuleType) -> None:
         prov = LiteLLMProvider(default_model="ollama/llama3")
         prov.complete([Message(role="user", content="hi")])
         assert "tools" not in fake_litellm._calls[0]
 
-    def test_max_tokens_forwarded(
-        self, fake_litellm: types.ModuleType
-    ) -> None:
+    def test_max_tokens_forwarded(self, fake_litellm: types.ModuleType) -> None:
         prov = LiteLLMProvider(default_model="ollama/llama3")
         prov.complete(
             [Message(role="user", content="hi")],
@@ -461,9 +449,7 @@ class TestCompleteWiring:
         )
         assert fake_litellm._calls[0]["max_tokens"] == 500
 
-    def test_temperature_default(
-        self, fake_litellm: types.ModuleType
-    ) -> None:
+    def test_temperature_default(self, fake_litellm: types.ModuleType) -> None:
         prov = LiteLLMProvider(default_model="ollama/llama3")
         prov.complete([Message(role="user", content="hi")])
         assert fake_litellm._calls[0]["temperature"] == 0.7
@@ -473,9 +459,7 @@ class TestCompleteWiring:
         prov.complete([Message(role="user", content="hi")])
         assert fake_litellm._calls[0]["timeout"] == 120.0
 
-    def test_returns_completion_response(
-        self, fake_litellm: types.ModuleType
-    ) -> None:
+    def test_returns_completion_response(self, fake_litellm: types.ModuleType) -> None:
         prov = LiteLLMProvider(default_model="ollama/llama3")
         resp = prov.complete([Message(role="user", content="hi")])
         assert isinstance(resp, CompletionResponse)

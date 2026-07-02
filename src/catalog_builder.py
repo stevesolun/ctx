@@ -74,13 +74,15 @@ def scan_skills_dir(skills_dir: Path) -> list[dict]:
                 except Exception as exc:
                     print(f"Warning: failed to read skill file {skill_md}: {exc}", file=sys.stderr)
                     lines = 0
-                results.append({
-                    "name": item.name,
-                    "path": str(skill_md),
-                    "lines": lines,
-                    "type": "skill",
-                    "over_180": lines > cfg.line_threshold,
-                })
+                results.append(
+                    {
+                        "name": item.name,
+                        "path": str(skill_md),
+                        "lines": lines,
+                        "type": "skill",
+                        "over_180": lines > cfg.line_threshold,
+                    }
+                )
     return results
 
 
@@ -96,13 +98,15 @@ def scan_agents_dir(agents_dir: Path) -> list[dict]:
         except Exception as exc:
             print(f"Warning: failed to read agent file {item}: {exc}", file=sys.stderr)
             lines = 0
-        results.append({
-            "name": item.stem,
-            "path": str(item),
-            "lines": lines,
-            "type": "agent",
-            "over_180": lines > cfg.line_threshold,
-        })
+        results.append(
+            {
+                "name": item.stem,
+                "path": str(item),
+                "lines": lines,
+                "type": "agent",
+                "over_180": lines > cfg.line_threshold,
+            }
+        )
     return results
 
 
@@ -234,7 +238,9 @@ def main() -> None:
 
     wiki_dir = Path(args.wiki)
     if not wiki_dir.exists():
-        print(f"Wiki not initialized at {wiki_dir}. Run wiki_sync.py --init first.", file=sys.stderr)
+        print(
+            f"Wiki not initialized at {wiki_dir}. Run wiki_sync.py --init first.", file=sys.stderr
+        )
         sys.exit(1)
 
     stats = build_catalog(

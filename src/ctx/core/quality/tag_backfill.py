@@ -50,85 +50,119 @@ _SLUG_TOKEN_RE = re.compile(r"[-_/]+")
 # to be useful as tags. Keep this list intentionally short — every
 # entry here is a tag we won't ever auto-add. Curated by hand from
 # the most common tokens in the catalog.
-_TOKEN_STOPLIST: frozenset[str] = frozenset({
-    # generic
-    "skill", "agent", "skills", "agents", "tool", "tools",
-    "init", "setup", "config", "guide", "guidelines",
-    "create", "creator", "builder", "build",
-    "the", "and", "or", "for", "with", "of", "to", "as",
-    "v1", "v2", "v3", "v4", "py", "ts", "js",
-    # numeric / sequence prefixes used by some imports
-    "00", "01", "02", "03", "04", "05", "10", "20",
-})
+_TOKEN_STOPLIST: frozenset[str] = frozenset(
+    {
+        # generic
+        "skill",
+        "agent",
+        "skills",
+        "agents",
+        "tool",
+        "tools",
+        "init",
+        "setup",
+        "config",
+        "guide",
+        "guidelines",
+        "create",
+        "creator",
+        "builder",
+        "build",
+        "the",
+        "and",
+        "or",
+        "for",
+        "with",
+        "of",
+        "to",
+        "as",
+        "v1",
+        "v2",
+        "v3",
+        "v4",
+        "py",
+        "ts",
+        "js",
+        # numeric / sequence prefixes used by some imports
+        "00",
+        "01",
+        "02",
+        "03",
+        "04",
+        "05",
+        "10",
+        "20",
+    }
+)
 
 # Domain keyword allowlist. If any of these appear in the entity body,
 # they are added as tags. Keep this list short and high-signal — every
 # entry here is something worth surfacing in recommendations.
 _KEYWORD_TAGS: dict[str, list[str]] = {
     # languages
-    "python":      ["python"],
-    "typescript":  ["typescript"],
-    "javascript":  ["javascript"],
-    "rust":        ["rust"],
-    "golang":      ["golang"],
-    "java ":       ["java"],
-    "kotlin":      ["kotlin"],
-    "swift":       ["swift"],
-    "c++":         ["cpp"],
-    "c#":          ["csharp"],
-    "ruby":        ["ruby"],
-    "elixir":      ["elixir"],
-    "scala":       ["scala"],
-    "php":         ["php"],
+    "python": ["python"],
+    "typescript": ["typescript"],
+    "javascript": ["javascript"],
+    "rust": ["rust"],
+    "golang": ["golang"],
+    "java ": ["java"],
+    "kotlin": ["kotlin"],
+    "swift": ["swift"],
+    "c++": ["cpp"],
+    "c#": ["csharp"],
+    "ruby": ["ruby"],
+    "elixir": ["elixir"],
+    "scala": ["scala"],
+    "php": ["php"],
     # frameworks
-    "react":       ["react", "frontend"],
-    "vue":         ["vue", "frontend"],
-    "angular":     ["angular", "frontend"],
-    "next.js":     ["nextjs", "frontend"],
-    "nextjs":      ["nextjs", "frontend"],
-    "svelte":      ["svelte", "frontend"],
-    "fastapi":     ["fastapi", "api", "python"],
-    "flask":       ["flask", "python"],
-    "django":      ["django", "python"],
-    "express":     ["express", "nodejs"],
-    "rails":       ["rails", "ruby"],
-    "spring":      ["spring", "java"],
-    "laravel":     ["laravel", "php"],
+    "react": ["react", "frontend"],
+    "vue": ["vue", "frontend"],
+    "angular": ["angular", "frontend"],
+    "next.js": ["nextjs", "frontend"],
+    "nextjs": ["nextjs", "frontend"],
+    "svelte": ["svelte", "frontend"],
+    "fastapi": ["fastapi", "api", "python"],
+    "flask": ["flask", "python"],
+    "django": ["django", "python"],
+    "express": ["express", "nodejs"],
+    "rails": ["rails", "ruby"],
+    "spring": ["spring", "java"],
+    "laravel": ["laravel", "php"],
     # data / ml
-    "pandas":      ["pandas", "python", "data"],
-    "numpy":       ["numpy", "python"],
-    "pytorch":     ["pytorch", "ml"],
-    "tensorflow":  ["tensorflow", "ml"],
+    "pandas": ["pandas", "python", "data"],
+    "numpy": ["numpy", "python"],
+    "pytorch": ["pytorch", "ml"],
+    "tensorflow": ["tensorflow", "ml"],
     "huggingface": ["huggingface", "ml"],
-    "embedding":   ["embeddings", "ml"],
+    "embedding": ["embeddings", "ml"],
     # infra
-    "kubernetes":  ["kubernetes", "devops"],
-    "docker":      ["docker", "devops"],
-    "terraform":   ["terraform", "devops"],
-    "ansible":     ["ansible", "devops"],
-    "aws":         ["aws", "cloud"],
-    "azure":       ["azure", "cloud"],
-    "gcp ":        ["gcp", "cloud"],
+    "kubernetes": ["kubernetes", "devops"],
+    "docker": ["docker", "devops"],
+    "terraform": ["terraform", "devops"],
+    "ansible": ["ansible", "devops"],
+    "aws": ["aws", "cloud"],
+    "azure": ["azure", "cloud"],
+    "gcp ": ["gcp", "cloud"],
     # disciplines
-    "security":    ["security"],
-    "vulnerab":    ["security"],
+    "security": ["security"],
+    "vulnerab": ["security"],
     "penetration": ["security"],
-    "testing":     ["testing"],
-    "tdd":         ["testing", "tdd"],
-    "ci/cd":       ["cicd", "devops"],
+    "testing": ["testing"],
+    "tdd": ["testing", "tdd"],
+    "ci/cd": ["cicd", "devops"],
     "performance": ["performance"],
-    "monitoring":  ["observability"],
-    "logging":     ["observability"],
-    "observabil":  ["observability"],
-    "graphql":     ["graphql", "api"],
-    "rest api":    ["rest", "api"],
-    "websocket":   ["websocket"],
-    "grpc":        ["grpc", "api"],
-    "mcp ":        ["mcp"],
-    "claude":      ["claude"],
-    "openai":      ["openai"],
-    "anthropic":   ["anthropic"],
-    "agent":       ["agents"],
+    "monitoring": ["observability"],
+    "logging": ["observability"],
+    "observabil": ["observability"],
+    "graphql": ["graphql", "api"],
+    "rest api": ["rest", "api"],
+    "websocket": ["websocket"],
+    "grpc": ["grpc", "api"],
+    "mcp ": ["mcp"],
+    "claude": ["claude"],
+    "openai": ["openai"],
+    "anthropic": ["anthropic"],
+    "agent": ["agents"],
 }
 
 
@@ -138,17 +172,21 @@ _KEYWORD_TAGS: dict[str, list[str]] = {
 @dataclass
 class TagProposal:
     """Per-entity backfill proposal."""
-    entity_type: str    # "skill" | "agent"
+
+    entity_type: str  # "skill" | "agent"
     slug: str
-    path: Path          # canonical SKILL.md / agent .md path
+    path: Path  # canonical SKILL.md / agent .md path
     current_tags: list[str]
     proposed_add: list[str]  # tags to add (no duplicates with current)
-    sources: dict[str, list[str]] = field(default_factory=dict)  # token | keyword | corpus → list of tags
+    sources: dict[str, list[str]] = field(
+        default_factory=dict
+    )  # token | keyword | corpus → list of tags
 
 
 @dataclass
 class TagReport:
     """Aggregate output of one backfill scan."""
+
     total_entities_scanned: int
     entities_with_empty_tags: int
     proposals: list[TagProposal] = field(default_factory=list)
@@ -187,7 +225,7 @@ def _split_frontmatter(text: str) -> tuple[str, str, str]:
         except ValueError:
             return text, "", ""
         fm = rest[3:close].strip("\n")
-        body_after = rest[close + 4:].lstrip("\n")
+        body_after = rest[close + 4 :].lstrip("\n")
         return prefix, body_after, fm
     prefix = ""
     rest = text
@@ -196,7 +234,7 @@ def _split_frontmatter(text: str) -> tuple[str, str, str]:
     except ValueError:
         return text, "", ""
     fm = rest[3:close].strip("\n")
-    body_after = rest[close + 4:].lstrip("\n")
+    body_after = rest[close + 4 :].lstrip("\n")
     return prefix, body_after, fm
 
 
@@ -233,7 +271,8 @@ def _parse_frontmatter_tags(fm_text: str) -> tuple[list[str], bool]:
 
 
 def _render_frontmatter_with_added_tags(
-    fm_text: str, tags_to_add: list[str],
+    fm_text: str,
+    tags_to_add: list[str],
 ) -> str:
     """Return the frontmatter with the new tags merged in."""
     existing, present = _parse_frontmatter_tags(fm_text)
@@ -302,7 +341,8 @@ def _existing_tag_vocabulary(entities: Iterable[Path]) -> Counter:
 
 def _slug_token_candidates(slug: str) -> list[str]:
     return [
-        t for t in _SLUG_TOKEN_RE.split(slug.lower())
+        t
+        for t in _SLUG_TOKEN_RE.split(slug.lower())
         if t and len(t) >= 3 and t not in _TOKEN_STOPLIST and not t.isdigit()
     ]
 
@@ -319,8 +359,12 @@ def _keyword_candidates(body: str) -> list[str]:
 
 
 def _propose(
-    path: Path, entity_type: str, slug: str,
-    *, vocab: Counter, max_tags: int,
+    path: Path,
+    entity_type: str,
+    slug: str,
+    *,
+    vocab: Counter,
+    max_tags: int,
 ) -> TagProposal:
     text = path.read_text(encoding="utf-8", errors="replace")
     _, body_after, fm = _split_frontmatter(text)
@@ -416,7 +460,9 @@ def discover_empty_tag_entities(wiki_dir: Path) -> list[tuple[str, str, Path]]:
 
 
 def run_backfill(
-    *, wiki_dir: Path, max_tags_per_entity: int = 6,
+    *,
+    wiki_dir: Path,
+    max_tags_per_entity: int = 6,
 ) -> TagReport:
     """Walk the catalog, propose backfills for empty-tag entities."""
     skills_root = Path.home() / ".claude" / "skills"
@@ -432,7 +478,10 @@ def run_backfill(
     proposals: list[TagProposal] = []
     for entity_type, slug, path in targets:
         prop = _propose(
-            path, entity_type, slug, vocab=vocab,
+            path,
+            entity_type,
+            slug,
+            vocab=vocab,
             max_tags=max_tags_per_entity,
         )
         if prop.proposed_add:
@@ -497,21 +546,24 @@ def render_markdown(report: TagReport, *, top_n: int = 200) -> str:
 
 
 def render_json(report: TagReport) -> str:
-    return json.dumps({
-        "total_entities_scanned": report.total_entities_scanned,
-        "entities_with_empty_tags": report.entities_with_empty_tags,
-        "proposals": [
-            {
-                "entity_type": p.entity_type,
-                "slug": p.slug,
-                "path": str(p.path),
-                "current_tags": p.current_tags,
-                "proposed_add": p.proposed_add,
-                "sources": p.sources,
-            }
-            for p in report.proposals
-        ],
-    }, indent=2)
+    return json.dumps(
+        {
+            "total_entities_scanned": report.total_entities_scanned,
+            "entities_with_empty_tags": report.entities_with_empty_tags,
+            "proposals": [
+                {
+                    "entity_type": p.entity_type,
+                    "slug": p.slug,
+                    "path": str(p.path),
+                    "current_tags": p.current_tags,
+                    "proposed_add": p.proposed_add,
+                    "sources": p.sources,
+                }
+                for p in report.proposals
+            ],
+        },
+        indent=2,
+    )
 
 
 # ── CLI ───────────────────────────────────────────────────────────────
@@ -525,24 +577,32 @@ def main(argv: Iterable[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--wiki", type=Path,
+        "--wiki",
+        type=Path,
         default=Path.home() / ".claude" / "skill-wiki",
         help="Wiki directory (default: ~/.claude/skill-wiki)",
     )
     parser.add_argument(
-        "--max-tags", type=int, default=6,
+        "--max-tags",
+        type=int,
+        default=6,
         help="Max tags to add per entity (default: 6)",
     )
     parser.add_argument(
-        "--report", type=Path, default=Path("graph") / "tag-backfill.md",
+        "--report",
+        type=Path,
+        default=Path("graph") / "tag-backfill.md",
         help="Markdown report output path",
     )
     parser.add_argument(
-        "--report-json", type=Path, default=Path("graph") / "tag-backfill.json",
+        "--report-json",
+        type=Path,
+        default=Path("graph") / "tag-backfill.json",
         help="JSON report output path",
     )
     parser.add_argument(
-        "--apply", action="store_true",
+        "--apply",
+        action="store_true",
         help="Edit frontmatter in place (default: report-only).",
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -550,7 +610,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     report = run_backfill(
-        wiki_dir=args.wiki, max_tags_per_entity=args.max_tags,
+        wiki_dir=args.wiki,
+        max_tags_per_entity=args.max_tags,
     )
 
     args.report.parent.mkdir(parents=True, exist_ok=True)

@@ -44,15 +44,15 @@ def test_validate_skill_name_accepts_valid(valid: str) -> None:
 @pytest.mark.parametrize(
     "bad",
     [
-        "",                     # empty
-        "-leading-dash",        # starts with hyphen
-        "UpperCase",            # uppercase not allowed
-        "with.dot",             # dot not in pattern
-        "with_underscore",      # underscore not in pattern
-        "with space",           # space
-        "../etc/passwd",        # traversal
-        "a" * 65,               # too long (64 chars is max)
-        "../../etc",            # traversal with multiple segments
+        "",  # empty
+        "-leading-dash",  # starts with hyphen
+        "UpperCase",  # uppercase not allowed
+        "with.dot",  # dot not in pattern
+        "with_underscore",  # underscore not in pattern
+        "with space",  # space
+        "../etc/passwd",  # traversal
+        "a" * 65,  # too long (64 chars is max)
+        "../../etc",  # traversal with multiple segments
     ],
 )
 def test_validate_skill_name_rejects_invalid(bad: str) -> None:

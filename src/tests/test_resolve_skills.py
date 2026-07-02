@@ -31,6 +31,7 @@ from ctx.core.wiki.wiki_packs import write_wiki_base_pack
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_skill(skills_dir: Path, name: str, frontmatter: str = "") -> Path:
     """Write a minimal SKILL.md under skills_dir/<name>/."""
     d = skills_dir / name
@@ -71,6 +72,7 @@ def _resolve_without_graph(
 # ---------------------------------------------------------------------------
 # discover_available_skills
 # ---------------------------------------------------------------------------
+
 
 class TestDiscoverAvailableSkills:
     def test_happy_path_single_skill(self, tmp_path):
@@ -115,6 +117,7 @@ class TestDiscoverAvailableSkills:
 # ---------------------------------------------------------------------------
 # read_wiki_overrides
 # ---------------------------------------------------------------------------
+
 
 class TestReadWikiOverrides:
     def _make_override_page(self, wiki: Path, name: str, fields: dict) -> None:
@@ -184,11 +187,7 @@ class TestReadWikiOverrides:
                     "# react\n"
                 ),
                 "entities/skills/pack-only.md": (
-                    "---\n"
-                    "always_load: true\n"
-                    "use_count: 2\n"
-                    "---\n"
-                    "# pack-only\n"
+                    "---\nalways_load: true\nuse_count: 2\n---\n# pack-only\n"
                 ),
             },
         )
@@ -211,10 +210,9 @@ class TestReadWikiOverrides:
 # resolve
 # ---------------------------------------------------------------------------
 
+
 class TestResolve:
-    def test_graph_can_be_disabled_for_deterministic_unit_resolution(
-        self, tmp_path, monkeypatch
-    ):
+    def test_graph_can_be_disabled_for_deterministic_unit_resolution(self, tmp_path, monkeypatch):
         from ctx.core.resolve import resolve_skills  # noqa: PLC0415
 
         def fail_if_loaded():
@@ -248,14 +246,21 @@ class TestResolve:
         # specific skill, not the entire load list, so this test stays
         # robust against richer graph-driven recommendations.
         loaded_skills = [
-            e.get("skill") for e in manifest["load"]
-            if e.get("entity_type", "skill") == "skill"
+            e.get("skill") for e in manifest["load"] if e.get("entity_type", "skill") == "skill"
         ]
         assert "react" not in loaded_skills
 
     def test_always_load_override_adds_skill(self, tmp_path):
         available = {"docker": {"path": str(tmp_path / "docker/SKILL.md"), "name": "docker"}}
-        overrides = {"docker": {"always_load": True, "never_load": False, "use_count": 0, "last_used": "", "status": "installed"}}
+        overrides = {
+            "docker": {
+                "always_load": True,
+                "never_load": False,
+                "use_count": 0,
+                "last_used": "",
+                "status": "installed",
+            }
+        }
         profile = _minimal_profile()  # no detection for docker
         manifest = _resolve_without_graph(profile, available, overrides)
         loaded_names = [e["skill"] for e in manifest["load"]]
@@ -263,7 +268,15 @@ class TestResolve:
 
     def test_never_load_override_removes_skill(self, tmp_path):
         available = {"react": {"path": str(tmp_path / "react/SKILL.md"), "name": "react"}}
-        overrides = {"react": {"always_load": False, "never_load": True, "use_count": 0, "last_used": "", "status": "installed"}}
+        overrides = {
+            "react": {
+                "always_load": False,
+                "never_load": True,
+                "use_count": 0,
+                "last_used": "",
+                "status": "installed",
+            }
+        }
         profile = _minimal_profile(frameworks=[_detection("react")])
         manifest = _resolve_without_graph(profile, available, overrides)
         loaded_names = [e["skill"] for e in manifest["load"]]
@@ -274,10 +287,12 @@ class TestResolve:
             "fastapi": {"path": str(tmp_path / "fastapi/SKILL.md"), "name": "fastapi"},
             "flask": {"path": str(tmp_path / "flask/SKILL.md"), "name": "flask"},
         }
-        profile = _minimal_profile(frameworks=[
-            _detection("fastapi", confidence=0.95),
-            _detection("flask", confidence=0.6),
-        ])
+        profile = _minimal_profile(
+            frameworks=[
+                _detection("fastapi", confidence=0.95),
+                _detection("flask", confidence=0.6),
+            ]
+        )
         manifest = _resolve_without_graph(profile, available, {})
         loaded_names = [e["skill"] for e in manifest["load"]]
         # fastapi has higher base priority (8) and higher confidence boost
@@ -287,18 +302,37 @@ class TestResolve:
 
     def test_max_skills_cap(self, tmp_path):
         # Create 20 available skills each mapped from detections
-        skills_with_map = ["react", "docker", "fastapi", "django", "flask",
-                           "pytest", "jest", "langchain", "nextjs", "vue"]
-        available = {n: {"path": str(tmp_path / n / "SKILL.md"), "name": n} for n in skills_with_map}
+        skills_with_map = [
+            "react",
+            "docker",
+            "fastapi",
+            "django",
+            "flask",
+            "pytest",
+            "jest",
+            "langchain",
+            "nextjs",
+            "vue",
+        ]
+        available = {
+            n: {"path": str(tmp_path / n / "SKILL.md"), "name": n} for n in skills_with_map
+        }
         profile = _minimal_profile(frameworks=[_detection(n, 0.9) for n in skills_with_map])
         manifest = _resolve_without_graph(profile, available, {}, max_skills=3)
         # At most 3 skill-mapped items (plus meta skills if available)
-        non_meta = [e for e in manifest["load"] if e["skill"] not in ("skill-router", "file-reading")]
+        non_meta = [
+            e for e in manifest["load"] if e["skill"] not in ("skill-router", "file-reading")
+        ]
         assert len(non_meta) <= 3
         assert any("Capped" in w for w in manifest["warnings"])
 
     def test_meta_skills_added_if_available(self, tmp_path):
-        available = {"skill-router": {"path": str(tmp_path / "skill-router/SKILL.md"), "name": "skill-router"}}
+        available = {
+            "skill-router": {
+                "path": str(tmp_path / "skill-router/SKILL.md"),
+                "name": "skill-router",
+            }
+        }
         profile = _minimal_profile()
         manifest = _resolve_without_graph(profile, available, {})
         loaded_names = [e["skill"] for e in manifest["load"]]
@@ -342,15 +376,12 @@ class TestResolveMcpRecommendations:
             def number_of_nodes(self) -> int:
                 return 1
 
-        monkeypatch.setattr(
-            resolve_skills, "_load_graph", lambda: _FakeGraph()
-        )
+        monkeypatch.setattr(resolve_skills, "_load_graph", lambda: _FakeGraph())
         monkeypatch.setattr(resolve_skills, "_GRAPH_AVAILABLE", True)
 
-    def test_mcp_graph_hit_lands_in_mcp_servers_not_load(
-        self, tmp_path, monkeypatch
-    ):
+    def test_mcp_graph_hit_lands_in_mcp_servers_not_load(self, tmp_path, monkeypatch):
         from ctx.core.resolve import resolve_skills  # noqa: PLC0415
+
         self._fake_graph(monkeypatch)
 
         # Synthetic graph hit: an MCP-type neighbor with score above the
@@ -366,9 +397,7 @@ class TestResolveMcpRecommendations:
                 },
             ]
 
-        monkeypatch.setattr(
-            resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds
-        )
+        monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds)
 
         available = {"react": {"path": str(tmp_path / "react/SKILL.md"), "name": "react"}}
         profile = _minimal_profile(frameworks=[_detection("react")])
@@ -383,10 +412,9 @@ class TestResolveMcpRecommendations:
             "MCP must NOT land in manifest['load'] — that's the skill-loader bucket"
         )
 
-    def test_mcp_entry_has_reason_score_and_shared_tags(
-        self, tmp_path, monkeypatch
-    ):
+    def test_mcp_entry_has_reason_score_and_shared_tags(self, tmp_path, monkeypatch):
         from ctx.core.resolve import resolve_skills  # noqa: PLC0415
+
         self._fake_graph(monkeypatch)
 
         def fake_resolve_by_seeds(graph, seeds, **kwargs):
@@ -400,9 +428,7 @@ class TestResolveMcpRecommendations:
                 },
             ]
 
-        monkeypatch.setattr(
-            resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds
-        )
+        monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds)
 
         available = {"django": {"path": str(tmp_path / "django/SKILL.md"), "name": "django"}}
         profile = _minimal_profile(frameworks=[_detection("django")])
@@ -415,23 +441,30 @@ class TestResolveMcpRecommendations:
         assert "graph neighbor of django" in entry["reason"]
         assert "_t:fetch" in entry["shared_tags"]
 
-    def test_mcp_deduped_when_same_name_hit_twice(
-        self, tmp_path, monkeypatch
-    ):
+    def test_mcp_deduped_when_same_name_hit_twice(self, tmp_path, monkeypatch):
         from ctx.core.resolve import resolve_skills  # noqa: PLC0415
+
         self._fake_graph(monkeypatch)
 
         def fake_resolve_by_seeds(graph, seeds, **kwargs):
             return [
-                {"name": "duped-mcp", "type": "mcp-server", "score": 2.0,
-                 "shared_tags": [], "via": ["a"]},
-                {"name": "duped-mcp", "type": "mcp-server", "score": 1.8,
-                 "shared_tags": [], "via": ["b"]},
+                {
+                    "name": "duped-mcp",
+                    "type": "mcp-server",
+                    "score": 2.0,
+                    "shared_tags": [],
+                    "via": ["a"],
+                },
+                {
+                    "name": "duped-mcp",
+                    "type": "mcp-server",
+                    "score": 1.8,
+                    "shared_tags": [],
+                    "via": ["b"],
+                },
             ]
 
-        monkeypatch.setattr(
-            resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds
-        )
+        monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds)
 
         available = {"react": {"path": str(tmp_path / "react/SKILL.md"), "name": "react"}}
         profile = _minimal_profile(frameworks=[_detection("react")])
@@ -439,10 +472,9 @@ class TestResolveMcpRecommendations:
 
         assert sum(1 for m in manifest["mcp_servers"] if m["name"] == "duped-mcp") == 1
 
-    def test_mcp_below_noise_floor_dropped(
-        self, tmp_path, monkeypatch
-    ):
+    def test_mcp_below_noise_floor_dropped(self, tmp_path, monkeypatch):
         from ctx.core.resolve import resolve_skills  # noqa: PLC0415
+
         self._fake_graph(monkeypatch)
 
         def fake_resolve_by_seeds(graph, seeds, **kwargs):
@@ -450,14 +482,17 @@ class TestResolveMcpRecommendations:
             # in [0,1]) against the 0.20 MCP floor. A value of 0.1
             # sits below the floor so the hit must be dropped.
             return [
-                {"name": "weak-mcp", "type": "mcp-server",
-                 "score": 0.8, "normalized_score": 0.10,
-                 "shared_tags": [], "via": ["a"]},
+                {
+                    "name": "weak-mcp",
+                    "type": "mcp-server",
+                    "score": 0.8,
+                    "normalized_score": 0.10,
+                    "shared_tags": [],
+                    "via": ["a"],
+                },
             ]
 
-        monkeypatch.setattr(
-            resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds
-        )
+        monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds)
 
         available = {"react": {"path": str(tmp_path / "react/SKILL.md"), "name": "react"}}
         profile = _minimal_profile(frameworks=[_detection("react")])
@@ -465,25 +500,32 @@ class TestResolveMcpRecommendations:
 
         assert manifest["mcp_servers"] == []
 
-    def test_skill_hits_still_route_to_load(
-        self, tmp_path, monkeypatch
-    ):
+    def test_skill_hits_still_route_to_load(self, tmp_path, monkeypatch):
         # Regression: mixing mcp-server hits and skill hits must not
         # break the existing skill path.
         from ctx.core.resolve import resolve_skills  # noqa: PLC0415
+
         self._fake_graph(monkeypatch)
 
         def fake_resolve_by_seeds(graph, seeds, **kwargs):
             return [
-                {"name": "pytest-something", "type": "skill", "score": 3.0,
-                 "shared_tags": [], "via": ["django"]},
-                {"name": "fetch-mcp", "type": "mcp-server", "score": 2.0,
-                 "shared_tags": [], "via": ["django"]},
+                {
+                    "name": "pytest-something",
+                    "type": "skill",
+                    "score": 3.0,
+                    "shared_tags": [],
+                    "via": ["django"],
+                },
+                {
+                    "name": "fetch-mcp",
+                    "type": "mcp-server",
+                    "score": 2.0,
+                    "shared_tags": [],
+                    "via": ["django"],
+                },
             ]
 
-        monkeypatch.setattr(
-            resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds
-        )
+        monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds)
 
         available = {
             "django": {"path": str(tmp_path / "django/SKILL.md"), "name": "django"},
@@ -500,10 +542,9 @@ class TestResolveMcpRecommendations:
         assert "fetch-mcp" in mcp_names
         assert "pytest-something" in load_names
 
-    def test_agent_graph_hit_lands_in_load_without_installed_skill(
-        self, tmp_path, monkeypatch
-    ):
+    def test_agent_graph_hit_lands_in_load_without_installed_skill(self, tmp_path, monkeypatch):
         from ctx.core.resolve import resolve_skills  # noqa: PLC0415
+
         self._fake_graph(monkeypatch)
 
         def fake_resolve_by_seeds(graph, seeds, **kwargs):
@@ -518,25 +559,18 @@ class TestResolveMcpRecommendations:
                 },
             ]
 
-        monkeypatch.setattr(
-            resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds
-        )
+        monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_resolve_by_seeds)
 
         available = {"django": {"path": str(tmp_path / "django/SKILL.md"), "name": "django"}}
         profile = _minimal_profile(frameworks=[_detection("django")])
         manifest = resolve(profile, available, {})
 
-        agents = [
-            e for e in manifest["load"]
-            if e.get("entity_type") == "agent"
-        ]
+        agents = [e for e in manifest["load"] if e.get("entity_type") == "agent"]
         assert [e["skill"] for e in agents] == ["code-reviewer"]
         assert agents[0]["path"] == "/mnt/agents/unknown/code-reviewer.md"
         assert not any("code-reviewer needed but not installed" in w for w in manifest["warnings"])
 
-    def test_real_graph_walk_routes_cross_type_hits(
-        self, tmp_path, monkeypatch
-    ):
+    def test_real_graph_walk_routes_cross_type_hits(self, tmp_path, monkeypatch):
         import networkx as nx
         from ctx.core.resolve import resolve_skills  # noqa: PLC0415
 
@@ -591,6 +625,7 @@ class TestResolveMcpRecommendations:
 # read_intent_signals
 # ---------------------------------------------------------------------------
 
+
 class TestReadIntentSignals:
     def _write_log(self, path: Path, entries: list[dict]) -> None:
         lines = [json.dumps(e) for e in entries]
@@ -602,32 +637,39 @@ class TestReadIntentSignals:
 
     def test_counts_todays_signals(self, tmp_path, monkeypatch):
         from datetime import datetime, timezone
+
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         log = tmp_path / "intent.jsonl"
-        self._write_log(log, [
-            {"date": today, "signals": ["react", "docker"]},
-            {"date": today, "signals": ["react"]},
-        ])
+        self._write_log(
+            log,
+            [
+                {"date": today, "signals": ["react", "docker"]},
+                {"date": today, "signals": ["react"]},
+            ],
+        )
         signals = read_intent_signals(str(log))
         assert signals["react"] == 2
         assert signals["docker"] == 1
 
     def test_ignores_other_dates(self, tmp_path):
         log = tmp_path / "intent.jsonl"
-        self._write_log(log, [
-            {"date": "2020-01-01", "signals": ["react"]},
-        ])
+        self._write_log(
+            log,
+            [
+                {"date": "2020-01-01", "signals": ["react"]},
+            ],
+        )
         signals = read_intent_signals(str(log))
         # Today's date != 2020-01-01, so nothing counted
         assert "react" not in signals
 
     def test_skips_bad_json_lines(self, tmp_path):
         from datetime import datetime, timezone
+
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         log = tmp_path / "intent.jsonl"
         log.write_text(
-            'not json\n'
-            f'{json.dumps({"date": today, "signals": ["fastapi"]})}\n',
+            f"not json\n{json.dumps({'date': today, 'signals': ['fastapi']})}\n",
             encoding="utf-8",
         )
         signals = read_intent_signals(str(log))
@@ -643,6 +685,7 @@ class TestReadIntentSignals:
 # ---------------------------------------------------------------------------
 # apply_intent_boosts
 # ---------------------------------------------------------------------------
+
 
 class TestApplyIntentBoosts:
     def _make_manifest(self) -> dict:
@@ -695,8 +738,8 @@ class TestApplyIntentBoosts:
 # nothing. Post-fix the floors are percentile thresholds in [0,1],
 # scale-invariant.
 
-class TestNoiseFloorNormalized:
 
+class TestNoiseFloorNormalized:
     def _fake_graph(self, monkeypatch):
         import networkx as nx
         from ctx.core.resolve import resolve_skills
@@ -714,18 +757,26 @@ class TestNoiseFloorNormalized:
         gets silently dropped on small fixtures."""
         from ctx.core.resolve import resolve_skills
         from ctx.core.resolve.resolve_skills import resolve
+
         self._fake_graph(monkeypatch)
 
         def fake_hits(*a, **kw):
             return [
-                {"name": "top-skill", "type": "skill",
-                 "score": 1.23, "normalized_score": 1.0,
-                 "shared_tags": ["x"], "via": ["react"]},
+                {
+                    "name": "top-skill",
+                    "type": "skill",
+                    "score": 1.23,
+                    "normalized_score": 1.0,
+                    "shared_tags": ["x"],
+                    "via": ["react"],
+                },
             ]
 
         monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_hits)
-        available = {"react": {"path": str(tmp_path / "r/SKILL.md"), "name": "react"},
-                     "top-skill": {"path": str(tmp_path / "t/SKILL.md"), "name": "top-skill"}}
+        available = {
+            "react": {"path": str(tmp_path / "r/SKILL.md"), "name": "react"},
+            "top-skill": {"path": str(tmp_path / "t/SKILL.md"), "name": "top-skill"},
+        }
         profile = _minimal_profile(frameworks=[_detection("react")])
         manifest = resolve(profile, available, {})
         assert "top-skill" in {e["skill"] for e in manifest["load"]}
@@ -734,17 +785,26 @@ class TestNoiseFloorNormalized:
         """Skill hits with normalized_score < 0.30 don't make the cut."""
         from ctx.core.resolve import resolve_skills
         from ctx.core.resolve.resolve_skills import resolve
+
         self._fake_graph(monkeypatch)
 
         def fake_hits(*a, **kw):
             return [
-                {"name": "noisy", "type": "skill",
-                 "score": 0.12, "normalized_score": 0.10,
-                 "shared_tags": [], "via": ["react"]},
+                {
+                    "name": "noisy",
+                    "type": "skill",
+                    "score": 0.12,
+                    "normalized_score": 0.10,
+                    "shared_tags": [],
+                    "via": ["react"],
+                },
             ]
+
         monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_hits)
-        available = {"react": {"path": str(tmp_path / "r/SKILL.md"), "name": "react"},
-                     "noisy": {"path": str(tmp_path / "n/SKILL.md"), "name": "noisy"}}
+        available = {
+            "react": {"path": str(tmp_path / "r/SKILL.md"), "name": "react"},
+            "noisy": {"path": str(tmp_path / "n/SKILL.md"), "name": "noisy"},
+        }
         profile = _minimal_profile(frameworks=[_detection("react")])
         manifest = resolve(profile, available, {})
         assert "noisy" not in {e["skill"] for e in manifest["load"]}
@@ -756,17 +816,29 @@ class TestNoiseFloorNormalized:
         wipes out MCP recommendations without CI noticing."""
         from ctx.core.resolve import resolve_skills
         from ctx.core.resolve.resolve_skills import resolve
+
         self._fake_graph(monkeypatch)
 
         def fake_hits(*a, **kw):
             return [
-                {"name": "mid-mcp", "type": "mcp-server",
-                 "score": 0.3, "normalized_score": 0.25,
-                 "shared_tags": ["x"], "via": ["react"]},
-                {"name": "mid-skill", "type": "skill",
-                 "score": 0.3, "normalized_score": 0.25,
-                 "shared_tags": ["x"], "via": ["react"]},
+                {
+                    "name": "mid-mcp",
+                    "type": "mcp-server",
+                    "score": 0.3,
+                    "normalized_score": 0.25,
+                    "shared_tags": ["x"],
+                    "via": ["react"],
+                },
+                {
+                    "name": "mid-skill",
+                    "type": "skill",
+                    "score": 0.3,
+                    "normalized_score": 0.25,
+                    "shared_tags": ["x"],
+                    "via": ["react"],
+                },
             ]
+
         monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_hits)
         available = {
             "react": {"path": str(tmp_path / "r/SKILL.md"), "name": "react"},
@@ -786,17 +858,26 @@ class TestNoiseFloorNormalized:
         doesn't silently return [] after the P2.5 upgrade."""
         from ctx.core.resolve import resolve_skills
         from ctx.core.resolve.resolve_skills import resolve
+
         self._fake_graph(monkeypatch)
 
         def fake_hits(*a, **kw):
             # No ``normalized_score`` key — pre-P2.5 shape.
             return [
-                {"name": "legacy-hit", "type": "skill",
-                 "score": 2.5, "shared_tags": ["x"], "via": ["react"]},
+                {
+                    "name": "legacy-hit",
+                    "type": "skill",
+                    "score": 2.5,
+                    "shared_tags": ["x"],
+                    "via": ["react"],
+                },
             ]
+
         monkeypatch.setattr(resolve_skills, "_resolve_by_seeds", fake_hits)
-        available = {"react": {"path": str(tmp_path / "r/SKILL.md"), "name": "react"},
-                     "legacy-hit": {"path": str(tmp_path / "l/SKILL.md"), "name": "legacy-hit"}}
+        available = {
+            "react": {"path": str(tmp_path / "r/SKILL.md"), "name": "react"},
+            "legacy-hit": {"path": str(tmp_path / "l/SKILL.md"), "name": "legacy-hit"},
+        }
         profile = _minimal_profile(frameworks=[_detection("react")])
         manifest = resolve(profile, available, {})
         # Raw score 2.5 >> any old skill floor so legacy behaviour survives.

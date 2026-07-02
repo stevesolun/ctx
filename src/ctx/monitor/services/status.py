@@ -198,13 +198,17 @@ def graph_store_status(graph_dir: Path) -> dict[str, Any]:
         }
     node_count = validation.get("nodes")
     edge_count = validation.get("edges")
-    status.update({
-        "ok": bool(validation.get("ok")),
-        "fresh": bool(validation.get("fresh")),
-        "nodes": node_count if isinstance(node_count, int) else 0,
-        "edges": edge_count if isinstance(edge_count, int) else 0,
-        "errors": validation.get("errors") if isinstance(validation.get("errors"), list) else [],
-    })
+    status.update(
+        {
+            "ok": bool(validation.get("ok")),
+            "fresh": bool(validation.get("fresh")),
+            "nodes": node_count if isinstance(node_count, int) else 0,
+            "edges": edge_count if isinstance(edge_count, int) else 0,
+            "errors": validation.get("errors")
+            if isinstance(validation.get("errors"), list)
+            else [],
+        }
+    )
     return status
 
 
@@ -291,13 +295,15 @@ def telemetry_status(config: Mapping[str, Any] | None = None) -> dict[str, Any]:
 
 def telemetry_spool_status(path: Path) -> dict[str, Any]:
     status = file_status(path)
-    status.update({
-        "event_count": 0,
-        "malformed_records": 0,
-        "outcomes": {},
-        "sources": {},
-        "latest_event": None,
-    })
+    status.update(
+        {
+            "event_count": 0,
+            "malformed_records": 0,
+            "outcomes": {},
+            "sources": {},
+            "latest_event": None,
+        }
+    )
     if not status.get("exists"):
         return status
     outcomes: Counter[str] = Counter()

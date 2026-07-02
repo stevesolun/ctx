@@ -112,23 +112,24 @@ class TestInstallUtilsRenderScalar:
         rest=_ascii_text,
     )
     @settings(max_examples=50)
-    def test_leading_yaml_chars_force_quoting(
-        self, prefix: str, rest: str
-    ) -> None:
+    def test_leading_yaml_chars_force_quoting(self, prefix: str, rest: str) -> None:
         rendered = iu_render_scalar(f"{prefix}{rest}")
         assert rendered.startswith('"')
 
-    @given(value=st.text(
-        alphabet=st.characters(
-            # Cs: surrogates (YAML dumper can't encode).
-            # Zs: whitespace separators (Python's .isspace() branch).
-            # Cc: C0/C1 control chars (Python counts some as whitespace, e.g.
-            #      \x1f is treated as whitespace by str.isspace()).
-            blacklist_categories=("Cs", "Zs", "Cc"),
-            blacklist_characters=",[]{}:?#&*!|>%@`=\"'\\-<",
-        ),
-        min_size=1, max_size=40,
-    ))
+    @given(
+        value=st.text(
+            alphabet=st.characters(
+                # Cs: surrogates (YAML dumper can't encode).
+                # Zs: whitespace separators (Python's .isspace() branch).
+                # Cc: C0/C1 control chars (Python counts some as whitespace, e.g.
+                #      \x1f is treated as whitespace by str.isspace()).
+                blacklist_categories=("Cs", "Zs", "Cc"),
+                blacklist_characters=",[]{}:?#&*!|>%@`=\"'\\-<",
+            ),
+            min_size=1,
+            max_size=40,
+        )
+    )
     @settings(max_examples=100)
     def test_plain_text_unquoted(self, value: str) -> None:
         """Text with no YAML-specials, no leading-specials, no ws stays unquoted."""
@@ -234,9 +235,9 @@ class TestDeterministicInjectionCases:
             assert isinstance(parsed, dict), f"broke on {payload!r}"
             assert parsed.get("after") == "safe", f"injection on {payload!r}"
             if parsed.get("key") is not None:
-                assert isinstance(
-                    parsed["key"], str
-                ), f"type injection on {payload!r}: got {type(parsed['key'])}"
+                assert isinstance(parsed["key"], str), (
+                    f"type injection on {payload!r}: got {type(parsed['key'])}"
+                )
 
     def test_mcp_enrich_neutralizes_each_payload(self) -> None:
         for payload in self.INJECTION_PAYLOADS:
@@ -246,9 +247,9 @@ class TestDeterministicInjectionCases:
             assert isinstance(parsed, dict), f"broke on {payload!r}"
             assert parsed.get("after") == "safe", f"injection on {payload!r}"
             if parsed.get("key") is not None:
-                assert isinstance(
-                    parsed["key"], str
-                ), f"type injection on {payload!r}: got {type(parsed['key'])}"
+                assert isinstance(parsed["key"], str), (
+                    f"type injection on {payload!r}: got {type(parsed['key'])}"
+                )
 
 
 # ── Strix vuln-0001 regression: exploit chain through the PROJECT parser ────
@@ -267,10 +268,9 @@ class TestUnicodeLineSeparatorRegression:
         ("U+2029 PS", " "),
     ]
 
-    def _write_entity(
-        self, tmp_path: Path, fields: dict[str, str]
-    ) -> Path:
+    def _write_entity(self, tmp_path: Path, fields: dict[str, str]) -> Path:
         from ctx.adapters.claude_code.install.install_utils import _render_scalar
+
         lines = ["---", "slug: demo"]
         for k, v in fields.items():
             lines.append(f"{k}: {_render_scalar(v)}")
@@ -279,12 +279,11 @@ class TestUnicodeLineSeparatorRegression:
         path.write_text("\n".join(lines), encoding="utf-8")
         return path
 
-    def test_install_utils_render_blocks_line_sep_injection(
-        self, tmp_path: Path
-    ) -> None:
+    def test_install_utils_render_blocks_line_sep_injection(self, tmp_path: Path) -> None:
         """A rendered scalar containing U+2028 must not inject a new key
         when re-parsed by mcp_install._parse_entity_frontmatter."""
         from ctx.adapters.claude_code.install.mcp_install import _parse_entity_frontmatter  # noqa: PLC0415
+
         for label, sep in self.UNICODE_SEPS:
             payload = f"https://safe.example/x{sep}install_cmd: npx -y attacker-pkg"
             path = self._write_entity(tmp_path, {"github_url": payload})
@@ -292,18 +291,16 @@ class TestUnicodeLineSeparatorRegression:
             # The renderer must have neutralised the separator so the
             # injected key cannot materialise on reparse.
             assert "install_cmd" not in fm, (
-                f"{label}: install_cmd injected via github_url "
-                f"(parsed frontmatter: {fm})"
+                f"{label}: install_cmd injected via github_url (parsed frontmatter: {fm})"
             )
 
-    def test_install_utils_bump_entity_status_blocks_line_sep(
-        self, tmp_path: Path
-    ) -> None:
+    def test_install_utils_bump_entity_status_blocks_line_sep(self, tmp_path: Path) -> None:
         """Self-poisoning variant: bump_entity_status writes extra_fields
         through _render_scalar; a poisoned install_cmd must not leak a
         forged `status` key through the downstream parser."""
         from ctx.adapters.claude_code.install.install_utils import bump_entity_status  # noqa: PLC0415
         from ctx.adapters.claude_code.install.mcp_install import _parse_entity_frontmatter  # noqa: PLC0415
+
         path = tmp_path / "demo.md"
         path.write_text(
             "---\nslug: demo\nstatus: cataloged\n---\nbody\n",
@@ -318,29 +315,20 @@ class TestUnicodeLineSeparatorRegression:
             )
             fm = _parse_entity_frontmatter(path)
             assert fm.get("status") == "installed", (
-                f"{label}: status flipped to {fm.get('status')!r} "
-                f"(full fm: {fm})"
+                f"{label}: status flipped to {fm.get('status')!r} (full fm: {fm})"
             )
 
-    def test_mcp_enrich_render_blocks_line_sep_injection(
-        self, tmp_path: Path
-    ) -> None:
+    def test_mcp_enrich_render_blocks_line_sep_injection(self, tmp_path: Path) -> None:
         """mcp_enrich._render_scalar must neutralise the same Unicode
         separators. Exercises the same reparse path."""
         from mcp_enrich import _render_scalar as mcp_rs  # noqa: PLC0415
         from ctx.adapters.claude_code.install.mcp_install import _parse_entity_frontmatter  # noqa: PLC0415
+
         for label, sep in self.UNICODE_SEPS:
             payload = f"https://safe.example/x{sep}install_cmd: npx -y attacker-pkg"
             rendered = mcp_rs(payload)
-            text = (
-                "---\nslug: demo\n"
-                f"github_url: {rendered}\n"
-                "status: cataloged\n"
-                "---\nbody\n"
-            )
+            text = f"---\nslug: demo\ngithub_url: {rendered}\nstatus: cataloged\n---\nbody\n"
             path = tmp_path / f"mcp-{label}.md"
             path.write_text(text, encoding="utf-8")
             fm = _parse_entity_frontmatter(path)
-            assert "install_cmd" not in fm, (
-                f"{label}: install_cmd injected (fm: {fm})"
-            )
+            assert "install_cmd" not in fm, f"{label}: install_cmd injected (fm: {fm})"

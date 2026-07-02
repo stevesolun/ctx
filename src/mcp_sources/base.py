@@ -31,6 +31,7 @@ from urllib.request import (
 )
 
 from ctx.utils._fs_utils import atomic_write_text
+
 # Import the module rather than `cfg` so that ctx_config.reload()
 # (used by test_config.py) doesn't leave us holding a stale reference.
 import ctx_config as _ctx_config
@@ -65,9 +66,7 @@ class Source(Protocol):
     homepage: str
     """Human-readable URL for logs and docs."""
 
-    def fetch(
-        self, *, limit: int | None = None, refresh: bool = False
-    ) -> Iterator[dict]:
+    def fetch(self, *, limit: int | None = None, refresh: bool = False) -> Iterator[dict]:
         """Yield raw record dicts suitable for ``McpRecord.from_dict``.
 
         Args:

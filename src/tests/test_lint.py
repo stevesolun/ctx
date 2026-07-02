@@ -78,7 +78,9 @@ class TestLintStalePage:
     def test_lint_detects_stale_page(self, tmp_path: Path) -> None:
         wiki = make_wiki(tmp_path)
         make_entity_page(
-            wiki, "old-skill", ["python"],
+            wiki,
+            "old-skill",
+            ["python"],
             body="Old content.",
             updated=_STALE_DATE,
         )
@@ -101,7 +103,9 @@ class TestLintOrphanPage:
         make_entity_page(wiki, "lonely-skill", ["python"], body="Nobody links here.")
         # A second page that does NOT link to lonely-skill
         make_entity_page(
-            wiki, "social-skill", ["python"],
+            wiki,
+            "social-skill",
+            ["python"],
             body="I link to [[entities/skills/social-skill]] (self-loop excluded).",
         )
 
@@ -123,13 +127,17 @@ class TestLintCleanPagePasses:
         wiki = make_wiki(tmp_path)
         # Create two pages that cross-link each other so neither is orphaned.
         make_entity_page(
-            wiki, "clean-a", ["python"],
+            wiki,
+            "clean-a",
+            ["python"],
             body="See also [[entities/skills/clean-b]] for companion content.",
             updated=_FRESH_DATE,
             wikilinks=["entities/skills/clean-b"],
         )
         make_entity_page(
-            wiki, "clean-b", ["python"],
+            wiki,
+            "clean-b",
+            ["python"],
             body="Paired with [[entities/skills/clean-a]].",
             updated=_FRESH_DATE,
             wikilinks=["entities/skills/clean-a"],
@@ -138,15 +146,16 @@ class TestLintCleanPagePasses:
         pages = _collect(wiki)
 
         fm_findings = [
-            f for f in wl.check_missing_frontmatter(pages)
+            f
+            for f in wl.check_missing_frontmatter(pages)
             if "clean-a" in f.page or "clean-b" in f.page
         ]
         stale_findings = [
-            f for f in wl.check_stale_content(pages)
-            if "clean-a" in f.page or "clean-b" in f.page
+            f for f in wl.check_stale_content(pages) if "clean-a" in f.page or "clean-b" in f.page
         ]
         broken_findings = [
-            f for f in wl.check_broken_wikilinks(pages)
+            f
+            for f in wl.check_broken_wikilinks(pages)
             if "clean-a" in f.page or "clean-b" in f.page
         ]
 
@@ -197,18 +206,20 @@ class TestLintFixIndex:
     def test_fix_index_routes_multi_entity_pages_to_correct_sections(self, tmp_path: Path) -> None:
         wiki = make_wiki(tmp_path)
         (wiki / "index.md").write_text(
-            "\n".join([
-                "# Index",
-                "",
-                "## Skills",
-                "",
-                "## Agents",
-                "",
-                "## MCP Servers",
-                "",
-                "## Harnesses",
-                "",
-            ]),
+            "\n".join(
+                [
+                    "# Index",
+                    "",
+                    "## Skills",
+                    "",
+                    "## Agents",
+                    "",
+                    "## MCP Servers",
+                    "",
+                    "## Harnesses",
+                    "",
+                ]
+            ),
             encoding="utf-8",
         )
 

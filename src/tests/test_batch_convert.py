@@ -34,6 +34,7 @@ from batch_convert import (  # noqa: E402
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _make_skill_md(tmp_path: Path, content: str, name: str = "test-skill") -> Path:
     """Write a SKILL.md under tmp_path/<name>/SKILL.md and return the path."""
     skill_dir = tmp_path / name
@@ -118,6 +119,7 @@ def _fake_skill_content(num_lines: int = 250) -> str:
 # classify_section
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestClassifySection:
     def test_classify_section_scope(self):
         """Section with 'prerequisite' and 'constraint' keywords -> scope."""
@@ -150,10 +152,7 @@ class TestClassifySection:
     def test_classify_section_build(self):
         """Generic instruction section with no strong keywords -> build (default)."""
         header = "## Implementation"
-        body = "\n".join(
-            f"        Write the {i}th component of the module."
-            for i in range(1, 12)
-        )
+        body = "\n".join(f"        Write the {i}th component of the module." for i in range(1, 12))
         result = classify_section(header, body)
         assert result == "build", f"Expected 'build', got {result!r}"
 
@@ -174,6 +173,7 @@ class TestClassifySection:
 # ─────────────────────────────────────────────────────────────────────────────
 # extract_gate_questions
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestExtractGateQuestions:
     def test_extract_gate_questions_avoid(self):
@@ -221,6 +221,7 @@ class TestExtractGateQuestions:
 # ─────────────────────────────────────────────────────────────────────────────
 # parse_sections
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestParseSections:
     def test_parse_sections_basic(self):
@@ -285,6 +286,7 @@ class TestParseSections:
 # ─────────────────────────────────────────────────────────────────────────────
 # split_into_chunks
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestSplitIntoChunks:
     def test_split_into_chunks_short_text(self):
@@ -381,6 +383,7 @@ class TestSplitIntoChunks:
 # ─────────────────────────────────────────────────────────────────────────────
 # convert_skill — end-to-end
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestConvertSkill:
     """End-to-end tests for convert_skill().
@@ -498,9 +501,7 @@ class TestConvertSkill:
         orchestrator = skill_250.parent / "SKILL.md"
         assert orchestrator.exists()
         line_count = len(orchestrator.read_text(encoding="utf-8").split("\n"))
-        assert line_count < 30, (
-            f"SKILL.md orchestrator has {line_count} lines; expected < 30"
-        )
+        assert line_count < 30, f"SKILL.md orchestrator has {line_count} lines; expected < 30"
 
     def test_convert_skill_check_gates_has_questions(self, skill_250: Path):
         """check-gates.md contains at least one YES/NO question."""
@@ -511,7 +512,8 @@ class TestConvertSkill:
         assert "YES/NO" in gates_content, "check-gates.md has no YES/NO questions"
         # Count actual question lines (numbered list items)
         question_lines = [
-            line for line in gates_content.split("\n")
+            line
+            for line in gates_content.split("\n")
             if line.strip() and line.strip()[0].isdigit() and "YES/NO" in line
         ]
         assert len(question_lines) >= 1
@@ -519,8 +521,7 @@ class TestConvertSkill:
     def test_convert_skill_shards_long_non_build_stage(self, tmp_path: Path):
         """Long scope/plan/check/deliver stages are split behind short indexes."""
         body = "\n".join(
-            f"- Requirement {i}: preserve this constraint exactly."
-            for i in range(220)
+            f"- Requirement {i}: preserve this constraint exactly." for i in range(220)
         )
         content = dedent(f"""\
             ---
@@ -569,8 +570,15 @@ class TestConvertSkill:
         """convert_skill returns a dict with all expected stat keys when converted."""
         result = convert_skill(skill_250)
         assert result["status"] == "converted"
-        for key in ("skill", "original_lines", "pipeline_files", "gate_questions",
-                    "max_file_lines", "build_splits", "reference_files"):
+        for key in (
+            "skill",
+            "original_lines",
+            "pipeline_files",
+            "gate_questions",
+            "max_file_lines",
+            "build_splits",
+            "reference_files",
+        ):
             assert key in result, f"Missing key {key!r} in result"
 
     def test_convert_skill_original_lines_accurate(self, skill_250: Path):
@@ -595,9 +603,7 @@ class TestConvertSkill:
         # Either way, SKILL.md.original must still hold the ORIGINAL content.
         original_path = skill_250.parent / "SKILL.md.original"
         preserved = original_path.read_text(encoding="utf-8")
-        assert preserved == original_content, (
-            "SKILL.md.original was overwritten on the second call"
-        )
+        assert preserved == original_content, "SKILL.md.original was overwritten on the second call"
 
     # ── output_dir override ───────────────────────────────────────────────────
 

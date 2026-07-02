@@ -63,13 +63,17 @@ def _symlink_to(target: Path, link: Path, *, target_is_directory: bool) -> None:
 class TestInstallAgent:
     def test_invalid_slug(self, wiki_dir: Path, agents_dir: Path) -> None:
         r = agent_install.install_agent(
-            "../evil", wiki_dir=wiki_dir, agents_dir=agents_dir,
+            "../evil",
+            wiki_dir=wiki_dir,
+            agents_dir=agents_dir,
         )
         assert r.status == "failed"
 
     def test_not_in_wiki(self, wiki_dir: Path, agents_dir: Path) -> None:
         r = agent_install.install_agent(
-            "ghost", wiki_dir=wiki_dir, agents_dir=agents_dir,
+            "ghost",
+            wiki_dir=wiki_dir,
+            agents_dir=agents_dir,
         )
         assert r.status == "not-in-wiki"
         assert "ctx-agent-mirror" in r.message
@@ -88,7 +92,9 @@ class TestInstallAgent:
         _symlink_to(outside, source, target_is_directory=False)
 
         r = agent_install.install_agent(
-            "architect", wiki_dir=wiki_dir, agents_dir=agents_dir,
+            "architect",
+            wiki_dir=wiki_dir,
+            agents_dir=agents_dir,
         )
 
         assert r.status == "failed"
@@ -104,15 +110,14 @@ class TestInstallAgent:
     ) -> None:
         _seed_agent(wiki_dir, "architect")
         r = agent_install.install_agent(
-            "architect", wiki_dir=wiki_dir, agents_dir=agents_dir,
+            "architect",
+            wiki_dir=wiki_dir,
+            agents_dir=agents_dir,
         )
         assert r.status == "installed"
         assert (agents_dir / "architect.md").read_text(encoding="utf-8").startswith("agent body")
         m = install_utils.load_manifest()
-        assert any(
-            e["skill"] == "architect" and e["entity_type"] == "agent"
-            for e in m["load"]
-        )
+        assert any(e["skill"] == "architect" and e["entity_type"] == "agent" for e in m["load"])
         entity = wiki_dir / "entities" / "agents" / "architect.md"
         assert "status: installed" in entity.read_text(encoding="utf-8")
 
@@ -124,7 +129,10 @@ class TestInstallAgent:
     ) -> None:
         _seed_agent(wiki_dir, "a")
         r = agent_install.install_agent(
-            "a", wiki_dir=wiki_dir, agents_dir=agents_dir, dry_run=True,
+            "a",
+            wiki_dir=wiki_dir,
+            agents_dir=agents_dir,
+            dry_run=True,
         )
         assert r.status == "would-install"
         assert not (agents_dir / "a.md").exists()
@@ -139,7 +147,9 @@ class TestInstallAgent:
         _seed_agent(wiki_dir, "a")
         (agents_dir / "a.md").write_text("old\n", encoding="utf-8")
         r = agent_install.install_agent(
-            "a", wiki_dir=wiki_dir, agents_dir=agents_dir,
+            "a",
+            wiki_dir=wiki_dir,
+            agents_dir=agents_dir,
         )
         assert r.status == "skipped-existing"
         # Manifest reconciled.
@@ -157,7 +167,10 @@ class TestInstallAgent:
         _seed_agent(wiki_dir, "a")
         (agents_dir / "a.md").write_text("old\n", encoding="utf-8")
         r = agent_install.install_agent(
-            "a", wiki_dir=wiki_dir, agents_dir=agents_dir, dry_run=True,
+            "a",
+            wiki_dir=wiki_dir,
+            agents_dir=agents_dir,
+            dry_run=True,
         )
         assert r.status == "skipped-existing"
         assert install_utils.load_manifest()["load"] == []
@@ -171,7 +184,10 @@ class TestInstallAgent:
         _seed_agent(wiki_dir, "a")
         (agents_dir / "a.md").write_text("old\n", encoding="utf-8")
         r = agent_install.install_agent(
-            "a", wiki_dir=wiki_dir, agents_dir=agents_dir, force=True,
+            "a",
+            wiki_dir=wiki_dir,
+            agents_dir=agents_dir,
+            force=True,
         )
         assert r.status == "installed"
         content = (agents_dir / "a.md").read_text(encoding="utf-8")
@@ -195,9 +211,7 @@ class TestSplitSlugs:
         return ns
 
     def test_all_three_sources(self) -> None:
-        out = agent_install._split_slugs(
-            self._ns(slug="a", slugs="b,c", slugs_positional=["d"])
-        )
+        out = agent_install._split_slugs(self._ns(slug="a", slugs="b,c", slugs_positional=["d"]))
         assert out == ["a", "b", "c", "d"]
 
     def test_trims_comma_empties(self) -> None:
@@ -210,9 +224,7 @@ class TestSplitSlugs:
 
 
 class TestMain:
-    def test_no_args_exit_2(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_args_exit_2(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("sys.argv", ["ctx-agent-install"])
         with pytest.raises(SystemExit) as ei:
             agent_install.main()
@@ -229,9 +241,15 @@ class TestMain:
         _seed_agent(wiki_dir, "a")
         monkeypatch.setattr(
             "sys.argv",
-            ["ctx-agent-install", "--slug", "a",
-             "--wiki-dir", str(wiki_dir),
-             "--agents-dir", str(agents_dir)],
+            [
+                "ctx-agent-install",
+                "--slug",
+                "a",
+                "--wiki-dir",
+                str(wiki_dir),
+                "--agents-dir",
+                str(agents_dir),
+            ],
         )
         with pytest.raises(SystemExit) as ei:
             agent_install.main()
@@ -249,10 +267,16 @@ class TestMain:
         _seed_agent(wiki_dir, "a")
         monkeypatch.setattr(
             "sys.argv",
-            ["ctx-agent-install", "--slug", "a",
-             "--wiki-dir", str(wiki_dir),
-             "--agents-dir", str(agents_dir),
-             "--json"],
+            [
+                "ctx-agent-install",
+                "--slug",
+                "a",
+                "--wiki-dir",
+                str(wiki_dir),
+                "--agents-dir",
+                str(agents_dir),
+                "--json",
+            ],
         )
         with pytest.raises(SystemExit):
             agent_install.main()
@@ -272,10 +296,18 @@ class TestMain:
         _seed_agent(wiki_dir, "b")
         monkeypatch.setattr(
             "sys.argv",
-            ["ctx-agent-install", "--slug", "a", "--slugs", "a,b",
-             "--wiki-dir", str(wiki_dir),
-             "--agents-dir", str(agents_dir),
-             "--json"],
+            [
+                "ctx-agent-install",
+                "--slug",
+                "a",
+                "--slugs",
+                "a,b",
+                "--wiki-dir",
+                str(wiki_dir),
+                "--agents-dir",
+                str(agents_dir),
+                "--json",
+            ],
         )
         with pytest.raises(SystemExit):
             agent_install.main()
@@ -290,9 +322,14 @@ class TestMain:
     ) -> None:
         monkeypatch.setattr(
             "sys.argv",
-            ["ctx-agent-install", "ghost",
-             "--wiki-dir", str(wiki_dir),
-             "--agents-dir", str(agents_dir)],
+            [
+                "ctx-agent-install",
+                "ghost",
+                "--wiki-dir",
+                str(wiki_dir),
+                "--agents-dir",
+                str(agents_dir),
+            ],
         )
         with pytest.raises(SystemExit) as ei:
             agent_install.main()
@@ -309,9 +346,15 @@ class TestMain:
         (agents_dir / "a.md").write_text("x\n", encoding="utf-8")
         monkeypatch.setattr(
             "sys.argv",
-            ["ctx-agent-install", "--slug", "a",
-             "--wiki-dir", str(wiki_dir),
-             "--agents-dir", str(agents_dir)],
+            [
+                "ctx-agent-install",
+                "--slug",
+                "a",
+                "--wiki-dir",
+                str(wiki_dir),
+                "--agents-dir",
+                str(agents_dir),
+            ],
         )
         with pytest.raises(SystemExit) as ei:
             agent_install.main()

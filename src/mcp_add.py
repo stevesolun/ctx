@@ -166,16 +166,12 @@ def _render_existing_update_page(
         name=str(updated_fm.get("name") or record.name),
         description=kept_description,
         sources=tuple(merged_sources),
-        github_url=_optional_text_from_frontmatter(
-            updated_fm.get("github_url"), record.github_url
-        ),
+        github_url=_optional_text_from_frontmatter(updated_fm.get("github_url"), record.github_url),
         homepage_url=_optional_text_from_frontmatter(
             updated_fm.get("homepage_url"), record.homepage_url
         ),
         tags=_tuple_from_frontmatter(updated_fm.get("tags"), record.tags),
-        transports=_tuple_from_frontmatter(
-            updated_fm.get("transports"), record.transports
-        ),
+        transports=_tuple_from_frontmatter(updated_fm.get("transports"), record.transports),
     )
     rendered_text = generate_mcp_page(render_record)
     return _rewrite_frontmatter(rendered_text, updated_fm)
@@ -222,9 +218,7 @@ def _scan_for_github_url(mcp_dir: Path, target: str) -> Path | None:
     return None
 
 
-def _find_existing_by_github_url(
-    mcp_dir: Path, target_github_url: str | None
-) -> Path | None:
+def _find_existing_by_github_url(mcp_dir: Path, target_github_url: str | None) -> Path | None:
     """Return the path of an existing entity page for ``target_github_url``.
 
     Phase 3.6 cross-source dedup: when awesome-mcp and pulsemcp both
@@ -271,9 +265,7 @@ def _find_existing_by_github_url(
         try:
             relpath = hit.relative_to(mcp_dir).as_posix()
             slug = hit.stem
-            mcp_canonical_index.upsert(
-                mcp_dir, target, slug=slug, relpath=relpath, index=index
-            )
+            mcp_canonical_index.upsert(mcp_dir, target, slug=slug, relpath=relpath, index=index)
         except (OSError, ValueError):
             # Index-repair failure must not block the dedup decision;
             # the next successful add will get another chance to repair.
@@ -459,7 +451,7 @@ def add_mcp(
     is_new_page: bool
     merged_sources: list[str]
     decision = None  # Filled only on the new-record path; new entries
-                     # carry their intake findings forward into the log.
+    # carry their intake findings forward into the log.
     corpus_text = ""
 
     # Phase 1 of branching: compute the read-side state. No serialization
@@ -673,9 +665,7 @@ def _process_batch(
 
 def main() -> None:
     """Entry point for the ctx-mcp-add CLI."""
-    parser = argparse.ArgumentParser(
-        description="Add MCP server records to the wiki catalog"
-    )
+    parser = argparse.ArgumentParser(description="Add MCP server records to the wiki catalog")
 
     source_group = parser.add_mutually_exclusive_group(required=True)
     source_group.add_argument(
@@ -729,9 +719,7 @@ def main() -> None:
         if not jsonl_path.exists():
             print(f"Error: {jsonl_path} does not exist.", file=sys.stderr)
             sys.exit(1)
-        for lineno, line in enumerate(
-            jsonl_path.read_text(encoding="utf-8-sig").splitlines(), 1
-        ):
+        for lineno, line in enumerate(jsonl_path.read_text(encoding="utf-8-sig").splitlines(), 1):
             line = line.lstrip("\ufeff").strip()
             if not line:
                 continue

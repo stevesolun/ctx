@@ -120,14 +120,16 @@ def test_dashboard_agent_unload_preserves_same_slug_skill(
     manifest_path = claude_dir / "skill-manifest.json"
     manifest_path.parent.mkdir(parents=True)
     manifest_path.write_text(
-        json.dumps({
-            "load": [
-                {"skill": "debugger", "entity_type": "skill", "source": "seed"},
-                {"skill": "debugger", "entity_type": "agent", "source": "seed"},
-            ],
-            "unload": [],
-            "warnings": [],
-        }),
+        json.dumps(
+            {
+                "load": [
+                    {"skill": "debugger", "entity_type": "skill", "source": "seed"},
+                    {"skill": "debugger", "entity_type": "agent", "source": "seed"},
+                ],
+                "unload": [],
+                "warnings": [],
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.setitem(sys.modules, "ctx_audit_log", _AuditLog)
@@ -143,12 +145,8 @@ def test_dashboard_agent_unload_preserves_same_slug_skill(
 
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert ok, message
-    assert data["load"] == [
-        {"skill": "debugger", "entity_type": "skill", "source": "seed"}
-    ]
-    assert data["unload"] == [
-        {"skill": "debugger", "entity_type": "agent", "source": "seed"}
-    ]
+    assert data["load"] == [{"skill": "debugger", "entity_type": "skill", "source": "seed"}]
+    assert data["unload"] == [{"skill": "debugger", "entity_type": "agent", "source": "seed"}]
 
 
 @pytest.fixture()
@@ -159,7 +157,9 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (home / ".claude" / "skills" / "goodskill" / "SKILL.md").write_text("# good", encoding="utf-8")
     (home / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
     (home / ".claude" / "outside-skill").mkdir(parents=True)
-    (home / ".claude" / "outside-skill" / "SKILL.md").write_text("# outside skill", encoding="utf-8")
+    (home / ".claude" / "outside-skill" / "SKILL.md").write_text(
+        "# outside skill", encoding="utf-8"
+    )
     (home / ".claude" / "agents").mkdir(parents=True, exist_ok=True)
     (home / ".claude" / "agents" / "goodagent.md").write_text("# good agent", encoding="utf-8")
     (home / ".claude" / "outside-agent.md").write_text("# outside agent", encoding="utf-8")
@@ -168,6 +168,7 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("USERPROFILE", str(home))  # Windows
 
     from ctx.adapters.claude_code import skill_loader
+
     importlib.reload(skill_loader)
     monkeypatch.setattr(skill_loader, "SKILLS_DIR", home / ".claude" / "skills")
     monkeypatch.setattr(skill_loader, "AGENTS_DIR", home / ".claude" / "agents")
@@ -208,7 +209,7 @@ def test_main_security_scan_outputs_report_and_targets_bundle(
     loader.main()
 
     captured = capsys.readouterr()
-    payload = json.loads(captured.out[captured.out.index("{"):])
+    payload = json.loads(captured.out[captured.out.index("{") :])
     assert scan_targets == [home / ".claude" / "skills" / "goodskill"]
     assert "SkillSpector report:" in captured.out
     assert "static scan clean" in captured.out
@@ -277,7 +278,7 @@ def test_main_security_scan_missing_scanner_is_visible(
     loader.main()
 
     captured = capsys.readouterr()
-    payload = json.loads(captured.out[captured.out.index("{"):])
+    payload = json.loads(captured.out[captured.out.index("{") :])
     assert "SkillSpector: missing" in captured.out
     assert "SkillSpector is not installed or not on PATH." in captured.out
     assert payload["loaded"][0]["security_scan"]["status"] == "missing"
@@ -309,7 +310,7 @@ def test_main_security_scan_required_blocks_manifest_write(
         loader.main()
 
     captured = capsys.readouterr()
-    payload = json.loads(captured.out[captured.out.index("{"):])
+    payload = json.loads(captured.out[captured.out.index("{") :])
     assert exc_info.value.code == 1
     assert "Blocked: goodskill [skill] failed SkillSpector" in captured.err
     assert payload["loaded"] == []
@@ -341,7 +342,7 @@ def test_main_security_scan_skips_agents(
     loader.main()
 
     captured = capsys.readouterr()
-    payload = json.loads(captured.out[captured.out.index("{"):])
+    payload = json.loads(captured.out[captured.out.index("{") :])
     assert scan_calls == 0
     assert "SkillSpector report:" not in captured.out
     assert payload["loaded"][0]["type"] == "agent"
@@ -401,12 +402,14 @@ def test_rglob_pattern_cannot_escape_agents_dir(fake_home):
 def test_validate_skill_name_accepts_common_names(fake_home):
     loader, _ = fake_home
     from ctx.core.wiki.wiki_utils import validate_skill_name
+
     for name in ("fastapi-pro", "docker_expert", "py3.11", "a", "Aa0._-"):
         assert validate_skill_name(name) == name
 
 
 def test_validate_skill_name_rejects_bad(fake_home):
     from ctx.core.wiki.wiki_utils import validate_skill_name
+
     for bad in ("../x", "x/y", "*", "", "_leading", ".leading", "-leading"):
         with pytest.raises(ValueError):
             validate_skill_name(bad)
@@ -420,17 +423,14 @@ def test_validate_skill_name_rejects_bad(fake_home):
 # wrote entries without an ``entity_type`` field. A same-slug
 # skill + agent collision silently dropped one of them.
 
-class TestUpdateManifestEntityType:
 
+class TestUpdateManifestEntityType:
     def test_writes_entity_type_field(self, fake_home):
         loader, home = fake_home
         manifest_path = home / ".claude" / "skill-manifest.json"
         loader.update_manifest("goodskill", entity_type="skill")
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        entries = [
-            e for e in data["load"]
-            if e.get("skill") == "goodskill"
-        ]
+        entries = [e for e in data["load"] if e.get("skill") == "goodskill"]
         assert len(entries) == 1
         assert entries[0].get("entity_type") == "skill"
 
@@ -443,10 +443,7 @@ class TestUpdateManifestEntityType:
         loader.update_manifest("code-reviewer", entity_type="skill")
         loader.update_manifest("code-reviewer", entity_type="agent")
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        pairs = {
-            (e.get("skill"), e.get("entity_type"))
-            for e in data["load"]
-        }
+        pairs = {(e.get("skill"), e.get("entity_type")) for e in data["load"]}
         assert ("code-reviewer", "skill") in pairs
         assert ("code-reviewer", "agent") in pairs
 
@@ -478,11 +475,16 @@ class TestUpdateManifestEntityType:
         ``entity_type`` in the old entry implicitly meant ``skill``."""
         loader, home = fake_home
         manifest_path = home / ".claude" / "skill-manifest.json"
-        manifest_path.write_text(json.dumps({
-            "load": [{"skill": "foo", "source": "legacy"}],
-            "unload": [],
-            "warnings": [],
-        }), encoding="utf-8")
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "load": [{"skill": "foo", "source": "legacy"}],
+                    "unload": [],
+                    "warnings": [],
+                }
+            ),
+            encoding="utf-8",
+        )
         loader.update_manifest("foo", entity_type="skill")
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
         foo_entries = [e for e in data["load"] if e.get("skill") == "foo"]
@@ -515,18 +517,20 @@ class TestUpdateManifestEntityType:
         manifest_path.parent.mkdir(parents=True)
         slugs = [f"skill-{i}" for i in range(8)]
         manifest_path.write_text(
-            json.dumps({
-                "load": [
-                    {
-                        "skill": slug,
-                        "entity_type": "skill",
-                        "source": "seed",
-                    }
-                    for slug in slugs
-                ],
-                "unload": [],
-                "warnings": [],
-            }),
+            json.dumps(
+                {
+                    "load": [
+                        {
+                            "skill": slug,
+                            "entity_type": "skill",
+                            "source": "seed",
+                        }
+                        for slug in slugs
+                    ],
+                    "unload": [],
+                    "warnings": [],
+                }
+            ),
             encoding="utf-8",
         )
 

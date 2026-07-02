@@ -47,7 +47,7 @@ BAD_HASHES = [
     "foo.bar",
     "foo:bar",
     "",
-    "x" * 65,           # too long
+    "x" * 65,  # too long
     "bad hash",
     "has\nnewline",
 ]
@@ -65,8 +65,7 @@ def test_toolbox_verdict_rejects_bad_plan_hash(bad):
         tv._validate_plan_hash(bad)
 
 
-@pytest.mark.parametrize("good", ["a", "abc123", "plan-1", "plan_2",
-                                   "0123456789abcdef", "A" * 64])
+@pytest.mark.parametrize("good", ["a", "abc123", "plan-1", "plan_2", "0123456789abcdef", "A" * 64])
 def test_good_plan_hashes_accepted(good):
     assert cr._validate_plan_hash(good) == good
     assert tv._validate_plan_hash(good) == good
@@ -94,6 +93,7 @@ def test_plan_from_dict_rejects_traversal():
 
 
 # ── file_lock cross-thread serialization ────────────────────────────────────
+
 
 def test_file_lock_serializes_concurrent_writers(tmp_path):
     """Two threads both incrementing under the lock must see +2, not +1."""
@@ -127,6 +127,7 @@ def test_file_lock_creates_parent(tmp_path):
 
 # ── toolbox.validate no longer misroutes YAML paths ─────────────────────────
 
+
 def test_validate_reads_supplied_yaml_file(tmp_path, capsys, monkeypatch):
     """
     Prior behavior: `toolbox validate <path>.yaml` silently validated
@@ -158,6 +159,7 @@ def test_validate_reads_supplied_yaml_file(tmp_path, capsys, monkeypatch):
 
 # ── dashboard/install hardening ─────────────────────────────────────────────
 
+
 def _write_mcp_entity(wiki_dir: Path, slug: str, frontmatter: dict[str, str]) -> Path:
     shard = slug[0] if slug and slug[0].isalpha() else "0-9"
     path = wiki_dir / "entities" / "mcp-servers" / shard / f"{slug}.md"
@@ -171,8 +173,7 @@ def _write_mcp_entity(wiki_dir: Path, slug: str, frontmatter: dict[str, str]) ->
 
 def test_docs_sanitizer_rewrites_unquoted_active_urls() -> None:
     cleaned = dashboard_docs.sanitize_docs_html(
-        '<a href=javascript:alert(1)>bad</a>'
-        '<img src=data:text/html,<svg/onload=alert(1)>>'
+        "<a href=javascript:alert(1)>bad</a><img src=data:text/html,<svg/onload=alert(1)>>"
     )
 
     assert "javascript:" not in cleaned.lower()
@@ -258,10 +259,7 @@ def test_harness_run_redacts_token_shaped_output_not_present_in_parent_env(
 
     def fake_run(_cmd: list[str], **_kwargs: Any) -> _FakeRun:
         return _FakeRun(
-            stdout=(
-                "created OPENAI_API_KEY=sk-testsecret1234567890 "
-                "and ghp_supersecret1234567890"
-            )
+            stdout=("created OPENAI_API_KEY=sk-testsecret1234567890 and ghp_supersecret1234567890")
         )
 
     monkeypatch.setattr(harness_install.subprocess, "run", fake_run)

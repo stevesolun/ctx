@@ -90,14 +90,7 @@ def _valid_md(name: str, description: str, extra_body: str = "") -> str:
         "least one H2 section, and more than the minimum required body "
         f"length. {extra_body}".strip()
     )
-    return (
-        "---\n"
-        f"name: {name}\n"
-        f"description: {description}\n"
-        "---\n"
-        f"# {name}\n\n"
-        f"{body}\n"
-    )
+    return f"---\nname: {name}\ndescription: {description}\n---\n# {name}\n\n{body}\n"
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -211,9 +204,7 @@ class TestStructuralShortCircuit:
         assert "FRONTMATTER_MISSING" in codes
         assert reset_intake_pipeline.call_count == 0
 
-    def test_empty_corpus_allows_valid_candidate_without_embed(
-        self, reset_intake_pipeline
-    ):
+    def test_empty_corpus_allows_valid_candidate_without_embed(self, reset_intake_pipeline):
         decision = pipeline.check_intake(
             _valid_md("first", "first skill ever added"),
             "skills",
@@ -234,6 +225,7 @@ class TestRoundTrip:
         # record + check round-trip returns cosine 1.0.
         md = _valid_md("alpha", "alpha helper skill")
         from intake_gate import compose_corpus_text
+
         text = compose_corpus_text(md)
         vec = np.zeros(8, dtype=np.float32)
         vec[0] = 1.0
@@ -264,6 +256,7 @@ class TestRoundTrip:
 
     def test_distinct_content_passes(self, reset_intake_pipeline):
         from intake_gate import compose_corpus_text
+
         md_a = _valid_md("alpha", "alpha helper skill")
         md_b = _valid_md("bravo", "something completely unrelated")
 
@@ -294,6 +287,7 @@ class TestRoundTrip:
 class TestSubjectTypeIsolation:
     def test_skills_and_agents_do_not_cross_pollute(self, reset_intake_pipeline):
         from intake_gate import compose_corpus_text
+
         md = _valid_md("shared", "shared description body")
         text = compose_corpus_text(md)
         vec = np.zeros(8, dtype=np.float32)
@@ -302,7 +296,9 @@ class TestSubjectTypeIsolation:
 
         # Record under skills.
         pipeline.record_embedding(
-            subject_id="shared", raw_md=md, subject_type="skills",
+            subject_id="shared",
+            raw_md=md,
+            subject_type="skills",
         )
 
         # Identical candidate submitted as an agent must NOT see the

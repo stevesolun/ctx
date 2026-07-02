@@ -78,9 +78,7 @@ def fake_claude(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         state["calls"].append(cmd)
         if state["raise_exc"] is not None:
             raise state["raise_exc"]
-        return _FakeProc(
-            returncode=state["rc"], stdout=state["stdout"], stderr=state["stderr"]
-        )
+        return _FakeProc(returncode=state["rc"], stdout=state["stdout"], stderr=state["stderr"])
 
     monkeypatch.setattr(mcp_install.subprocess, "run", fake_run)
     return state
@@ -121,17 +119,13 @@ class TestParseFrontmatter:
         assert mcp_install._parse_entity_frontmatter(f) == {}
 
     def test_flat_scalars(self, wiki_dir: Path) -> None:
-        path = _write_entity(
-            wiki_dir, "github", {"name": "GitHub MCP", "stars": "42"}
-        )
+        path = _write_entity(wiki_dir, "github", {"name": "GitHub MCP", "stars": "42"})
         fm = mcp_install._parse_entity_frontmatter(path)
         assert fm["name"] == "GitHub MCP"
         assert fm["stars"] == "42"
 
     def test_quoted_values_unwrapped(self, wiki_dir: Path) -> None:
-        path = _write_entity(
-            wiki_dir, "quoted", {"description": '"a: b"'}
-        )
+        path = _write_entity(wiki_dir, "quoted", {"description": '"a: b"'})
         fm = mcp_install._parse_entity_frontmatter(path)
         assert fm["description"] == "a: b"
 
@@ -190,9 +184,7 @@ class TestRunClaudeMcp:
         assert rc == 0 and out == "ok"
         assert fake_claude["calls"][0] == ["claude", "mcp", "list"]
 
-    def test_claude_not_on_path(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_claude_not_on_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def boom(*_a: Any, **_kw: Any) -> Any:
             raise FileNotFoundError("claude not found")
 
@@ -236,9 +228,7 @@ class TestRenderCard:
 
     def test_quality_grade_needs_score(self) -> None:
         """Grade without score: the grade line is skipped entirely."""
-        out = mcp_install.render_card(
-            {"quality_grade": "A"}, "s", command=None
-        )
+        out = mcp_install.render_card({"quality_grade": "A"}, "s", command=None)
         assert "quality:" not in out
 
     def test_all_fields_rendered(self) -> None:
@@ -252,8 +242,7 @@ class TestRenderCard:
             "author": "alice",
         }
         out = mcp_install.render_card(fm, "gh", command="npx -y p")
-        for needle in ["GitHub", "test", "https://example/x", "42", "grade A",
-                       "alice", "npx -y p"]:
+        for needle in ["GitHub", "test", "https://example/x", "42", "grade A", "alice", "npx -y p"]:
             assert needle in out
 
 
@@ -263,14 +252,20 @@ class TestRenderCard:
 class TestInstallMcp:
     def test_invalid_slug_rejected(self, wiki_dir: Path) -> None:
         r = mcp_install.install_mcp(
-            "../evil", wiki_dir=wiki_dir, command="npx -y p", auto=True,
+            "../evil",
+            wiki_dir=wiki_dir,
+            command="npx -y p",
+            auto=True,
         )
         assert r.status == "not-in-wiki"
         assert "invalid slug" in r.message
 
     def test_not_in_wiki(self, wiki_dir: Path) -> None:
         r = mcp_install.install_mcp(
-            "ghost", wiki_dir=wiki_dir, command="npx -y p", auto=True,
+            "ghost",
+            wiki_dir=wiki_dir,
+            command="npx -y p",
+            auto=True,
         )
         assert r.status == "not-in-wiki"
 
@@ -286,7 +281,10 @@ class TestInstallMcp:
         _symlink_to(outside, entity, target_is_directory=False)
 
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, command="npx -y p", auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            command="npx -y p",
+            auto=True,
         )
 
         assert r.status == "failed"
@@ -300,7 +298,10 @@ class TestInstallMcp:
     ) -> None:
         _write_entity(wiki_dir, "gh", {"status": "installed"})
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, command="npx -y p", auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            command="npx -y p",
+            auto=True,
         )
         assert r.status == "skipped-existing"
 
@@ -319,12 +320,14 @@ class TestInstallMcp:
 
         assert r.status == "skipped-existing"
         manifest = install_utils.load_manifest()
-        assert manifest["load"] == [{
-            "skill": "gh",
-            "entity_type": "mcp-server",
-            "source": "ctx-mcp-install",
-            "command": "npx -y old-pkg",
-        }]
+        assert manifest["load"] == [
+            {
+                "skill": "gh",
+                "entity_type": "mcp-server",
+                "source": "ctx-mcp-install",
+                "command": "npx -y old-pkg",
+            }
+        ]
 
     def test_force_overrides_skip(
         self,
@@ -334,8 +337,11 @@ class TestInstallMcp:
     ) -> None:
         _write_entity(wiki_dir, "gh", {"status": "installed"})
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, command="npx -y p",
-            auto=True, force=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            command="npx -y p",
+            auto=True,
+            force=True,
         )
         assert r.status == "installed"
 
@@ -367,12 +373,14 @@ class TestInstallMcp:
 
         assert r.status == "installed"
         manifest = install_utils.load_manifest()
-        assert manifest["load"] == [{
-            "skill": "gh",
-            "entity_type": "mcp-server",
-            "source": "ctx-mcp-install",
-            "command": "npx -y new-pkg",
-        }]
+        assert manifest["load"] == [
+            {
+                "skill": "gh",
+                "entity_type": "mcp-server",
+                "source": "ctx-mcp-install",
+                "command": "npx -y new-pkg",
+            }
+        ]
 
     def test_no_command_no_json(self, wiki_dir: Path) -> None:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
@@ -383,17 +391,20 @@ class TestInstallMcp:
     def test_invalid_json_config(self, wiki_dir: Path) -> None:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, json_config="{not json",
+            "gh",
+            wiki_dir=wiki_dir,
+            json_config="{not json",
             auto=True,
         )
         assert r.status == "invalid-cmd"
 
-    def test_dry_run_never_invokes_cli(
-        self, wiki_dir: Path, fake_claude: dict[str, Any]
-    ) -> None:
+    def test_dry_run_never_invokes_cli(self, wiki_dir: Path, fake_claude: dict[str, Any]) -> None:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, command="npx -y p", dry_run=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            command="npx -y p",
+            dry_run=True,
         )
         assert r.status == "would-install"
         assert fake_claude["calls"] == []
@@ -407,7 +418,9 @@ class TestInstallMcp:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
         monkeypatch.setattr("builtins.input", lambda _prompt: "n")
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, command="npx -y p",
+            "gh",
+            wiki_dir=wiki_dir,
+            command="npx -y p",
         )
         assert r.status == "aborted"
         assert fake_claude["calls"] == []
@@ -433,16 +446,16 @@ class TestInstallMcp:
         """rm -rf /  as install_cmd must be refused before shell-out."""
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, command="rm -rf /",
+            "gh",
+            wiki_dir=wiki_dir,
+            command="rm -rf /",
             auto=True,
         )
         assert r.status == "invalid-cmd"
         assert "allowlist" in r.message
         assert fake_claude["calls"] == []  # never reached the CLI
 
-    @pytest.mark.parametrize(
-        "exe", ["npx", "uvx", "node", "python", "python3", "deno", "bunx"]
-    )
+    @pytest.mark.parametrize("exe", ["npx", "uvx", "node", "python", "python3", "deno", "bunx"])
     def test_executable_allowlist_permits_known(
         self,
         wiki_dir: Path,
@@ -452,7 +465,9 @@ class TestInstallMcp:
     ) -> None:
         _write_entity(wiki_dir, f"srv-{exe}", {"status": "cataloged"})
         r = mcp_install.install_mcp(
-            f"srv-{exe}", wiki_dir=wiki_dir, command=f"{exe} -y pkg",
+            f"srv-{exe}",
+            wiki_dir=wiki_dir,
+            command=f"{exe} -y pkg",
             auto=True,
         )
         assert r.status == "installed"
@@ -462,7 +477,9 @@ class TestInstallMcp:
     ) -> None:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, command='npx -y "unclosed',
+            "gh",
+            wiki_dir=wiki_dir,
+            command='npx -y "unclosed',
             auto=True,
         )
         assert r.status == "invalid-cmd"
@@ -518,16 +535,19 @@ class TestInstallMcp:
     # code-execution argument forms must be rejected. A tampered frontmatter
     # install_cmd could otherwise invoke arbitrary interpreter-controlled
     # code through python, node, or deno.
-    @pytest.mark.parametrize("cmd", [
-        'python -c "import os; os.system(\'whoami\')"',
-        'python3 -c "pwn"',
-        "python -m http.server",
-        'python3 -m http.server',
-        "node -e require('fs').writeFileSync('/tmp/p','owned')",
-        'node --eval "process.exit(1)"',
-        'deno eval "await Deno.writeTextFile(\'/tmp/p\',\'x\')"',
-        'deno repl',
-    ])
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "python -c \"import os; os.system('whoami')\"",
+            'python3 -c "pwn"',
+            "python -m http.server",
+            "python3 -m http.server",
+            "node -e require('fs').writeFileSync('/tmp/p','owned')",
+            'node --eval "process.exit(1)"',
+            "deno eval \"await Deno.writeTextFile('/tmp/p','x')\"",
+            "deno repl",
+        ],
+    )
     def test_rejects_code_execution_args_through_allowlisted_interpreter(
         self,
         wiki_dir: Path,
@@ -538,7 +558,10 @@ class TestInstallMcp:
         """Each payload uses an allowlisted exec but a code-execution arg."""
         _write_entity(wiki_dir, "srv", {"status": "cataloged"})
         r = mcp_install.install_mcp(
-            "srv", wiki_dir=wiki_dir, command=cmd, auto=True,
+            "srv",
+            wiki_dir=wiki_dir,
+            command=cmd,
+            auto=True,
         )
         assert r.status == "invalid-cmd", (
             f"{cmd!r} slipped past arg-shape filter (status={r.status})"
@@ -546,15 +569,18 @@ class TestInstallMcp:
         assert fake_claude["calls"] == [], "claude CLI was invoked"
 
     # Non-regression: the supported package-launcher patterns MUST still work.
-    @pytest.mark.parametrize("cmd", [
-        "npx -y @modelcontextprotocol/server-github",
-        "uvx atlassian-mcp",
-        "bunx some-pkg",
-        "node /opt/mcp-server/index.js",         # script path, not -e
-        "python /opt/mcp-server/server.py",      # script path, not -c
-        "python3 ./server.py",
-        "deno run --allow-net /opt/mcp/main.ts", # deno run is the designed path
-    ])
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "npx -y @modelcontextprotocol/server-github",
+            "uvx atlassian-mcp",
+            "bunx some-pkg",
+            "node /opt/mcp-server/index.js",  # script path, not -e
+            "python /opt/mcp-server/server.py",  # script path, not -c
+            "python3 ./server.py",
+            "deno run --allow-net /opt/mcp/main.ts",  # deno run is the designed path
+        ],
+    )
     def test_accepts_supported_launcher_patterns(
         self,
         wiki_dir: Path,
@@ -564,7 +590,10 @@ class TestInstallMcp:
     ) -> None:
         _write_entity(wiki_dir, "srv-ok", {"status": "cataloged"})
         r = mcp_install.install_mcp(
-            "srv-ok", wiki_dir=wiki_dir, command=cmd, auto=True,
+            "srv-ok",
+            wiki_dir=wiki_dir,
+            command=cmd,
+            auto=True,
         )
         assert r.status == "installed", (
             f"legitimate launcher {cmd!r} falsely rejected (msg={r.message})"
@@ -616,7 +645,10 @@ class TestInstallMcp:
     ) -> None:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, command="   ", auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            command="   ",
+            auto=True,
         )
         assert r.status == "invalid-cmd"
         assert "empty" in r.message.lower()
@@ -631,7 +663,10 @@ class TestInstallMcp:
         fake_claude["rc"] = 1
         fake_claude["stderr"] = "boom"
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, command="npx -y p", auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            command="npx -y p",
+            auto=True,
         )
         assert r.status == "claude-cli-failed"
         assert "boom" in r.message
@@ -647,7 +682,10 @@ class TestInstallMcp:
         fake_claude["stderr"] = "failed GITHUB_TOKEN=ghp_supersecret123456789012345"
 
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, command="npx -y p", auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            command="npx -y p",
+            auto=True,
         )
 
         assert r.status == "claude-cli-failed"
@@ -664,7 +702,10 @@ class TestInstallMcp:
         fake_claude["stdout"] = "registered OPENAI_API_KEY=sk-supersecret123456789012345"
 
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, command="npx -y p", auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            command="npx -y p",
+            auto=True,
         )
 
         assert r.status == "installed"
@@ -680,7 +721,10 @@ class TestInstallMcp:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
         cfg = json.dumps({"command": "npx", "args": ["-y", "pkg"]})
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, json_config=cfg, auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            json_config=cfg,
+            auto=True,
         )
         assert r.status == "installed"
         call = fake_claude["calls"][0]
@@ -689,9 +733,12 @@ class TestInstallMcp:
         entry = manifest["load"][0]
         assert "json_config" not in entry
         assert "command" not in manifest["load"][0]
-        assert entry["json_config_sha256"] == hashlib.sha256(
-            cfg.encode("utf-8"),
-        ).hexdigest()
+        assert (
+            entry["json_config_sha256"]
+            == hashlib.sha256(
+                cfg.encode("utf-8"),
+            ).hexdigest()
+        )
         assert entry["json_config_command"] == "npx"
         assert entry["json_config_keys"] == "args,command"
         assert entry["json_config_args_count"] == "2"
@@ -703,13 +750,18 @@ class TestInstallMcp:
         isolated_manifest: Path,
     ) -> None:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
-        cfg = json.dumps({
-            "command": "npx",
-            "env": {"GITHUB_TOKEN": "ghp_supersecret123456789012345"},
-        })
+        cfg = json.dumps(
+            {
+                "command": "npx",
+                "env": {"GITHUB_TOKEN": "ghp_supersecret123456789012345"},
+            }
+        )
 
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, json_config=cfg, auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            json_config=cfg,
+            auto=True,
         )
 
         assert r.status == "invalid-cmd"
@@ -719,7 +771,10 @@ class TestInstallMcp:
     @pytest.mark.parametrize(
         "cfg",
         [
-            {"command": "npx", "args": ["-y", "pkg", "GITHUB_TOKEN=ghp_supersecret123456789012345"]},
+            {
+                "command": "npx",
+                "args": ["-y", "pkg", "GITHUB_TOKEN=ghp_supersecret123456789012345"],
+            },
             {"command": "npx", "args": ["-y", "pkg", "--api-key", "sk-supersecret123456789012345"]},
             {"command": "npx", "args": ["-y", "pkg", "--client-secret=plain-secret-value"]},
         ],
@@ -734,7 +789,10 @@ class TestInstallMcp:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
 
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, json_config=json.dumps(cfg), auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            json_config=json.dumps(cfg),
+            auto=True,
         )
 
         assert r.status == "invalid-cmd"
@@ -763,7 +821,10 @@ class TestInstallMcp:
         }
 
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, json_config=json.dumps(cfg), auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            json_config=json.dumps(cfg),
+            auto=True,
         )
 
         assert r.status == "invalid-cmd"
@@ -777,13 +838,18 @@ class TestInstallMcp:
         isolated_manifest: Path,
     ) -> None:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
-        cfg = json.dumps({
-            "command": "npx",
-            "env": {"GITHUB_TOKEN": "$GITHUB_TOKEN"},
-        })
+        cfg = json.dumps(
+            {
+                "command": "npx",
+                "env": {"GITHUB_TOKEN": "$GITHUB_TOKEN"},
+            }
+        )
 
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, json_config=cfg, auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            json_config=cfg,
+            auto=True,
         )
 
         assert r.status == "installed"
@@ -798,15 +864,20 @@ class TestInstallMcp:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
-        cfg = json.dumps({
-            "command": "npx",
-            "args": ["-y", "pkg"],
-            "env": {"GITHUB_TOKEN": "$GITHUB_TOKEN"},
-        })
+        cfg = json.dumps(
+            {
+                "command": "npx",
+                "args": ["-y", "pkg"],
+                "env": {"GITHUB_TOKEN": "$GITHUB_TOKEN"},
+            }
+        )
         monkeypatch.setattr("builtins.input", lambda _prompt: "y")
 
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, json_config=cfg, auto=False,
+            "gh",
+            wiki_dir=wiki_dir,
+            json_config=cfg,
+            auto=False,
         )
         out = capsys.readouterr().out
 
@@ -826,17 +897,17 @@ class TestInstallMcp:
     ) -> None:
         entity = _write_entity(wiki_dir, "gh", {"status": "cataloged"})
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, command="npx -y pkg", auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            command="npx -y pkg",
+            auto=True,
         )
         assert r.status == "installed"
         # Status flipped on disk.
         assert "status: installed" in entity.read_text(encoding="utf-8")
         # Manifest has the entry tagged as mcp-server.
         m = install_utils.load_manifest()
-        assert any(
-            e["skill"] == "gh" and e["entity_type"] == "mcp-server"
-            for e in m["load"]
-        )
+        assert any(e["skill"] == "gh" and e["entity_type"] == "mcp-server" for e in m["load"])
 
     def test_install_cmd_fallback_from_frontmatter(
         self,
@@ -845,11 +916,12 @@ class TestInstallMcp:
         isolated_manifest: Path,
     ) -> None:
         """Reinstall with --force reads install_cmd from frontmatter."""
-        _write_entity(
-            wiki_dir, "gh", {"status": "installed", "install_cmd": "npx -y pkg"}
-        )
+        _write_entity(wiki_dir, "gh", {"status": "installed", "install_cmd": "npx -y pkg"})
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, force=True, auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            force=True,
+            auto=True,
         )
         assert r.status == "installed"
         assert r.command == "npx -y pkg"
@@ -861,11 +933,12 @@ class TestInstallMcp:
         isolated_manifest: Path,
     ) -> None:
         """Frontmatter-supplied install_cmd must still pass the allowlist."""
-        _write_entity(
-            wiki_dir, "gh", {"status": "installed", "install_cmd": "rm -rf /"}
-        )
+        _write_entity(wiki_dir, "gh", {"status": "installed", "install_cmd": "rm -rf /"})
         r = mcp_install.install_mcp(
-            "gh", wiki_dir=wiki_dir, force=True, auto=True,
+            "gh",
+            wiki_dir=wiki_dir,
+            force=True,
+            auto=True,
         )
         assert r.status == "invalid-cmd"
         assert fake_claude["calls"] == []
@@ -934,12 +1007,14 @@ class TestUninstallMcp:
         assert "status: cataloged" in entity.read_text(encoding="utf-8")
         manifest = install_utils.load_manifest()
         assert manifest["load"] == []
-        assert manifest["unload"] == [{
-            "skill": "gh",
-            "entity_type": "mcp-server",
-            "source": "ctx-mcp-uninstall",
-            "command": "npx -y pkg",
-        }]
+        assert manifest["unload"] == [
+            {
+                "skill": "gh",
+                "entity_type": "mcp-server",
+                "source": "ctx-mcp-uninstall",
+                "command": "npx -y pkg",
+            }
+        ]
 
     def test_dry_run(
         self,
@@ -977,8 +1052,7 @@ class TestUninstallMcp:
         m = install_utils.load_manifest()
         assert not any(e["skill"] == "gh" for e in m["load"])
         assert any(
-            e["skill"] == "gh" and e["entity_type"] == "mcp-server"
-            and e["command"] == "npx -y pkg"
+            e["skill"] == "gh" and e["entity_type"] == "mcp-server" and e["command"] == "npx -y pkg"
             for e in m["unload"]
         )
 
@@ -993,31 +1067,39 @@ class TestUninstallMcp:
             "gh",
             {"status": "installed", "install_cmd": "npx -y pkg"},
         )
-        install_utils.save_manifest({
-            "load": [{
-                "skill": "gh",
-                "entity_type": "mcp-server",
-                "source": "ctx-mcp-install",
-                "command": "npx -y pkg",
-            }],
-            "unload": [{
-                "skill": "gh",
-                "entity_type": "mcp-server",
-                "source": "old-dashboard",
-            }],
-            "warnings": [],
-        })
+        install_utils.save_manifest(
+            {
+                "load": [
+                    {
+                        "skill": "gh",
+                        "entity_type": "mcp-server",
+                        "source": "ctx-mcp-install",
+                        "command": "npx -y pkg",
+                    }
+                ],
+                "unload": [
+                    {
+                        "skill": "gh",
+                        "entity_type": "mcp-server",
+                        "source": "old-dashboard",
+                    }
+                ],
+                "warnings": [],
+            }
+        )
 
         result = mcp_install.uninstall_mcp("gh", wiki_dir=wiki_dir)
 
         assert result.status == "uninstalled"
         manifest = install_utils.load_manifest()
-        assert manifest["unload"] == [{
-            "skill": "gh",
-            "entity_type": "mcp-server",
-            "source": "old-dashboard",
-            "command": "npx -y pkg",
-        }]
+        assert manifest["unload"] == [
+            {
+                "skill": "gh",
+                "entity_type": "mcp-server",
+                "source": "old-dashboard",
+                "command": "npx -y pkg",
+            }
+        ]
 
     def test_cli_failure_without_force(
         self,
@@ -1090,13 +1172,20 @@ class TestUninstallMcp:
 
 
 class TestPromptConfirm:
-    @pytest.mark.parametrize("ans,expected", [
-        ("y", True), ("Y", True), ("yes", True), ("YES", True),
-        ("n", False), ("no", False), ("", False), ("maybe", False),
-    ])
-    def test_answers(
-        self, monkeypatch: pytest.MonkeyPatch, ans: str, expected: bool
-    ) -> None:
+    @pytest.mark.parametrize(
+        "ans,expected",
+        [
+            ("y", True),
+            ("Y", True),
+            ("yes", True),
+            ("YES", True),
+            ("n", False),
+            ("no", False),
+            ("", False),
+            ("maybe", False),
+        ],
+    )
+    def test_answers(self, monkeypatch: pytest.MonkeyPatch, ans: str, expected: bool) -> None:
         monkeypatch.setattr("builtins.input", lambda _p: ans)
         assert mcp_install._prompt_confirm("go?") is expected
 
@@ -1130,8 +1219,7 @@ class TestInstallMain:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
         monkeypatch.setattr(
             "sys.argv",
-            ["ctx-mcp-install", "gh", "--cmd", "npx -y p",
-             "--auto", "--wiki-dir", str(wiki_dir)],
+            ["ctx-mcp-install", "gh", "--cmd", "npx -y p", "--auto", "--wiki-dir", str(wiki_dir)],
         )
         with pytest.raises(SystemExit) as ei:
             mcp_install.install_main()
@@ -1149,8 +1237,16 @@ class TestInstallMain:
         _write_entity(wiki_dir, "gh", {"status": "cataloged"})
         monkeypatch.setattr(
             "sys.argv",
-            ["ctx-mcp-install", "gh", "--cmd", "npx -y p", "--auto",
-             "--wiki-dir", str(wiki_dir), "--json"],
+            [
+                "ctx-mcp-install",
+                "gh",
+                "--cmd",
+                "npx -y p",
+                "--auto",
+                "--wiki-dir",
+                str(wiki_dir),
+                "--json",
+            ],
         )
         with pytest.raises(SystemExit):
             mcp_install.install_main()
@@ -1171,8 +1267,7 @@ class TestInstallMain:
         fake_claude["rc"] = 1
         monkeypatch.setattr(
             "sys.argv",
-            ["ctx-mcp-install", "gh", "--cmd", "npx -y p", "--auto",
-             "--wiki-dir", str(wiki_dir)],
+            ["ctx-mcp-install", "gh", "--cmd", "npx -y p", "--auto", "--wiki-dir", str(wiki_dir)],
         )
         with pytest.raises(SystemExit) as ei:
             mcp_install.install_main()
@@ -1215,9 +1310,7 @@ class TestInstallMain:
 
 
 class TestForceUtf8Stdio:
-    def test_survives_stream_without_reconfigure(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_survives_stream_without_reconfigure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         class _Dumb:
             pass
 
@@ -1225,9 +1318,7 @@ class TestForceUtf8Stdio:
         monkeypatch.setattr(mcp_install.sys, "stderr", _Dumb())
         mcp_install._force_utf8_stdio()  # must not raise
 
-    def test_tolerates_reconfigure_oserror(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_tolerates_reconfigure_oserror(self, monkeypatch: pytest.MonkeyPatch) -> None:
         class _ThrowsOnReconfig:
             def reconfigure(self, **_kw: Any) -> None:
                 raise OSError("not a tty")

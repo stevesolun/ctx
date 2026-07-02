@@ -64,8 +64,8 @@ _MCP_ENTITY_SUBDIR = Path("entities") / "mcp-servers"
 
 
 class _DetailSource(Protocol):
-    def fetch_details(self, slug: str, *, refresh: bool = False) -> dict:
-        ...
+    def fetch_details(self, slug: str, *, refresh: bool = False) -> dict: ...
+
 
 # Line-break codepoints that Python's str.splitlines() treats as
 # boundaries. The renderer neutralises all five so that a quoted
@@ -74,10 +74,15 @@ class _DetailSource(Protocol):
 # vuln-0001 HIGH. \x85 is NEL,   is LINE SEPARATOR,   is
 # PARAGRAPH SEPARATOR — written with \u escapes so editor autonorm
 # cannot silently convert them to plain space (U+0020).
-_LINE_SEP_TRANSLATE = str.maketrans({
-    "\r": " ", "\n": " ",
-    "\x85": " ", "\u2028": " ", "\u2029": " ",
-})
+_LINE_SEP_TRANSLATE = str.maketrans(
+    {
+        "\r": " ",
+        "\n": " ",
+        "\x85": " ",
+        "\u2028": " ",
+        "\u2029": " ",
+    }
+)
 
 
 # ── Graceful exit ────────────────────────────────────────────────────────────
@@ -124,6 +129,7 @@ def _checkpoint_path(wiki_path: Path, source: str) -> Path:
     # wiki, which an attacker could use to overwrite ~/.claude/settings.json
     # via ``--source "C:...\\settings"``. Security-auditor H-3, fixed here.
     from ctx.utils._safe_name import validate_source_name  # noqa: PLC0415
+
     validate_source_name(source, field="source")
     return wiki_path / CHECKPOINT_SUBDIR / f"{source}.json"
 
@@ -220,9 +226,7 @@ def _extract_slug_from_path(path: Path) -> str:
 # Map {source_name: regex that pulls the upstream slug out of a
 # homepage_url}. Each regex has one named group ``slug``.
 _SOURCE_SLUG_PATTERNS: dict[str, re.Pattern[str]] = {
-    "pulsemcp": re.compile(
-        r"^https?://(?:www\.)?pulsemcp\.com/servers/(?P<slug>[^/?#\s]+)"
-    ),
+    "pulsemcp": re.compile(r"^https?://(?:www\.)?pulsemcp\.com/servers/(?P<slug>[^/?#\s]+)"),
 }
 
 
@@ -402,11 +406,7 @@ def _render_scalar(value: Any) -> str:
             any(ch in sanitised for ch in yaml_structural)
             or (
                 sanitised
-                and (
-                    sanitised[0] == "-"
-                    or sanitised[0].isspace()
-                    or sanitised[-1].isspace()
-                )
+                and (sanitised[0] == "-" or sanitised[0].isspace() or sanitised[-1].isspace())
             )
             or sanitised.startswith(("?", "[", "{"))
         )
@@ -501,13 +501,9 @@ def enrich_entities(
     """
     source = SOURCES.get(source_name)
     if source is None:
-        raise ValueError(
-            f"unknown source {source_name!r}; known: {sorted(SOURCES)}"
-        )
+        raise ValueError(f"unknown source {source_name!r}; known: {sorted(SOURCES)}")
     if not hasattr(source, "fetch_details"):
-        raise NotImplementedError(
-            f"source {source_name!r} does not implement fetch_details()"
-        )
+        raise NotImplementedError(f"source {source_name!r} does not implement fetch_details()")
     detail_source = cast(_DetailSource, source)
 
     processed = checkpoint["processed"]
@@ -618,8 +614,7 @@ def enrich_entities(
         if report_progress:
             fields = ",".join(enrichment.keys()) if enrichment else "none"
             print(
-                f"  [{attempted}] [{outcome}] {wiki_slug} "
-                f"(source={source_slug}, fields={fields})",
+                f"  [{attempted}] [{outcome}] {wiki_slug} (source={source_slug}, fields={fields})",
                 flush=True,
             )
 
@@ -681,34 +676,41 @@ def _build_parser() -> argparse.ArgumentParser:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--slug", help="Enrich one slug only (dry-run candidate)")
     group.add_argument(
-        "--status", action="store_true",
+        "--status",
+        action="store_true",
         help="Print checkpoint summary and exit",
     )
     group.add_argument(
-        "--reset", action="store_true",
+        "--reset",
+        action="store_true",
         help="Delete the checkpoint for --source before starting",
     )
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Cap the number of entities attempted this run")
-    parser.add_argument("--refresh", action="store_true",
-                        help="Bypass the raw detail-page cache")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Fetch but do not write any frontmatter")
     parser.add_argument(
-        "--skip-failures", action="store_true",
+        "--limit", type=int, default=None, help="Cap the number of entities attempted this run"
+    )
+    parser.add_argument("--refresh", action="store_true", help="Bypass the raw detail-page cache")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Fetch but do not write any frontmatter"
+    )
+    parser.add_argument(
+        "--skip-failures",
+        action="store_true",
         help="Do not retry slugs already present in checkpoint.failures",
     )
     parser.add_argument(
-        "--flush-every", type=int, default=DEFAULT_FLUSH_EVERY,
+        "--flush-every",
+        type=int,
+        default=DEFAULT_FLUSH_EVERY,
         help=f"Checkpoint flush cadence (default {DEFAULT_FLUSH_EVERY})",
     )
     parser.add_argument(
-        "--sleep", type=float, default=DEFAULT_SLEEP_SECONDS,
+        "--sleep",
+        type=float,
+        default=DEFAULT_SLEEP_SECONDS,
         help=f"Seconds between fetches (default {DEFAULT_SLEEP_SECONDS})",
     )
     parser.add_argument("--wiki", default=str(cfg.wiki_dir), help="Wiki root")
-    parser.add_argument("--quiet", action="store_true",
-                        help="Suppress per-entity progress lines")
+    parser.add_argument("--quiet", action="store_true", help="Suppress per-entity progress lines")
     return parser
 
 

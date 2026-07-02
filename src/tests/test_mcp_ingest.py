@@ -73,9 +73,7 @@ class _FakeAddMcp:
         if mode == "reject":
             decision = IntakeDecision(
                 allow=False,
-                findings=(
-                    IntakeFinding(code="TEST", severity="fail", message="synthetic reject"),
-                ),
+                findings=(IntakeFinding(code="TEST", severity="fail", message="synthetic reject"),),
             )
             raise IntakeRejected(decision)
         if mode == "error":
@@ -189,28 +187,29 @@ class TestCheckpointPersistence:
 
 
 class TestFreshRun:
-    def test_all_records_processed(
-        self, tmp_path: Path, fake_add: _FakeAddMcp
-    ) -> None:
+    def test_all_records_processed(self, tmp_path: Path, fake_add: _FakeAddMcp) -> None:
         cp = mcp_ingest.load_checkpoint(tmp_path, "src")
         records = [_record_dict(f"slug-{i}") for i in range(3)]
         mcp_ingest.ingest_records(
-            records, source="src", wiki_path=tmp_path,
-            checkpoint=cp, report_progress=False,
+            records,
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp,
+            report_progress=False,
         )
         assert fake_add.calls == ["slug-0", "slug-1", "slug-2"]
         assert set(cp["processed"]) == {"slug-0", "slug-1", "slug-2"}
         assert cp["failures"] == {}
         assert cp["total_seen"] == 3
 
-    def test_checkpoint_persisted_at_end(
-        self, tmp_path: Path, fake_add: _FakeAddMcp
-    ) -> None:
+    def test_checkpoint_persisted_at_end(self, tmp_path: Path, fake_add: _FakeAddMcp) -> None:
         cp = mcp_ingest.load_checkpoint(tmp_path, "src")
         mcp_ingest.ingest_records(
             [_record_dict("only-one")],
-            source="src", wiki_path=tmp_path,
-            checkpoint=cp, report_progress=False,
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp,
+            report_progress=False,
         )
         reloaded = mcp_ingest.load_checkpoint(tmp_path, "src")
         assert "only-one" in reloaded["processed"]
@@ -223,8 +222,10 @@ class TestFreshRun:
         cp = mcp_ingest.load_checkpoint(tmp_path, "src")
         mcp_ingest.ingest_records(
             [_record_dict("slug-0"), _record_dict("slug-1")],
-            source="src", wiki_path=tmp_path,
-            checkpoint=cp, report_progress=False,
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp,
+            report_progress=False,
         )
         assert cp["processed"]["slug-0"]["result"] == "added"
         assert cp["processed"]["slug-1"]["result"] == "merged"
@@ -234,9 +235,7 @@ class TestFreshRun:
 
 
 class TestResume:
-    def test_processed_slugs_skipped(
-        self, tmp_path: Path, fake_add: _FakeAddMcp
-    ) -> None:
+    def test_processed_slugs_skipped(self, tmp_path: Path, fake_add: _FakeAddMcp) -> None:
         cp = mcp_ingest.load_checkpoint(tmp_path, "src")
         cp["processed"]["slug-1"] = {"result": "added", "at": "prior"}
         mcp_ingest.save_checkpoint(tmp_path, cp)
@@ -245,8 +244,10 @@ class TestResume:
         cp2 = mcp_ingest.load_checkpoint(tmp_path, "src")
         mcp_ingest.ingest_records(
             [_record_dict("slug-0"), _record_dict("slug-1"), _record_dict("slug-2")],
-            source="src", wiki_path=tmp_path,
-            checkpoint=cp2, report_progress=False,
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp2,
+            report_progress=False,
         )
         # slug-1 must NOT have been passed to add_mcp.
         assert fake_add.calls == ["slug-0", "slug-2"]
@@ -262,8 +263,10 @@ class TestResume:
         cp2 = mcp_ingest.load_checkpoint(tmp_path, "src")
         mcp_ingest.ingest_records(
             [_record_dict("slug-bad"), _record_dict("slug-ok")],
-            source="src", wiki_path=tmp_path,
-            checkpoint=cp2, report_progress=False,
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp2,
+            report_progress=False,
         )
         assert fake_add.calls == ["slug-ok"]
         # Failure stays recorded.
@@ -283,8 +286,11 @@ class TestResume:
         cp2 = mcp_ingest.load_checkpoint(tmp_path, "src")
         mcp_ingest.ingest_records(
             [_record_dict("slug-bad")],
-            source="src", wiki_path=tmp_path,
-            checkpoint=cp2, retry_failures=True, report_progress=False,
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp2,
+            retry_failures=True,
+            report_progress=False,
         )
         assert fake.calls == ["slug-bad"]
         assert "slug-bad" in cp2["processed"]
@@ -301,8 +307,11 @@ class TestResume:
 
         mcp_ingest.ingest_records(
             [_record_dict("slug-bad")],
-            source="src", wiki_path=tmp_path,
-            checkpoint=cp, retry_failures=True, report_progress=False,
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp,
+            retry_failures=True,
+            report_progress=False,
         )
         assert "slug-bad" in cp["failures"]
         # Error message reflects the NEW attempt, not the prior one.
@@ -321,8 +330,10 @@ class TestOutcomes:
         bad_record: dict[str, Any] = {}
         mcp_ingest.ingest_records(
             [bad_record, _record_dict("ok")],
-            source="src", wiki_path=tmp_path,
-            checkpoint=cp, report_progress=False,
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp,
+            report_progress=False,
         )
         # Fake was only called for the valid record.
         assert fake_add.calls == ["ok"]
@@ -338,8 +349,10 @@ class TestOutcomes:
         cp = mcp_ingest.load_checkpoint(tmp_path, "src")
         mcp_ingest.ingest_records(
             [_record_dict("slug-rj")],
-            source="src", wiki_path=tmp_path,
-            checkpoint=cp, report_progress=False,
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp,
+            report_progress=False,
         )
         assert "slug-rj" in cp["processed"]
         assert cp["processed"]["slug-rj"]["result"].startswith("rejected:")
@@ -354,8 +367,10 @@ class TestOutcomes:
         cp = mcp_ingest.load_checkpoint(tmp_path, "src")
         mcp_ingest.ingest_records(
             [_record_dict("slug-err"), _record_dict("slug-ok")],
-            source="src", wiki_path=tmp_path,
-            checkpoint=cp, report_progress=False,
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp,
+            report_progress=False,
         )
         # Both slugs attempted — error doesn't abort the batch.
         assert fake.calls == ["slug-err", "slug-ok"]
@@ -367,9 +382,7 @@ class TestOutcomes:
 
 
 class TestFlushCadence:
-    def test_flush_every_n_records(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_flush_every_n_records(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         # Count save_checkpoint invocations to verify flush cadence.
         save_calls: list[int] = []
         original = mcp_ingest.save_checkpoint
@@ -385,8 +398,12 @@ class TestFlushCadence:
         cp = mcp_ingest.load_checkpoint(tmp_path, "src")
         records = [_record_dict(f"slug-{i}") for i in range(7)]
         mcp_ingest.ingest_records(
-            records, source="src", wiki_path=tmp_path,
-            checkpoint=cp, flush_every=3, report_progress=False,
+            records,
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp,
+            flush_every=3,
+            report_progress=False,
         )
         # 7 records, flush_every=3 -> flushes at i=3 and i=6 (2 cadence
         # flushes) + 1 final flush = 3 saves total.
@@ -418,8 +435,11 @@ class TestGracefulExit:
         cp = mcp_ingest.load_checkpoint(tmp_path, "src")
         mcp_ingest.ingest_records(
             [_record_dict(f"slug-{i}") for i in range(5)],
-            source="src", wiki_path=tmp_path,
-            checkpoint=cp, graceful=graceful, report_progress=False,
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp,
+            graceful=graceful,
+            report_progress=False,
         )
         # slug-0 and slug-1 processed, rest skipped.
         assert fake.calls == ["slug-0", "slug-1"]

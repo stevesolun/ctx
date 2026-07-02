@@ -41,7 +41,9 @@ def test_overlay_entities_preserves_existing_graph_and_adds_selected_pages(tmp_p
     (source_wiki / "entities" / "harnesses" / "new-harness.md").write_text("# Harness\n")
     body = skills_root / "new-skill" / "SKILL.md"
     body.write_text("# body\n", encoding="utf-8")
-    (skills_root / "new-skill" / "references" / "guide.md").write_text("# guide\n", encoding="utf-8")
+    (skills_root / "new-skill" / "references" / "guide.md").write_text(
+        "# guide\n", encoding="utf-8"
+    )
     source_graph = {
         "graph": {"export_id": "source"},
         "nodes": [
@@ -82,7 +84,9 @@ def test_overlay_entities_preserves_existing_graph_and_adds_selected_pages(tmp_p
     with tarfile.open(tarball, "w:gz") as tf:
         _add_text(tf, "./graphify-out/graph.json", json.dumps(graph))
         _add_text(tf, "./graphify-out/communities.json", json.dumps(communities))
-        _add_text(tf, "./graphify-out/graph-delta.json", json.dumps({"version": 1, "export_id": "old"}))
+        _add_text(
+            tf, "./graphify-out/graph-delta.json", json.dumps({"version": 1, "export_id": "old"})
+        )
         _add_text(tf, "./graphify-out/graph-report.md", "> Export ID: old\n")
         _add_text(tf, "./graphify-out/graph-export-manifest.json", json.dumps(manifest))
         _add_text(tf, "./keep.md", "keep")

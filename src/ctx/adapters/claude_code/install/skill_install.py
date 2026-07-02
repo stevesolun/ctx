@@ -66,7 +66,7 @@ class InstallResult:
 
     slug: str
     status: str  # "installed" | "would-install" | "skipped-existing"
-                 # | "not-in-wiki" | "failed"
+    # | "not-in-wiki" | "failed"
     installed_path: str | None
     source_variant: str | None  # "transformed" | "original" | None
     references_copied: int
@@ -87,9 +87,7 @@ def _converted_dir(wiki_dir: Path, slug: str) -> Path:
     return wiki_dir / "converted" / slug
 
 
-def _pick_source(
-    converted: Path, prefer: str
-) -> tuple[Path | None, str | None]:
+def _pick_source(converted: Path, prefer: str) -> tuple[Path | None, str | None]:
     """Pick the on-disk SKILL.md to install.
 
     Returns ``(path, variant)`` where variant is ``"transformed"`` for
@@ -130,9 +128,13 @@ def _ensure_micro_converted(
     except Exception as exc:  # noqa: BLE001 - install should return a structured failure.
         return None, None, f"micro-skill conversion failed: {exc}"
     if result.get("status") != "converted":
-        return None, None, (
-            "micro-skill conversion did not complete: "
-            f"{result.get('reason') or result.get('status')}"
+        return (
+            None,
+            None,
+            (
+                "micro-skill conversion did not complete: "
+                f"{result.get('reason') or result.get('status')}"
+            ),
         )
     transformed = converted / "SKILL.md"
     if not transformed.is_file():
@@ -216,38 +218,53 @@ def install_skill(
         validate_skill_name(slug)
     except ValueError as exc:
         return InstallResult(
-            slug=slug, status="failed", installed_path=None,
-            source_variant=None, references_copied=0,
+            slug=slug,
+            status="failed",
+            installed_path=None,
+            source_variant=None,
+            references_copied=0,
             message=f"invalid slug: {exc}",
         )
 
     converted = _converted_dir(wiki_dir, slug)
     if converted.is_symlink():
         return InstallResult(
-            slug=slug, status="failed", installed_path=None,
-            source_variant=None, references_copied=0,
+            slug=slug,
+            status="failed",
+            installed_path=None,
+            source_variant=None,
+            references_copied=0,
             message=f"unsafe symlinked wiki content at {converted}",
         )
     if not converted.is_dir():
         return InstallResult(
-            slug=slug, status="not-in-wiki", installed_path=None,
-            source_variant=None, references_copied=0,
+            slug=slug,
+            status="not-in-wiki",
+            installed_path=None,
+            source_variant=None,
+            references_copied=0,
             message=f"no wiki content at {converted}",
         )
 
     source, variant = _pick_source(converted, prefer)
     if source is None:
         return InstallResult(
-            slug=slug, status="not-in-wiki", installed_path=None,
-            source_variant=None, references_copied=0,
+            slug=slug,
+            status="not-in-wiki",
+            installed_path=None,
+            source_variant=None,
+            references_copied=0,
             message="wiki has no SKILL.md or SKILL.md.original",
         )
     assert variant is not None
     unsafe_symlink = _find_symlink_in_tree(converted)
     if unsafe_symlink is not None:
         return InstallResult(
-            slug=slug, status="failed", installed_path=None,
-            source_variant=variant, references_copied=0,
+            slug=slug,
+            status="failed",
+            installed_path=None,
+            source_variant=variant,
+            references_copied=0,
             message=f"unsafe symlinked wiki bundle at {unsafe_symlink}",
         )
 
@@ -266,24 +283,28 @@ def install_skill(
             )
             if security_scan_required and scan_result.status != "passed":
                 return InstallResult(
-                    slug=slug, status="failed", installed_path=None,
-                    source_variant=variant, references_copied=0,
-                    message=(
-                        "SkillSpector security scan did not pass: "
-                        f"{scan_result.status}"
-                    ),
+                    slug=slug,
+                    status="failed",
+                    installed_path=None,
+                    source_variant=variant,
+                    references_copied=0,
+                    message=(f"SkillSpector security scan did not pass: {scan_result.status}"),
                     security_scan=scan_result,
                 )
         # Already installed. Still refresh manifest/status so an earlier
         # install that didn't record into manifest gets reconciled.
         if not dry_run:
             record_install(
-                slug, entity_type="skill", source="ctx-skill-install",
+                slug,
+                entity_type="skill",
+                source="ctx-skill-install",
             )
             bump_entity_status(_entity_path(wiki_dir, slug), status="installed")
         return InstallResult(
-            slug=slug, status="skipped-existing",
-            installed_path=str(dest), source_variant=variant,
+            slug=slug,
+            status="skipped-existing",
+            installed_path=str(dest),
+            source_variant=variant,
             references_copied=0,
             message=(
                 "already installed; pass --force to overwrite"
@@ -315,8 +336,11 @@ def install_skill(
             )
             message = f"{message}; SkillSpector: {scan_result.status}"
         return InstallResult(
-            slug=slug, status="would-install", installed_path=str(dest),
-            source_variant=variant, references_copied=refs_count,
+            slug=slug,
+            status="would-install",
+            installed_path=str(dest),
+            source_variant=variant,
+            references_copied=refs_count,
             message=message,
             security_scan=scan_result,
         )
@@ -328,8 +352,11 @@ def install_skill(
     )
     if source is None:
         return InstallResult(
-            slug=slug, status="failed", installed_path=None,
-            source_variant=variant, references_copied=0,
+            slug=slug,
+            status="failed",
+            installed_path=None,
+            source_variant=variant,
+            references_copied=0,
             message=conversion_error,
         )
 
@@ -344,8 +371,11 @@ def install_skill(
         )
         if security_scan_required and scan_result.status != "passed":
             return InstallResult(
-                slug=slug, status="failed", installed_path=None,
-                source_variant=variant, references_copied=0,
+                slug=slug,
+                status="failed",
+                installed_path=None,
+                source_variant=variant,
+                references_copied=0,
                 message=f"SkillSpector security scan did not pass: {scan_result.status}",
                 security_scan=scan_result,
             )
@@ -355,8 +385,11 @@ def install_skill(
         refs_copied = _copy_bundle_files(converted, dest_dir)
     except (OSError, ValueError) as exc:
         return InstallResult(
-            slug=slug, status="failed", installed_path=None,
-            source_variant=variant, references_copied=0,
+            slug=slug,
+            status="failed",
+            installed_path=None,
+            source_variant=variant,
+            references_copied=0,
             message=str(exc),
         )
 
@@ -365,11 +398,12 @@ def install_skill(
     emit_load_event(slug, _SESSION_ID)
 
     return InstallResult(
-        slug=slug, status="installed", installed_path=str(dest),
-        source_variant=variant, references_copied=refs_copied,
-        message=(
-            f"SkillSpector: {scan_result.status}" if scan_result is not None else ""
-        ),
+        slug=slug,
+        status="installed",
+        installed_path=str(dest),
+        source_variant=variant,
+        references_copied=refs_copied,
+        message=(f"SkillSpector: {scan_result.status}" if scan_result is not None else ""),
         security_scan=scan_result,
     )
 
@@ -451,8 +485,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--skillspector-bin",
         help=(
-            "SkillSpector executable. Defaults to CTX_SKILLSPECTOR_BIN or "
-            "'skillspector' on PATH."
+            "SkillSpector executable. Defaults to CTX_SKILLSPECTOR_BIN or 'skillspector' on PATH."
         ),
     )
     parser.add_argument(
@@ -505,7 +538,8 @@ def main() -> None:
     if args.json:
         payload = [
             {
-                "slug": r.slug, "status": r.status,
+                "slug": r.slug,
+                "status": r.status,
                 "installed_path": r.installed_path,
                 "source_variant": r.source_variant,
                 "references_copied": r.references_copied,

@@ -89,7 +89,9 @@ def render_quality_drilldown(
     if sidecar is None:
         if embedded_quality_markdown:
             quality_markdown = embedded_quality_markdown.strip()
-            if not re.search(r"^#{1,6}\s+Quality\b", quality_markdown, re.IGNORECASE | re.MULTILINE):
+            if not re.search(
+                r"^#{1,6}\s+Quality\b", quality_markdown, re.IGNORECASE | re.MULTILINE
+            ):
                 quality_markdown = "## Quality\n\n" + quality_markdown
             return (
                 "<div class='card wiki-body'>"
@@ -128,9 +130,13 @@ def render_quality_drilldown(
             "</tr>"
         )
     if not signal_rows:
-        signal_rows.append("<tr><td colspan='5' class='muted'>No signal breakdown was recorded.</td></tr>")
+        signal_rows.append(
+            "<tr><td colspan='5' class='muted'>No signal breakdown was recorded.</td></tr>"
+        )
     hard_floor = sidecar.get("hard_floor")
-    floor_html = f" <span class='muted'>floor {html.escape(str(hard_floor))}</span>" if hard_floor else ""
+    floor_html = (
+        f" <span class='muted'>floor {html.escape(str(hard_floor))}</span>" if hard_floor else ""
+    )
     return (
         "<div class='card'>"
         "<h2>Quality</h2>"
@@ -156,15 +162,8 @@ def subgraph_quality_cell(sidecar: dict[str, Any] | None) -> str:
     grade = html.escape(str(sidecar.get("grade", "F")))
     score = float(sidecar.get("raw_score", sidecar.get("score", 0.0)) or 0.0)
     floor = str(sidecar.get("hard_floor") or "").strip()
-    floor_html = (
-        f" <span class='muted'>floor {html.escape(floor)}</span>"
-        if floor
-        else ""
-    )
-    return (
-        f"<span class='pill grade-{grade}'>{grade}</span> "
-        f"<code>{score:.3f}</code>{floor_html}"
-    )
+    floor_html = f" <span class='muted'>floor {html.escape(floor)}</span>" if floor else ""
+    return f"<span class='pill grade-{grade}'>{grade}</span> <code>{score:.3f}</code>{floor_html}"
 
 
 def _subgraph_node_title(
@@ -226,22 +225,25 @@ def render_entity_subgraph_svg(
         ),
     ):
         node_type = graph_type_from_node_id(
-            node_id, str(node.get("type") or "skill"),
+            node_id,
+            str(node.get("type") or "skill"),
         )
         node_slug = graph_slug_from_node_id(node_id)
         label = display_label(node.get("label"), fallback_slug=node_slug)
         sidecar = sidecar_by_id.get(node_id)
-        node_payload.append({
-            "id": node_id,
-            "slug": node_slug,
-            "label": label,
-            "type": node_type,
-            "href": entity_wiki_href(node_slug, node_type),
-            "title": _subgraph_node_title(label, node_type, sidecar),
-            "fill": _subgraph_node_fill(node_type),
-            "stroke": _subgraph_grade_stroke(sidecar),
-            "is_center": node_id == center,
-        })
+        node_payload.append(
+            {
+                "id": node_id,
+                "slug": node_slug,
+                "label": label,
+                "type": node_type,
+                "href": entity_wiki_href(node_slug, node_type),
+                "title": _subgraph_node_title(label, node_type, sidecar),
+                "fill": _subgraph_node_fill(node_type),
+                "stroke": _subgraph_grade_stroke(sidecar),
+                "is_center": node_id == center,
+            }
+        )
 
     edge_payload: list[dict[str, Any]] = []
     for edge in edges:
@@ -252,16 +254,18 @@ def render_entity_subgraph_svg(
             continue
         shared = ", ".join(str(tag) for tag in data.get("shared_tags", [])[:6]) or "none"
         weight = float(data.get("weight", 0.0) or 0.0)
-        edge_payload.append({
-            "source": source,
-            "target": target,
-            "weight": weight,
-            "title": (
-                f"{display_slug(graph_slug_from_node_id(source))} -> "
-                f"{display_slug(graph_slug_from_node_id(target))} - weight {weight:.3f} "
-                f"- shared {shared}"
-            ),
-        })
+        edge_payload.append(
+            {
+                "source": source,
+                "target": target,
+                "weight": weight,
+                "title": (
+                    f"{display_slug(graph_slug_from_node_id(source))} -> "
+                    f"{display_slug(graph_slug_from_node_id(target))} - weight {weight:.3f} "
+                    f"- shared {shared}"
+                ),
+            }
+        )
 
     nodes_json = json_for_script(node_payload)
     edges_json = json_for_script(edge_payload)
@@ -332,12 +336,12 @@ def render_entity_subgraph_svg(
         "      const t = projected.get(e.target);\n"
         "      if (!s || !t) return '';\n"
         "      const w = Math.max(1, Math.min(4, 1 + Math.sqrt(Math.max(0, Number(e.weight || 1)))));\n"
-        "      return '<line x1=\"' + s.x.toFixed(1) + '\" y1=\"' + s.y.toFixed(1) + '\" x2=\"' + t.x.toFixed(1) + '\" y2=\"' + t.y.toFixed(1) + '\" stroke=\"#64748b\" stroke-opacity=\"0.55\" stroke-width=\"' + w.toFixed(2) + '\" />';\n"
+        '      return \'<line x1="\' + s.x.toFixed(1) + \'" y1="\' + s.y.toFixed(1) + \'" x2="\' + t.x.toFixed(1) + \'" y2="\' + t.y.toFixed(1) + \'" stroke="#64748b" stroke-opacity="0.55" stroke-width="\' + w.toFixed(2) + \'" />\';\n'
         "    }).join('');\n"
         "    const nodeEls = nodes.slice().sort((a, b) => (projected.get(a.id)?.z || 0) - (projected.get(b.id)?.z || 0)).map(n => {\n"
         "      const p = projected.get(n.id) || {x: width / 2, y: height / 2, z: 0, scale: 1};\n"
         "      const r = Math.max(7, (n.is_center ? 18 : 12) * Math.max(0.7, p.scale));\n"
-        "      return '<a href=\"' + escapeHtml(n.href) + '\"><g data-testid=\"entity-subgraph-node\" data-node-detail=\"' + escapeHtml(n.title) + '\"><title>' + escapeHtml(n.title) + '</title><circle cx=\"' + p.x.toFixed(1) + '\" cy=\"' + p.y.toFixed(1) + '\" r=\"' + r + '\" fill=\"' + escapeHtml(n.fill) + '\" stroke=\"' + escapeHtml(n.stroke) + '\" stroke-width=\"3\" /><text x=\"' + p.x.toFixed(1) + '\" y=\"' + (p.y + r + 14).toFixed(1) + '\" text-anchor=\"middle\" font-size=\"11\" fill=\"#111827\" style=\"pointer-events:none;\">' + escapeHtml(String(n.label).slice(0, 28)) + '</text></g></a>';\n"
+        '      return \'<a href="\' + escapeHtml(n.href) + \'"><g data-testid="entity-subgraph-node" data-node-detail="\' + escapeHtml(n.title) + \'"><title>\' + escapeHtml(n.title) + \'</title><circle cx="\' + p.x.toFixed(1) + \'" cy="\' + p.y.toFixed(1) + \'" r="\' + r + \'" fill="\' + escapeHtml(n.fill) + \'" stroke="\' + escapeHtml(n.stroke) + \'" stroke-width="3" /><text x="\' + p.x.toFixed(1) + \'" y="\' + (p.y + r + 14).toFixed(1) + \'" text-anchor="middle" font-size="11" fill="#111827" style="pointer-events:none;">\' + escapeHtml(String(n.label).slice(0, 28)) + \'</text></g></a>\';\n'
         "    }).join('');\n"
         "    const edgeHits = edges.map(e => {\n"
         "      const s = projected.get(e.source);\n"
@@ -345,9 +349,9 @@ def render_entity_subgraph_svg(
         "      if (!s || !t) return '';\n"
         "      const hx1 = s.x + (t.x - s.x) * 0.18, hy1 = s.y + (t.y - s.y) * 0.18;\n"
         "      const hx2 = s.x + (t.x - s.x) * 0.82, hy2 = s.y + (t.y - s.y) * 0.82;\n"
-        "      return '<line data-testid=\"entity-subgraph-edge\" data-edge-detail=\"' + escapeHtml(e.title) + '\" x1=\"' + hx1.toFixed(1) + '\" y1=\"' + hy1.toFixed(1) + '\" x2=\"' + hx2.toFixed(1) + '\" y2=\"' + hy2.toFixed(1) + '\" stroke=\"transparent\" stroke-width=\"12\" style=\"pointer-events:stroke;\"><title>' + escapeHtml(e.title) + '</title></line>';\n"
+        '      return \'<line data-testid="entity-subgraph-edge" data-edge-detail="\' + escapeHtml(e.title) + \'" x1="\' + hx1.toFixed(1) + \'" y1="\' + hy1.toFixed(1) + \'" x2="\' + hx2.toFixed(1) + \'" y2="\' + hy2.toFixed(1) + \'" stroke="transparent" stroke-width="12" style="pointer-events:stroke;"><title>\' + escapeHtml(e.title) + \'</title></line>\';\n'
         "    }).join('');\n"
-        "    svg.innerHTML = '<rect width=\"100%\" height=\"100%\" fill=\"#f8fafc\" />' + edgeLines + nodeEls + edgeHits;\n"
+        '    svg.innerHTML = \'<rect width="100%" height="100%" fill="#f8fafc" />\' + edgeLines + nodeEls + edgeHits;\n'
         "    attachHover();\n"
         "  }\n"
         "  document.getElementById('entity-subgraph-zoom-in')?.addEventListener('click', () => { zoom = Math.min(2.5, zoom * 1.18); draw(); });\n"
@@ -384,14 +388,9 @@ def render_entity_subgraph(
     edges = graph.get("edges") or []
     if not center:
         return (
-            "<div class='card'>"
-            "<p class='muted'>No graph node was found for this entity.</p>"
-            "</div>"
+            "<div class='card'><p class='muted'>No graph node was found for this entity.</p></div>"
         )
-    node_by_id = {
-        str(node.get("data", {}).get("id", "")): node.get("data", {})
-        for node in nodes
-    }
+    node_by_id = {str(node.get("data", {}).get("id", "")): node.get("data", {}) for node in nodes}
     sidecar_by_id = {
         node_id: subgraph_sidecar(
             graph_slug_from_node_id(node_id),
@@ -453,6 +452,7 @@ def render_entity_subgraph(
         + table
         + "</div>"
     )
+
 
 def runtime_graph_center_data(graph: dict) -> dict[str, Any] | None:
     center = str(graph.get("center") or "")
@@ -777,8 +777,7 @@ def render_runtime_graph_entity_page(
         + runtime_graph_metric_row("usage_score", usage_score)
         + runtime_graph_metric_row("degree", degree)
         + "</table></div>"
-        "</div>"
-        + action_html
+        "</div>" + action_html
     )
     body = (
         f"<h1>{html.escape(label)}</h1>"
@@ -815,9 +814,7 @@ def render_wiki_entity_page(
     """Render one expanded wiki entity page from already-loaded Markdown."""
     display = display_slug(slug)
     type_suffix = (
-        f"&amp;type={html.escape(entity_type)}"
-        if entity_type in dashboard_entity_types
-        else ""
+        f"&amp;type={html.escape(entity_type)}" if entity_type in dashboard_entity_types else ""
     )
 
     fm_row_parts = []
@@ -835,11 +832,7 @@ def render_wiki_entity_page(
         grade = str(sidecar.get("grade", "F"))
         score = float(sidecar.get("raw_score", 0.0) or 0.0)
         hard_floor = str(sidecar.get("hard_floor") or "")
-        floor_html = (
-            " &middot; floor " + html.escape(hard_floor)
-            if hard_floor
-            else ""
-        )
+        floor_html = " &middot; floor " + html.escape(hard_floor) if hard_floor else ""
         quality_summary_html = (
             "<div class='card'>"
             f"<strong>Quality</strong> <span class='pill grade-{html.escape(grade)}'>"

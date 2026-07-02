@@ -44,11 +44,7 @@ def summary_cache_key(sidecar_dir: Path) -> tuple[Any, ...]:
                         or not entry.is_file(follow_symlinks=False)
                     ):
                         continue
-                    bucket = (
-                        "lifecycle"
-                        if name.endswith(".lifecycle.json")
-                        else "quality"
-                    )
+                    bucket = "lifecycle" if name.endswith(".lifecycle.json") else "quality"
                     try:
                         stat = entry.stat(follow_symlinks=False)
                     except OSError:

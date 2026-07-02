@@ -130,17 +130,9 @@ def pack_compaction_status(
             wiki_packs_dir=wiki_packs_dir,
         )
 
-    graph_base_export_id = (
-        graph_entries[0].manifest.base_export_id if graph_entries else None
-    )
-    wiki_base_export_id = (
-        wiki_entries[0].manifest.base_export_id if wiki_entries else None
-    )
-    base_export_id = (
-        graph_base_export_id
-        if graph_base_export_id == wiki_base_export_id
-        else None
-    )
+    graph_base_export_id = graph_entries[0].manifest.base_export_id if graph_entries else None
+    wiki_base_export_id = wiki_entries[0].manifest.base_export_id if wiki_entries else None
+    base_export_id = graph_base_export_id if graph_base_export_id == wiki_base_export_id else None
     can_compact_now = bool(
         graph_entries
         and wiki_entries
@@ -188,8 +180,10 @@ def compact_active_pack_sets(
     wiki_root = Path(wiki_path)
     graph_packs_dir = wiki_root / "graphify-out" / "packs"
     wiki_packs_dir = wiki_root / "wiki-packs"
-    stage_root = Path(staging_dir) if staging_dir is not None else (
-        wiki_root / "graphify-out" / "pack-compaction-staging" / _pack_id(base_export_id)
+    stage_root = (
+        Path(staging_dir)
+        if staging_dir is not None
+        else (wiki_root / "graphify-out" / "pack-compaction-staging" / _pack_id(base_export_id))
     )
     if stage_root.exists():
         raise PackCompactionError(f"staging directory already exists: {stage_root}")
@@ -278,7 +272,9 @@ def promote_staged_pack_sets(
         try:
             graph_store = ensure_graph_store(
                 wiki_root / "graphify-out",
-                Path(graph_store_db_path) if graph_store_db_path else _default_graph_store_db(wiki_root),
+                Path(graph_store_db_path)
+                if graph_store_db_path
+                else _default_graph_store_db(wiki_root),
             )
         except (OSError, ValueError) as exc:
             raise PackCompactionError(f"graph store refresh failed: {exc}") from exc
@@ -379,7 +375,9 @@ def main(argv: list[str] | None = None) -> int:
     compact_promote.add_argument("--staging-dir", help="Destination staging root")
     compact_promote.add_argument("--graph-config-hash", help="Override graph config hash")
     compact_promote.add_argument("--graph-model-id", help="Override graph model id")
-    compact_promote.add_argument("--created-at", help="Optional created_at value for staged manifests")
+    compact_promote.add_argument(
+        "--created-at", help="Optional created_at value for staged manifests"
+    )
     compact_promote.add_argument("--graph-backup-packs-dir", help="Optional graph backup directory")
     compact_promote.add_argument("--wiki-backup-packs-dir", help="Optional wiki backup directory")
     compact_promote.add_argument("--graph-store-db", help="Optional SQLite graph store path")
@@ -488,14 +486,10 @@ def main(argv: list[str] | None = None) -> int:
                 staged_graph_packs_dir=compact_result.staged_graph_packs_dir,
                 staged_wiki_packs_dir=compact_result.staged_wiki_packs_dir,
                 graph_backup_packs_dir=(
-                    Path(args.graph_backup_packs_dir)
-                    if args.graph_backup_packs_dir
-                    else None
+                    Path(args.graph_backup_packs_dir) if args.graph_backup_packs_dir else None
                 ),
                 wiki_backup_packs_dir=(
-                    Path(args.wiki_backup_packs_dir)
-                    if args.wiki_backup_packs_dir
-                    else None
+                    Path(args.wiki_backup_packs_dir) if args.wiki_backup_packs_dir else None
                 ),
                 refresh_graph_store=not args.no_graph_store_refresh,
                 graph_store_db_path=Path(args.graph_store_db) if args.graph_store_db else None,
@@ -523,14 +517,10 @@ def main(argv: list[str] | None = None) -> int:
                 staged_graph_packs_dir=Path(args.staged_graph_packs_dir),
                 staged_wiki_packs_dir=Path(args.staged_wiki_packs_dir),
                 graph_backup_packs_dir=(
-                    Path(args.graph_backup_packs_dir)
-                    if args.graph_backup_packs_dir
-                    else None
+                    Path(args.graph_backup_packs_dir) if args.graph_backup_packs_dir else None
                 ),
                 wiki_backup_packs_dir=(
-                    Path(args.wiki_backup_packs_dir)
-                    if args.wiki_backup_packs_dir
-                    else None
+                    Path(args.wiki_backup_packs_dir) if args.wiki_backup_packs_dir else None
                 ),
                 refresh_graph_store=not args.no_graph_store_refresh,
                 graph_store_db_path=Path(args.graph_store_db) if args.graph_store_db else None,
@@ -552,7 +542,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if args.staged_graph_packs_dir or args.staged_wiki_packs_dir:
                 if not args.staged_graph_packs_dir or not args.staged_wiki_packs_dir:
-                    parser.error("--staged-graph-packs-dir and --staged-wiki-packs-dir are required together")
+                    parser.error(
+                        "--staged-graph-packs-dir and --staged-wiki-packs-dir are required together"
+                    )
                 graph_packs_dir = Path(args.staged_graph_packs_dir)
                 wiki_packs_dir = Path(args.staged_wiki_packs_dir)
             elif args.wiki_path:
@@ -595,10 +587,7 @@ def _default_overlay_threshold() -> int:
 
 def _normalise_overlay_threshold(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise PackCompactionError(
-            "overlay_threshold must be an integer >= 1 "
-            f"(got {value!r})"
-        )
+        raise PackCompactionError(f"overlay_threshold must be an integer >= 1 (got {value!r})")
     return value
 
 

@@ -88,26 +88,28 @@ def overlay_entities(
         skills_root=skills_root,
         runtime=runtime,
     )
-    replacements.update({
-        "graphify-out/graph.json": _json_bytes(graph, compact=True),
-        "graphify-out/dashboard-neighborhoods.sqlite3": _dashboard_index_bytes(graph),
-        "graphify-out/graph-delta.json": _json_bytes(
-            _render_delta(graph, selected, export_id=export_id, generated=timestamp),
-            compact=False,
-        ),
-        "graphify-out/communities.json": _json_bytes(communities, compact=False),
-        "graphify-out/graph-report.md": _render_report(
-            graph,
-            communities,
-            selected=selected,
-            export_id=export_id,
-            generated=timestamp,
-        ).encode("utf-8"),
-        "graphify-out/graph-export-manifest.json": _json_bytes(
-            _render_manifest(graph, communities, export_id=export_id, generated=timestamp),
-            compact=False,
-        ),
-    })
+    replacements.update(
+        {
+            "graphify-out/graph.json": _json_bytes(graph, compact=True),
+            "graphify-out/dashboard-neighborhoods.sqlite3": _dashboard_index_bytes(graph),
+            "graphify-out/graph-delta.json": _json_bytes(
+                _render_delta(graph, selected, export_id=export_id, generated=timestamp),
+                compact=False,
+            ),
+            "graphify-out/communities.json": _json_bytes(communities, compact=False),
+            "graphify-out/graph-report.md": _render_report(
+                graph,
+                communities,
+                selected=selected,
+                export_id=export_id,
+                generated=timestamp,
+            ).encode("utf-8"),
+            "graphify-out/graph-export-manifest.json": _json_bytes(
+                _render_manifest(graph, communities, export_id=export_id, generated=timestamp),
+                compact=False,
+            ),
+        }
+    )
     _rewrite_tarball(tarball, replacements)
     return OverlayStats(
         node_count=len(graph["nodes"]),
@@ -256,7 +258,9 @@ def _entity_page(source_wiki: Path, entity_type: str, slug: str) -> Path | None:
     return None
 
 
-def _skill_replacements(source_wiki: Path, slug: str, *, skills_root: Path | None) -> dict[str, bytes]:
+def _skill_replacements(
+    source_wiki: Path, slug: str, *, skills_root: Path | None
+) -> dict[str, bytes]:
     root = skills_root or Path.home() / ".claude" / "skills"
     candidates = [
         source_wiki / "converted" / slug / "SKILL.md",
@@ -288,11 +292,14 @@ def _rewrite_tarball(tarball: Path, replacements: dict[str, bytes]) -> None:
     staged = tarball.with_name(f"{tarball.name}.staged")
     reject_symlink_path(staged)
     skip_names = set(replacements)
-    with tarfile.open(tarball, "r:gz") as src, tarfile.open(
-        staged,
-        "w:gz",
-        compresslevel=OVERLAY_GZIP_COMPRESSLEVEL,
-    ) as dst:
+    with (
+        tarfile.open(tarball, "r:gz") as src,
+        tarfile.open(
+            staged,
+            "w:gz",
+            compresslevel=OVERLAY_GZIP_COMPRESSLEVEL,
+        ) as dst,
+    ):
         for member in src:
             safe_name = _safe_tar_name(member.name)
             if safe_name is None:
@@ -357,11 +364,13 @@ def _render_delta(
 ) -> dict[str, Any]:
     selected_set = set(selected)
     nodes = [
-        node for node in _list_field(graph, "nodes")
+        node
+        for node in _list_field(graph, "nodes")
         if isinstance(node, dict) and node.get("id") in selected_set
     ]
     edges = [
-        edge for edge in _list_field(graph, "edges")
+        edge
+        for edge in _list_field(graph, "edges")
         if isinstance(edge, dict)
         and (edge.get("source") in selected_set or edge.get("target") in selected_set)
     ]

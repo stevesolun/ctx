@@ -161,7 +161,11 @@ class TestCompactLayout:
 
     def test_head_tail_preserved(self) -> None:
         c = TokenBudgetCompactor(
-            max_chars=10**9, max_messages=10, keep_head=2, keep_tail=3, min_middle=1,
+            max_chars=10**9,
+            max_messages=10,
+            keep_head=2,
+            keep_tail=3,
+            min_middle=1,
         )
         msgs = [
             Message(role="system", content="sys"),
@@ -190,7 +194,11 @@ class TestCompactLayout:
 
     def test_skip_when_middle_too_short(self) -> None:
         c = TokenBudgetCompactor(
-            max_chars=10**9, max_messages=20, keep_head=2, keep_tail=3, min_middle=10,
+            max_chars=10**9,
+            max_messages=20,
+            keep_head=2,
+            keep_tail=3,
+            min_middle=10,
         )
         msgs = [Message(role="user", content=f"m{i}") for i in range(7)]
         p = self._provider_with_summary()
@@ -202,7 +210,11 @@ class TestCompactLayout:
 
     def test_empty_summary_replaced_with_placeholder(self) -> None:
         c = TokenBudgetCompactor(
-            max_chars=10**9, max_messages=10, keep_head=1, keep_tail=2, min_middle=1,
+            max_chars=10**9,
+            max_messages=10,
+            keep_head=1,
+            keep_tail=2,
+            min_middle=1,
         )
         msgs = [Message(role="user", content=f"m{i}") for i in range(8)]
         # Summary call returns empty string.
@@ -213,7 +225,11 @@ class TestCompactLayout:
 
     def test_keep_tail_zero_keeps_no_tail_and_compacts_middle(self) -> None:
         c = TokenBudgetCompactor(
-            max_chars=10**9, max_messages=10, keep_head=1, keep_tail=0, min_middle=1,
+            max_chars=10**9,
+            max_messages=10,
+            keep_head=1,
+            keep_tail=0,
+            min_middle=1,
         )
         msgs = [Message(role="user", content=f"m{i}") for i in range(5)]
         p = self._provider_with_summary("ZERO_TAIL_SUMMARY")
@@ -230,7 +246,11 @@ class TestCompactLayout:
 
     def test_tail_expands_to_preserve_tool_call_pair(self) -> None:
         c = TokenBudgetCompactor(
-            max_chars=10**9, max_messages=10, keep_head=1, keep_tail=1, min_middle=1,
+            max_chars=10**9,
+            max_messages=10,
+            keep_head=1,
+            keep_tail=1,
+            min_middle=1,
         )
         call = ToolCall(id="c1", name="fs__read", arguments={"path": "a.txt"})
         msgs = [
@@ -255,7 +275,11 @@ class TestCompactLayout:
 
     def test_head_expands_to_preserve_tool_call_pair(self) -> None:
         c = TokenBudgetCompactor(
-            max_chars=10**9, max_messages=20, keep_head=2, keep_tail=1, min_middle=1,
+            max_chars=10**9,
+            max_messages=20,
+            keep_head=2,
+            keep_tail=1,
+            min_middle=1,
         )
         call = ToolCall(id="c1", name="fs__read", arguments={"path": "a.txt"})
         msgs = [
@@ -289,7 +313,11 @@ class TestCompactLayout:
 
     def test_head_expansion_skips_when_tool_pair_consumes_middle(self) -> None:
         c = TokenBudgetCompactor(
-            max_chars=10**9, max_messages=20, keep_head=2, keep_tail=1, min_middle=1,
+            max_chars=10**9,
+            max_messages=20,
+            keep_head=2,
+            keep_tail=1,
+            min_middle=1,
         )
         call = ToolCall(id="c1", name="fs__read", arguments={"path": "a.txt"})
         msgs = [
@@ -320,7 +348,11 @@ class TestCompactOnProviderError:
                 raise RuntimeError("provider kaput")
 
         c = TokenBudgetCompactor(
-            max_chars=10**9, max_messages=10, keep_head=1, keep_tail=2, min_middle=1,
+            max_chars=10**9,
+            max_messages=10,
+            keep_head=1,
+            keep_tail=2,
+            min_middle=1,
         )
         msgs = [Message(role="user", content=f"m{i}") for i in range(8)]
         out = c.compact(msgs, _Boom())
@@ -342,9 +374,7 @@ class TestHelpers:
             Message(
                 role="assistant",
                 content="",
-                tool_calls=(
-                    ToolCall(id="c1", name="fs__r", arguments={"p": "abc"}),
-                ),
+                tool_calls=(ToolCall(id="c1", name="fs__r", arguments={"p": "abc"}),),
             )
         ]
         # name("fs__r") + json({"p": "abc"}) = 5 + 12 = 17
@@ -377,9 +407,7 @@ class TestHelpers:
             Message(
                 role="assistant",
                 content="using tool",
-                tool_calls=(
-                    ToolCall(id="c1", name="fs__r", arguments={"p": "/tmp"}),
-                ),
+                tool_calls=(ToolCall(id="c1", name="fs__r", arguments={"p": "/tmp"}),),
             )
         ]
         out = _render_messages_for_summary(msgs)
@@ -391,7 +419,10 @@ class TestHelpers:
     def test_render_tool_result(self) -> None:
         msgs = [
             Message(
-                role="tool", content="ok", tool_call_id="c1", name="fs__r",
+                role="tool",
+                content="ok",
+                tool_call_id="c1",
+                name="fs__r",
             )
         ]
         out = _render_messages_for_summary(msgs)
@@ -419,7 +450,11 @@ class TestCompactNow:
     def test_noop_when_no_compaction_happens(self) -> None:
         """compact_now returns original message list when middle is too short."""
         c = TokenBudgetCompactor(
-            max_chars=10**9, max_messages=20, keep_head=2, keep_tail=3, min_middle=100,
+            max_chars=10**9,
+            max_messages=20,
+            keep_head=2,
+            keep_tail=3,
+            min_middle=100,
         )
         msgs = [Message(role="user", content=f"m{i}") for i in range(7)]
         p = _Scripted(responses=[_resp(content="unused")])
@@ -438,9 +473,9 @@ class TestLoopIntegration:
         # user+assistant pair (the model calls a tool, we answer).
         tc = ToolCall(id="c1", name="srv__noop", arguments={})
         responses = [
-            _resp(content="", tool_calls=(tc,)),   # iter 1 — tool call
-            _resp(content="", tool_calls=(tc,)),   # iter 2 — tool call
-            _resp(content="final answer"),          # iter 3 — stop
+            _resp(content="", tool_calls=(tc,)),  # iter 1 — tool call
+            _resp(content="", tool_calls=(tc,)),  # iter 2 — tool call
+            _resp(content="final answer"),  # iter 3 — stop
         ]
         provider = _Scripted(responses=responses)
 
@@ -463,11 +498,11 @@ class TestLoopIntegration:
         # iter2_resp, summary_resp, iter3_resp.
         provider = _Scripted(
             responses=[
-                responses[0],   # iter 1
+                responses[0],  # iter 1
                 summary_response,
-                responses[1],   # iter 2
+                responses[1],  # iter 2
                 summary_response,
-                responses[2],   # iter 3
+                responses[2],  # iter 3
             ]
         )
 
@@ -490,11 +525,12 @@ class TestLoopIntegration:
         # did not split the assistant/tool pair at the tail boundary.
         iter2_msgs = provider.calls[2]
         assert [m.role for m in iter2_msgs] == [
-            "system", "assistant", "assistant", "tool",
+            "system",
+            "assistant",
+            "assistant",
+            "tool",
         ]
-        assert any(
-            m.content.startswith("[Compacted") for m in iter2_msgs
-        )
+        assert any(m.content.startswith("[Compacted") for m in iter2_msgs)
         assert iter2_msgs[-2].tool_calls == (tc,)
         assert iter2_msgs[-1].tool_call_id == "c1"
 
@@ -513,13 +549,8 @@ class TestLoopIntegration:
                 for message in messages:
                     if message.role == "assistant":
                         seen_call_ids.update(call.id for call in message.tool_calls)
-                    if (
-                        message.role == "tool"
-                        and message.tool_call_id not in seen_call_ids
-                    ):
-                        raise AssertionError(
-                            f"orphan tool result: {message.tool_call_id}"
-                        )
+                    if message.role == "tool" and message.tool_call_id not in seen_call_ids:
+                        raise AssertionError(f"orphan tool result: {message.tool_call_id}")
                 return super().complete(
                     messages,
                     tools,
@@ -591,7 +622,9 @@ class TestLoopIntegration:
     def test_no_compactor_parameter_is_backward_compatible(self) -> None:
         provider = _Scripted(responses=[_resp(content="done")])
         result = run_loop(
-            provider=provider, system_prompt="", task="hi",
+            provider=provider,
+            system_prompt="",
+            task="hi",
         )
         assert result.stop_reason == "completed"
 

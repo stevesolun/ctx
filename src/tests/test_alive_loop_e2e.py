@@ -139,7 +139,11 @@ def _write_graph_json(wiki_dir: Path, nodes: list[dict], edges: list[dict]) -> P
     for n in nodes:
         G.add_node(n["id"], **{k: v for k, v in n.items() if k != "id"})
     for e in edges:
-        G.add_edge(e["source"], e["target"], **{k: v for k, v in e.items() if k not in {"source", "target"}})
+        G.add_edge(
+            e["source"],
+            e["target"],
+            **{k: v for k, v in e.items() if k not in {"source", "target"}},
+        )
     data = nx.node_link_data(G, edges="edges")
     path = wiki_dir / "graphify-out" / "graph.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -170,26 +174,29 @@ def e2e_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path
     # The "python" signal is the trigger we'll feed into the monitor.
     _write_skill_entity(wiki_dir, "python-patterns", tags=["python", "patterns"])
     _write_skill_body(
-        wiki_dir, "python-patterns",
+        wiki_dir,
+        "python-patterns",
         "# python-patterns\n\nBest practices for idiomatic Python.\n",
     )
     _write_skill_entity(wiki_dir, "security-basics", tags=["security"])
     _write_skill_body(
-        wiki_dir, "security-basics",
+        wiki_dir,
+        "security-basics",
         "# security-basics\n\nSecurity fundamentals.\n",
     )
 
     _write_agent_entity(wiki_dir, "code-reviewer", tags=["python", "review"])
     _write_agent_body(
-        wiki_dir, "code-reviewer",
+        wiki_dir,
+        "code-reviewer",
         "---\nname: code-reviewer\ndescription: review code\n---\n\n"
         "Review code for quality and security issues.\n",
     )
     _write_agent_entity(wiki_dir, "devops-engineer", tags=["devops", "docker"])
     _write_agent_body(
-        wiki_dir, "devops-engineer",
-        "---\nname: devops-engineer\ndescription: devops\n---\n\n"
-        "DevOps tooling and CI/CD.\n",
+        wiki_dir,
+        "devops-engineer",
+        "---\nname: devops-engineer\ndescription: devops\n---\n\nDevOps tooling and CI/CD.\n",
     )
 
     _write_mcp_entity(wiki_dir, "anthropic-python-sdk", tags=["python", "sdk"])
@@ -199,50 +206,86 @@ def e2e_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path
     _write_graph_json(
         wiki_dir,
         nodes=[
-            {"id": "skill:python-patterns", "label": "python-patterns",
-             "type": "skill", "tags": ["python", "patterns"]},
-            {"id": "skill:security-basics", "label": "security-basics",
-             "type": "skill", "tags": ["security"]},
-            {"id": "agent:code-reviewer", "label": "code-reviewer",
-             "type": "agent", "tags": ["python", "review"]},
-            {"id": "agent:devops-engineer", "label": "devops-engineer",
-             "type": "agent", "tags": ["devops", "docker"]},
-            {"id": "mcp-server:anthropic-python-sdk",
-             "label": "anthropic-python-sdk",
-             "type": "mcp-server", "tags": ["python", "sdk"]},
-            {"id": "mcp-server:atlassian-cloud",
-             "label": "atlassian-cloud",
-             "type": "mcp-server", "tags": ["saas"]},
+            {
+                "id": "skill:python-patterns",
+                "label": "python-patterns",
+                "type": "skill",
+                "tags": ["python", "patterns"],
+            },
+            {
+                "id": "skill:security-basics",
+                "label": "security-basics",
+                "type": "skill",
+                "tags": ["security"],
+            },
+            {
+                "id": "agent:code-reviewer",
+                "label": "code-reviewer",
+                "type": "agent",
+                "tags": ["python", "review"],
+            },
+            {
+                "id": "agent:devops-engineer",
+                "label": "devops-engineer",
+                "type": "agent",
+                "tags": ["devops", "docker"],
+            },
+            {
+                "id": "mcp-server:anthropic-python-sdk",
+                "label": "anthropic-python-sdk",
+                "type": "mcp-server",
+                "tags": ["python", "sdk"],
+            },
+            {
+                "id": "mcp-server:atlassian-cloud",
+                "label": "atlassian-cloud",
+                "type": "mcp-server",
+                "tags": ["saas"],
+            },
         ],
         edges=[
-            {"source": "skill:python-patterns", "target": "agent:code-reviewer",
-             "weight": 1, "shared_tags": ["python"]},
-            {"source": "skill:python-patterns",
-             "target": "mcp-server:anthropic-python-sdk",
-             "weight": 1, "shared_tags": ["python"]},
-            {"source": "agent:code-reviewer",
-             "target": "mcp-server:anthropic-python-sdk",
-             "weight": 1, "shared_tags": ["python"]},
+            {
+                "source": "skill:python-patterns",
+                "target": "agent:code-reviewer",
+                "weight": 1,
+                "shared_tags": ["python"],
+            },
+            {
+                "source": "skill:python-patterns",
+                "target": "mcp-server:anthropic-python-sdk",
+                "weight": 1,
+                "shared_tags": ["python"],
+            },
+            {
+                "source": "agent:code-reviewer",
+                "target": "mcp-server:anthropic-python-sdk",
+                "weight": 1,
+                "shared_tags": ["python"],
+            },
         ],
     )
 
     # ── Monkeypatch every module's path constants ─────────────────────────
     from ctx.adapters.claude_code.hooks import context_monitor as _cm
+
     monkeypatch.setattr(_cm, "CLAUDE_DIR", claude_dir)
     monkeypatch.setattr(_cm, "INTENT_LOG", intent_log)
     monkeypatch.setattr(_cm, "PENDING_SKILLS", pending_skills)
     monkeypatch.setattr(_cm, "MANIFEST_PATH", manifest)
 
     from ctx.adapters.claude_code.hooks import bundle_orchestrator as _bo
+
     monkeypatch.setattr(_bo, "CLAUDE_DIR", claude_dir)
     monkeypatch.setattr(_bo, "PENDING_SKILLS", pending_skills)
     monkeypatch.setattr(_bo, "PENDING_UNLOAD", claude_dir / "pending-unload.json")
     monkeypatch.setattr(_bo, "SHOWN_FLAG", claude_dir / ".bundle-shown")
 
     from ctx.adapters.claude_code.install import install_utils as _iu
+
     monkeypatch.setattr(_iu, "MANIFEST_PATH", manifest)
 
     import ctx_config
+
     monkeypatch.setattr(
         ctx_config.cfg,
         "graph_semantic_cache_dir",
@@ -269,7 +312,9 @@ class TestAliveLoopE2E:
     """One test per chain link + one test for the full journey."""
 
     def test_signals_below_threshold_do_not_fire(
-        self, e2e_world, monkeypatch,
+        self,
+        e2e_world,
+        monkeypatch,
     ):
         """Single invocation with one unmatched signal stays below the
         default threshold=3 — pending-skills.json must NOT be written.
@@ -280,10 +325,17 @@ class TestAliveLoopE2E:
         accumulated."""
         from ctx.adapters.claude_code.hooks import context_monitor as _cm
 
-        monkeypatch.setattr(sys, "argv", [
-            "context_monitor.py", "--tool", "Read",
-            "--input", json.dumps({"file_path": "App.tsx"}),
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "context_monitor.py",
+                "--tool",
+                "Read",
+                "--input",
+                json.dumps({"file_path": "App.tsx"}),
+            ],
+        )
         _cm.main()
 
         assert not e2e_world["pending_skills"].exists(), (
@@ -291,7 +343,9 @@ class TestAliveLoopE2E:
         )
 
     def test_cumulative_threshold_fires_pending_write(
-        self, e2e_world, monkeypatch,
+        self,
+        e2e_world,
+        monkeypatch,
     ):
         """Cumulative signals across multiple invocations trigger the
         pending-skills write once the threshold is reached. The alive
@@ -303,15 +357,22 @@ class TestAliveLoopE2E:
         # signal extraction. Each invocation surfaces a distinct signal
         # set; cumulative union crosses threshold=3.
         invocations = [
-            ("Read", {"file_path": "App.tsx"}),           # -> react
-            ("Read", {"file_path": "Dockerfile"}),        # -> docker
-            ("Bash", {"command": "pip install fastapi"}), # -> fastapi, python
+            ("Read", {"file_path": "App.tsx"}),  # -> react
+            ("Read", {"file_path": "Dockerfile"}),  # -> docker
+            ("Bash", {"command": "pip install fastapi"}),  # -> fastapi, python
         ]
         for tool, tool_input in invocations:
-            monkeypatch.setattr(sys, "argv", [
-                "context_monitor.py", "--tool", tool,
-                "--input", json.dumps(tool_input),
-            ])
+            monkeypatch.setattr(
+                sys,
+                "argv",
+                [
+                    "context_monitor.py",
+                    "--tool",
+                    tool,
+                    "--input",
+                    json.dumps(tool_input),
+                ],
+            )
             _cm.main()
 
         assert e2e_world["pending_skills"].exists()
@@ -324,7 +385,9 @@ class TestAliveLoopE2E:
         assert "graph_suggestions" in payload
 
     def test_graph_suggest_returns_cross_type_bundle(
-        self, e2e_world, monkeypatch,
+        self,
+        e2e_world,
+        monkeypatch,
     ):
         """With a python signal and a graph containing a python skill +
         python agent + python MCP, graph_suggest returns entries
@@ -342,7 +405,10 @@ class TestAliveLoopE2E:
         )
 
     def test_bundle_orchestrator_renders_categorised_message(
-        self, e2e_world, capsys, monkeypatch,
+        self,
+        e2e_world,
+        capsys,
+        monkeypatch,
     ):
         """Fire the cumulative threshold, then run the bundle orchestrator
         hook. Output must contain the three-type categorised layout and
@@ -358,10 +424,17 @@ class TestAliveLoopE2E:
             ("Bash", {"command": "pip install fastapi"}),
         ]
         for tool, tool_input in invocations:
-            monkeypatch.setattr(sys, "argv", [
-                "context_monitor.py", "--tool", tool,
-                "--input", json.dumps(tool_input),
-            ])
+            monkeypatch.setattr(
+                sys,
+                "argv",
+                [
+                    "context_monitor.py",
+                    "--tool",
+                    tool,
+                    "--input",
+                    json.dumps(tool_input),
+                ],
+            )
             _cm.main()
 
         # Sanity: pending-skills.json was written.
@@ -377,12 +450,11 @@ class TestAliveLoopE2E:
         # returned; we assert at least two of three are present since
         # the python signal hits our skill + agent + MCP all.
         headers = {h for h in ("Skills:", "Agents:", "MCPs:") if h in msg}
-        assert len(headers) >= 2, (
-            f"expected multi-type categorisation, got headers={headers}"
-        )
+        assert len(headers) >= 2, f"expected multi-type categorisation, got headers={headers}"
 
     def test_install_skill_copies_body_and_records_manifest(
-        self, e2e_world,
+        self,
+        e2e_world,
     ):
         """User approves a skill from the bundle → skill_install copies
         wiki body into the live skills dir, flips entity status to
@@ -403,13 +475,14 @@ class TestAliveLoopE2E:
         assert ("python-patterns", "skill") in loaded
 
         # Entity status bumped.
-        entity_text = (
-            e2e_world["wiki"] / "entities" / "skills" / "python-patterns.md"
-        ).read_text(encoding="utf-8")
+        entity_text = (e2e_world["wiki"] / "entities" / "skills" / "python-patterns.md").read_text(
+            encoding="utf-8"
+        )
         assert "status: installed" in entity_text
 
     def test_install_agent_writes_body_and_records_manifest_distinct_from_skill(
-        self, e2e_world,
+        self,
+        e2e_world,
     ):
         """Approving an agent with the SAME slug as an installed skill
         must not collide — the manifest dedups on (slug, entity_type)
@@ -437,7 +510,9 @@ class TestAliveLoopE2E:
         assert ("code-reviewer", "agent") in pairs
 
     def test_install_and_uninstall_mcp_records_manifest(
-        self, e2e_world, monkeypatch,
+        self,
+        e2e_world,
+        monkeypatch,
     ):
         """MCP approval and removal reconcile typed manifest entries."""
         from ctx.adapters.claude_code.install import mcp_install
@@ -470,13 +545,7 @@ class TestAliveLoopE2E:
         loaded = {(e.get("skill"), e.get("entity_type")) for e in manifest["load"]}
         assert ("anthropic-python-sdk", "mcp-server") in loaded
 
-        entity = (
-            e2e_world["wiki"]
-            / "entities"
-            / "mcp-servers"
-            / "a"
-            / "anthropic-python-sdk.md"
-        )
+        entity = e2e_world["wiki"] / "entities" / "mcp-servers" / "a" / "anthropic-python-sdk.md"
         assert "status: installed" in entity.read_text(encoding="utf-8")
 
         uninstall_result = mcp_install.uninstall_mcp(
@@ -488,15 +557,16 @@ class TestAliveLoopE2E:
 
         manifest = json.loads(e2e_world["manifest"].read_text(encoding="utf-8"))
         loaded = {(e.get("skill"), e.get("entity_type")) for e in manifest["load"]}
-        unloaded = {
-            (e.get("skill"), e.get("entity_type")) for e in manifest["unload"]
-        }
+        unloaded = {(e.get("skill"), e.get("entity_type")) for e in manifest["unload"]}
         assert ("anthropic-python-sdk", "mcp-server") not in loaded
         assert ("anthropic-python-sdk", "mcp-server") in unloaded
         assert "status: cataloged" in entity.read_text(encoding="utf-8")
 
     def test_full_user_journey_signals_to_install(
-        self, e2e_world, capsys, monkeypatch,
+        self,
+        e2e_world,
+        capsys,
+        monkeypatch,
     ):
         """The A-Z.
 
@@ -543,10 +613,17 @@ class TestAliveLoopE2E:
             ("Bash", {"command": "pip install fastapi"}),
         ]
         for tool, tool_input in invocations:
-            monkeypatch.setattr(sys, "argv", [
-                "context_monitor.py", "--tool", tool,
-                "--input", json.dumps(tool_input),
-            ])
+            monkeypatch.setattr(
+                sys,
+                "argv",
+                [
+                    "context_monitor.py",
+                    "--tool",
+                    tool,
+                    "--input",
+                    json.dumps(tool_input),
+                ],
+            )
             _cm.main()
         assert e2e_world["pending_skills"].exists(), (
             "alive loop broken: cumulative threshold didn't fire"
@@ -588,9 +665,7 @@ class TestAliveLoopE2E:
         assert (e2e_world["agents"] / "code-reviewer.md").is_file()
 
         manifest = json.loads(e2e_world["manifest"].read_text(encoding="utf-8"))
-        loaded_pairs = {
-            (e.get("skill"), e.get("entity_type")) for e in manifest["load"]
-        }
+        loaded_pairs = {(e.get("skill"), e.get("entity_type")) for e in manifest["load"]}
         assert {
             ("python-patterns", "skill"),
             ("code-reviewer", "agent"),
@@ -603,6 +678,4 @@ class TestAliveLoopE2E:
             "entities/mcp-servers/a/anthropic-python-sdk.md",
         ):
             text = (e2e_world["wiki"] / entity_rel).read_text(encoding="utf-8")
-            assert "status: installed" in text, (
-                f"status not flipped on {entity_rel}"
-            )
+            assert "status: installed" in text, f"status not flipped on {entity_rel}"

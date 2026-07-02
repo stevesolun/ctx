@@ -90,6 +90,7 @@ def test_recommendation_surfaces_share_order_type_and_normalized_score(
     graph_path = claude_dir / "skill-wiki" / "graphify-out" / "graph.json"
     _write_golden_graph(graph_path)
     import ctx_config
+
     monkeypatch.setattr(
         ctx_config.cfg,
         "graph_semantic_cache_dir",
@@ -147,6 +148,7 @@ def test_hook_uses_shared_query_min_score_and_top_k(
     graph_path.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(context_monitor, "CLAUDE_DIR", claude_dir)
     import ctx_config
+
     monkeypatch.setattr(
         ctx_config,
         "cfg",
@@ -174,7 +176,9 @@ def test_hook_uses_shared_query_min_score_and_top_k(
     monkeypatch.setitem(
         sys.modules,
         "ctx.core.resolve.recommendations",
-        type("FakeRecommendModule", (), {"recommend_by_tags": staticmethod(fake_recommend_by_tags)}),
+        type(
+            "FakeRecommendModule", (), {"recommend_by_tags": staticmethod(fake_recommend_by_tags)}
+        ),
     )
 
     out = context_monitor.graph_suggest(["fastapi", "python"], top_k=99)
@@ -304,9 +308,7 @@ def test_generic_toolbox_can_opt_into_semantic_query_scoring(
     assert calls["query"] == "fastapi python"
     assert calls["entity_types"] == ("skill", "agent", "mcp-server")
     assert calls["use_semantic_query"] is True
-    assert calls["semantic_cache_dir"] == (
-        tmp_path / "skill-wiki" / ".embedding-cache" / "graph"
-    )
+    assert calls["semantic_cache_dir"] == (tmp_path / "skill-wiki" / ".embedding-cache" / "graph")
 
 
 def test_generic_toolbox_allows_tagless_semantic_query_opt_in(
@@ -368,9 +370,7 @@ def test_generic_toolbox_allows_tagless_semantic_query_opt_in(
     assert calls["tags"] == []
     assert calls["query"] == "go"
     assert calls["use_semantic_query"] is True
-    assert calls["semantic_cache_dir"] == (
-        tmp_path / "skill-wiki" / ".embedding-cache" / "graph"
-    )
+    assert calls["semantic_cache_dir"] == (tmp_path / "skill-wiki" / ".embedding-cache" / "graph")
 
 
 def test_scan_repo_recommendations_use_shared_graph_bundle(
@@ -382,6 +382,7 @@ def test_scan_repo_recommendations_use_shared_graph_bundle(
     graph_path = wiki / "graphify-out" / "graph.json"
     _write_golden_graph(graph_path)
     import ctx_config
+
     monkeypatch.setattr(
         ctx_config,
         "cfg",
@@ -433,6 +434,7 @@ def test_scan_repo_recommendations_use_graph_packs_without_legacy_graph_json(
         graph=graph,
     )
     import ctx_config
+
     monkeypatch.setattr(
         ctx_config,
         "cfg",

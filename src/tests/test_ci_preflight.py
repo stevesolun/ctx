@@ -29,6 +29,7 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
     names = _names_for(["src/ctx/adapters/generic/loop.py"])
 
     assert "no-test policy" in names
+    assert "ruff format" in names
     assert "ruff" in names
     assert "mypy" in names
     assert "unit-linux equivalent" in names
@@ -63,10 +64,15 @@ def test_internal_no_test_policy_fails_dirty_contract_without_tests() -> None:
 
 
 def test_internal_no_test_policy_accepts_dirty_contract_with_tests() -> None:
-    assert _run_no_test_policy_for_files([
-        "src/ctx/adapters/generic/loop.py",
-        "src/tests/test_harness_loop.py",
-    ]) == 0
+    assert (
+        _run_no_test_policy_for_files(
+            [
+                "src/ctx/adapters/generic/loop.py",
+                "src/tests/test_harness_loop.py",
+            ]
+        )
+        == 0
+    )
 
 
 def test_preflight_pr_profile_runs_package_build_for_source_prs() -> None:

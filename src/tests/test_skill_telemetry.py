@@ -34,9 +34,9 @@ import skill_telemetry as st  # noqa: E402
 
 
 def _iso(offset_seconds: float = 0.0) -> str:
-    return (
-        datetime.now(timezone.utc) + timedelta(seconds=offset_seconds)
-    ).isoformat(timespec="seconds")
+    return (datetime.now(timezone.utc) + timedelta(seconds=offset_seconds)).isoformat(
+        timespec="seconds"
+    )
 
 
 def _event(**overrides: object) -> st.TelemetryEvent:
@@ -110,22 +110,27 @@ def test_event_rejects_unknown_schema() -> None:
 def test_log_event_rejects_oversized_meta(tmp_path: Path) -> None:
     big = {f"k{i}": i for i in range(st._MAX_META_KEYS + 1)}
     with pytest.raises(ValueError, match="max"):
-        st.log_event("load", "x", "s1", meta=big, path=tmp_path / "e.jsonl",
-                     trusted_root=tmp_path)
+        st.log_event("load", "x", "s1", meta=big, path=tmp_path / "e.jsonl", trusted_root=tmp_path)
 
 
 def test_log_event_rejects_non_scalar_meta_value(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="must be str/int/float/bool/None"):
         st.log_event(
-            "load", "x", "s1", meta={"nested": {"a": 1}},
-            path=tmp_path / "e.jsonl", trusted_root=tmp_path,
+            "load",
+            "x",
+            "s1",
+            meta={"nested": {"a": 1}},
+            path=tmp_path / "e.jsonl",
+            trusted_root=tmp_path,
         )
 
 
 def test_log_event_rejects_oversized_meta_string(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="exceeds"):
         st.log_event(
-            "load", "x", "s1",
+            "load",
+            "x",
+            "s1",
             meta={"big": "a" * (st._MAX_META_VALUE_LEN + 1)},
             path=tmp_path / "e.jsonl",
             trusted_root=tmp_path,
@@ -170,16 +175,27 @@ def test_log_event_and_read_events_round_trip(tmp_path: Path) -> None:
     events_path = tmp_path / "skill-events.jsonl"
 
     rec_a = st.log_event(
-        "load", "python-patterns", "sess-1",
-        meta={"source": "unit-test"}, path=events_path, trusted_root=tmp_path,
+        "load",
+        "python-patterns",
+        "sess-1",
+        meta={"source": "unit-test"},
+        path=events_path,
+        trusted_root=tmp_path,
     )
     rec_b = st.log_event(
-        "unload", "python-patterns", "sess-1", path=events_path,
+        "unload",
+        "python-patterns",
+        "sess-1",
+        path=events_path,
         trusted_root=tmp_path,
     )
     rec_c = st.log_event(
-        "override", "flask", "sess-1",
-        meta={"replaced_with": "fastapi"}, path=events_path, trusted_root=tmp_path,
+        "override",
+        "flask",
+        "sess-1",
+        meta={"replaced_with": "fastapi"},
+        path=events_path,
+        trusted_root=tmp_path,
     )
 
     got = list(st.read_events(path=events_path, trusted_root=tmp_path))
@@ -203,7 +219,11 @@ def test_log_event_creates_owner_only_file(tmp_path: Path) -> None:
     events_path = tmp_path / "nested" / "skill-events.jsonl"
 
     st.log_event(
-        "load", "python-patterns", "sess-1", path=events_path, trusted_root=tmp_path,
+        "load",
+        "python-patterns",
+        "sess-1",
+        path=events_path,
+        trusted_root=tmp_path,
     )
 
     assert stat.S_IMODE(events_path.parent.stat().st_mode) == 0o700
@@ -221,26 +241,44 @@ def test_read_events_skips_malformed_lines(
     # One valid event, one garbage line, one event missing a required key,
     # one event missing event_id (now rejected), one blank line, one valid.
     good1 = {
-        "event": "load", "skill": "x", "timestamp": _iso(),
-        "session_id": "s1", "event_id": "e1", "meta": {},
+        "event": "load",
+        "skill": "x",
+        "timestamp": _iso(),
+        "session_id": "s1",
+        "event_id": "e1",
+        "meta": {},
     }
     good2 = {
-        "event": "unload", "skill": "x", "timestamp": _iso(),
-        "session_id": "s1", "event_id": "e2", "meta": {},
+        "event": "unload",
+        "skill": "x",
+        "timestamp": _iso(),
+        "session_id": "s1",
+        "event_id": "e2",
+        "meta": {},
     }
     missing_session = {
-        "event": "load", "skill": "x", "timestamp": _iso(), "event_id": "ex",
+        "event": "load",
+        "skill": "x",
+        "timestamp": _iso(),
+        "event_id": "ex",
     }
     missing_event_id = {
-        "event": "load", "skill": "x", "timestamp": _iso(), "session_id": "s1",
+        "event": "load",
+        "skill": "x",
+        "timestamp": _iso(),
+        "session_id": "s1",
     }
     events_path.write_text(
-        json.dumps(good1) + "\n"
-        + "not-json-at-all\n"
-        + json.dumps(missing_session) + "\n"
-        + json.dumps(missing_event_id) + "\n"
+        json.dumps(good1)
         + "\n"
-        + json.dumps(good2) + "\n",
+        + "not-json-at-all\n"
+        + json.dumps(missing_session)
+        + "\n"
+        + json.dumps(missing_event_id)
+        + "\n"
+        + "\n"
+        + json.dumps(good2)
+        + "\n",
         encoding="utf-8",
     )
 
@@ -270,8 +308,7 @@ def test_concurrent_appends_produce_wellformed_lines(tmp_path: Path) -> None:
     N = 32
 
     def worker(i: int) -> None:
-        st.log_event("load", f"skill{i:03d}", f"sess-{i}", path=events_path,
-                     trusted_root=tmp_path)
+        st.log_event("load", f"skill{i:03d}", f"sess-{i}", path=events_path, trusted_root=tmp_path)
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(worker, range(N)))

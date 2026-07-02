@@ -143,21 +143,34 @@ def test_main_attach_dry_run_outputs_overlay_without_writing(tmp_path, capsys) -
     text_file = tmp_path / "new-python.md"
     text_file.write_text("new python testing helper", encoding="utf-8")
 
-    rc = main([
-        "attach",
-        "--index-dir", str(index_dir),
-        "--overlay", str(overlay),
-        "--node-id", "skill:new-python",
-        "--label", "new-python",
-        "--type", "skill",
-        "--tag", "python",
-        "--text-file", str(text_file),
-        "--model-id", "model-a",
-        "--vector-json", "[1.0, 0.0]",
-        "--top-k", "1",
-        "--min-score", "0.5",
-        "--dry-run",
-    ])
+    rc = main(
+        [
+            "attach",
+            "--index-dir",
+            str(index_dir),
+            "--overlay",
+            str(overlay),
+            "--node-id",
+            "skill:new-python",
+            "--label",
+            "new-python",
+            "--type",
+            "skill",
+            "--tag",
+            "python",
+            "--text-file",
+            str(text_file),
+            "--model-id",
+            "model-a",
+            "--vector-json",
+            "[1.0, 0.0]",
+            "--top-k",
+            "1",
+            "--min-score",
+            "0.5",
+            "--dry-run",
+        ]
+    )
 
     assert rc == 0
     assert not overlay.exists()
@@ -185,21 +198,34 @@ def test_main_attach_queries_delta_vector_indexes(tmp_path, capsys) -> None:
     ).save(delta_index_dir)
     overlay = tmp_path / "entity-overlays.jsonl"
 
-    rc = main([
-        "attach",
-        "--index-dir", str(index_dir),
-        "--delta-index-dir", str(delta_index_dir),
-        "--overlay", str(overlay),
-        "--node-id", "skill:new-python",
-        "--label", "new-python",
-        "--type", "skill",
-        "--text", "new python testing helper",
-        "--model-id", "model-a",
-        "--vector-json", "[1.0, 0.0]",
-        "--top-k", "1",
-        "--min-score", "0.5",
-        "--dry-run",
-    ])
+    rc = main(
+        [
+            "attach",
+            "--index-dir",
+            str(index_dir),
+            "--delta-index-dir",
+            str(delta_index_dir),
+            "--overlay",
+            str(overlay),
+            "--node-id",
+            "skill:new-python",
+            "--label",
+            "new-python",
+            "--type",
+            "skill",
+            "--text",
+            "new python testing helper",
+            "--model-id",
+            "model-a",
+            "--vector-json",
+            "[1.0, 0.0]",
+            "--top-k",
+            "1",
+            "--min-score",
+            "0.5",
+            "--dry-run",
+        ]
+    )
 
     assert rc == 0
     assert not overlay.exists()
@@ -226,12 +252,16 @@ def test_main_validate_indexes_reports_base_and_delta(tmp_path, capsys) -> None:
         vectors=np.asarray([[0.9, 0.1]], dtype="float32"),
     ).save(delta_index_dir)
 
-    rc = main([
-        "validate-indexes",
-        "--index-dir", str(index_dir),
-        "--delta-index-dir", str(delta_index_dir),
-        "--json",
-    ])
+    rc = main(
+        [
+            "validate-indexes",
+            "--index-dir",
+            str(index_dir),
+            "--delta-index-dir",
+            str(delta_index_dir),
+            "--json",
+        ]
+    )
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -260,12 +290,16 @@ def test_main_validate_indexes_rejects_incompatible_delta(tmp_path, capsys) -> N
         vectors=np.asarray([[0.9, 0.1]], dtype="float32"),
     ).save(delta_index_dir)
 
-    rc = main([
-        "validate-indexes",
-        "--index-dir", str(index_dir),
-        "--delta-index-dir", str(delta_index_dir),
-        "--json",
-    ])
+    rc = main(
+        [
+            "validate-indexes",
+            "--index-dir",
+            str(index_dir),
+            "--delta-index-dir",
+            str(delta_index_dir),
+            "--json",
+        ]
+    )
 
     assert rc == 1
     payload = json.loads(capsys.readouterr().out)
@@ -290,17 +324,28 @@ def test_main_attach_writes_idempotent_overlay_used_by_resolver(tmp_path) -> Non
     overlay = tmp_path / "entity-overlays.jsonl"
     args = [
         "attach",
-        "--index-dir", str(index_dir),
-        "--overlay", str(overlay),
-        "--node-id", "skill:new-python",
-        "--label", "new-python",
-        "--type", "skill",
-        "--tag", "python",
-        "--text", "new python testing helper",
-        "--model-id", "model-a",
-        "--vector-json", "[1.0, 0.0]",
-        "--top-k", "1",
-        "--min-score", "0.5",
+        "--index-dir",
+        str(index_dir),
+        "--overlay",
+        str(overlay),
+        "--node-id",
+        "skill:new-python",
+        "--label",
+        "new-python",
+        "--type",
+        "skill",
+        "--tag",
+        "python",
+        "--text",
+        "new python testing helper",
+        "--model-id",
+        "model-a",
+        "--vector-json",
+        "[1.0, 0.0]",
+        "--top-k",
+        "1",
+        "--min-score",
+        "0.5",
     ]
 
     assert main(args) == 0
@@ -320,17 +365,28 @@ def test_main_attach_writes_idempotent_overlay_used_by_resolver(tmp_path) -> Non
 
     changed_args = [
         "attach",
-        "--index-dir", str(index_dir),
-        "--overlay", str(overlay),
-        "--node-id", "skill:new-python",
-        "--label", "new-python",
-        "--type", "skill",
-        "--tag", "python",
-        "--text", "updated ruby testing helper",
-        "--model-id", "model-a",
-        "--vector-json", "[0.0, 1.0]",
-        "--top-k", "1",
-        "--min-score", "0.5",
+        "--index-dir",
+        str(index_dir),
+        "--overlay",
+        str(overlay),
+        "--node-id",
+        "skill:new-python",
+        "--label",
+        "new-python",
+        "--type",
+        "skill",
+        "--tag",
+        "python",
+        "--text",
+        "updated ruby testing helper",
+        "--model-id",
+        "model-a",
+        "--vector-json",
+        "[0.0, 1.0]",
+        "--top-k",
+        "1",
+        "--min-score",
+        "0.5",
     ]
     assert main(changed_args) == 0
     loaded_after_change = load_graph(graph_path)
@@ -355,11 +411,13 @@ def test_main_attach_writes_idempotent_overlay_pack(tmp_path, capsys) -> None:
     base_dir.mkdir(parents=True)
     graph_json = base_dir / "graph.json"
     graph_json.write_text(
-        json.dumps({
-            "graph": {"export_id": "export-1"},
-            "nodes": [{"id": "skill:python-testing", "type": "skill"}],
-            "edges": [],
-        }),
+        json.dumps(
+            {
+                "graph": {"export_id": "export-1"},
+                "nodes": [{"id": "skill:python-testing", "type": "skill"}],
+                "edges": [],
+            }
+        ),
         encoding="utf-8",
     )
     write_pack_manifest(
@@ -380,20 +438,34 @@ def test_main_attach_writes_idempotent_overlay_pack(tmp_path, capsys) -> None:
     overlay = tmp_path / "entity-overlays.jsonl"
     args = [
         "attach",
-        "--index-dir", str(index_dir),
-        "--overlay", str(overlay),
-        "--pack-root", str(packs_dir),
-        "--base-export-id", "export-1",
-        "--config-hash", "config-sha",
-        "--node-id", "skill:new-python",
-        "--label", "new-python",
-        "--type", "skill",
-        "--tag", "python",
-        "--text", "new python testing helper",
-        "--model-id", "model-a",
-        "--vector-json", "[1.0, 0.0]",
-        "--top-k", "1",
-        "--min-score", "0.5",
+        "--index-dir",
+        str(index_dir),
+        "--overlay",
+        str(overlay),
+        "--pack-root",
+        str(packs_dir),
+        "--base-export-id",
+        "export-1",
+        "--config-hash",
+        "config-sha",
+        "--node-id",
+        "skill:new-python",
+        "--label",
+        "new-python",
+        "--type",
+        "skill",
+        "--tag",
+        "python",
+        "--text",
+        "new python testing helper",
+        "--model-id",
+        "model-a",
+        "--vector-json",
+        "[1.0, 0.0]",
+        "--top-k",
+        "1",
+        "--min-score",
+        "0.5",
         "--json",
     ]
 
@@ -434,17 +506,28 @@ def test_main_attach_overlay_pack_replaces_stale_incident_edges(tmp_path, capsys
     overlay = tmp_path / "entity-overlays.jsonl"
     common = [
         "attach",
-        "--index-dir", str(index_dir),
-        "--overlay", str(overlay),
-        "--pack-root", str(packs_dir),
-        "--base-export-id", "export-1",
-        "--config-hash", "config-sha",
-        "--node-id", "skill:changing",
-        "--label", "changing",
-        "--type", "skill",
-        "--model-id", "model-a",
-        "--top-k", "1",
-        "--min-score", "0.5",
+        "--index-dir",
+        str(index_dir),
+        "--overlay",
+        str(overlay),
+        "--pack-root",
+        str(packs_dir),
+        "--base-export-id",
+        "export-1",
+        "--config-hash",
+        "config-sha",
+        "--node-id",
+        "skill:changing",
+        "--label",
+        "changing",
+        "--type",
+        "skill",
+        "--model-id",
+        "model-a",
+        "--top-k",
+        "1",
+        "--min-score",
+        "0.5",
         "--json",
     ]
 
@@ -468,18 +551,32 @@ def test_main_attach_default_min_score_matches_build_floor(tmp_path) -> None:
     ).save(index_dir)
     overlay = tmp_path / "entity-overlays.jsonl"
 
-    assert main([
-        "attach",
-        "--index-dir", str(index_dir),
-        "--overlay", str(overlay),
-        "--node-id", "skill:new-python",
-        "--label", "new-python",
-        "--type", "skill",
-        "--text", "new python testing helper",
-        "--model-id", "model-a",
-        "--vector-json", "[1.0, 0.0]",
-        "--top-k", "1",
-    ]) == 0
+    assert (
+        main(
+            [
+                "attach",
+                "--index-dir",
+                str(index_dir),
+                "--overlay",
+                str(overlay),
+                "--node-id",
+                "skill:new-python",
+                "--label",
+                "new-python",
+                "--type",
+                "skill",
+                "--text",
+                "new python testing helper",
+                "--model-id",
+                "model-a",
+                "--vector-json",
+                "[1.0, 0.0]",
+                "--top-k",
+                "1",
+            ]
+        )
+        == 0
+    )
 
     payload = json.loads(overlay.read_text(encoding="utf-8"))
     assert payload["edges"][0]["target"] == "skill:almost-python"

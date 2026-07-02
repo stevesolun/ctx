@@ -172,14 +172,8 @@ def write_active_wiki_overlay_pack(
     created_at: str | None = None,
 ) -> WikiPackManifest | None:
     """Append a small overlay to the active base wiki pack, if one exists."""
-    page_map = {
-        _normalise_page_path(path): text
-        for path, text in (pages or {}).items()
-    }
-    tombstone_paths = [
-        _normalise_page_path(path)
-        for path in (tombstones or [])
-    ]
+    page_map = {_normalise_page_path(path): text for path, text in (pages or {}).items()}
+    tombstone_paths = [_normalise_page_path(path) for path in (tombstones or [])]
     if not page_map and not tombstone_paths:
         return None
 
@@ -360,7 +354,12 @@ def promote_wiki_pack_set(
             moved_active = True
         staged_packs_dir.replace(active_packs_dir)
     except OSError as exc:
-        if moved_active and backup_dir is not None and backup_dir.exists() and not active_packs_dir.exists():
+        if (
+            moved_active
+            and backup_dir is not None
+            and backup_dir.exists()
+            and not active_packs_dir.exists()
+        ):
             backup_dir.replace(active_packs_dir)
         raise WikiPackManifestError(f"failed to promote wiki pack set: {exc}") from exc
 
@@ -488,10 +487,7 @@ def _write_wiki_pack(
             (_normalise_page_path(path), value) for path, value in pages.items()
         )
     ]
-    tombstone_rows = [
-        {"path": _normalise_page_path(path)}
-        for path in sorted(tombstones)
-    ]
+    tombstone_rows = [{"path": _normalise_page_path(path)} for path in sorted(tombstones)]
     artifact_paths: list[str] = []
     _write_jsonl(pack_dir / "pages.jsonl", page_rows)
     artifact_paths.append("pages.jsonl")
@@ -504,10 +500,7 @@ def _write_wiki_pack(
         parent_export_id=parent_export_id,
         page_count=len(page_rows),
         tombstone_count=len(tombstone_rows),
-        checksums={
-            name: sha256_file(pack_dir / name)
-            for name in artifact_paths
-        },
+        checksums={name: sha256_file(pack_dir / name) for name in artifact_paths},
         created_at=created_at,
     )
     manifest.validate()

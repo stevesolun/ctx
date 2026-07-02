@@ -112,14 +112,16 @@ def read_harness_install_rows(claude_dir: Path) -> list[dict[str, Any]]:
         slug = str(data.get("slug") or path.stem).strip()
         if not slug or not is_safe_source_name(slug):
             continue
-        rows.append({
-            "skill": slug,
-            "entity_type": "harness",
-            "source": "ctx-harness-install",
-            "command": data.get("target") or data.get("repo_url") or "",
-            "installed_at": data.get("installed_at", ""),
-            "status": data.get("status", "installed"),
-        })
+        rows.append(
+            {
+                "skill": slug,
+                "entity_type": "harness",
+                "source": "ctx-harness-install",
+                "command": data.get("target") or data.get("repo_url") or "",
+                "installed_at": data.get("installed_at", ""),
+                "status": data.get("status", "installed"),
+            }
+        )
     return rows
 
 

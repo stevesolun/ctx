@@ -100,9 +100,7 @@ def _assert_hydrated_artifacts(repo: Path) -> None:
     for rel, min_bytes in HYDRATED_ARTIFACT_MIN_BYTES.items():
         artifact = repo / rel
         if not artifact.is_file():
-            raise FileNotFoundError(
-                f"{rel.as_posix()} is required before Hugging Face sync"
-            )
+            raise FileNotFoundError(f"{rel.as_posix()} is required before Hugging Face sync")
         size = artifact.stat().st_size
         if size < min_bytes:
             raise RuntimeError(
@@ -113,9 +111,7 @@ def _assert_hydrated_artifacts(repo: Path) -> None:
         with artifact.open("rb") as fh:
             prefix = fh.read(len(LFS_POINTER_PREFIX))
         if prefix == LFS_POINTER_PREFIX:
-            raise RuntimeError(
-                f"{rel.as_posix()} is a Git LFS pointer, not the hydrated artifact"
-            )
+            raise RuntimeError(f"{rel.as_posix()} is a Git LFS pointer, not the hydrated artifact")
         _assert_matches_lfs_pointer(repo, rel, artifact)
     _validate_graph_artifact_integrity(repo)
 
@@ -168,8 +164,7 @@ def _validate_graph_artifact_integrity(repo: Path) -> None:
         validate_graph_artifacts(repo / "graph", **_graph_validation_kwargs(repo))
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(
-            "graph artifact integrity validation failed before Hugging Face sync: "
-            f"{exc}"
+            f"graph artifact integrity validation failed before Hugging Face sync: {exc}"
         ) from exc
 
 

@@ -53,8 +53,7 @@ class TestRenderScalar:
         # inside a quoted string) — pin that NEITHER approach leaves a
         # raw newline in the output.
         assert "\n" not in out, (
-            f"rendered scalar contains raw newline — YAML injection "
-            f"vector: {out!r}"
+            f"rendered scalar contains raw newline — YAML injection vector: {out!r}"
         )
         # Whatever sanitisation happens, the string must not produce
         # a ``status: installed`` key at the YAML top level. If the
@@ -75,9 +74,7 @@ class TestRenderScalar:
         assert "\n" not in out
         # And the second "key" must not survive as an actual YAML key
         # — it must be subsumed into the rendered scalar.
-        assert out.count(":") <= 2, (
-            f"suspicious colon count in {out!r} — possible key injection"
-        )
+        assert out.count(":") <= 2, f"suspicious colon count in {out!r} — possible key injection"
 
     def test_null_sentinel_roundtrip_unaffected(self):
         """Empty string and None distinct rendering preserved — None
@@ -93,11 +90,7 @@ class TestRenderScalar:
         a fake ``status`` or ``install_cmd`` key inserted."""
         entity = tmp_path / "e.md"
         entity.write_text(
-            "---\n"
-            "slug: sample\n"
-            "github_url: null\n"
-            "updated: '2026-01-01'\n"
-            "---\n# sample\nbody\n",
+            "---\nslug: sample\ngithub_url: null\nupdated: '2026-01-01'\n---\n# sample\nbody\n",
             encoding="utf-8",
         )
         # A Source that returned a multi-line URL injection attempt.
@@ -111,7 +104,8 @@ class TestRenderScalar:
         # have injected one.
         fm = text.split("---", 2)[1]
         status_keys = [
-            line for line in fm.splitlines()
+            line
+            for line in fm.splitlines()
             if line.lstrip().startswith("status:")
             # Must be at column 0 (not inside a quoted scalar).
             and not line.startswith(" ")

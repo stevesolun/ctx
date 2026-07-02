@@ -135,10 +135,12 @@ def dashboard_index_uncovered_overlay_nodes(
     neighbor_targets: dict[str, set[str]] = {}
 
     def node_exists(node_id: str) -> bool:
-        return bool(conn.execute(
-            "SELECT 1 FROM nodes WHERE id=? LIMIT 1",
-            (node_id,),
-        ).fetchone())
+        return bool(
+            conn.execute(
+                "SELECT 1 FROM nodes WHERE id=? LIMIT 1",
+                (node_id,),
+            ).fetchone()
+        )
 
     def indexed_neighbors(node_id: str) -> set[str]:
         cached = neighbor_targets.get(node_id)
@@ -382,11 +384,7 @@ def ensure_dashboard_graph_index(
 
     manifest_id = manifest_export_id()
     packaged_id = packaged_export_id()
-    if (
-        manifest_id is not None
-        and packaged_id is not None
-        and manifest_id != packaged_id
-    ):
+    if manifest_id is not None and packaged_id is not None and manifest_id != packaged_id:
         return None
 
     archive_paths = archives()

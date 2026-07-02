@@ -11,18 +11,29 @@ import math
 
 import networkx as nx
 
-SLUG_STOP: frozenset[str] = frozenset({
-    "a", "an", "the", "and", "of", "for", "to", "with",
-    "skill", "agent", "expert", "pro", "core",
-})
+SLUG_STOP: frozenset[str] = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "of",
+        "for",
+        "to",
+        "with",
+        "skill",
+        "agent",
+        "expert",
+        "pro",
+        "core",
+    }
+)
 
 
 def slug_tokens(slug: str, *, stop_words: frozenset[str] = SLUG_STOP) -> list[str]:
     """Return >=3-char non-stopword slug tokens."""
     return [
-        token
-        for token in slug.lower().split("-")
-        if len(token) >= 3 and token not in stop_words
+        token for token in slug.lower().split("-") if len(token) >= 3 and token not in stop_words
     ]
 
 
@@ -66,7 +77,7 @@ def adamic_adar_scores(
             continue
         contribution = 1.0 / math.log(degree)
         for index, n1 in enumerate(neighbors):
-            for n2 in neighbors[index + 1:]:
+            for n2 in neighbors[index + 1 :]:
                 pair = canonical_pair(n1, n2)
                 if pair in pair_lookup:
                     scores[pair] += contribution
@@ -86,7 +97,7 @@ def pairs_from_index(
             continue
         sorted_ids = sorted(node_ids)
         for offset, n1 in enumerate(sorted_ids):
-            for n2 in sorted_ids[offset + 1:]:
+            for n2 in sorted_ids[offset + 1 :]:
                 pair = (n1, n2)
                 counts[pair] += 1
                 shared[pair].append(key)

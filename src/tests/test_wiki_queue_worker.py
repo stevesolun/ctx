@@ -382,9 +382,7 @@ def test_process_next_entity_upsert_delta_index_feeds_next_attach(
     records = active_overlay_records(
         load_overlay_records(wiki / "graphify-out" / "entity-overlays.jsonl")
     )
-    second_record = next(
-        record for record in records if record["node_id"] == "skill:second-worker"
-    )
+    second_record = next(record for record in records if record["node_id"] == "skill:second-worker")
     assert any(edge["target"] == "skill:first-worker" for edge in second_record["edges"])
     graph = load_graph(graph_path)
     assert graph.has_edge("skill:second-worker", "skill:first-worker")
@@ -569,11 +567,13 @@ def test_process_next_entity_upsert_writes_node_pack_without_vector_index(
         config_hash="config-sha",
         model_id="test-model",
         nodes=[{"id": "skill:docs-helper", "type": "skill"}],
-        edges=[{
-            "source": "skill:docs-helper",
-            "target": "skill:python-testing",
-            "weight": 0.5,
-        }],
+        edges=[
+            {
+                "source": "skill:docs-helper",
+                "target": "skill:python-testing",
+                "weight": 0.5,
+            }
+        ],
         tombstones=[],
         created_at="2026-01-01T00:00:00+00:00",
     )
@@ -596,8 +596,7 @@ def test_process_next_entity_upsert_writes_node_pack_without_vector_index(
     assert result is not None
     assert result.status == wiki_queue.STATUS_SUCCEEDED
     assert (
-        "incremental attach skipped (no vector index); node overlay pack inserted"
-        in result.message
+        "incremental attach skipped (no vector index); node overlay pack inserted" in result.message
     )
     graph = load_merged_pack_graph(packs_dir)
     assert graph.nodes["skill:docs-helper"] == {

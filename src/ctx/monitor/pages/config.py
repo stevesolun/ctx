@@ -99,9 +99,7 @@ def render_config(
         )
     group_html = "".join(
         "<section style='margin-bottom:1rem;'>"
-        f"<h2>{html.escape(group)}</h2>"
-        + "".join(rows)
-        + "</section>"
+        f"<h2>{html.escape(group)}</h2>" + "".join(rows) + "</section>"
         for group, rows in rows_by_group.items()
     )
     body = (

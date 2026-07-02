@@ -136,7 +136,9 @@ def _copy_stream(src: IO[bytes], dst: IO[bytes], chunk_size: int = 1024 * 1024) 
         dst.write(chunk)
 
 
-def _write_jsonl_gz(path: Path, records: Iterable[SkillSpectorAuditRecord], *, append: bool) -> None:
+def _write_jsonl_gz(
+    path: Path, records: Iterable[SkillSpectorAuditRecord], *, append: bool
+) -> None:
     mode = "at" if append and path.exists() else "wt"
     with cast(TextIO, gzip.open(path, mode, encoding="utf-8", newline="\n")) as f:
         for record in records:
@@ -297,7 +299,9 @@ def _record_from_report(
     )
 
 
-def _error_record(slug: str, message: str, *, elapsed_seconds: float | None = None) -> dict[str, object]:
+def _error_record(
+    slug: str, message: str, *, elapsed_seconds: float | None = None
+) -> dict[str, object]:
     return SkillSpectorAuditRecord(
         schema_version=AUDIT_SCHEMA_VERSION,
         slug=slug,
@@ -365,7 +369,9 @@ def _scan_skill_dir(skill_dir_str: str) -> dict[str, object]:
         )
         return record.to_json()
     except Exception as exc:  # noqa: BLE001 - scanner failures become audit records.
-        return _error_record(slug, str(exc), elapsed_seconds=round(time.perf_counter() - started, 3))
+        return _error_record(
+            slug, str(exc), elapsed_seconds=round(time.perf_counter() - started, 3)
+        )
 
 
 def _extract_member(member: tarfile.TarInfo, tf: tarfile.TarFile, dest_root: Path) -> None:
@@ -417,9 +423,7 @@ def _completed_record_from_payload(payload: dict[str, object]) -> SkillSpectorAu
         scanner_version=str(payload["scanner_version"]) if payload.get("scanner_version") else None,
         mode=str(payload.get("mode") or "static-no-llm"),
         llm_requested=bool(payload.get("llm_requested")),
-        elapsed_seconds=(
-            _optional_float(payload.get("elapsed_seconds"))
-        ),
+        elapsed_seconds=(_optional_float(payload.get("elapsed_seconds"))),
         error=str(payload["error"]) if payload.get("error") else None,
         issue_rules=tuple(str(rule) for rule in issue_rules),
     )
@@ -521,7 +525,9 @@ def audit_tar(
                     if current_slug is not None and current_root is not None:
                         if current_root.exists() and (current_root / "SKILL.md").exists():
                             if limit is None or submitted < limit:
-                                pending[pool.submit(_scan_skill_dir, str(current_root))] = current_root
+                                pending[pool.submit(_scan_skill_dir, str(current_root))] = (
+                                    current_root
+                                )
                                 submitted += 1
             while pending:
                 drain_one()
@@ -584,11 +590,7 @@ def stamp_entity_text(text: str, record: SkillSpectorAuditRecord) -> str:
         if end != -1:
             frontmatter = stripped[4:end]
             body = stripped[end + 5 :]
-    lines = [
-        line
-        for line in frontmatter.splitlines()
-        if not line.startswith("skillspector_")
-    ]
+    lines = [line for line in frontmatter.splitlines() if not line.startswith("skillspector_")]
     lines.extend(
         [
             "skillspector_checked: true",
@@ -765,11 +767,7 @@ def cover_entity_pages(wiki_tar: Path, audit: Path) -> dict[str, int]:
             if converted_slug is not None and safe_name.endswith("/SKILL.md"):
                 converted_slugs.add(converted_slug)
     missing_body = sorted(entity_slugs - converted_slugs)
-    to_append = [
-        _no_body_record(slug)
-        for slug in missing_body
-        if slug not in records
-    ]
+    to_append = [_no_body_record(slug) for slug in missing_body if slug not in records]
     if to_append:
         _write_jsonl_gz(audit, to_append, append=True)
     return {
@@ -827,10 +825,14 @@ def _cover_entities_command(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Audit/stamp ctx skill wiki artifacts with SkillSpector.")
+    parser = argparse.ArgumentParser(
+        description="Audit/stamp ctx skill wiki artifacts with SkillSpector."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    audit_parser = subparsers.add_parser("audit-tar", help="Scan converted skill bodies from a wiki tarball.")
+    audit_parser = subparsers.add_parser(
+        "audit-tar", help="Scan converted skill bodies from a wiki tarball."
+    )
     audit_parser.add_argument("--wiki-tar", required=True, help="Path to graph/wiki-graph.tar.gz.")
     audit_parser.add_argument("--out", required=True, help="Audit JSONL gzip output path.")
     audit_parser.add_argument("--workers", type=int, default=max((os.cpu_count() or 2) // 2, 1))
@@ -845,7 +847,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     audit_parser.set_defaults(func=_audit_tar_command)
 
-    stamp_parser = subparsers.add_parser("stamp-tar", help="Stamp skill entity pages using an audit file.")
+    stamp_parser = subparsers.add_parser(
+        "stamp-tar", help="Stamp skill entity pages using an audit file."
+    )
     stamp_parser.add_argument("--wiki-tar", required=True)
     stamp_parser.add_argument("--audit", required=True)
     stamp_parser.add_argument("--out", required=True)

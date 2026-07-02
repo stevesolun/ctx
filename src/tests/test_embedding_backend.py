@@ -50,9 +50,7 @@ def test_factory_rejects_unknown_backend() -> None:
 
 
 def test_factory_applies_custom_model_on_ollama() -> None:
-    e = eb.get_embedder(
-        "ollama", model="mxbai-embed-large", base_url="http://localhost:11434"
-    )
+    e = eb.get_embedder("ollama", model="mxbai-embed-large", base_url="http://localhost:11434")
     assert isinstance(e, eb.OllamaEmbedder)
     assert e.model_name == "mxbai-embed-large"
 
@@ -199,7 +197,7 @@ def test_st_embedder_model_field_is_not_in_init() -> None:
 @pytest.mark.parametrize(
     "bad_url",
     [
-        "http://169.254.169.254",      # AWS IMDS
+        "http://169.254.169.254",  # AWS IMDS
         "http://metadata.google.internal",
         "http://10.0.0.5",
         "http://internal-service.corp",

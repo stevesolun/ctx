@@ -32,10 +32,7 @@ from ctx.adapters.claude_code.hooks import bundle_orchestrator as _bo
 
 class TestCategoriseBundle:
     def _sug(self, *entries) -> list[dict]:
-        return [
-            {"name": n, "type": t, "score": s, "matching_tags": ["x"]}
-            for n, t, s in entries
-        ]
+        return [{"name": n, "type": t, "score": s, "matching_tags": ["x"]} for n, t, s in entries]
 
     def test_bundle_excludes_harnesses_from_execution_bundle(self):
         """Harnesses are recommended by model onboarding, not hook bundles."""
@@ -122,8 +119,7 @@ class TestCategoriseBundle:
 class TestRenderBundleMessage:
     def _sug(self, *entries) -> list[dict]:
         return [
-            {"name": n, "type": t, "score": s, "matching_tags": ["stack-x"]}
-            for n, t, s in entries
+            {"name": n, "type": t, "score": s, "matching_tags": ["stack-x"]} for n, t, s in entries
         ]
 
     def test_categorised_headers_only_for_types_with_entries(self):
@@ -198,17 +194,23 @@ class TestMainEndToEnd:
         assert exc.value.code == 0
 
     def test_pending_with_bundle_emits_hook_json(
-        self, tmp_path, monkeypatch, capsys,
+        self,
+        tmp_path,
+        monkeypatch,
+        capsys,
     ):
         self._setup_paths(tmp_path, monkeypatch)
         pending = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "unmatched_signals": ["fastapi"],
             "graph_suggestions": [
-                {"name": "fastapi-pro", "type": "skill", "score": 90,
-                 "matching_tags": ["fastapi"]},
-                {"name": "anthropic-python-sdk", "type": "mcp-server",
-                 "score": 75, "matching_tags": []},
+                {"name": "fastapi-pro", "type": "skill", "score": 90, "matching_tags": ["fastapi"]},
+                {
+                    "name": "anthropic-python-sdk",
+                    "type": "mcp-server",
+                    "score": 75,
+                    "matching_tags": [],
+                },
             ],
         }
         (tmp_path / "pending-skills.json").write_text(json.dumps(pending))
@@ -225,7 +227,10 @@ class TestMainEndToEnd:
         assert "Harnesses:" not in msg
 
     def test_pending_unload_without_pending_skills_emits_hook_json(
-        self, tmp_path, monkeypatch, capsys,
+        self,
+        tmp_path,
+        monkeypatch,
+        capsys,
     ):
         self._setup_paths(tmp_path, monkeypatch)
         pending_unload = {
@@ -244,18 +249,25 @@ class TestMainEndToEnd:
         assert "loaded but never used" in msg
 
     def test_already_shown_suppresses_output(
-        self, tmp_path, monkeypatch, capsys,
+        self,
+        tmp_path,
+        monkeypatch,
+        capsys,
     ):
         """Second invocation in the same session doesn't re-emit."""
         self._setup_paths(tmp_path, monkeypatch)
         pending_at = datetime.now(timezone.utc).isoformat()
-        (tmp_path / "pending-skills.json").write_text(json.dumps({
-            "generated_at": pending_at,
-            "unmatched_signals": ["x"],
-            "graph_suggestions": [
-                {"name": "a", "type": "skill", "score": 50, "matching_tags": []},
-            ],
-        }))
+        (tmp_path / "pending-skills.json").write_text(
+            json.dumps(
+                {
+                    "generated_at": pending_at,
+                    "unmatched_signals": ["x"],
+                    "graph_suggestions": [
+                        {"name": "a", "type": "skill", "score": 50, "matching_tags": []},
+                    ],
+                }
+            )
+        )
         # Pre-mark shown with a timestamp AFTER pending_at so the guard trips.
         later = datetime.now(timezone.utc).isoformat()
         (tmp_path / ".bundle-shown").write_text(json.dumps({"shown_at": later}))
@@ -271,6 +283,7 @@ class TestMainEndToEnd:
 
         # Monkey-patch the lazy ctx_config import path used inside _top_k.
         import ctx_config as _cfg_mod
+
         monkeypatch.setattr(_cfg_mod.cfg, "recommendation_top_k", 2)
 
         pending = {
@@ -303,11 +316,13 @@ class TestSkillSuggestShim:
 
     def test_shim_re_exports_main(self):
         from ctx.adapters.claude_code.hooks import skill_suggest
+
         # The shim re-imports main from bundle_orchestrator. The function
         # object must be the SAME instance to guarantee behavioural parity.
         assert skill_suggest.main is _bo.main
 
     def test_shim_re_exports_constants(self):
         from ctx.adapters.claude_code.hooks import skill_suggest
+
         assert skill_suggest.PENDING_SKILLS == _bo.PENDING_SKILLS
         assert skill_suggest.PENDING_UNLOAD == _bo.PENDING_UNLOAD

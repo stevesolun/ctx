@@ -130,9 +130,7 @@ class TestEnsureWiki:
         assert "# Skill Wiki Log" in text
         assert "Wiki initialized" in text
 
-    def test_idempotent_second_call_does_not_overwrite_files(
-        self, tmp_path: Path
-    ) -> None:
+    def test_idempotent_second_call_does_not_overwrite_files(self, tmp_path: Path) -> None:
         wiki = tmp_path / "wiki"
         wiki_sync.ensure_wiki(str(wiki))
 
@@ -163,9 +161,7 @@ class TestEnsureWiki:
         text = (wiki / "SCHEMA.md").read_text(encoding="utf-8")
         assert _FIXED_DATE in text
 
-    def test_log_contains_today_date(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_log_contains_today_date(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _pin_today(monkeypatch)
         wiki = tmp_path / "wiki"
         wiki_sync.ensure_wiki(str(wiki))
@@ -287,11 +283,14 @@ class TestSaveScan:
         assert "target-repo" in Path(result).name
         assert "nested" not in Path(result).name
 
-    @pytest.mark.parametrize("repo_path", [
-        "/projects/alpha",
-        "C:\\Users\\dev\\beta",
-        "/tmp/gamma-123",
-    ])
+    @pytest.mark.parametrize(
+        "repo_path",
+        [
+            "/projects/alpha",
+            "C:\\Users\\dev\\beta",
+            "/tmp/gamma-123",
+        ],
+    )
     def test_various_repo_paths(
         self, repo_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -359,13 +358,16 @@ class TestSanitizeYamlValue:
         result = self._sanitize(42)  # type: ignore[arg-type]
         assert result == "42"
 
-    @pytest.mark.parametrize("value,expected_clean", [
-        ("normal", "normal"),
-        ("  spaces  ", "spaces"),
-        (":colon-start", "colon-start"),
-        ("#hash-start", "hash-start"),
-        ("multi\nline\nvalue", "multi line value"),
-    ])
+    @pytest.mark.parametrize(
+        "value,expected_clean",
+        [
+            ("normal", "normal"),
+            ("  spaces  ", "spaces"),
+            (":colon-start", "colon-start"),
+            ("#hash-start", "hash-start"),
+            ("multi\nline\nvalue", "multi line value"),
+        ],
+    )
     def test_parametrized_sanitize(self, value: str, expected_clean: str) -> None:
         assert self._sanitize(value) == expected_clean
 
@@ -580,9 +582,7 @@ class TestUpsertSkillPage:
         updated = page.read_text(encoding="utf-8")
         assert f"updated: {_FIXED_DATE}" in updated
 
-    def test_update_bumps_last_used(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_update_bumps_last_used(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _pin_today(monkeypatch)
         wiki = self._wiki(tmp_path)
         page = wiki / "entities" / "skills" / "my-skill.md"
@@ -608,28 +608,32 @@ class TestUpsertSkillPage:
 
     # --- validation ---
 
-    @pytest.mark.parametrize("bad_name", [
-        "",
-        " leading-space",
-        "has space",
-        "!invalid",
-        "-starts-with-dash",
-    ])
-    def test_invalid_skill_name_raises_value_error(
-        self, bad_name: str, tmp_path: Path
-    ) -> None:
+    @pytest.mark.parametrize(
+        "bad_name",
+        [
+            "",
+            " leading-space",
+            "has space",
+            "!invalid",
+            "-starts-with-dash",
+        ],
+    )
+    def test_invalid_skill_name_raises_value_error(self, bad_name: str, tmp_path: Path) -> None:
         wiki = tmp_path / "wiki"
         wiki_sync.ensure_wiki(str(wiki))
         with pytest.raises(ValueError, match="Invalid skill name"):
             wiki_sync.upsert_skill_page(str(wiki), bad_name, self._skill_info())
 
-    @pytest.mark.parametrize("good_name", [
-        "my-skill",
-        "skill123",
-        "Skill.Name",
-        "a",
-        "my_skill_v2",
-    ])
+    @pytest.mark.parametrize(
+        "good_name",
+        [
+            "my-skill",
+            "skill123",
+            "Skill.Name",
+            "a",
+            "my_skill_v2",
+        ],
+    )
     def test_valid_skill_names_accepted(
         self, good_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -698,14 +702,17 @@ class TestEntityIndexLink:
         result = wiki_sync._entity_index_link("mcp-servers", "")
         assert result == "entities/mcp-servers/0-9/"
 
-    @pytest.mark.parametrize("subject_type,slug,expected", [
-        ("skills", "react-hooks", "entities/skills/react-hooks"),
-        ("agents", "tdd-guide", "entities/agents/tdd-guide"),
-        ("plugins", "obsidian-plugin", "entities/plugins/obsidian-plugin"),
-        ("mcp-servers", "anthropic-mcp", "entities/mcp-servers/a/anthropic-mcp"),
-        ("mcp-servers", "1password-mcp", "entities/mcp-servers/0-9/1password-mcp"),
-        ("mcp-servers", "zotero-mcp", "entities/mcp-servers/z/zotero-mcp"),
-    ])
+    @pytest.mark.parametrize(
+        "subject_type,slug,expected",
+        [
+            ("skills", "react-hooks", "entities/skills/react-hooks"),
+            ("agents", "tdd-guide", "entities/agents/tdd-guide"),
+            ("plugins", "obsidian-plugin", "entities/plugins/obsidian-plugin"),
+            ("mcp-servers", "anthropic-mcp", "entities/mcp-servers/a/anthropic-mcp"),
+            ("mcp-servers", "1password-mcp", "entities/mcp-servers/0-9/1password-mcp"),
+            ("mcp-servers", "zotero-mcp", "entities/mcp-servers/z/zotero-mcp"),
+        ],
+    )
     def test_parametrized_link_generation(
         self, subject_type: str, slug: str, expected: str
     ) -> None:
@@ -728,9 +735,7 @@ class TestUpdateIndex:
             (wiki / "index.md").write_text(content, encoding="utf-8")
         return wiki
 
-    def test_empty_entries_is_noop(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_entries_is_noop(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         wiki = self._wiki_with_index(tmp_path, monkeypatch)
         original = (wiki / "index.md").read_text(encoding="utf-8")
         wiki_sync.update_index(str(wiki), [])
@@ -834,9 +839,7 @@ class TestUpdateIndex:
     ) -> None:
         """If index.md has no ## Agents section, it should be created."""
         index_content = (
-            "# Skill Wiki Index\n\n"
-            "> Last updated: 2024-01-01 | Total pages: 0\n\n"
-            "## Skills\n\n"
+            "# Skill Wiki Index\n\n> Last updated: 2024-01-01 | Total pages: 0\n\n## Skills\n\n"
         )
         wiki = self._wiki_with_index(tmp_path, monkeypatch, content=index_content)
         wiki_sync.update_index(str(wiki), ["my-agent"], subject_type="agents")
@@ -924,9 +927,7 @@ class TestAppendLog:
         wiki_sync.ensure_wiki(str(wiki))
         return wiki
 
-    def test_appends_entry_to_log(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_appends_entry_to_log(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         wiki = self._wiki(tmp_path, monkeypatch)
         wiki_sync.append_log(str(wiki), "scan", "my-repo", ["detail one", "detail two"])
         log = (wiki / "log.md").read_text(encoding="utf-8")
@@ -1258,9 +1259,7 @@ class TestMarkStale:
         # Must not raise
         wiki_sync.mark_stale(str(wiki), "ghost-skill")
 
-    def test_sets_status_to_stale(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_sets_status_to_stale(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         wiki = self._wiki(tmp_path, monkeypatch)
         page = wiki / "entities" / "skills" / "my-skill.md"
         page.write_text(_minimal_skill_page(), encoding="utf-8")
@@ -1368,7 +1367,9 @@ class TestUpdateIndexEdgeCases:
         wiki = tmp_path / "wiki"
         wiki_sync.ensure_wiki(str(wiki))
         # Write index without a trailing newline so lines[-1] != ""
-        index_content = "# Skill Wiki Index\n\n> Last updated: 2024-01-01 | Total pages: 0\n\n## Skills"
+        index_content = (
+            "# Skill Wiki Index\n\n> Last updated: 2024-01-01 | Total pages: 0\n\n## Skills"
+        )
         (wiki / "index.md").write_text(index_content, encoding="utf-8")
 
         wiki_sync.update_index(str(wiki), ["my-agent"], subject_type="agents")
@@ -1418,7 +1419,12 @@ class TestMain:
         }
         manifest = {
             "load": [
-                {"skill": "python-testing", "path": "/skills/python-testing", "reason": "python testing", "priority": 5},
+                {
+                    "skill": "python-testing",
+                    "path": "/skills/python-testing",
+                    "reason": "python testing",
+                    "priority": 5,
+                },
             ],
             "unload": [],
             "warnings": [],
@@ -1433,9 +1439,12 @@ class TestMain:
             "sys.argv",
             [
                 "wiki_sync",
-                "--profile", str(profile_path),
-                "--manifest", str(manifest_path),
-                "--wiki", str(wiki_dir),
+                "--profile",
+                str(profile_path),
+                "--manifest",
+                str(manifest_path),
+                "--wiki",
+                str(wiki_dir),
             ],
         )
         wiki_sync.main()
@@ -1493,9 +1502,12 @@ class TestMain:
             "sys.argv",
             [
                 "wiki_sync",
-                "--profile", str(profile_path),
-                "--manifest", str(manifest_path),
-                "--wiki", str(wiki_dir),
+                "--profile",
+                str(profile_path),
+                "--manifest",
+                str(manifest_path),
+                "--wiki",
+                str(wiki_dir),
             ],
         )
         wiki_sync.main()
@@ -1528,7 +1540,12 @@ class TestMain:
         profile = {"repo_path": str(tmp_path / "proj"), "project_type": "go"}
         manifest = {
             "load": [
-                {"skill": "golang-testing", "path": "/s/golang-testing", "reason": "go testing", "priority": 3},
+                {
+                    "skill": "golang-testing",
+                    "path": "/s/golang-testing",
+                    "reason": "go testing",
+                    "priority": 3,
+                },
             ],
             "unload": [],
             "warnings": ["one warning"],
@@ -1543,9 +1560,12 @@ class TestMain:
             "sys.argv",
             [
                 "wiki_sync",
-                "--profile", str(profile_path),
-                "--manifest", str(manifest_path),
-                "--wiki", str(wiki_dir),
+                "--profile",
+                str(profile_path),
+                "--manifest",
+                str(manifest_path),
+                "--wiki",
+                str(wiki_dir),
             ],
         )
         wiki_sync.main()

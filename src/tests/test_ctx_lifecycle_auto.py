@@ -121,7 +121,9 @@ class TestAutoModeNoEOFError:
         # Create a skill directory so the demote filesystem move succeeds.
         skill_dir = _sources.skills_dir / slug
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("---\nname: auto-skill\n---\n# Body\n", encoding="utf-8")
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: auto-skill\n---\n# Body\n", encoding="utf-8"
+        )
 
         proposals, observed = lc.plan_review(sources=_sources, cfg=cfg, now=NOW)
 
@@ -133,15 +135,16 @@ class TestAutoModeNoEOFError:
         buckets = lc._partition(proposals)
 
         # This must not raise EOFError or call _prompt_yes_no.
-        applied = lc._apply_buckets(
-            buckets, observed, sources=_sources, cfg=cfg, auto=True
-        )
+        applied = lc._apply_buckets(buckets, observed, sources=_sources, cfg=cfg, auto=True)
 
         assert prompt_called == [], f"Unexpected prompt calls: {prompt_called}"
         assert applied >= 1
 
     def test_auto_skips_archive_without_prompting(
-        self, _sources: lc.LifecycleSources, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+        self,
+        _sources: lc.LifecycleSources,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Archive candidates are deferred (not applied) under --auto, no prompt raised."""
         prompt_called = []
@@ -175,9 +178,7 @@ class TestAutoModeNoEOFError:
         buckets = lc._partition(proposals)
 
         # Must complete without EOFError and without calling _prompt_yes_no.
-        applied = lc._apply_buckets(
-            buckets, observed, sources=_sources, cfg=cfg, auto=True
-        )
+        applied = lc._apply_buckets(buckets, observed, sources=_sources, cfg=cfg, auto=True)
 
         assert prompt_called == [], f"Unexpected prompt calls: {prompt_called}"
         # Archive was deferred, so nothing should have been applied.
@@ -201,16 +202,12 @@ class TestAutoModeNoEOFError:
         )
         _write_lifecycle_sidecar(_sources.sidecar_dir, state)
 
-        proposals, _ = lc.plan_review(
-            sources=_sources, cfg=cfg, now=NOW, include_delete=True
-        )
+        proposals, _ = lc.plan_review(sources=_sources, cfg=cfg, now=NOW, include_delete=True)
         delete_candidates = [p for p in proposals if p.target_state == "deleted"]
         assert delete_candidates, "Expected at least one delete candidate"
 
         for p in delete_candidates:
-            assert not p.auto_safe, (
-                f"Delete proposal for {p.slug} must have auto_safe=False"
-            )
+            assert not p.auto_safe, f"Delete proposal for {p.slug} must have auto_safe=False"
             assert p.requires_typed_confirmation, (
                 f"Delete proposal for {p.slug} must require typed confirmation"
             )

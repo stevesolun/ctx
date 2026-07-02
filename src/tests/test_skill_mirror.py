@@ -68,7 +68,9 @@ class TestMirrorOne:
         _write_skill(skills, "short-skill", lines=30)
 
         r = _sm.mirror_one(
-            "short-skill", skills_dir=skills, wiki_dir=wiki,
+            "short-skill",
+            skills_dir=skills,
+            wiki_dir=wiki,
             line_threshold=180,
         )
 
@@ -84,7 +86,9 @@ class TestMirrorOne:
         _write_skill(skills, "long-skill", lines=250)
 
         r = _sm.mirror_one(
-            "long-skill", skills_dir=skills, wiki_dir=wiki,
+            "long-skill",
+            skills_dir=skills,
+            wiki_dir=wiki,
             line_threshold=180,
         )
 
@@ -103,7 +107,9 @@ class TestMirrorOne:
         (pipeline_dir / "references").mkdir()
 
         r = _sm.mirror_one(
-            "had-pipeline", skills_dir=skills, wiki_dir=wiki,
+            "had-pipeline",
+            skills_dir=skills,
+            wiki_dir=wiki,
             line_threshold=180,
         )
 
@@ -119,8 +125,11 @@ class TestMirrorOne:
         stale.write_text("STALE WIKI BODY\n", encoding="utf-8")
 
         r = _sm.mirror_one(
-            "edited", skills_dir=skills, wiki_dir=wiki,
-            line_threshold=180, force=True,
+            "edited",
+            skills_dir=skills,
+            wiki_dir=wiki,
+            line_threshold=180,
+            force=True,
         )
 
         assert r.status == "mirrored"
@@ -138,14 +147,19 @@ class TestMirrorOne:
         mirror_path.write_text("BODY\n", encoding="utf-8")
 
         r = _sm.mirror_one(
-            "same", skills_dir=skills, wiki_dir=wiki, line_threshold=180,
+            "same",
+            skills_dir=skills,
+            wiki_dir=wiki,
+            line_threshold=180,
         )
         assert r.status == "unchanged"
 
     def test_invalid_slug_rejected(self, dirs):
         skills, wiki = dirs
         r = _sm.mirror_one(
-            "../etc/passwd", skills_dir=skills, wiki_dir=wiki,
+            "../etc/passwd",
+            skills_dir=skills,
+            wiki_dir=wiki,
             line_threshold=180,
         )
         assert r.status == "skipped-invalid"
@@ -153,7 +167,9 @@ class TestMirrorOne:
     def test_missing_local_returns_not_found(self, dirs):
         skills, wiki = dirs
         r = _sm.mirror_one(
-            "does-not-exist", skills_dir=skills, wiki_dir=wiki,
+            "does-not-exist",
+            skills_dir=skills,
+            wiki_dir=wiki,
             line_threshold=180,
         )
         assert r.status == "not-found"
@@ -163,8 +179,11 @@ class TestMirrorOne:
         _write_skill(skills, "dry", lines=30)
 
         r = _sm.mirror_one(
-            "dry", skills_dir=skills, wiki_dir=wiki,
-            line_threshold=180, dry_run=True,
+            "dry",
+            skills_dir=skills,
+            wiki_dir=wiki,
+            line_threshold=180,
+            dry_run=True,
         )
 
         assert r.status == "mirrored"
@@ -191,7 +210,9 @@ class TestMirrorAll:
         (wiki / "converted" / "had-pipeline" / "references").mkdir()
 
         results = _sm.mirror_all(
-            skills_dir=skills, wiki_dir=wiki, line_threshold=180,
+            skills_dir=skills,
+            wiki_dir=wiki,
+            line_threshold=180,
         )
 
         by_status = {r.slug: r.status for r in results}
@@ -207,7 +228,9 @@ class TestMirrorAll:
             _write_skill(skills, slug, lines=10)
 
         results = _sm.mirror_all(
-            skills_dir=skills, wiki_dir=wiki, line_threshold=180,
+            skills_dir=skills,
+            wiki_dir=wiki,
+            line_threshold=180,
         )
         assert [r.slug for r in results] == ["a-skill", "b-skill", "c-skill"]
 
@@ -227,7 +250,8 @@ class TestPruneOrphans:
         (mirror_dir / "SKILL.md").write_text("orphan\n", encoding="utf-8")
 
         results = _sm.prune_orphans(
-            skills_dir=skills, wiki_dir=wiki,
+            skills_dir=skills,
+            wiki_dir=wiki,
         )
 
         assert any(r.slug == "vanished" and r.status == "pruned" for r in results)
@@ -270,7 +294,9 @@ class TestPruneOrphans:
         (mirror_dir / "SKILL.md").write_text("x\n", encoding="utf-8")
 
         results = _sm.prune_orphans(
-            skills_dir=skills, wiki_dir=wiki, dry_run=True,
+            skills_dir=skills,
+            wiki_dir=wiki,
+            dry_run=True,
         )
 
         assert any(r.status == "pruned" and "dry-run" in r.message for r in results)
@@ -293,30 +319,38 @@ class TestIntegrationWithInstall:
 
         skills, wiki = dirs
         _write_skill(
-            skills, "short-e2e", lines=10,
+            skills,
+            "short-e2e",
+            lines=10,
             content="# short-e2e\n\nBody for a short skill.\n",
         )
         # Before mirror: install fails.
         install_target = tmp_path / "install-target"
         before = install_skill(
-            "short-e2e", wiki_dir=wiki, skills_dir=install_target,
+            "short-e2e",
+            wiki_dir=wiki,
+            skills_dir=install_target,
         )
         assert before.status == "not-in-wiki"
 
         # Run the mirror.
         r = _sm.mirror_one(
-            "short-e2e", skills_dir=skills, wiki_dir=wiki,
+            "short-e2e",
+            skills_dir=skills,
+            wiki_dir=wiki,
             line_threshold=180,
         )
         assert r.status == "mirrored"
 
         # Install now succeeds with the mirrored body.
         after = install_skill(
-            "short-e2e", wiki_dir=wiki, skills_dir=install_target,
+            "short-e2e",
+            wiki_dir=wiki,
+            skills_dir=install_target,
         )
         assert after.status == "installed"
         assert (install_target / "short-e2e" / "SKILL.md").is_file()
         # Content matches the local body verbatim.
-        assert "Body for a short skill." in (
-            install_target / "short-e2e" / "SKILL.md"
-        ).read_text(encoding="utf-8")
+        assert "Body for a short skill." in (install_target / "short-e2e" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )

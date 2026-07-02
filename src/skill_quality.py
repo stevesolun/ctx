@@ -107,16 +107,12 @@ def _ensure_safe_slug(slug: str) -> str:
     return slug
 
 
-_WEIGHT_KEYS: frozenset[str] = frozenset(
-    {"telemetry", "intake", "graph", "routing"}
-)
+_WEIGHT_KEYS: frozenset[str] = frozenset({"telemetry", "intake", "graph", "routing"})
 
 
 def _validate_weight_vector(name: str, weights: Mapping[str, float]) -> None:
     if set(weights) != _WEIGHT_KEYS:
-        raise ValueError(
-            f"{name} must supply exactly: telemetry, intake, graph, routing"
-        )
+        raise ValueError(f"{name} must supply exactly: telemetry, intake, graph, routing")
     total = sum(weights.values())
     if not 0.99 <= total <= 1.01:
         raise ValueError(f"{name} must sum to 1.0; got {total:.4f}")
@@ -129,12 +125,8 @@ def _validate_weight_vector(name: str, weights: Mapping[str, float]) -> None:
 class QualityConfig:
     """All knobs used by the scorer. Frozen so tests cannot mutate by accident."""
 
-    weights: Mapping[str, float] = field(
-        default_factory=lambda: dict(_DEFAULT_WEIGHTS)
-    )
-    agent_weights: Mapping[str, float] = field(
-        default_factory=lambda: dict(_DEFAULT_AGENT_WEIGHTS)
-    )
+    weights: Mapping[str, float] = field(default_factory=lambda: dict(_DEFAULT_WEIGHTS))
+    agent_weights: Mapping[str, float] = field(default_factory=lambda: dict(_DEFAULT_AGENT_WEIGHTS))
     grade_thresholds: Mapping[str, float] = field(
         default_factory=lambda: dict(_DEFAULT_GRADE_THRESHOLDS)
     )
@@ -151,9 +143,7 @@ class QualityConfig:
         b = self.grade_thresholds["B"]
         c = self.grade_thresholds["C"]
         if not 0.0 <= c <= b <= a <= 1.0:
-            raise ValueError(
-                "grade thresholds must satisfy 0 <= C <= B <= A <= 1"
-            )
+            raise ValueError("grade thresholds must satisfy 0 <= C <= B <= A <= 1")
         if self.stale_threshold_days <= 0:
             raise ValueError("stale_threshold_days must be > 0")
         if self.recent_window_days <= 0:
@@ -178,14 +168,14 @@ class QualityScore:
     """One skill's quality score snapshot — frozen for safe sharing."""
 
     slug: str
-    subject_type: str                  # "skill" | "agent"
-    raw_score: float                   # weighted sum before floors
-    score: float                       # final, after floors + clamp
-    grade: str                         # A / B / C / D / F
-    hard_floor: str | None             # which floor fired, if any
+    subject_type: str  # "skill" | "agent"
+    raw_score: float  # weighted sum before floors
+    score: float  # final, after floors + clamp
+    grade: str  # A / B / C / D / F
+    hard_floor: str | None  # which floor fired, if any
     signals: Mapping[str, SignalResult] = field(default_factory=dict)
     weights: Mapping[str, float] = field(default_factory=dict)
-    computed_at: str = ""              # ISO-8601 UTC
+    computed_at: str = ""  # ISO-8601 UTC
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -220,6 +210,7 @@ def default_sidecar_dir() -> Path:
     """
     try:
         from ctx_config import cfg  # local import to avoid cost on test import
+
         raw = cfg.get("quality", {}) or {}
         paths = raw.get("paths", {}) if isinstance(raw, dict) else {}
         configured = paths.get("sidecar_dir") if isinstance(paths, dict) else None
@@ -297,9 +288,7 @@ def compute_quality(
     if set(signals) != required:
         missing = required - set(signals)
         extra = set(signals) - required
-        raise ValueError(
-            f"signals keys mismatch: missing={sorted(missing)}, extra={sorted(extra)}"
-        )
+        raise ValueError(f"signals keys mismatch: missing={sorted(missing)}, extra={sorted(extra)}")
 
     raw = sum(weights[name] * signals[name].score for name in required)
     score = max(0.0, min(1.0, raw))
@@ -386,10 +375,7 @@ def _read_skill_source(slug: str, sources: SignalSources) -> tuple[str, str]:
     if agent_path.is_file():
         return "agent", agent_path.read_text(encoding="utf-8", errors="replace")
     if sources.agents_dir.is_dir():
-        matches = [
-            p for p in sources.agents_dir.rglob(f"{slug}.md")
-            if p.is_file()
-        ]
+        matches = [p for p in sources.agents_dir.rglob(f"{slug}.md") if p.is_file()]
         if len(matches) > 1:
             raise FileNotFoundError(
                 f"ambiguous agent slug {slug!r}: found {len(matches)} files "
@@ -455,9 +441,7 @@ def _compute_telemetry_inputs(
     recent_cutoff = now.timestamp() - recent_window_days * 86400.0
 
     event_iter: Iterable[dict[str, Any]] = (
-        events_override
-        if events_override is not None
-        else _iter_events_for_slug(slug, events_path)
+        events_override if events_override is not None else _iter_events_for_slug(slug, events_path)
     )
     for obj in event_iter:
         if obj.get("event") != "load":
@@ -485,9 +469,7 @@ def _compute_telemetry_inputs(
     }
 
 
-def _compute_routing_inputs(
-    slug: str, trace_path: Path | None
-) -> dict[str, int]:
+def _compute_routing_inputs(slug: str, trace_path: Path | None) -> dict[str, int]:
     """Count ``considered`` and ``picked`` events for one slug.
 
     Trace format (JSONL): ``{"skill": "...", "considered": true,
@@ -563,9 +545,7 @@ def extract_signals_for_slug(
     has_fm_block = raw_md.lstrip().startswith("---")
 
     events_override = (
-        list(sources.events_index.get(slug, []))
-        if sources.events_index is not None
-        else None
+        list(sources.events_index.get(slug, [])) if sources.events_index is not None else None
     )
     tel_inputs = _compute_telemetry_inputs(
         slug,
@@ -626,8 +606,7 @@ def _render_quality_section(score: QualityScore) -> str:
         _QUALITY_SECTION_HEADER,
         "",
         f"- **Grade:** {score.grade}",
-        f"- **Score:** {score.score:.2f} "
-        f"(raw {score.raw_score:.2f})",
+        f"- **Score:** {score.score:.2f} (raw {score.raw_score:.2f})",
         f"- **Computed:** {score.computed_at}",
     ]
     if score.hard_floor:
@@ -645,9 +624,7 @@ def _render_quality_section(score: QualityScore) -> str:
 
 
 _QUALITY_BLOCK_RE = re.compile(
-    re.escape(_QUALITY_SECTION_BEGIN)
-    + r".*?"
-    + re.escape(_QUALITY_SECTION_END),
+    re.escape(_QUALITY_SECTION_BEGIN) + r".*?" + re.escape(_QUALITY_SECTION_END),
     re.DOTALL,
 )
 
@@ -690,9 +667,10 @@ def _update_frontmatter_quality(raw_md: str, score: QualityScore) -> str:
 
     lines = fm_block.splitlines()
     kept: list[str] = [
-        ln for ln in lines if not ln.lstrip().startswith(
-            ("quality_score:", "quality_grade:", "quality_updated_at:",
-             "quality_hard_floor:")
+        ln
+        for ln in lines
+        if not ln.lstrip().startswith(
+            ("quality_score:", "quality_grade:", "quality_updated_at:", "quality_hard_floor:")
         )
     ]
     # Drop trailing blanks from the kept block, then re-append our pairs.
@@ -822,12 +800,15 @@ def persist_quality(
     # so the monitor's per-session timeline can filter by session_id.
     try:
         from ctx_audit_log import log  # local import, no CLI dep
+
         subject_type: Literal["skill", "agent"] = (
             "agent" if score.subject_type == "agent" else "skill"
         )
         event = f"{subject_type}.score_updated"
         log(
-            event, subject_type=subject_type, subject=score.slug,
+            event,
+            subject_type=subject_type,
+            subject=score.slug,
             actor="hook",
             session_id=os.environ.get("CTX_SESSION_ID"),
             meta={
@@ -842,9 +823,7 @@ def persist_quality(
     return written
 
 
-def load_quality(
-    slug: str, *, sidecar_dir: Path | None = None
-) -> QualityScore | None:
+def load_quality(slug: str, *, sidecar_dir: Path | None = None) -> QualityScore | None:
     """Read back a previously-persisted ``QualityScore`` from disk.
 
     Returns ``None`` if no sidecar exists. Partial / corrupt files raise
@@ -889,9 +868,7 @@ def recompute_slug(
     update_frontmatter: bool = True,
 ) -> QualityScore:
     """End-to-end recompute: extract signals → compute → persist."""
-    subject_type, signals = extract_signals_for_slug(
-        slug, sources=sources, config=config, now=now
-    )
+    subject_type, signals = extract_signals_for_slug(slug, sources=sources, config=config, now=now)
     score = compute_quality(
         slug=slug,
         subject_type=subject_type,
@@ -985,6 +962,7 @@ def recompute_all(
     events_index = _build_events_index(sources.events_path)
     # Inject the pre-built index into a new SignalSources instance.
     from dataclasses import replace as _dc_replace
+
     indexed_sources = _dc_replace(sources, events_index=events_index)
 
     successes: list[QualityScore] = []
@@ -1013,6 +991,7 @@ def recompute_all(
 def _build_sources_from_config() -> SignalSources:
     """Construct SignalSources from ``ctx_config.cfg`` for CLI invocations."""
     from ctx_config import cfg  # local import: avoid cost on unit-test import
+
     quality_raw = cfg.get("quality", {}) or {}
     paths = quality_raw.get("paths", {}) if isinstance(quality_raw, dict) else {}
     trace_path_raw = paths.get("router_trace") if isinstance(paths, dict) else None
@@ -1034,6 +1013,7 @@ def _build_sources_from_config() -> SignalSources:
 def _config_from_cfg() -> QualityConfig:
     """Build QualityConfig from ``ctx_config.cfg``'s ``quality`` block."""
     from ctx_config import cfg
+
     quality_raw = cfg.get("quality", {}) or {}
     if not isinstance(quality_raw, dict):
         return QualityConfig()
@@ -1083,8 +1063,10 @@ def cmd_recompute(args: argparse.Namespace) -> int:
         elif args.slug:
             slugs = [args.slug]
         else:
-            print("recompute: pass one or more SLUG positionals, --all, "
-                  "--slugs, or --slug", file=sys.stderr)
+            print(
+                "recompute: pass one or more SLUG positionals, --all, --slugs, or --slug",
+                file=sys.stderr,
+            )
             return 2
 
         for slug in slugs:
@@ -1096,12 +1078,15 @@ def cmd_recompute(args: argparse.Namespace) -> int:
                 print(f"[recompute] {slug}: {exc}", file=sys.stderr)
 
     if args.json:
-        print(json.dumps({"count": len(results), "failures": failures,
-                          "results": results}, indent=2))
+        print(
+            json.dumps({"count": len(results), "failures": failures, "results": results}, indent=2)
+        )
     else:
         for r in results:
-            print(f"{r['grade']}  {r['slug']:<40} score={r['score']:.2f}"
-                  + (f"  floor={r['hard_floor']}" if r['hard_floor'] else ""))
+            print(
+                f"{r['grade']}  {r['slug']:<40} score={r['score']:.2f}"
+                + (f"  floor={r['hard_floor']}" if r["hard_floor"] else "")
+            )
         print(f"{len(results)} recomputed, {failures} failed", file=sys.stderr)
     return 0 if failures == 0 else 1
 
@@ -1128,8 +1113,9 @@ def cmd_explain(args: argparse.Namespace) -> int:
         print(f"no sidecar for {args.slug!r} (run recompute first)", file=sys.stderr)
         return 1
     print(f"{loaded.slug} ({loaded.subject_type}) — grade {loaded.grade}")
-    print(f"  raw={loaded.raw_score:.4f}  score={loaded.score:.4f}"
-          f"  floor={loaded.hard_floor or '—'}")
+    print(
+        f"  raw={loaded.raw_score:.4f}  score={loaded.score:.4f}  floor={loaded.hard_floor or '—'}"
+    )
     print("")
     for name in ("telemetry", "intake", "graph", "routing"):
         sig = loaded.signals.get(name)
@@ -1171,8 +1157,10 @@ def cmd_list(args: argparse.Namespace) -> int:
         print(json.dumps(rows, indent=2))
     else:
         for r in sorted(rows, key=lambda x: (x.get("grade", "Z"), x.get("slug", ""))):
-            print(f"{r.get('grade', '?')}  {r.get('slug', '?'):<40} "
-                  f"score={float(r.get('score', 0)):.2f}")
+            print(
+                f"{r.get('grade', '?')}  {r.get('slug', '?'):<40} "
+                f"score={float(r.get('score', 0)):.2f}"
+            )
         print(f"{len(rows)} entries", file=sys.stderr)
     return 0
 
@@ -1185,8 +1173,12 @@ def build_argparser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("recompute", help="Recompute quality for one or more slugs")
-    r.add_argument("slugs_positional", nargs="*", metavar="SLUG",
-                   help="one or more slugs to recompute (positional)")
+    r.add_argument(
+        "slugs_positional",
+        nargs="*",
+        metavar="SLUG",
+        help="one or more slugs to recompute (positional)",
+    )
     r.add_argument("--all", action="store_true", help="recompute every installed slug")
     r.add_argument("--slug", help="recompute a single slug")
     r.add_argument("--slugs", help="comma-separated list of slugs")

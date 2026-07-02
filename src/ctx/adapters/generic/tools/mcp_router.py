@@ -55,18 +55,20 @@ _logger = logging.getLogger(__name__)
 
 _PROTOCOL_VERSION = "2024-11-05"
 _CLIENT_INFO = {"name": "ctx-harness", "version": "0.1"}
-_SAFE_PARENT_ENV_KEYS = frozenset({
-    "PATH",
-    "PATHEXT",
-    "SYSTEMROOT",
-    "WINDIR",
-    "COMSPEC",
-    "TMP",
-    "TEMP",
-    "HOME",
-    "USERPROFILE",
-    "LANG",
-})
+_SAFE_PARENT_ENV_KEYS = frozenset(
+    {
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "TMP",
+        "TEMP",
+        "HOME",
+        "USERPROFILE",
+        "LANG",
+    }
+)
 _SAFE_PARENT_ENV_PREFIXES = ("LC_",)
 
 # Tool names combine server name and tool name; "__" is the separator
@@ -107,9 +109,7 @@ def _validate_server_name(name: str) -> None:
             f"and may not contain {TOOL_SEPARATOR!r}: {name!r}"
         )
     if name.lower() in _RESERVED_SERVER_NAMES:
-        raise ValueError(
-            f"MCP server name {name!r} is reserved for built-in ctx tools"
-        )
+        raise ValueError(f"MCP server name {name!r} is reserved for built-in ctx tools")
 
 
 def _validate_env_name(name: str) -> None:
@@ -290,20 +290,15 @@ class McpClient:
             )
         except OSError as exc:
             raise McpServerError(
-                f"{self._config.name}: failed to start MCP command "
-                f"{self._config.command!r}: {exc}"
+                f"{self._config.name}: failed to start MCP command {self._config.command!r}: {exc}"
             ) from exc
         assert self._proc.stdin and self._proc.stdout and self._proc.stderr
 
         # Drain stderr in the background so a verbose server can't fill
         # the OS pipe buffer and deadlock us.
-        self._stderr_thread = threading.Thread(
-            target=self._drain_stderr, daemon=True
-        )
+        self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
         self._stderr_thread.start()
-        self._stdout_thread = threading.Thread(
-            target=self._drain_stdout, daemon=True
-        )
+        self._stdout_thread = threading.Thread(target=self._drain_stdout, daemon=True)
         self._stdout_thread.start()
 
         try:
@@ -352,9 +347,7 @@ class McpClient:
                         self._config.name,
                     )
         except Exception as exc:  # noqa: BLE001
-            _logger.debug(
-                "MCP server '%s' stop error: %s", self._config.name, exc
-            )
+            _logger.debug("MCP server '%s' stop error: %s", self._config.name, exc)
         for thread in (self._stdout_thread, self._stderr_thread):
             if thread and thread.is_alive():
                 thread.join(timeout=0.2)
@@ -390,7 +383,8 @@ class McpClient:
                 ToolDefinition(
                     name=name,
                     description=str(t.get("description", "")),
-                    parameters=t.get("inputSchema") or {
+                    parameters=t.get("inputSchema")
+                    or {
                         "type": "object",
                         "properties": {},
                     },
@@ -432,9 +426,7 @@ class McpClient:
     ) -> dict[str, Any]:
         """Send a JSON-RPC request, wait for the matching response."""
         if self._proc is None or self._proc.stdin is None or self._proc.stdout is None:
-            raise RuntimeError(
-                f"MCP client '{self._config.name}' is not started"
-            )
+            raise RuntimeError(f"MCP client '{self._config.name}' is not started")
         with self._lock:
             request_id = self._next_id
             self._next_id += 1
@@ -470,9 +462,7 @@ class McpClient:
                             f"{timeout if timeout is not None else self._config.request_timeout}s"
                         )
                 try:
-                    frame = self._read_frame(
-                        timeout=remaining if deadline is not None else None
-                    )
+                    frame = self._read_frame(timeout=remaining if deadline is not None else None)
                 except TimeoutError as exc:
                     raise McpServerError(
                         f"{self._config.name}.{method}: timed out after "
@@ -487,7 +477,8 @@ class McpClient:
                 if "id" not in frame:
                     _logger.debug(
                         "MCP %s notification: %s",
-                        self._config.name, frame.get("method"),
+                        self._config.name,
+                        frame.get("method"),
                     )
                     continue
                 if frame.get("id") != request_id:
@@ -495,7 +486,9 @@ class McpClient:
                     # while we hold the lock, but defensive).
                     _logger.debug(
                         "MCP %s stale response id=%s (waiting for %s)",
-                        self._config.name, frame.get("id"), request_id,
+                        self._config.name,
+                        frame.get("id"),
+                        request_id,
                     )
                     continue
                 if "error" in frame:
@@ -515,7 +508,9 @@ class McpClient:
         except (BrokenPipeError, OSError) as exc:
             _logger.debug(
                 "MCP %s: notify %s failed: %s",
-                self._config.name, method, exc,
+                self._config.name,
+                method,
+                exc,
             )
 
     def _write_frame(self, frame: dict[str, Any]) -> None:
@@ -540,13 +535,13 @@ class McpClient:
         try:
             for line in iter(proc.stdout.readline, b""):
                 try:
-                    self._stdout_frames.put(
-                        json.loads(line.decode("utf-8", errors="replace"))
-                    )
+                    self._stdout_frames.put(json.loads(line.decode("utf-8", errors="replace")))
                 except json.JSONDecodeError as exc:
                     _logger.warning(
                         "MCP %s: dropping malformed frame: %s (raw=%r)",
-                        self._config.name, exc, line,
+                        self._config.name,
+                        exc,
+                        line,
                     )
         finally:
             self._stdout_frames.put(None)
@@ -598,9 +593,7 @@ class McpRouter:
         try:
             for cfg in self._configs:
                 if cfg.name in self._clients:
-                    raise ValueError(
-                        f"duplicate MCP server name {cfg.name!r}"
-                    )
+                    raise ValueError(f"duplicate MCP server name {cfg.name!r}")
                 client = McpClient(cfg)
                 client.start()
                 self._clients[cfg.name] = client
@@ -650,9 +643,7 @@ class McpRouter:
             for tool in client.list_tools():
                 qualified_name = f"{server_name}{TOOL_SEPARATOR}{tool.name}"
                 if qualified_name in seen_names:
-                    raise ValueError(
-                        f"duplicate MCP tool name {qualified_name!r}"
-                    )
+                    raise ValueError(f"duplicate MCP tool name {qualified_name!r}")
                 seen_names.add(qualified_name)
                 out.append(
                     ToolDefinition(
@@ -674,9 +665,7 @@ class McpRouter:
         server, tool = qualified_name.split(TOOL_SEPARATOR, 1)
         client = self._clients.get(server)
         if client is None:
-            raise ValueError(
-                f"unknown MCP server {server!r}; known: {sorted(self._clients)}"
-            )
+            raise ValueError(f"unknown MCP server {server!r}; known: {sorted(self._clients)}")
         return client.call_tool(tool, arguments)
 
     @property

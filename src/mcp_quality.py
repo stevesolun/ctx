@@ -62,11 +62,11 @@ _logger = logging.getLogger(__name__)
 
 _DEFAULT_MCP_WEIGHTS: dict[str, float] = {
     "popularity": 0.30,
-    "freshness":  0.20,
+    "freshness": 0.20,
     "structural": 0.15,
-    "graph":      0.15,
-    "trust":      0.10,
-    "runtime":    0.10,
+    "graph": 0.15,
+    "trust": 0.10,
+    "runtime": 0.10,
 }  # sums to 1.0
 
 _MCP_WEIGHT_KEYS: frozenset[str] = frozenset(_DEFAULT_MCP_WEIGHTS)
@@ -90,9 +90,7 @@ _MCP_NODE_PREFIX = "mcp-server:"
 class McpQualityConfig:
     """All tunable knobs for the MCP quality scorer. Frozen — safe to share."""
 
-    weights: Mapping[str, float] = field(
-        default_factory=lambda: dict(_DEFAULT_MCP_WEIGHTS)
-    )
+    weights: Mapping[str, float] = field(default_factory=lambda: dict(_DEFAULT_MCP_WEIGHTS))
     grade_thresholds: Mapping[str, float] = field(
         default_factory=lambda: dict(_DEFAULT_MCP_GRADE_THRESHOLDS)
     )
@@ -103,9 +101,7 @@ class McpQualityConfig:
     def __post_init__(self) -> None:
         # --- weight vector ---
         if set(self.weights) != _MCP_WEIGHT_KEYS:
-            raise ValueError(
-                f"weights must supply exactly: {sorted(_MCP_WEIGHT_KEYS)}"
-            )
+            raise ValueError(f"weights must supply exactly: {sorted(_MCP_WEIGHT_KEYS)}")
         total = sum(self.weights.values())
         if not 0.99 <= total <= 1.01:
             raise ValueError(f"weights must sum to 1.0; got {total:.4f}")
@@ -120,9 +116,7 @@ class McpQualityConfig:
         b = self.grade_thresholds["B"]
         c = self.grade_thresholds["C"]
         if not 0.0 <= c <= b <= a <= 1.0:
-            raise ValueError(
-                "grade thresholds must satisfy 0 <= C <= B <= A <= 1"
-            )
+            raise ValueError("grade thresholds must satisfy 0 <= C <= B <= A <= 1")
 
         # --- numeric bounds ---
         if self.star_saturation <= 0:
@@ -143,12 +137,12 @@ class McpQualityScore:
     """One MCP server's quality score snapshot — frozen for safe sharing."""
 
     slug: str
-    raw_score: float                    # weighted sum before clamping
-    score: float                        # final, clamped to [0, 1]
-    grade: str                          # A / B / C / D
+    raw_score: float  # weighted sum before clamping
+    score: float  # final, clamped to [0, 1]
+    grade: str  # A / B / C / D
     signals: Mapping[str, SignalResult]
     weights: Mapping[str, float]
-    computed_at: str                    # ISO-8601 UTC
+    computed_at: str  # ISO-8601 UTC
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict for JSON persistence."""
@@ -252,9 +246,7 @@ def compute_quality(
     if set(signals) != _MCP_WEIGHT_KEYS:
         missing = _MCP_WEIGHT_KEYS - set(signals)
         extra = set(signals) - _MCP_WEIGHT_KEYS
-        raise ValueError(
-            f"signals keys mismatch: missing={sorted(missing)}, extra={sorted(extra)}"
-        )
+        raise ValueError(f"signals keys mismatch: missing={sorted(missing)}, extra={sorted(extra)}")
 
     raw = sum(cfg.weights[name] * signals[name].score for name in _MCP_WEIGHT_KEYS)
     score = round(max(0.0, min(1.0, raw)), 10)
@@ -365,9 +357,7 @@ def _read_mcp_entity(
     path = _resolve_mcp_entity_path(slug, wiki_dir)
     raw = _read_mcp_entity_text(slug, wiki_dir, pages=pages)
     if raw is None:
-        raise FileNotFoundError(
-            f"MCP entity not found: {path}"
-        )
+        raise FileNotFoundError(f"MCP entity not found: {path}")
     fm, _body = parse_frontmatter_and_body(raw)
     # McpRecord.from_dict is tolerant of missing optional fields.
     record = McpRecord.from_dict({**fm, "slug": slug})
@@ -408,9 +398,7 @@ def load_graph_index(wiki_dir: Path) -> dict[str, dict[str, Any]]:
         # Derive this node's type prefix (e.g. "skill", "mcp-server").
         node_prefix = node_id.split(":")[0] if ":" in node_id else ""
         cross_type = sum(
-            1
-            for nb in neighbours
-            if (nb.split(":")[0] if ":" in nb else "") != node_prefix
+            1 for nb in neighbours if (nb.split(":")[0] if ":" in nb else "") != node_prefix
         )
         index[node_id] = {
             "degree": len(neighbours),
@@ -559,6 +547,7 @@ def default_sidecar_dir() -> Path:
     """
     try:
         from ctx_config import cfg  # local import — avoid cost on test import
+
         raw = cfg.get("mcp_quality", {}) or {}
         paths = raw.get("paths", {}) if isinstance(raw, dict) else {}
         configured = paths.get("sidecar_dir") if isinstance(paths, dict) else None
@@ -650,10 +639,9 @@ def _update_frontmatter_quality(raw_md: str, score: McpQualityScore) -> str:
 
     lines = fm_block.splitlines()
     kept: list[str] = [
-        ln for ln in lines
-        if not ln.lstrip().startswith(
-            ("quality_score:", "quality_grade:", "quality_updated_at:")
-        )
+        ln
+        for ln in lines
+        if not ln.lstrip().startswith(("quality_score:", "quality_grade:", "quality_updated_at:"))
     ]
     while kept and not kept[-1].strip():
         kept.pop()
@@ -727,9 +715,7 @@ def persist_quality(
 # ────────────────────────────────────────────────────────────────────
 
 
-def load_quality(
-    slug: str, *, sidecar_dir: Path | None = None
-) -> McpQualityScore | None:
+def load_quality(slug: str, *, sidecar_dir: Path | None = None) -> McpQualityScore | None:
     """Read a previously-persisted ``McpQualityScore`` from disk.
 
     Returns ``None`` if no sidecar exists. Partial/corrupt files raise
@@ -880,6 +866,7 @@ def _wiki_dir_from_config() -> Path:
     """
     try:
         from ctx_config import cfg  # local import: avoid cost on unit-test import
+
         return cfg.wiki_dir
     except Exception:  # noqa: BLE001
         return Path.home() / ".claude" / "skill-wiki"
@@ -897,6 +884,7 @@ def _config_from_cfg() -> McpQualityConfig:
     """Build McpQualityConfig from ctx_config.cfg's mcp_quality block."""
     try:
         from ctx_config import cfg
+
         raw = cfg.get("mcp_quality", {}) or {}
     except Exception:  # noqa: BLE001
         return McpQualityConfig()
@@ -966,9 +954,7 @@ def cmd_recompute(args: argparse.Namespace) -> int:
         )
     else:
         for r in results:
-            print(
-                f"{r['grade']}  {r['slug']:<50}  score={r['score']:.2f}"
-            )
+            print(f"{r['grade']}  {r['slug']:<50}  score={r['score']:.2f}")
         print(f"{len(results)} recomputed, {failures} failed", file=sys.stderr)
     return 0 if failures == 0 else 1
 
@@ -1036,16 +1022,13 @@ def cmd_list(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         print(json.dumps(rows, indent=2))
     else:
-        for r in sorted(
-            rows, key=lambda x: (x.get("grade", "Z"), x.get("slug", ""))
-        ):
+        for r in sorted(rows, key=lambda x: (x.get("grade", "Z"), x.get("slug", ""))):
             # Format: <slug>\t<grade>\tscore=N.NN
             # Slug-first matches the convention used by the existing
             # ctx-skill-quality list and aligns with how users grep
             # ("ctx-mcp-quality list | grep my-mcp").
             print(
-                f"{r.get('slug', '?')}\t{r.get('grade', '?')}\t"
-                f"score={float(r.get('score', 0)):.2f}"
+                f"{r.get('slug', '?')}\t{r.get('grade', '?')}\tscore={float(r.get('score', 0)):.2f}"
             )
         print(f"{len(rows)} MCP entries", file=sys.stderr)
     return 0
