@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from ctx.utils._secret_scan import redact_secret_text
+
 AGENT_SCAN_REPO = "https://github.com/snyk/agent-scan"
 TRACKER_SCHEMA_VERSION = 1
 DEFAULT_TRACKER = Path("qa/agent_scan_security_tracker.csv")
@@ -38,6 +40,22 @@ CSV_FIELDS = (
     "scanned_at",
 )
 ISSUE_CODE_FIELDS = ("code", "issue_code", "rule_id", "id")
+SCAN_ENV_ALLOWLIST = (
+    "SNYK_TOKEN",
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "LANG",
+    "LC_ALL",
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "NO_PROXY",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "ALL_PROXY",
+)
 
 
 @dataclass(frozen=True)
@@ -365,17 +383,28 @@ def _scan_row(
         str(storage_file),
         target.scan_target,
     ]
-    completed = runner(
-        command,
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=180,
-        env=_scan_env(repo),
-    )
-    payload = _load_agent_scan_json(completed.stdout)
-    issues = _collect_issues(payload)
+    try:
+        completed = runner(
+            command,
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=180,
+            env=_scan_env(repo),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return _status_row(
+            target,
+            scan_status="scan_error",
+            suggested_action="Inspect Agent Scan runtime prerequisites and rerun this target.",
+            review_status="needs-agent-scan-review",
+            evidence=_compact_text(f"Agent Scan execution failed: {type(exc).__name__}: {exc}"),
+            scanned_at=scanned_at,
+            scanner_version=scanner_version,
+        )
+    payload, parse_error = _load_agent_scan_json(completed.stdout)
+    issues = _collect_issues(payload) if parse_error is None else []
     if completed.returncode != 0 and not issues:
         return _status_row(
             target,
@@ -385,6 +414,16 @@ def _scan_row(
             evidence=_compact_text(
                 completed.stdout or completed.stderr or "Agent Scan returned nonzero."
             ),
+            scanned_at=scanned_at,
+            scanner_version=scanner_version,
+        )
+    if parse_error is not None and not issues:
+        return _status_row(
+            target,
+            scan_status="scan_error",
+            suggested_action="Inspect Agent Scan JSON output and rerun after fixing scanner/runtime prerequisites.",
+            review_status="needs-agent-scan-review",
+            evidence=_compact_text(f"{parse_error} {completed.stdout or completed.stderr}"),
             scanned_at=scanned_at,
             scanner_version=scanner_version,
         )
@@ -447,21 +486,22 @@ def _status_row(
         issue_codes="",
         suggested_action=suggested_action,
         review_status=review_status,
-        evidence=evidence,
+        evidence=_compact_text(evidence),
         scanner="Snyk Agent Scan",
         scanner_version=scanner_version,
         scanned_at=scanned_at,
     )
 
 
-def _load_agent_scan_json(text: str) -> Any:
+def _load_agent_scan_json(text: str) -> tuple[Any, str | None]:
     stripped = text.strip()
     if not stripped:
-        return None
+        return None, "Agent Scan produced empty JSON output."
     try:
-        return json.loads(stripped)
-    except json.JSONDecodeError:
-        return None
+        return json.loads(stripped), None
+    except json.JSONDecodeError as exc:
+        detail = f"line {exc.lineno} column {exc.colno}"
+        return None, f"Agent Scan produced invalid JSON output ({detail})."
 
 
 def _collect_issues(payload: Any) -> list[dict[str, object]]:
@@ -512,14 +552,14 @@ def _finding_action(severity: str, issue_codes: str) -> str:
 
 
 def _compact_text(text: str, limit: int = 500) -> str:
-    compact = " ".join(text.split())
+    compact = " ".join(redact_secret_text(text).split())
     if len(compact) <= limit:
         return compact
     return compact[: limit - 3].rstrip() + "..."
 
 
 def _scan_env(repo: Path) -> dict[str, str]:
-    env = dict(os.environ)
+    env = {key: os.environ[key] for key in SCAN_ENV_ALLOWLIST if key in os.environ}
     venv_bin = repo / ".venv" / "bin"
     if venv_bin.is_dir():
         env["PATH"] = f"{venv_bin}{os.pathsep}{env.get('PATH', '')}"

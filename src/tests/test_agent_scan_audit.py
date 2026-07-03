@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from pytest import MonkeyPatch
+
 from ctx.core.quality.agent_scan_audit import AgentScanTarget
 from ctx.core.quality.agent_scan_audit import build_tracker_rows
 from ctx.core.quality.agent_scan_audit import discover_targets
@@ -184,6 +186,62 @@ def test_tracker_rows_normalize_agent_scan_findings(tmp_path: Path) -> None:
     assert row.issue_count == 1
     assert row.issue_codes == "W001"
     assert "expose the risk" in row.suggested_action
+
+
+def test_scan_errors_are_rows_with_redacted_evidence_and_minimal_env(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path)
+    target = AgentScanTarget(
+        "skill",
+        "router",
+        "repo-skill",
+        "skills/router/SKILL.md",
+        "skills/router/SKILL.md",
+        True,
+    )
+    captured_env: dict[str, str] = {}
+    secret = "sk-testsecret123456789012345"
+    monkeypatch.setenv("SNYK_TOKEN", "snyk-token")
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_supersecret123456789012345")
+
+    def invalid_json_runner(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if command[-1] == "--help":
+            return subprocess.CompletedProcess(command, 0, stdout="Snyk Agent Scan v0.5.12")
+        captured_env.update(kwargs["env"])
+        return subprocess.CompletedProcess(command, 0, stdout=f"OPENAI_API_KEY={secret}")
+
+    invalid_rows = build_tracker_rows(
+        [target],
+        repo=repo,
+        snyk_token_present=True,
+        runner=invalid_json_runner,
+        now="2026-07-02T00:00:00+00:00",
+    )
+
+    assert invalid_rows[0].scan_status == "scan_error"
+    assert "invalid JSON" in invalid_rows[0].evidence
+    assert secret not in invalid_rows[0].evidence
+    assert captured_env["SNYK_TOKEN"] == "snyk-token"
+    assert "OPENAI_API_KEY" not in captured_env
+    assert "GITHUB_TOKEN" not in captured_env
+
+    def failing_runner(command: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        if command[-1] == "--help":
+            return subprocess.CompletedProcess(command, 0, stdout="Snyk Agent Scan v0.5.12")
+        raise subprocess.TimeoutExpired(command, timeout=180)
+
+    failed_rows = build_tracker_rows(
+        [target],
+        repo=repo,
+        snyk_token_present=True,
+        runner=failing_runner,
+        now="2026-07-02T00:00:00+00:00",
+    )
+    assert failed_rows[0].scan_status == "scan_error"
+    assert "TimeoutExpired" in failed_rows[0].evidence
 
 
 def test_write_tracker_outputs_stable_csv_booleans(tmp_path: Path) -> None:
