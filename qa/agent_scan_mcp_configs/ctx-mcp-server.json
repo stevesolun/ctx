@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ctx-wiki": {
+      "type": "stdio",
+      "command": "ctx-mcp-server",
+      "args": []
+    }
+  }
+}
