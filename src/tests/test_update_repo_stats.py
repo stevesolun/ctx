@@ -441,8 +441,22 @@ def test_harness_aware_readme_prose_is_updated() -> None:
 
 
 def test_published_inventory_prose_uses_exact_graph_counts(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    graph_dir = tmp_path / "graph"
+    graph_dir.mkdir()
+    (graph_dir / "wiki-graph.tar.gz").write_text(
+        "\n".join(
+            (
+                "version https://git-lfs.github.com/spec/v1",
+                "oid sha256:" + ("a" * 64),
+                f"size {314 * 1024 * 1024}",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
     text = "\n".join(
         [
             "badge/Graph-79%2C958_nodes_/_1.8M_edges-red",
@@ -461,7 +475,7 @@ def test_published_inventory_prose_uses_exact_graph_counts(
         "harnesses": 207,
         "communities": 52,
     }
-    monkeypatch.setattr(urs, "_full_wiki_tarball_mib", lambda: 314)
+    monkeypatch.setattr(urs, "REPO_ROOT", tmp_path)
 
     patched = text
     for pattern, replacement in urs.build_replacements(stats, tests=None, converted=None):

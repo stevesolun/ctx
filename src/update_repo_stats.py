@@ -721,7 +721,25 @@ def _full_wiki_tarball_mib() -> int | None:
     tarball = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
     if not tarball.exists():
         return None
-    return round(tarball.stat().st_size / (1024 * 1024))
+    size = _git_lfs_pointer_size(tarball)
+    if size is None:
+        size = tarball.stat().st_size
+    return round(size / (1024 * 1024))
+
+
+def _git_lfs_pointer_size(path: Path) -> int | None:
+    try:
+        if path.stat().st_size > 1024:
+            return None
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if not text.startswith("version https://git-lfs.github.com/spec/v1\n"):
+        return None
+    match = re.search(r"^size (\d+)$", text, re.MULTILINE)
+    if match is None:
+        return None
+    return int(match.group(1))
 
 
 Replacement = tuple[re.Pattern[str], str]

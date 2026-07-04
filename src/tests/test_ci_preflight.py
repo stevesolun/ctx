@@ -3,26 +3,40 @@ from __future__ import annotations
 from pathlib import Path
 
 from scripts.ci_preflight import _run_no_test_policy_for_files
+from scripts.ci_preflight import Check
 from scripts.ci_preflight import select_checks
 
 
-def _names_for(files: list[str], *, profile: str = "pr") -> list[str]:
+def _checks_for(files: list[str], *, profile: str = "pr") -> list[Check]:
     checks, _notes = select_checks(
         base_ref="origin/main",
         files=files,
         profile=profile,
         python="python",
     )
+    return checks
+
+
+def _names_for(files: list[str], *, profile: str = "pr") -> list[str]:
+    checks = _checks_for(files, profile=profile)
     return [check.name for check in checks]
 
 
 def test_preflight_runs_docs_gate_for_docs_changes() -> None:
     names = _names_for(["docs/index.md"])
+    tracker_checks = _checks_for(["qa/bug_smoke_status.csv"])
+    tracker_names = [check.name for check in tracker_checks]
+    public_docs_tracker = next(
+        check for check in tracker_checks if check.name == "public docs tracker"
+    )
 
     assert "repo stats" in names
     assert "docs strict build" in names
     assert "no-test policy" not in names
     assert "unit-linux equivalent" not in names
+    assert "docs strict build" in tracker_names
+    assert "unit-linux equivalent" not in tracker_names
+    assert "src/tests/test_bug_smoke_tracker.py" in public_docs_tracker.argv
 
 
 def test_preflight_runs_source_gates_for_source_changes() -> None:
