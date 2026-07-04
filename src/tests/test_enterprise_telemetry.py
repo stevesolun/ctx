@@ -116,8 +116,12 @@ def test_sanitize_payload_hashes_common_path_key_shapes() -> None:
             "ctx.repository": "steves/private-repo",
             "workspace": "/Users/example/private-repo",
             "workspace.root": "/Users/example/private-repo",
+            "workspace_url": "https://example.test/steves/private-repo",
+            "ctx.workspace.url": "https://example.test/steves/private-repo",
             "project": "/Users/example/private-repo/service",
             "project-dir": "/Users/example/private-repo/service",
+            "project_url": "https://example.test/steves/private-repo/service",
+            "ctx.project.url": "https://example.test/steves/private-repo/service",
             "context": "Look in /Users/example/private-repo for acme",
             "safe": "kept",
         },
@@ -133,8 +137,12 @@ def test_sanitize_payload_hashes_common_path_key_shapes() -> None:
     assert payload["ctx.repository_hash"].startswith("sha256:")
     assert payload["workspace_hash"].startswith("sha256:")
     assert payload["workspace.root_hash"].startswith("sha256:")
+    assert payload["workspace_url_hash"].startswith("sha256:")
+    assert payload["ctx.workspace.url_hash"].startswith("sha256:")
     assert payload["project_hash"].startswith("sha256:")
     assert payload["project-dir_hash"].startswith("sha256:")
+    assert payload["project_url_hash"].startswith("sha256:")
+    assert payload["ctx.project.url_hash"].startswith("sha256:")
     assert payload["context_hash"].startswith("sha256:")
     assert payload["safe"] == "kept"
     for raw_key in (
@@ -147,8 +155,12 @@ def test_sanitize_payload_hashes_common_path_key_shapes() -> None:
         "ctx.repository",
         "workspace",
         "workspace.root",
+        "workspace_url",
+        "ctx.workspace.url",
         "project",
         "project-dir",
+        "project_url",
+        "ctx.project.url",
         "context",
     ):
         assert raw_key not in payload

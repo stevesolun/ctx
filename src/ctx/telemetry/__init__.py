@@ -100,8 +100,10 @@ _RAW_VALUE_KEYS = frozenset(
         "tool_output",
         "project",
         "project_name",
+        "project_url",
         "workspace",
         "workspace_name",
+        "workspace_url",
     }
 )
 _RAW_VALUE_KEY_SUFFIXES = (
@@ -123,8 +125,10 @@ _RAW_VALUE_KEY_SUFFIXES = (
     "_repository_url",
     "_workspace",
     "_workspace_name",
+    "_workspace_url",
     "_project",
     "_project_name",
+    "_project_url",
 )
 _SCALAR_TYPES = (str, int, float, bool, type(None))
 
