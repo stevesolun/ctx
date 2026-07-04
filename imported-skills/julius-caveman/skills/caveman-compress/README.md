@@ -67,7 +67,7 @@ All validations passed ✅ — headings, code blocks, URLs, file paths preserved
 
 ## Security
 
-`caveman-compress` is flagged as Snyk High Risk due to subprocess and file I/O patterns detected by static analysis. This is a false positive — see [SECURITY.md](./SECURITY.md) for a full explanation of what the skill does and does not do.
+`caveman-compress` may look risky to static analysis because it uses subprocess and file I/O patterns. See [SECURITY.md](./SECURITY.md) for a full explanation of what the skill does and does not do.
 
 ## Install
 

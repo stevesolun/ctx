@@ -1,8 +1,8 @@
 # Security
 
-## Snyk High Risk Rating
+## Static Analysis Risk Notes
 
-`caveman-compress` receives a Snyk High Risk rating due to static analysis heuristics. This document explains what the skill does and does not do.
+`caveman-compress` may look risky to static analysis because it uses subprocess and file I/O patterns. This document explains what the skill does and does not do.
 
 ### What triggers the rating
 

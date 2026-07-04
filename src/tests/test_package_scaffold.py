@@ -50,7 +50,6 @@ _EXPECTED_CONSOLE_SCRIPTS: tuple[str, ...] = (
     "ctx-agent-add",
     "ctx-agent-install",
     "ctx-agent-mirror",
-    "ctx-agent-scan-audit",
     "ctx-agent-unload",
     "ctx-bundle-suggest",
     "ctx-dedup-check",
