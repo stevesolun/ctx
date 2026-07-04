@@ -423,7 +423,7 @@ def ensure_dashboard_graph_index(
                         tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
                         try:
                             with tmp.open("wb") as out:
-                                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                                while chunk := source.read(1024 * 1024):
                                     out.write(chunk)
                             if not index_matches_manifest(tmp):
                                 continue
