@@ -494,6 +494,7 @@ def enrich_entities(
     sleep_seconds: float = DEFAULT_SLEEP_SECONDS,
     graceful: _GracefulExit | None = None,
     report_progress: bool = True,
+    current_run_failures: list[str] | None = None,
 ) -> dict:
     """Enrich each entity via ``source.fetch_details(slug)``.
 
@@ -511,6 +512,11 @@ def enrich_entities(
     pages = _load_active_wiki_pack_pages(wiki_path)
 
     attempted = enriched = unchanged = failed = skipped = 0
+
+    def _record_current_failure(slug: str) -> None:
+        if current_run_failures is not None:
+            current_run_failures.append(slug)
+
     for path in entity_paths:
         if limit is not None and attempted >= limit:
             break
@@ -557,6 +563,7 @@ def enrich_entities(
             enrichment = detail_source.fetch_details(source_slug, refresh=refresh)
         except Exception as exc:  # noqa: BLE001 — batch must continue
             failed += 1
+            _record_current_failure(wiki_slug)
             if not dry_run:
                 failures[wiki_slug] = {
                     "error": f"{type(exc).__name__}: {exc}",
@@ -583,6 +590,7 @@ def enrich_entities(
             )
         except Exception as exc:  # noqa: BLE001
             failed += 1
+            _record_current_failure(wiki_slug)
             if not dry_run:
                 failures[wiki_slug] = {
                     "error": f"apply: {type(exc).__name__}: {exc}",
@@ -752,6 +760,7 @@ def main() -> None:
             pass
 
     checkpoint = load_checkpoint(wiki_path, args.source)
+    current_run_failures: list[str] = []
 
     if args.slug:
         # Single-slug path: bypass the discovery loop, build a one-file list.
@@ -787,11 +796,13 @@ def main() -> None:
             sleep_seconds=args.sleep,
             graceful=graceful,
             report_progress=not args.quiet,
+            current_run_failures=current_run_failures,
         )
     finally:
         graceful.uninstall()
 
-    sys.exit(1 if checkpoint["failures"] else 0)
+    has_failures = bool(current_run_failures) if args.dry_run else bool(checkpoint["failures"])
+    sys.exit(1 if has_failures else 0)
 
 
 if __name__ == "__main__":

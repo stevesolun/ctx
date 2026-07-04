@@ -248,6 +248,7 @@ def ingest_records(
     flush_every: int = DEFAULT_FLUSH_EVERY,
     graceful: _GracefulExit | None = None,
     report_progress: bool = True,
+    current_run_failures: list[str] | None = None,
 ) -> IngestCheckpoint:
     """Run ``records`` through ``add_mcp``, updating ``checkpoint`` in place.
 
@@ -268,6 +269,10 @@ def ingest_records(
         if report_progress:
             print(f"  [{i}] [{status}] {slug}", flush=True)
 
+    def _record_current_failure(slug: str) -> None:
+        if current_run_failures is not None:
+            current_run_failures.append(slug)
+
     for raw in records:
         checkpoint["total_seen"] += 1
         seen_this_run += 1
@@ -280,6 +285,7 @@ def ingest_records(
             record = McpRecord.from_dict(raw)
         except Exception as exc:  # noqa: BLE001 — one bad record must not kill the run
             errored += 1
+            _record_current_failure(str(raw_slug))
             if not dry_run:
                 checkpoint["failures"][str(raw_slug)] = {
                     "error": f"parse: {exc}",
@@ -338,6 +344,7 @@ def ingest_records(
             _progress(seen_this_run, slug, f"rejected:{codes}")
         except Exception as exc:  # noqa: BLE001 — batch must continue
             errored += 1
+            _record_current_failure(slug)
             if not dry_run:
                 checkpoint["failures"][slug] = {
                     "error": f"{type(exc).__name__}: {exc}",
@@ -525,6 +532,7 @@ def main() -> None:
             pass
 
     checkpoint = load_checkpoint(wiki_path, args.source)
+    current_run_failures: list[str] = []
 
     graceful = _GracefulExit()
     graceful.install()
@@ -539,13 +547,15 @@ def main() -> None:
             flush_every=args.flush_every,
             graceful=graceful,
             report_progress=not args.quiet,
+            current_run_failures=current_run_failures,
         )
     finally:
         graceful.uninstall()
 
     # Non-zero exit when failures remain uncleared — lets CI tie
     # "ingest green" to "no outstanding error records".
-    sys.exit(1 if checkpoint["failures"] else 0)
+    has_failures = bool(current_run_failures) if args.dry_run else bool(checkpoint["failures"])
+    sys.exit(1 if has_failures else 0)
 
 
 # _MCP_ENTITY_SUBDIR re-exported for tests that want to look at disk
