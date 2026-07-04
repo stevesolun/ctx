@@ -110,6 +110,19 @@ def test_sanitize_payload_hashes_common_path_key_shapes() -> None:
             "paths": ["/Users/example/private-repo/a.py"],
             "ctx.repo.path": "/Users/example/private-repo",
             "file.paths": ["/Users/example/private-repo/b.py"],
+            "repo_name": "private-repo",
+            "repository": "steves/private-repo",
+            "ctx.repo.name": "private-repo",
+            "ctx.repository": "steves/private-repo",
+            "workspace": "/Users/example/private-repo",
+            "workspace.root": "/Users/example/private-repo",
+            "workspace_url": "https://example.test/steves/private-repo",
+            "ctx.workspace.url": "https://example.test/steves/private-repo",
+            "project": "/Users/example/private-repo/service",
+            "project-dir": "/Users/example/private-repo/service",
+            "project_url": "https://example.test/steves/private-repo/service",
+            "ctx.project.url": "https://example.test/steves/private-repo/service",
+            "context": "Look in /Users/example/private-repo for acme",
             "safe": "kept",
         },
         config={"mode": "local_redacted", "privacy": {"hash_salt": "test-salt"}},
@@ -118,11 +131,44 @@ def test_sanitize_payload_hashes_common_path_key_shapes() -> None:
     assert payload["paths_hash"].startswith("sha256:")
     assert payload["ctx.repo.path_hash"].startswith("sha256:")
     assert payload["file.paths_hash"].startswith("sha256:")
+    assert payload["repo_name_hash"].startswith("sha256:")
+    assert payload["repository_hash"].startswith("sha256:")
+    assert payload["ctx.repo.name_hash"].startswith("sha256:")
+    assert payload["ctx.repository_hash"].startswith("sha256:")
+    assert payload["workspace_hash"].startswith("sha256:")
+    assert payload["workspace.root_hash"].startswith("sha256:")
+    assert payload["workspace_url_hash"].startswith("sha256:")
+    assert payload["ctx.workspace.url_hash"].startswith("sha256:")
+    assert payload["project_hash"].startswith("sha256:")
+    assert payload["project-dir_hash"].startswith("sha256:")
+    assert payload["project_url_hash"].startswith("sha256:")
+    assert payload["ctx.project.url_hash"].startswith("sha256:")
+    assert payload["context_hash"].startswith("sha256:")
     assert payload["safe"] == "kept"
-    assert "paths" not in payload
-    assert "ctx.repo.path" not in payload
-    assert "file.paths" not in payload
-    assert "/Users/example/private-repo" not in json.dumps(payload)
+    for raw_key in (
+        "paths",
+        "ctx.repo.path",
+        "file.paths",
+        "repo_name",
+        "repository",
+        "ctx.repo.name",
+        "ctx.repository",
+        "workspace",
+        "workspace.root",
+        "workspace_url",
+        "ctx.workspace.url",
+        "project",
+        "project-dir",
+        "project_url",
+        "ctx.project.url",
+        "context",
+    ):
+        assert raw_key not in payload
+    payload_json = json.dumps(payload)
+    assert "/Users/example/private-repo" not in payload_json
+    assert "steves/private-repo" not in payload_json
+    assert "private-repo" not in payload_json
+    assert "acme" not in payload_json
 
 
 def test_telemetry_span_propagates_trace_to_nested_events(tmp_path: Path) -> None:
