@@ -73,6 +73,7 @@ _RAW_VALUE_KEYS = frozenset(
     {
         "command",
         "command_output",
+        "context",
         "cwd",
         "goal",
         "input",
@@ -85,6 +86,11 @@ _RAW_VALUE_KEYS = frozenset(
         "raw_input",
         "raw_prompt",
         "repo",
+        "repo_name",
+        "repo_url",
+        "repository",
+        "repository_name",
+        "repository_url",
         "response",
         "stderr",
         "stdout",
@@ -92,13 +98,39 @@ _RAW_VALUE_KEYS = frozenset(
         "tool_args",
         "tool_input",
         "tool_output",
+        "project",
+        "project_name",
+        "workspace",
+        "workspace_name",
     }
+)
+_RAW_VALUE_KEY_SUFFIXES = (
+    "_path",
+    "_paths",
+    "_dir",
+    "_dirs",
+    "_directory",
+    "_directories",
+    "_folder",
+    "_folders",
+    "_root",
+    "_roots",
+    "_repo",
+    "_repo_name",
+    "_repo_url",
+    "_repository",
+    "_repository_name",
+    "_repository_url",
+    "_workspace",
+    "_workspace_name",
+    "_project",
+    "_project_name",
 )
 _SCALAR_TYPES = (str, int, float, bool, type(None))
 
 
 def _raw_value_key_like(normalized_key: str) -> bool:
-    return normalized_key in _RAW_VALUE_KEYS or normalized_key.endswith(("_path", "_paths"))
+    return normalized_key in _RAW_VALUE_KEYS or normalized_key.endswith(_RAW_VALUE_KEY_SUFFIXES)
 
 
 @dataclass(frozen=True)
