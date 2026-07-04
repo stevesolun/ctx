@@ -28,6 +28,7 @@ DOCS_PATTERNS = (
     "graph/README.md",
     "LICENSE",
     "mkdocs.yml",
+    "qa/bug_smoke_status.csv",
     "qa/feature_status.csv",
     "requirements-docs.txt",
 )

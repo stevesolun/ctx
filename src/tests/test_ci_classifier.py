@@ -63,6 +63,15 @@ def test_qa_feature_status_tracker_is_docs_only() -> None:
     assert flags["source_changed"] is False
 
 
+def test_qa_bug_smoke_status_tracker_is_docs_only() -> None:
+    flags = classify_paths(["qa/bug_smoke_status.csv"])
+
+    assert flags["docs_only"] is True
+    assert flags["docs_changed"] is True
+    assert flags["graph_only"] is False
+    assert flags["source_changed"] is False
+
+
 def test_qa_helper_scripts_are_not_docs_only() -> None:
     flags = classify_paths(["qa/check_feature_status.py"])
 

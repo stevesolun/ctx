@@ -190,6 +190,7 @@ def select_checks(
                         "pytest",
                         "-q",
                         "--no-cov",
+                        "src/tests/test_bug_smoke_tracker.py",
                         "src/tests/test_feature_user_story_tracker.py",
                         "src/tests/test_toolbox_cli.py",
                     ),

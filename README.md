@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-4436_inventory-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-4439_inventory-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![Graph](https://img.shields.io/badge/Graph-79%2C958_nodes_/_1%2C778%2C069_edges-red.svg)](https://stevesolun.github.io/ctx/knowledge-graph/)
 [![Skills](https://img.shields.io/badge/Skills-68%2C494-blue.svg)](https://stevesolun.github.io/ctx/catalog/?type=skill)
 [![Agents](https://img.shields.io/badge/Agents-467-purple.svg)](https://stevesolun.github.io/ctx/catalog/?type=agent)
@@ -51,6 +51,9 @@ and tool-selection/token-history ledger
 [`qa/tool-selection-token-history/tracker.csv`](qa/tool-selection-token-history/tracker.csv)
 are supporting detail ledgers that feed that root tracker; canonical status and
 release readiness stay in `qa/feature_status.csv`.
+Bug-smoke audit findings live in
+[`qa/bug_smoke_status.csv`](qa/bug_smoke_status.csv) and are validated by the
+same public docs tracker.
 Rows for public MkDocs pages use the exact `docs/...md` path from `mkdocs.yml`
 as `entrypoint_or_route`. Public linked docs assets under
 `docs/assets/javascripts/`, `docs/services/`, and `docs/toolbox/templates/`

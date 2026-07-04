@@ -64,6 +64,8 @@ with persistent memory that gets smarter every session.
     `docs/toolbox/templates/` change, update both
     `docs/qa/feature-user-story-status.csv` and the canonical
     `qa/feature_status.csv` with the exact path in `entrypoint_or_route`.
+    Bug-smoke audit rows live in `qa/bug_smoke_status.csv` and are validated
+    by the same public docs tracker.
 
 ## Why this exists
 
@@ -219,7 +221,7 @@ ones are flagged. New ones self-ingest.
     ---
 
     Current main is **v1.0.20** — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-    4,436 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+    4,439 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
     ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),
