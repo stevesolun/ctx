@@ -280,12 +280,13 @@ def ingest_records(
             record = McpRecord.from_dict(raw)
         except Exception as exc:  # noqa: BLE001 — one bad record must not kill the run
             errored += 1
-            checkpoint["failures"][str(raw_slug)] = {
-                "error": f"parse: {exc}",
-                "at": _now_iso(),
-            }
+            if not dry_run:
+                checkpoint["failures"][str(raw_slug)] = {
+                    "error": f"parse: {exc}",
+                    "at": _now_iso(),
+                }
             _progress(seen_this_run, str(raw_slug), "parse-error")
-            if seen_this_run % flush_every == 0:
+            if not dry_run and seen_this_run % flush_every == 0:
                 save_checkpoint(wiki_path, checkpoint)
             if graceful and graceful.requested:
                 break
@@ -309,7 +310,8 @@ def ingest_records(
                 continue
             # Retry: clear the old failure so a new attempt's outcome
             # is the recorded one, whether success or a new failure.
-            del checkpoint["failures"][slug]
+            if not dry_run:
+                del checkpoint["failures"][slug]
 
         # Attempt.
         try:
@@ -319,7 +321,8 @@ def ingest_records(
                 added += 1
             else:
                 merged += 1
-            checkpoint["processed"][slug] = {"result": outcome, "at": _now_iso()}
+            if not dry_run:
+                checkpoint["processed"][slug] = {"result": outcome, "at": _now_iso()}
             _progress(seen_this_run, slug, outcome)
         except IntakeRejected as exc:
             rejected += 1
@@ -327,27 +330,30 @@ def ingest_records(
             # Rejections are *not* failures — they're a valid outcome.
             # Record under processed so resumes don't reprocess, but
             # annotate with the reason.
-            checkpoint["processed"][slug] = {
-                "result": f"rejected:{codes}",
-                "at": _now_iso(),
-            }
+            if not dry_run:
+                checkpoint["processed"][slug] = {
+                    "result": f"rejected:{codes}",
+                    "at": _now_iso(),
+                }
             _progress(seen_this_run, slug, f"rejected:{codes}")
         except Exception as exc:  # noqa: BLE001 — batch must continue
             errored += 1
-            checkpoint["failures"][slug] = {
-                "error": f"{type(exc).__name__}: {exc}",
-                "at": _now_iso(),
-            }
+            if not dry_run:
+                checkpoint["failures"][slug] = {
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "at": _now_iso(),
+                }
             _progress(seen_this_run, slug, "error")
 
-        if seen_this_run % flush_every == 0:
+        if not dry_run and seen_this_run % flush_every == 0:
             save_checkpoint(wiki_path, checkpoint)
 
         if graceful and graceful.requested:
             break
 
     # Final flush — captures the tail end of the run, SIGINT or not.
-    save_checkpoint(wiki_path, checkpoint)
+    if not dry_run:
+        save_checkpoint(wiki_path, checkpoint)
 
     if report_progress:
         tail = " (interrupted)" if graceful and graceful.requested else ""

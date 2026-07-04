@@ -214,6 +214,35 @@ class TestFreshRun:
         reloaded = mcp_ingest.load_checkpoint(tmp_path, "src")
         assert "only-one" in reloaded["processed"]
 
+    def test_dry_run_does_not_checkpoint_processed_slugs(
+        self, tmp_path: Path, fake_add: _FakeAddMcp
+    ) -> None:
+        cp = mcp_ingest.load_checkpoint(tmp_path, "src")
+        record = _record_dict("dry-run-poison")
+        mcp_ingest.ingest_records(
+            [record],
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp,
+            dry_run=True,
+            report_progress=False,
+        )
+
+        assert cp["processed"] == {}
+        assert mcp_ingest.load_checkpoint(tmp_path, "src")["processed"] == {}
+
+        live_cp = mcp_ingest.load_checkpoint(tmp_path, "src")
+        mcp_ingest.ingest_records(
+            [record],
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=live_cp,
+            report_progress=False,
+        )
+
+        assert fake_add.calls == ["dry-run-poison", "dry-run-poison"]
+        assert "dry-run-poison" in mcp_ingest.load_checkpoint(tmp_path, "src")["processed"]
+
     def test_merge_vs_add_recorded_in_result(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

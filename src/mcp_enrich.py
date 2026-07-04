@@ -538,17 +538,18 @@ def enrich_entities(
             # Entity has no homepage_url for this source (e.g. ingested
             # from a different source). Record a skip so we don't
             # retry; it's not a failure.
-            processed[wiki_slug] = {
-                "result": "no-source-url",
-                "at": _now_iso(),
-                "fields": [],
-            }
+            if not dry_run:
+                processed[wiki_slug] = {
+                    "result": "no-source-url",
+                    "at": _now_iso(),
+                    "fields": [],
+                }
             if report_progress:
                 print(
                     f"  [{attempted}] [no-source-url] {wiki_slug}",
                     flush=True,
                 )
-            if attempted % flush_every == 0:
+            if not dry_run and attempted % flush_every == 0:
                 save_checkpoint(wiki_path, checkpoint)
             continue
 
@@ -556,18 +557,19 @@ def enrich_entities(
             enrichment = detail_source.fetch_details(source_slug, refresh=refresh)
         except Exception as exc:  # noqa: BLE001 — batch must continue
             failed += 1
-            failures[wiki_slug] = {
-                "error": f"{type(exc).__name__}: {exc}",
-                "at": _now_iso(),
-                "source_slug": source_slug,
-            }
+            if not dry_run:
+                failures[wiki_slug] = {
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "at": _now_iso(),
+                    "source_slug": source_slug,
+                }
             if report_progress:
                 print(
                     f"  [{attempted}] [FAIL] {wiki_slug} "
                     f"(source={source_slug}): {type(exc).__name__}",
                     flush=True,
                 )
-            if attempted % flush_every == 0:
+            if not dry_run and attempted % flush_every == 0:
                 save_checkpoint(wiki_path, checkpoint)
             continue
 
@@ -581,11 +583,12 @@ def enrich_entities(
             )
         except Exception as exc:  # noqa: BLE001
             failed += 1
-            failures[wiki_slug] = {
-                "error": f"apply: {type(exc).__name__}: {exc}",
-                "at": _now_iso(),
-                "source_slug": source_slug,
-            }
+            if not dry_run:
+                failures[wiki_slug] = {
+                    "error": f"apply: {type(exc).__name__}: {exc}",
+                    "at": _now_iso(),
+                    "source_slug": source_slug,
+                }
             if report_progress:
                 print(
                     f"  [{attempted}] [APPLY-FAIL] {wiki_slug}: {exc}",
@@ -596,7 +599,8 @@ def enrich_entities(
         if diff:
             enriched += 1
             outcome = "enriched"
-            failures.pop(wiki_slug, None)
+            if not dry_run:
+                failures.pop(wiki_slug, None)
         elif enrichment:
             unchanged += 1
             outcome = "unchanged"
@@ -604,12 +608,13 @@ def enrich_entities(
             unchanged += 1
             outcome = "no-repo"
 
-        processed[wiki_slug] = {
-            "result": outcome,
-            "at": _now_iso(),
-            "fields": list(enrichment.keys()) if enrichment else [],
-            "source_slug": source_slug,
-        }
+        if not dry_run:
+            processed[wiki_slug] = {
+                "result": outcome,
+                "at": _now_iso(),
+                "fields": list(enrichment.keys()) if enrichment else [],
+                "source_slug": source_slug,
+            }
 
         if report_progress:
             fields = ",".join(enrichment.keys()) if enrichment else "none"
@@ -618,7 +623,7 @@ def enrich_entities(
                 flush=True,
             )
 
-        if attempted % flush_every == 0:
+        if not dry_run and attempted % flush_every == 0:
             save_checkpoint(wiki_path, checkpoint)
 
         # Polite pacing — only between LIVE fetches, not cache hits.
@@ -627,7 +632,8 @@ def enrich_entities(
         if sleep_seconds > 0:
             time.sleep(sleep_seconds)
 
-    save_checkpoint(wiki_path, checkpoint)
+    if not dry_run:
+        save_checkpoint(wiki_path, checkpoint)
     if report_progress:
         tail = " (interrupted)" if graceful and graceful.requested else ""
         print(

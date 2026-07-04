@@ -158,3 +158,64 @@ class TestRenderScalar:
         assert 'github_url: "https://github.com/example/pack-only"' in merged[relpath]
         assert "stars: 7" in merged[relpath]
         assert not (wiki / relpath).exists()
+
+    def test_enrich_entities_dry_run_does_not_checkpoint_processed_slugs(
+        self, tmp_path, monkeypatch
+    ):
+        wiki = tmp_path / "wiki"
+        relpath = "entities/mcp-servers/d/dry-run-poison.md"
+        write_wiki_base_pack(
+            pack_dir=wiki / "wiki-packs" / "base-export-1",
+            pack_id="base-export-1",
+            base_export_id="wiki-export-1",
+            pages={
+                relpath: (
+                    "---\n"
+                    "name: Dry Run Poison\n"
+                    "homepage_url: https://www.pulsemcp.com/servers/dry-run-poison\n"
+                    "github_url: null\n"
+                    "updated: '2026-01-01'\n"
+                    "---\n"
+                    "# Dry Run Poison\n"
+                )
+            },
+        )
+
+        class Source:
+            def __init__(self):
+                self.calls = []
+
+            def fetch_details(self, slug, *, refresh=False):  # noqa: ARG002, ANN001, ANN201
+                self.calls.append(slug)
+                return {"github_url": "https://github.com/example/dry-run-poison"}
+
+        source = Source()
+        monkeypatch.setitem(_me.SOURCES, "pulsemcp", source)
+        entity_paths = list(_me._iter_entities(wiki))
+
+        checkpoint = _me.load_checkpoint(wiki, "pulsemcp")
+        _me.enrich_entities(
+            entity_paths,
+            source_name="pulsemcp",
+            wiki_path=wiki,
+            checkpoint=checkpoint,
+            dry_run=True,
+            sleep_seconds=0,
+            report_progress=False,
+        )
+
+        assert checkpoint["processed"] == {}
+        assert _me.load_checkpoint(wiki, "pulsemcp")["processed"] == {}
+
+        live_checkpoint = _me.load_checkpoint(wiki, "pulsemcp")
+        _me.enrich_entities(
+            entity_paths,
+            source_name="pulsemcp",
+            wiki_path=wiki,
+            checkpoint=live_checkpoint,
+            sleep_seconds=0,
+            report_progress=False,
+        )
+
+        assert source.calls == ["dry-run-poison", "dry-run-poison"]
+        assert "dry-run-poison" in _me.load_checkpoint(wiki, "pulsemcp")["processed"]
