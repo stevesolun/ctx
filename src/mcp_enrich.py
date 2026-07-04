@@ -20,6 +20,11 @@ Why this exists (from Phase 6e close-out):
 Checkpoint: ``<wiki>/.enrich-checkpoint/<source>.json`` — same shape
 as the Phase 6c ingest checkpoint. Slugs in ``processed`` skip on
 resume. ``failures`` retry on the next run unless ``--skip-failures``.
+Dry runs fetch and compute diffs without writing frontmatter or
+checkpoint state. They exit non-zero only for failures observed in the
+current dry-run invocation, not for failures already persisted in the
+checkpoint.
+
 All fetches go through the existing SSRF-hardened ``fetch_text`` in
 ``mcp_sources/base.py`` with the pulsemcp-level date-keyed cache, so
 a second run over the same day is near-instant (cache hit) and a
@@ -31,7 +36,7 @@ Usage:
     ctx-mcp-enrich --source pulsemcp --slug foo-bar   # single entity
     ctx-mcp-enrich --source pulsemcp --status         # checkpoint report
     ctx-mcp-enrich --source pulsemcp --reset          # delete checkpoint
-    ctx-mcp-enrich --source pulsemcp --dry-run        # fetch but don't write
+    ctx-mcp-enrich --source pulsemcp --dry-run        # fetch without writes
 """
 
 from __future__ import annotations
@@ -494,10 +499,14 @@ def enrich_entities(
     sleep_seconds: float = DEFAULT_SLEEP_SECONDS,
     graceful: _GracefulExit | None = None,
     report_progress: bool = True,
+    current_run_failures: list[str] | None = None,
 ) -> dict:
     """Enrich each entity via ``source.fetch_details(slug)``.
 
-    Returns the same checkpoint (mutated).
+    Returns the same checkpoint (mutated). With ``dry_run=True``, processed
+    and failure outcomes are not written to the checkpoint and no checkpoint
+    file is saved; callers can pass ``current_run_failures`` to collect
+    failures for dry-run exit status.
     """
     source = SOURCES.get(source_name)
     if source is None:
@@ -511,6 +520,11 @@ def enrich_entities(
     pages = _load_active_wiki_pack_pages(wiki_path)
 
     attempted = enriched = unchanged = failed = skipped = 0
+
+    def _record_current_failure(slug: str) -> None:
+        if current_run_failures is not None:
+            current_run_failures.append(slug)
+
     for path in entity_paths:
         if limit is not None and attempted >= limit:
             break
@@ -538,17 +552,18 @@ def enrich_entities(
             # Entity has no homepage_url for this source (e.g. ingested
             # from a different source). Record a skip so we don't
             # retry; it's not a failure.
-            processed[wiki_slug] = {
-                "result": "no-source-url",
-                "at": _now_iso(),
-                "fields": [],
-            }
+            if not dry_run:
+                processed[wiki_slug] = {
+                    "result": "no-source-url",
+                    "at": _now_iso(),
+                    "fields": [],
+                }
             if report_progress:
                 print(
                     f"  [{attempted}] [no-source-url] {wiki_slug}",
                     flush=True,
                 )
-            if attempted % flush_every == 0:
+            if not dry_run and attempted % flush_every == 0:
                 save_checkpoint(wiki_path, checkpoint)
             continue
 
@@ -556,18 +571,20 @@ def enrich_entities(
             enrichment = detail_source.fetch_details(source_slug, refresh=refresh)
         except Exception as exc:  # noqa: BLE001 — batch must continue
             failed += 1
-            failures[wiki_slug] = {
-                "error": f"{type(exc).__name__}: {exc}",
-                "at": _now_iso(),
-                "source_slug": source_slug,
-            }
+            _record_current_failure(wiki_slug)
+            if not dry_run:
+                failures[wiki_slug] = {
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "at": _now_iso(),
+                    "source_slug": source_slug,
+                }
             if report_progress:
                 print(
                     f"  [{attempted}] [FAIL] {wiki_slug} "
                     f"(source={source_slug}): {type(exc).__name__}",
                     flush=True,
                 )
-            if attempted % flush_every == 0:
+            if not dry_run and attempted % flush_every == 0:
                 save_checkpoint(wiki_path, checkpoint)
             continue
 
@@ -581,11 +598,13 @@ def enrich_entities(
             )
         except Exception as exc:  # noqa: BLE001
             failed += 1
-            failures[wiki_slug] = {
-                "error": f"apply: {type(exc).__name__}: {exc}",
-                "at": _now_iso(),
-                "source_slug": source_slug,
-            }
+            _record_current_failure(wiki_slug)
+            if not dry_run:
+                failures[wiki_slug] = {
+                    "error": f"apply: {type(exc).__name__}: {exc}",
+                    "at": _now_iso(),
+                    "source_slug": source_slug,
+                }
             if report_progress:
                 print(
                     f"  [{attempted}] [APPLY-FAIL] {wiki_slug}: {exc}",
@@ -596,7 +615,8 @@ def enrich_entities(
         if diff:
             enriched += 1
             outcome = "enriched"
-            failures.pop(wiki_slug, None)
+            if not dry_run:
+                failures.pop(wiki_slug, None)
         elif enrichment:
             unchanged += 1
             outcome = "unchanged"
@@ -604,12 +624,13 @@ def enrich_entities(
             unchanged += 1
             outcome = "no-repo"
 
-        processed[wiki_slug] = {
-            "result": outcome,
-            "at": _now_iso(),
-            "fields": list(enrichment.keys()) if enrichment else [],
-            "source_slug": source_slug,
-        }
+        if not dry_run:
+            processed[wiki_slug] = {
+                "result": outcome,
+                "at": _now_iso(),
+                "fields": list(enrichment.keys()) if enrichment else [],
+                "source_slug": source_slug,
+            }
 
         if report_progress:
             fields = ",".join(enrichment.keys()) if enrichment else "none"
@@ -618,7 +639,7 @@ def enrich_entities(
                 flush=True,
             )
 
-        if attempted % flush_every == 0:
+        if not dry_run and attempted % flush_every == 0:
             save_checkpoint(wiki_path, checkpoint)
 
         # Polite pacing — only between LIVE fetches, not cache hits.
@@ -627,7 +648,8 @@ def enrich_entities(
         if sleep_seconds > 0:
             time.sleep(sleep_seconds)
 
-    save_checkpoint(wiki_path, checkpoint)
+    if not dry_run:
+        save_checkpoint(wiki_path, checkpoint)
     if report_progress:
         tail = " (interrupted)" if graceful and graceful.requested else ""
         print(
@@ -690,7 +712,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--refresh", action="store_true", help="Bypass the raw detail-page cache")
     parser.add_argument(
-        "--dry-run", action="store_true", help="Fetch but do not write any frontmatter"
+        "--dry-run",
+        action="store_true",
+        help="Fetch but do not write frontmatter or checkpoint state",
     )
     parser.add_argument(
         "--skip-failures",
@@ -746,6 +770,7 @@ def main() -> None:
             pass
 
     checkpoint = load_checkpoint(wiki_path, args.source)
+    current_run_failures: list[str] = []
 
     if args.slug:
         # Single-slug path: bypass the discovery loop, build a one-file list.
@@ -781,11 +806,15 @@ def main() -> None:
             sleep_seconds=args.sleep,
             graceful=graceful,
             report_progress=not args.quiet,
+            current_run_failures=current_run_failures,
         )
     finally:
         graceful.uninstall()
 
-    sys.exit(1 if checkpoint["failures"] else 0)
+    # Live runs fail while checkpoint failures remain uncleared; dry-runs fail
+    # only for failures observed in this invocation.
+    has_failures = bool(current_run_failures) if args.dry_run else bool(checkpoint["failures"])
+    sys.exit(1 if has_failures else 0)
 
 
 if __name__ == "__main__":

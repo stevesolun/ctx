@@ -22,11 +22,30 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 import mcp_enrich as _me
 from ctx.core.wiki.wiki_packs import load_merged_wiki_pages, write_wiki_base_pack
+
+
+def _write_pulsemcp_entity(wiki: Path, slug: str) -> None:
+    path = wiki / "entities" / "mcp-servers" / slug[0] / f"{slug}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        (
+            "---\n"
+            f"name: {slug}\n"
+            f"homepage_url: https://www.pulsemcp.com/servers/{slug}\n"
+            "github_url: null\n"
+            "updated: '2026-01-01'\n"
+            "---\n"
+            f"# {slug}\n"
+        ),
+        encoding="utf-8",
+    )
 
 
 class TestRenderScalar:
@@ -158,3 +177,97 @@ class TestRenderScalar:
         assert 'github_url: "https://github.com/example/pack-only"' in merged[relpath]
         assert "stars: 7" in merged[relpath]
         assert not (wiki / relpath).exists()
+
+    def test_enrich_entities_dry_run_does_not_checkpoint_processed_slugs(
+        self, tmp_path, monkeypatch
+    ):
+        wiki = tmp_path / "wiki"
+        relpath = "entities/mcp-servers/d/dry-run-poison.md"
+        write_wiki_base_pack(
+            pack_dir=wiki / "wiki-packs" / "base-export-1",
+            pack_id="base-export-1",
+            base_export_id="wiki-export-1",
+            pages={
+                relpath: (
+                    "---\n"
+                    "name: Dry Run Poison\n"
+                    "homepage_url: https://www.pulsemcp.com/servers/dry-run-poison\n"
+                    "github_url: null\n"
+                    "updated: '2026-01-01'\n"
+                    "---\n"
+                    "# Dry Run Poison\n"
+                )
+            },
+        )
+
+        class Source:
+            def __init__(self):
+                self.calls = []
+
+            def fetch_details(self, slug, *, refresh=False):  # noqa: ARG002, ANN001, ANN201
+                self.calls.append(slug)
+                return {"github_url": "https://github.com/example/dry-run-poison"}
+
+        source = Source()
+        monkeypatch.setitem(_me.SOURCES, "pulsemcp", source)
+        entity_paths = list(_me._iter_entities(wiki))
+
+        checkpoint = _me.load_checkpoint(wiki, "pulsemcp")
+        _me.enrich_entities(
+            entity_paths,
+            source_name="pulsemcp",
+            wiki_path=wiki,
+            checkpoint=checkpoint,
+            dry_run=True,
+            sleep_seconds=0,
+            report_progress=False,
+        )
+
+        assert checkpoint["processed"] == {}
+        assert _me.load_checkpoint(wiki, "pulsemcp")["processed"] == {}
+
+        live_checkpoint = _me.load_checkpoint(wiki, "pulsemcp")
+        _me.enrich_entities(
+            entity_paths,
+            source_name="pulsemcp",
+            wiki_path=wiki,
+            checkpoint=live_checkpoint,
+            sleep_seconds=0,
+            report_progress=False,
+        )
+
+        assert source.calls == ["dry-run-poison", "dry-run-poison"]
+        assert "dry-run-poison" in _me.load_checkpoint(wiki, "pulsemcp")["processed"]
+
+    def test_dry_run_fetch_failure_exits_nonzero_without_checkpoint(self, tmp_path, monkeypatch):
+        wiki = tmp_path / "wiki"
+        _write_pulsemcp_entity(wiki, "detail-fail")
+
+        class Source:
+            def fetch_details(self, slug, *, refresh=False):  # noqa: ARG002, ANN001, ANN201
+                raise RuntimeError(f"synthetic detail failure for {slug}")
+
+        monkeypatch.setitem(_me.SOURCES, "pulsemcp", Source())
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "ctx-mcp-enrich",
+                "--source",
+                "pulsemcp",
+                "--slug",
+                "detail-fail",
+                "--wiki",
+                str(wiki),
+                "--dry-run",
+                "--sleep",
+                "0",
+                "--quiet",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            _me.main()
+
+        assert exc.value.code == 1
+        assert not _me._checkpoint_path(wiki, "pulsemcp").exists()

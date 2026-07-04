@@ -214,6 +214,35 @@ class TestFreshRun:
         reloaded = mcp_ingest.load_checkpoint(tmp_path, "src")
         assert "only-one" in reloaded["processed"]
 
+    def test_dry_run_does_not_checkpoint_processed_slugs(
+        self, tmp_path: Path, fake_add: _FakeAddMcp
+    ) -> None:
+        cp = mcp_ingest.load_checkpoint(tmp_path, "src")
+        record = _record_dict("dry-run-poison")
+        mcp_ingest.ingest_records(
+            [record],
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=cp,
+            dry_run=True,
+            report_progress=False,
+        )
+
+        assert cp["processed"] == {}
+        assert mcp_ingest.load_checkpoint(tmp_path, "src")["processed"] == {}
+
+        live_cp = mcp_ingest.load_checkpoint(tmp_path, "src")
+        mcp_ingest.ingest_records(
+            [record],
+            source="src",
+            wiki_path=tmp_path,
+            checkpoint=live_cp,
+            report_progress=False,
+        )
+
+        assert fake_add.calls == ["dry-run-poison", "dry-run-poison"]
+        assert "dry-run-poison" in mcp_ingest.load_checkpoint(tmp_path, "src")["processed"]
+
     def test_merge_vs_add_recorded_in_result(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -376,6 +405,105 @@ class TestOutcomes:
         assert fake.calls == ["slug-err", "slug-ok"]
         assert "slug-err" in cp["failures"]
         assert "slug-ok" in cp["processed"]
+
+
+class TestDryRunCliExitStatus:
+    def test_parse_error_exits_nonzero_without_checkpoint(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        record_path = tmp_path / "bad.json"
+        record_path.write_text("{}", encoding="utf-8")
+        wiki = tmp_path / "wiki"
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "ctx-mcp-ingest",
+                "--source",
+                "src",
+                "--from-json",
+                str(record_path),
+                "--wiki",
+                str(wiki),
+                "--dry-run",
+                "--quiet",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            mcp_ingest.main()
+
+        assert exc.value.code == 1
+        assert not mcp_ingest._checkpoint_path(wiki, "src").exists()
+
+    def test_add_error_exits_nonzero_without_checkpoint(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        record_path = tmp_path / "record.json"
+        record_path.write_text(json.dumps(_record_dict("slug-err")), encoding="utf-8")
+        wiki = tmp_path / "wiki"
+        fake = _FakeAddMcp(behaviour={"slug-err": "error"})
+        monkeypatch.setattr(mcp_ingest, "add_mcp", fake)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "ctx-mcp-ingest",
+                "--source",
+                "src",
+                "--from-json",
+                str(record_path),
+                "--wiki",
+                str(wiki),
+                "--dry-run",
+                "--quiet",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            mcp_ingest.main()
+
+        assert exc.value.code == 1
+        assert fake.calls == ["slug-err"]
+        assert not mcp_ingest._checkpoint_path(wiki, "src").exists()
+
+    def test_successful_dry_run_retry_ignores_persisted_failures(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        record_path = tmp_path / "record.json"
+        record_path.write_text(json.dumps(_record_dict("slug-ok")), encoding="utf-8")
+        wiki = tmp_path / "wiki"
+        checkpoint = mcp_ingest.load_checkpoint(wiki, "src")
+        checkpoint["failures"]["slug-ok"] = {"error": "prior", "at": "earlier"}
+        mcp_ingest.save_checkpoint(wiki, checkpoint)
+        fake = _FakeAddMcp()
+        monkeypatch.setattr(mcp_ingest, "add_mcp", fake)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "ctx-mcp-ingest",
+                "--source",
+                "src",
+                "--from-json",
+                str(record_path),
+                "--wiki",
+                str(wiki),
+                "--dry-run",
+                "--retry-failures",
+                "--quiet",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            mcp_ingest.main()
+
+        assert exc.value.code == 0
+        assert fake.calls == ["slug-ok"]
+        assert mcp_ingest.load_checkpoint(wiki, "src")["failures"] == {
+            "slug-ok": {"error": "prior", "at": "earlier"}
+        }
 
 
 # ── Flush cadence ───────────────────────────────────────────────────────────

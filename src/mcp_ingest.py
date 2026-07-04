@@ -56,9 +56,14 @@ Schema v1::
 separate so ``--retry-failures`` can target just them without re-doing
 the 9k successful records.
 
+Dry runs validate and route records through ``mcp_add`` without writing
+entity files or checkpoint state. They still exit non-zero when the
+current dry-run invocation sees parse/add failures, but prior checkpoint
+failures do not poison the dry-run exit status.
+
 Interrupts
 ----------
-SIGINT/SIGTERM trigger a final checkpoint flush before exit. The
+For live runs, SIGINT/SIGTERM trigger a final checkpoint flush before exit. The
 in-flight record is NOT aborted mid-write — Python's signal handling
 is cooperative, so the interrupt is observed between records. In the
 worst case the checkpoint is one record behind disk state; the next
@@ -248,11 +253,15 @@ def ingest_records(
     flush_every: int = DEFAULT_FLUSH_EVERY,
     graceful: _GracefulExit | None = None,
     report_progress: bool = True,
+    current_run_failures: list[str] | None = None,
 ) -> IngestCheckpoint:
     """Run ``records`` through ``add_mcp``, updating ``checkpoint`` in place.
 
     Returns the same checkpoint object (mutated) for caller convenience.
     Writes to disk every ``flush_every`` records and on graceful exit.
+    With ``dry_run=True``, processed/failure outcomes are not written to
+    ``checkpoint`` and no checkpoint file is saved; callers can pass
+    ``current_run_failures`` to collect failures for dry-run exit status.
 
     Skip rules:
       - slug in ``checkpoint['processed']`` -> skip (already done)
@@ -268,6 +277,10 @@ def ingest_records(
         if report_progress:
             print(f"  [{i}] [{status}] {slug}", flush=True)
 
+    def _record_current_failure(slug: str) -> None:
+        if current_run_failures is not None:
+            current_run_failures.append(slug)
+
     for raw in records:
         checkpoint["total_seen"] += 1
         seen_this_run += 1
@@ -280,12 +293,14 @@ def ingest_records(
             record = McpRecord.from_dict(raw)
         except Exception as exc:  # noqa: BLE001 — one bad record must not kill the run
             errored += 1
-            checkpoint["failures"][str(raw_slug)] = {
-                "error": f"parse: {exc}",
-                "at": _now_iso(),
-            }
+            _record_current_failure(str(raw_slug))
+            if not dry_run:
+                checkpoint["failures"][str(raw_slug)] = {
+                    "error": f"parse: {exc}",
+                    "at": _now_iso(),
+                }
             _progress(seen_this_run, str(raw_slug), "parse-error")
-            if seen_this_run % flush_every == 0:
+            if not dry_run and seen_this_run % flush_every == 0:
                 save_checkpoint(wiki_path, checkpoint)
             if graceful and graceful.requested:
                 break
@@ -309,7 +324,8 @@ def ingest_records(
                 continue
             # Retry: clear the old failure so a new attempt's outcome
             # is the recorded one, whether success or a new failure.
-            del checkpoint["failures"][slug]
+            if not dry_run:
+                del checkpoint["failures"][slug]
 
         # Attempt.
         try:
@@ -319,7 +335,8 @@ def ingest_records(
                 added += 1
             else:
                 merged += 1
-            checkpoint["processed"][slug] = {"result": outcome, "at": _now_iso()}
+            if not dry_run:
+                checkpoint["processed"][slug] = {"result": outcome, "at": _now_iso()}
             _progress(seen_this_run, slug, outcome)
         except IntakeRejected as exc:
             rejected += 1
@@ -327,27 +344,31 @@ def ingest_records(
             # Rejections are *not* failures — they're a valid outcome.
             # Record under processed so resumes don't reprocess, but
             # annotate with the reason.
-            checkpoint["processed"][slug] = {
-                "result": f"rejected:{codes}",
-                "at": _now_iso(),
-            }
+            if not dry_run:
+                checkpoint["processed"][slug] = {
+                    "result": f"rejected:{codes}",
+                    "at": _now_iso(),
+                }
             _progress(seen_this_run, slug, f"rejected:{codes}")
         except Exception as exc:  # noqa: BLE001 — batch must continue
             errored += 1
-            checkpoint["failures"][slug] = {
-                "error": f"{type(exc).__name__}: {exc}",
-                "at": _now_iso(),
-            }
+            _record_current_failure(slug)
+            if not dry_run:
+                checkpoint["failures"][slug] = {
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "at": _now_iso(),
+                }
             _progress(seen_this_run, slug, "error")
 
-        if seen_this_run % flush_every == 0:
+        if not dry_run and seen_this_run % flush_every == 0:
             save_checkpoint(wiki_path, checkpoint)
 
         if graceful and graceful.requested:
             break
 
     # Final flush — captures the tail end of the run, SIGINT or not.
-    save_checkpoint(wiki_path, checkpoint)
+    if not dry_run:
+        save_checkpoint(wiki_path, checkpoint)
 
     if report_progress:
         tail = " (interrupted)" if graceful and graceful.requested else ""
@@ -455,7 +476,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Validate and route records but skip writes and embeddings",
+        help="Validate and route records but skip entity, embedding, and checkpoint writes",
     )
     parser.add_argument(
         "--flush-every",
@@ -519,6 +540,7 @@ def main() -> None:
             pass
 
     checkpoint = load_checkpoint(wiki_path, args.source)
+    current_run_failures: list[str] = []
 
     graceful = _GracefulExit()
     graceful.install()
@@ -533,13 +555,15 @@ def main() -> None:
             flush_every=args.flush_every,
             graceful=graceful,
             report_progress=not args.quiet,
+            current_run_failures=current_run_failures,
         )
     finally:
         graceful.uninstall()
 
-    # Non-zero exit when failures remain uncleared — lets CI tie
-    # "ingest green" to "no outstanding error records".
-    sys.exit(1 if checkpoint["failures"] else 0)
+    # Live runs fail while checkpoint failures remain uncleared; dry-runs fail
+    # only for failures observed in this invocation.
+    has_failures = bool(current_run_failures) if args.dry_run else bool(checkpoint["failures"])
+    sys.exit(1 if has_failures else 0)
 
 
 # _MCP_ENTITY_SUBDIR re-exported for tests that want to look at disk
