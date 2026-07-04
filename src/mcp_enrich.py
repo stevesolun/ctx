@@ -20,6 +20,11 @@ Why this exists (from Phase 6e close-out):
 Checkpoint: ``<wiki>/.enrich-checkpoint/<source>.json`` — same shape
 as the Phase 6c ingest checkpoint. Slugs in ``processed`` skip on
 resume. ``failures`` retry on the next run unless ``--skip-failures``.
+Dry runs fetch and compute diffs without writing frontmatter or
+checkpoint state. They exit non-zero only for failures observed in the
+current dry-run invocation, not for failures already persisted in the
+checkpoint.
+
 All fetches go through the existing SSRF-hardened ``fetch_text`` in
 ``mcp_sources/base.py`` with the pulsemcp-level date-keyed cache, so
 a second run over the same day is near-instant (cache hit) and a
@@ -31,7 +36,7 @@ Usage:
     ctx-mcp-enrich --source pulsemcp --slug foo-bar   # single entity
     ctx-mcp-enrich --source pulsemcp --status         # checkpoint report
     ctx-mcp-enrich --source pulsemcp --reset          # delete checkpoint
-    ctx-mcp-enrich --source pulsemcp --dry-run        # fetch but don't write
+    ctx-mcp-enrich --source pulsemcp --dry-run        # fetch without writes
 """
 
 from __future__ import annotations
@@ -498,7 +503,10 @@ def enrich_entities(
 ) -> dict:
     """Enrich each entity via ``source.fetch_details(slug)``.
 
-    Returns the same checkpoint (mutated).
+    Returns the same checkpoint (mutated). With ``dry_run=True``, processed
+    and failure outcomes are not written to the checkpoint and no checkpoint
+    file is saved; callers can pass ``current_run_failures`` to collect
+    failures for dry-run exit status.
     """
     source = SOURCES.get(source_name)
     if source is None:
@@ -704,7 +712,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--refresh", action="store_true", help="Bypass the raw detail-page cache")
     parser.add_argument(
-        "--dry-run", action="store_true", help="Fetch but do not write any frontmatter"
+        "--dry-run",
+        action="store_true",
+        help="Fetch but do not write frontmatter or checkpoint state",
     )
     parser.add_argument(
         "--skip-failures",
@@ -801,6 +811,8 @@ def main() -> None:
     finally:
         graceful.uninstall()
 
+    # Live runs fail while checkpoint failures remain uncleared; dry-runs fail
+    # only for failures observed in this invocation.
     has_failures = bool(current_run_failures) if args.dry_run else bool(checkpoint["failures"])
     sys.exit(1 if has_failures else 0)
 

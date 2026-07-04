@@ -56,9 +56,14 @@ Schema v1::
 separate so ``--retry-failures`` can target just them without re-doing
 the 9k successful records.
 
+Dry runs validate and route records through ``mcp_add`` without writing
+entity files or checkpoint state. They still exit non-zero when the
+current dry-run invocation sees parse/add failures, but prior checkpoint
+failures do not poison the dry-run exit status.
+
 Interrupts
 ----------
-SIGINT/SIGTERM trigger a final checkpoint flush before exit. The
+For live runs, SIGINT/SIGTERM trigger a final checkpoint flush before exit. The
 in-flight record is NOT aborted mid-write — Python's signal handling
 is cooperative, so the interrupt is observed between records. In the
 worst case the checkpoint is one record behind disk state; the next
@@ -254,6 +259,9 @@ def ingest_records(
 
     Returns the same checkpoint object (mutated) for caller convenience.
     Writes to disk every ``flush_every`` records and on graceful exit.
+    With ``dry_run=True``, processed/failure outcomes are not written to
+    ``checkpoint`` and no checkpoint file is saved; callers can pass
+    ``current_run_failures`` to collect failures for dry-run exit status.
 
     Skip rules:
       - slug in ``checkpoint['processed']`` -> skip (already done)
@@ -468,7 +476,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Validate and route records but skip writes and embeddings",
+        help="Validate and route records but skip entity, embedding, and checkpoint writes",
     )
     parser.add_argument(
         "--flush-every",
@@ -552,8 +560,8 @@ def main() -> None:
     finally:
         graceful.uninstall()
 
-    # Non-zero exit when failures remain uncleared — lets CI tie
-    # "ingest green" to "no outstanding error records".
+    # Live runs fail while checkpoint failures remain uncleared; dry-runs fail
+    # only for failures observed in this invocation.
     has_failures = bool(current_run_failures) if args.dry_run else bool(checkpoint["failures"])
     sys.exit(1 if has_failures else 0)
 
