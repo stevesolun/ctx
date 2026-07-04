@@ -23,6 +23,7 @@ from ctx.telemetry import (
     telemetry_enabled,
 )
 from ctx.utils._fs_utils import reject_symlink_path
+from ctx.utils._secret_scan import redact_secret_text
 
 
 _SESSION_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
@@ -32,6 +33,13 @@ _ESCALATION_STATUSES = {"open", "resolved", "ignored"}
 _SELECTION_SOURCES = {"user", "system", "host", "unknown"}
 _TOKEN_ATTRIBUTIONS = {"exact", "estimated", "unavailable"}
 _LIFECYCLE_SANITIZER_CONFIG = {"enabled": True, "mode": "local_redacted"}
+_PATH_SEGMENT_RE = r"[^/\s'\"`<>|:;,\)\]]+"
+_UNIX_ABSOLUTE_PATH_RE = re.compile(rf"(?<![\w./-])/(?:{_PATH_SEGMENT_RE}/)+{_PATH_SEGMENT_RE}")
+_TILDE_PATH_RE = re.compile(rf"(?<![\w./-])~/(?:{_PATH_SEGMENT_RE}/)*{_PATH_SEGMENT_RE}")
+_WINDOWS_ABSOLUTE_PATH_RE = re.compile(
+    r"(?<![\w./-])[A-Za-z]:\\(?:[^\\\s'\"`<>|:;,\)\]]+\\)*"
+    r"[^\\\s'\"`<>|:;,\)\]]+"
+)
 _SECURITY_SCAN_STATUSES = {
     "passed",
     "findings",
@@ -342,9 +350,31 @@ def _sanitize_lifecycle_event(event: dict[str, Any]) -> dict[str, Any]:
             source_context,
             config=_LIFECYCLE_SANITIZER_CONFIG,
         )
+    security_scan = redacted.get("security_scan")
+    if isinstance(security_scan, dict):
+        redacted["security_scan"] = _sanitize_security_scan(security_scan)
     cwd = redacted.pop("cwd", None)
     if isinstance(cwd, str) and cwd:
         redacted["cwd_hash"] = hash_identifier(cwd)
+    return redacted
+
+
+def _sanitize_security_scan(raw: Any) -> Any:
+    if isinstance(raw, str):
+        return _redact_path_text(redact_secret_text(raw))
+    if isinstance(raw, list):
+        return [_sanitize_security_scan(item) for item in raw]
+    if isinstance(raw, tuple):
+        return [_sanitize_security_scan(item) for item in raw]
+    if isinstance(raw, dict):
+        return {str(key): _sanitize_security_scan(value) for key, value in raw.items()}
+    return raw
+
+
+def _redact_path_text(text: str) -> str:
+    redacted = text
+    for pattern in (_UNIX_ABSOLUTE_PATH_RE, _TILDE_PATH_RE, _WINDOWS_ABSOLUTE_PATH_RE):
+        redacted = pattern.sub("[redacted-path]", redacted)
     return redacted
 
 

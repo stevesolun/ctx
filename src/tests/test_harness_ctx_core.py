@@ -1025,6 +1025,77 @@ class TestRuntimeLifecycle:
         )
         assert state["loaded"][0]["security_scan"]["status"] == "passed"
 
+    def test_skill_load_redacts_security_scan_tokens_and_paths(
+        self,
+        toolbox: CtxCoreToolbox,
+        tmp_path: Path,
+    ) -> None:
+        leaked_path = "/Users/example/private/fastapi-pro/SKILL.md"
+        github_token = "ghp_abcdefghijklmnopqrstuvwx"
+        openai_key = "sk-abcdefghijklmnopqrstuvwxyz"
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__load_entity",
+                    arguments={
+                        "session_id": "s-scan-redaction",
+                        "entity_type": "skill",
+                        "slug": "fastapi-pro",
+                        "security_scan": {
+                            "status": "findings",
+                            "required": True,
+                            "command": [
+                                "skillspector",
+                                "scan",
+                                leaked_path,
+                                f"--github-token={github_token}",
+                            ],
+                            "exit_code": 1,
+                            "output": f"OPENAI_API_KEY={openai_key} found in {leaked_path}",
+                            "summary": f"review {leaked_path}",
+                        },
+                    },
+                )
+            )
+        )
+
+        assert result["ok"] is True
+        scan = result["event"]["security_scan"]
+        assert scan["status"] == "findings"
+        assert scan["required"] is True
+        assert scan["exit_code"] == 1
+        assert scan["command"] == [
+            "skillspector",
+            "scan",
+            "[redacted-path]",
+            "--github-token=[redacted]",
+        ]
+        assert scan["output"] == "OPENAI_API_KEY=[redacted] found in [redacted-path]"
+        assert scan["summary"] == "review [redacted-path]"
+
+        stored_event = json.loads(
+            (tmp_path / "runtime" / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1]
+        )
+        assert stored_event["security_scan"] == scan
+
+        state = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c2",
+                    name="ctx__session_state",
+                    arguments={"session_id": "s-scan-redaction"},
+                )
+            )
+        )
+        assert state["loaded"][0]["security_scan"] == scan
+
+        serialized_scan = json.dumps(scan)
+        assert github_token not in serialized_scan
+        assert openai_key not in serialized_scan
+        assert leaked_path not in serialized_scan
+
     def test_invalid_security_scan_status_is_structured(
         self,
         toolbox: CtxCoreToolbox,
