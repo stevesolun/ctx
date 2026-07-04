@@ -64,6 +64,8 @@ with persistent memory that gets smarter every session.
     `docs/toolbox/templates/` change, update both
     `docs/qa/feature-user-story-status.csv` and the canonical
     `qa/feature_status.csv` with the exact path in `entrypoint_or_route`.
+    Bug-smoke audit rows live in `qa/bug_smoke_status.csv` and are validated
+    by the same public docs tracker.
 
 ## Why this exists
 

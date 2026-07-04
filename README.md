@@ -51,6 +51,9 @@ and tool-selection/token-history ledger
 [`qa/tool-selection-token-history/tracker.csv`](qa/tool-selection-token-history/tracker.csv)
 are supporting detail ledgers that feed that root tracker; canonical status and
 release readiness stay in `qa/feature_status.csv`.
+Bug-smoke audit findings live in
+[`qa/bug_smoke_status.csv`](qa/bug_smoke_status.csv) and are validated by the
+same public docs tracker.
 Rows for public MkDocs pages use the exact `docs/...md` path from `mkdocs.yml`
 as `entrypoint_or_route`. Public linked docs assets under
 `docs/assets/javascripts/`, `docs/services/`, and `docs/toolbox/templates/`

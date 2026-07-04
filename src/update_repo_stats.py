@@ -717,7 +717,7 @@ def format_edges(n: int) -> str:
 
 
 def _full_wiki_tarball_mib() -> int | None:
-    """Return the shipped full wiki tarball size rounded to whole MiB."""
+    """Return the shipped full wiki tarball MiB, following Git LFS pointers."""
     tarball = REPO_ROOT / "graph" / "wiki-graph.tar.gz"
     if not tarball.exists():
         return None
