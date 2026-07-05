@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
+
+import yaml  # type: ignore[import-untyped]
 
 from scripts.ci_preflight import _run_no_test_policy_for_files
 from scripts.ci_preflight import Check
+from scripts.ci_preflight import PUBLIC_DOCS_TRACKER_TESTS
 from scripts.ci_preflight import select_checks
 
 
@@ -20,6 +24,23 @@ def _checks_for(files: list[str], *, profile: str = "pr") -> list[Check]:
 def _names_for(files: list[str], *, profile: str = "pr") -> list[str]:
     checks = _checks_for(files, profile=profile)
     return [check.name for check in checks]
+
+
+def _workflow_docs_tracker_tests() -> tuple[str, ...]:
+    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["docs-check"]["steps"]
+    run = next(
+        step["run"] for step in steps if step.get("name") == "Run public docs tracker checks"
+    )
+    command = " ".join(line.rstrip("\\").strip() for line in run.splitlines() if line.strip())
+    argv = shlex.split(command)
+
+    assert argv[:5] == ["python", "-m", "pytest", "-q", "--no-cov"]
+    return tuple(argv[5:])
+
+
+def test_pr_docs_workflow_tracker_tests_match_preflight() -> None:
+    assert _workflow_docs_tracker_tests() == PUBLIC_DOCS_TRACKER_TESTS
 
 
 def test_preflight_runs_docs_gate_for_docs_changes() -> None:
