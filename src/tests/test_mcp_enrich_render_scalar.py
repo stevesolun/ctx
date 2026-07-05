@@ -176,6 +176,24 @@ class TestRenderScalar:
 
         assert _me.load_checkpoint(tmp_path, "pulsemcp") == _me._empty_checkpoint("pulsemcp")
 
+    def test_load_checkpoint_drops_failures_for_processed_slugs(self, tmp_path):
+        path = _me._checkpoint_path(tmp_path, "pulsemcp")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            (
+                '{"version": 1, "source": "pulsemcp", "started_at": "now", '
+                '"updated_at": "now", "total_seen": 2, '
+                '"processed": {"done": {"result": "unchanged"}}, '
+                '"failures": {"done": {"error": "stale"}, "retry": {"error": "fresh"}}}'
+            ),
+            encoding="utf-8",
+        )
+
+        checkpoint = _me.load_checkpoint(tmp_path, "pulsemcp")
+
+        assert "done" in checkpoint["processed"]
+        assert checkpoint["failures"] == {"retry": {"error": "fresh"}}
+
     def test_enrich_entities_updates_pack_only_mcp_page(self, tmp_path, monkeypatch):
         wiki = tmp_path / "wiki"
         relpath = "entities/mcp-servers/p/pack-only.md"
@@ -312,6 +330,39 @@ class TestRenderScalar:
 
         assert "same-repo" not in checkpoint["failures"]
         assert checkpoint["processed"]["same-repo"]["result"] == "unchanged"
+
+    def test_enrich_entities_clears_stale_processed_failure_before_skip(
+        self, tmp_path, monkeypatch
+    ):
+        wiki = tmp_path / "wiki"
+        _write_pulsemcp_entity(wiki, "already-done")
+        entity = wiki / "entities" / "mcp-servers" / "a" / "already-done.md"
+
+        class Source:
+            def __init__(self):
+                self.calls = []
+
+            def fetch_details(self, slug, *, refresh=False):  # noqa: ARG002, ANN001, ANN201
+                self.calls.append(slug)
+                return {"github_url": "https://github.com/example/already-done"}
+
+        source = Source()
+        monkeypatch.setitem(_me.SOURCES, "pulsemcp", source)
+        checkpoint = _me.load_checkpoint(wiki, "pulsemcp")
+        checkpoint["processed"]["already-done"] = {"result": "unchanged", "at": "earlier"}
+        checkpoint["failures"]["already-done"] = {"error": "stale", "at": "earlier"}
+
+        _me.enrich_entities(
+            [entity],
+            source_name="pulsemcp",
+            wiki_path=wiki,
+            checkpoint=checkpoint,
+            sleep_seconds=0,
+            report_progress=False,
+        )
+
+        assert source.calls == []
+        assert checkpoint["failures"] == {}
 
     def test_enrich_entities_rejects_non_positive_flush_every(self, tmp_path, monkeypatch):
         wiki = tmp_path / "wiki"

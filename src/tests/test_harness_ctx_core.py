@@ -787,6 +787,10 @@ class TestRuntimeLifecycle:
             trigger="hook from /Users/steves/private/hook.py",
             reason=f"secret {secret} leaked from /Users/steves/private",
         )
+        ended = store.end_session(
+            session_id="s-private",
+            status=f"stopped by {secret} in /Users/steves/private/stop.log",
+        )
         state = store.session_state(session_id="s-private")
 
         payload = json.dumps(
@@ -794,6 +798,7 @@ class TestRuntimeLifecycle:
                 "used": used,
                 "validation": validation,
                 "escalation": escalation,
+                "ended": ended,
                 "state": state,
             }
         )

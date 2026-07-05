@@ -184,6 +184,7 @@ def load_checkpoint(wiki_path: Path, source: str) -> dict:
         total_seen = int(data.get("total_seen") or 0)
     except (TypeError, ValueError):
         return _empty_checkpoint(source)
+    failures = {key: value for key, value in failures.items() if key not in processed}
     return {
         "version": CHECKPOINT_VERSION,
         "source": source,
@@ -530,6 +531,8 @@ def enrich_entities(
 
     processed = checkpoint["processed"]
     failures = checkpoint["failures"]
+    for wiki_slug in set(processed).intersection(failures):
+        failures.pop(wiki_slug, None)
     pages = _load_active_wiki_pack_pages(wiki_path)
 
     attempted = enriched = unchanged = failed = skipped = 0
