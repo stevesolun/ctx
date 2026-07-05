@@ -436,6 +436,7 @@ def _iter_records_from(
     of streaming from ``ctx-mcp-fetch | ctx-mcp-ingest``. JSONL readers
     yield per line; the JSON-object reader is a single-record degenerate.
     """
+
     def _input_error(slug: str, message: str) -> dict[str, Any]:
         return {"slug": slug, _INPUT_ERROR_KEY: message}
 
@@ -480,7 +481,9 @@ def _iter_records_from(
         if not line:
             continue
         try:
-            yield _decoded_record(json.loads(line), f"<stdin>:line:{lineno}", f"stdin line {lineno}")
+            yield _decoded_record(
+                json.loads(line), f"<stdin>:line:{lineno}", f"stdin line {lineno}"
+            )
         except json.JSONDecodeError as exc:
             print(f"Error: stdin line {lineno} bad JSON: {exc}", file=sys.stderr)
             yield _input_error(f"<stdin>:line:{lineno}", f"bad JSON: {exc}")
