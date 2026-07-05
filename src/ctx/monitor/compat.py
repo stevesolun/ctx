@@ -1253,7 +1253,7 @@ def _render_wiki_entity(
 def _wiki_index_entries(
     limit_per_type: int | None = _WIKI_INDEX_LIMIT_PER_TYPE,
 ) -> list[dict]:
-    """List every wiki entity page under ~/.claude/skill-wiki/entities/.
+    """List dashboard-supported wiki entities from packs plus local files.
 
     Returns ``{slug, type, tags, description}`` rows. The full skill inventory
     is too large to render as one HTML page, so the dashboard samples

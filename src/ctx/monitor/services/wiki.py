@@ -72,6 +72,7 @@ def queue_entity_refresh(
 
 
 def wiki_pack_state(wiki_dir: Path) -> WikiPackState | None:
+    """Return cached merged wiki-pack state, preserving active tombstones."""
     global _WIKI_PACK_CACHE_KEY, _WIKI_PACK_CACHE_VALUE
 
     packs_dir = wiki_dir / "wiki-packs"
@@ -152,6 +153,7 @@ def iter_entity_paths(
     wiki_dir: Path,
     entity_type: str | None = None,
 ) -> list[tuple[str, str, Path]]:
+    """List pack-backed entities plus local files not shadowed by packs."""
     normalized = normalize_entity_type(entity_type) if entity_type else None
     if entity_type is not None and normalized is None:
         raise ValueError(f"unsupported entity_type: {entity_type!r}")
