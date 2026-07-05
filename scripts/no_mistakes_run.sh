@@ -1,15 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# no-mistakes agents run in a stripped-down environment. Keep ctx validation fast
-# by exposing the verified project Python toolchain and Codex-bundled ripgrep.
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd -- "${script_dir}/.." && pwd -P)"
-pwd_ctx_python_bin="${PWD}/.venv/bin"
-repo_ctx_python_bin="${repo_root}/.venv/bin"
-fallback_ctx_python_bin="/tmp/ctx-verify-venv/bin"
-codex_resources="${CTX_NO_MISTAKES_CODEX_RESOURCES:-/Applications/Codex.app/Contents/Resources}"
-real_codex="${CTX_NO_MISTAKES_REAL_CODEX:-${codex_resources}/codex}"
+action="${1:-}"
 
 is_trusted_python_bin() {
   local bin_dir="$1"
@@ -36,11 +30,25 @@ raise SystemExit(1 if missing else 0)
 PY
 }
 
+append_agent_wrapper_venv() {
+  local config_path="${HOME:-}/.no-mistakes/config.yaml"
+  local wrapper_path
+  local wrapper_root
+
+  [[ -f "${config_path}" ]] || return 0
+  wrapper_path="$(awk '/^[[:space:]]+codex:[[:space:]]/ {print $2; exit}' "${config_path}")"
+  [[ -n "${wrapper_path}" && -f "${wrapper_path}" ]] || return 0
+  wrapper_root="$(cd -- "$(dirname -- "${wrapper_path}")/.." && pwd -P)"
+  candidate_python_bins+=("${wrapper_root}/.venv/bin")
+}
+
 candidate_python_bins=()
 if [[ -n "${CTX_NO_MISTAKES_PYTHON_BIN:-}" ]]; then
   candidate_python_bins+=("${CTX_NO_MISTAKES_PYTHON_BIN}")
 fi
-candidate_python_bins+=("${pwd_ctx_python_bin}" "${repo_ctx_python_bin}" "${fallback_ctx_python_bin}")
+candidate_python_bins+=("${PWD}/.venv/bin" "${repo_root}/.venv/bin")
+append_agent_wrapper_venv
+candidate_python_bins+=("/tmp/ctx-verify-venv/bin")
 
 trusted_ctx_python_bin=""
 for candidate_python_bin in "${candidate_python_bins[@]}"; do
@@ -50,16 +58,31 @@ for candidate_python_bin in "${candidate_python_bins[@]}"; do
   fi
 done
 
-if [[ -n "${trusted_ctx_python_bin}" ]]; then
-  export PATH="${trusted_ctx_python_bin}:${codex_resources}:${PATH}"
-  export CTX_NO_MISTAKES_PYTHON_BIN_RESOLVED="${trusted_ctx_python_bin}"
-  if [[ -x "${trusted_ctx_python_bin}/python" ]]; then
-    export VIRTUAL_ENV="${VIRTUAL_ENV:-${trusted_ctx_python_bin%/bin}}"
-  fi
-else
-  export PATH="${codex_resources}:${PATH}"
+if [[ -z "${trusted_ctx_python_bin}" ]]; then
+  echo "No trusted ctx validation Python found with pytest, ruff, and mypy." >&2
+  exit 127
 fi
+
+export PATH="${trusted_ctx_python_bin}:${PATH}"
+export VIRTUAL_ENV="${trusted_ctx_python_bin%/bin}"
+export CTX_NO_MISTAKES_PYTHON_BIN_RESOLVED="${trusted_ctx_python_bin}"
 export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 export PIP_DISABLE_PIP_VERSION_CHECK="${PIP_DISABLE_PIP_VERSION_CHECK:-1}"
 
-exec "${real_codex}" "$@"
+case "${action}" in
+  test)
+    exec python scripts/ci_preflight.py --profile pr
+    ;;
+  lint)
+    python -m ruff check .
+    python -m ruff format --check src hooks scripts
+    exec python -m mypy src
+    ;;
+  format)
+    exec python -m ruff format src hooks scripts
+    ;;
+  *)
+    echo "Usage: scripts/no_mistakes_run.sh {test|lint|format}" >&2
+    exit 64
+    ;;
+esac
