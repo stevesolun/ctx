@@ -5294,6 +5294,8 @@ def test_entity_search_and_detail_apis_support_edit_flow(
         )
         assert status == 200
         assert detail["slug"] == "python-patterns"
+        assert detail["path"] == "entities/skills/python-patterns.md"
+        assert str(fake_claude) not in detail["path"]
         assert detail["frontmatter"]["description"] == "Idiomatic Python patterns"
         assert "Use dataclasses" in detail["body"]
     finally:
