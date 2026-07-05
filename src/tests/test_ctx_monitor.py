@@ -3959,6 +3959,8 @@ def test_entity_subgraph_wrapper_matches_extracted_wiki_renderer() -> None:
 
     assert wrapper_html == direct_html
     assert "/wiki/github-api?type=mcp-server" in wrapper_html
+    assert '[data-testid="entity-subgraph-node"]' in wrapper_html
+    assert "[data-3d-node-id]" not in wrapper_html
     assert "mcp-server" in wrapper_html
 
 

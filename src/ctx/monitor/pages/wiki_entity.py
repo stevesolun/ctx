@@ -12,6 +12,13 @@ from ctx.monitor.pages.wiki_markdown import TruncateFn, WikiLinkFn, render_wiki_
 
 MetricRowFn = Callable[[str, Any], str]
 
+_ENTITY_TYPE_FOR_PATH_SUBJECT = {
+    "skills": "skill",
+    "agents": "agent",
+    "mcp-servers": "mcp-server",
+    "harnesses": "harness",
+}
+
 
 def entity_tab_script() -> str:
     return """
@@ -164,6 +171,25 @@ def subgraph_quality_cell(sidecar: dict[str, Any] | None) -> str:
     floor = str(sidecar.get("hard_floor") or "").strip()
     floor_html = f" <span class='muted'>floor {html.escape(floor)}</span>" if floor else ""
     return f"<span class='pill grade-{grade}'>{grade}</span> <code>{score:.3f}</code>{floor_html}"
+
+
+def resolved_wiki_entity_type(
+    requested_type: str | None,
+    meta: dict[str, Any],
+    path: Any,
+    *,
+    dashboard_entity_types: tuple[str, ...],
+) -> str | None:
+    if requested_type in dashboard_entity_types:
+        return requested_type
+    frontmatter_type = str(meta.get("type") or "").strip()
+    if frontmatter_type in dashboard_entity_types:
+        return frontmatter_type
+    for part in getattr(path, "parts", ()):
+        path_type = _ENTITY_TYPE_FOR_PATH_SUBJECT.get(str(part))
+        if path_type in dashboard_entity_types:
+            return path_type
+    return requested_type
 
 
 def _subgraph_node_title(
@@ -357,7 +383,7 @@ def render_entity_subgraph_svg(
         "  document.getElementById('entity-subgraph-zoom-in')?.addEventListener('click', () => { zoom = Math.min(2.5, zoom * 1.18); draw(); });\n"
         "  document.getElementById('entity-subgraph-zoom-out')?.addEventListener('click', () => { zoom = Math.max(0.35, zoom / 1.18); draw(); });\n"
         "  let dragging = false, lastX = 0, lastY = 0;\n"
-        "  svg.addEventListener('pointerdown', ev => { if (ev.target.closest('[data-3d-node-id]') || ev.target.closest('[data-edge-detail]')) return; dragging = true; lastX = ev.clientX; lastY = ev.clientY; svg.setPointerCapture(ev.pointerId); });\n"
+        "  svg.addEventListener('pointerdown', ev => { if (ev.target.closest('[data-testid=\"entity-subgraph-node\"]') || ev.target.closest('[data-edge-detail]')) return; dragging = true; lastX = ev.clientX; lastY = ev.clientY; svg.setPointerCapture(ev.pointerId); });\n"
         "  svg.addEventListener('pointerup', ev => { dragging = false; try { svg.releasePointerCapture(ev.pointerId); } catch (_) {} });\n"
         "  svg.addEventListener('pointermove', ev => { if (!dragging) return; yaw += (ev.clientX - lastX) * 0.01; pitch += (ev.clientY - lastY) * 0.01; pitch = Math.max(-1.35, Math.min(1.35, pitch)); lastX = ev.clientX; lastY = ev.clientY; draw(); });\n"
         "  svg.addEventListener('wheel', ev => { ev.preventDefault(); zoom = Math.max(0.35, Math.min(2.5, zoom * (ev.deltaY < 0 ? 1.08 : 0.92))); draw(); }, {passive:false});\n"
@@ -693,10 +719,16 @@ def render_wiki_entity(
             f"<h1>{html.escape(slug)}</h1><p class='muted'>read error: page unavailable</p>",
         )
     meta, md_body = parse_frontmatter(raw)
-    sidecar = load_sidecar(slug, entity_type=entity_type)
+    resolved_type = resolved_wiki_entity_type(
+        entity_type,
+        meta,
+        path,
+        dashboard_entity_types=dashboard_entity_types,
+    )
+    sidecar = load_sidecar(slug, entity_type=resolved_type)
     return render_wiki_entity_page(
         slug=slug,
-        entity_type=entity_type,
+        entity_type=resolved_type,
         meta=meta,
         md_body=md_body,
         sidecar=sidecar if isinstance(sidecar, dict) else None,

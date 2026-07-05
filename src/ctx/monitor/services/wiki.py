@@ -121,7 +121,6 @@ def entity_path(
             relpath = core_entity_types.entity_relpath(current_type, slug)
             if relpath is not None and relpath.as_posix() in pack_pages:
                 return path
-            continue
         if path.exists():
             return path
     return None
@@ -147,9 +146,25 @@ def iter_entity_paths(
     normalized = normalize_entity_type(entity_type) if entity_type else None
     if entity_type is not None and normalized is None:
         raise ValueError(f"unsupported entity_type: {entity_type!r}")
+    base = wiki_dir / "entities"
+    file_rows: list[tuple[str, str, Path]] = []
+    if base.is_dir():
+        for sub, current_type, recursive in _DASHBOARD_ENTITY_SOURCES:
+            if normalized is not None and normalized != current_type:
+                continue
+            root = base / sub
+            if not root.is_dir():
+                continue
+            paths = root.rglob("*.md") if recursive else root.glob("*.md")
+            for file_path in paths:
+                slug = file_path.stem
+                if is_safe_slug(slug):
+                    file_rows.append((slug, current_type, file_path))
+
     pack_pages = wiki_pack_pages(wiki_dir)
     if pack_pages is not None:
-        pack_rows: list[tuple[str, str, Path]] = []
+        rows: list[tuple[str, str, Path]] = []
+        packed_relpaths: set[str] = set()
         for relpath in sorted(pack_pages):
             parsed = pack_entity_from_relpath(relpath)
             if parsed is None:
@@ -157,25 +172,15 @@ def iter_entity_paths(
             slug, current_type = parsed
             if normalized is not None and normalized != current_type:
                 continue
-            path = core_entity_types.entity_page_path(wiki_dir, current_type, slug)
-            if path is not None:
-                pack_rows.append((slug, current_type, path))
-        return sorted(pack_rows, key=lambda row: (row[1], row[0].lower(), row[2].as_posix()))
-    base = wiki_dir / "entities"
-    if not base.is_dir():
-        return []
-    file_rows: list[tuple[str, str, Path]] = []
-    for sub, current_type, recursive in _DASHBOARD_ENTITY_SOURCES:
-        if normalized is not None and normalized != current_type:
-            continue
-        root = base / sub
-        if not root.is_dir():
-            continue
-        paths = root.rglob("*.md") if recursive else root.glob("*.md")
-        for path in paths:
-            slug = path.stem
-            if is_safe_slug(slug):
-                file_rows.append((slug, current_type, path))
+            pack_path = core_entity_types.entity_page_path(wiki_dir, current_type, slug)
+            if pack_path is not None:
+                packed_relpaths.add(relpath)
+                rows.append((slug, current_type, pack_path))
+        for slug, current_type, file_path in file_rows:
+            file_relpath = core_entity_types.entity_relpath(current_type, slug)
+            if file_relpath is None or file_relpath.as_posix() not in packed_relpaths:
+                rows.append((slug, current_type, file_path))
+        return sorted(rows, key=lambda row: (row[1], row[0].lower(), row[2].as_posix()))
     return sorted(file_rows, key=lambda row: (row[1], row[0].lower(), row[2].as_posix()))
 
 
@@ -236,7 +241,6 @@ def read_entity_text(
             relpath = core_entity_types.entity_relpath(current_type, slug)
             if relpath is not None and relpath.as_posix() in pack_pages:
                 return pack_pages[relpath.as_posix()]
-        return None
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:

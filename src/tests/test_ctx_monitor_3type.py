@@ -182,7 +182,7 @@ class TestWikiIndexEntries:
         path = _mt.wiki_entity_path("langgraph", entity_type="harness")
         assert path == wiki_3type / "entities" / "harnesses" / "langgraph.md"
 
-    def test_wiki_pack_pages_override_physical_entity_pages(
+    def test_wiki_pack_pages_override_physical_pages_and_include_local_only_pages(
         self,
         wiki_3type: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -197,6 +197,17 @@ class TestWikiIndexEntries:
             "description: stale physical description\n"
             "---\n"
             "# Stale Physical Page\n",
+            encoding="utf-8",
+        )
+        (wiki_3type / "entities" / "skills" / "manage-created.md").write_text(
+            "---\n"
+            "title: Manage Created\n"
+            "type: skill\n"
+            "tags: [local]\n"
+            "description: local manage page\n"
+            "---\n"
+            "# Manage Created\n\n"
+            "Local-only Manage-created body.\n",
             encoding="utf-8",
         )
         write_wiki_base_pack(
@@ -235,10 +246,23 @@ class TestWikiIndexEntries:
         )
         detail = _mt.wiki_entity_detail("python-patterns", entity_type="skill")
         search = _mt.search_wiki_entities("merged body", entity_type="skill")
+        local_detail = _mt.wiki_entity_detail("manage-created", entity_type="skill")
+        local_search = _mt.search_wiki_entities("local-only manage", entity_type="skill")
+        local_html = _mt.render_wiki_entity("manage-created", entity_type="skill")
         html = _mt.render_wiki_entity("python-patterns", entity_type="skill")
         stats = _mt.wiki_stats()
 
-        assert slugs == {"python-patterns", "github"}
+        assert slugs == {
+            "anthropic-python-sdk",
+            "atlassian-cloud",
+            "code-reviewer",
+            "github",
+            "langgraph",
+            "manage-created",
+            "pulsemcp-meta",
+            "python-patterns",
+            "security-basics",
+        }
         assert service_detail is not None
         assert service_detail["frontmatter"]["title"] == "Fresh Pack Page"
         assert "Merged wiki pack body" in service_detail["body"]
@@ -246,16 +270,52 @@ class TestWikiIndexEntries:
         assert detail["frontmatter"]["title"] == "Fresh Pack Page"
         assert "Merged wiki pack body" in detail["body"]
         assert [row["slug"] for row in search] == ["python-patterns"]
+        assert local_detail is not None
+        assert local_detail["frontmatter"]["title"] == "Manage Created"
+        assert "Local-only Manage-created body" in local_detail["body"]
+        assert [row["slug"] for row in local_search] == ["manage-created"]
+        assert "Manage Created" in local_html
         assert "Fresh Pack Page" in html
         assert "Stale Physical Page" not in html
         assert stats == {
-            "skills": 1,
-            "agents": 0,
-            "mcps": 1,
-            "harnesses": 0,
-            "total": 2,
+            "skills": 3,
+            "agents": 1,
+            "mcps": 4,
+            "harnesses": 1,
+            "total": 9,
             "split_known": True,
         }
+
+    def test_wiki_entity_page_resolves_type_from_path_for_untyped_non_skill(
+        self,
+        wiki_3type: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls: dict[str, list[tuple[str, str | None]]] = {"sidecar": [], "subgraph": []}
+        (wiki_3type / "entities" / "agents" / "untyped-agent.md").write_text(
+            "---\ntitle: Untyped Agent\n---\n# Untyped Agent\n\nBody.\n",
+            encoding="utf-8",
+        )
+
+        def fake_sidecar(slug: str, entity_type: str | None = None) -> dict[str, Any]:
+            calls["sidecar"].append((slug, entity_type))
+            return {"grade": "A", "raw_score": 0.91}
+
+        def fake_subgraph(slug: str, entity_type: str | None = None) -> str:
+            calls["subgraph"].append((slug, entity_type))
+            return "<div>subgraph</div>"
+
+        monkeypatch.setattr(_mt, "load_sidecar", fake_sidecar)
+        monkeypatch.setattr(_mt, "render_entity_subgraph", fake_subgraph)
+
+        html = _mt.render_wiki_entity("untyped-agent")
+
+        assert calls == {
+            "sidecar": [("untyped-agent", "agent")],
+            "subgraph": [("untyped-agent", "agent")],
+        }
+        assert "/skill/untyped-agent?type=agent" in html
+        assert "/graph?slug=untyped-agent&amp;type=agent" in html
 
     def test_wiki_search_indexes_tags_beyond_preview_limit(self, wiki_3type):
         page = wiki_3type / "entities" / "skills" / "many-tags.md"
