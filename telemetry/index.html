@@ -1520,6 +1520,7 @@ or runs an export.</p>
 <li><code>ctx.api.recommend_bundle</code></li>
 <li><code>ctx.api.recommend_related</code></li>
 <li><code>ctx.mcp.request</code></li>
+<li><code>ctx.mcp.external_tool_call</code></li>
 <li><code>ctx.core.recommend_bundle</code></li>
 <li><code>ctx.core.recommend_related</code></li>
 <li><code>ctx.runtime_lifecycle.record</code></li>
@@ -1530,13 +1531,22 @@ or runs an export.</p>
 <code>ctx.operation</code>, <code>ctx.tool.name</code>, <code>ctx.result.count</code>,
 <code>ctx.selection.selected.count</code>, <code>ctx.selection.rejected.count</code>,
 <code>ctx.selection.source</code>, <code>ctx.selection.selected</code>, <code>ctx.usage.attribution</code>, and
-hashed identifiers like <code>ctx.query.hash</code>, <code>ctx.slug.hash</code>, or
-<code>ctx.session.hash</code>.</p>
+failure/correlation attributes such as <code>ctx.run.failure_stage</code>,
+<code>ctx.session.previous_trace_id</code>, <code>ctx.traceparent.received</code>, and hashed
+identifiers like <code>ctx.query.hash</code>, <code>ctx.slug.hash</code>, or <code>ctx.session.hash</code>.</p>
 <p>Every recorded event gets a generated OpenTelemetry-compatible <code>trace_id</code> and
-<code>span_id</code> when the caller does not provide one. OTLP export maps those to the
-log record <code>traceId</code> and <code>spanId</code> fields and also includes ctx release
-provenance as <code>ctx.version</code>. In installed wheels this comes from package
-metadata; in source checkouts it falls back to <code>ctx.__version__</code>.</p>
+<code>span_id</code> when the caller does not provide one. The local envelope also keeps
+<code>parent_span_id</code> when a span was parented to another ctx span or to inbound MCP
+<code>traceparent</code> metadata. OTLP export maps trace and span ids to the log record
+<code>traceId</code> and <code>spanId</code> fields and also includes ctx release provenance as
+<code>ctx.version</code>. In installed wheels this comes from package metadata; in source
+checkouts it falls back to <code>ctx.__version__</code>.</p>
+<p>The <code>ctx run</code> session log stores the initial CLI trace id so <code>ctx resume</code> can
+emit <code>ctx.session.previous_trace_id</code> without exposing raw prompts. When the
+generic MCP router calls an external MCP server, it records
+<code>ctx.mcp.external_tool_call</code>, injects W3C <code>traceparent</code> plus a hashed session
+correlator into JSON-RPC <code>_meta</code>, and the ctx MCP server parents request spans
+to valid inbound trace metadata.</p>
 <h2 id="metric-shape">Metric Shape<a class="headerlink" href="#metric-shape" title="Permanent link">&para;</a></h2>
 <p>Metrics use the <code>ctx.telemetry.metrics.v1</code> envelope and the same local redaction
 rules as events. <code>record_counter()</code> writes monotonic counter points and
@@ -1559,6 +1569,9 @@ or repairing one signal does not advance the other.</p>
   non-negative <code>total_tokens</code> value.</li>
 <li><code>ctx.tool_usage.tokens_per_record</code> observes the same total as a histogram.</li>
 </ul>
+<p>Those metric points are recorded inside the same telemetry span as the
+<code>ctx.runtime_lifecycle.record</code> event that describes the usage, so trace/span
+correlation stays aligned across event and metric signals.</p>
 <p>Attribution is always explicit through <code>ctx.usage.attribution</code>:
 <code>exact</code>, <code>estimated</code>, or <code>unavailable</code>. The built-in <code>ctx run</code> provider totals
 are session-scoped and are labeled as unavailable for per-tool attribution; ctx
@@ -1876,7 +1889,7 @@ raw message text:</p>
 </tr>
 <tr>
 <td>CLI/runtime usage</td>
-<td>count logs for <code>ctx.cli.run</code>, <code>ctx.cli.resume</code>, <code>ctx.runtime_lifecycle.record</code></td>
+<td>count logs for <code>ctx.cli.run</code>, <code>ctx.cli.resume</code>, <code>ctx.runtime_lifecycle.record</code>, <code>ctx.mcp.external_tool_call</code></td>
 </tr>
 <tr>
 <td>Exporter health</td>
