@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shlex
 from pathlib import Path
@@ -404,6 +405,45 @@ def test_agents_only_uses_type_filtered_recommendations(monkeypatch) -> None:
     assert [row["name"] for row in payload["capabilities"]["agents"]] == ["browser-agent"]
 
 
+def test_multi_grant_recommendations_use_single_combined_graph_call(monkeypatch) -> None:
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(loopflow, "query_to_tags", lambda query: ["python"])
+    monkeypatch.setattr(loopflow, "_recommendation_graph", lambda: _FakeGraph())
+
+    def fake_recommend_by_tags(
+        graph: Any,
+        tags: list[str],
+        *,
+        top_n: int,
+        query: str | None,
+        entity_types: tuple[str, ...] | set[str] | None,
+        min_normalized_score: float,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        del graph, tags, query, min_normalized_score, kwargs
+        calls.append(tuple(entity_types or ()))
+        assert top_n == 6
+        assert entity_types == ("skill", "agent", "mcp-server")
+        return [
+            {"name": "security-review", "type": "skill", "score": 92},
+            {"name": "browser-agent", "type": "agent", "score": 88},
+            {"name": "filesystem", "type": "mcp-server", "score": 84},
+        ]
+
+    monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
+
+    payload = loopflow.recommend_for_loop(
+        goal="python task",
+        permissions={"skills", "agents", "mcps"},
+        top_k=2,
+    )
+
+    assert calls == [("skill", "agent", "mcp-server")]
+    assert [row["name"] for row in payload["capabilities"]["skills"]] == ["security-review"]
+    assert [row["name"] for row in payload["capabilities"]["agents"]] == ["browser-agent"]
+    assert [row["name"] for row in payload["capabilities"]["mcps"]] == ["filesystem"]
+
+
 def test_done_when_signals_feed_recommendation_queries(monkeypatch) -> None:
     capability_queries: list[str] = []
     harness_queries: list[str] = []
@@ -739,6 +779,54 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
     assert "python -m ctx.adapters.loopflow" in payload["loopflow"]["before_plan"]
     assert payload["loopflow"]["use_tools"] is None
     assert payload["loopflow"]["use_skills"] == "use skills: security-review"
+
+
+def test_look_at_paths_are_sanitized_in_public_payload(monkeypatch) -> None:
+    raw_paths = [
+        "/private/repos/customer-alpha/src/payments/checkout.py",
+        r"C:\sensitive\customer-beta\src\billing\handler.ts",
+    ]
+    capability_queries: list[str] = []
+
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del permissions, top_k
+        capability_queries.append(query)
+        return [{"name": "security-review", "type": "skill"}]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+    monkeypatch.setattr(loopflow, "recommend_harnesses", lambda *args, **kwargs: [])
+
+    payload = loopflow.recommend_for_loop(
+        goal="review checkout handling",
+        look_at=raw_paths,
+        permissions={"skills"},
+    )
+
+    serialized_payload = json.dumps(payload, sort_keys=True)
+    expected_hashes = [hashlib.sha256(path.encode("utf-8")).hexdigest()[:16] for path in raw_paths]
+    assert capability_queries == [
+        "review checkout handling loopflow "
+        "context: /private/repos/customer-alpha/src/payments/checkout.py, "
+        r"C:\sensitive\customer-beta\src\billing\handler.ts"
+    ]
+    assert payload["context"]["look_at"] == {
+        "count": 2,
+        "items": [
+            {"basename": "checkout.py", "path_hash": expected_hashes[0]},
+            {"basename": "handler.ts", "path_hash": expected_hashes[1]},
+        ],
+    }
+    assert "basename=checkout.py" in payload["context"]["query"]
+    assert "basename=handler.ts" in payload["context"]["query"]
+    assert "count=2" in payload["context"]["query"]
+    for raw_path in raw_paths:
+        assert raw_path not in payload["context"]["query"]
+        assert raw_path not in serialized_payload
 
 
 def test_last_failure_match_fields_stay_out_of_capability_payload(monkeypatch) -> None:

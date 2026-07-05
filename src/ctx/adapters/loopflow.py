@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -101,6 +102,38 @@ def _done_when_text(done_when: list[str]) -> str:
     if not checks:
         return ""
     return "done when: " + ", ".join(checks)
+
+
+def _context_basename(value: str) -> str:
+    stripped = value.strip().rstrip("/\\")
+    if not stripped:
+        return ""
+    return re.split(r"[\\/]", stripped)[-1] or stripped
+
+
+def _safe_context_refs(values: list[str]) -> dict[str, Any]:
+    items: list[dict[str, str]] = []
+    for value in values:
+        stripped = value.strip()
+        if not stripped:
+            continue
+        items.append(
+            {
+                "basename": _context_basename(stripped),
+                "path_hash": hashlib.sha256(stripped.encode("utf-8")).hexdigest()[:16],
+            }
+        )
+    return {"count": len(items), "items": items}
+
+
+def _safe_context_query_items(safe_context: dict[str, Any]) -> list[str]:
+    items = safe_context.get("items", [])
+    if not items:
+        return []
+    return [
+        f"count={safe_context.get('count', len(items))}",
+        *[f"basename={item['basename']} path_hash={item['path_hash']}" for item in items],
+    ]
 
 
 def _build_query(
@@ -280,19 +313,14 @@ def _recommend_capability_rows(
         return []
     from ctx_config import cfg  # noqa: PLC0415
 
-    rows: list[dict[str, Any]] = []
-    for entity_type in entity_types:
-        rows.extend(
-            recommend_by_tags(
-                graph,
-                tags,
-                top_n=top_k,
-                query=query,
-                entity_types=(entity_type,),
-                min_normalized_score=cfg.recommendation_min_normalized_score,
-            )
-        )
-    return rows
+    return recommend_by_tags(
+        graph,
+        tags,
+        top_n=top_k * len(entity_types),
+        query=query,
+        entity_types=tuple(entity_types),
+        min_normalized_score=cfg.recommendation_min_normalized_score,
+    )
 
 
 def recommend_for_loop(
@@ -321,6 +349,7 @@ def recommend_for_loop(
     safe_top_k = max(1, min(int(top_k), 20))
     granted = permissions or set()
     context_paths = look_at or []
+    safe_context = _safe_context_refs(context_paths)
     done_when_checks = [value.strip() for value in (done_when or []) if value.strip()]
     requirements, unknown_requirement_keys = _normalize_harness_requirements(
         harness_requirements or {}
@@ -328,7 +357,7 @@ def recommend_for_loop(
     public_query = _build_query(
         goal=goal,
         loop_name=loop_name,
-        look_at=context_paths,
+        look_at=_safe_context_query_items(safe_context),
         done_when=done_when_checks,
         last_failure="",
         loop_kind=loop_kind,
@@ -426,7 +455,7 @@ def recommend_for_loop(
         "context": {
             "goal": goal,
             "loop_name": loop_name,
-            "look_at": context_paths,
+            "look_at": safe_context,
             "done_when": done_when_checks,
             "last_failure_present": bool(last_failure),
             "query": public_query,
