@@ -417,6 +417,7 @@ def sync_card_to_huggingface(
     from huggingface_hub import HfApi
 
     head = _git(repo, "rev-parse", "HEAD")
+    _assert_repo_stats_current(repo)
     workspace = Path(tempfile.mkdtemp(prefix="ctx-hf-card-"))
     export_dir = workspace / "export"
     try:

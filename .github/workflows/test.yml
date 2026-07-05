@@ -443,10 +443,6 @@ jobs:
               if pointer is not None:
                   expected_oid, expected_size = pointer
 
-              if expected_oid != fallback["sha256"] or expected_size != int(fallback["size"]):
-                  hydrate_from_lfs(path_name, expected_oid, expected_size, hydrated_min_size)
-                  return
-
               deadline = time.monotonic() + release_asset_wait_seconds
               while True:
                   candidates = []
@@ -471,10 +467,12 @@ jobs:
                   if candidates:
                       break
                   if time.monotonic() >= deadline:
-                      raise SystemExit(
+                      print(
                           f"No previous release asset matches {path_name} "
                           f"sha256:{expected_oid} size:{expected_size}"
                       )
+                      hydrate_from_lfs(path_name, expected_oid, expected_size, hydrated_min_size)
+                      return
                   print(
                       f"Waiting for matching release asset {graph_tar.name} "
                       f"sha256:{expected_oid} size:{expected_size}"

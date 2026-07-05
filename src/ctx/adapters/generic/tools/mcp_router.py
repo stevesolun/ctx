@@ -206,6 +206,24 @@ def _child_env_for_config(config: "McpServerConfig") -> dict[str, str]:
     return env
 
 
+def _expand_env_placeholders(value: str, env: dict[str, str]) -> str:
+    def replace_match(match: re.Match[str]) -> str:
+        name = match.group("braced") or match.group("bare")
+        if name is None:
+            return match.group(0)
+        return env.get(name, match.group(0))
+
+    return re.sub(
+        r"\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<bare>[A-Za-z_][A-Za-z0-9_]*))",
+        replace_match,
+        value,
+    )
+
+
+def _expand_config_args(config: "McpServerConfig", env: dict[str, str]) -> tuple[str, ...]:
+    return tuple(_expand_env_placeholders(arg, env) for arg in config.args)
+
+
 def _popen_process_group_kwargs() -> dict[str, Any]:
     if os.name == "nt":
         return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
@@ -349,9 +367,10 @@ class McpClient:
         env = _child_env_for_config(self._config)
 
         command = _resolve_executable(self._config.command, env)
+        args = _expand_config_args(self._config, env)
         try:
             self._proc = subprocess.Popen(
-                [command, *self._config.args],
+                [command, *args],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
