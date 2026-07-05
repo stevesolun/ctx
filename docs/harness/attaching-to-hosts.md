@@ -226,7 +226,11 @@ If the console script is unavailable, use the package entrypoint instead:
 
 Explicit `--mcp name:<command>` specs are split into argv without a shell.
 Secret-looking inline arguments are rejected so tokens do not land in session
-metadata; pass credentials with `--mcp-env name:ENVVAR` instead.
+metadata; pass credentials with `--mcp-env name:ENVVAR` and quote argv
+placeholders such as `${ENVVAR}` when the server requires the value as an
+argument. ctx expands `$ENVVAR` and `${ENVVAR}` from the child environment
+immediately before spawning the MCP server; the stored session metadata keeps
+the placeholder, not the secret value.
 
 Planning and review modes are opt-in flags on `ctx run`. Use `--planner` to
 produce a structured spec before generation, `--evaluator` to grade and revise

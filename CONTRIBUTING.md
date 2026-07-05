@@ -67,8 +67,11 @@ ruff check --fix src hooks scripts
 Maintainer no-mistakes agents can use `scripts/no_mistakes_codex_env.sh` as
 the Codex wrapper for this repo. It prepends the verified project Python venv
 when present and owner-only, plus Codex-bundled resources, without installing
-or upgrading system packages. Set `CTX_NO_MISTAKES_PYTHON_BIN` to override the
-Python venv explicitly; `CTX_NO_MISTAKES_CODEX_RESOURCES` and
+or upgrading system packages. Candidate venvs are checked in this order:
+`CTX_NO_MISTAKES_PYTHON_BIN`, `$PWD/.venv/bin`, this repository's `.venv/bin`,
+then `/tmp/ctx-verify-venv/bin`; the first owner-only venv containing
+`pytest`, `ruff`, and `mypy` wins and is exposed as
+`CTX_NO_MISTAKES_PYTHON_BIN_RESOLVED`. `CTX_NO_MISTAKES_CODEX_RESOURCES` and
 `CTX_NO_MISTAKES_REAL_CODEX` override the Codex resource directory or binary.
 
 ## Commit conventions

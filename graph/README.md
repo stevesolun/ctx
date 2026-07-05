@@ -155,6 +155,11 @@ python src/validate_graph_artifacts.py --deep \
   --expected-harness-pages 207
 ```
 
+PR graph checks hydrate tarball pointers from matching GitHub release assets
+first. If a PR points at a new Git LFS object that is not in the release cache,
+CI performs a targeted `git lfs pull` for that artifact and verifies its
+pointer SHA-256 and size before validation.
+
 Manual sanity checks:
 
 ```bash

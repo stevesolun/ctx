@@ -300,6 +300,11 @@ class McpServerConfig:
     so there is no shell interpolation — a server config cannot inject
     shell metacharacters into the spawn call.
 
+    ``args`` may contain ``$ENVVAR`` or ``${ENVVAR}`` placeholders. They
+    expand from the final child environment immediately before spawn, which
+    lets callers pass credential argv without persisting secret values in the
+    config.
+
     ``env`` is the explicit child overlay. Parent secrets are not
     inherited by default; only a small process-basics allowlist
     (PATH, temp/home, locale, Windows runtime vars) is passed through.
