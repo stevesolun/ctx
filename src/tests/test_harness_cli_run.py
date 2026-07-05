@@ -1142,9 +1142,7 @@ class TestRunCommand:
                 pass
 
             def plan(self, _task: str) -> None:
-                raise RuntimeError(
-                    "private planner failure for /Users/example/private-repo"
-                )
+                raise RuntimeError("private planner failure for /Users/example/private-repo")
 
         monkeypatch.setattr(run_cli, "Planner", FailingPlanner)
 
@@ -1558,9 +1556,7 @@ class TestResumeCommand:
             .read_text(encoding="utf-8")
             .splitlines()
         ]
-        session_start = next(
-            event for event in session_events if event["type"] == "session_start"
-        )
+        session_start = next(event for event in session_events if event["type"] == "session_start")
         assert session_start["initial_trace_id"] == run_cli_events[0].trace_id
         assert "follow-up" not in telemetry_path.read_text(encoding="utf-8")
 

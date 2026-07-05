@@ -392,9 +392,7 @@ class TestClientRobustness:
         monkeypatch.setattr(client, "_read_frame", fake_read_frame)
 
         with telemetry.telemetry_span(trace_id="1" * 32, span_id="2" * 16):
-            assert client._request("tools/call", {"name": "echo", "arguments": {}}) == {
-                "ok": True
-            }
+            assert client._request("tools/call", {"name": "echo", "arguments": {}}) == {"ok": True}
 
         assert len(frames) == 1
         meta = frames[0]["params"]["_meta"]
@@ -419,9 +417,7 @@ class TestClientRobustness:
         monkeypatch.setattr(client, "_read_frame", fake_read_frame)
 
         with telemetry.telemetry_span(trace_id="1" * 32, span_id="2" * 16):
-            assert client._request("tools/call", {"name": "echo", "arguments": {}}) == {
-                "ok": True
-            }
+            assert client._request("tools/call", {"name": "echo", "arguments": {}}) == {"ok": True}
 
         assert len(frames) == 1
         assert "_meta" not in frames[0]["params"]
