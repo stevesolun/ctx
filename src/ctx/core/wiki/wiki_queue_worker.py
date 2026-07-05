@@ -41,6 +41,30 @@ _ENTITY_SUBJECT_TYPES = {
 }
 _DEFAULT_ATTACH_MIN_FINAL_WEIGHT = 0.03
 _VECTOR_INDEX_META_NAME = "vector-index.meta.json"
+_WIKI_GRAPH_PROMOTION_TARGET_NAMES = frozenset(
+    {
+        "communities.json",
+        "graph-delta.json",
+        "graph-export-manifest.json",
+        "graph-report.md",
+        "graph.json",
+    }
+)
+_REPO_GRAPH_PROMOTION_TARGET_NAMES = frozenset(
+    {
+        "communities.json",
+        "dedup-report.json",
+        "dedup-report.md",
+        "entity-overlays.jsonl",
+        "skills-sh-catalog.json.gz",
+        "skillspector-audit.jsonl.gz",
+        "tag-backfill.json",
+        "tag-backfill.md",
+        "wiki-graph-runtime.tar.gz",
+        "wiki-graph-stats.json",
+        "wiki-graph.tar.gz",
+    }
+)
 MaintenanceHandler = Callable[[Path, dict[str, Any]], str]
 
 
@@ -556,9 +580,12 @@ def _handle_tar_refresh(_wiki_path: Path, payload: dict[str, Any]) -> str:
     return "tar refresh completed"
 
 
-def _handle_artifact_promotion(_wiki_path: Path, payload: dict[str, Any]) -> str:
-    staged = Path(_required_payload_string(payload, "staged_path"))
-    target = Path(_required_payload_string(payload, "target_path"))
+def _handle_artifact_promotion(wiki_path: Path, payload: dict[str, Any]) -> str:
+    staged, target = _resolve_artifact_promotion_paths(
+        wiki_path,
+        _required_payload_string(payload, "staged_path"),
+        _required_payload_string(payload, "target_path"),
+    )
     validator = payload.get("validator")
     validate = None
     if validator == "wiki-tar":
@@ -569,6 +596,81 @@ def _handle_artifact_promotion(_wiki_path: Path, payload: dict[str, Any]) -> str
         raise ValueError(f"unsupported artifact validator: {validator}")
     result = promote_staged_artifact(staged, target, validate=validate)
     return f"promoted artifact to {result.target}"
+
+
+def _resolve_artifact_promotion_paths(
+    wiki_path: Path,
+    raw_staged_path: str,
+    raw_target_path: str,
+) -> tuple[Path, Path]:
+    wiki_root = Path(wiki_path).expanduser().resolve()
+    repo_root = _source_root()
+    target = _resolve_artifact_target_path(raw_target_path, wiki_root, repo_root)
+    staged = _resolve_staged_artifact_path(raw_staged_path, target, wiki_root, repo_root)
+    expected_staged = target.with_name(f"{target.name}.staged")
+    if staged != expected_staged:
+        raise ValueError(
+            f"artifact promotion staged_path must be the target sibling {expected_staged}"
+        )
+    if not staged.is_file():
+        raise FileNotFoundError(f"staged artifact does not exist: {staged}")
+    reject_symlink_path(staged)
+    reject_symlink_path(target)
+    return staged, target
+
+
+def _resolve_artifact_target_path(
+    raw_target_path: str,
+    wiki_root: Path,
+    repo_root: Path,
+) -> Path:
+    bases = (wiki_root, repo_root)
+    for base in bases:
+        target = _resolve_payload_path(raw_target_path, base)
+        if _is_allowed_artifact_target(target, wiki_root, repo_root):
+            return target
+    target = _resolve_payload_path(raw_target_path, wiki_root)
+    raise ValueError(f"artifact promotion target_path is not an allowed artifact target: {target}")
+
+
+def _resolve_staged_artifact_path(
+    raw_staged_path: str,
+    target: Path,
+    wiki_root: Path,
+    repo_root: Path,
+) -> Path:
+    path = Path(raw_staged_path).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    expected_staged = target.with_name(f"{target.name}.staged")
+    for base in (target.parent, wiki_root, repo_root):
+        staged = (base / path).resolve()
+        if staged == expected_staged:
+            return staged
+    return (wiki_root / path).resolve()
+
+
+def _resolve_payload_path(raw_path: str, base: Path) -> Path:
+    path = Path(raw_path).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    return (base / path).resolve()
+
+
+def _is_allowed_artifact_target(target: Path, wiki_root: Path, repo_root: Path) -> bool:
+    if target.parent == wiki_root / "graphify-out":
+        return target.name in _WIKI_GRAPH_PROMOTION_TARGET_NAMES
+    if target.parent == repo_root / "graph":
+        return target.name in _REPO_GRAPH_PROMOTION_TARGET_NAMES
+    return False
+
+
+def _source_root() -> Path:
+    source = Path(__file__).resolve()
+    for parent in source.parents:
+        if (parent / "pyproject.toml").is_file():
+            return parent
+    return source.parents[4]
 
 
 def _handle_pack_compaction(wiki_path: Path, payload: dict[str, Any]) -> str:
