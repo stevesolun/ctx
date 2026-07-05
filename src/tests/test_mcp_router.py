@@ -402,6 +402,32 @@ class TestClientRobustness:
         assert meta["ctx.session.hash"].startswith("sha256:")
         assert "sess-private" not in json.dumps(frames[0], sort_keys=True)
 
+    def test_request_skips_trace_metadata_when_telemetry_disabled(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        frames: list[dict[str, Any]] = []
+        client = McpClient(_make_config(), session_id="sess-private")
+        client._proc = type("Proc", (), {"stdin": object(), "stdout": object()})()  # type: ignore[assignment]
+
+        def fake_read_frame(*, timeout: float | None) -> dict[str, Any]:
+            assert timeout is None or timeout > 0
+            return {"jsonrpc": "2.0", "id": 0, "result": {"ok": True}}
+
+        monkeypatch.setattr(mcp_router, "telemetry_enabled", lambda: False)
+        monkeypatch.setattr(client, "_write_frame", frames.append)
+        monkeypatch.setattr(client, "_read_frame", fake_read_frame)
+
+        with telemetry.telemetry_span(trace_id="1" * 32, span_id="2" * 16):
+            assert client._request("tools/call", {"name": "echo", "arguments": {}}) == {
+                "ok": True
+            }
+
+        assert len(frames) == 1
+        assert "_meta" not in frames[0]["params"]
+        assert "traceparent" not in json.dumps(frames[0], sort_keys=True)
+        assert "sess-private" not in json.dumps(frames[0], sort_keys=True)
+
     def test_parent_env_is_not_inherited_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("CTX_SECRET_SHOULD_NOT_LEAK", "leaked")
         with McpClient(_make_config()) as client:

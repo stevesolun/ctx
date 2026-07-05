@@ -28,6 +28,7 @@ import json
 import logging
 import math
 import os
+import re
 import shlex
 import sys
 import time
@@ -68,6 +69,7 @@ _GITHUB_MCP_CREDENTIAL_ENV = (
     "GITHUB_TOKEN",
     "GH_TOKEN",
 )
+_TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 # ── Provider key-env defaults ───────────────────────────────────────────────
@@ -584,7 +586,11 @@ def _run_setup_failure_payload(args: argparse.Namespace, *, stage: str) -> dict[
 
 def _session_initial_trace_id(meta: dict[str, Any]) -> str | None:
     value = meta.get("initial_trace_id") or meta.get("trace_id")
-    return value if isinstance(value, str) and value else None
+    if not isinstance(value, str):
+        return None
+    if not _TRACE_ID_RE.fullmatch(value) or value == "0" * 32:
+        return None
+    return value
 
 
 def _with_previous_trace_id(
@@ -1107,7 +1113,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 exc=exc,
             )
         raise
-    router = McpRouter(mcp_configs) if mcp_configs else None
+    router = McpRouter(mcp_configs, session_id=session_id) if mcp_configs else None
 
     # ctx-core tools.
     lifecycle = RuntimeLifecycleStore()
@@ -1545,7 +1551,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     # transcript unless the user explicitly opts in for this resume.
     recorded_mcp_configs = _mcp_configs_from_metadata(meta)
     mcp_configs = recorded_mcp_configs if args.restore_session_mcp else []
-    router = McpRouter(mcp_configs) if mcp_configs else None
+    router = McpRouter(mcp_configs, session_id=args.session_id) if mcp_configs else None
 
     lifecycle = RuntimeLifecycleStore()
     extra_tools: list[ToolDefinition] = []

@@ -50,7 +50,13 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 from ctx.adapters.generic.providers.base import ToolDefinition
-from ctx.telemetry import hash_identifier, record_event, telemetry_span, traceparent_from_span
+from ctx.telemetry import (
+    hash_identifier,
+    record_event,
+    telemetry_enabled,
+    telemetry_span,
+    traceparent_from_span,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -96,6 +102,8 @@ def _duration_ms(started: float) -> float:
 
 
 def _current_trace_metadata(session_id: str | None) -> dict[str, str]:
+    if not telemetry_enabled():
+        return {}
     meta: dict[str, str] = {}
     traceparent = traceparent_from_span()
     if traceparent is not None:

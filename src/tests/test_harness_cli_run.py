@@ -284,6 +284,64 @@ class TestRunCommand:
         captured = capsys.readouterr()
         assert "final answer" in captured.out
 
+    def test_run_passes_session_id_to_mcp_router(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls: list[str] = []
+        router_session_ids: list[str | None] = []
+
+        class FakeRouter:
+            started = False
+
+            def __init__(self, configs: list[Any], *, session_id: str | None = None) -> None:
+                assert len(configs) == 1
+                router_session_ids.append(session_id)
+
+            def start(self) -> None:
+                calls.append("start")
+                self.started = True
+
+            def stop(self) -> None:
+                calls.append("stop")
+                self.started = False
+
+            def list_tools(self) -> list[Any]:
+                assert self.started
+                calls.append("list_tools")
+                return []
+
+            def call(self, name: str, arguments: dict[str, Any]) -> str:
+                raise AssertionError(f"unexpected tool call: {name} {arguments}")
+
+        monkeypatch.setattr(run_cli, "McpRouter", FakeRouter)
+
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/llama3",
+                "--task",
+                "say hi",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "mcp-run",
+                "--mcp",
+                "raw:ignored-command",
+                "--no-ctx-tools",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        capsys.readouterr()
+        assert router_session_ids == ["mcp-run"]
+        assert calls == ["start", "list_tools", "stop"]
+
     def test_run_uses_ctx_init_model_profile_when_model_omitted(
         self,
         fake_litellm: Any,
@@ -1846,12 +1904,14 @@ class TestResumeCommand:
     ) -> None:
         restored: list[Any] = []
         calls: list[str] = []
+        router_session_ids: list[str | None] = []
 
         class FakeRouter:
             started = False
 
-            def __init__(self, configs: list[Any]) -> None:
+            def __init__(self, configs: list[Any], *, session_id: str | None = None) -> None:
                 restored.extend(configs)
+                router_session_ids.append(session_id)
 
             def start(self) -> None:
                 calls.append("start")
@@ -1887,6 +1947,7 @@ class TestResumeCommand:
         assert len(restored) == 1
         assert restored[0].command == "definitely-not-a-real-mcp-command"
         assert restored[0].credential_env == ("DANGER_TOKEN",)
+        assert router_session_ids == ["restore-mcp"]
         assert "restoring MCP server danger" in captured.err
         assert calls == ["start", "list_tools", "stop"]
 
@@ -1906,7 +1967,7 @@ class TestResumeCommand:
                     "ts": "t",
                     "session_id": "no-model",
                     "task": "old",
-                    "initial_trace_id": "original-trace",
+                    "initial_trace_id": "original-trace-private",
                 }
             )
             + "\n"
@@ -1937,8 +1998,10 @@ class TestResumeCommand:
         assert failed.error_kind == "ValueError"
         assert failed.payload["ctx.run.phase"] == "failed"
         assert failed.payload["ctx.run.failure_stage"] == "validation"
-        assert failed.payload["ctx.session.previous_trace_id"] == "original-trace"
-        assert "go" not in telemetry_path.read_text(encoding="utf-8")
+        assert "ctx.session.previous_trace_id" not in failed.payload
+        raw = telemetry_path.read_text(encoding="utf-8")
+        assert "original-trace-private" not in raw
+        assert "go" not in raw
 
     def test_resume_missing_session(
         self,
