@@ -474,7 +474,8 @@ class CtxCoreToolbox:
                 name=f"{_NAMESPACE}wiki_get",
                 description=(
                     "Fetch a single wiki entity page by slug. Returns "
-                    "the full frontmatter (as a dict) and body text. "
+                    "the full frontmatter (as a dict), body text, and "
+                    "wiki-relative path. "
                     "Use after recommend_bundle / wiki_search to read "
                     "the detail of a specific candidate."
                 ),
@@ -878,7 +879,10 @@ class CtxCoreToolbox:
         return json.dumps(
             {
                 "error": f"no entity page found for slug {slug!r}",
-                "looked_in": [str(p) for _, p, _ in candidates],
+                "looked_in": [
+                    _wiki_entity_relpath(candidate_type, slug)
+                    for candidate_type, _, _ in candidates
+                ],
             }
         )
 
@@ -1003,7 +1007,7 @@ class CtxCoreToolbox:
                 "slug": path.stem,
                 "entity_type": entity_type,
                 "wikilink": wikilink,
-                "path": str(path),
+                "path": _wiki_entity_relpath(entity_type, path.stem),
                 "frontmatter": fm,
                 "body": body,
             },

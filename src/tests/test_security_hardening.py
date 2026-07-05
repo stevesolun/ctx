@@ -180,6 +180,34 @@ def test_docs_sanitizer_rewrites_unquoted_active_urls() -> None:
     assert "data:text/html" not in cleaned.lower()
 
 
+@pytest.mark.parametrize(
+    ("payload", "neutralized_attr", "forbidden_fragment"),
+    [
+        ('<a href="java&#x73;cript:alert(1)">bad</a>', 'href="#"', "java&#x73;cript"),
+        ('<img src="data&#x3a;text/html,<svg onload=alert(1)>">', 'src="#"', "data&#x3a;"),
+        (
+            '<svg><a xlink:href="java&#x0a;script:alert(1)">bad</a></svg>',
+            'xlink:href="#"',
+            "java&#x0a;script",
+        ),
+        (
+            '<div formaction="java&#x09;script:alert(1)">bad</div>',
+            'formaction="#"',
+            "java&#x09;script",
+        ),
+    ],
+)
+def test_docs_sanitizer_neutralizes_entity_encoded_active_url_attrs(
+    payload: str,
+    neutralized_attr: str,
+    forbidden_fragment: str,
+) -> None:
+    cleaned = dashboard_docs.sanitize_docs_html(payload)
+
+    assert neutralized_attr in cleaned
+    assert forbidden_fragment not in cleaned.lower()
+
+
 def test_dashboard_skill_load_requires_security_scan(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -789,8 +789,8 @@ def _flatten_content(content: list[Any] | None) -> str:
     """Concatenate a MCP tool-result content array into a single string.
 
     Text blocks pass through verbatim. Non-text blocks (image/resource)
-    are summarised with a short tag; the harness loop can grow
-    multi-modal tool results in a later phase.
+    are summarised with a short tag; resource URIs are deliberately
+    omitted so local paths and private identifiers do not leak.
     """
     if not content:
         return ""
@@ -806,8 +806,7 @@ def _flatten_content(content: list[Any] | None) -> str:
             mime = block.get("mimeType", "image/*")
             parts.append(f"[{mime} image omitted]")
         elif btype == "resource":
-            uri = block.get("resource", {}).get("uri", "<no-uri>")
-            parts.append(f"[resource: {uri}]")
+            parts.append("[resource omitted]")
         else:
             parts.append(f"[{btype or 'unknown'} block omitted]")
     return "".join(parts)

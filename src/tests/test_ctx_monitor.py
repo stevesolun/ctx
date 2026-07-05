@@ -1337,6 +1337,34 @@ def test_skill_sidecar_api_reads_typed_sidecar(
     assert payload["subject_type"] == "mcp-server"
 
 
+def test_skill_sidecar_api_missing_sidecar_returns_json_404(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server, thread, port = _serve_monitor(monkeypatch)
+    try:
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/api/skill/missing-sidecar.json",
+                timeout=5,
+            ) as response:
+                status = response.status
+                content_type = response.headers.get_content_type()
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            content_type = exc.headers.get_content_type()
+            payload = json.loads(exc.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert status == 404
+    assert content_type == "application/json"
+    assert payload == {"detail": "no sidecar for missing-sidecar"}
+
+
 def test_load_sidecar_can_disambiguate_duplicate_slug(fake_claude: Path) -> None:
     _write_sidecar(
         fake_claude,

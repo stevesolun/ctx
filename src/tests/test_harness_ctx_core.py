@@ -1817,7 +1817,7 @@ class TestWikiSearch:
 
 
 class TestWikiGet:
-    def test_happy_path(self, toolbox: CtxCoreToolbox) -> None:
+    def test_happy_path(self, toolbox: CtxCoreToolbox, tmp_path: Path) -> None:
         result = json.loads(
             toolbox.dispatch(
                 ToolCall(id="c1", name="ctx__wiki_get", arguments={"slug": "python-patterns"})
@@ -1825,6 +1825,9 @@ class TestWikiGet:
         )
         assert "error" not in result
         assert result["slug"] == "python-patterns"
+        assert result["path"] == "entities/skills/python-patterns.md"
+        assert not Path(result["path"]).is_absolute()
+        assert str(tmp_path) not in json.dumps(result)
         assert "frontmatter" in result
         assert "body" in result
         assert "Python Patterns" in result["body"]
@@ -1846,14 +1849,21 @@ class TestWikiGet:
         assert "error" in result
         assert "invalid" in result["error"].lower()
 
-    def test_nonexistent_slug(self, toolbox: CtxCoreToolbox) -> None:
+    def test_nonexistent_slug(self, toolbox: CtxCoreToolbox, tmp_path: Path) -> None:
         result = json.loads(
             toolbox.dispatch(
                 ToolCall(id="c1", name="ctx__wiki_get", arguments={"slug": "does-not-exist"})
             )
         )
         assert "error" in result
-        assert "looked_in" in result
+        assert result["looked_in"] == [
+            "entities/skills/does-not-exist.md",
+            "entities/agents/does-not-exist.md",
+            "entities/mcp-servers/d/does-not-exist.md",
+            "entities/harnesses/does-not-exist.md",
+        ]
+        assert all(not Path(candidate).is_absolute() for candidate in result["looked_in"])
+        assert str(tmp_path) not in json.dumps(result)
 
     def test_entity_type_disambiguates_duplicate_slugs(self, tmp_path: Path) -> None:
         wiki = _build_synthetic_wiki(tmp_path)

@@ -109,7 +109,7 @@ def handle_readonly_route(
         slug = params["slug"]
         sidecar = deps.load_sidecar(slug, query.get("type"))
         if sidecar is None:
-            return ReadOnlyApiResponse(None, status=404, not_found_detail=f"no sidecar for {slug}")
+            return ReadOnlyApiResponse({"detail": f"no sidecar for {slug}"}, status=404)
         return ReadOnlyApiResponse(sidecar)
     if name == "api_graph":
         slug = params["slug"]
