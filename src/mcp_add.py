@@ -25,6 +25,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Iterable
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -605,15 +606,16 @@ def add_mcp(
 
 
 def _process_batch(
-    records: list[dict[str, Any]],
+    records: Iterable[dict[str, Any]],
     wiki_path: Path,
     dry_run: bool,
     skip_existing: bool,
     update_existing: bool,
+    total: int | None = None,
 ) -> tuple[int, int, int, int, int]:
     """Process records. Returns (added, merged, reviewed, rejected, errors)."""
     added = merged = reviewed = rejected = errors = 0
-    total = len(records)
+    total_label = str(total) if total is not None else "?"
 
     for i, raw in enumerate(records, 1):
         slug = raw.get("slug", "<unknown>")
@@ -621,7 +623,7 @@ def _process_batch(
             record = McpRecord.from_dict(raw)
         except Exception as exc:  # noqa: BLE001 — batch CLI must not crash on one bad record
             errors += 1
-            print(f"  [{i}/{total}] ERROR: {slug}: {exc}", file=sys.stderr)
+            print(f"  [{i}/{total_label}] ERROR: {slug}: {exc}", file=sys.stderr)
             continue
 
         entity_rel = record.entity_relpath()
@@ -629,7 +631,7 @@ def _process_batch(
 
         if skip_existing and _read_entity_page(wiki_path, target_relpath) is not None:
             merged += 1
-            print(f"  [{i}/{total}] [skipped] {record.slug}")
+            print(f"  [{i}/{total_label}] [skipped] {record.slug}")
             continue
 
         try:
@@ -651,16 +653,27 @@ def _process_batch(
             else:
                 merged += 1
                 status = "updated" if update_existing else "merged"
-            print(f"  [{i}/{total}] [{status}] {record.slug}")
+            print(f"  [{i}/{total_label}] [{status}] {record.slug}")
         except IntakeRejected as exc:
             rejected += 1
             codes = ", ".join(f.code for f in exc.decision.failures) or "unknown"
-            print(f"  [{i}/{total}] [rejected] {record.slug}: {codes}", file=sys.stderr)
+            print(f"  [{i}/{total_label}] [rejected] {record.slug}: {codes}", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001 — batch CLI must continue past one failure
             errors += 1
-            print(f"  [{i}/{total}] ERROR: {record.slug}: {exc}", file=sys.stderr)
+            print(f"  [{i}/{total_label}] ERROR: {record.slug}: {exc}", file=sys.stderr)
 
     return added, merged, reviewed, rejected, errors
+
+
+def _iter_jsonl_records(lines: Iterable[str]) -> Iterable[dict[str, Any]]:
+    for lineno, line in enumerate(lines, 1):
+        line = line.lstrip("\ufeff").strip()
+        if not line:
+            continue
+        try:
+            yield json.loads(line)
+        except json.JSONDecodeError as exc:
+            print(f"Warning: line {lineno} skipped (bad JSON): {exc}", file=sys.stderr)
 
 
 def main() -> None:
@@ -701,8 +714,6 @@ def main() -> None:
     wiki_path = Path(os.path.expanduser(args.wiki))
     ensure_wiki(str(wiki_path))
 
-    raw_records: list[dict[str, Any]] = []
-
     if args.from_json:
         json_path = Path(os.path.expanduser(args.from_json))
         if not json_path.exists():
@@ -713,42 +724,41 @@ def main() -> None:
         except json.JSONDecodeError as exc:
             print(f"Error: failed to parse JSON: {exc}", file=sys.stderr)
             sys.exit(1)
+        added, merged, reviewed, rejected, errors = _process_batch(
+            records=raw_records,
+            wiki_path=wiki_path,
+            dry_run=args.dry_run,
+            skip_existing=args.skip_existing,
+            update_existing=args.update_existing,
+            total=1,
+        )
 
     elif args.from_jsonl:
         jsonl_path = Path(os.path.expanduser(args.from_jsonl))
         if not jsonl_path.exists():
             print(f"Error: {jsonl_path} does not exist.", file=sys.stderr)
             sys.exit(1)
-        for lineno, line in enumerate(jsonl_path.read_text(encoding="utf-8-sig").splitlines(), 1):
-            line = line.lstrip("\ufeff").strip()
-            if not line:
-                continue
-            try:
-                raw_records.append(json.loads(line))
-            except json.JSONDecodeError as exc:
-                print(f"Warning: line {lineno} skipped (bad JSON): {exc}", file=sys.stderr)
+        with jsonl_path.open(encoding="utf-8-sig") as handle:
+            added, merged, reviewed, rejected, errors = _process_batch(
+                records=_iter_jsonl_records(handle),
+                wiki_path=wiki_path,
+                dry_run=args.dry_run,
+                skip_existing=args.skip_existing,
+                update_existing=args.update_existing,
+            )
 
-    elif args.from_stdin:
-        for lineno, line in enumerate(sys.stdin, 1):
-            line = line.lstrip("\ufeff").strip()
-            if not line:
-                continue
-            try:
-                raw_records.append(json.loads(line))
-            except json.JSONDecodeError as exc:
-                print(f"Warning: line {lineno} skipped (bad JSON): {exc}", file=sys.stderr)
+    else:
+        added, merged, reviewed, rejected, errors = _process_batch(
+            records=_iter_jsonl_records(sys.stdin),
+            wiki_path=wiki_path,
+            dry_run=args.dry_run,
+            skip_existing=args.skip_existing,
+            update_existing=args.update_existing,
+        )
 
-    if not raw_records:
+    if not any((added, merged, reviewed, rejected, errors)):
         print("No records to process.", file=sys.stderr)
         sys.exit(0)
-
-    added, merged, reviewed, rejected, errors = _process_batch(
-        records=raw_records,
-        wiki_path=wiki_path,
-        dry_run=args.dry_run,
-        skip_existing=args.skip_existing,
-        update_existing=args.update_existing,
-    )
 
     dry_label = " (dry-run)" if args.dry_run else ""
     print(
