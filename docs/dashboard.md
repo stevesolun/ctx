@@ -105,12 +105,16 @@ The local catalog includes search, browser autocomplete suggestions, type
 filters, tile cards, and click-through detail pages for each entity.
 
 The wiki tab requires full wiki markdown content from
-`ctx-init --graph --graph-install-mode full` or local/private wiki entities.
-The default runtime graph install powers recommendations and graph stats but
-does not expand every entity page. When entity pages exist, the wiki tab is a
-filterable card grid over a deterministic, bounded dashboard sample:
-up to 500 pages per dashboard-supported entity type under
-`~/.claude/skill-wiki/entities/{skills,agents,mcp-servers,harnesses}/`.
+`ctx-init --graph --graph-install-mode full`, installed wiki packs, or
+local/private wiki entities. The default runtime graph install powers
+recommendations and graph stats but does not expand every entity page. When
+entity pages exist, the wiki tab is a filterable card grid over a
+deterministic, bounded dashboard sample: up to 500 pages per
+dashboard-supported entity type. If `~/.claude/skill-wiki/wiki-packs/` is
+installed, the dashboard reads the merged base+overlay pack state first: pack
+pages override stale physical files with the same relative path, active
+tombstones hide deleted pack paths, and safe local-only entity files that are
+not covered by a pack page or tombstone stay searchable.
 MCP server pages use the sharded layout
 `entities/mcp-servers/<first-char-or-0-9>/<slug>.md`; the dashboard
 routes `/wiki/<slug>` to the same shard convention. Harness pages use
@@ -132,7 +136,10 @@ Dashboard-supported entity pages (`/wiki/<slug>?type=<entity>`) render a
 bounded markdown preview and a bounded frontmatter table on the right, plus a
 quality banner with deep links to `/skill/<slug>` (sidecar detail) and
 `/graph?slug=<slug>&type=<entity>` (1-hop neighborhood). Long body previews and
-frontmatter values are visibly marked as truncated.
+frontmatter values are visibly marked as truncated. If `type` is omitted, the
+dashboard resolves it from frontmatter and then from the entity path so untyped
+agent, MCP, and harness pages still use the correct sidecar and subgraph
+context.
 
 ### Explore the knowledge graph — `/graph`
 
@@ -219,8 +226,8 @@ per-process monitor token injected into the rendered page.
 | `/loaded` | **Currently-loaded skills, agents, MCP servers, and installed harness records** from `~/.claude/skill-manifest.json` plus `~/.claude/harness-installs/*.json`; skill/agent/MCP rows expose supported live actions |
 | `/skills` | Every sidecar as a filterable **card grid**: left sidebar (search by slug, grade checkboxes, skill/agent/MCP toggle, hide-floored), card shows grade pill + raw score + links to sidecar/wiki/graph |
 | `/skill/<slug>` | Full sidecar breakdown: four-signal score (telemetry · intake · graph · routing), hard-floor reason, computed_at timestamp, per-skill audit timeline |
-| `/wiki` | **Wiki entity index** - bounded card-grid sample of up to 500 pages per dashboard-supported entity type under `~/.claude/skill-wiki/entities/{skills,agents,mcp-servers,harnesses}/`, including sharded MCP server pages and flat harness pages. Left sidebar: text search over the visible sample (slug, description, tag), skill/agent/MCP/harness checkboxes. |
-| `/wiki/<slug>?type=<entity>` | Dashboard-supported wiki entity page rendered: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views. The optional `type` query disambiguates duplicate slugs such as `langgraph`. |
+| `/wiki` | **Wiki entity index** - bounded card-grid sample of up to 500 pages per dashboard-supported entity type, merging installed wiki-pack pages with local-only entity files not shadowed by a pack page or tombstone. Includes sharded MCP server pages and flat harness pages. Left sidebar: text search over the visible sample (slug, description, tag), skill/agent/MCP/harness checkboxes. |
+| `/wiki/<slug>?type=<entity>` | Dashboard-supported wiki entity page rendered from the merged pack/local source: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views. The optional `type` query disambiguates duplicate slugs such as `langgraph`; omitted types are inferred from frontmatter or path when possible. |
 | `/graph` | **Graph explorer landing page** - node/edge count header, a "Popular seed slugs" block (18 highest-degree skill/agent/MCP/harness entities as clickable chips), search box for any skill/agent/MCP/harness slug, and the built-in graph list panel. Clicking a seed chip navigates to `/graph?slug=<slug>&type=<entity>`. |
 | `/graph?slug=<slug>&type=<entity>` | **Built-in** 1-hop neighborhood around the target skill/agent/MCP/harness slug. Entity pills identify skill, agent, MCP server, and harness rows. Tap any node to navigate to that entity's typed wiki page. Type and tag filters run client-side. |
 | `/recommend` | Selectable recommendation page: query and top-k controls, repeated selected/rejected ID inputs, select-all/select-none helpers, recommendation state, TLDR/reason text, and graph-backed related suggestions for partial selections. |
@@ -249,7 +256,7 @@ per-process monitor token injected into the rendered page.
 | `GET /api/runtime.json` | Runtime lifecycle summary: source path, validation count, failed/error count, open-escalation count, latest validation, recent validations, open escalations, session IDs, `tool_selection`, `token_usage`, `token_usage_history`, and `recent_tool_usage`. |
 | `GET /api/config.json` | Effective/default/user config payload used by the Config tab. |
 | `GET /api/entities/search.json?q=<text>&type=<entity>&limit=80` | Wiki entity search results for Manage, Config, and entity picker flows. |
-| `GET /api/entity/<slug>.json?type=<entity>` | Frontmatter and Markdown body for one wiki entity. |
+| `GET /api/entity/<slug>.json?type=<entity>` | Frontmatter and Markdown body for one wiki entity from the same merged pack/local source as `/wiki/<slug>`. |
 | `GET /api/events.stream` | Server-sent events tail of `~/.claude/ctx-audit.jsonl` |
 
 ### Mutation endpoints
@@ -276,7 +283,7 @@ load/unload mutation endpoint yet.
 | `POST /api/unload` | `{"slug": "...", "entity_type": "mcp-server"}` | `mcp_install.uninstall_mcp(slug, wiki_dir=...)` |
 | `POST /api/config` | `{"updates": {...}}` | persist supported user config overrides after validation |
 | `POST /api/entity/upsert` | entity metadata/body payload | write or update a wiki entity, then attach graph/recommendation metadata |
-| `POST /api/entity/delete` | `{"slug": "...", "entity_type": "skill"}` | remove a dashboard-supported wiki entity after safe-name validation |
+| `POST /api/entity/delete` | `{"slug": "...", "entity_type": "skill"}` | remove a dashboard-supported wiki entity after safe-name validation; active wiki packs receive a tombstone on worker drain |
 
 Harness load/unload POSTs are rejected with the exact
 `ctx-harness-install ... --dry-run` command to run instead. Skill rows emit
@@ -299,7 +306,7 @@ always drill from a headline number to the raw sidecar that produced it.
 |---|---|
 | **Currently loaded** | Count of entries in `skill-manifest.json[load]`. Clicking the card drills to `/loaded` |
 | **Sidecars** | Total sidecars in `~/.claude/skill-quality/` |
-| **Wiki entities** | Count of dashboard-supported wiki pages (skills + agents + MCP servers + harnesses) |
+| **Wiki entities** | Count of dashboard-supported merged wiki pages (skills + agents + MCP servers + harnesses) |
 | **Knowledge graph** | Dashboard-supported skill/agent/MCP/harness node count + edge count from `graphify-out/graph.json` |
 | **Runtime checks** | Validation totals, failed/error checks, and open escalations from the generic runtime lifecycle ledger |
 | **Audit events** | Line count of `~/.claude/ctx-audit.jsonl` |

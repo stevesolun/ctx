@@ -244,7 +244,10 @@ The user-facing behavior is intended to stay the same: recommendations,
 dashboard graph views, wiki pages, and harness setup still read the merged
 graph/wiki as one catalog. The difference is how updates are stored. Adding or
 updating one skill, agent, MCP server, or harness can write a small overlay pack
-instead of forcing a full graph and wiki rebuild.
+instead of forcing a full graph and wiki rebuild. For local dashboard/search
+reads, wiki-pack pages override physical files at the same relative path,
+active wiki tombstones hide deleted paths, and safe local-only entity files that
+are not present in a pack or tombstone still participate in the catalog.
 
 This makes normal updates faster and safer:
 
@@ -343,9 +346,11 @@ wiki index, and, when a persisted semantic vector index exists, runs a
 best-effort ANN attach into `graphify-out/entity-overlays.jsonl`. That overlay
 lets the runtime resolver connect a new or updated entity to existing graph
 neighbors without recomputing global all-pairs similarity. When modular wiki
-packs exist, the same write is mirrored into a wiki overlay pack. The worker
-also queues a graph-store refresh so dashboard and resolver reads see the merged
-view. The entity markdown page or wiki page overlay remains the source of truth.
+packs exist, the same write is mirrored into a wiki overlay pack; deletes are
+mirrored as wiki tombstones. The worker also queues a graph-store refresh so
+dashboard and resolver reads see the merged view. The active wiki page is the
+pack page when one exists, otherwise the local entity markdown file unless a
+pack tombstone hides that relative path.
 
 For manual review or debugging:
 

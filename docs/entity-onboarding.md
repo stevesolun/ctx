@@ -24,9 +24,10 @@ when active graph packs exist, writes a small graph overlay pack for the
 changed entity. If the vector index is missing, the worker can still write a
 node-only graph overlay pack and refresh `graph-store.sqlite3`, so local
 dashboard/search/recommendation reads see the merged base+overlay graph without
-a full all-pairs semantic rebuild. The wiki page remains the source of truth;
-only legacy installs without active graph packs fall back to the normal
-incremental graph export job.
+a full all-pairs semantic rebuild. Wiki readers also merge active pack pages
+with safe local-only entity files, while pack pages and tombstones shadow local
+files at the same relative path. Only legacy installs without active graph
+packs fall back to the normal incremental graph export job.
 
 ## Updating the Graph and LLM Wiki
 
@@ -48,7 +49,8 @@ the update is treated like a release step.
    `ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1`. This updates the
    wiki index, writes wiki overlay packs, attempts incremental ANN graph attach
    when a vector index exists, writes graph overlay packs when active packs are
-   present, and queues a graph-store refresh so local reads see the merged view.
+   present, and queues a graph-store refresh so local reads see the merged
+   graph/wiki view.
 6. Rebuild the curated wiki graph with `ctx-wiki-graphify` before shipping
    release artifacts or when you need a full graph/export reconciliation.
 7. Repack `graph/wiki-graph.tar.gz` through the artifact promotion path:
@@ -206,7 +208,10 @@ Removal has three separate meanings. First decide which one you need.
 - **Catalog removal** stops ctx from showing the entity in the wiki, graph, and
   recommendations. Use the dashboard: `ctx-monitor serve`, open **Manage**,
   search for the slug and type, then choose **Delete selected**. This deletes
-  the wiki page and queues an `entity-upsert` delete plus `graph-export` job.
+  the wiki page and queues an `entity-upsert` delete plus graph refresh. When
+  active wiki packs exist, draining the worker records a wiki tombstone so the
+  removed relative path stays hidden even if it still exists in a base pack or
+  stale local file.
 - **Runtime unload** removes a currently loaded entity from the live manifest.
   Use the dashboard **Loaded** page. MCP unloads call the Claude MCP removal
   path when available; skill and agent unloads remove the manifest row.
