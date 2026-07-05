@@ -25,22 +25,21 @@ README = repo_root / "README.md"
 PASS_STATUSES = {"Tested Pass", "Retested Pass"}
 VALIDATION_STATUSES = {"Needs Validation"}
 FIX_STATUSES = {"Needs Fix"}
-ACTIONABLE_STATUSES = PASS_STATUSES | VALIDATION_STATUSES | FIX_STATUSES
+ACTIONABLE_STATUSES = (
+    PASS_STATUSES
+    | VALIDATION_STATUSES
+    | FIX_STATUSES
+    | {
+        "Blocked/Human Decision",
+    }
+)
 CANONICAL_STATUSES = ACTIONABLE_STATUSES | {
     "Needs Story",
     "Blocked",
     "Blocked/Human Decision",
     "Deprecated",
 }
-CANONICAL_STATUS_OVERRIDES = {
-    "DIST-004": {
-        "source_status": "Needs Fix",
-        "canonical_status": "Blocked/Human Decision",
-        "owner_lane": "Human Owner",
-        "review_note": "canonical status override",
-        "validation_status": "out of scope",
-    },
-}
+CANONICAL_STATUS_OVERRIDES: dict[str, dict[str, str]] = {}
 
 
 def _tracker_rows() -> list[dict[str, str]]:
@@ -287,9 +286,15 @@ def test_feature_user_story_tracker_covers_distribution_workflows() -> None:
 
     assert workflows
     assert [workflow for workflow in workflows if workflow not in tracker] == []
+    public_tracker_tests = (
+        "src/tests/test_bug_smoke_tracker.py",
+        "src/tests/test_feature_user_story_tracker.py",
+        "src/tests/test_dashboard_user_story_tracker.py",
+        "src/tests/test_toolbox_cli.py",
+    )
     for workflow in (docs_workflow, publish_workflow):
-        assert "src/tests/test_feature_user_story_tracker.py" in workflow
-        assert "src/tests/test_dashboard_user_story_tracker.py" in workflow
+        for test_path in public_tracker_tests:
+            assert test_path in workflow
     assert "github.repository == 'stevesolun/ctx'" in hf_workflow
     assert "Missing HF_TOKEN" in hf_workflow
 
