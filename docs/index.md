@@ -67,7 +67,8 @@ with persistent memory that gets smarter every session.
     `docs/qa/dashboard-user-story-status.csv`) and the canonical
     `qa/feature_status.csv` with the exact path in `entrypoint_or_route`.
     Bug-smoke audit rows live in `qa/bug_smoke_status.csv` and are validated
-    by the same public docs tracker.
+    by the same public docs tracker; `Retested Pass` rows must include `PASS:`
+    retest evidence and a closed `next_action` starting with `Closed;`.
 
 ## Why this exists
 
