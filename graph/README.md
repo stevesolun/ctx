@@ -91,13 +91,16 @@ store refresh path.
 - `graphify-out/graph-delta.json` - delta export for the latest graph generation
 - `graphify-out/graph-export-manifest.json` - export manifest tying graph, delta, communities, and report to one generation
 - `graphify-out/communities.json` - community export
-- `SCHEMA.md`, `index.md`, `log.md`, `catalog.md` - wiki contract and indexes
+- `SCHEMA.md`, `index.md` - wiki contract and root index
 - `.obsidian/` - vault metadata for local graph browsing
 
-`SKILL.md.original` backups, transient `.lock` files, and `.ctx/` queue state
-are not shipped. Local micro-skill conversion may keep `.original` files for
-traceability, but the packaged tarball excludes them so users do not ingest raw
-long bodies after conversion.
+`SKILL.md.original` backups, transient `.lock` files, `.ctx/` queue state, and
+local generated markdown catalogs such as `catalog.md`, `converted-index.md`,
+`log.md`, and `versions-catalog.md` are not shipped. Local micro-skill
+conversion may keep `.original` files for traceability, but the packaged
+tarball excludes them so users do not ingest raw long bodies after conversion.
+Markdown payloads are also scrubbed of host-user paths during repack and the
+artifact validator rejects `/Users/...` and `C:\Users\...` signatures.
 
 ## Extract
 
@@ -297,8 +300,9 @@ python src/import_skills_sh_catalog.py \
 
 For a full local wiki repack from an existing artifact, use the packed-page
 repacker. It writes `wiki-packs/base-<export-id>/`, removes expanded
-skill/agent/MCP entity pages from the tar member list, and leaves harness pages
-directly available for fast runtime setup:
+skill/agent/MCP entity pages and local generated markdown catalogs from the tar
+member list, redacts host-user paths in markdown payloads, and leaves harness
+pages directly available for fast runtime setup:
 
 ```bash
 python scripts/pack_full_wiki_tar.py \
@@ -332,13 +336,16 @@ python -c "from pathlib import Path; from ctx.core.wiki.artifact_promotion impor
 The repack command above is for Git Bash/MSYS. In Linux/macOS shells omit
 `--force-local`; in PowerShell use `tar -czf` without `--force-local`.
 
-Both flows validate candidates before atomic promotion. Each promoted artifact
-gets a sibling `*.promotion.json` file with current, candidate, and `last_good`
-hashes for review or rollback. The graph, delta, communities, report, and
-export manifest are shipped together and carry the same export ID so validation
-can reject mixed or partially refreshed graph generations. Raw `.original`
-backups, transient `.lock` files, and `.ctx/` queue state must not appear in
-the shipped tarball.
+Both flows validate candidates before atomic promotion. Queue-driven artifact
+promotion accepts only known graph artifacts under `<wiki>/graphify-out/` or
+repo `graph/`, and the staged file must be the target sibling named
+`<target>.staged`. Each promoted artifact gets a sibling `*.promotion.json` file
+with current, candidate, and `last_good` hashes for review or rollback. The
+graph, delta, communities, report, and export manifest are shipped together and
+carry the same export ID so validation can reject mixed or partially refreshed
+graph generations. Raw `.original` backups, transient `.lock` files, `.ctx/`
+queue state, local generated markdown catalogs, and host-user paths must not
+appear in the shipped tarball.
 
 ## Implementation Notes
 

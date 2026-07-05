@@ -102,6 +102,7 @@ class BackupConfig:
     # Phase 2 implements incremental/hybrid. Phase 1 only honours "full".
     scope: str = "full"
     max_file_bytes: int = 5 * 1024 * 1024  # 5 MB
+    # Top-level filenames under ~/.claude only; paths and traversal are rejected.
     top_files: tuple[str, ...] = (
         "settings.json",
         "skill-manifest.json",

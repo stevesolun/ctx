@@ -80,7 +80,9 @@ See `src/backup_config.py` and the `backup` section of
 
 - **top_files** — `settings.json`, `skill-manifest.json`,
   `pending-skills.json`, `CLAUDE.md`, `AGENTS.md`, `user-profile.json`,
-  `skill-system-config.json`, `skill-registry.json`.
+  `skill-system-config.json`, `skill-registry.json`. User overrides must be
+  top-level filenames only: no path separators, absolute paths, drive letters,
+  UNC paths, `.` entries, or `..` traversal.
 - **trees** — `agents/`, `skills/`.
 - **memory** — `projects/*/memory/**` when `memory_glob` is true.
 - **always excluded** — `.credentials.json`, `claude.json`, token
@@ -204,12 +206,14 @@ python -m backup_mirror prune --policy --dry-run --json
 python -m backup_mirror prune --policy
 
 # Legacy mode (still works): keep only the N newest.
+python -m backup_mirror prune --keep 20 --dry-run
 python -m backup_mirror prune --keep 20
 ```
 
 The policy output tells you which snapshots were kept by `keep_latest`
 versus `keep_daily`, so a surprising retention decision is easy to
-audit.
+audit. Legacy `--keep` dry-runs print the snapshot IDs that would be removed
+without deleting their directories.
 
 ## Troubleshooting
 

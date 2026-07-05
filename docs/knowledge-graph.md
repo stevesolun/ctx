@@ -20,8 +20,9 @@ skill bodies are hydrated as installable `SKILL.md` files under
 `converted/`; the **28,612** entries over the configured line
 limit were converted to gated micro-skill orchestrators. Full original bodies
 are used during graph rebuilds for semantic similarity, but
-`SKILL.md.original` backups, transient `.lock` files, and `.ctx/` queue state
-are omitted from the shipped tarball.
+`SKILL.md.original` backups, transient `.lock` files, `.ctx/` queue state,
+local generated markdown catalogs, and host-user paths are omitted from the
+shipped tarball.
 
 | | Count |
 |---|---:|
@@ -416,9 +417,11 @@ Graphify exports stage and validate each generated artifact before atomic
 promotion. `graph.json`, `graph-delta.json`, `communities.json`,
 `graph-report.md`, and `graph-export-manifest.json` each get a sibling
 `*.promotion.json` file with candidate, current, and `last_good` hashes plus
-rollback metadata. The manifest is promoted last, so a crash between artifact
-promotion and manifest promotion is detected as an incomplete export and the
-next run rebuilds instead of trusting mixed graph files.
+rollback metadata. Queue-driven promotion only accepts those known graph
+targets under `<wiki>/graphify-out/` from sibling `<target>.staged` files. The
+manifest is promoted last, so a crash between artifact promotion and manifest
+promotion is detected as an incomplete export and the next run rebuilds instead
+of trusting mixed graph files.
 
 ## Current artifact record
 

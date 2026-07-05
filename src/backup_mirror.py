@@ -33,8 +33,9 @@ Commands:
         Restore the snapshot over the live tree. Without --dry-run this
         overwrites live files; with --dry-run it prints what would change.
 
-    python src/backup_mirror.py prune --keep <N>
-        Delete all but the N newest snapshots. Legacy mode.
+    python src/backup_mirror.py prune --keep <N> [--dry-run]
+        Delete all but the N newest snapshots. Legacy mode. With
+        ``--dry-run`` it prints what would be removed without deleting.
 
     python src/backup_mirror.py prune --policy [--dry-run] [--json]
         Apply the configured retention policy (keep_latest + keep_daily).
@@ -664,7 +665,9 @@ def prune_snapshots(
 
     Retained for backward compatibility. New callers should prefer
     :func:`prune_by_policy`, which honours both ``keep_latest`` and
-    ``keep_daily`` from the active :class:`BackupRetention`.
+    ``keep_daily`` from the active :class:`BackupRetention`. When
+    ``dry_run`` is true, return the snapshot IDs that would be removed without
+    deleting their directories.
     """
     if keep < 0:
         raise ValueError(f"keep must be >= 0, got {keep}")

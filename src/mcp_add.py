@@ -11,10 +11,10 @@ Usage
     # Single record from JSON file
     ctx-mcp-add --from-json /path/to/record.json
 
-    # JSONL from file (one JSON object per line)
+    # JSONL from file, streamed one JSON object per line
     ctx-mcp-add --from-jsonl /path/to/records.jsonl
 
-    # JSONL from stdin
+    # JSONL from stdin, streamed one JSON object per line
     ctx-mcp-add --from-stdin
 
     [--dry-run] [--wiki PATH] [--skip-existing]
@@ -613,7 +613,7 @@ def _process_batch(
     update_existing: bool,
     total: int | None = None,
 ) -> tuple[int, int, int, int, int]:
-    """Process records. Returns (added, merged, reviewed, rejected, errors)."""
+    """Process record iterables. Returns (added, merged, reviewed, rejected, errors)."""
     added = merged = reviewed = rejected = errors = 0
     total_label = str(total) if total is not None else "?"
 

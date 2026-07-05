@@ -191,6 +191,7 @@ ctx-agent-add --agent-path ./code-reviewer.md --name code-reviewer
 ctx-agent-add --agent-path ./code-reviewer.md --name code-reviewer --update-existing
 
 ctx-mcp-add --from-json ./github-mcp.json
+ctx-mcp-fetch --source pulsemcp --limit 50 | ctx-mcp-add --from-stdin
 ctx-mcp-add --from-json ./github-mcp.json --update-existing
 
 ctx-harness-add --from-json ./text-to-cad-harness.json
@@ -302,8 +303,10 @@ ctx-mcp-add --from-json ./github-mcp.json
 ```
 
 MCP pages live under `entities/mcp-servers/<shard>/<slug>.md`. The add command
-detects existing pages by slug and, when possible, canonical GitHub URL. If a
-match exists, ctx prints the update review and skips replacement unless
+accepts a single JSON object with `--from-json` or streams JSONL records from
+`--from-jsonl`/`--from-stdin` without preloading the whole batch. It detects
+existing pages by slug and, when possible, canonical GitHub URL. If a match
+exists, ctx prints the update review and skips replacement unless
 `--update-existing` is passed.
 
 ## Add a Harness

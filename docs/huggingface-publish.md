@@ -28,6 +28,11 @@ the repository secret `HF_TOKEN` is configured. On the canonical
 silently drift from the dataset repo. On forks, a missing token still exits
 successfully with a notice because forks are not trusted publishing sources.
 
+When only repo-card inputs changed (`README.md`, `CHANGELOG.md`, or files under
+`docs/`), the workflow uses card-only upload mode. Source, test, workflow, graph,
+or packaging changes always run the full dataset sync so tracked files cannot
+drift behind GitHub.
+
 The sync script is still the contract: it exports the tracked git snapshot,
 adds Hugging Face repo-card metadata, validates README/docs stats, verifies the
 graph artifacts are hydrated rather than LFS pointers, and refuses to publish

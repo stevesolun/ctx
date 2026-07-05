@@ -254,7 +254,8 @@ def _parse_mcp_spec(spec: str) -> McpServerConfig:
       name:<shell-invocation>
         Example: filesystem:npx -y @modelcontextprotocol/server-filesystem /data
         The part before the colon is the name; the part after is the
-        command + args (split on whitespace, no shell).
+        command + args (split on whitespace, no shell). Secret-looking
+        inline args are rejected; pass credentials with --mcp-env.
 
       name (bare)
         Names that match a known preset get a default invocation.
@@ -767,7 +768,8 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="NAME[:COMMAND]",
         help=(
             "Attach an MCP server. Repeatable. Forms: "
-            "'filesystem' (preset) or 'name:npx -y ...' (explicit)."
+            "'filesystem' (preset) or 'name:npx -y ...' (explicit; "
+            "secret-looking argv rejected)."
         ),
     )
     r.add_argument(

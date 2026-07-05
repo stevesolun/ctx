@@ -224,6 +224,10 @@ system prompt overrides, session resume, JSON output, ...).
 If the console script is unavailable, use the package entrypoint instead:
 `python -m ctx run ...`.
 
+Explicit `--mcp name:<command>` specs are split into argv without a shell.
+Secret-looking inline arguments are rejected so tokens do not land in session
+metadata; pass credentials with `--mcp-env name:ENVVAR` instead.
+
 Planning and review modes are opt-in flags on `ctx run`. Use `--planner` to
 produce a structured spec before generation, `--evaluator` to grade and revise
 the result, and `--contract` with both `--planner` and `--evaluator` to refine
