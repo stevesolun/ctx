@@ -40,6 +40,8 @@ HYDRATED_ARTIFACT_MIN_BYTES = {
     Path("graph/wiki-graph-runtime.tar.gz"): 10_000_000,
     Path("graph/skills-sh-catalog.json.gz"): 1_000_000,
 }
+CARD_ONLY_DELETE_PATTERNS = ("README.md", "CHANGELOG.md", "docs/**")
+_CARD_ONLY_FILES = frozenset({Path("README.md"), Path("CHANGELOG.md")})
 GRAPH_VALIDATOR_INT_FLAGS = {
     "--min-nodes": "min_nodes",
     "--min-edges": "min_edges",
@@ -231,19 +233,32 @@ def _export_tracked_tree(repo: Path, export_dir: Path) -> None:
     repo_root = repo.resolve()
     export_root = export_dir.resolve()
     for rel in _iter_tracked_files(repo):
-        source = (repo_root / rel).resolve()
-        if source != repo_root and not source.is_relative_to(repo_root):
-            raise ValueError(f"unsafe source path: {rel}")
-        if source.is_symlink():
-            raise ValueError(f"refusing to follow symlink during HF sync: {rel}")
-        if not source.is_file():
-            continue
-        target = (export_root / rel).resolve()
-        if target != export_root and not target.is_relative_to(export_root):
-            raise ValueError(f"unsafe export path: {rel}")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+        _copy_export_file(repo_root, export_root, rel)
     _copy_hydrated_artifacts(repo_root, export_root)
+
+
+def _export_card_inputs(repo: Path, export_dir: Path) -> None:
+    repo_root = repo.resolve()
+    export_root = export_dir.resolve()
+    for rel in _iter_tracked_files(repo):
+        if rel in _CARD_ONLY_FILES or (rel.parts and rel.parts[0] == "docs"):
+            _copy_export_file(repo_root, export_root, rel)
+    _patch_export_readme(export_dir)
+
+
+def _copy_export_file(repo_root: Path, export_root: Path, rel: Path) -> None:
+    source = (repo_root / rel).resolve()
+    if source != repo_root and not source.is_relative_to(repo_root):
+        raise ValueError(f"unsafe source path: {rel}")
+    if source.is_symlink():
+        raise ValueError(f"refusing to follow symlink during HF sync: {rel}")
+    if not source.is_file():
+        return
+    target = (export_root / rel).resolve()
+    if target != export_root and not target.is_relative_to(export_root):
+        raise ValueError(f"unsafe export path: {rel}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
 
 
 def _copy_hydrated_artifacts(repo_root: Path, export_root: Path) -> None:
@@ -342,6 +357,25 @@ def _upload_readme_card(
         shutil.rmtree(workspace, ignore_errors=True)
 
 
+def _upload_card_inputs(
+    *,
+    api: Any,
+    export_dir: Path,
+    repo_id: str,
+    repo_type: str,
+    head: str,
+) -> str:
+    info = api.upload_folder(
+        repo_id=repo_id,
+        repo_type=repo_type,
+        folder_path=str(export_dir),
+        commit_message=f"Sync ctx card {head[:7]}",
+        commit_description=f"GitHub commit: {head}",
+        delete_patterns=list(CARD_ONLY_DELETE_PATTERNS),
+    )
+    return str(getattr(info, "commit_url", info))
+
+
 def sync_to_huggingface(
     *,
     repo: Path,
@@ -379,19 +413,26 @@ def sync_card_to_huggingface(
     repo_type: str,
     token: str,
 ) -> str:
-    """Upload only the Hugging Face repo card README."""
+    """Upload only Hugging Face repo-card inputs."""
     from huggingface_hub import HfApi
 
     head = _git(repo, "rev-parse", "HEAD")
-    api = HfApi(token=token)
-    _ensure_hf_repo_exists(api=api, repo_id=repo_id, repo_type=repo_type)
-    return _upload_readme_card(
-        api=api,
-        repo=repo,
-        repo_id=repo_id,
-        repo_type=repo_type,
-        head=head,
-    )
+    workspace = Path(tempfile.mkdtemp(prefix="ctx-hf-card-"))
+    export_dir = workspace / "export"
+    try:
+        export_dir.mkdir()
+        _export_card_inputs(repo, export_dir)
+        api = HfApi(token=token)
+        _ensure_hf_repo_exists(api=api, repo_id=repo_id, repo_type=repo_type)
+        return _upload_card_inputs(
+            api=api,
+            export_dir=export_dir,
+            repo_id=repo_id,
+            repo_type=repo_type,
+            head=head,
+        )
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
 
 
 def main() -> None:
@@ -412,7 +453,7 @@ def main() -> None:
     parser.add_argument(
         "--card-only",
         action="store_true",
-        help="Only refresh README.md repo-card metadata without uploading artifacts",
+        help="Only refresh repo-card inputs without uploading artifacts",
     )
     args = parser.parse_args()
     token = os.environ.get("HF_TOKEN")

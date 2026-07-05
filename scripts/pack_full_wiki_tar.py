@@ -13,8 +13,8 @@ from pathlib import Path, PurePosixPath
 from ctx.core.wiki.wiki_packs import load_merged_wiki_pages, write_wiki_base_pack
 
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
-_WINDOWS_USER_PATH_RE = re.compile(r"(?i)\b[A-Z]:[\\/]+Users[\\/]+[^\s`\"'<>|)]*")
-_POSIX_USER_PATH_RE = re.compile(r"/Users/[^\s`\"'<>|)]*")
+_WINDOWS_USER_PATH_RE = re.compile(r"(?i)\b[A-Z]:[\\/]+Users[\\/]+[^`\"'<>|\r\n)]*")
+_POSIX_USER_PATH_RE = re.compile(r"/Users/[^`\"'<>|\r\n)]*")
 _GRAPH_MANIFEST = "graphify-out/graph-export-manifest.json"
 _REQUIRED_EXPANDED_MARKDOWN = frozenset({"graphify-out/graph-report.md"})
 _LOCAL_GENERATED_MARKDOWN = frozenset(

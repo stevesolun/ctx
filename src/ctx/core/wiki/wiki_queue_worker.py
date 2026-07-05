@@ -612,8 +612,6 @@ def _resolve_artifact_promotion_paths(
         raise ValueError(
             f"artifact promotion staged_path must be the target sibling {expected_staged}"
         )
-    if not staged.is_file():
-        raise FileNotFoundError(f"staged artifact does not exist: {staged}")
     reject_symlink_path(staged)
     reject_symlink_path(target)
     return staged, target

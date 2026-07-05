@@ -219,6 +219,38 @@ def _coerce_trees(raw: Any, default: tuple[BackupTree, ...]) -> tuple[BackupTree
     return tuple(out)
 
 
+def _coerce_user_top_files(raw: Any) -> tuple[str, ...] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        _warn_ignored_config("top_files override must be a list")
+        return None
+    out: list[str] = []
+    for entry in raw:
+        try:
+            out.append(_validate_top_file(str(entry)))
+        except ValueError as exc:
+            _warn_ignored_config(f"ignoring top_files entry: {exc}")
+    return tuple(out)
+
+
+def _sanitize_user_override(raw: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(raw)
+    if "top_files" in sanitized:
+        top_files = _coerce_user_top_files(sanitized["top_files"])
+        if top_files is None:
+            sanitized.pop("top_files", None)
+        else:
+            sanitized["top_files"] = list(top_files)
+    return sanitized
+
+
+def _warn_ignored_config(message: str) -> None:
+    import sys as _sys
+
+    print(f"[backup-config] {message}", file=_sys.stderr)
+
+
 def _coerce_retention(raw: Any) -> BackupRetention:
     if not isinstance(raw, dict):
         return BackupRetention()
@@ -294,7 +326,7 @@ def from_ctx_config() -> BackupConfig:
         try:
             user_raw = json.loads(user_override.read_text(encoding="utf-8"))
             if isinstance(user_raw, dict):
-                _deep_merge(merged, user_raw)
+                _deep_merge(merged, _sanitize_user_override(user_raw))
         except (OSError, json.JSONDecodeError):
             pass
 
