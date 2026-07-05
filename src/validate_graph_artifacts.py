@@ -99,6 +99,7 @@ _EDGE_SCORE_FIELDS = (
     "token_sim",
 )
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+_HOST_USER_PATH_RE = re.compile(rb"(?:[A-Za-z]:[\\/]+Users[\\/]|/Users/)")
 _PREVIEW_HTML_FILES = (
     "sample-top60.html",
     "viz-ai-agents.html",
@@ -514,6 +515,19 @@ def _safe_tar_name(raw_name: str) -> str:
     return "/".join(parts)
 
 
+def _read_tar_member_bytes(tf: tarfile.TarFile, member: tarfile.TarInfo) -> bytes:
+    f = tf.extractfile(member)
+    if f is None:
+        raise GraphArtifactError(f"{member.name} could not be read")
+    with f:
+        return f.read()
+
+
+def _validate_archive_markdown_payload(name: str, payload: bytes, *, context: str) -> None:
+    if _HOST_USER_PATH_RE.search(payload):
+        raise GraphArtifactError(f"{context} markdown contains host path: {name}")
+
+
 def _count_lines(payload: bytes) -> int:
     return len(payload.decode("utf-8", errors="replace").splitlines())
 
@@ -876,11 +890,16 @@ def validate_graph_artifacts(
                 raise GraphArtifactError(
                     f"archive contains transient queue state: {member.name}",
                 )
+            markdown_payload: bytes | None = None
+            if member.isfile() and name.endswith(".md"):
+                markdown_payload = _read_tar_member_bytes(tf, member)
+                _validate_archive_markdown_payload(name, markdown_payload, context="archive")
             if member.isfile() and _is_converted_skill_page(name):
-                f = tf.extractfile(member)
-                if f is None:
-                    raise GraphArtifactError(f"{member.name} could not be read")
-                payload = f.read()
+                payload = (
+                    markdown_payload
+                    if markdown_payload is not None
+                    else _read_tar_member_bytes(tf, member)
+                )
                 for ref in _iter_skill_bundle_refs(payload):
                     skill_bundle_refs.append((name, ref, _skill_bundle_target_name(name, ref)))
                 if deep and name.startswith("converted/skills-sh-"):
@@ -925,10 +944,12 @@ def validate_graph_artifacts(
                     raise GraphArtifactError(f"{name} did not contain a JSON object")
                 manifest = data
             elif member.isfile() and name == "graphify-out/graph-report.md":
-                f = tf.extractfile(member)
-                if f is None:
-                    raise GraphArtifactError(f"{member.name} could not be read")
-                _record_export_id(export_ids, name, _export_id_from_report(f.read()))
+                payload = (
+                    markdown_payload
+                    if markdown_payload is not None
+                    else _read_tar_member_bytes(tf, member)
+                )
+                _record_export_id(export_ids, name, _export_id_from_report(payload))
             elif member.isfile() and name == "graphify-out/dashboard-neighborhoods.sqlite3":
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sqlite3")
                 tmp.close()
@@ -940,10 +961,12 @@ def validate_graph_artifacts(
                 _copy_wiki_pack_tar_member(tf, member, name, wiki_packs_dir)
             elif member.isfile() and deep and name.startswith("converted/skills-sh-"):
                 if name.endswith("/SKILL.md") or "/references/" in name:
-                    f = tf.extractfile(member)
-                    if f is None:
-                        raise GraphArtifactError(f"{member.name} could not be read")
-                    lines = _count_lines(f.read())
+                    payload = (
+                        markdown_payload
+                        if markdown_payload is not None
+                        else _read_tar_member_bytes(tf, member)
+                    )
+                    lines = _count_lines(payload)
                     limit = line_threshold if name.endswith("/SKILL.md") else max_stage_lines
                     if lines > limit:
                         raise GraphArtifactError(
@@ -1000,6 +1023,8 @@ def validate_graph_artifacts(
         wiki_pack_tmp.cleanup()
     for page_name, text in wiki_pack_pages.items():
         payload = text.encode("utf-8")
+        if page_name.endswith(".md"):
+            _validate_archive_markdown_payload(page_name, payload, context="wiki pack")
         if _is_converted_skill_page(page_name):
             for ref in _iter_skill_bundle_refs(payload):
                 skill_bundle_refs.append(
@@ -1168,6 +1193,14 @@ def _validate_runtime_graph_archive(
                 raise GraphArtifactError(
                     f"runtime archive contains transient queue state: {member.name}",
                 )
+            markdown_payload: bytes | None = None
+            if member.isfile() and name.endswith(".md"):
+                markdown_payload = _read_tar_member_bytes(tf, member)
+                _validate_archive_markdown_payload(
+                    name,
+                    markdown_payload,
+                    context="runtime archive",
+                )
             if member.isfile() and name == "graphify-out/graph.json":
                 f = tf.extractfile(member)
                 if f is None:
@@ -1185,10 +1218,12 @@ def _validate_runtime_graph_archive(
                     raise GraphArtifactError(f"{name} did not contain a JSON object")
                 manifest = data
             elif member.isfile() and name == "graphify-out/graph-report.md":
-                f = tf.extractfile(member)
-                if f is None:
-                    raise GraphArtifactError(f"{member.name} could not be read")
-                _record_export_id(export_ids, name, _export_id_from_report(f.read()))
+                payload = (
+                    markdown_payload
+                    if markdown_payload is not None
+                    else _read_tar_member_bytes(tf, member)
+                )
+                _record_export_id(export_ids, name, _export_id_from_report(payload))
             elif member.isfile() and name == "graphify-out/dashboard-neighborhoods.sqlite3":
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sqlite3")
                 tmp.close()

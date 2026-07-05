@@ -212,11 +212,11 @@ def _is_high_fanout_entity_page(name: str) -> bool:
 
 
 def _should_pack_markdown_page(name: str) -> bool:
-    return name.endswith(".md") and not name.startswith("wiki-packs/")
+    return name.endswith(".md") and name != "log.md" and not name.startswith("wiki-packs/")
 
 
 def _should_skip_expanded_markdown_member(name: str) -> bool:
-    return (
+    return name == "log.md" or (
         name.endswith(".md")
         and name not in _REQUIRED_EXPANDED_MARKDOWN
         and "/" in name

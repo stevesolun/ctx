@@ -23,6 +23,7 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
     target = tmp_path / "wiki-graph-packed.tar.gz"
     with tarfile.open(source, "w:gz") as tf:
         _add_text(tf, "index.md", "# Wiki\n")
+        _add_text(tf, "log.md", "local export: /Users/steves/ctx C:\\Users\\steves\\ctx\n")
         _add_text(tf, "entities/skills/current.md", "# Current Skill\n")
         _add_text(tf, "entities/skills/empty.md", "")
         _add_text(tf, "entities/agents/reviewer.md", "# Reviewer Agent\n")
@@ -40,7 +41,7 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
 
     stats = repack_full_wiki_tar(source, target)
 
-    assert stats.removed_expanded_markdown_pages == 5
+    assert stats.removed_expanded_markdown_pages == 6
     assert stats.packed_pages == 8
     with tarfile.open(target, "r:gz") as tf:
         names = {member.name for member in tf.getmembers()}
@@ -52,6 +53,7 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
     assert "entities/mcp-servers/github.md" not in names
     assert "entities/harnesses/langgraph.md" in names
     assert "concepts/empty.md" not in names
+    assert "log.md" not in names
     assert "graphify-out/graph-report.md" in names
     assert "wiki-packs/base-test-export/wiki-pack-manifest.json" in names
     assert "wiki-packs/base-test-export/pages.jsonl" in names
@@ -62,6 +64,7 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
     assert pages["entities/agents/reviewer.md"] == "# Reviewer Agent\n"
     assert pages["entities/mcp-servers/github.md"] == "# GitHub MCP\n"
     assert pages["concepts/empty.md"] == "<!-- empty markdown page -->\n"
+    assert "log.md" not in pages
 
     second_target = tmp_path / "wiki-graph-packed-again.tar.gz"
     repack_full_wiki_tar(target, second_target)

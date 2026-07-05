@@ -298,6 +298,7 @@ def _write_archive(
     include_original: bool = False,
     include_lock: bool = False,
     include_queue: bool = False,
+    top_level_log: str | None = None,
     include_delta: bool = True,
     include_report: bool = True,
     include_manifest: bool = True,
@@ -333,6 +334,8 @@ def _write_archive(
         wiki_pack_dir = _write_test_wiki_pack(graph_dir, export_id=manifest_export_id)
     with tarfile.open(graph_dir / "wiki-graph.tar.gz", "w:gz") as tf:
         _add_text(tf, "./index.md", "# Wiki\n")
+        if top_level_log is not None:
+            _add_text(tf, "./log.md", top_level_log)
         if include_wiki_pack and wiki_pack_dir is not None:
             for path in sorted(wiki_pack_dir.rglob("*")):
                 if path.is_file():
@@ -1116,6 +1119,30 @@ def test_validate_graph_artifacts_rejects_lock_members(tmp_path: Path) -> None:
 
     with pytest.raises(GraphArtifactError, match="lock member"):
         validate_graph_artifacts(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "host_path",
+    [
+        "/Users/steves/ctx/graph",
+        "C:\\Users\\steves\\ctx\\graph",
+    ],
+)
+def test_validate_graph_artifacts_rejects_host_paths_in_tar_markdown(
+    tmp_path: Path,
+    host_path: str,
+) -> None:
+    _write_catalog(
+        tmp_path,
+        converted_path="converted/skills-sh-example-skill/SKILL.md",
+    )
+    _write_archive(tmp_path, top_level_log=f"export log: {host_path}\n")
+
+    with pytest.raises(
+        GraphArtifactError,
+        match=r"archive markdown contains host path: log\.md",
+    ):
+        validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
 
 
 def test_validate_graph_artifacts_rejects_transient_queue_state(tmp_path: Path) -> None:
