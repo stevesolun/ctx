@@ -54,12 +54,15 @@ Schema v1::
 
 ``processed`` slugs skip entirely on resume. ``failures`` are kept
 separate so ``--retry-failures`` can target just them without re-doing
-the 9k successful records.
+the 9k successful records. Missing, corrupt, wrong-source, wrong-version,
+or wrong-shape checkpoints fail open to a fresh checkpoint, including
+scalar or nested member shapes inside ``processed`` and ``failures``.
 
 Dry runs validate and route records through ``mcp_add`` without writing
 entity files or checkpoint state. They still exit non-zero when the
-current dry-run invocation sees parse/add failures, but prior checkpoint
-failures do not poison the dry-run exit status.
+current dry-run invocation sees malformed JSONL, non-object JSON, parse
+failures, or add failures, but prior checkpoint failures do not poison
+the dry-run exit status.
 
 Interrupts
 ----------

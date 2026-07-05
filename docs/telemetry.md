@@ -14,6 +14,7 @@ Events use the `ctx.telemetry.v1` envelope and OpenTelemetry-style naming:
 - `ctx.api.recommend_bundle`
 - `ctx.api.recommend_related`
 - `ctx.mcp.request`
+- `ctx.mcp.external_tool_call`
 - `ctx.core.recommend_bundle`
 - `ctx.core.recommend_related`
 - `ctx.runtime_lifecycle.record`
@@ -24,14 +25,24 @@ Outcome and dimensions live in attributes such as `otel.status_code`,
 `ctx.operation`, `ctx.tool.name`, `ctx.result.count`,
 `ctx.selection.selected.count`, `ctx.selection.rejected.count`,
 `ctx.selection.source`, `ctx.selection.selected`, `ctx.usage.attribution`, and
-hashed identifiers like `ctx.query.hash`, `ctx.slug.hash`, or
-`ctx.session.hash`.
+failure/correlation attributes such as `ctx.run.failure_stage`,
+`ctx.session.previous_trace_id`, `ctx.traceparent.received`, and hashed
+identifiers like `ctx.query.hash`, `ctx.slug.hash`, or `ctx.session.hash`.
 
 Every recorded event gets a generated OpenTelemetry-compatible `trace_id` and
-`span_id` when the caller does not provide one. OTLP export maps those to the
-log record `traceId` and `spanId` fields and also includes ctx release
-provenance as `ctx.version`. In installed wheels this comes from package
-metadata; in source checkouts it falls back to `ctx.__version__`.
+`span_id` when the caller does not provide one. The local envelope also keeps
+`parent_span_id` when a span was parented to another ctx span or to inbound MCP
+`traceparent` metadata. OTLP export maps trace and span ids to the log record
+`traceId` and `spanId` fields and also includes ctx release provenance as
+`ctx.version`. In installed wheels this comes from package metadata; in source
+checkouts it falls back to `ctx.__version__`.
+
+The `ctx run` session log stores the initial CLI trace id so `ctx resume` can
+emit `ctx.session.previous_trace_id` without exposing raw prompts. When the
+generic MCP router calls an external MCP server, it records
+`ctx.mcp.external_tool_call`, injects W3C `traceparent` plus a hashed session
+correlator into JSON-RPC `_meta`, and the ctx MCP server parents request spans
+to valid inbound trace metadata.
 
 ## Metric Shape
 
@@ -57,6 +68,10 @@ Runtime lifecycle token usage emits OTel-style metric names when a host records
 - `ctx.tool_usage.tokens` counts total tokens when the record has a
   non-negative `total_tokens` value.
 - `ctx.tool_usage.tokens_per_record` observes the same total as a histogram.
+
+Those metric points are recorded inside the same telemetry span as the
+`ctx.runtime_lifecycle.record` event that describes the usage, so trace/span
+correlation stays aligned across event and metric signals.
 
 Attribution is always explicit through `ctx.usage.attribution`:
 `exact`, `estimated`, or `unavailable`. The built-in `ctx run` provider totals
@@ -416,7 +431,7 @@ raw message text:
 | Error rate | count logs where `otel.status_code = ERROR`, grouped by `ctx.source` |
 | Exception fingerprints | count logs grouped by `ctx.exception.fingerprint`, `ctx.exception.type` |
 | API latency | histogram metric `ctx.api.duration` by `ctx.operation` |
-| CLI/runtime usage | count logs for `ctx.cli.run`, `ctx.cli.resume`, `ctx.runtime_lifecycle.record` |
+| CLI/runtime usage | count logs for `ctx.cli.run`, `ctx.cli.resume`, `ctx.runtime_lifecycle.record`, `ctx.mcp.external_tool_call` |
 | Exporter health | status JSON fields `status`, `attempted`, `exported`, `failed`, `malformed_pending_records`, `error_kind` |
 | Spool growth | `event_count`, `malformed_records`, and checkpoint age from `/api/status.json` |
 

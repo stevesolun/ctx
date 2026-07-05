@@ -448,7 +448,7 @@ def _valid_span_id(value: str) -> bool:
 
 
 def traceparent_from_span(span: TelemetrySpan | None = None) -> str | None:
-    """Return a W3C traceparent header value for the current telemetry span."""
+    """Return a W3C traceparent header for ``span`` or the active span."""
 
     resolved = span if span is not None else _CURRENT_SPAN.get()
     if resolved is None:
@@ -479,7 +479,12 @@ def telemetry_span(
     span_id: str | None = None,
     parent_span_id: str | None = None,
 ) -> Iterator[TelemetrySpan]:
-    """Start a nested telemetry span using OpenTelemetry-compatible IDs."""
+    """Start a telemetry span using OpenTelemetry-compatible IDs.
+
+    An active span is always the parent. ``parent_span_id`` is used only when
+    importing an external trace, such as MCP ``traceparent`` metadata, with no
+    active local span.
+    """
 
     parent = _CURRENT_SPAN.get()
     span = TelemetrySpan(
