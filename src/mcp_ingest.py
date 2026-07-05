@@ -80,7 +80,7 @@ import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, TypedDict
+from typing import Any, Iterable, TypedDict, cast
 
 from ctx.utils._fs_utils import atomic_write_json
 from ctx_config import cfg
@@ -101,6 +101,7 @@ __all__ = [
 CHECKPOINT_SUBDIR = ".ingest-checkpoint"
 CHECKPOINT_VERSION = 1
 DEFAULT_FLUSH_EVERY = 10
+_INPUT_ERROR_KEY = "__ctx_mcp_ingest_input_error__"
 
 
 class _ProcessedEntry(TypedDict):
@@ -161,6 +162,17 @@ def _empty_checkpoint(source: str) -> IngestCheckpoint:
     }
 
 
+def _is_checkpoint_entry_map(value: object, required_key: str) -> bool:
+    if not isinstance(value, dict):
+        return False
+    for slug, entry in value.items():
+        if not isinstance(slug, str) or not isinstance(entry, dict):
+            return False
+        if not isinstance(entry.get(required_key), str) or not isinstance(entry.get("at"), str):
+            return False
+    return True
+
+
 def load_checkpoint(wiki_path: Path, source: str) -> IngestCheckpoint:
     """Load ``source``'s checkpoint. Return an empty one on any failure.
 
@@ -183,18 +195,27 @@ def load_checkpoint(wiki_path: Path, source: str) -> IngestCheckpoint:
         # Defensive: someone hand-copied a checkpoint or the filename
         # was renamed. Treat as mismatch rather than silently conflating.
         return _empty_checkpoint(source)
-    processed = data.get("processed") or {}
-    failures = data.get("failures") or {}
-    if not isinstance(processed, dict) or not isinstance(failures, dict):
+    started_at = data.get("started_at") or _now_iso()
+    updated_at = data.get("updated_at") or _now_iso()
+    total_seen = data.get("total_seen", 0)
+    processed = data.get("processed", {})
+    failures = data.get("failures", {})
+    if not isinstance(started_at, str) or not isinstance(updated_at, str):
+        return _empty_checkpoint(source)
+    if not isinstance(total_seen, int) or isinstance(total_seen, bool) or total_seen < 0:
+        return _empty_checkpoint(source)
+    if not _is_checkpoint_entry_map(processed, "result") or not _is_checkpoint_entry_map(
+        failures, "error"
+    ):
         return _empty_checkpoint(source)
     return {
         "version": CHECKPOINT_VERSION,
         "source": source,
-        "started_at": str(data.get("started_at") or _now_iso()),
-        "updated_at": str(data.get("updated_at") or _now_iso()),
-        "total_seen": int(data.get("total_seen") or 0),
-        "processed": processed,
-        "failures": failures,
+        "started_at": started_at,
+        "updated_at": updated_at,
+        "total_seen": total_seen,
+        "processed": cast(dict[str, _ProcessedEntry], processed),
+        "failures": cast(dict[str, _FailureEntry], failures),
     }
 
 
@@ -243,7 +264,7 @@ class _GracefulExit:
 
 
 def ingest_records(
-    records: Iterable[dict[str, Any]],
+    records: Iterable[object],
     *,
     source: str,
     wiki_path: Path,
@@ -285,7 +306,28 @@ def ingest_records(
         checkpoint["total_seen"] += 1
         seen_this_run += 1
 
-        raw_slug = raw.get("slug") or "<unknown>"
+        if isinstance(raw, dict):
+            raw_slug = raw.get("slug") or "<unknown>"
+            input_error = raw.get(_INPUT_ERROR_KEY)
+        else:
+            raw_slug = "<unknown>"
+            input_error = f"expected record object, got {type(raw).__name__}"
+        if isinstance(input_error, str):
+            errored += 1
+            _record_current_failure(str(raw_slug))
+            if not dry_run:
+                checkpoint["failures"][str(raw_slug)] = {
+                    "error": input_error,
+                    "at": _now_iso(),
+                }
+            _progress(seen_this_run, str(raw_slug), "input-error")
+            if not dry_run and seen_this_run % flush_every == 0:
+                save_checkpoint(wiki_path, checkpoint)
+            if graceful and graceful.requested:
+                break
+            continue
+
+        assert isinstance(raw, dict)
 
         # Parse first so checkpoint key matches record.slug exactly.
         # Malformed records go to failures keyed by the raw slug we have.
@@ -394,9 +436,27 @@ def _iter_records_from(
     of streaming from ``ctx-mcp-fetch | ctx-mcp-ingest``. JSONL readers
     yield per line; the JSON-object reader is a single-record degenerate.
     """
+    def _input_error(slug: str, message: str) -> dict[str, Any]:
+        return {"slug": slug, _INPUT_ERROR_KEY: message}
+
+    def _decoded_record(value: Any, slug: str, label: str) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        message = f"expected JSON object, got {type(value).__name__}"
+        print(f"Error: {label} {message}", file=sys.stderr)
+        return _input_error(slug, message)
+
     if args.from_json:
         path = Path(os.path.expanduser(args.from_json))
-        yield json.loads(path.read_text(encoding="utf-8"))
+        try:
+            yield _decoded_record(
+                json.loads(path.read_text(encoding="utf-8")),
+                f"{path}:json",
+                str(path),
+            )
+        except json.JSONDecodeError as exc:
+            print(f"Error: bad JSON in {path}: {exc}", file=sys.stderr)
+            yield _input_error(f"{path}:json", f"bad JSON: {exc}")
         return
     if args.from_jsonl:
         path = Path(os.path.expanduser(args.from_jsonl))
@@ -405,9 +465,14 @@ def _iter_records_from(
             if not line:
                 continue
             try:
-                yield json.loads(line)
+                yield _decoded_record(
+                    json.loads(line),
+                    f"{path}:line:{lineno}",
+                    f"line {lineno}",
+                )
             except json.JSONDecodeError as exc:
-                print(f"Warning: line {lineno} bad JSON: {exc}", file=sys.stderr)
+                print(f"Error: line {lineno} bad JSON: {exc}", file=sys.stderr)
+                yield _input_error(f"{path}:line:{lineno}", f"bad JSON: {exc}")
         return
     # Default: stdin.
     for lineno, raw in enumerate(sys.stdin, 1):
@@ -415,9 +480,10 @@ def _iter_records_from(
         if not line:
             continue
         try:
-            yield json.loads(line)
+            yield _decoded_record(json.loads(line), f"<stdin>:line:{lineno}", f"stdin line {lineno}")
         except json.JSONDecodeError as exc:
-            print(f"Warning: stdin line {lineno} bad JSON: {exc}", file=sys.stderr)
+            print(f"Error: stdin line {lineno} bad JSON: {exc}", file=sys.stderr)
+            yield _input_error(f"<stdin>:line:{lineno}", f"bad JSON: {exc}")
 
 
 def _print_status(wiki_path: Path, source: str) -> None:
