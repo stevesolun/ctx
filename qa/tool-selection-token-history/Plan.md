@@ -194,7 +194,11 @@ Candidate files:
 Validation:
 
 ```sh
-/tmp/ctx-verify-venv/bin/python -m pytest -q -p no:cacheprovider src/tests/test_feature_user_story_tracker.py src/tests/test_dashboard_user_story_tracker.py
+/tmp/ctx-verify-venv/bin/python -m pytest -q -p no:cacheprovider \
+  src/tests/test_bug_smoke_tracker.py \
+  src/tests/test_feature_user_story_tracker.py \
+  src/tests/test_dashboard_user_story_tracker.py \
+  src/tests/test_toolbox_cli.py
 /tmp/ctx-verify-venv/bin/python -m mkdocs build --strict
 ```
 
