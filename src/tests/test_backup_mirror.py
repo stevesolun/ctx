@@ -463,3 +463,15 @@ def test_cli_prune_keeps_newest(fake_home):
     rc = bm.main(["prune", "--keep", "1"])
     assert rc == 0
     assert len(bm.list_snapshots()) == 1
+
+
+def test_cli_prune_keep_dry_run_does_not_delete(fake_home, capsys):
+    _seed_home(fake_home)
+    bm.create_snapshot(now=1.0)
+    bm.create_snapshot(now=2.0)
+    bm.create_snapshot(now=3.0)
+    rc = bm.main(["prune", "--keep", "1", "--dry-run"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "would remove" in out
+    assert len(bm.list_snapshots()) == 3

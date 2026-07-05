@@ -41,6 +41,27 @@ ALWAYS_EXCLUDE: frozenset[str] = frozenset(
 _ALLOWED_SCOPES: frozenset[str] = frozenset({"full", "incremental", "hybrid"})
 
 
+def _validate_top_file(value: str) -> str:
+    """Validate a top-level file name from backup.top_files."""
+    value = value.strip()
+    if not value:
+        raise ValueError("top_files[] must be a non-empty filename")
+    parts = value.replace("\\", "/").split("/")
+    if any(part == ".." for part in parts):
+        raise ValueError(f"top_files[]: {value!r} contains '..' path traversal")
+    if value == ".":
+        raise ValueError("top_files[]: '.' is not a filename")
+    if value.startswith(("//", "\\\\")):
+        raise ValueError(f"top_files[]: {value!r} is a UNC path")
+    if len(value) >= 2 and value[1] == ":":
+        raise ValueError(f"top_files[]: {value!r} contains a drive letter")
+    if value.startswith(("/", "\\")):
+        raise ValueError(f"top_files[]: {value!r} is absolute")
+    if "/" in value or "\\" in value:
+        raise ValueError(f"top_files[]: {value!r} contains a path separator")
+    return value
+
+
 # ── Schema ──────────────────────────────────────────────────────────────────
 
 
@@ -115,11 +136,10 @@ class BackupConfig:
             raise ValueError(f"retention.keep_daily must be >= 0, got {self.retention.keep_daily}")
         if "{timestamp}" not in self.name_format:
             raise ValueError(f"name_format must contain '{{timestamp}}', got {self.name_format!r}")
+        validated_top = tuple(_validate_top_file(str(name)) for name in self.top_files)
         # Silently drop ALWAYS_EXCLUDE names from top_files. frozen
         # dataclass requires object.__setattr__ for the rewrite.
-        filtered_top = tuple(
-            name for name in self.top_files if Path(name).name not in ALWAYS_EXCLUDE
-        )
+        filtered_top = tuple(name for name in validated_top if name not in ALWAYS_EXCLUDE)
         if filtered_top != self.top_files:
             object.__setattr__(self, "top_files", filtered_top)
 

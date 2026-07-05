@@ -654,7 +654,12 @@ def _delete_snapshot_dirs(
     return removed
 
 
-def prune_snapshots(keep: int, backups_dir: Path | None = None) -> tuple[str, ...]:
+def prune_snapshots(
+    keep: int,
+    backups_dir: Path | None = None,
+    *,
+    dry_run: bool = False,
+) -> tuple[str, ...]:
     """Legacy prune: keep only the ``keep`` newest snapshots.
 
     Retained for backward compatibility. New callers should prefer
@@ -666,6 +671,8 @@ def prune_snapshots(keep: int, backups_dir: Path | None = None) -> tuple[str, ..
     backups_dir = backups_dir if backups_dir is not None else BACKUPS_DIR
     snaps = list_snapshots(backups_dir)
     to_remove = snaps[keep:]
+    if dry_run:
+        return tuple(s.snapshot_id for s in to_remove)
     return tuple(_delete_snapshot_dirs(to_remove, backups_dir))
 
 
@@ -916,10 +923,11 @@ def cmd_prune(args: argparse.Namespace) -> int:
     if args.keep is None:
         print("prune requires either --policy or --keep N", file=sys.stderr)
         return 2
-    removed = prune_snapshots(args.keep)
+    removed = prune_snapshots(args.keep, dry_run=args.dry_run)
     for r in removed:
-        print(f"removed {r}")
-    print(f"kept {args.keep} newest snapshot(s); removed {len(removed)}.")
+        print(f"{'would remove' if args.dry_run else 'removed'} {r}")
+    action = "would remove" if args.dry_run else "removed"
+    print(f"kept {args.keep} newest snapshot(s); {action} {len(removed)}.")
     return 0
 
 

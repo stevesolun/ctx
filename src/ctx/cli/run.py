@@ -55,6 +55,7 @@ from ctx.adapters.generic.state import (
 )
 from ctx.adapters.generic.tools import McpRouter, McpServerConfig
 from ctx.telemetry import record_event, record_exception, telemetry_span
+from ctx.utils._secret_scan import find_inline_secret_arg
 
 
 _logger = logging.getLogger(__name__)
@@ -279,6 +280,12 @@ def _parse_mcp_spec(spec: str) -> McpServerConfig:
             raise SystemExit(f"malformed --mcp spec: {spec!r}: {exc}") from exc
         if not parts:
             raise SystemExit(f"malformed --mcp spec: {spec!r}")
+        secret_arg = find_inline_secret_arg(parts)
+        if secret_arg is not None:
+            raise SystemExit(
+                f"--mcp inline command for server {name!r} contains secret-looking "
+                f"argv {secret_arg!r}; use --mcp-env {name}:ENVVAR instead"
+            )
         if name == "filesystem" and len(parts) == 1:
             filesystem_preset = _MCP_PRESETS["filesystem"]
             return McpServerConfig(
