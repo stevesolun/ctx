@@ -403,14 +403,10 @@ def _validate_session_id(raw: str) -> str:
 def _record_runtime_lifecycle_telemetry(event: dict[str, Any]) -> None:
     token_usage = event.get("token_usage")
     usage_attribution: str | None = None
+    total_tokens: Any = None
     if isinstance(token_usage, dict):
         usage_attribution = str(token_usage.get("attribution") or "unavailable")
         total_tokens = token_usage.get("total_tokens")
-        _record_token_usage_metrics(
-            event,
-            attribution=usage_attribution,
-            total_tokens=total_tokens if isinstance(total_tokens, int) else None,
-        )
     payload: dict[str, Any] = {
         "ctx.lifecycle.action": str(event.get("action") or ""),
         "ctx.payload.present": bool(event.get("payload")),
@@ -445,10 +441,16 @@ def _record_runtime_lifecycle_telemetry(event: dict[str, Any]) -> None:
         payload["ctx.usage.cost_usd"] = (
             float(cost_value) if isinstance(cost_value, (int, float)) else None
         )
-    if not telemetry_enabled():
-        return
     try:
         with telemetry_span():
+            if isinstance(token_usage, dict) and usage_attribution is not None:
+                _record_token_usage_metrics(
+                    event,
+                    attribution=usage_attribution,
+                    total_tokens=total_tokens if isinstance(total_tokens, int) else None,
+                )
+            if not telemetry_enabled():
+                return
             record_event(
                 "ctx.runtime_lifecycle.record",
                 source="ctx-runtime-lifecycle",

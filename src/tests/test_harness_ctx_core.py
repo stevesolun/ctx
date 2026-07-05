@@ -807,6 +807,61 @@ class TestRuntimeLifecycle:
         assert "[redacted]" in payload
         assert "[redacted-path]" in payload
 
+    def test_runtime_lifecycle_usage_metrics_share_lifecycle_span(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from ctx.adapters.generic import runtime_lifecycle
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+        from ctx.telemetry import current_telemetry_span
+        from ctx.telemetry import telemetry_span
+
+        spans: list[tuple[str, str, str, str, str | None]] = []
+
+        def capture_span(kind: str, name: str) -> None:
+            span = current_telemetry_span()
+            assert span is not None
+            spans.append((kind, name, span.trace_id, span.span_id, span.parent_span_id))
+
+        def capture_record_event(event_name: str, **kwargs: Any) -> None:  # noqa: ARG001
+            capture_span("event", event_name)
+
+        def capture_counter(name: str, **kwargs: Any) -> None:  # noqa: ARG001
+            capture_span("metric", name)
+
+        def capture_histogram(name: str, **kwargs: Any) -> None:  # noqa: ARG001
+            capture_span("metric", name)
+
+        monkeypatch.setattr(runtime_lifecycle, "telemetry_enabled", lambda: True)
+        monkeypatch.setattr(runtime_lifecycle, "record_event", capture_record_event)
+        monkeypatch.setattr(runtime_lifecycle, "record_counter", capture_counter)
+        monkeypatch.setattr(runtime_lifecycle, "record_histogram", capture_histogram)
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+        with telemetry_span() as parent:
+            store.mark_entity_used(
+                session_id="s-span",
+                entity_type="skill",
+                slug="fastapi-pro",
+                token_usage={
+                    "attribution": "exact",
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                },
+            )
+
+        event_span = next(item for item in spans if item[0] == "event")
+        metric_spans = [item for item in spans if item[0] == "metric"]
+        assert [item[1] for item in metric_spans] == [
+            "ctx.tool_usage.records",
+            "ctx.tool_usage.tokens",
+            "ctx.tool_usage.tokens_per_record",
+        ]
+        assert event_span[4] == parent.span_id
+        assert all(item[2] == event_span[2] for item in metric_spans)
+        assert all(item[3] == event_span[3] for item in metric_spans)
+
     def test_lifecycle_tools_append_events(
         self,
         toolbox: CtxCoreToolbox,
