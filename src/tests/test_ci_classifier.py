@@ -202,6 +202,18 @@ def test_no_test_policy_treats_all_workflows_as_contract_files() -> None:
         assert result.contract_files == (workflow,)
 
 
+def test_no_test_policy_requires_tests_for_release_sync_artifact_scripts() -> None:
+    for script in (
+        "scripts/sync_huggingface.py",
+        "scripts/pack_full_wiki_tar.py",
+        "scripts/graph_artifact_guard.py",
+    ):
+        result = evaluate_policy([script], (), {script: "+print('changed')\n"})
+
+        assert result.passed is False
+        assert result.contract_files == (script,)
+
+
 def test_ci_workflows_default_to_read_only_token_permissions() -> None:
     for workflow_path in _workflow_paths():
         workflow = workflow_path.read_text(encoding="utf-8")

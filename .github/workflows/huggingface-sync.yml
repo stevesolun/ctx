@@ -67,7 +67,7 @@ jobs:
               for line in Path("changed-files.txt").read_text(encoding="utf-8").splitlines()
               if line.strip()
           ]
-          card_only_prefixes = (".github/", "docs/", "src/tests/")
+          card_only_prefixes = ("docs/",)
           card_only_files = {"README.md", "CHANGELOG.md"}
           card_only = bool(files) and all(
               path in card_only_files or path.startswith(card_only_prefixes)

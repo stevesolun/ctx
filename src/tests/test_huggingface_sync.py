@@ -172,6 +172,8 @@ def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:
     assert "--repo-type dataset" in text
     assert "--repo-type model" not in text
     assert "Classify sync scope" in text
+    assert 'card_only_prefixes = ("docs/",)' in text
+    assert 'card_only_prefixes = (".github/", "docs/", "src/tests/")' not in text
     assert "card_only_files" in text
     assert 'SYNC_MODE" == "card"' in text
     assert "--card-only" in text
