@@ -21,6 +21,7 @@ Contracts pinned:
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -436,6 +437,50 @@ class TestOutcomes:
 
 
 class TestDryRunCliExitStatus:
+    def test_jsonl_file_is_streamed_without_read_text(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        record_path = tmp_path / "records.jsonl"
+        record_path.write_text(json.dumps(_record_dict("streamed")) + "\n", encoding="utf-8")
+
+        def _fail_read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+            raise AssertionError(f"unexpected read_text for {self}")
+
+        monkeypatch.setattr(Path, "read_text", _fail_read_text)
+
+        rows = list(
+            mcp_ingest._iter_records_from(
+                argparse.Namespace(from_json=None, from_jsonl=str(record_path))
+            )
+        )
+
+        assert rows == [_record_dict("streamed")]
+
+    def test_status_does_not_create_wiki_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        wiki = tmp_path / "missing-wiki"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "ctx-mcp-ingest",
+                "--source",
+                "src",
+                "--wiki",
+                str(wiki),
+                "--status",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            mcp_ingest.main()
+
+        captured = capsys.readouterr()
+        assert exc.value.code == 0
+        assert "source:       src" in captured.out
+        assert not wiki.exists()
+
     def test_parse_error_exits_nonzero_without_checkpoint(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

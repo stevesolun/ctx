@@ -600,8 +600,11 @@ class TestFlattenContent:
     def test_resource_block_summarised(self) -> None:
         from ctx.adapters.generic.tools.mcp_router import _flatten_content
 
-        out = _flatten_content([{"type": "resource", "resource": {"uri": "file:///x.md"}}])
-        assert "[resource: file:///x.md]" in out
+        out = _flatten_content(
+            [{"type": "resource", "resource": {"uri": "file:///Users/alice/private/x.md"}}]
+        )
+        assert "[resource omitted]" in out
+        assert "file:///Users/alice/private/x.md" not in out
 
     def test_unknown_type(self) -> None:
         from ctx.adapters.generic.tools.mcp_router import _flatten_content

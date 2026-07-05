@@ -572,6 +572,20 @@ def sanitize_docs_html(rendered_html: str) -> str:
             return tag_html
         return html.escape(tag_html)
 
+    def has_active_url_scheme(value: str) -> bool:
+        normalised = re.sub(r"[\x00-\x20\x7f]+", "", html.unescape(value)).lower()
+        return normalised.startswith(("javascript:", "data:text/html"))
+
+    def neutralise_active_url_attr(match: re.Match[str]) -> str:
+        attr_name = match.group(1)
+        raw_value = match.group(2)
+        value = raw_value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if has_active_url_scheme(value):
+            return f' {attr_name}="#"'
+        return match.group(0)
+
     for tag in dangerous_blocks:
         rendered_html = re.sub(
             rf"<\s*{tag}\b[^>]*>.*?<\s*/\s*{tag}\s*>",
@@ -608,8 +622,8 @@ def sanitize_docs_html(rendered_html: str) -> str:
         flags=re.IGNORECASE,
     )
     rendered_html = re.sub(
-        r"\s+(href|src)\s*=\s*(?:\"\s*(?:javascript:|data:text/html)[^\"]*\"|'\s*(?:javascript:|data:text/html)[^']*'|(?:javascript:|data:text/html)[^\s>]*)",
-        lambda match: f' {match.group(1)}="#"',
+        r"\s+(href|src|xlink:href|formaction)\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]*)",
+        neutralise_active_url_attr,
         rendered_html,
         flags=re.IGNORECASE,
     )

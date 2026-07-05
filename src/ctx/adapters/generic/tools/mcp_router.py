@@ -806,8 +806,7 @@ def _flatten_content(content: list[Any] | None) -> str:
             mime = block.get("mimeType", "image/*")
             parts.append(f"[{mime} image omitted]")
         elif btype == "resource":
-            uri = block.get("resource", {}).get("uri", "<no-uri>")
-            parts.append(f"[resource: {uri}]")
+            parts.append("[resource omitted]")
         else:
             parts.append(f"[{btype or 'unknown'} block omitted]")
     return "".join(parts)

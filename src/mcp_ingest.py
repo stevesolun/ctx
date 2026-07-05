@@ -464,19 +464,20 @@ def _iter_records_from(
         return
     if args.from_jsonl:
         path = Path(os.path.expanduser(args.from_jsonl))
-        for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            line = raw.strip()
-            if not line:
-                continue
-            try:
-                yield _decoded_record(
-                    json.loads(line),
-                    f"{path}:line:{lineno}",
-                    f"line {lineno}",
-                )
-            except json.JSONDecodeError as exc:
-                print(f"Error: line {lineno} bad JSON: {exc}", file=sys.stderr)
-                yield _input_error(f"{path}:line:{lineno}", f"bad JSON: {exc}")
+        with path.open(encoding="utf-8") as handle:
+            for lineno, raw in enumerate(handle, 1):
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    yield _decoded_record(
+                        json.loads(line),
+                        f"{path}:line:{lineno}",
+                        f"line {lineno}",
+                    )
+                except json.JSONDecodeError as exc:
+                    print(f"Error: line {lineno} bad JSON: {exc}", file=sys.stderr)
+                    yield _input_error(f"{path}:line:{lineno}", f"bad JSON: {exc}")
         return
     # Default: stdin.
     for lineno, raw in enumerate(sys.stdin, 1):
@@ -594,11 +595,12 @@ def main() -> None:
     args = parser.parse_args()
 
     wiki_path = Path(os.path.expanduser(args.wiki))
-    ensure_wiki(str(wiki_path))
 
     if args.status:
         _print_status(wiki_path, args.source)
         sys.exit(0)
+
+    ensure_wiki(str(wiki_path))
 
     if args.flush_every <= 0:
         print("Error: --flush-every must be a positive integer", file=sys.stderr)
