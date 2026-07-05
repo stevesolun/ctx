@@ -33,6 +33,7 @@ _ESCALATION_STATUSES = {"open", "resolved", "ignored"}
 _SELECTION_SOURCES = {"user", "system", "host", "unknown"}
 _TOKEN_ATTRIBUTIONS = {"exact", "estimated", "unavailable"}
 _LIFECYCLE_SANITIZER_CONFIG = {"enabled": True, "mode": "local_redacted"}
+_LIFECYCLE_FREE_TEXT_FIELDS = ("reason", "evidence", "command", "summary", "trigger")
 _PATH_SEGMENT_RE = r"[^/\s'\"`<>|:;,\)\]]+"
 _UNIX_ABSOLUTE_PATH_RE = re.compile(rf"(?<![\w./-])/(?:{_PATH_SEGMENT_RE}/)+{_PATH_SEGMENT_RE}")
 _TILDE_PATH_RE = re.compile(rf"(?<![\w./-])~/(?:{_PATH_SEGMENT_RE}/)*{_PATH_SEGMENT_RE}")
@@ -353,15 +354,23 @@ def _sanitize_lifecycle_event(event: dict[str, Any]) -> dict[str, Any]:
     security_scan = redacted.get("security_scan")
     if isinstance(security_scan, dict):
         redacted["security_scan"] = _sanitize_security_scan(security_scan)
+    for field in _LIFECYCLE_FREE_TEXT_FIELDS:
+        value = redacted.get(field)
+        if isinstance(value, str):
+            redacted[field] = _sanitize_free_text(value)
     cwd = redacted.pop("cwd", None)
     if isinstance(cwd, str) and cwd:
         redacted["cwd_hash"] = hash_identifier(cwd)
     return redacted
 
 
+def _sanitize_free_text(text: str) -> str:
+    return _redact_path_text(redact_secret_text(text))
+
+
 def _sanitize_security_scan(raw: Any) -> Any:
     if isinstance(raw, str):
-        return _redact_path_text(redact_secret_text(raw))
+        return _sanitize_free_text(raw)
     if isinstance(raw, list):
         return [_sanitize_security_scan(item) for item in raw]
     if isinstance(raw, tuple):

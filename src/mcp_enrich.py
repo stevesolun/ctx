@@ -174,12 +174,22 @@ def load_checkpoint(wiki_path: Path, source: str) -> dict:
     failures = data.get("failures") or {}
     if not isinstance(processed, dict) or not isinstance(failures, dict):
         return _empty_checkpoint(source)
+    if not all(
+        isinstance(key, str) and isinstance(value, dict) for key, value in processed.items()
+    ):
+        return _empty_checkpoint(source)
+    if not all(isinstance(key, str) and isinstance(value, dict) for key, value in failures.items()):
+        return _empty_checkpoint(source)
+    try:
+        total_seen = int(data.get("total_seen") or 0)
+    except (TypeError, ValueError):
+        return _empty_checkpoint(source)
     return {
         "version": CHECKPOINT_VERSION,
         "source": source,
         "started_at": str(data.get("started_at") or _now_iso()),
         "updated_at": str(data.get("updated_at") or _now_iso()),
-        "total_seen": int(data.get("total_seen") or 0),
+        "total_seen": total_seen,
         "processed": processed,
         "failures": failures,
     }
@@ -349,19 +359,20 @@ def _set_frontmatter_field(text: str, field: str, value: Any) -> str:
     """
     escaped = re.escape(field)
     rendered = _render_scalar(value)
+    fm_match = _FRONTMATTER_RE.match(text)
+    if fm_match is None:
+        return text  # no frontmatter at all; skip rather than fabricate
 
     # Try to replace an existing key.
     pattern = rf"^{escaped}:[ \t]*.*$"
     repl = f"{field}: {rendered}"
-    new_text, n = re.subn(pattern, repl, text, count=1, flags=re.MULTILINE)
+    frontmatter = fm_match.group(1)
+    new_frontmatter, n = re.subn(pattern, repl, frontmatter, count=1, flags=re.MULTILINE)
     if n:
-        return new_text
+        return text[: fm_match.start(1)] + new_frontmatter + text[fm_match.end(1) :]
 
     # Key didn't exist — insert after the opening delimiter. We only
     # do this inside the frontmatter block to avoid polluting bodies.
-    fm_match = _FRONTMATTER_RE.match(text)
-    if fm_match is None:
-        return text  # no frontmatter at all; skip rather than fabricate
     insert_at = fm_match.end(1)
     return text[:insert_at] + f"\n{field}: {rendered}" + text[insert_at:]
 
@@ -513,6 +524,8 @@ def enrich_entities(
         raise ValueError(f"unknown source {source_name!r}; known: {sorted(SOURCES)}")
     if not hasattr(source, "fetch_details"):
         raise NotImplementedError(f"source {source_name!r} does not implement fetch_details()")
+    if flush_every <= 0:
+        raise ValueError("flush_every must be a positive integer")
     detail_source = cast(_DetailSource, source)
 
     processed = checkpoint["processed"]
@@ -553,6 +566,7 @@ def enrich_entities(
             # from a different source). Record a skip so we don't
             # retry; it's not a failure.
             if not dry_run:
+                failures.pop(wiki_slug, None)
                 processed[wiki_slug] = {
                     "result": "no-source-url",
                     "at": _now_iso(),
@@ -615,8 +629,6 @@ def enrich_entities(
         if diff:
             enriched += 1
             outcome = "enriched"
-            if not dry_run:
-                failures.pop(wiki_slug, None)
         elif enrichment:
             unchanged += 1
             outcome = "unchanged"
@@ -625,6 +637,7 @@ def enrich_entities(
             outcome = "no-repo"
 
         if not dry_run:
+            failures.pop(wiki_slug, None)
             processed[wiki_slug] = {
                 "result": outcome,
                 "at": _now_iso(),
@@ -755,6 +768,8 @@ def main() -> None:
     _force_utf8_stdio()
     parser = _build_parser()
     args = parser.parse_args()
+    if args.flush_every <= 0:
+        parser.error("--flush-every must be a positive integer")
 
     wiki_path = Path(os.path.expanduser(args.wiki))
 
