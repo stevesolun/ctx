@@ -422,7 +422,9 @@ class TestRunCommand:
         fake_litellm: Any,
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        telemetry_path = _enable_real_telemetry(monkeypatch, tmp_path)
         path = tmp_path / "pinned-session.jsonl"
         path.write_text("sentinel\n", encoding="utf-8")
         exit_code = main(
@@ -444,6 +446,20 @@ class TestRunCommand:
         assert exit_code == 1
         assert path.read_text(encoding="utf-8") == "sentinel\n"
         assert "already exists" in captured.err
+        events = [
+            event
+            for event in read_events(telemetry_path, trusted_root=tmp_path)
+            if event.event_name == "ctx.cli.run"
+        ]
+        assert len(events) == 1
+        failed = events[0]
+        assert failed.trace_id is not None
+        assert failed.span_id is not None
+        assert failed.outcome == "error"
+        assert failed.error_kind == "FileExistsError"
+        assert failed.payload["ctx.run.phase"] == "failed"
+        assert failed.payload["ctx.run.failure_stage"] == "session_create"
+        assert "hi" not in telemetry_path.read_text(encoding="utf-8")
 
     def test_session_id_reuse_can_overwrite_with_flag(
         self,
@@ -1054,6 +1070,63 @@ class TestRunCommand:
         assert "/Users/example/private-repo" not in raw
         assert "private run task" not in raw
 
+    def test_run_planner_failure_telemetry_has_trace_and_is_redacted(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        telemetry_path = _enable_real_telemetry(monkeypatch, tmp_path)
+
+        class FailingPlanner:
+            def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+                pass
+
+            def plan(self, _task: str) -> None:
+                raise RuntimeError(
+                    "private planner failure for /Users/example/private-repo"
+                )
+
+        monkeypatch.setattr(run_cli, "Planner", FailingPlanner)
+
+        with pytest.raises(RuntimeError):
+            main(
+                [
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "private planner task",
+                    "--sessions-dir",
+                    str(tmp_path / "sessions"),
+                    "--session-id",
+                    "trace-planner-error",
+                    "--planner",
+                    "--no-ctx-tools",
+                    "--quiet",
+                ]
+            )
+
+        capsys.readouterr()
+        events = [
+            event
+            for event in read_events(telemetry_path, trusted_root=tmp_path)
+            if event.event_name == "ctx.cli.run"
+        ]
+        assert [event.payload["ctx.run.phase"] for event in events] == ["failed"]
+        failed = events[0]
+        assert failed.trace_id is not None
+        assert failed.span_id is not None
+        assert failed.outcome == "error"
+        assert failed.error_kind == "RuntimeError"
+        assert failed.payload["ctx.run.failure_stage"] == "planner"
+        assert failed.payload["ctx.exception.message_hash"].startswith("sha256:")
+        raw = telemetry_path.read_text(encoding="utf-8")
+        assert "private planner failure" not in raw
+        assert "/Users/example/private-repo" not in raw
+        assert "private planner task" not in raw
+
 
 # ── Subcommand: sessions ──────────────────────────────────────────────────
 
@@ -1412,10 +1485,25 @@ class TestResumeCommand:
         ]
         assert resume_trace_id is not None
         assert resume_span_id is not None
+        assert run_cli_events[0].trace_id is not None
         assert resume_cli_events[1].trace_id == resume_trace_id
         assert resume_cli_events[1].span_id == resume_span_id
         assert run_cli_events[0].trace_id != resume_trace_id
+        assert all(
+            event.payload["ctx.session.previous_trace_id"] == run_cli_events[0].trace_id
+            for event in resume_cli_events
+        )
         assert all(event.parent_span_id == resume_span_id for event in resume_lifecycle_events)
+        session_events = [
+            json.loads(line)
+            for line in (sessions_dir / "trace-resume.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        session_start = next(
+            event for event in session_events if event["type"] == "session_start"
+        )
+        assert session_start["initial_trace_id"] == run_cli_events[0].trace_id
         assert "follow-up" not in telemetry_path.read_text(encoding="utf-8")
 
     def test_resume_exception_telemetry_hashes_provider_error(
@@ -1806,12 +1894,20 @@ class TestResumeCommand:
         self,
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        telemetry_path = _enable_real_telemetry(monkeypatch, tmp_path)
         # Hand-write a session log with no 'model' in metadata.
         path = tmp_path / "no-model.jsonl"
         path.write_text(
             json.dumps(
-                {"type": "session_start", "ts": "t", "session_id": "no-model", "task": "old"}
+                {
+                    "type": "session_start",
+                    "ts": "t",
+                    "session_id": "no-model",
+                    "task": "old",
+                    "initial_trace_id": "original-trace",
+                }
             )
             + "\n"
             + json.dumps(
@@ -1828,13 +1924,44 @@ class TestResumeCommand:
         )
         exit_code = main(["resume", "no-model", "--task", "go", "--sessions-dir", str(tmp_path)])
         assert exit_code == 1
+        events = [
+            event
+            for event in read_events(telemetry_path, trusted_root=tmp_path)
+            if event.event_name == "ctx.cli.resume"
+        ]
+        assert len(events) == 1
+        failed = events[0]
+        assert failed.trace_id is not None
+        assert failed.span_id is not None
+        assert failed.outcome == "error"
+        assert failed.error_kind == "ValueError"
+        assert failed.payload["ctx.run.phase"] == "failed"
+        assert failed.payload["ctx.run.failure_stage"] == "validation"
+        assert failed.payload["ctx.session.previous_trace_id"] == "original-trace"
+        assert "go" not in telemetry_path.read_text(encoding="utf-8")
 
     def test_resume_missing_session(
         self,
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        telemetry_path = _enable_real_telemetry(monkeypatch, tmp_path)
         exit_code = main(["resume", "not-there", "--task", "go", "--sessions-dir", str(tmp_path)])
         captured = capsys.readouterr()
         assert exit_code == 1
         assert "session log not found" in captured.err
+        events = [
+            event
+            for event in read_events(telemetry_path, trusted_root=tmp_path)
+            if event.event_name == "ctx.cli.resume"
+        ]
+        assert len(events) == 1
+        failed = events[0]
+        assert failed.trace_id is not None
+        assert failed.span_id is not None
+        assert failed.outcome == "error"
+        assert failed.error_kind == "SessionLoadError"
+        assert failed.payload["ctx.run.phase"] == "failed"
+        assert failed.payload["ctx.run.failure_stage"] == "session_load"
+        assert "go" not in telemetry_path.read_text(encoding="utf-8")

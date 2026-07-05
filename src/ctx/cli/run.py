@@ -561,6 +561,41 @@ def _run_start_payload(
     }
 
 
+def _run_setup_failure_payload(args: argparse.Namespace, *, stage: str) -> dict[str, Any]:
+    model = args.model if isinstance(args.model, str) and args.model else None
+    provider_prefix = _model_provider_prefix(model) if model else None
+    payload: dict[str, Any] = {
+        "ctx.task.length": len(str(args.task or "")),
+        "ctx.ctx_tools.enabled": not args.no_ctx_tools,
+        "ctx.planner.enabled": bool(args.planner),
+        "ctx.evaluator.enabled": bool(args.evaluator),
+        "ctx.contract.enabled": bool(args.contract),
+        "ctx.run.failure_stage": stage,
+    }
+    if model:
+        payload["ctx.model"] = model
+    provider = args.provider or provider_prefix
+    if provider:
+        payload["ctx.provider"] = provider
+    if provider_prefix:
+        payload["ctx.provider_prefix"] = provider_prefix
+    return payload
+
+
+def _session_initial_trace_id(meta: dict[str, Any]) -> str | None:
+    value = meta.get("initial_trace_id") or meta.get("trace_id")
+    return value if isinstance(value, str) and value else None
+
+
+def _with_previous_trace_id(
+    payload: dict[str, Any],
+    previous_trace_id: str | None,
+) -> dict[str, Any]:
+    if previous_trace_id:
+        payload["ctx.session.previous_trace_id"] = previous_trace_id
+    return payload
+
+
 def _resume_start_payload(
     args: argparse.Namespace,
     *,
@@ -571,8 +606,9 @@ def _resume_start_payload(
     restored_mcp_count: int,
     allow_count: int,
     deny_count: int,
+    previous_trace_id: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "ctx.model": model,
         "ctx.task.length": len(str(args.task or "")),
         "ctx.ctx_tools.enabled": use_ctx_tools,
@@ -582,6 +618,22 @@ def _resume_start_payload(
         "ctx.tool_policy.allow_count": allow_count,
         "ctx.tool_policy.deny_count": deny_count,
     }
+    return _with_previous_trace_id(payload, previous_trace_id)
+
+
+def _resume_setup_failure_payload(
+    args: argparse.Namespace,
+    *,
+    stage: str,
+    previous_trace_id: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "ctx.task.length": len(str(args.task or "")),
+        "ctx.run.failure_stage": stage,
+    }
+    if args.model:
+        payload["ctx.model"] = args.model
+    return _with_previous_trace_id(payload, previous_trace_id)
 
 
 def _loop_result_payload(result: Any) -> dict[str, Any]:
@@ -952,11 +1004,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
+    telemetry_started = time.perf_counter()
     profile_error = _apply_model_profile_defaults(args)
     if profile_error:
         print(profile_error, file=sys.stderr)
+        with telemetry_span():
+            _record_cli_telemetry(
+                "ctx.cli.run",
+                session_id=args.session_id,
+                phase="failed",
+                payload=_run_setup_failure_payload(args, stage="validation"),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind="ValueError",
+            )
         return 2
-    telemetry_started = time.perf_counter()
 
     sdir = Path(args.sessions_dir) if args.sessions_dir else default_sessions_dir()
 
@@ -969,7 +1031,21 @@ def _cmd_run(args: argparse.Namespace) -> int:
     )
 
     session_id = args.session_id or new_session_id()
-    system_prompt = _resolve_system_prompt(args.system_prompt)
+    try:
+        system_prompt = _resolve_system_prompt(args.system_prompt)
+    except Exception as exc:
+        with telemetry_span():
+            _record_cli_telemetry(
+                "ctx.cli.run",
+                session_id=session_id,
+                phase="failed",
+                payload=_run_setup_failure_payload(args, stage="validation"),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind=type(exc).__name__,
+                exc=exc,
+            )
+        raise
 
     # Planner pass (opt-in, SOLO path only — when --evaluator is set,
     # run_with_evaluation owns the planner call so the P/G/E agents
@@ -984,7 +1060,21 @@ def _cmd_run(args: argparse.Namespace) -> int:
             provider,
             model=args.planner_model or args.model,
         )
-        plan_artifact = planner.plan(args.task)
+        try:
+            plan_artifact = planner.plan(args.task)
+        except Exception as exc:
+            with telemetry_span():
+                _record_cli_telemetry(
+                    "ctx.cli.run",
+                    session_id=session_id,
+                    phase="failed",
+                    payload=_run_setup_failure_payload(args, stage="planner"),
+                    outcome="error",
+                    duration_ms=_duration_ms(telemetry_started),
+                    error_kind=type(exc).__name__,
+                    exc=exc,
+                )
+            raise
         system_prompt = augmented_system_prompt(system_prompt, plan_artifact)
         if not args.quiet:
             status = "ok" if plan_artifact.parsed_ok else "unstructured"
@@ -999,10 +1089,24 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if ctx_tools_enabled:
         system_prompt = _with_ctx_session_instructions(system_prompt, session_id)
 
-    mcp_configs = _apply_mcp_env_overlays(
-        [_parse_mcp_spec(spec) for spec in args.mcp],
-        args.mcp_env,
-    )
+    try:
+        mcp_configs = _apply_mcp_env_overlays(
+            [_parse_mcp_spec(spec) for spec in args.mcp],
+            args.mcp_env,
+        )
+    except Exception as exc:
+        with telemetry_span():
+            _record_cli_telemetry(
+                "ctx.cli.run",
+                session_id=session_id,
+                phase="failed",
+                payload=_run_setup_failure_payload(args, stage="validation"),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind=type(exc).__name__,
+                exc=exc,
+            )
+        raise
     router = McpRouter(mcp_configs) if mcp_configs else None
 
     # ctx-core tools.
@@ -1034,52 +1138,73 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "use --overwrite-session to replace it or ctx resume to continue it.",
             file=sys.stderr,
         )
+        with telemetry_span():
+            _record_cli_telemetry(
+                "ctx.cli.run",
+                session_id=session_id,
+                phase="failed",
+                payload=_run_setup_failure_payload(args, stage="session_create"),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind="FileExistsError",
+            )
         return 1
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        with telemetry_span():
+            _record_cli_telemetry(
+                "ctx.cli.run",
+                session_id=session_id,
+                phase="failed",
+                payload=_run_setup_failure_payload(args, stage="session_create"),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind=type(exc).__name__,
+            )
         return 1
-    metadata = {
-        "task": args.task,
-        "model": args.model,
-        "provider": args.provider or _model_provider_prefix(args.model),
-        "provider_prefix": _model_provider_prefix(args.model),
-        "api_key_env": api_key_env or "",
-        "base_url": args.base_url or "",
-        "system_prompt": system_prompt,
-        "temperature": args.temperature,
-        "max_tokens": args.max_tokens,
-        "provider_timeout": args.provider_timeout,
-        "max_iterations": args.max_iterations,
-        "budget_usd": args.budget_usd,
-        "budget_tokens": args.budget_tokens,
-        "mcp": [
-            {
-                "name": c.name,
-                "command": c.command,
-                "args": list(c.args),
-                "credential_env": list(c.credential_env),
-            }
-            for c in mcp_configs
-        ],
-        "ctx_tools_enabled": ctx_tools_enabled,
-        "tool_policy": {"allow": list(allow_tools), "deny": list(deny_tools)},
-        "planner_used": plan_artifact is not None,
-        "contract_used": bool(args.evaluator and args.contract),
-        "evaluator_used": args.evaluator,
-        "evaluator_max_rounds": args.evaluator_rounds if args.evaluator else None,
-        "plan": plan_artifact.to_dict() if plan_artifact else None,
-        "plan_usage": (
-            {
-                "input_tokens": plan_artifact.usage.input_tokens,
-                "output_tokens": plan_artifact.usage.output_tokens,
-                "cost_usd": plan_artifact.usage.cost_usd,
-            }
-            if plan_artifact
-            else None
-        ),
-    }
-    observer = JsonlObserver(store, session_metadata=metadata)
-    with telemetry_span():
+    with telemetry_span() as span:
+        metadata = {
+            "task": args.task,
+            "model": args.model,
+            "provider": args.provider or _model_provider_prefix(args.model),
+            "provider_prefix": _model_provider_prefix(args.model),
+            "api_key_env": api_key_env or "",
+            "base_url": args.base_url or "",
+            "system_prompt": system_prompt,
+            "temperature": args.temperature,
+            "max_tokens": args.max_tokens,
+            "provider_timeout": args.provider_timeout,
+            "max_iterations": args.max_iterations,
+            "budget_usd": args.budget_usd,
+            "budget_tokens": args.budget_tokens,
+            "initial_trace_id": span.trace_id,
+            "mcp": [
+                {
+                    "name": c.name,
+                    "command": c.command,
+                    "args": list(c.args),
+                    "credential_env": list(c.credential_env),
+                }
+                for c in mcp_configs
+            ],
+            "ctx_tools_enabled": ctx_tools_enabled,
+            "tool_policy": {"allow": list(allow_tools), "deny": list(deny_tools)},
+            "planner_used": plan_artifact is not None,
+            "contract_used": bool(args.evaluator and args.contract),
+            "evaluator_used": args.evaluator,
+            "evaluator_max_rounds": args.evaluator_rounds if args.evaluator else None,
+            "plan": plan_artifact.to_dict() if plan_artifact else None,
+            "plan_usage": (
+                {
+                    "input_tokens": plan_artifact.usage.input_tokens,
+                    "output_tokens": plan_artifact.usage.output_tokens,
+                    "cost_usd": plan_artifact.usage.cost_usd,
+                }
+                if plan_artifact
+                else None
+            ),
+        }
+        observer = JsonlObserver(store, session_metadata=metadata)
         if ctx_tools_enabled:
             _record_lifecycle_safely(
                 lifecycle,
@@ -1131,6 +1256,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 if args.contract and not args.planner:
                     # Contracts refine planner output; without a plan
                     # they'd have no prior spec to refine.
+                    _record_cli_telemetry(
+                        "ctx.cli.run",
+                        session_id=session_id,
+                        phase="failed",
+                        payload=_run_setup_failure_payload(
+                            args,
+                            stage="validation",
+                        ),
+                        outcome="error",
+                        duration_ms=_duration_ms(telemetry_started),
+                        error_kind="SystemExit",
+                    )
                     raise SystemExit(
                         "error: --contract requires --planner (the contract "
                         "refines the planner's success_criteria into "
@@ -1300,19 +1437,47 @@ def _load_session_for_cli(session_id: str, sessions_dir: Path) -> Any | None:
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
+    telemetry_started = time.perf_counter()
     sdir = Path(args.sessions_dir) if args.sessions_dir else default_sessions_dir()
     state = _load_session_for_cli(args.session_id, sdir)
     if state is None:
+        with telemetry_span():
+            _record_cli_telemetry(
+                "ctx.cli.resume",
+                session_id=args.session_id,
+                phase="failed",
+                payload=_resume_setup_failure_payload(
+                    args,
+                    stage="session_load",
+                ),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind="SessionLoadError",
+            )
         return 1
-    telemetry_started = time.perf_counter()
 
     meta = state.metadata
+    previous_trace_id = _session_initial_trace_id(meta)
     model = args.model or meta.get("model")
     if not model:
         print(
             f"error: session {args.session_id!r} has no recorded model; pass --model explicitly.",
             file=sys.stderr,
         )
+        with telemetry_span():
+            _record_cli_telemetry(
+                "ctx.cli.resume",
+                session_id=args.session_id,
+                phase="failed",
+                payload=_resume_setup_failure_payload(
+                    args,
+                    stage="validation",
+                    previous_trace_id=previous_trace_id,
+                ),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind="ValueError",
+            )
         return 1
 
     use_ctx_tools = bool(meta.get("ctx_tools_enabled", True))
@@ -1348,7 +1513,25 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         timeout=provider_timeout,
     )
 
-    store = SessionStore.attach(args.session_id, sessions_dir=sdir)
+    try:
+        store = SessionStore.attach(args.session_id, sessions_dir=sdir)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        with telemetry_span():
+            _record_cli_telemetry(
+                "ctx.cli.resume",
+                session_id=args.session_id,
+                phase="failed",
+                payload=_resume_setup_failure_payload(
+                    args,
+                    stage="session_attach",
+                    previous_trace_id=previous_trace_id,
+                ),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind=type(exc).__name__,
+                exc=exc,
+            )
+        raise
     observer = JsonlObserver(
         store,
         session_metadata={},
@@ -1424,6 +1607,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 restored_mcp_count=len(mcp_configs),
                 allow_count=len(allow_tools),
                 deny_count=len(deny_tools),
+                previous_trace_id=previous_trace_id,
             ),
             outcome="ok",
             duration_ms=_duration_ms(telemetry_started),
@@ -1464,7 +1648,10 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 "ctx.cli.resume",
                 session_id=args.session_id,
                 phase="failed",
-                payload=_loop_result_payload(result),
+                payload=_with_previous_trace_id(
+                    _loop_result_payload(result),
+                    previous_trace_id,
+                ),
                 outcome="error",
                 duration_ms=_duration_ms(telemetry_started),
                 error_kind=type(exc).__name__,
@@ -1488,7 +1675,10 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             "ctx.cli.resume",
             session_id=args.session_id,
             phase="finished",
-            payload=_loop_result_payload(result),
+            payload=_with_previous_trace_id(
+                _loop_result_payload(result),
+                previous_trace_id,
+            ),
             outcome=outcome,
             duration_ms=_duration_ms(telemetry_started),
             error_kind=error_kind,
