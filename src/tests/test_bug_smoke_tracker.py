@@ -18,6 +18,7 @@ STATUSES = {
     "False Positive",
 }
 FIX_STATUSES = {"Fixed", "Blocked", "Not Started", "N/A"}
+CLOSED_NEXT_ACTION_PREFIX = "Closed;"
 
 
 def _tracker_rows() -> list[dict[str, str]]:
@@ -62,6 +63,9 @@ def test_bug_smoke_tracker_has_valid_rows() -> None:
         if row["status"] == "Retested Pass":
             assert row["fix_status"] == "Fixed"
             assert row["retest_evidence"].startswith("PASS:")
+            assert row["next_action"].startswith(CLOSED_NEXT_ACTION_PREFIX), (
+                f"{row['finding_id']} has non-closed next_action"
+            )
         if row["status"] == "Blocked/Human Decision":
             assert row["owner"] == "Human Owner"
             assert row["fix_status"] == "Blocked"
