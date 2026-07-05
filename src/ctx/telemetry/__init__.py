@@ -439,11 +439,45 @@ def current_telemetry_span() -> TelemetrySpan | None:
     return _CURRENT_SPAN.get()
 
 
+def _valid_trace_id(value: str) -> bool:
+    return len(value) == 32 and value != "0" * 32 and all(ch in "0123456789abcdef" for ch in value)
+
+
+def _valid_span_id(value: str) -> bool:
+    return len(value) == 16 and value != "0" * 16 and all(ch in "0123456789abcdef" for ch in value)
+
+
+def traceparent_from_span(span: TelemetrySpan | None = None) -> str | None:
+    """Return a W3C traceparent header value for the current telemetry span."""
+
+    resolved = span if span is not None else _CURRENT_SPAN.get()
+    if resolved is None:
+        return None
+    if not _valid_trace_id(resolved.trace_id) or not _valid_span_id(resolved.span_id):
+        return None
+    return f"00-{resolved.trace_id}-{resolved.span_id}-01"
+
+
+def parse_traceparent(value: str) -> tuple[str, str] | None:
+    """Parse W3C traceparent into ``(trace_id, parent_span_id)``."""
+
+    parts = value.strip().split("-")
+    if len(parts) != 4:
+        return None
+    version, trace_id, span_id, flags = parts
+    if version != "00" or len(flags) != 2:
+        return None
+    if not _valid_trace_id(trace_id) or not _valid_span_id(span_id):
+        return None
+    return trace_id, span_id
+
+
 @contextmanager
 def telemetry_span(
     *,
     trace_id: str | None = None,
     span_id: str | None = None,
+    parent_span_id: str | None = None,
 ) -> Iterator[TelemetrySpan]:
     """Start a nested telemetry span using OpenTelemetry-compatible IDs."""
 
@@ -451,7 +485,7 @@ def telemetry_span(
     span = TelemetrySpan(
         trace_id=trace_id or (parent.trace_id if parent is not None else uuid.uuid4().hex),
         span_id=span_id or secrets.token_hex(8),
-        parent_span_id=parent.span_id if parent is not None else None,
+        parent_span_id=parent.span_id if parent is not None else parent_span_id,
     )
     token = _CURRENT_SPAN.set(span)
     try:

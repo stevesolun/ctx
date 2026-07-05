@@ -69,7 +69,13 @@ from typing import Any, BinaryIO
 
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.providers import ToolCall
-from ctx.telemetry import hash_identifier, record_event, record_exception, telemetry_span
+from ctx.telemetry import (
+    hash_identifier,
+    parse_traceparent,
+    record_event,
+    record_exception,
+    telemetry_span,
+)
 
 
 _logger = logging.getLogger(__name__)
@@ -290,6 +296,39 @@ def _safe_mcp_payload(
     return payload
 
 
+def _jsonrpc_metadata(frame: dict[str, Any], params: object) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for value in (frame.get("metadata"), frame.get("_meta")):
+        if isinstance(value, dict):
+            metadata.update(value)
+    if isinstance(params, dict) and isinstance(params.get("_meta"), dict):
+        metadata.update(params["_meta"])
+    return metadata
+
+
+def _trace_context_from_metadata(
+    frame: dict[str, Any],
+    params: object,
+) -> tuple[str | None, str | None]:
+    metadata = _jsonrpc_metadata(frame, params)
+    raw_traceparent = metadata.get("traceparent")
+    parsed = parse_traceparent(raw_traceparent) if isinstance(raw_traceparent, str) else None
+    if parsed is None:
+        return None, None
+    return parsed
+
+
+def _safe_metadata_payload(frame: dict[str, Any], params: object) -> dict[str, Any]:
+    metadata = _jsonrpc_metadata(frame, params)
+    payload: dict[str, Any] = {}
+    if isinstance(metadata.get("traceparent"), str):
+        payload["ctx.traceparent.received"] = parse_traceparent(metadata["traceparent"]) is not None
+    session_hash = metadata.get("ctx.session.hash")
+    if isinstance(session_hash, str) and session_hash.startswith("sha256:"):
+        payload["ctx.session.hash"] = session_hash
+    return payload
+
+
 def _mcp_result_payload(method: str, result: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     if method == "tools/list":
@@ -464,6 +503,8 @@ def _process_line(
         response_emitted=not is_notification,
         request_id_type=_request_id_type(frame),
     )
+    base_payload.update(_safe_metadata_payload(frame, params))
+    trace_id, parent_span_id = _trace_context_from_metadata(frame, params)
 
     if not isinstance(method, str) or not method:
         if not is_notification:
@@ -481,7 +522,7 @@ def _process_line(
             )
         return
 
-    with telemetry_span():
+    with telemetry_span(trace_id=trace_id, parent_span_id=parent_span_id):
         if is_notification:
             # Per spec we accept (and ignore) unknown notifications rather
             # than erroring — it lets hosts send progress/ping/cancel

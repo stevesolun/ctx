@@ -587,6 +587,59 @@ def test_mcp_core_events_share_trace_context(
     assert spans["mcp"].parent_span_id is None
 
 
+def test_mcp_request_traceparent_parents_server_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ctx.adapters.generic.ctx_core_tools as core_tools
+
+    trace_id = "1" * 32
+    client_span_id = "2" * 16
+    session_hash = "sha256:" + "3" * 64
+    spans: dict[str, telemetry.TelemetrySpan] = {}
+    payloads: list[dict[str, Any]] = []
+
+    def capture_mcp_event(*args: Any, **kwargs: Any) -> None:
+        span = telemetry.current_telemetry_span()
+        assert span is not None
+        spans["mcp"] = span
+        payloads.append(dict(kwargs["payload"]))
+
+    def capture_core_event(*args: Any, **kwargs: Any) -> None:
+        span = telemetry.current_telemetry_span()
+        assert span is not None
+        spans["core"] = span
+
+    monkeypatch.setattr(mcp_server, "_record_mcp_request", capture_mcp_event)
+    monkeypatch.setattr(core_tools, "_record_core_tool_event", capture_core_event)
+    out = BytesIO()
+    frame = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "ctx__missing",
+            "arguments": {},
+            "_meta": {
+                "traceparent": f"00-{trace_id}-{client_span_id}-01",
+                "ctx.session.hash": session_hash,
+            },
+        },
+    }
+
+    mcp_server._process_line(json.dumps(frame), mcp_server._ServerState(), out)
+
+    response = json.loads(out.getvalue().decode("utf-8"))
+    assert response["result"]["isError"] is True
+    assert set(spans) == {"core", "mcp"}
+    assert spans["mcp"].trace_id == trace_id
+    assert spans["mcp"].parent_span_id == client_span_id
+    assert spans["mcp"].span_id != client_span_id
+    assert spans["core"].trace_id == trace_id
+    assert spans["core"].parent_span_id == spans["mcp"].span_id
+    assert payloads[0]["ctx.traceparent.received"] is True
+    assert payloads[0]["ctx.session.hash"] == session_hash
+
+
 def test_record_event_returns_none_when_disabled(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
 

@@ -11,6 +11,7 @@ so there's no cross-test state.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import time
@@ -19,6 +20,7 @@ from typing import Any
 
 import pytest
 
+import ctx.telemetry as telemetry
 from ctx.adapters.generic.tools import (
     McpClient,
     McpRouter,
@@ -175,6 +177,54 @@ class TestClientToolOperations:
             with pytest.raises(McpServerError, match="isError"):
                 c.call_tool("echo", {"text": "x"})
 
+    def test_call_tool_records_privacy_safe_telemetry(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        events: list[tuple[str, dict[str, Any], telemetry.TelemetrySpan | None]] = []
+
+        def fake_record_event(event_name: str, **kwargs: Any) -> None:
+            events.append((event_name, kwargs, telemetry.current_telemetry_span()))
+
+        def fake_request(
+            method: str,
+            params: dict[str, Any] | None,
+            *,
+            timeout: float | None = None,
+        ) -> dict[str, Any]:
+            assert method == "tools/call"
+            assert params == {"name": "echo", "arguments": {"text": "private acme query"}}
+            assert timeout is None
+            return {"content": [{"type": "text", "text": "ok"}]}
+
+        monkeypatch.setattr(mcp_router, "record_event", fake_record_event)
+        client = McpClient(_make_config(), session_id="sess-mcp")
+        monkeypatch.setattr(client, "_request", fake_request)
+
+        with telemetry.telemetry_span(trace_id="1" * 32, span_id="2" * 16):
+            assert client.call_tool("echo", {"text": "private acme query"}) == "ok"
+
+        assert len(events) == 1
+        event_name, kwargs, span = events[0]
+        assert event_name == "ctx.mcp.external_tool_call"
+        assert kwargs["source"] == "ctx-mcp-router"
+        assert kwargs["transport"] == "mcp-jsonrpc"
+        assert kwargs["session_id"] == "sess-mcp"
+        assert kwargs["outcome"] == "ok"
+        assert kwargs["duration_ms"] >= 0
+        assert kwargs["payload"] == {
+            "rpc.system": "jsonrpc",
+            "rpc.method": "tools/call",
+            "mcp.server.name": "fake",
+            "mcp.tool.name": "echo",
+            "otel.status_code": "OK",
+        }
+        assert "private acme query" not in json.dumps(kwargs, sort_keys=True)
+        assert span is not None
+        assert span.trace_id == "1" * 32
+        assert span.parent_span_id == "2" * 16
+        assert span.span_id != "2" * 16
+
 
 class TestClientRobustness:
     @pytest.mark.parametrize(
@@ -325,6 +375,32 @@ class TestClientRobustness:
             with pytest.raises(McpServerError, match="timed out after 0.2s"):
                 client.call_tool("echo", {"text": "x"})
             assert time.monotonic() - started < 1.5
+
+    def test_request_injects_traceparent_and_session_hash(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        frames: list[dict[str, Any]] = []
+        client = McpClient(_make_config(), session_id="sess-private")
+        client._proc = type("Proc", (), {"stdin": object(), "stdout": object()})()  # type: ignore[assignment]
+
+        def fake_read_frame(*, timeout: float | None) -> dict[str, Any]:
+            assert timeout is None or timeout > 0
+            return {"jsonrpc": "2.0", "id": 0, "result": {"ok": True}}
+
+        monkeypatch.setattr(client, "_write_frame", frames.append)
+        monkeypatch.setattr(client, "_read_frame", fake_read_frame)
+
+        with telemetry.telemetry_span(trace_id="1" * 32, span_id="2" * 16):
+            assert client._request("tools/call", {"name": "echo", "arguments": {}}) == {
+                "ok": True
+            }
+
+        assert len(frames) == 1
+        meta = frames[0]["params"]["_meta"]
+        assert meta["traceparent"] == f"00-{'1' * 32}-{'2' * 16}-01"
+        assert meta["ctx.session.hash"].startswith("sha256:")
+        assert "sess-private" not in json.dumps(frames[0], sort_keys=True)
 
     def test_parent_env_is_not_inherited_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("CTX_SECRET_SHOULD_NOT_LEAK", "leaked")
