@@ -137,7 +137,10 @@ def test_hook_mains_exit_zero_and_dispatch_expected_work(
     # Point everything at tmp so no real state is touched.
     monkeypatch.setenv("HOME", str(tmp_path))
     events = tmp_path / "skill-events.jsonl"
-    _write_events(events, [{"event": "load", "skill": "demo", "timestamp": _iso(NOW)}])
+    _write_events(
+        events,
+        [{"event": "load", "skill": "demo", "timestamp": _iso(datetime.now(timezone.utc))}],
+    )
     monkeypatch.setattr(qh, "_EVENTS_PATH", events, raising=True)
     monkeypatch.setattr(qh, "_STATE_PATH", tmp_path / "state.json", raising=True)
 
@@ -149,6 +152,7 @@ def test_hook_mains_exit_zero_and_dispatch_expected_work(
     monkeypatch.setattr("sys.stdin", _StdinStub(""))
     rc = qh.main()
     assert rc == 0  # hook never propagates errors
+    assert not (tmp_path / "state.json").exists()
 
     current = datetime.now(timezone.utc)
     (tmp_path / "state.json").write_text(

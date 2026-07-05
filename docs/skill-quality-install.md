@@ -62,7 +62,9 @@ absolute path to this checkout (use forward slashes on Windows):
 ```
 
 The hook always exits 0: a scoring error will not block session
-shutdown.
+shutdown. If recompute fails, the hook leaves
+`~/.claude/skill-quality/.hook-state.json` unchanged so the same event
+window is retried on the next session end.
 
 ## Seed the sidecars (first run only)
 

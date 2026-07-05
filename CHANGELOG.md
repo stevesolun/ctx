@@ -15,10 +15,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Hardened docs deploy and release publish gates so feature and dashboard
   tracker suites run before site deployment or package publishing.
+- Added the dashboard public-docs tracker suite to PR docs-check and local
+  preflight.
 - Added `ruff format --check` to local preflight and main static CI gates for
   `src`, `hooks`, and `scripts`.
 - Made canonical Hugging Face sync fail when `HF_TOKEN` is missing while forks
   still skip safely without publishing.
+
+### Fixed
+
+- Tightened local preflight no-test release metadata exemptions so version and
+  stats-only exceptions require matching diff hunks.
+- Kept quality Stop hook checkpoints from advancing when recompute fails so
+  unscored events retry on the next session end.
 
 ## [1.0.20] - 2026-06-29
 

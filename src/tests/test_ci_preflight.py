@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
+
+import yaml  # type: ignore[import-untyped]
 
 from scripts.ci_preflight import _run_no_test_policy_for_files
 from scripts.ci_preflight import Check
+from scripts.ci_preflight import PUBLIC_DOCS_TRACKER_TESTS
 from scripts.ci_preflight import select_checks
 
 
@@ -22,6 +26,23 @@ def _names_for(files: list[str], *, profile: str = "pr") -> list[str]:
     return [check.name for check in checks]
 
 
+def _workflow_docs_tracker_tests() -> tuple[str, ...]:
+    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["docs-check"]["steps"]
+    run = next(
+        step["run"] for step in steps if step.get("name") == "Run public docs tracker checks"
+    )
+    command = " ".join(line.rstrip("\\").strip() for line in run.splitlines() if line.strip())
+    argv = shlex.split(command)
+
+    assert argv[:5] == ["python", "-m", "pytest", "-q", "--no-cov"]
+    return tuple(argv[5:])
+
+
+def test_pr_docs_workflow_tracker_tests_match_preflight() -> None:
+    assert _workflow_docs_tracker_tests() == PUBLIC_DOCS_TRACKER_TESTS
+
+
 def test_preflight_runs_docs_gate_for_docs_changes() -> None:
     names = _names_for(["docs/index.md"])
     tracker_checks = _checks_for(["qa/bug_smoke_status.csv"])
@@ -37,6 +58,7 @@ def test_preflight_runs_docs_gate_for_docs_changes() -> None:
     assert "docs strict build" in tracker_names
     assert "unit-linux equivalent" not in tracker_names
     assert "src/tests/test_bug_smoke_tracker.py" in public_docs_tracker.argv
+    assert "src/tests/test_dashboard_user_story_tracker.py" in public_docs_tracker.argv
 
 
 def test_preflight_runs_source_gates_for_source_changes() -> None:
@@ -87,6 +109,10 @@ def test_internal_no_test_policy_accepts_dirty_contract_with_tests() -> None:
         )
         == 0
     )
+
+
+def test_internal_no_test_policy_rejects_metadata_without_diff_context() -> None:
+    assert _run_no_test_policy_for_files(["pyproject.toml"], diffs_by_file={}) == 1
 
 
 def test_preflight_pr_profile_runs_package_build_for_source_prs() -> None:
