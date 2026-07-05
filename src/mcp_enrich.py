@@ -5,7 +5,9 @@ mcp_enrich.py -- Phase 6f detail-page enrichment for MCP entities.
 Walks every MCP entity file (``<wiki>/entities/mcp-servers/<shard>/<slug>.md``)
 and calls the source's ``fetch_details(slug)`` to pull ``github_url``
 and ``stars`` from the detail page. The scraped values are written
-back into the entity's YAML frontmatter.
+back into the entity's YAML frontmatter. Body text with matching key names is
+left untouched; files without YAML frontmatter are skipped rather than
+fabricated.
 
 Why this exists (from Phase 6e close-out):
   - The listing pages scraped by Phase 6c (``mcp_ingest``) expose
@@ -20,6 +22,9 @@ Why this exists (from Phase 6e close-out):
 Checkpoint: ``<wiki>/.enrich-checkpoint/<source>.json`` — same shape
 as the Phase 6c ingest checkpoint. Slugs in ``processed`` skip on
 resume. ``failures`` retry on the next run unless ``--skip-failures``.
+Malformed checkpoint shapes reset to a fresh checkpoint, and processed slugs
+win over stale failure entries so a prior retry failure cannot shadow a later
+success.
 Dry runs fetch and compute diffs without writing frontmatter or
 checkpoint state. They exit non-zero only for failures observed in the
 current dry-run invocation, not for failures already persisted in the
@@ -157,7 +162,10 @@ def load_checkpoint(wiki_path: Path, source: str) -> dict:
 
     The authoritative state lives in the entity frontmatter itself;
     a lost or corrupt checkpoint just means the next run re-fetches
-    the detail pages (which hit the cache, so cheap).
+    the detail pages (which hit the cache, so cheap). ``processed`` and
+    ``failures`` must be string-keyed maps of detail records; malformed maps or
+    an invalid ``total_seen`` reset the checkpoint, while processed slugs clear
+    stale failure entries.
     """
     path = _checkpoint_path(wiki_path, source)
     if not path.is_file():
@@ -355,8 +363,8 @@ def _set_frontmatter_field(text: str, field: str, value: Any) -> str:
     Lossy for complex YAML (lists, mappings) but we only touch simple
     scalar fields (``github_url``, ``stars``, ``updated``), and the
     frontmatter on these entity files is flat. Uses line-anchored
-    regex so a ``github_url: null`` in the middle doesn't match a
-    hypothetical ``sub_github_url`` key on a following line.
+    regex scoped to the frontmatter block so a body-only ``github_url`` line or
+    hypothetical ``sub_github_url`` key is left untouched.
     """
     escaped = re.escape(field)
     rendered = _render_scalar(value)
@@ -518,7 +526,8 @@ def enrich_entities(
     Returns the same checkpoint (mutated). With ``dry_run=True``, processed
     and failure outcomes are not written to the checkpoint and no checkpoint
     file is saved; callers can pass ``current_run_failures`` to collect
-    failures for dry-run exit status.
+    failures for dry-run exit status. ``flush_every`` must be positive, and a
+    processed outcome clears any stale failure entry for the same wiki slug.
     """
     source = SOURCES.get(source_name)
     if source is None:

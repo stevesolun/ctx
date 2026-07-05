@@ -126,6 +126,11 @@ normalize to `_path` or `_paths` suffixes. The only accepted modes are
 `local_redacted`, `disabled`, `off`, and `none`; unknown modes fail closed
 instead of emitting raw fields.
 
+Runtime lifecycle records apply the same local-redacted posture to their
+evidence-bearing strings. Top-level `reason`, `evidence`, `command`, `summary`,
+`trigger`, and `status` values, plus nested security-scan text, are stored only
+after secret and local path redaction.
+
 Local JSONL records retain the top-level `session_id` field for compatibility
 with existing local-only workflows, but they also include a salted
 `session_hash`. Remote OTLP export sends `ctx.session.hash` and never sends the

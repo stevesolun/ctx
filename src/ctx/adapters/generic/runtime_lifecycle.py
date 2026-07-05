@@ -1,4 +1,10 @@
-"""Host-neutral runtime lifecycle logging for generic ctx integrations."""
+"""Host-neutral runtime lifecycle logging for generic ctx integrations.
+
+Runtime lifecycle events are local operational records, but user- or
+host-provided free text is still privacy-sensitive. The store redacts secrets
+and local paths from top-level lifecycle text, nested payloads, source context,
+and security-scan details before appending events.
+"""
 
 from __future__ import annotations
 
@@ -53,7 +59,7 @@ _SECURITY_SCAN_STATUSES = {
 
 @dataclass(frozen=True)
 class RuntimeLifecycleStore:
-    """Append-only lifecycle event store for custom/API/local harnesses."""
+    """Append-only, privacy-redacted event store for custom/API/local harnesses."""
 
     root: Path | None = None
 

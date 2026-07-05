@@ -23,6 +23,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Redacted runtime lifecycle free-text fields before storing local events so
+  evidence, commands, summaries, triggers, reasons, and statuses do not retain
+  secrets or local filesystem paths.
+- Hardened `ctx-mcp-enrich` checkpoint and frontmatter handling so malformed
+  checkpoints reset cleanly, processed slugs clear stale failures, body keys are
+  not rewritten, and non-positive flush cadences fail fast.
 - Tightened local preflight no-test release metadata exemptions so version and
   stats-only exceptions require matching diff hunks.
 - Kept quality Stop hook checkpoints from advancing when recompute fails so
