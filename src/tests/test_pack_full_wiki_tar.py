@@ -23,12 +23,19 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
     target = tmp_path / "wiki-graph-packed.tar.gz"
     with tarfile.open(source, "w:gz") as tf:
         _add_text(tf, "index.md", "# Wiki\n")
+        _add_text(tf, "catalog.md", "| skill | `C:\\Users\\steves\\ctx\\SKILL.md` |\n")
+        _add_text(tf, "converted-index.md", "`/Users/steves/ctx/converted`\n")
         _add_text(tf, "log.md", "local export: /Users/steves/ctx C:\\Users\\steves\\ctx\n")
-        _add_text(tf, "entities/skills/current.md", "# Current Skill\n")
+        _add_text(tf, "versions-catalog.md", "`C:\\Users\\steves\\ctx\\versions`\n")
+        _add_text(tf, "entities/skills/current.md", "# Current Skill\nSource: /Users/steves/ctx\n")
         _add_text(tf, "entities/skills/empty.md", "")
         _add_text(tf, "entities/agents/reviewer.md", "# Reviewer Agent\n")
         _add_text(tf, "entities/mcp-servers/github.md", "# GitHub MCP\n")
-        _add_text(tf, "entities/harnesses/langgraph.md", "# LangGraph Harness\n")
+        _add_text(
+            tf,
+            "entities/harnesses/langgraph.md",
+            "# LangGraph Harness\nRun C:\\Users\\steves\\ctx\\harness.py\n",
+        )
         _add_text(tf, "concepts/empty.md", "")
         _add_text(
             tf,
@@ -41,7 +48,7 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
 
     stats = repack_full_wiki_tar(source, target)
 
-    assert stats.removed_expanded_markdown_pages == 6
+    assert stats.removed_expanded_markdown_pages == 9
     assert stats.packed_pages == 8
     with tarfile.open(target, "r:gz") as tf:
         names = {member.name for member in tf.getmembers()}
@@ -53,18 +60,29 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
     assert "entities/mcp-servers/github.md" not in names
     assert "entities/harnesses/langgraph.md" in names
     assert "concepts/empty.md" not in names
+    assert "catalog.md" not in names
+    assert "converted-index.md" not in names
     assert "log.md" not in names
+    assert "versions-catalog.md" not in names
     assert "graphify-out/graph-report.md" in names
     assert "wiki-packs/base-test-export/wiki-pack-manifest.json" in names
     assert "wiki-packs/base-test-export/pages.jsonl" in names
+    harness_text = (tmp_path / "extracted" / "entities" / "harnesses" / "langgraph.md").read_text(
+        encoding="utf-8"
+    )
+    assert "C:\\Users\\steves" not in harness_text
+    assert "<host-user-path>" in harness_text
 
     pages = load_merged_wiki_pages(tmp_path / "extracted" / "wiki-packs")
-    assert pages["entities/skills/current.md"] == "# Current Skill\n"
+    assert pages["entities/skills/current.md"] == "# Current Skill\nSource: <host-user-path>\n"
     assert pages["entities/skills/empty.md"] == "<!-- empty markdown page -->\n"
     assert pages["entities/agents/reviewer.md"] == "# Reviewer Agent\n"
     assert pages["entities/mcp-servers/github.md"] == "# GitHub MCP\n"
     assert pages["concepts/empty.md"] == "<!-- empty markdown page -->\n"
+    assert "catalog.md" not in pages
+    assert "converted-index.md" not in pages
     assert "log.md" not in pages
+    assert "versions-catalog.md" not in pages
 
     second_target = tmp_path / "wiki-graph-packed-again.tar.gz"
     repack_full_wiki_tar(target, second_target)
@@ -73,6 +91,10 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
         tf.extractall(tmp_path / "extracted-again")
     assert "graphify-out/graph-report.md" in second_names
     repacked_pages = load_merged_wiki_pages(tmp_path / "extracted-again" / "wiki-packs")
-    assert repacked_pages["entities/skills/current.md"] == "# Current Skill\n"
+    assert (
+        repacked_pages["entities/skills/current.md"]
+        == "# Current Skill\nSource: <host-user-path>\n"
+    )
     assert repacked_pages["entities/agents/reviewer.md"] == "# Reviewer Agent\n"
     assert repacked_pages["entities/mcp-servers/github.md"] == "# GitHub MCP\n"
+    assert "catalog.md" not in repacked_pages

@@ -13,8 +13,18 @@ from pathlib import Path, PurePosixPath
 from ctx.core.wiki.wiki_packs import load_merged_wiki_pages, write_wiki_base_pack
 
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+_WINDOWS_USER_PATH_RE = re.compile(r"(?i)\b[A-Z]:[\\/]+Users[\\/]+[^\s`\"'<>|)]*")
+_POSIX_USER_PATH_RE = re.compile(r"/Users/[^\s`\"'<>|)]*")
 _GRAPH_MANIFEST = "graphify-out/graph-export-manifest.json"
 _REQUIRED_EXPANDED_MARKDOWN = frozenset({"graphify-out/graph-report.md"})
+_LOCAL_GENERATED_MARKDOWN = frozenset(
+    {
+        "catalog.md",
+        "converted-index.md",
+        "log.md",
+        "versions-catalog.md",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -60,7 +70,13 @@ def repack_full_wiki_tar(source: Path, target: Path | None = None) -> RepackStat
         if not export_id:
             raise ValueError(f"{source} is missing graph export id")
         if existing_pack_root.exists():
-            pages.update(load_merged_wiki_pages(existing_pack_root))
+            pages.update(
+                {
+                    name: _normalise_page_text(text)
+                    for name, text in load_merged_wiki_pages(existing_pack_root).items()
+                    if _should_pack_markdown_page(name)
+                }
+            )
 
         pack_root = tmp_root / "wiki-packs"
         write_wiki_base_pack(
@@ -112,8 +128,14 @@ def _rewrite_tar_with_pack(
                     if extracted is None:
                         raise ValueError(f"archive file is unreadable: {member.name}")
                     with extracted:
-                        member.name = name
-                        dst.addfile(member, extracted)
+                        if name.endswith(".md"):
+                            text = _normalise_page_text(
+                                extracted.read().decode("utf-8", errors="replace")
+                            )
+                            _add_text(dst, name=name, text=text)
+                        else:
+                            member.name = name
+                            dst.addfile(member, extracted)
                     written_names.add(name)
                 elif member.isdir():
                     member.name = name
@@ -122,9 +144,9 @@ def _rewrite_tar_with_pack(
                 else:
                     raise ValueError(f"unsupported archive member: {member.name}")
             for name in sorted(_REQUIRED_EXPANDED_MARKDOWN - written_names):
-                text = pages.get(name)
-                if text is not None:
-                    _add_text(dst, name=name, text=text)
+                required_text = pages.get(name)
+                if required_text is not None:
+                    _add_text(dst, name=name, text=required_text)
             for path in sorted(pack_root.rglob("*")):
                 if path.is_file():
                     dst.add(path, arcname=path.relative_to(pack_root.parent).as_posix())
@@ -175,7 +197,16 @@ def _validate_pack_payload(pack_root: Path, expected_pages: dict[str, str]) -> N
 
 
 def _normalise_page_text(text: str) -> str:
-    return text if text.strip() else "<!-- empty markdown page -->\n"
+    if not text.strip():
+        return "<!-- empty markdown page -->\n"
+    return _redact_host_user_paths(text)
+
+
+def _redact_host_user_paths(text: str) -> str:
+    return _POSIX_USER_PATH_RE.sub(
+        "<host-user-path>",
+        _WINDOWS_USER_PATH_RE.sub("<host-user-path>", text),
+    )
 
 
 def _safe_tar_name(raw_name: str) -> str:
@@ -212,11 +243,15 @@ def _is_high_fanout_entity_page(name: str) -> bool:
 
 
 def _should_pack_markdown_page(name: str) -> bool:
-    return name.endswith(".md") and name != "log.md" and not name.startswith("wiki-packs/")
+    return (
+        name.endswith(".md")
+        and name not in _LOCAL_GENERATED_MARKDOWN
+        and not name.startswith("wiki-packs/")
+    )
 
 
 def _should_skip_expanded_markdown_member(name: str) -> bool:
-    return name == "log.md" or (
+    return name in _LOCAL_GENERATED_MARKDOWN or (
         name.endswith(".md")
         and name not in _REQUIRED_EXPANDED_MARKDOWN
         and "/" in name

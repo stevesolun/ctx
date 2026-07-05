@@ -224,14 +224,14 @@ ones are flagged. New ones self-ingest.
     ---
 
     Current main is **v1.0.20** — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-    4,498 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+    4,500 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
     ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),
     `ctx-incremental-attach`, `ctx-incremental-shadow`, `ctx-dedup-check`
     (pre-ship near-duplicate gate), and
     `ctx-tag-backfill` (entity hygiene), plus a fast runtime graph artifact
-    and the full ~282 MiB wiki tarball with **79,958 nodes / 1,778,069 edges / 52 Louvain communities**.
+    and the full ~281 MiB wiki tarball with **79,958 nodes / 1,778,069 edges / 52 Louvain communities**.
 
     [:octicons-arrow-right-24: CHANGELOG](https://github.com/stevesolun/ctx/blob/main/CHANGELOG.md) ·
     [Repository](https://github.com/stevesolun/ctx)
