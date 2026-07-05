@@ -1529,9 +1529,10 @@ when active graph packs exist, writes a small graph overlay pack for the
 changed entity. If the vector index is missing, the worker can still write a
 node-only graph overlay pack and refresh <code>graph-store.sqlite3</code>, so local
 dashboard/search/recommendation reads see the merged base+overlay graph without
-a full all-pairs semantic rebuild. The wiki page remains the source of truth;
-only legacy installs without active graph packs fall back to the normal
-incremental graph export job.</p>
+a full all-pairs semantic rebuild. Wiki readers also merge active pack pages
+with safe local-only entity files, while pack pages and tombstones shadow local
+files at the same relative path. Only legacy installs without active graph
+packs fall back to the normal incremental graph export job.</p>
 <h2 id="updating-the-graph-and-llm-wiki">Updating the Graph and LLM Wiki<a class="headerlink" href="#updating-the-graph-and-llm-wiki" title="Permanent link">&para;</a></h2>
 <p>Use this sequence for every accepted skill, agent, MCP server, or harness
 change. The graph and LLM-wiki are shippable artifacts, not scratch output, so
@@ -1551,7 +1552,8 @@ the update is treated like a release step.</p>
    <code>ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1</code>. This updates the
    wiki index, writes wiki overlay packs, attempts incremental ANN graph attach
    when a vector index exists, writes graph overlay packs when active packs are
-   present, and queues a graph-store refresh so local reads see the merged view.</li>
+   present, and queues a graph-store refresh so local reads see the merged
+   graph/wiki view.</li>
 <li>Rebuild the curated wiki graph with <code>ctx-wiki-graphify</code> before shipping
    release artifacts or when you need a full graph/export reconciliation.</li>
 <li>Repack <code>graph/wiki-graph.tar.gz</code> through the artifact promotion path:
@@ -1681,7 +1683,10 @@ checkout under <code>~/.claude/harnesses/&lt;slug&gt;</code>. Catalog entity rep
 <li><strong>Catalog removal</strong> stops ctx from showing the entity in the wiki, graph, and
   recommendations. Use the dashboard: <code>ctx-monitor serve</code>, open <strong>Manage</strong>,
   search for the slug and type, then choose <strong>Delete selected</strong>. This deletes
-  the wiki page and queues an <code>entity-upsert</code> delete plus <code>graph-export</code> job.</li>
+  the wiki page and queues an <code>entity-upsert</code> delete plus graph refresh. When
+  active wiki packs exist, draining the worker records a wiki tombstone so the
+  removed relative path stays hidden even if it still exists in a base pack or
+  stale local file.</li>
 <li><strong>Runtime unload</strong> removes a currently loaded entity from the live manifest.
   Use the dashboard <strong>Loaded</strong> page. MCP unloads call the Claude MCP removal
   path when available; skill and agent unloads remove the manifest row.</li>

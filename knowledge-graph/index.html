@@ -1838,7 +1838,10 @@ truth" to this operational model:</p>
 dashboard graph views, wiki pages, and harness setup still read the merged
 graph/wiki as one catalog. The difference is how updates are stored. Adding or
 updating one skill, agent, MCP server, or harness can write a small overlay pack
-instead of forcing a full graph and wiki rebuild.</p>
+instead of forcing a full graph and wiki rebuild. For local dashboard/search
+reads, wiki-pack pages override physical files at the same relative path,
+active wiki tombstones hide deleted paths, and safe local-only entity files that
+are not present in a pack or tombstone still participate in the catalog.</p>
 <p>This makes normal updates faster and safer:</p>
 <ul>
 <li><strong>Faster adds/updates</strong> - the worker writes a page overlay and, when the
@@ -1915,9 +1918,11 @@ wiki index, and, when a persisted semantic vector index exists, runs a
 best-effort ANN attach into <code>graphify-out/entity-overlays.jsonl</code>. That overlay
 lets the runtime resolver connect a new or updated entity to existing graph
 neighbors without recomputing global all-pairs similarity. When modular wiki
-packs exist, the same write is mirrored into a wiki overlay pack. The worker
-also queues a graph-store refresh so dashboard and resolver reads see the merged
-view. The entity markdown page or wiki page overlay remains the source of truth.</p>
+packs exist, the same write is mirrored into a wiki overlay pack; deletes are
+mirrored as wiki tombstones. The worker also queues a graph-store refresh so
+dashboard and resolver reads see the merged view. The active wiki page is the
+pack page when one exists, otherwise the local entity markdown file unless a
+pack tombstone hides that relative path.</p>
 <p>For manual review or debugging:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>ctx-incremental-attach<span class="w"> </span>calibrate<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span>--graph<span class="w"> </span>~/.claude/skill-wiki/graphify-out/graph.json

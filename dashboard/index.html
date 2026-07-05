@@ -1803,12 +1803,16 @@ the full wiki pages and start the local dashboard:</p>
 <p>The local catalog includes search, browser autocomplete suggestions, type
 filters, tile cards, and click-through detail pages for each entity.</p>
 <p>The wiki tab requires full wiki markdown content from
-<code>ctx-init --graph --graph-install-mode full</code> or local/private wiki entities.
-The default runtime graph install powers recommendations and graph stats but
-does not expand every entity page. When entity pages exist, the wiki tab is a
-filterable card grid over a deterministic, bounded dashboard sample:
-up to 500 pages per dashboard-supported entity type under
-<code>~/.claude/skill-wiki/entities/{skills,agents,mcp-servers,harnesses}/</code>.
+<code>ctx-init --graph --graph-install-mode full</code>, installed wiki packs, or
+local/private wiki entities. The default runtime graph install powers
+recommendations and graph stats but does not expand every entity page. When
+entity pages exist, the wiki tab is a filterable card grid over a
+deterministic, bounded dashboard sample: up to 500 pages per
+dashboard-supported entity type. If <code>~/.claude/skill-wiki/wiki-packs/</code> is
+installed, the dashboard reads the merged base+overlay pack state first: pack
+pages override stale physical files with the same relative path, active
+tombstones hide deleted pack paths, and safe local-only entity files that are
+not covered by a pack page or tombstone stay searchable.
 MCP server pages use the sharded layout
 <code>entities/mcp-servers/&lt;first-char-or-0-9&gt;/&lt;slug&gt;.md</code>; the dashboard
 routes <code>/wiki/&lt;slug&gt;</code> to the same shard convention. Harness pages use
@@ -1829,7 +1833,10 @@ testing" — check <code>agent</code>, type <code>testing</code> in the search b
 bounded markdown preview and a bounded frontmatter table on the right, plus a
 quality banner with deep links to <code>/skill/&lt;slug&gt;</code> (sidecar detail) and
 <code>/graph?slug=&lt;slug&gt;&amp;type=&lt;entity&gt;</code> (1-hop neighborhood). Long body previews and
-frontmatter values are visibly marked as truncated.</p>
+frontmatter values are visibly marked as truncated. If <code>type</code> is omitted, the
+dashboard resolves it from frontmatter and then from the entity path so untyped
+agent, MCP, and harness pages still use the correct sidecar and subgraph
+context.</p>
 <h3 id="explore-the-knowledge-graph-graph">Explore the knowledge graph — <code>/graph</code><a class="headerlink" href="#explore-the-knowledge-graph-graph" title="Permanent link">&para;</a></h3>
 <p>The graph tab is a dependency-free interactive SVG view over the
 dashboard-supported skill/agent/MCP/harness graph. Imported skills are normal
@@ -1923,11 +1930,11 @@ per-process monitor token injected into the rendered page.</p>
 </tr>
 <tr>
 <td><code>/wiki</code></td>
-<td><strong>Wiki entity index</strong> - bounded card-grid sample of up to 500 pages per dashboard-supported entity type under <code>~/.claude/skill-wiki/entities/{skills,agents,mcp-servers,harnesses}/</code>, including sharded MCP server pages and flat harness pages. Left sidebar: text search over the visible sample (slug, description, tag), skill/agent/MCP/harness checkboxes.</td>
+<td><strong>Wiki entity index</strong> - bounded card-grid sample of up to 500 pages per dashboard-supported entity type, merging installed wiki-pack pages with local-only entity files not shadowed by a pack page or tombstone. Includes sharded MCP server pages and flat harness pages. Left sidebar: text search over the visible sample (slug, description, tag), skill/agent/MCP/harness checkboxes.</td>
 </tr>
 <tr>
 <td><code>/wiki/&lt;slug&gt;?type=&lt;entity&gt;</code></td>
-<td>Dashboard-supported wiki entity page rendered: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views. The optional <code>type</code> query disambiguates duplicate slugs such as <code>langgraph</code>.</td>
+<td>Dashboard-supported wiki entity page rendered from the merged pack/local source: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views. The optional <code>type</code> query disambiguates duplicate slugs such as <code>langgraph</code>; omitted types are inferred from frontmatter or path when possible.</td>
 </tr>
 <tr>
 <td><code>/graph</code></td>
@@ -2034,7 +2041,7 @@ per-process monitor token injected into the rendered page.</p>
 </tr>
 <tr>
 <td><code>GET /api/entity/&lt;slug&gt;.json?type=&lt;entity&gt;</code></td>
-<td>Frontmatter and Markdown body for one wiki entity.</td>
+<td>Frontmatter and Markdown body for one wiki entity from the same merged pack/local source as <code>/wiki/&lt;slug&gt;</code>.</td>
 </tr>
 <tr>
 <td><code>GET /api/events.stream</code></td>
@@ -2106,7 +2113,7 @@ load/unload mutation endpoint yet.</p>
 <tr>
 <td><code>POST /api/entity/delete</code></td>
 <td><code>{"slug": "...", "entity_type": "skill"}</code></td>
-<td>remove a dashboard-supported wiki entity after safe-name validation</td>
+<td>remove a dashboard-supported wiki entity after safe-name validation; active wiki packs receive a tombstone on worker drain</td>
 </tr>
 </tbody>
 </table>
@@ -2141,7 +2148,7 @@ always drill from a headline number to the raw sidecar that produced it.</p>
 </tr>
 <tr>
 <td><strong>Wiki entities</strong></td>
-<td>Count of dashboard-supported wiki pages (skills + agents + MCP servers + harnesses)</td>
+<td>Count of dashboard-supported merged wiki pages (skills + agents + MCP servers + harnesses)</td>
 </tr>
 <tr>
 <td><strong>Knowledge graph</strong></td>
