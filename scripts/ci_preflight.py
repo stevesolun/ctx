@@ -23,6 +23,13 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.ci_classifier import classify_paths  # noqa: E402
 from scripts.ci_no_test_policy import evaluate_policy  # noqa: E402
 
+PUBLIC_DOCS_TRACKER_TESTS = (
+    "src/tests/test_bug_smoke_tracker.py",
+    "src/tests/test_feature_user_story_tracker.py",
+    "src/tests/test_dashboard_user_story_tracker.py",
+    "src/tests/test_toolbox_cli.py",
+)
+
 
 GRAPH_VALIDATE_ARGS = (
     "src/validate_graph_artifacts.py",
@@ -87,14 +94,47 @@ def _run_git(args: list[str], *, allow_failure: bool = False) -> list[str]:
     return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
 
-def changed_files(base_ref: str) -> list[str]:
+def _run_git_text(args: list[str], *, allow_failure: bool = False) -> str:
+    proc = subprocess.run(
+        ["git", *args],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        if allow_failure:
+            return ""
+        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip())
+    return proc.stdout
+
+
+def _diff_base(base_ref: str) -> str:
     merge_base = _run_git(["merge-base", base_ref, "HEAD"], allow_failure=True)
-    base = merge_base[0] if merge_base else base_ref
+    return merge_base[0] if merge_base else base_ref
+
+
+def changed_files(base_ref: str) -> list[str]:
+    base = _diff_base(base_ref)
     paths = set(_run_git(["diff", "--name-only", base, "HEAD"], allow_failure=True))
     paths.update(_run_git(["diff", "--name-only"], allow_failure=True))
     paths.update(_run_git(["diff", "--cached", "--name-only"], allow_failure=True))
     paths.update(_run_git(["ls-files", "--others", "--exclude-standard"], allow_failure=True))
     return sorted(path.replace("\\", "/") for path in paths)
+
+
+def _diffs_for_files(base_ref: str, files: list[str]) -> dict[str, str]:
+    base = _diff_base(base_ref)
+    diffs: dict[str, str] = {}
+    for path in files:
+        parts = (
+            _run_git_text(["diff", "--unified=0", base, "HEAD", "--", path], allow_failure=True),
+            _run_git_text(["diff", "--cached", "--unified=0", "--", path], allow_failure=True),
+            _run_git_text(["diff", "--unified=0", "--", path], allow_failure=True),
+        )
+        diff_text = "\n".join(part for part in parts if part)
+        if diff_text:
+            diffs[path] = diff_text
+    return diffs
 
 
 def select_checks(
@@ -190,9 +230,7 @@ def select_checks(
                         "pytest",
                         "-q",
                         "--no-cov",
-                        "src/tests/test_bug_smoke_tracker.py",
-                        "src/tests/test_feature_user_story_tracker.py",
-                        "src/tests/test_toolbox_cli.py",
+                        *PUBLIC_DOCS_TRACKER_TESTS,
                     ),
                 ),
                 Check("docs strict build", (python, "-m", "mkdocs", "build", "--strict")),
@@ -286,8 +324,15 @@ def select_checks(
     return checks, notes
 
 
-def _run_no_test_policy_for_files(files: list[str]) -> int:
-    result = evaluate_policy(files, (), {})
+def _run_no_test_policy_for_files(
+    files: list[str],
+    *,
+    base_ref: str = "origin/main",
+    diffs_by_file: dict[str, str] | None = None,
+) -> int:
+    if diffs_by_file is None:
+        diffs_by_file = _diffs_for_files(base_ref, files)
+    result = evaluate_policy(files, (), diffs_by_file)
     print(result.message)
     if result.contract_files:
         print("Contract files:")
@@ -358,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
 
     files = changed_files(args.base)
     if args.internal_no_test_policy:
-        return _run_no_test_policy_for_files(files)
+        return _run_no_test_policy_for_files(files, base_ref=args.base)
 
     checks, notes = select_checks(
         base_ref=args.base,

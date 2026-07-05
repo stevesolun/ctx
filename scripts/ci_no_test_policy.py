@@ -65,6 +65,14 @@ def is_test_file(path: str) -> bool:
     return path.startswith("src/tests/") and path.endswith((".py", ".json"))
 
 
+def _content_diff_lines(diff_text: str) -> tuple[str, ...]:
+    return tuple(
+        line
+        for line in diff_text.splitlines()
+        if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+    )
+
+
 def is_release_metadata_only(
     changed_files: Iterable[str],
     diffs_by_file: dict[str, str],
@@ -79,10 +87,11 @@ def is_release_metadata_only(
     for path in files:
         if path == "CHANGELOG.md":
             continue
+        change_lines = _content_diff_lines(diffs_by_file.get(path, ""))
+        if not change_lines:
+            return False
         if path in RELEASE_GENERATED_STATS_FILES:
-            for line in diffs_by_file.get(path, "").splitlines():
-                if not line.startswith(("+", "-")) or line.startswith(("+++", "---")):
-                    continue
+            for line in change_lines:
                 text = line[1:].strip()
                 if (
                     not TEST_COUNT_STATS_RE.fullmatch(text)
@@ -95,9 +104,7 @@ def is_release_metadata_only(
                     return False
             continue
         expected = VERSION_LINE_RE if path == "pyproject.toml" else INIT_VERSION_LINE_RE
-        for line in diffs_by_file.get(path, "").splitlines():
-            if not line.startswith(("+", "-")) or line.startswith(("+++", "---")):
-                continue
+        for line in change_lines:
             if not expected.fullmatch(line[1:].strip()):
                 return False
     return True

@@ -146,7 +146,7 @@ def _invoke_recompute(slugs: list[str], session_id: str | None = None) -> int:
     script = SRC / "skill_quality.py"
     if not script.is_file():
         print(f"[quality_on_session_end] missing {script}", file=sys.stderr)
-        return 0
+        return 1
     # Propagate session_id via environment so the per-slug
     # skill.score_updated audit rows carry it. Without this the
     # dashboard's per-session timeline drops the middle event in the
@@ -168,7 +168,7 @@ def _invoke_recompute(slugs: list[str], session_id: str | None = None) -> int:
         return result.returncode
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"[quality_on_session_end] recompute failed: {exc}", file=sys.stderr)
-        return 0
+        return 1
 
 
 def main() -> int:
@@ -187,8 +187,14 @@ def main() -> int:
     if not session_id:
         session_id = f"session-{now.strftime('%Y%m%dT%H%M%SZ')}"
 
-    _invoke_recompute(slugs, session_id=session_id)
-    _write_state(now)
+    recompute_rc = _invoke_recompute(slugs, session_id=session_id)
+    if recompute_rc == 0:
+        _write_state(now)
+    else:
+        print(
+            "[quality_on_session_end] recompute did not complete; state not advanced",
+            file=sys.stderr,
+        )
 
     # Unified audit: one line per session boundary + rotate if big.
     # Guarded with try/except because a hook that fails on audit is
