@@ -446,12 +446,13 @@ def install_mcp(
         install_cmd = _safe_manifest_command(fm.get("install_cmd"))
         if install_cmd:
             skipped_extra["command"] = install_cmd
-        record_install(
-            slug,
-            entity_type="mcp-server",
-            source="ctx-mcp-install",
-            extra=skipped_extra,
-        )
+        if not dry_run:
+            record_install(
+                slug,
+                entity_type="mcp-server",
+                source="ctx-mcp-install",
+                extra=skipped_extra,
+            )
         return InstallResult(
             slug=slug,
             status="skipped-existing",
