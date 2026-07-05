@@ -1446,12 +1446,14 @@ format/check, mypy, pip check, unit coverage, canaries, package build,
 twine, docs, graph validation, browser, and similarity checks as needed.
 Use <code>--profile full</code> before release work to force the source/package gates
 even for docs-only or graph-only changes. Docs changes run public docs
-tracker checks before the strict MkDocs build. Public docs surfaces are
+tracker checks before the strict MkDocs build, including bug-smoke,
+feature, dashboard, and toolbox coverage. Public docs surfaces are
 release-tracked: when
 <code>mkdocs.yml</code> adds, removes, or moves a nav <code>.md</code> page, or public linked
 assets under <code>docs/assets/javascripts/</code>, <code>docs/services/</code>, or
-<code>docs/toolbox/templates/</code> change, update both
-<code>docs/qa/feature-user-story-status.csv</code> and the canonical
+<code>docs/toolbox/templates/</code> change, update the relevant supporting ledger
+(<code>docs/qa/feature-user-story-status.csv</code> or
+<code>docs/qa/dashboard-user-story-status.csv</code>) and the canonical
 <code>qa/feature_status.csv</code> with the exact path in <code>entrypoint_or_route</code>.
 Bug-smoke audit rows live in <code>qa/bug_smoke_status.csv</code> and are validated
 by the same public docs tracker.</p>
@@ -1590,7 +1592,7 @@ A/B/C/D/F.</p>
 <p><strong>Source snapshot</strong></p>
 <hr />
 <p>Current main is <strong>v1.0.20</strong> — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-4,449 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+4,450 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
 ships console scripts including <code>ctx-init</code>,
 <code>ctx-monitor</code> (local dashboard with graph + wiki + load/unload for
 skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),

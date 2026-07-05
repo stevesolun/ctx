@@ -1564,7 +1564,9 @@ absolute path to this checkout (use forward slashes on Windows):</p>
 </span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="p">}</span>
 </span></code></pre></div>
 <p>The hook always exits 0: a scoring error will not block session
-shutdown.</p>
+shutdown. If recompute fails, the hook leaves
+<code>~/.claude/skill-quality/.hook-state.json</code> unchanged so the same event
+window is retried on the next session end.</p>
 <h2 id="seed-the-sidecars-first-run-only">Seed the sidecars (first run only)<a class="headerlink" href="#seed-the-sidecars-first-run-only" title="Permanent link">&para;</a></h2>
 <p>Run once after install so every installed skill has a baseline score:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ctx-skill-quality<span class="w"> </span>recompute<span class="w"> </span>--all
