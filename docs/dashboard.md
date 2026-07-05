@@ -250,7 +250,7 @@ per-process monitor token injected into the rendered page.
 | `GET /api/sessions.json` | All sessions with aggregated counts |
 | `GET /api/manifest.json` | Raw `skill-manifest.json` passthrough |
 | `GET /api/status.json` | `{queue, artifacts, telemetry}` payload: durable queue counts/recent jobs, graph/wiki artifact file status and promotion metadata, plus telemetry spool/export health including malformed records and exporter errors |
-| `GET /api/skill/<slug>.json` | Raw sidecar for one slug |
+| `GET /api/skill/<slug>.json` | Raw sidecar for one slug; missing or unsafe slugs return JSON `{detail: ...}` with HTTP 404 |
 | `GET /api/graph/<slug>.json?type=<entity>&hops=1&limit=40` | Dashboard-shaped skill/agent/MCP/harness `{nodes, edges, center}`; `type` is optional but recommended for duplicate slugs, `hops` is [1, 3], `limit` is [5, 150]. |
 | `GET /api/kpi.json` | `DashboardSummary` passthrough — `{total, by_subject, grade_counts, lifecycle_counts, category_breakdown, hard_floor_counts, low_quality_candidates, archived, generated_at}`. Returns `{total: 0, detail: "no sidecars yet"}` when the quality directory is empty |
 | `GET /api/runtime.json` | Runtime lifecycle summary: source path, validation count, failed/error count, open-escalation count, latest validation, recent validations, open escalations, session IDs, `tool_selection`, `token_usage`, `token_usage_history`, and `recent_tool_usage`. |

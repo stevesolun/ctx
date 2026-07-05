@@ -789,8 +789,8 @@ def _flatten_content(content: list[Any] | None) -> str:
     """Concatenate a MCP tool-result content array into a single string.
 
     Text blocks pass through verbatim. Non-text blocks (image/resource)
-    are summarised with a short tag; the harness loop can grow
-    multi-modal tool results in a later phase.
+    are summarised with a short tag; resource URIs are deliberately
+    omitted so local paths and private identifiers do not leak.
     """
     if not content:
         return ""

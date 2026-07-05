@@ -334,7 +334,8 @@ def wiki_get(
     ``entity_type`` optionally disambiguates duplicate slugs across
     skills, agents, MCP servers, and harnesses.
 
-    Result dict on hit: ``slug``, ``path``, ``frontmatter``, ``body``.
+    Result dict on hit: ``slug``, wiki-relative ``path``,
+    ``frontmatter``, ``body``.
     Errors (invalid slug, traversal attempt, file missing) all map to
     ``None`` — library callers get a simple "exists or not" contract.
     """

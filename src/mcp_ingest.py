@@ -23,13 +23,13 @@ Usage
     # Stream from a source, checkpointed per-source:
     ctx-mcp-fetch --source awesome-mcp | ctx-mcp-ingest --source awesome-mcp
 
-    # Replay a JSONL file (idempotent re-runs skip already-processed):
+    # Replay a JSONL file one line at a time (idempotent re-runs skip already-processed):
     ctx-mcp-ingest --source pulsemcp --from-jsonl records.jsonl
 
     # Retry only the failures from the prior run:
     ctx-mcp-ingest --source pulsemcp --retry-failures --from-stdin
 
-    # Inspect progress:
+    # Inspect progress without creating a missing wiki path:
     ctx-mcp-ingest --source pulsemcp --status
 
 Checkpoint
@@ -494,7 +494,7 @@ def _iter_records_from(
 
 
 def _print_status(wiki_path: Path, source: str) -> None:
-    """Dump a human-readable summary of the current checkpoint."""
+    """Dump a checkpoint summary without initializing a missing wiki path."""
     cp = load_checkpoint(wiki_path, source)
     print(f"source:       {cp['source']}")
     print(f"started_at:   {cp['started_at']}")

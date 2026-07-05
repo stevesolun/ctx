@@ -474,7 +474,8 @@ class CtxCoreToolbox:
                 name=f"{_NAMESPACE}wiki_get",
                 description=(
                     "Fetch a single wiki entity page by slug. Returns "
-                    "the full frontmatter (as a dict) and body text. "
+                    "the full frontmatter (as a dict), body text, and "
+                    "wiki-relative path. "
                     "Use after recommend_bundle / wiki_search to read "
                     "the detail of a specific candidate."
                 ),
