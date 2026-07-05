@@ -32,7 +32,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from ctx.core import entity_types as _entity_types
-from ctx.core.wiki.wiki_packs import write_wiki_base_pack
+from ctx.core.wiki.wiki_packs import write_wiki_base_pack, write_wiki_overlay_pack
 from ctx.monitor import testing as _mt
 from ctx.monitor.services import wiki as _wiki_service
 
@@ -236,6 +236,14 @@ class TestWikiIndexEntries:
                 ),
             },
         )
+        write_wiki_overlay_pack(
+            pack_dir=wiki_3type / "wiki-packs" / "overlay-delete-security-basics",
+            pack_id="overlay-delete-security-basics",
+            base_export_id="export-1",
+            parent_export_id="export-1",
+            pages={},
+            tombstones=["entities/skills/security-basics.md"],
+        )
 
         entries = _mt.wiki_index_entries(limit_per_type=None)
         slugs = {entry["slug"] for entry in entries}
@@ -249,6 +257,8 @@ class TestWikiIndexEntries:
         local_detail = _mt.wiki_entity_detail("manage-created", entity_type="skill")
         local_search = _mt.search_wiki_entities("local-only manage", entity_type="skill")
         local_html = _mt.render_wiki_entity("manage-created", entity_type="skill")
+        tombstoned_detail = _mt.wiki_entity_detail("security-basics", entity_type="skill")
+        tombstoned_search = _mt.search_wiki_entities("security-basics", entity_type="skill")
         html = _mt.render_wiki_entity("python-patterns", entity_type="skill")
         stats = _mt.wiki_stats()
 
@@ -261,7 +271,6 @@ class TestWikiIndexEntries:
             "manage-created",
             "pulsemcp-meta",
             "python-patterns",
-            "security-basics",
         }
         assert service_detail is not None
         assert service_detail["frontmatter"]["title"] == "Fresh Pack Page"
@@ -275,16 +284,63 @@ class TestWikiIndexEntries:
         assert "Local-only Manage-created body" in local_detail["body"]
         assert [row["slug"] for row in local_search] == ["manage-created"]
         assert "Manage Created" in local_html
+        assert _mt.wiki_entity_path("security-basics", entity_type="skill") is None
+        assert tombstoned_detail is None
+        assert tombstoned_search == []
         assert "Fresh Pack Page" in html
         assert "Stale Physical Page" not in html
         assert stats == {
-            "skills": 3,
+            "skills": 2,
             "agents": 1,
             "mcps": 4,
             "harnesses": 1,
-            "total": 9,
+            "total": 8,
             "split_known": True,
         }
+
+    def test_untyped_pack_read_uses_resolved_local_entity_path(
+        self,
+        wiki_3type: Path,
+    ) -> None:
+        _wiki_service.reset_caches()
+        (wiki_3type / "entities" / "skills" / "shared-slug.md").write_text(
+            "---\n"
+            "title: Local Skill\n"
+            "type: skill\n"
+            "tags: [local]\n"
+            "---\n"
+            "# Local Skill\n\n"
+            "Local skill body.\n",
+            encoding="utf-8",
+        )
+        write_wiki_base_pack(
+            pack_dir=wiki_3type / "wiki-packs" / "base-export-1",
+            pack_id="base-export-1",
+            base_export_id="export-1",
+            pages={
+                "entities/agents/shared-slug.md": (
+                    "---\n"
+                    "title: Packed Agent\n"
+                    "type: agent\n"
+                    "tags: [pack]\n"
+                    "---\n"
+                    "# Packed Agent\n\n"
+                    "Packed agent body.\n"
+                ),
+            },
+        )
+
+        detail = _mt.wiki_entity_detail("shared-slug")
+        agent_detail = _mt.wiki_entity_detail("shared-slug", entity_type="agent")
+
+        assert detail is not None
+        assert detail["type"] == "skill"
+        assert detail["frontmatter"]["title"] == "Local Skill"
+        assert "Local skill body" in detail["body"]
+        assert "Packed agent body" not in detail["body"]
+        assert agent_detail is not None
+        assert agent_detail["type"] == "agent"
+        assert agent_detail["frontmatter"]["title"] == "Packed Agent"
 
     def test_wiki_entity_page_resolves_type_from_path_for_untyped_non_skill(
         self,

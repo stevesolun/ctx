@@ -120,6 +120,12 @@ class WikiPackPromotion:
         }
 
 
+@dataclass(frozen=True)
+class WikiPackState:
+    pages: dict[str, str]
+    tombstones: frozenset[str]
+
+
 def write_wiki_base_pack(
     *,
     pack_dir: Path,
@@ -253,12 +259,13 @@ def _overlay_sort_key(entry: WikiPackEntry) -> tuple[str, str]:
     return entry.manifest.created_at or "", entry.manifest.pack_id
 
 
-def load_merged_wiki_pages(packs_dir: Path) -> dict[str, str]:
-    """Return wiki-relative markdown pages after applying overlay packs."""
+def load_merged_wiki_pack_state(packs_dir: Path) -> WikiPackState:
+    """Return wiki-relative markdown pages and active tombstones after applying overlays."""
     entries = discover_wiki_pack_manifests(packs_dir)
     if not entries:
-        return {}
+        return WikiPackState(pages={}, tombstones=frozenset())
     pages: dict[str, str] = {}
+    tombstones: set[str] = set()
     for entry in entries:
         page_rows = _read_jsonl_objects(entry.path / "pages.jsonl")
         tombstone_rows = _read_jsonl_objects(entry.path / "tombstones.jsonl")
@@ -281,9 +288,17 @@ def load_merged_wiki_pages(packs_dir: Path) -> dict[str, str]:
             if isinstance(expected_sha, str) and expected_sha != _sha256_text(text):
                 raise WikiPackManifestError(f"wiki page checksum mismatch: {relpath}")
             pages[relpath] = text
+            tombstones.discard(relpath)
         for row in tombstone_rows:
-            pages.pop(_normalise_page_path(_required_str(row, "path")), None)
-    return pages
+            relpath = _normalise_page_path(_required_str(row, "path"))
+            pages.pop(relpath, None)
+            tombstones.add(relpath)
+    return WikiPackState(pages=pages, tombstones=frozenset(tombstones))
+
+
+def load_merged_wiki_pages(packs_dir: Path) -> dict[str, str]:
+    """Return wiki-relative markdown pages after applying overlay packs."""
+    return load_merged_wiki_pack_state(packs_dir).pages
 
 
 def compact_wiki_packs(

@@ -12,14 +12,14 @@ from urllib.parse import quote
 
 from ctx.core import entity_types as core_entity_types
 from ctx.core.wiki import wiki_queue
-from ctx.core.wiki.wiki_packs import load_merged_wiki_pages
+from ctx.core.wiki.wiki_packs import WikiPackState, load_merged_wiki_pack_state
 from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body
 from ctx.monitor.services import graph as graph_service
 from ctx.utils._safe_name import is_safe_source_name
 
 
 _WIKI_PACK_CACHE_KEY: tuple[Any, ...] | None = None
-_WIKI_PACK_CACHE_VALUE: dict[str, str] | None = None
+_WIKI_PACK_CACHE_VALUE: WikiPackState | None = None
 _DASHBOARD_ENTITY_SOURCES: tuple[tuple[str, str, bool], ...] = (
     core_entity_types.entity_source_specs()
 )
@@ -71,8 +71,7 @@ def queue_entity_refresh(
     )
 
 
-def wiki_pack_pages(wiki_dir: Path) -> dict[str, str] | None:
-    """Return merged wiki-pack pages, or None when packs are not installed."""
+def wiki_pack_state(wiki_dir: Path) -> WikiPackState | None:
     global _WIKI_PACK_CACHE_KEY, _WIKI_PACK_CACHE_VALUE
 
     packs_dir = wiki_dir / "wiki-packs"
@@ -93,10 +92,16 @@ def wiki_pack_pages(wiki_dir: Path) -> dict[str, str] | None:
     if _WIKI_PACK_CACHE_KEY == cache_key and _WIKI_PACK_CACHE_VALUE is not None:
         return _WIKI_PACK_CACHE_VALUE
 
-    pages = load_merged_wiki_pages(packs_dir)
+    state = load_merged_wiki_pack_state(packs_dir)
     _WIKI_PACK_CACHE_KEY = cache_key
-    _WIKI_PACK_CACHE_VALUE = pages
-    return pages
+    _WIKI_PACK_CACHE_VALUE = state
+    return state
+
+
+def wiki_pack_pages(wiki_dir: Path) -> dict[str, str] | None:
+    """Return merged wiki-pack pages, or None when packs are not installed."""
+    state = wiki_pack_state(wiki_dir)
+    return state.pages if state is not None else None
 
 
 def entity_path(
@@ -110,17 +115,21 @@ def entity_path(
     normalized = normalize_entity_type(entity_type) if entity_type else None
     if entity_type is not None and normalized is None:
         return None
-    pack_pages = wiki_pack_pages(wiki_dir)
+    pack_state = wiki_pack_state(wiki_dir)
     for _sub, current_type, _recursive in _DASHBOARD_ENTITY_SOURCES:
         if normalized is not None and normalized != current_type:
             continue
         path = core_entity_types.entity_page_path(wiki_dir, current_type, slug)
         if path is None:
             continue
-        if pack_pages is not None:
+        if pack_state is not None:
             relpath = core_entity_types.entity_relpath(current_type, slug)
-            if relpath is not None and relpath.as_posix() in pack_pages:
-                return path
+            if relpath is not None:
+                relpath_text = relpath.as_posix()
+                if relpath_text in pack_state.pages:
+                    return path
+                if relpath_text in pack_state.tombstones:
+                    continue
         if path.exists():
             return path
     return None
@@ -161,10 +170,11 @@ def iter_entity_paths(
                 if is_safe_slug(slug):
                     file_rows.append((slug, current_type, file_path))
 
-    pack_pages = wiki_pack_pages(wiki_dir)
-    if pack_pages is not None:
+    pack_state = wiki_pack_state(wiki_dir)
+    if pack_state is not None:
+        pack_pages = pack_state.pages
         rows: list[tuple[str, str, Path]] = []
-        packed_relpaths: set[str] = set()
+        pack_relpaths = set(pack_pages) | set(pack_state.tombstones)
         for relpath in sorted(pack_pages):
             parsed = pack_entity_from_relpath(relpath)
             if parsed is None:
@@ -174,11 +184,10 @@ def iter_entity_paths(
                 continue
             pack_path = core_entity_types.entity_page_path(wiki_dir, current_type, slug)
             if pack_path is not None:
-                packed_relpaths.add(relpath)
                 rows.append((slug, current_type, pack_path))
         for slug, current_type, file_path in file_rows:
             file_relpath = core_entity_types.entity_relpath(current_type, slug)
-            if file_relpath is None or file_relpath.as_posix() not in packed_relpaths:
+            if file_relpath is None or file_relpath.as_posix() not in pack_relpaths:
                 rows.append((slug, current_type, file_path))
         return sorted(rows, key=lambda row: (row[1], row[0].lower(), row[2].as_posix()))
     return sorted(file_rows, key=lambda row: (row[1], row[0].lower(), row[2].as_posix()))
@@ -234,17 +243,28 @@ def read_entity_text(
     entity_type: str | None,
     path: Path,
 ) -> str | None:
-    pack_pages = wiki_pack_pages(wiki_dir)
-    if pack_pages is not None:
-        entity_types = [entity_type] if entity_type is not None else list(_DASHBOARD_ENTITY_TYPES)
-        for current_type in entity_types:
-            relpath = core_entity_types.entity_relpath(current_type, slug)
-            if relpath is not None and relpath.as_posix() in pack_pages:
-                return pack_pages[relpath.as_posix()]
+    pack_state = wiki_pack_state(wiki_dir)
+    if pack_state is not None:
+        relpath = wiki_relative_path(wiki_dir, path)
+        if relpath is not None:
+            if relpath in pack_state.pages:
+                return pack_state.pages[relpath]
+            if relpath in pack_state.tombstones:
+                return None
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
+
+
+def wiki_relative_path(wiki_dir: Path, path: Path) -> str | None:
+    try:
+        return path.resolve().relative_to(wiki_dir.resolve()).as_posix()
+    except (OSError, ValueError):
+        try:
+            return path.relative_to(wiki_dir).as_posix()
+        except ValueError:
+            return None
 
 
 def wiki_stats_from_dashboard_index(
