@@ -1563,11 +1563,13 @@ def test_validator_default_floors_match_preflight_contract() -> None:
     assert values["--min-semantic-edges"] == str(DEFAULT_MIN_SEMANTIC_EDGES)
 
 
-def test_graph_only_workflow_waits_for_release_asset_upload() -> None:
+def test_graph_only_workflow_uses_release_cache_or_targeted_lfs() -> None:
     workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
     steps = workflow["jobs"]["graph-check"]["steps"]
     resolve_step = next(
-        step for step in steps if step.get("name") == "Resolve graph artifacts from release assets"
+        step
+        for step in steps
+        if step.get("name") == "Resolve graph artifacts from release assets or targeted LFS"
     )
     script = resolve_step["run"]
 
@@ -1575,3 +1577,6 @@ def test_graph_only_workflow_waits_for_release_asset_upload() -> None:
     assert "while True:" in script
     assert "Waiting for matching release asset" in script
     assert "time.sleep(release_asset_poll_seconds)" in script
+    assert "Pointer for {path_name} is not in release cache" in script
+    assert '"git", "lfs", "pull", "--include", path_name' in script
+    assert "verify_hydrated_file(graph_tar, expected_oid, expected_size)" in script
