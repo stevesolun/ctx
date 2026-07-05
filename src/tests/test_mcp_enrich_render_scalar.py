@@ -134,6 +134,66 @@ class TestRenderScalar:
             f"{status_keys!r}\nFull frontmatter:\n{fm}"
         )
 
+    def test_set_frontmatter_field_ignores_body_keys(self):
+        text = "---\nname: sample\n---\n# sample\ngithub_url: body-only\n"
+
+        result = _me._set_frontmatter_field(
+            text,
+            "github_url",
+            "https://github.com/example/sample",
+        )
+
+        frontmatter = result.split("---", 2)[1]
+        body = result.split("---", 2)[2]
+        assert 'github_url: "https://github.com/example/sample"' in frontmatter
+        assert "github_url: body-only" in body
+
+    def test_load_checkpoint_resets_bad_total_seen(self, tmp_path):
+        path = _me._checkpoint_path(tmp_path, "pulsemcp")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            (
+                '{"version": 1, "source": "pulsemcp", "started_at": "now", '
+                '"updated_at": "now", "total_seen": "NaN", '
+                '"processed": {}, "failures": {}}'
+            ),
+            encoding="utf-8",
+        )
+
+        assert _me.load_checkpoint(tmp_path, "pulsemcp") == _me._empty_checkpoint("pulsemcp")
+
+    def test_load_checkpoint_resets_bad_nested_shapes(self, tmp_path):
+        path = _me._checkpoint_path(tmp_path, "pulsemcp")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            (
+                '{"version": 1, "source": "pulsemcp", "started_at": "now", '
+                '"updated_at": "now", "total_seen": 1, '
+                '"processed": {"slug": []}, "failures": {}}'
+            ),
+            encoding="utf-8",
+        )
+
+        assert _me.load_checkpoint(tmp_path, "pulsemcp") == _me._empty_checkpoint("pulsemcp")
+
+    def test_load_checkpoint_drops_failures_for_processed_slugs(self, tmp_path):
+        path = _me._checkpoint_path(tmp_path, "pulsemcp")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            (
+                '{"version": 1, "source": "pulsemcp", "started_at": "now", '
+                '"updated_at": "now", "total_seen": 2, '
+                '"processed": {"done": {"result": "unchanged"}}, '
+                '"failures": {"done": {"error": "stale"}, "retry": {"error": "fresh"}}}'
+            ),
+            encoding="utf-8",
+        )
+
+        checkpoint = _me.load_checkpoint(tmp_path, "pulsemcp")
+
+        assert "done" in checkpoint["processed"]
+        assert checkpoint["failures"] == {"retry": {"error": "fresh"}}
+
     def test_enrich_entities_updates_pack_only_mcp_page(self, tmp_path, monkeypatch):
         wiki = tmp_path / "wiki"
         relpath = "entities/mcp-servers/p/pack-only.md"
@@ -238,6 +298,92 @@ class TestRenderScalar:
 
         assert source.calls == ["dry-run-poison", "dry-run-poison"]
         assert "dry-run-poison" in _me.load_checkpoint(wiki, "pulsemcp")["processed"]
+
+    def test_successful_unchanged_retry_clears_prior_failure(self, tmp_path, monkeypatch):
+        wiki = tmp_path / "wiki"
+        _write_pulsemcp_entity(wiki, "same-repo")
+        entity = wiki / "entities" / "mcp-servers" / "s" / "same-repo.md"
+        entity.write_text(
+            entity.read_text(encoding="utf-8").replace(
+                "github_url: null",
+                'github_url: "https://github.com/example/same-repo"',
+            ),
+            encoding="utf-8",
+        )
+
+        class Source:
+            def fetch_details(self, slug, *, refresh=False):  # noqa: ARG002, ANN001, ANN201
+                return {"github_url": "https://github.com/example/same-repo"}
+
+        monkeypatch.setitem(_me.SOURCES, "pulsemcp", Source())
+        checkpoint = _me.load_checkpoint(wiki, "pulsemcp")
+        checkpoint["failures"]["same-repo"] = {"error": "prior", "at": "earlier"}
+
+        _me.enrich_entities(
+            [entity],
+            source_name="pulsemcp",
+            wiki_path=wiki,
+            checkpoint=checkpoint,
+            sleep_seconds=0,
+            report_progress=False,
+        )
+
+        assert "same-repo" not in checkpoint["failures"]
+        assert checkpoint["processed"]["same-repo"]["result"] == "unchanged"
+
+    def test_enrich_entities_clears_stale_processed_failure_before_skip(
+        self, tmp_path, monkeypatch
+    ):
+        wiki = tmp_path / "wiki"
+        _write_pulsemcp_entity(wiki, "already-done")
+        entity = wiki / "entities" / "mcp-servers" / "a" / "already-done.md"
+
+        class Source:
+            def __init__(self):
+                self.calls = []
+
+            def fetch_details(self, slug, *, refresh=False):  # noqa: ARG002, ANN001, ANN201
+                self.calls.append(slug)
+                return {"github_url": "https://github.com/example/already-done"}
+
+        source = Source()
+        monkeypatch.setitem(_me.SOURCES, "pulsemcp", source)
+        checkpoint = _me.load_checkpoint(wiki, "pulsemcp")
+        checkpoint["processed"]["already-done"] = {"result": "unchanged", "at": "earlier"}
+        checkpoint["failures"]["already-done"] = {"error": "stale", "at": "earlier"}
+
+        _me.enrich_entities(
+            [entity],
+            source_name="pulsemcp",
+            wiki_path=wiki,
+            checkpoint=checkpoint,
+            sleep_seconds=0,
+            report_progress=False,
+        )
+
+        assert source.calls == []
+        assert checkpoint["failures"] == {}
+
+    def test_enrich_entities_rejects_non_positive_flush_every(self, tmp_path, monkeypatch):
+        wiki = tmp_path / "wiki"
+        _write_pulsemcp_entity(wiki, "bad-flush")
+
+        class Source:
+            def fetch_details(self, slug, *, refresh=False):  # noqa: ARG002, ANN001, ANN201
+                return {"github_url": "https://github.com/example/bad-flush"}
+
+        monkeypatch.setitem(_me.SOURCES, "pulsemcp", Source())
+
+        with pytest.raises(ValueError, match="flush_every"):
+            _me.enrich_entities(
+                list(_me._iter_entities(wiki)),
+                source_name="pulsemcp",
+                wiki_path=wiki,
+                checkpoint=_me.load_checkpoint(wiki, "pulsemcp"),
+                flush_every=0,
+                sleep_seconds=0,
+                report_progress=False,
+            )
 
     def test_dry_run_fetch_failure_exits_nonzero_without_checkpoint(self, tmp_path, monkeypatch):
         wiki = tmp_path / "wiki"

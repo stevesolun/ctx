@@ -763,6 +763,50 @@ class TestRuntimeLifecycle:
         assert metrics[0][4]["ctx.entity.type"] == "mcp-server"
         assert metrics[0][4]["ctx.usage.attribution"] == "unavailable"
 
+    def test_runtime_lifecycle_redacts_free_text_fields(self, tmp_path: Path) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        secret = "sk-" + ("a" * 32)
+        store = RuntimeLifecycleStore(root=tmp_path)
+
+        used = store.mark_entity_used(
+            session_id="s-private",
+            entity_type="skill",
+            slug="fastapi-pro",
+            evidence=f"opened {secret} from /Users/steves/private/app.py",
+        )
+        validation = store.record_validation(
+            session_id="s-private",
+            check_name="pytest",
+            status="failed",
+            command=f"pytest /Users/steves/private/tests --token {secret}",
+            summary=f"failed at /Users/steves/private/tests/test_app.py with {secret}",
+        )
+        escalation = store.record_escalation(
+            session_id="s-private",
+            trigger="hook from /Users/steves/private/hook.py",
+            reason=f"secret {secret} leaked from /Users/steves/private",
+        )
+        ended = store.end_session(
+            session_id="s-private",
+            status=f"stopped by {secret} in /Users/steves/private/stop.log",
+        )
+        state = store.session_state(session_id="s-private")
+
+        payload = json.dumps(
+            {
+                "used": used,
+                "validation": validation,
+                "escalation": escalation,
+                "ended": ended,
+                "state": state,
+            }
+        )
+        assert secret not in payload
+        assert "/Users/steves" not in payload
+        assert "[redacted]" in payload
+        assert "[redacted-path]" in payload
+
     def test_lifecycle_tools_append_events(
         self,
         toolbox: CtxCoreToolbox,

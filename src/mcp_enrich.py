@@ -5,7 +5,9 @@ mcp_enrich.py -- Phase 6f detail-page enrichment for MCP entities.
 Walks every MCP entity file (``<wiki>/entities/mcp-servers/<shard>/<slug>.md``)
 and calls the source's ``fetch_details(slug)`` to pull ``github_url``
 and ``stars`` from the detail page. The scraped values are written
-back into the entity's YAML frontmatter.
+back into the entity's YAML frontmatter. Body text with matching key names is
+left untouched; files without YAML frontmatter are skipped rather than
+fabricated.
 
 Why this exists (from Phase 6e close-out):
   - The listing pages scraped by Phase 6c (``mcp_ingest``) expose
@@ -20,6 +22,9 @@ Why this exists (from Phase 6e close-out):
 Checkpoint: ``<wiki>/.enrich-checkpoint/<source>.json`` — same shape
 as the Phase 6c ingest checkpoint. Slugs in ``processed`` skip on
 resume. ``failures`` retry on the next run unless ``--skip-failures``.
+Malformed checkpoint shapes reset to a fresh checkpoint, and processed slugs
+win over stale failure entries so a prior retry failure cannot shadow a later
+success.
 Dry runs fetch and compute diffs without writing frontmatter or
 checkpoint state. They exit non-zero only for failures observed in the
 current dry-run invocation, not for failures already persisted in the
@@ -157,7 +162,10 @@ def load_checkpoint(wiki_path: Path, source: str) -> dict:
 
     The authoritative state lives in the entity frontmatter itself;
     a lost or corrupt checkpoint just means the next run re-fetches
-    the detail pages (which hit the cache, so cheap).
+    the detail pages (which hit the cache, so cheap). ``processed`` and
+    ``failures`` must be string-keyed maps of detail records; malformed maps or
+    an invalid ``total_seen`` reset the checkpoint, while processed slugs clear
+    stale failure entries.
     """
     path = _checkpoint_path(wiki_path, source)
     if not path.is_file():
@@ -174,12 +182,23 @@ def load_checkpoint(wiki_path: Path, source: str) -> dict:
     failures = data.get("failures") or {}
     if not isinstance(processed, dict) or not isinstance(failures, dict):
         return _empty_checkpoint(source)
+    if not all(
+        isinstance(key, str) and isinstance(value, dict) for key, value in processed.items()
+    ):
+        return _empty_checkpoint(source)
+    if not all(isinstance(key, str) and isinstance(value, dict) for key, value in failures.items()):
+        return _empty_checkpoint(source)
+    try:
+        total_seen = int(data.get("total_seen") or 0)
+    except (TypeError, ValueError):
+        return _empty_checkpoint(source)
+    failures = {key: value for key, value in failures.items() if key not in processed}
     return {
         "version": CHECKPOINT_VERSION,
         "source": source,
         "started_at": str(data.get("started_at") or _now_iso()),
         "updated_at": str(data.get("updated_at") or _now_iso()),
-        "total_seen": int(data.get("total_seen") or 0),
+        "total_seen": total_seen,
         "processed": processed,
         "failures": failures,
     }
@@ -344,24 +363,25 @@ def _set_frontmatter_field(text: str, field: str, value: Any) -> str:
     Lossy for complex YAML (lists, mappings) but we only touch simple
     scalar fields (``github_url``, ``stars``, ``updated``), and the
     frontmatter on these entity files is flat. Uses line-anchored
-    regex so a ``github_url: null`` in the middle doesn't match a
-    hypothetical ``sub_github_url`` key on a following line.
+    regex scoped to the frontmatter block so a body-only ``github_url`` line or
+    hypothetical ``sub_github_url`` key is left untouched.
     """
     escaped = re.escape(field)
     rendered = _render_scalar(value)
+    fm_match = _FRONTMATTER_RE.match(text)
+    if fm_match is None:
+        return text  # no frontmatter at all; skip rather than fabricate
 
     # Try to replace an existing key.
     pattern = rf"^{escaped}:[ \t]*.*$"
     repl = f"{field}: {rendered}"
-    new_text, n = re.subn(pattern, repl, text, count=1, flags=re.MULTILINE)
+    frontmatter = fm_match.group(1)
+    new_frontmatter, n = re.subn(pattern, repl, frontmatter, count=1, flags=re.MULTILINE)
     if n:
-        return new_text
+        return text[: fm_match.start(1)] + new_frontmatter + text[fm_match.end(1) :]
 
     # Key didn't exist — insert after the opening delimiter. We only
     # do this inside the frontmatter block to avoid polluting bodies.
-    fm_match = _FRONTMATTER_RE.match(text)
-    if fm_match is None:
-        return text  # no frontmatter at all; skip rather than fabricate
     insert_at = fm_match.end(1)
     return text[:insert_at] + f"\n{field}: {rendered}" + text[insert_at:]
 
@@ -506,17 +526,22 @@ def enrich_entities(
     Returns the same checkpoint (mutated). With ``dry_run=True``, processed
     and failure outcomes are not written to the checkpoint and no checkpoint
     file is saved; callers can pass ``current_run_failures`` to collect
-    failures for dry-run exit status.
+    failures for dry-run exit status. ``flush_every`` must be positive, and a
+    processed outcome clears any stale failure entry for the same wiki slug.
     """
     source = SOURCES.get(source_name)
     if source is None:
         raise ValueError(f"unknown source {source_name!r}; known: {sorted(SOURCES)}")
     if not hasattr(source, "fetch_details"):
         raise NotImplementedError(f"source {source_name!r} does not implement fetch_details()")
+    if flush_every <= 0:
+        raise ValueError("flush_every must be a positive integer")
     detail_source = cast(_DetailSource, source)
 
     processed = checkpoint["processed"]
     failures = checkpoint["failures"]
+    for wiki_slug in set(processed).intersection(failures):
+        failures.pop(wiki_slug, None)
     pages = _load_active_wiki_pack_pages(wiki_path)
 
     attempted = enriched = unchanged = failed = skipped = 0
@@ -553,6 +578,7 @@ def enrich_entities(
             # from a different source). Record a skip so we don't
             # retry; it's not a failure.
             if not dry_run:
+                failures.pop(wiki_slug, None)
                 processed[wiki_slug] = {
                     "result": "no-source-url",
                     "at": _now_iso(),
@@ -615,8 +641,6 @@ def enrich_entities(
         if diff:
             enriched += 1
             outcome = "enriched"
-            if not dry_run:
-                failures.pop(wiki_slug, None)
         elif enrichment:
             unchanged += 1
             outcome = "unchanged"
@@ -625,6 +649,7 @@ def enrich_entities(
             outcome = "no-repo"
 
         if not dry_run:
+            failures.pop(wiki_slug, None)
             processed[wiki_slug] = {
                 "result": outcome,
                 "at": _now_iso(),
@@ -755,6 +780,8 @@ def main() -> None:
     _force_utf8_stdio()
     parser = _build_parser()
     args = parser.parse_args()
+    if args.flush_every <= 0:
+        parser.error("--flush-every must be a positive integer")
 
     wiki_path = Path(os.path.expanduser(args.wiki))
 
