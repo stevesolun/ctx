@@ -14,7 +14,8 @@ Contracts pinned:
   - Flush cadence: checkpoint persisted every N records + at end.
   - SIGINT simulation: graceful exit flushes the partial checkpoint.
   - load_checkpoint fail-open on missing / corrupt / wrong-version /
-    wrong-source / wrong-shape.
+    wrong-source / wrong-shape / corrupt member shapes.
+  - Malformed JSONL lines count as current-run failures.
   - _checkpoint_path rejects source names with path separators.
 """
 
@@ -158,6 +159,33 @@ class TestCheckpointPersistence:
         path.write_text("[]", encoding="utf-8")
         cp = mcp_ingest.load_checkpoint(tmp_path, "src")
         assert cp["processed"] == {}
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"total_seen": {"nested": 1}, "processed": {}, "failures": {}},
+            {"total_seen": "2", "processed": {}, "failures": {}},
+            {
+                "total_seen": 0,
+                "processed": {"s1": {"result": {"nested": "added"}, "at": "x"}},
+                "failures": {},
+            },
+            {"total_seen": 0, "processed": {}, "failures": {"s2": "boom"}},
+        ],
+    )
+    def test_corrupt_scalar_or_nested_checkpoint_members_return_empty(
+        self, tmp_path: Path, payload: dict[str, Any]
+    ) -> None:
+        path = tmp_path / mcp_ingest.CHECKPOINT_SUBDIR / "src.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload.update({"version": mcp_ingest.CHECKPOINT_VERSION, "source": "src"})
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        cp = mcp_ingest.load_checkpoint(tmp_path, "src")
+
+        assert cp["processed"] == {}
+        assert cp["failures"] == {}
+        assert cp["total_seen"] == 0
 
     def test_path_separator_in_source_rejected(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError):
@@ -435,6 +463,37 @@ class TestDryRunCliExitStatus:
             mcp_ingest.main()
 
         assert exc.value.code == 1
+        assert not mcp_ingest._checkpoint_path(wiki, "src").exists()
+
+    def test_malformed_jsonl_exits_nonzero_without_checkpoint(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        record_path = tmp_path / "bad.jsonl"
+        record_path.write_text("{not-json\n[]\n", encoding="utf-8")
+        wiki = tmp_path / "wiki"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "ctx-mcp-ingest",
+                "--source",
+                "src",
+                "--from-jsonl",
+                str(record_path),
+                "--wiki",
+                str(wiki),
+                "--dry-run",
+                "--quiet",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            mcp_ingest.main()
+
+        captured = capsys.readouterr()
+        assert exc.value.code == 1
+        assert "line 1 bad JSON" in captured.err
+        assert "line 2 expected JSON object" in captured.err
         assert not mcp_ingest._checkpoint_path(wiki, "src").exists()
 
     def test_add_error_exits_nonzero_without_checkpoint(

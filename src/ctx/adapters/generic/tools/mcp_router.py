@@ -50,6 +50,13 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 from ctx.adapters.generic.providers.base import ToolDefinition
+from ctx.telemetry import (
+    hash_identifier,
+    record_event,
+    telemetry_enabled,
+    telemetry_span,
+    traceparent_from_span,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -88,6 +95,69 @@ _TOKEN_VALUE_RE = re.compile(
     r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat|hf|sk|xox[baprs])"
     r"[_-]?[A-Za-z0-9_./+=-]{8,}\b"
 )
+
+
+def _duration_ms(started: float) -> float:
+    return (time.perf_counter() - started) * 1000.0
+
+
+def _current_trace_metadata(session_id: str | None) -> dict[str, str]:
+    if not telemetry_enabled():
+        return {}
+    meta: dict[str, str] = {}
+    traceparent = traceparent_from_span()
+    if traceparent is not None:
+        meta["traceparent"] = traceparent
+    if session_id:
+        meta["ctx.session.hash"] = hash_identifier(session_id)
+    return meta
+
+
+def _params_with_metadata(
+    params: dict[str, Any] | None,
+    *,
+    session_id: str | None,
+) -> dict[str, Any]:
+    out = dict(params or {})
+    meta = _current_trace_metadata(session_id)
+    if not meta:
+        return out
+    existing = out.get("_meta")
+    merged = dict(existing) if isinstance(existing, dict) else {}
+    merged.update(meta)
+    out["_meta"] = merged
+    return out
+
+
+def _record_mcp_client_tool_call(
+    *,
+    server: str,
+    tool: str,
+    session_id: str | None,
+    outcome: str,
+    duration_ms: float,
+    error_kind: str | None = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "rpc.system": "jsonrpc",
+        "rpc.method": "tools/call",
+        "mcp.server.name": server,
+        "mcp.tool.name": tool,
+        "otel.status_code": "ERROR" if outcome == "error" else "OK",
+    }
+    try:
+        record_event(
+            "ctx.mcp.external_tool_call",
+            source="ctx-mcp-router",
+            transport="mcp-jsonrpc",
+            session_id=session_id,
+            outcome=outcome,
+            duration_ms=duration_ms,
+            error_kind=error_kind,
+            payload=payload,
+        )
+    except Exception:  # noqa: BLE001 - telemetry must never break tool execution.
+        pass
 
 
 def _default_child_env() -> dict[str, str]:
@@ -254,8 +324,9 @@ class McpClient:
     ``call_tool`` calls on the same client are serialized by a lock.
     """
 
-    def __init__(self, config: McpServerConfig) -> None:
+    def __init__(self, config: McpServerConfig, *, session_id: str | None = None) -> None:
         self._config = config
+        self._session_id = str(session_id or "").strip() or None
         self._proc: subprocess.Popen[bytes] | None = None
         self._lock = threading.Lock()
         self._next_id = 0
@@ -404,16 +475,48 @@ class McpClient:
 
         Raises ``McpServerError`` when the server reports an error.
         """
-        result = self._request(
-            "tools/call",
-            {"name": name, "arguments": arguments},
-        )
-        if result.get("isError"):
-            content = _flatten_content(result.get("content", []))
-            raise McpServerError(
-                f"tool '{name}' on '{self._config.name}' reported isError: {content}"
+        started = time.perf_counter()
+        recorded = False
+        with telemetry_span():
+            try:
+                result = self._request(
+                    "tools/call",
+                    {"name": name, "arguments": arguments},
+                )
+                if result.get("isError"):
+                    content = _flatten_content(result.get("content", []))
+                    _record_mcp_client_tool_call(
+                        server=self._config.name,
+                        tool=name,
+                        session_id=self._session_id,
+                        outcome="error",
+                        duration_ms=_duration_ms(started),
+                        error_kind="tool_error",
+                    )
+                    recorded = True
+                    raise McpServerError(
+                        f"tool '{name}' on '{self._config.name}' reported isError: {content}"
+                    )
+                output = _flatten_content(result.get("content", []))
+            except Exception as exc:
+                if not recorded:
+                    _record_mcp_client_tool_call(
+                        server=self._config.name,
+                        tool=name,
+                        session_id=self._session_id,
+                        outcome="error",
+                        duration_ms=_duration_ms(started),
+                        error_kind=type(exc).__name__,
+                    )
+                raise
+            _record_mcp_client_tool_call(
+                server=self._config.name,
+                tool=name,
+                session_id=self._session_id,
+                outcome="ok",
+                duration_ms=_duration_ms(started),
             )
-        return _flatten_content(result.get("content", []))
+            return output
 
     # ── JSON-RPC plumbing ─────────────────────────────────────────────────
 
@@ -434,7 +537,7 @@ class McpClient:
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "method": method,
-                "params": params or {},
+                "params": _params_with_metadata(params, session_id=self._session_id),
             }
             try:
                 self._write_frame(request)
@@ -580,8 +683,14 @@ class McpRouter:
     distinguishes them.
     """
 
-    def __init__(self, configs: list[McpServerConfig]) -> None:
+    def __init__(
+        self,
+        configs: list[McpServerConfig],
+        *,
+        session_id: str | None = None,
+    ) -> None:
         self._configs = list(configs)
+        self._session_id = str(session_id or "").strip() or None
         self._clients: dict[str, McpClient] = {}
         self._started = False
 
@@ -594,7 +703,7 @@ class McpRouter:
             for cfg in self._configs:
                 if cfg.name in self._clients:
                     raise ValueError(f"duplicate MCP server name {cfg.name!r}")
-                client = McpClient(cfg)
+                client = McpClient(cfg, session_id=self._session_id)
                 client.start()
                 self._clients[cfg.name] = client
                 spawned.append(cfg.name)
