@@ -1,0 +1,12 @@
+commands:
+  test: "scripts/no_mistakes_run.sh test"
+  lint: "scripts/no_mistakes_run.sh lint"
+  format: "scripts/no_mistakes_run.sh format"
+
+auto_fix:
+  rebase: 3
+  review: 3
+  test: 3
+  document: 3
+  lint: 3
+  ci: 3
