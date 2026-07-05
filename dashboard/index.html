@@ -2017,7 +2017,7 @@ per-process monitor token injected into the rendered page.</p>
 </tr>
 <tr>
 <td><code>GET /api/skill/&lt;slug&gt;.json</code></td>
-<td>Raw sidecar for one slug</td>
+<td>Raw sidecar for one slug; missing or unsafe slugs return JSON <code>{detail: ...}</code> with HTTP 404</td>
 </tr>
 <tr>
 <td><code>GET /api/graph/&lt;slug&gt;.json?type=&lt;entity&gt;&amp;hops=1&amp;limit=40</code></td>
