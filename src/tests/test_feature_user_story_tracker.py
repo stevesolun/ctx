@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import shlex
 import sys
 import tomllib
 from pathlib import Path
@@ -14,6 +15,7 @@ sys.path.insert(0, str(repo_root / "src"))
 import ctx  # noqa: E402
 import ctx.api as ctx_api  # noqa: E402
 from ctx.monitor import routes as monitor_routes  # noqa: E402
+from scripts.ci_preflight import PUBLIC_DOCS_TRACKER_TESTS  # noqa: E402
 from scripts.ci_preflight import select_checks  # noqa: E402
 
 TRACKER = repo_root / "docs" / "qa" / "feature-user-story-status.csv"
@@ -25,22 +27,21 @@ README = repo_root / "README.md"
 PASS_STATUSES = {"Tested Pass", "Retested Pass"}
 VALIDATION_STATUSES = {"Needs Validation"}
 FIX_STATUSES = {"Needs Fix"}
-ACTIONABLE_STATUSES = PASS_STATUSES | VALIDATION_STATUSES | FIX_STATUSES
+ACTIONABLE_STATUSES = (
+    PASS_STATUSES
+    | VALIDATION_STATUSES
+    | FIX_STATUSES
+    | {
+        "Blocked/Human Decision",
+    }
+)
 CANONICAL_STATUSES = ACTIONABLE_STATUSES | {
     "Needs Story",
     "Blocked",
     "Blocked/Human Decision",
     "Deprecated",
 }
-CANONICAL_STATUS_OVERRIDES = {
-    "DIST-004": {
-        "source_status": "Needs Fix",
-        "canonical_status": "Blocked/Human Decision",
-        "owner_lane": "Human Owner",
-        "review_note": "canonical status override",
-        "validation_status": "out of scope",
-    },
-}
+CANONICAL_STATUS_OVERRIDES: dict[str, dict[str, str]] = {}
 
 
 def _tracker_rows() -> list[dict[str, str]]:
@@ -125,6 +126,26 @@ def _relative_file_paths(root: Path, pattern: str) -> list[str]:
         for path in sorted(root.glob(pattern))
         if path.is_file()
     ]
+
+
+def _workflow_pytest_paths(workflow_path: Path, step_name: str) -> tuple[str, ...]:
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    runs = [
+        step["run"]
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+        if step.get("name") == step_name
+    ]
+    assert len(runs) == 1
+    command = " ".join(line.rstrip("\\").strip() for line in runs[0].splitlines() if line.strip())
+    argv = shlex.split(command)
+
+    assert argv[:5] == ["python", "-m", "pytest", "-q", "--no-cov"]
+    return tuple(arg for arg in argv[5:] if arg.startswith("src/tests/"))
+
+
+def _contains_contiguous_slice(haystack: tuple[str, ...], needle: tuple[str, ...]) -> bool:
+    return any(haystack[index : index + len(needle)] == needle for index in range(len(haystack)))
 
 
 def test_canonical_feature_status_tracker_merges_supporting_ledgers() -> None:
@@ -281,15 +302,21 @@ def test_feature_user_story_tracker_covers_distribution_workflows() -> None:
         if path.is_file() and path.suffix in {".yml", ".yaml"}
     )
     tracker = _tracker_text()
-    docs_workflow = (workflow_dir / "docs.yml").read_text(encoding="utf-8")
-    publish_workflow = (workflow_dir / "publish.yml").read_text(encoding="utf-8")
     hf_workflow = (workflow_dir / "huggingface-sync.yml").read_text(encoding="utf-8")
 
     assert workflows
     assert [workflow for workflow in workflows if workflow not in tracker] == []
-    for workflow in (docs_workflow, publish_workflow):
-        assert "src/tests/test_feature_user_story_tracker.py" in workflow
-        assert "src/tests/test_dashboard_user_story_tracker.py" in workflow
+    docs_tracker_tests = _workflow_pytest_paths(
+        workflow_dir / "docs.yml",
+        "Validate public docs tracker",
+    )
+    publish_canary_tests = _workflow_pytest_paths(
+        workflow_dir / "publish.yml",
+        "Release canary tests",
+    )
+
+    assert docs_tracker_tests == PUBLIC_DOCS_TRACKER_TESTS
+    assert _contains_contiguous_slice(publish_canary_tests, PUBLIC_DOCS_TRACKER_TESTS)
     assert "github.repository == 'stevesolun/ctx'" in hf_workflow
     assert "Missing HF_TOKEN" in hf_workflow
 
