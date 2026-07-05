@@ -1621,6 +1621,10 @@ hyphenated path keys such as <code>ctx.repo.path</code> and <code>repo-path</cod
 normalize to <code>_path</code> or <code>_paths</code> suffixes. The only accepted modes are
 <code>local_redacted</code>, <code>disabled</code>, <code>off</code>, and <code>none</code>; unknown modes fail closed
 instead of emitting raw fields.</p>
+<p>Runtime lifecycle records apply the same local-redacted posture to their
+evidence-bearing strings. Top-level <code>reason</code>, <code>evidence</code>, <code>command</code>, <code>summary</code>,
+<code>trigger</code>, and <code>status</code> values, plus nested security-scan text, are stored only
+after secret and local path redaction.</p>
 <p>Local JSONL records retain the top-level <code>session_id</code> field for compatibility
 with existing local-only workflows, but they also include a salted
 <code>session_hash</code>. Remote OTLP export sends <code>ctx.session.hash</code> and never sends the
