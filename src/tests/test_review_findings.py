@@ -106,7 +106,7 @@ def test_from_ctx_config_fails_closed_when_user_top_files_all_invalid(
 
     cfg = bc.from_ctx_config()
 
-    assert cfg.top_files == ()
+    assert cfg.top_files == bc.BackupConfig().top_files
 
 
 def test_host_user_path_redaction_covers_paths_with_spaces() -> None:

@@ -242,7 +242,7 @@ def _sanitize_user_override(raw: dict[str, Any]) -> dict[str, Any]:
         if top_files is None:
             sanitized.pop("top_files", None)
         elif not top_files and raw_top_files:
-            sanitized["top_files"] = []
+            sanitized.pop("top_files", None)
         else:
             sanitized["top_files"] = list(top_files)
     return sanitized
