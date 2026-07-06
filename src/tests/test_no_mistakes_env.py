@@ -5,6 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -13,6 +14,13 @@ def _write_executable(path: Path, content: str) -> None:
     path.chmod(0o755)
 
 
+posix_shell_only = pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX shell wrapper tests require a POSIX bash, not WSL bash on Windows.",
+)
+
+
+@posix_shell_only
 def test_no_mistakes_wrapper_prefers_valid_worktree_venv_over_broken_override(
     tmp_path: Path,
 ) -> None:
@@ -75,6 +83,7 @@ def test_no_mistakes_repo_config_defines_deterministic_commands() -> None:
     assert config["auto_fix"]["lint"] == 3
 
 
+@posix_shell_only
 def test_no_mistakes_run_script_uses_trusted_python_for_configured_commands(
     tmp_path: Path,
 ) -> None:
