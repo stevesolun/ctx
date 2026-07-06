@@ -108,6 +108,50 @@ def test_preflight_graph_lfs_pointer_verification(tmp_path: Path, monkeypatch) -
     ci_preflight._verify_hydrated_lfs_pointer(pointer)
 
 
+def test_preflight_graph_lfs_pull_uses_per_command_filters(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(ci_preflight, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(ci_preflight.shutil, "which", lambda _name: "/usr/bin/git")
+    artifact = tmp_path / "graph" / "wiki-graph.tar.gz"
+    artifact.parent.mkdir()
+    artifact.write_text(
+        f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 1\n",
+        encoding="utf-8",
+    )
+    calls: list[list[str]] = []
+
+    class Result:
+        returncode = 0
+
+    def fake_run(argv: list[str], **_kwargs) -> Result:
+        calls.append(argv)
+        return Result()
+
+    verified: list[ci_preflight.LfsPointer] = []
+    monkeypatch.setattr(ci_preflight.subprocess, "run", fake_run)
+    monkeypatch.setattr(ci_preflight, "_verify_hydrated_lfs_pointer", verified.append)
+
+    assert ci_preflight.hydrate_graph_lfs_artifacts() == 0
+
+    assert len(calls) == 1
+    argv = calls[0]
+    lfs_index = argv.index("lfs")
+    assert argv[:lfs_index] == ["git", *ci_preflight.GIT_LFS_FILTER_CONFIG]
+    assert argv[lfs_index:] == [
+        "lfs",
+        "pull",
+        "--include",
+        "graph/wiki-graph.tar.gz",
+        "--exclude",
+        "",
+    ]
+    assert verified == [
+        ci_preflight.LfsPointer("graph/wiki-graph.tar.gz", "a" * 64, 1),
+    ]
+
+
 def test_preflight_no_test_policy_invocation_uses_current_dirty_file_set() -> None:
     checks, _notes = select_checks(
         base_ref="origin/main",

@@ -82,6 +82,16 @@ GRAPH_LFS_MAX_FALLBACK_SIZES = {
 }
 LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1"
 LFS_POINTER_MAX_BYTES = 4096
+GIT_LFS_FILTER_CONFIG = (
+    "-c",
+    "filter.lfs.process=git-lfs filter-process",
+    "-c",
+    "filter.lfs.smudge=git-lfs smudge -- %f",
+    "-c",
+    "filter.lfs.clean=git-lfs clean -- %f",
+    "-c",
+    "filter.lfs.required=true",
+)
 
 
 @dataclass(frozen=True)
@@ -232,7 +242,16 @@ def hydrate_graph_lfs_artifacts() -> int:
             return 1
         print(f"Hydrating {pointer.path} from Git LFS sha256:{pointer.sha256} size:{pointer.size}")
         proc = subprocess.run(
-            ["git", "lfs", "pull", "--include", pointer.path, "--exclude", ""],
+            [
+                "git",
+                *GIT_LFS_FILTER_CONFIG,
+                "lfs",
+                "pull",
+                "--include",
+                pointer.path,
+                "--exclude",
+                "",
+            ],
             cwd=REPO_ROOT,
             check=False,
             env=env,
