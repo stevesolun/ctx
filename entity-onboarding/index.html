@@ -1581,7 +1581,12 @@ the update is treated like a release step.</p>
 <p>The durable wiki worker drains <code>entity-upsert</code>, <code>graph-export</code>,
 <code>skill-index-refresh</code>, <code>tar-refresh</code>, and <code>artifact-promotion</code> jobs. Use
 <code>ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1</code> for a controlled
-single-job drain, or omit <code>--limit</code> to drain the ready queue.</p>
+single-job drain, or omit <code>--limit</code> to drain the ready queue.
+Artifact-promotion jobs must target known <code>&lt;wiki&gt;/graphify-out/</code> graph outputs
+or allowlisted repo <code>graph/</code> release artifacts, and their staged path must be
+the target sibling named <code>&lt;target&gt;.staged</code>. The worker rejects staged/target
+symlinks and selects the JSON/JSONL/gzip/tar validator from the target file
+type before promotion.</p>
 <p>For a manual attach dry-run against an existing vector index:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ctx-incremental-attach<span class="w"> </span>attach<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--index-dir<span class="w"> </span>~/.claude/skill-wiki/.embedding-cache/graph/vector-index<span class="w"> </span><span class="se">\</span>
@@ -1669,10 +1674,11 @@ benefits, possible regressions, security findings, and a recommendation.</p>
 </span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>ctx-agent-add<span class="w"> </span>--agent-path<span class="w"> </span>./code-reviewer.md<span class="w"> </span>--name<span class="w"> </span>code-reviewer<span class="w"> </span>--update-existing
 </span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
 </span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>ctx-mcp-add<span class="w"> </span>--from-json<span class="w"> </span>./github-mcp.json
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>ctx-mcp-add<span class="w"> </span>--from-json<span class="w"> </span>./github-mcp.json<span class="w"> </span>--update-existing
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
-</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>ctx-harness-add<span class="w"> </span>--from-json<span class="w"> </span>./text-to-cad-harness.json
-</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>ctx-harness-add<span class="w"> </span>--from-json<span class="w"> </span>./text-to-cad-harness.json<span class="w"> </span>--update-existing
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>ctx-mcp-fetch<span class="w"> </span>--source<span class="w"> </span>pulsemcp<span class="w"> </span>--limit<span class="w"> </span><span class="m">50</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>ctx-mcp-add<span class="w"> </span>--from-stdin
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>ctx-mcp-add<span class="w"> </span>--from-json<span class="w"> </span>./github-mcp.json<span class="w"> </span>--update-existing
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>ctx-harness-add<span class="w"> </span>--from-json<span class="w"> </span>./text-to-cad-harness.json
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>ctx-harness-add<span class="w"> </span>--from-json<span class="w"> </span>./text-to-cad-harness.json<span class="w"> </span>--update-existing
 </span></code></pre></div>
 <p><code>ctx-harness-install --update</code> is different: it refreshes an installed harness
 checkout under <code>~/.claude/harnesses/&lt;slug&gt;</code>. Catalog entity replacement uses
@@ -1753,9 +1759,19 @@ installing it into a host.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>ctx-mcp-add<span class="w"> </span>--from-json<span class="w"> </span>./github-mcp.json
 </span></code></pre></div>
 <p>MCP pages live under <code>entities/mcp-servers/&lt;shard&gt;/&lt;slug&gt;.md</code>. The add command
-detects existing pages by slug and, when possible, canonical GitHub URL. If a
-match exists, ctx prints the update review and skips replacement unless
+accepts a single JSON object with <code>--from-json</code> or streams JSONL records from
+<code>--from-jsonl</code>/<code>--from-stdin</code> without preloading the whole batch. It detects
+existing pages by slug and, when possible, canonical GitHub URL. If a match
+exists, ctx prints the update review and skips replacement unless
 <code>--update-existing</code> is passed.</p>
+<p>Runtime install is separate from catalog add. Use
+<code>ctx-mcp-install &lt;slug&gt; --dry-run</code> to inspect the Claude MCP command without
+mutating local state. If the server is already installed, dry-run reports
+<code>skipped-existing</code> and does not reconcile <code>skill-manifest.json</code>; run without
+<code>--dry-run</code> to refresh the manifest record, or add <code>--force</code> when you need to
+reinstall the Claude MCP entry. Inline secret-looking arguments are rejected; use
+environment variables, secret-file/path flags, or <code>--cmd-json</code> placeholders
+instead of literal tokens.</p>
 <h2 id="add-a-harness">Add a Harness<a class="headerlink" href="#add-a-harness" title="Permanent link">&para;</a></h2>
 <p>Use this when a repo provides the runtime around a model rather than just a
 tool. Harness examples include coding-agent loops, CAD-generation runtimes,

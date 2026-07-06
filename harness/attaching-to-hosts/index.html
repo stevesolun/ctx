@@ -1719,7 +1719,13 @@ network, and inherit whatever environment you explicitly allow.</p>
 <p><code>command</code> and <code>args</code> are passed as an argv list, not through a shell.
 Parent secrets are not inherited unless you set <code>inherit_env: true</code>; prefer
 explicit <code>env</code> keys for servers that need credentials. <code>${tmp_path}</code> expands
-to a pytest temporary directory so filesystem probes can avoid real user data.</p>
+to a pytest temporary directory so filesystem probes can avoid real user data.
+For lower-level <code>McpServerConfig</code> users, <code>args</code> are literal by default. Set
+<code>expand_argv_env=True</code> to expand <code>$ENVVAR</code> and <code>${ENVVAR}</code> placeholders from the
+final child environment immediately before spawn. Sensitive placeholders are
+rejected unless <code>allow_argv_secret_expansion=True</code> is also set for trusted local
+servers that cannot avoid argv credentials; prefer <code>credential_env</code> or explicit
+<code>env</code> for servers that read secrets from the environment.</p>
 <hr />
 <h2 id="2-python-library-path">2. Python library path<a class="headerlink" href="#2-python-library-path" title="Permanent link">&para;</a></h2>
 <p>For custom harnesses that aren't MCP-native but can import Python:</p>
@@ -1784,6 +1790,16 @@ a non-default wiki/graph path:</p>
 system prompt overrides, session resume, JSON output, ...).
 If the console script is unavailable, use the package entrypoint instead:
 <code>python -m ctx run ...</code>.</p>
+<p>Explicit <code>--mcp name:&lt;command&gt;</code> specs are split into argv without a shell.
+Secret-looking inline arguments are rejected so tokens do not land in session
+metadata. Pass credentials with <code>--mcp-env name:ENVVAR</code> only to servers that
+read secrets from their child environment, or configure the server to read a
+secret file/path argument instead. Sensitive <code>$ENVVAR</code> and <code>${ENVVAR}</code> argv
+placeholders are rejected by default because resolving them would expose the
+secret in the child process argv. Secret indirection flags such as
+<code>--token-file</code>, <code>--api-key-path</code>, <code>--credential-env</code>, and
+<code>--client-secret-var</code> are accepted only when their values look like paths,
+placeholders, or environment variable names rather than literal secrets.</p>
 <p>Planning and review modes are opt-in flags on <code>ctx run</code>. Use <code>--planner</code> to
 produce a structured spec before generation, <code>--evaluator</code> to grade and revise
 the result, and <code>--contract</code> with both <code>--planner</code> and <code>--evaluator</code> to refine

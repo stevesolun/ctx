@@ -2037,11 +2037,11 @@ per-process monitor token injected into the rendered page.</p>
 </tr>
 <tr>
 <td><code>GET /api/entities/search.json?q=&lt;text&gt;&amp;type=&lt;entity&gt;&amp;limit=80</code></td>
-<td>Wiki entity search results for Manage, Config, and entity picker flows.</td>
+<td>Wiki entity search results for Manage, Config, and entity picker flows, with wiki-relative <code>path</code> values.</td>
 </tr>
 <tr>
 <td><code>GET /api/entity/&lt;slug&gt;.json?type=&lt;entity&gt;</code></td>
-<td>Frontmatter and Markdown body for one wiki entity from the same merged pack/local source as <code>/wiki/&lt;slug&gt;</code>.</td>
+<td>Frontmatter, wiki-relative <code>path</code>, and Markdown body for one wiki entity from the same merged pack/local source as <code>/wiki/&lt;slug&gt;</code>.</td>
 </tr>
 <tr>
 <td><code>GET /api/events.stream</code></td>

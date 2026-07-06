@@ -1605,7 +1605,9 @@ changed, or removed.</p>
 <ul>
 <li><strong>top_files</strong> — <code>settings.json</code>, <code>skill-manifest.json</code>,
   <code>pending-skills.json</code>, <code>CLAUDE.md</code>, <code>AGENTS.md</code>, <code>user-profile.json</code>,
-  <code>skill-system-config.json</code>, <code>skill-registry.json</code>.</li>
+  <code>skill-system-config.json</code>, <code>skill-registry.json</code>. User overrides must be
+  top-level filenames only: no path separators, absolute paths, drive letters,
+  UNC paths, <code>.</code> entries, or <code>..</code> traversal.</li>
 <li><strong>trees</strong> — <code>agents/</code>, <code>skills/</code>.</li>
 <li><strong>memory</strong> — <code>projects/*/memory/**</code> when <code>memory_glob</code> is true.</li>
 <li><strong>always excluded</strong> — <code>.credentials.json</code>, <code>claude.json</code>, token
@@ -1613,7 +1615,10 @@ changed, or removed.</p>
 </ul>
 <p>To override per user, drop a partial config at
 <code>~/.claude/backup-config.json</code>. Fields you omit fall back to the repo
-default. Example:</p>
+default. Invalid <code>top_files</code> entries are ignored with a <code>[backup-config]</code>
+stderr warning; if every supplied <code>top_files</code> entry is invalid, the effective
+config falls back to the defaults instead of disabling top-level backups.
+Example:</p>
 <div class="language-json highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">&quot;retention&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;keep_latest&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">100</span><span class="w"> </span><span class="p">},</span>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">&quot;top_files&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;settings.json&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;CLAUDE.md&quot;</span><span class="p">]</span>
@@ -1738,11 +1743,13 @@ we can't place in time.</p>
 </span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>python<span class="w"> </span>-m<span class="w"> </span>backup_mirror<span class="w"> </span>prune<span class="w"> </span>--policy
 </span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
 </span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># Legacy mode (still works): keep only the N newest.</span>
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>python<span class="w"> </span>-m<span class="w"> </span>backup_mirror<span class="w"> </span>prune<span class="w"> </span>--keep<span class="w"> </span><span class="m">20</span>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>python<span class="w"> </span>-m<span class="w"> </span>backup_mirror<span class="w"> </span>prune<span class="w"> </span>--keep<span class="w"> </span><span class="m">20</span><span class="w"> </span>--dry-run
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>python<span class="w"> </span>-m<span class="w"> </span>backup_mirror<span class="w"> </span>prune<span class="w"> </span>--keep<span class="w"> </span><span class="m">20</span>
 </span></code></pre></div>
 <p>The policy output tells you which snapshots were kept by <code>keep_latest</code>
 versus <code>keep_daily</code>, so a surprising retention decision is easy to
-audit.</p>
+audit. Legacy <code>--keep</code> dry-runs print the snapshot IDs that would be removed
+without deleting their directories.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

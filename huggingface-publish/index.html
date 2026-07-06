@@ -1418,12 +1418,18 @@ by git.</p>
 <h2 id="automatic-publish">Automatic publish<a class="headerlink" href="#automatic-publish" title="Permanent link">&para;</a></h2>
 <p>Every push to <code>main</code> runs <code>.github/workflows/huggingface-sync.yml</code>. The job
 checks out source without spending Git LFS bandwidth, hydrates the required
-graph artifacts from the latest GitHub release assets, installs the sync
-dependencies, and calls <code>scripts/sync_huggingface.py</code>. It publishes only when
-the repository secret <code>HF_TOKEN</code> is configured. On the canonical
+graph artifacts from matching GitHub release cache assets, and falls back to a
+targeted <code>git lfs pull</code> only when a pointer is newer than the cache and within
+the configured size cap. It then installs the sync dependencies and calls
+<code>scripts/sync_huggingface.py</code>. It publishes only when the repository secret
+<code>HF_TOKEN</code> is configured. On the canonical
 <code>stevesolun/ctx</code> repository, a missing token is a hard failure so main cannot
 silently drift from the dataset repo. On forks, a missing token still exits
 successfully with a notice because forks are not trusted publishing sources.</p>
+<p>When only repo-card inputs changed (<code>README.md</code>, <code>CHANGELOG.md</code>, or files under
+<code>docs/</code>), the workflow uses card-only upload mode. Source, test, workflow, graph,
+or packaging changes always run the full dataset sync so tracked files cannot
+drift behind GitHub.</p>
 <p>The sync script is still the contract: it exports the tracked git snapshot,
 adds Hugging Face repo-card metadata, validates README/docs stats, verifies the
 graph artifacts are hydrated rather than LFS pointers, and refuses to publish
@@ -1434,10 +1440,10 @@ local graph artifacts, adds the Hugging Face repo-card frontmatter to the
 uploaded <code>README.md</code>, and refuses to publish if the full wiki tarball, runtime
 wiki tarball, or compressed skill index is missing, too small, or still a Git
 LFS pointer.</p>
-<p>The script prefers Hugging Face's resumable large-folder uploader when the
-remote already has no stale paths. If the remote contains files that are not in
-the current git snapshot, the script falls back to a single clean replacement
-commit so deleted local files cannot survive remotely.</p>
+<p>Full sync uploads the exported tree with <code>delete_patterns="*"</code>, so files removed
+from the current git snapshot are removed remotely in the same commit.
+Card-only sync exports only <code>README.md</code>, <code>CHANGELOG.md</code>, and tracked <code>docs/**</code>
+inputs, then replaces just those remote paths.</p>
 <p>Do not paste the token into a command line. Prompt for it, set it only for the
 current process, and clear it after the upload.</p>
 <div class="language-powershell highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">python</span> <span class="n">-m</span> <span class="n">pip</span> <span class="n">install</span> <span class="p">-</span><span class="n">-upgrade</span> <span class="n">huggingface_hub</span>
@@ -1454,14 +1460,17 @@ current process, and clear it after the upload.</p>
 </span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>  <span class="nb">Remove-Item</span> <span class="n">Env</span><span class="p">:\</span><span class="n">HF_TOKEN</span> <span class="n">-ErrorAction</span> <span class="n">SilentlyContinue</span>
 </span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="p">}</span>
 </span></code></pre></div>
+<p>For a README/changelog/docs-only refresh:</p>
+<div class="language-powershell highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">python</span> <span class="n">scripts</span><span class="p">/</span><span class="n">sync_huggingface</span><span class="p">.</span><span class="n">py</span> <span class="p">-</span><span class="n">-repo</span> <span class="p">.</span> <span class="p">-</span><span class="n">-repo-id</span> <span class="n">Stevesolun</span><span class="p">/</span><span class="n">ctx</span> <span class="p">-</span><span class="n">-repo-type</span> <span class="n">dataset</span> <span class="p">-</span><span class="n">-card-only</span>
+</span></code></pre></div>
 <h2 id="verify">Verify<a class="headerlink" href="#verify" title="Permanent link">&para;</a></h2>
-<div class="language-powershell highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="sh">@&#39;</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="sh">from huggingface_hub import HfApi</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="sh">api = HfApi()</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="sh">info = api.repo_info(repo_id=&quot;Stevesolun/ctx&quot;, repo_type=&quot;dataset&quot;)</span>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="sh">print(info.id, info.sha)</span>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="sh">&#39;@</span> <span class="p">|</span> <span class="n">python</span> <span class="p">-</span>
+<div class="language-powershell highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="sh">@&#39;</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="sh">from huggingface_hub import HfApi</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="sh">api = HfApi()</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="sh">info = api.repo_info(repo_id=&quot;Stevesolun/ctx&quot;, repo_type=&quot;dataset&quot;)</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="sh">print(info.id, info.sha)</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="sh">&#39;@</span> <span class="p">|</span> <span class="n">python</span> <span class="p">-</span>
 </span></code></pre></div>
 <p>The dataset page should show the MIT license and the tags from the metadata
 wrapper.</p>

@@ -1600,12 +1600,13 @@ agents, and MCP servers.</p>
 is <strong>12,934 nodes</strong> (1,470 curated skills + 467 agents + 10,790 MCP servers + 207 harnesses). Harness pages under <code>entities/harnesses/</code> are ingested into
 local rebuilds and the separate harness recommendation path. The
 tarball also carries <strong>68,494 skill pages</strong>; <strong>67,024</strong>
-skill bodies are hydrated as installable <code>SKILL.md</code> files under
-<code>converted/</code>; the <strong>28,612</strong> entries over the configured line
-limit were converted to gated micro-skill orchestrators. Full original bodies
-are used during graph rebuilds for semantic similarity, but
-<code>SKILL.md.original</code> backups, transient <code>.lock</code> files, and <code>.ctx/</code> queue state
-are omitted from the shipped tarball.</p>
+skill bodies are hydrated as installable <code>SKILL.md</code> files in the wiki-pack
+base under <code>converted/</code>; the <strong>28,612</strong> entries over the configured line limit
+were converted to gated micro-skill orchestrators. Full original bodies are
+used during graph rebuilds for semantic similarity, but
+<code>SKILL.md.original</code> backups, transient <code>.lock</code> files, <code>.ctx/</code> queue state,
+local generated markdown catalogs, and host-user paths are omitted from the
+shipped tarball.</p>
 <table>
 <thead>
 <tr>
@@ -1676,14 +1677,15 @@ release asset for the installed package version. This installs
 the harness pages used by <code>ctx-harness-install</code>:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ctx-init<span class="w"> </span>--graph
 </span></code></pre></div>
-<p>To expand every shipped skill/agent/MCP entity page, harness page,
-skill page, concept page, converted micro-skill pipeline,
-and Obsidian vault metadata, request the full wiki artifact explicitly:</p>
+<p>To install the full shipped wiki, including the wiki-pack base for
+skill/agent/MCP entity pages, skill pages, concept pages, converted
+micro-skill pipelines, direct harness pages, and Obsidian vault metadata,
+request the full wiki artifact explicitly:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ctx-init<span class="w"> </span>--graph<span class="w"> </span>--graph-install-mode<span class="w"> </span>full
 </span></code></pre></div>
 <p>Manual extraction is still supported for offline/source installs. Extract the
-full tarball into your <code>~/.claude/skill-wiki/</code> when you want local markdown
-wiki browsing:</p>
+full tarball into your <code>~/.claude/skill-wiki/</code> when you want local wiki
+browsing through ctx's merged pack/local view:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/.claude/skill-wiki
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>tar<span class="w"> </span>xzf<span class="w"> </span>graph/wiki-graph.tar.gz<span class="w"> </span>-C<span class="w"> </span>~/.claude/skill-wiki/
 </span></code></pre></div>
@@ -1972,9 +1974,21 @@ for skill, agent, MCP server, or harness releases.</p>
 promotion. <code>graph.json</code>, <code>graph-delta.json</code>, <code>communities.json</code>,
 <code>graph-report.md</code>, and <code>graph-export-manifest.json</code> each get a sibling
 <code>*.promotion.json</code> file with candidate, current, and <code>last_good</code> hashes plus
-rollback metadata. The manifest is promoted last, so a crash between artifact
-promotion and manifest promotion is detected as an incomplete export and the
-next run rebuilds instead of trusting mixed graph files.</p>
+rollback metadata. Queue-driven promotion accepts only graphify artifacts named
+<code>graph.json</code>, <code>graph-delta.json</code>, <code>communities.json</code>, <code>graph-report.md</code>, or
+<code>graph-export-manifest.json</code> under <code>&lt;wiki&gt;/graphify-out/</code>, plus the release
+artifacts allowlisted under repo <code>graph/</code>, and always from sibling
+<code>&lt;target&gt;.staged</code> files. Staged and target symlinks are rejected. Validators are
+selected from the target suffix: JSON, JSONL, gzip JSON, gzip JSONL, full wiki
+tar, and runtime graph tar each get the matching structural check before
+promotion. The manifest is promoted last, so a crash between artifact promotion
+and manifest promotion is detected as an incomplete export and the next run
+rebuilds instead of trusting mixed graph files.</p>
+<p>Artifact validation also treats privacy and fanout as release contracts: archive
+JSON, graph-pack node/edge metadata, markdown members, and merged wiki-pack
+markdown must not contain host-user paths; markdown members are capped at
+10 MiB; local generated markdown such as <code>catalog.md</code>, <code>converted-index.md</code>,
+<code>log.md</code>, and <code>versions-catalog.md</code> must stay out of the full archive.</p>
 <h2 id="current-artifact-record">Current artifact record<a class="headerlink" href="#current-artifact-record" title="Permanent link">&para;</a></h2>
 <p>This page is intentionally current-state only. Older graph sizes made the public
 page look stale even when the headline table was correct, so historical refresh
