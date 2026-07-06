@@ -47,7 +47,7 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 from ctx.adapters.generic.providers.base import ToolDefinition
 from ctx.telemetry import (
@@ -95,6 +95,10 @@ _TOKEN_VALUE_RE = re.compile(
     r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat|hf|sk|xox[baprs])"
     r"[_-]?[A-Za-z0-9_./+=-]{8,}\b"
 )
+_SENSITIVE_ENV_KEY_RE = re.compile(
+    r"(?i)(API[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTHORIZATION)"
+)
+_MIN_LITERAL_SECRET_LENGTH = 4
 
 
 def _duration_ms(started: float) -> float:
@@ -187,14 +191,25 @@ def _validate_env_name(name: str) -> None:
         raise ValueError(f"invalid MCP credential env var name: {name!r}")
 
 
-def _redact_sensitive_text(text: str) -> str:
+def _redact_sensitive_text(text: str, literal_values: Iterable[str] = ()) -> str:
     """Remove likely credential values from diagnostics before retention."""
     text = _BEARER_RE.sub("Bearer [REDACTED]", text)
     text = _SENSITIVE_ASSIGNMENT_RE.sub(
         lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]",
         text,
     )
-    return _TOKEN_VALUE_RE.sub("[REDACTED]", text)
+    text = _TOKEN_VALUE_RE.sub("[REDACTED]", text)
+    for value in sorted(
+        {
+            value
+            for value in literal_values
+            if len(value) >= _MIN_LITERAL_SECRET_LENGTH and "[REDACTED]" not in value
+        },
+        key=len,
+        reverse=True,
+    ):
+        text = text.replace(value, "[REDACTED]")
+    return text
 
 
 def _child_env_for_config(config: "McpServerConfig") -> dict[str, str]:
@@ -204,6 +219,15 @@ def _child_env_for_config(config: "McpServerConfig") -> dict[str, str]:
             env[key] = os.environ[key]
     env.update(config.env)
     return env
+
+
+def _stderr_redaction_values(config: "McpServerConfig", env: dict[str, str]) -> tuple[str, ...]:
+    credential_keys = {key.upper() for key in config.credential_env}
+    values = []
+    for key, value in env.items():
+        if key.upper() in credential_keys or _SENSITIVE_ENV_KEY_RE.search(key):
+            values.append(value)
+    return tuple(dict.fromkeys(values))
 
 
 def _expand_env_placeholders(value: str, env: dict[str, str]) -> str:
@@ -360,6 +384,7 @@ class McpClient:
         # thread so a chatty server doesn't block the pipe.
         self._stderr_lines: list[str] = []
         self._stderr_thread: threading.Thread | None = None
+        self._stderr_redaction_values: tuple[str, ...] = ()
 
     # ── lifecycle ──────────────────────────────────────────────────────────
 
@@ -370,6 +395,7 @@ class McpClient:
 
         self._stdout_frames = queue.Queue()
         env = _child_env_for_config(self._config)
+        self._stderr_redaction_values = _stderr_redaction_values(self._config, env)
 
         command = _resolve_executable(self._config.command, env)
         args = _expand_config_args(self._config, env)
@@ -384,6 +410,7 @@ class McpClient:
                 **_popen_process_group_kwargs(),
             )
         except OSError as exc:
+            self._stderr_redaction_values = ()
             raise McpServerError(
                 f"{self._config.name}: failed to start MCP command {self._config.command!r}: {exc}"
             ) from exc
@@ -419,6 +446,7 @@ class McpClient:
         proc = self._proc
         self._proc = None
         if proc is None:
+            self._stderr_redaction_values = ()
             return
         try:
             # Close stdin to signal the server to exit cleanly.
@@ -448,6 +476,7 @@ class McpClient:
                 thread.join(timeout=0.2)
         self._stdout_thread = None
         self._stderr_thread = None
+        self._stderr_redaction_values = ()
 
     def __enter__(self) -> "McpClient":
         self.start()
@@ -683,7 +712,9 @@ class McpClient:
                 line = raw.decode("utf-8", errors="replace").rstrip()
                 if not line:
                     continue
-                self._stderr_lines.append(_redact_sensitive_text(line))
+                self._stderr_lines.append(
+                    _redact_sensitive_text(line, self._stderr_redaction_values)
+                )
                 # Cap memory usage on a chatty server.
                 if len(self._stderr_lines) > 200:
                     del self._stderr_lines[:-200]

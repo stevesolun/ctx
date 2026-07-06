@@ -110,6 +110,7 @@ _LOCAL_GENERATED_MARKDOWN = frozenset(
         "versions-catalog.md",
     }
 )
+_MAX_MARKDOWN_MEMBER_BYTES = 10 * 1024 * 1024
 _PREVIEW_HTML_FILES = (
     "sample-top60.html",
     "viz-ai-agents.html",
@@ -534,10 +535,30 @@ def _read_tar_member_bytes(tf: tarfile.TarFile, member: tarfile.TarInfo) -> byte
 
 
 def _validate_archive_markdown_payload(name: str, payload: bytes, *, context: str) -> None:
+    if len(payload) > _MAX_MARKDOWN_MEMBER_BYTES:
+        raise GraphArtifactError(
+            f"{context} markdown member too large: {name} ({len(payload)} bytes)",
+        )
     if _HOST_USER_PATH_RE.search(payload):
         raise GraphArtifactError(f"{context} markdown contains host path: {name}")
     if name in _LOCAL_GENERATED_MARKDOWN:
         raise GraphArtifactError(f"{context} contains local generated markdown: {name}")
+
+
+def _read_archive_markdown_payload(
+    tf: tarfile.TarFile,
+    member: tarfile.TarInfo,
+    name: str,
+    *,
+    context: str,
+) -> bytes:
+    if member.size > _MAX_MARKDOWN_MEMBER_BYTES:
+        raise GraphArtifactError(
+            f"{context} markdown member too large: {name} ({member.size} bytes)",
+        )
+    payload = _read_tar_member_bytes(tf, member)
+    _validate_archive_markdown_payload(name, payload, context=context)
+    return payload
 
 
 def _count_lines(payload: bytes) -> int:
@@ -904,8 +925,12 @@ def validate_graph_artifacts(
                 )
             markdown_payload: bytes | None = None
             if member.isfile() and name.endswith(".md"):
-                markdown_payload = _read_tar_member_bytes(tf, member)
-                _validate_archive_markdown_payload(name, markdown_payload, context="archive")
+                markdown_payload = _read_archive_markdown_payload(
+                    tf,
+                    member,
+                    name,
+                    context="archive",
+                )
             if member.isfile() and _is_converted_skill_page(name):
                 payload = (
                     markdown_payload
@@ -1207,10 +1232,10 @@ def _validate_runtime_graph_archive(
                 )
             markdown_payload: bytes | None = None
             if member.isfile() and name.endswith(".md"):
-                markdown_payload = _read_tar_member_bytes(tf, member)
-                _validate_archive_markdown_payload(
+                markdown_payload = _read_archive_markdown_payload(
+                    tf,
+                    member,
                     name,
-                    markdown_payload,
                     context="runtime archive",
                 )
             if member.isfile() and name == "graphify-out/graph.json":

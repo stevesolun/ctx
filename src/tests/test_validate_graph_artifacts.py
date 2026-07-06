@@ -13,6 +13,7 @@ import pytest
 import yaml  # type: ignore[import-untyped]
 import networkx as nx
 
+import validate_graph_artifacts as graph_validator
 from ctx.core.graph.graph_packs import build_pack_manifest, write_base_pack, write_pack_manifest
 from ctx.core.wiki.wiki_packs import write_wiki_base_pack
 from scripts.ci_preflight import GRAPH_VALIDATE_ARGS
@@ -1141,6 +1142,24 @@ def test_validate_graph_artifacts_rejects_host_paths_in_tar_markdown(
     with pytest.raises(
         GraphArtifactError,
         match=r"archive markdown contains host path: log\.md",
+    ):
+        validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
+
+
+def test_validate_graph_artifacts_rejects_oversized_tar_markdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_catalog(
+        tmp_path,
+        converted_path="converted/skills-sh-example-skill/SKILL.md",
+    )
+    monkeypatch.setattr(graph_validator, "_MAX_MARKDOWN_MEMBER_BYTES", 1024)
+    _write_archive(tmp_path, converted_skill_text="x" * 1025)
+
+    with pytest.raises(
+        GraphArtifactError,
+        match=r"archive markdown member too large: converted/skills-sh-example-skill/SKILL\.md",
     ):
         validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
 

@@ -360,6 +360,28 @@ class TestClientRobustness:
         assert "Authorization:" in stderr_tail
         assert "[REDACTED]" in stderr_tail
 
+    def test_stderr_redacts_credential_env_values(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        secret = "argv-only-secret"
+        monkeypatch.setenv("MCP_API_KEY", secret)
+        cfg = _make_config(
+            extra_env={
+                "FAKE_MCP_NOISY_STDERR": "1",
+                "FAKE_MCP_STDERR_LINE": secret,
+            },
+            credential_env=("MCP_API_KEY",),
+        )
+
+        with McpClient(cfg) as client:
+            client.list_tools()
+            _wait_until(lambda: "[REDACTED]" in client._stderr_tail())
+            stderr_tail = client._stderr_tail()
+
+        assert secret not in stderr_tail
+        assert "[REDACTED]" in stderr_tail
+
     def test_request_before_start_raises(self) -> None:
         client = McpClient(_make_config())
         with pytest.raises(RuntimeError, match="not started"):
