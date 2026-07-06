@@ -620,6 +620,20 @@ def test_ci_required_allows_full_matrix_skip_on_pr_only() -> None:
     assert failed_required_jobs(needs, event_name="push") == {"test": "skipped"}
 
 
+def test_ci_required_rejects_full_matrix_skip_on_ci_changed_pr() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {"ci_changed": "true"},
+        },
+        test={"result": "skipped"},
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "test": "skipped",
+    }
+
+
 def test_ci_required_allows_heavy_jobs_to_skip_on_docs_only_pr() -> None:
     needs = _required_needs(
         classify={
@@ -876,3 +890,13 @@ def test_workflow_runs_focused_telemetry_enterprise_gate() -> None:
     assert "src/tests/test_enterprise_telemetry.py" in workflow
     assert "src/tests/test_harness_cli_run.py" in workflow
     assert '-k "telemetry or runtime_lifecycle"' in workflow
+
+
+def test_workflow_runs_full_pytest_matrix_for_ci_changed_prs() -> None:
+    workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
+    pytest_job = workflow.split("\n  test:\n", maxsplit=1)[1].split(
+        "\n  contract-compat:", maxsplit=1
+    )[0]
+
+    assert "needs: classify" in pytest_job
+    assert "needs.classify.outputs.ci_changed == 'true'" in pytest_job

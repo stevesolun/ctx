@@ -184,7 +184,8 @@ jobs:
 
   test:
     name: pytest (${{ matrix.os }} / py${{ matrix.python-version }})
-    if: ${{ github.event_name != 'pull_request' }}
+    needs: classify
+    if: ${{ github.event_name != 'pull_request' || needs.classify.outputs.ci_changed == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
