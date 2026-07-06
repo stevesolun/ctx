@@ -414,6 +414,9 @@ jobs:
                       f"sha256:{actual_oid} size:{total}"
                   )
 
+          def pointer_matches_static_release_cache(pointer: tuple[str, int], fallback: dict[str, object]) -> bool:
+              return pointer == (str(fallback["sha256"]), int(fallback["size"]))
+
           def hydrate_from_lfs(path_name: str, expected_oid: str, expected_size: int, hydrated_min_size: int) -> None:
               graph_tar = Path(path_name)
               print(f"Pointer for {path_name} is not in release cache; hydrating from targeted Git LFS.")
@@ -442,6 +445,13 @@ jobs:
               pointer = read_lfs_pointer(graph_tar)
               if pointer is not None:
                   expected_oid, expected_size = pointer
+                  if not pointer_matches_static_release_cache(pointer, fallback):
+                      print(
+                          f"Pointer for {path_name} is newer than the static release cache; "
+                          "hydrating from targeted Git LFS without polling."
+                      )
+                      hydrate_from_lfs(path_name, expected_oid, expected_size, hydrated_min_size)
+                      return
 
               deadline = time.monotonic() + release_asset_wait_seconds
               while True:

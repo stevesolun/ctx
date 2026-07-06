@@ -229,6 +229,7 @@ def test_graph_artifact_job_uses_release_asset_fallback_for_lfs_budget() -> None
     assert 'tag_name.startswith("graph-artifacts-")' in workflow
     assert "sha256:{expected_oid} size:{expected_size}" in workflow
     assert "Pointer for {path_name} is not in release cache" in workflow
+    assert "hydrating from targeted Git LFS without polling" in workflow
     assert '"git", "lfs", "pull", "--include", path_name' in workflow
     assert "GIT_LFS_ACTIVITYTIMEOUT" in workflow
     assert "Hydrated {path_name} from" in workflow
@@ -286,8 +287,10 @@ def test_publish_workflow_validates_and_uploads_graph_assets() -> None:
     workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
 
     assert "Resolve release graph artifacts from release assets" in workflow
-    assert "Resolving graph artifacts from matching release assets" in workflow
-    assert "git lfs pull" not in workflow
+    assert "Resolving graph artifacts from release cache, or targeted Git LFS" in workflow
+    assert "hydrating from targeted Git LFS without polling" in workflow
+    assert '"git", "lfs", "pull", "--include", path_name' in workflow
+    assert "verify_hydrated_file(graph_tar, expected_oid, expected_size)" in workflow
     assert 'tag_name.startswith("graph-artifacts-")' in workflow
     assert "sha256:{expected_oid} size:{expected_size}" in workflow
     assert "Validate release graph artifacts" in workflow

@@ -139,20 +139,17 @@ jobs:
           TAG_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          echo "Resolving graph artifacts from matching release assets to avoid Git LFS bandwidth."
+          echo "Resolving graph artifacts from release cache, or targeted Git LFS for new pointers."
           python - <<'PY'
           import hashlib
           import json
           import os
           from pathlib import Path
           import subprocess
-          import time
           import urllib.request
 
           repo = os.environ["GITHUB_REPOSITORY"]
           current_tag = os.environ.get("TAG_NAME", "")
-          release_asset_wait_seconds = 300
-          release_asset_poll_seconds = 10
           expected_graph_assets = {
               "graph/wiki-graph.tar.gz": {
                   "sha256": "e487ec2109803e3c05cb2ca6906e8a0bae681f32a4fe79f3fb2f168fbea2c947",
@@ -170,57 +167,107 @@ jobs:
                   text=True,
               ))
 
+          def read_lfs_pointer(graph_tar: Path) -> tuple[str, int] | None:
+              if not graph_tar.exists():
+                  return None
+              pointer = graph_tar.read_text(encoding="utf-8", errors="replace")
+              if not pointer.startswith("version https://git-lfs.github.com/spec/v1"):
+                  return None
+              expected_oid = ""
+              expected_size = 0
+              for line in pointer.splitlines():
+                  if line.startswith("oid sha256:"):
+                      expected_oid = line.split(":", 1)[1].strip()
+                  elif line.startswith("size "):
+                      expected_size = int(line.split(" ", 1)[1].strip())
+              if expected_oid and expected_size:
+                  return expected_oid, expected_size
+              raise SystemExit(f"{graph_tar} has incomplete Git LFS pointer metadata")
+
+          def verify_hydrated_file(graph_tar: Path, expected_oid: str, expected_size: int) -> None:
+              sha = hashlib.sha256()
+              total = 0
+              with graph_tar.open("rb") as fh:
+                  while True:
+                      chunk = fh.read(1024 * 1024)
+                      if not chunk:
+                          break
+                      sha.update(chunk)
+                      total += len(chunk)
+              actual_oid = sha.hexdigest()
+              if actual_oid != expected_oid or total != expected_size:
+                  raise SystemExit(
+                      f"{graph_tar} does not match LFS pointer: "
+                      f"sha256:{actual_oid} size:{total}"
+                  )
+
+          def pointer_matches_static_release_cache(pointer: tuple[str, int], fallback: dict[str, object]) -> bool:
+              return pointer == (str(fallback["sha256"]), int(fallback["size"]))
+
+          def hydrate_from_lfs(path_name: str, expected_oid: str, expected_size: int, hydrated_min_size: int) -> None:
+              graph_tar = Path(path_name)
+              print(f"Pointer for {path_name} is not in release cache; hydrating from targeted Git LFS.")
+              env = os.environ.copy()
+              env.setdefault("GIT_LFS_SKIP_SMUDGE", "1")
+              env.setdefault("GIT_LFS_ACTIVITYTIMEOUT", "600")
+              env.setdefault("GIT_LFS_DIALTIMEOUT", "120")
+              env.setdefault("GIT_LFS_TLSTIMEOUT", "120")
+              subprocess.check_call(
+                  ["git", "lfs", "pull", "--include", path_name, "--exclude", ""],
+                  env=env,
+              )
+              if not graph_tar.exists() or graph_tar.stat().st_size <= hydrated_min_size:
+                  raise SystemExit(f"Git LFS did not hydrate {path_name}")
+              verify_hydrated_file(graph_tar, expected_oid, expected_size)
+              print(f"Hydrated {path_name} from targeted Git LFS sha256:{expected_oid} size:{expected_size}")
+
           def hydrate_from_release(path_name: str, hydrated_min_size: int) -> None:
               graph_tar = Path(path_name)
               fallback = expected_graph_assets[path_name]
               expected_oid = fallback["sha256"]
               expected_size = int(fallback["size"])
-              if graph_tar.exists():
-                  pointer = graph_tar.read_text(encoding="utf-8", errors="replace")
-                  for line in pointer.splitlines():
-                      if line.startswith("oid sha256:"):
-                          expected_oid = line.split(":", 1)[1].strip()
-                      elif line.startswith("size "):
-                          expected_size = int(line.split(" ", 1)[1].strip())
-                  if not pointer.startswith("version https://git-lfs.github.com/spec/v1") and graph_tar.stat().st_size > hydrated_min_size:
-                      print(f"{graph_tar} is already hydrated")
+              if graph_tar.exists() and graph_tar.stat().st_size > hydrated_min_size:
+                  print(f"{graph_tar} is already hydrated")
+                  return
+              pointer = read_lfs_pointer(graph_tar)
+              if pointer is not None:
+                  expected_oid, expected_size = pointer
+                  if not pointer_matches_static_release_cache(pointer, fallback):
+                      print(
+                          f"Pointer for {path_name} is newer than the static release cache; "
+                          "hydrating from targeted Git LFS without polling."
+                      )
+                      hydrate_from_lfs(path_name, expected_oid, expected_size, hydrated_min_size)
                       return
 
-              deadline = time.monotonic() + release_asset_wait_seconds
-              while True:
-                  candidates = []
-                  for release in load_releases():
-                      tag_name = str(release.get("tag_name") or "")
-                      is_graph_cache = tag_name.startswith("graph-artifacts-")
-                      if release.get("draft") or (
-                          release.get("prerelease") and not is_graph_cache
-                      ):
+              candidates = []
+              for release in load_releases():
+                  tag_name = str(release.get("tag_name") or "")
+                  is_graph_cache = tag_name.startswith("graph-artifacts-")
+                  if release.get("draft") or (
+                      release.get("prerelease") and not is_graph_cache
+                  ):
+                      continue
+                  if tag_name == current_tag:
+                      continue
+                  for asset in release.get("assets", []):
+                      if asset.get("name") != graph_tar.name:
                           continue
-                      if tag_name == current_tag:
+                      digest = str(asset.get("digest") or "")
+                      size = int(asset.get("size") or 0)
+                      if size != expected_size:
                           continue
-                      for asset in release.get("assets", []):
-                          if asset.get("name") != graph_tar.name:
-                              continue
-                          digest = str(asset.get("digest") or "")
-                          size = int(asset.get("size") or 0)
-                          if size != expected_size:
-                              continue
-                          if digest and digest != f"sha256:{expected_oid}":
-                              continue
-                          candidates.append((tag_name, asset))
+                      if digest and digest != f"sha256:{expected_oid}":
+                          continue
+                      candidates.append((tag_name, asset))
 
-                  if candidates:
-                      break
-                  if time.monotonic() >= deadline:
-                      raise SystemExit(
-                          f"No previous release asset matches {path_name} "
-                          f"sha256:{expected_oid} size:{expected_size}"
-                      )
+              if not candidates:
                   print(
-                      f"Waiting for matching release asset {graph_tar.name} "
+                      f"No previous release asset matches {path_name} "
                       f"sha256:{expected_oid} size:{expected_size}"
                   )
-                  time.sleep(release_asset_poll_seconds)
+                  hydrate_from_lfs(path_name, expected_oid, expected_size, hydrated_min_size)
+                  return
 
               source_tag, asset = candidates[0]
               tmp = graph_tar.with_name(f"{graph_tar.name}.download")
