@@ -28,6 +28,7 @@ package-lock.json
 
 # Temp / runtime outputs
 /tmp/
+.gate/
 *.tmp
 *.bak
 *.swp

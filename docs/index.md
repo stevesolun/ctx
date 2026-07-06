@@ -55,7 +55,9 @@ with persistent memory that gets smarter every session.
     `scripts/no_mistakes_run.sh fast` is the fast front door: it selects the
     same PR checks, splits independent work into isolated temporary worktree
     lanes, and runs them in parallel against committed branch history. The
-    serial preflight/no-mistakes path remains the authoritative final local
+    lane filters support fast reruns such as
+    `scripts/no_mistakes_run.sh fast --lane static --lane unit --summary-json .gate/local-fast.json`.
+    The serial preflight/no-mistakes path remains the authoritative final local
     gate. Preflight uses the same changed-file classifier as GitHub Actions and
     runs the matching local gates before you open a PR: stats, ruff
     format/check, mypy, pip check, unit coverage, canaries, package build,
@@ -232,7 +234,7 @@ ones are flagged. New ones self-ingest.
     ---
 
     Current main is **v1.0.21** — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-    4,577 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+    4,580 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
     ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),

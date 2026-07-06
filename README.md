@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-4577_inventory-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-4580_inventory-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![Graph](https://img.shields.io/badge/Graph-79%2C958_nodes_/_1%2C778%2C069_edges-red.svg)](https://stevesolun.github.io/ctx/knowledge-graph/)
 [![Skills](https://img.shields.io/badge/Skills-68%2C494-blue.svg)](https://stevesolun.github.io/ctx/catalog/?type=skill)
 [![Agents](https://img.shields.io/badge/Agents-467-purple.svg)](https://stevesolun.github.io/ctx/catalog/?type=agent)
@@ -147,8 +147,14 @@ scripts/no_mistakes_run.sh fast
 
 That runner selects the same checks as PR preflight, groups independent checks
 into isolated temporary worktree lanes, and runs them in parallel. Treat it as
-the fast front door; the serial preflight/no-mistakes path remains the
-authoritative final local gate:
+the fast front door; use lane filters for quick reruns after a failed lane:
+
+```bash
+scripts/no_mistakes_run.sh fast --lane static --lane unit --summary-json .gate/local-fast.json
+scripts/no_mistakes_run.sh fast --skip-lane graph
+```
+
+The serial preflight/no-mistakes path remains the authoritative final local gate:
 
 ```bash
 python scripts/ci_preflight.py --profile pr
