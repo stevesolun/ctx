@@ -23,6 +23,7 @@ _POSIX_USER_PATH_RE = re.compile(
     rf"(?:^|(?<=[`\"'(<\[\s=,:]))/(?:Users|home)/{_PATH_TOKEN}"
     rf"(?:{_PATH_SPACED_COMPONENT})*"
 )
+_POSIX_USER_PATH_PREFIX_RE = re.compile(r"(?:^|(?<=[`\"'(<\[\s=,:]))/(?:Users|home)/")
 _GRAPH_MANIFEST = "graphify-out/graph-export-manifest.json"
 _REQUIRED_EXPANDED_MARKDOWN = frozenset({"graphify-out/graph-report.md"})
 _LOCAL_GENERATED_MARKDOWN = frozenset(
@@ -211,10 +212,9 @@ def _normalise_page_text(text: str) -> str:
 
 
 def _redact_host_user_paths(text: str) -> str:
-    return _POSIX_USER_PATH_RE.sub(
-        "<host-user-path>",
-        _WINDOWS_USER_PATH_RE.sub("<host-user-path>", text),
-    )
+    redacted = _WINDOWS_USER_PATH_RE.sub("<host-user-path>", text)
+    redacted = _POSIX_USER_PATH_RE.sub("<host-user-path>", redacted)
+    return _POSIX_USER_PATH_PREFIX_RE.sub("<host-user-path>", redacted)
 
 
 def _safe_tar_name(raw_name: str) -> str:

@@ -130,14 +130,19 @@ def test_host_user_path_redaction_preserves_trailing_prose() -> None:
 def test_host_user_path_redaction_covers_key_value_delimiters() -> None:
     text = (
         "cwd=/Users/steves/ctx\nsource:/home/steves/wiki\nurl=https://example.com/home/user-guide\n"
+        "User: /validate /home/user/webapp --vuln-type command_injection\n"
+        "Binary: /home/user/binary_app/build/vuln\n"
+        "Rule: No `/home/` hardcoded path prefixes\n"
     )
 
     redacted = pack_full_wiki_tar._redact_host_user_paths(text)
 
     assert "/Users/" not in redacted
     assert "/home/steves" not in redacted
+    assert "/home/user/" not in redacted
+    assert "`/home/`" not in redacted
     assert "https://example.com/home/user-guide" in redacted
-    assert redacted.count("<host-user-path>") == 2
+    assert redacted.count("<host-user-path>") == 5
 
 
 @pytest.mark.parametrize(
