@@ -408,3 +408,33 @@ def test_mcp_env_placeholders_do_not_expand_credentials_into_argv_by_default(
     with pytest.raises(ValueError, match="sensitive env var 'MCP_API_KEY'"):
         mcp_router._expand_config_args(cfg, env)
     assert cfg.args[1] == "${MCP_API_KEY}"
+
+
+def test_artifact_promotion_rejects_repo_graph_target_from_untrusted_project(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    host_project = tmp_path / "host-project"
+    wiki = tmp_path / "wiki"
+    target = host_project / "graph" / "wiki-graph-stats.json"
+    staged = target.with_name(f"{target.name}.staged")
+    installed_worker = host_project / ".venv" / "site-packages" / "ctx" / "core" / "wiki"
+    target.parent.mkdir(parents=True)
+    installed_worker.mkdir(parents=True)
+    staged.write_text("{}", encoding="utf-8")
+    (host_project / "pyproject.toml").write_text(
+        '[project]\nname = "not-ctx"\n',
+        encoding="utf-8",
+    )
+    fake_source = installed_worker / "wiki_queue_worker.py"
+    fake_source.write_text("# installed worker\n", encoding="utf-8")
+    monkeypatch.setattr(wiki_queue_worker, "__file__", str(fake_source))
+
+    assert wiki_queue_worker._source_root() is None
+
+    with pytest.raises(ValueError, match="not an allowed artifact target"):
+        wiki_queue_worker._resolve_artifact_promotion_paths(
+            wiki,
+            str(staged),
+            str(target),
+        )

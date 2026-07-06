@@ -620,9 +620,9 @@ def _resolve_artifact_promotion_paths(
 def _resolve_artifact_target_path(
     raw_target_path: str,
     wiki_root: Path,
-    repo_root: Path,
+    repo_root: Path | None,
 ) -> Path:
-    bases = (wiki_root, repo_root)
+    bases = (wiki_root,) if repo_root is None else (wiki_root, repo_root)
     for base in bases:
         target = _resolve_payload_path(raw_target_path, base)
         if _is_allowed_artifact_target(target, wiki_root, repo_root):
@@ -635,13 +635,16 @@ def _resolve_staged_artifact_path(
     raw_staged_path: str,
     target: Path,
     wiki_root: Path,
-    repo_root: Path,
+    repo_root: Path | None,
 ) -> Path:
     path = Path(raw_staged_path).expanduser()
     if path.is_absolute():
         return path.resolve()
     expected_staged = target.with_name(f"{target.name}.staged")
-    for base in (target.parent, wiki_root, repo_root):
+    bases = (
+        (target.parent, wiki_root) if repo_root is None else (target.parent, wiki_root, repo_root)
+    )
+    for base in bases:
         staged = (base / path).resolve()
         if staged == expected_staged:
             return staged
@@ -655,20 +658,34 @@ def _resolve_payload_path(raw_path: str, base: Path) -> Path:
     return (base / path).resolve()
 
 
-def _is_allowed_artifact_target(target: Path, wiki_root: Path, repo_root: Path) -> bool:
+def _is_allowed_artifact_target(target: Path, wiki_root: Path, repo_root: Path | None) -> bool:
     if target.parent == wiki_root / "graphify-out":
         return target.name in _WIKI_GRAPH_PROMOTION_TARGET_NAMES
-    if target.parent == repo_root / "graph":
+    if repo_root is not None and target.parent == repo_root / "graph":
         return target.name in _REPO_GRAPH_PROMOTION_TARGET_NAMES
     return False
 
 
-def _source_root() -> Path:
+def _source_root() -> Path | None:
     source = Path(__file__).resolve()
     for parent in source.parents:
-        if (parent / "pyproject.toml").is_file():
+        if _is_ctx_source_root(parent, source):
             return parent
-    return source.parents[4]
+    return None
+
+
+def _is_ctx_source_root(parent: Path, source: Path) -> bool:
+    pyproject = parent / "pyproject.toml"
+    repo_source = parent / "src" / "ctx" / "core" / "wiki" / "wiki_queue_worker.py"
+    if not pyproject.is_file() or not repo_source.is_file():
+        return False
+    try:
+        return (
+            'name = "claude-ctx"' in pyproject.read_text(encoding="utf-8")
+            and repo_source.resolve() == source
+        )
+    except OSError:
+        return False
 
 
 def _handle_pack_compaction(wiki_path: Path, payload: dict[str, Any]) -> str:
