@@ -16,7 +16,13 @@ _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 _PATH_CHAR = r"[^`\"'<>|\s\r\n)]"
 _PATH_TOKEN = rf"{_PATH_CHAR}+"
 _PATH_TERMINAL_WORD = r"[A-Z0-9][^`\"'<>|/\\\s\r\n)]*"
-_PATH_LOWER_TERMINAL_WORD = r"[a-z][^`\"'<>|/\\\s\r\n),.;:!?]*"
+_PATH_LOWER_PROSE_WORDS = (
+    r"(?:a|an|and|are|as|at|by|for|from|in|is|of|on|or|the|to|was|were|with|without)"
+)
+_PATH_LOWER_TERMINAL_WORD = (
+    rf"(?!(?:{_PATH_LOWER_PROSE_WORDS})(?=$|[\s),.;:!?]))"
+    r"[a-z][^`\"'<>|/\\\s\r\n),.;:!?]*"
+)
 _PATH_TERMINAL_END = r"(?=$|[\r\n`\"'),.;:!?>\]])"
 _PATH_SPACED_COMPONENT = (
     rf"(?: {_PATH_CHAR}*[\\/]{_PATH_CHAR}*| {_PATH_CHAR}*\.{_PATH_CHAR}+"
