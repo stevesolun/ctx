@@ -30,6 +30,112 @@ Review ctx with paired agents that behave like production review teams:
 - Do not accept "tests passed" as evidence unless the behavior under review is
   directly demonstrated.
 
+## CTX Review Workbench Team
+
+### CTO Orchestrator
+
+Owns scope, task graph, conflicts, and merge criteria.
+
+Inputs:
+
+- `qa/feature_status.csv`.
+- `qa/bug_smoke_status.csv`.
+- CI/no-mistakes evidence.
+- Repo tree.
+
+Output:
+
+- One canonical review board with owner, status, evidence path, and blocker
+  state.
+
+### Feature Mapper + Feature Reviewer
+
+Mapper discovers every product capability: CLI, MCP server, dashboard,
+telemetry, graph/wiki, skills, agents, harnesses, and Loopflow adapter.
+
+Reviewer checks every discovered feature has a user story, expected behavior,
+test evidence, and tracker row.
+
+### Runtime/API/MCP Agent + Contract Reviewer
+
+Agent reviews `src/ctx/api.py`, `src/ctx/mcp_server`, generic adapters, tool
+router, and lifecycle flows.
+
+Reviewer checks API schemas, backwards compatibility, permissions, error
+behavior, and trace propagation.
+
+### Telemetry/Enterprise Agent + Privacy Reviewer
+
+Agent reviews OTel-style traces/metrics/logs, token usage KPIs, exporters,
+retention, and local defaults.
+
+Reviewer checks redaction, hashed error handling, salt boundaries, exporter
+config safety, and enterprise runbook gaps.
+
+### Dashboard/UX Agent + UX Critic
+
+Agent walks dashboard pages and user flows.
+
+Critic checks broken links, misleading states, graph/LLM-wiki/dashboard health,
+visual regressions, and empty/error states.
+
+### Graph/Wiki/Recommendation Agent + Evidence Reviewer
+
+Agent reviews graph artifacts, wiki packs, skill/agent/MCP recommendations, and
+subgroup selection behavior.
+
+Reviewer checks recommendations are explainable, reproducible,
+permission-aware, and backed by tests.
+
+### QA/Test Gate Agent + Gate Critic
+
+Agent runs local-fast, focused pytest, CI classifier, no-test policy,
+no-mistakes, and PR checks.
+
+Critic checks bottlenecks, flaky tests, overbroad gates, missing fixtures, and
+whether evidence is real or just "tests passed."
+
+### Security/Supply Chain Agent + Red-Team Reviewer
+
+Agent scans install scripts, sync/HF paths, tokens/secrets, LFS/artifacts, and
+external tool ingestion.
+
+Reviewer tries adversarial cases: malicious skill/MCP metadata, path traversal,
+unsafe exporters, and poisoned DSL/tool manifests.
+
+### Docs/Runbook Agent + Docs Reviewer
+
+Agent validates docs against code behavior.
+
+Reviewer checks every doc claim has command/test/source evidence and flags stale
+prose or unsupported marketing language.
+
+### Loopflow/DSL Integration Agent + DSL Author Reviewer
+
+Agent designs the Loopflow adapter surface: permissions, harnesses, skills,
+MCPs, agents, recommendations, and agent loops.
+
+Reviewer evaluates from the Loopflow owner's view: "Would I trust ctx as a
+recommendation/runtime layer without losing control of my DSL?"
+
+## Operating Loop
+
+Each pair produces:
+
+- finding
+- evidence
+- repro
+- risk
+- fix recommendation
+- reviewer verdict
+
+Then CTO merges them into:
+
+- canonical tracker updates
+- prioritized fix batches
+- local-fast/no-mistakes validation plan
+- PR-ready changelog
+
 ## Operating Principles
 
 - Keep one coordinator. The CTO owns scope, conflicts, ordering, and commit
