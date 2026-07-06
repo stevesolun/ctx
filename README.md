@@ -147,11 +147,13 @@ scripts/no_mistakes_run.sh fast
 
 That runner selects the same checks as PR preflight, groups independent checks
 into isolated temporary worktree lanes, and runs them in parallel. Treat it as
-the fast front door; use lane filters for quick reruns after a failed lane:
+the fast front door. It writes lane timing evidence to `.gate/local-fast.json`
+by default; use lane filters for quick reruns after a failed lane:
 
 ```bash
-scripts/no_mistakes_run.sh fast --lane static --lane unit --summary-json .gate/local-fast.json
+scripts/no_mistakes_run.sh fast --lane static --lane unit
 scripts/no_mistakes_run.sh fast --skip-lane graph
+scripts/no_mistakes_run.sh fast --summary-json /tmp/local-fast.json
 ```
 
 The serial preflight/no-mistakes path remains the authoritative final local gate:
