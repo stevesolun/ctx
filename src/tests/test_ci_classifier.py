@@ -187,6 +187,26 @@ def test_workflow_change_fails_open_for_future_gates() -> None:
     assert flags["docs_only"] is False
 
 
+def test_ci_gate_script_change_fails_open_for_future_gates() -> None:
+    for path in (
+        ".github/actions/setup/action.yml",
+        ".no-mistakes.yaml",
+        "scripts/ci_classifier.py",
+        "scripts/ci_preflight.py",
+        "scripts/ci_required.py",
+        "scripts/local_fast_gate.py",
+        "scripts/no_mistakes_run.sh",
+    ):
+        flags = classify_paths([path])
+
+        assert flags["ci_changed"] is True
+        assert flags["browser_changed"] is True
+        assert flags["package_changed"] is True
+        assert flags["similarity_changed"] is True
+        assert flags["source_changed"] is True
+        assert flags["telemetry_changed"] is True
+
+
 def test_no_test_policy_covers_ci_package_contract_files() -> None:
     workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
 
@@ -200,6 +220,19 @@ def test_no_test_policy_treats_all_workflows_as_contract_files() -> None:
 
         assert result.passed is False
         assert result.contract_files == (workflow,)
+
+
+def test_no_test_policy_requires_tests_for_gate_runtime_scripts() -> None:
+    for script in (
+        ".github/actions/setup/action.yml",
+        "scripts/ci_classifier.py",
+        "scripts/local_fast_gate.py",
+        "scripts/no_mistakes_run.sh",
+    ):
+        result = evaluate_policy([script], (), {script: "+echo changed\n"})
+
+        assert result.passed is False
+        assert result.contract_files == (script,)
 
 
 def test_no_test_policy_requires_tests_for_release_sync_artifact_scripts() -> None:

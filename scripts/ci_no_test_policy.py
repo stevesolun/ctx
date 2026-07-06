@@ -28,6 +28,8 @@ MAINTAINER_SCRIPT_CONTRACT_FILES = {
 }
 GATE_CONFIG_CONTRACT_FILES = {
     ".no-mistakes.yaml",
+    "scripts/local_fast_gate.py",
+    "scripts/no_mistakes_run.sh",
 }
 VERSION_LINE_RE = re.compile(r'version = "\d+\.\d+\.\d+(?:[-+._a-zA-Z0-9]*)?"')
 INIT_VERSION_LINE_RE = re.compile(r'__version__ = "\d+\.\d+\.\d+(?:[-+._a-zA-Z0-9]*)?"')
@@ -67,6 +69,7 @@ def is_contract_file(path: str) -> bool:
         or path in MAINTAINER_SCRIPT_CONTRACT_FILES
         or path in GATE_CONFIG_CONTRACT_FILES
         or path == "pyproject.toml"
+        or path.startswith(".github/actions/")
         or (path.startswith(".github/workflows/") and path.endswith((".yml", ".yaml")))
     ) and not path.startswith("src/tests/")
 

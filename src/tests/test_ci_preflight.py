@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shlex
 from pathlib import Path
 
@@ -104,6 +105,109 @@ def test_local_fast_whitespace_check_runs_against_base() -> None:
         "origin/main",
         "--internal-whitespace",
     )
+
+
+def test_local_fast_lane_filters_are_composable() -> None:
+    lanes = local_fast_gate.group_checks(_checks_for([".github/workflows/test.yml"]))
+
+    filtered = local_fast_gate.filter_lanes(
+        lanes,
+        include=("static", "unit", "feature"),
+        skip=("feature",),
+    )
+
+    assert [lane.name for lane in filtered] == ["static", "unit"]
+
+
+def test_local_fast_main_accepts_repeated_lane_args(monkeypatch, capsys) -> None:
+    checks = [
+        Check("ruff", ("python", "-m", "ruff", "check", "src")),
+        Check("unit-linux equivalent", ("python", "-m", "pytest", "-q")),
+        Check("build wheel", ("python", "-m", "build")),
+    ]
+    monkeypatch.setattr(local_fast_gate.shutil, "which", lambda _name: "/usr/bin/git")
+    monkeypatch.setattr(local_fast_gate, "changed_files", lambda _base: ["src/ctx/cli/run.py"])
+    monkeypatch.setattr(
+        local_fast_gate,
+        "select_checks",
+        lambda **_kwargs: (checks, []),
+    )
+
+    assert local_fast_gate.main(["--dry-run", "--lane", "static", "--lane", "unit"]) == 0
+
+    out = capsys.readouterr().out
+    assert "[lane] static" in out
+    assert "[lane] unit" in out
+    assert "[lane] package" not in out
+
+
+def test_local_fast_summary_json_records_lane_timings(tmp_path: Path) -> None:
+    summary_path = tmp_path / "gate" / "summary.json"
+    result = local_fast_gate.GateResult(
+        returncode=0,
+        elapsed=1.2345,
+        worker_count=2,
+        lanes=(
+            local_fast_gate.LaneResult(
+                name="cheap",
+                returncode=0,
+                elapsed=0.4567,
+                check_count=3,
+            ),
+        ),
+    )
+
+    local_fast_gate.write_summary_json(summary_path, result)
+
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload == {
+        "elapsed_seconds": 1.234,
+        "lanes": [
+            {
+                "check_count": 3,
+                "elapsed_seconds": 0.457,
+                "name": "cheap",
+                "returncode": 0,
+                "worktree": None,
+            }
+        ],
+        "returncode": 0,
+        "worker_count": 2,
+    }
+
+
+def test_local_fast_omits_deleted_worktree_paths(monkeypatch, tmp_path: Path) -> None:
+    worktree = tmp_path / "cheap"
+    removed: list[Path] = []
+    lane = local_fast_gate.Lane(
+        name="cheap",
+        checks=(Check("whitespace", ("python", "-V")),),
+    )
+    monkeypatch.setattr(local_fast_gate, "_create_worktree", lambda _name: worktree)
+    monkeypatch.setattr(local_fast_gate, "_remove_worktree", removed.append)
+    monkeypatch.setattr(local_fast_gate, "_run_check", lambda *args, **_kwargs: 0)
+
+    result = local_fast_gate.run_lane(lane, keep_worktrees=False)
+
+    assert result.worktree is None
+    assert removed == [worktree]
+
+
+def test_local_fast_kept_worktree_paths_remain_in_summary(monkeypatch, tmp_path: Path) -> None:
+    worktree = tmp_path / "cheap"
+    removed: list[Path] = []
+    lane = local_fast_gate.Lane(
+        name="cheap",
+        checks=(Check("whitespace", ("python", "-V")),),
+    )
+    monkeypatch.setattr(local_fast_gate, "_create_worktree", lambda _name: worktree)
+    monkeypatch.setattr(local_fast_gate, "_remove_worktree", removed.append)
+    monkeypatch.setattr(local_fast_gate, "_run_check", lambda *args, **_kwargs: 0)
+
+    result = local_fast_gate.run_lane(lane, keep_worktrees=True)
+
+    assert result.worktree == worktree
+    assert removed == []
 
 
 def test_preflight_graph_lfs_pointer_verification(tmp_path: Path, monkeypatch) -> None:

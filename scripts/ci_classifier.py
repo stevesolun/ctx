@@ -32,6 +32,14 @@ DOCS_PATTERNS = (
     "qa/feature_status.csv",
     "requirements-docs.txt",
 )
+CI_PATTERNS = (
+    ".github/actions/**",
+    ".github/workflows/**",
+    ".no-mistakes.yaml",
+    "scripts/ci_*.py",
+    "scripts/local_fast_gate.py",
+    "scripts/no_mistakes_run.sh",
+)
 GRAPH_ARTIFACT_PATTERNS = (
     "graph/communities.json",
     "graph/entity-overlays.jsonl",
@@ -118,7 +126,7 @@ def _is_graph_artifact_path(path: str) -> bool:
 
 def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
     files = [normalized for path in paths if (normalized := _normalize_path(path))]
-    ci_changed = any(_matches(path, (".github/workflows/**",)) for path in files)
+    ci_changed = any(_matches(path, CI_PATTERNS) for path in files)
     docs_changed = any(_matches(path, DOCS_PATTERNS) for path in files)
     graph_artifact_changed = any(_is_graph_artifact_path(path) for path in files)
     graph_only = bool(files) and all(_matches(path, ("graph/**",)) for path in files)

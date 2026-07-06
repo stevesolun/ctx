@@ -12,6 +12,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 import shutil
@@ -65,7 +66,16 @@ class LaneResult:
     name: str
     returncode: int
     elapsed: float
+    check_count: int
     worktree: Path | None = None
+
+
+@dataclass(frozen=True)
+class GateResult:
+    returncode: int
+    elapsed: float
+    worker_count: int
+    lanes: tuple[LaneResult, ...]
 
 
 def _lane_name(check: Check) -> str:
@@ -77,6 +87,21 @@ def group_checks(checks: list[Check]) -> list[Lane]:
     for check in checks:
         grouped[_lane_name(check)].append(_worktree_safe_check(check))
     return [Lane(name, tuple(grouped[name])) for name in LANE_ORDER if grouped[name]]
+
+
+def filter_lanes(
+    lanes: list[Lane],
+    *,
+    include: tuple[str, ...] = (),
+    skip: tuple[str, ...] = (),
+) -> list[Lane]:
+    include_set = set(include)
+    skip_set = set(skip)
+    return [
+        lane
+        for lane in lanes
+        if (not include_set or lane.name in include_set) and lane.name not in skip_set
+    ]
 
 
 def _worktree_safe_check(check: Check) -> Check:
@@ -148,6 +173,7 @@ def _run_check(check: Check, *, cwd: Path, index: int, total: int, lane: str) ->
 def run_lane(lane: Lane, *, keep_worktrees: bool) -> LaneResult:
     start = time.monotonic()
     worktree = _create_worktree(lane.name)
+    summary_worktree = worktree if keep_worktrees else None
     try:
         for index, check in enumerate(lane.checks, start=1):
             returncode = _run_check(
@@ -158,11 +184,28 @@ def run_lane(lane: Lane, *, keep_worktrees: bool) -> LaneResult:
                 lane=lane.name,
             )
             if returncode != 0:
-                return LaneResult(lane.name, returncode, time.monotonic() - start, worktree)
-        return LaneResult(lane.name, 0, time.monotonic() - start, worktree)
+                return LaneResult(
+                    lane.name,
+                    returncode,
+                    time.monotonic() - start,
+                    len(lane.checks),
+                    summary_worktree,
+                )
+        return LaneResult(
+            lane.name,
+            0,
+            time.monotonic() - start,
+            len(lane.checks),
+            summary_worktree,
+        )
     finally:
         if not keep_worktrees:
             _remove_worktree(worktree)
+
+
+def _sort_lane_results(results: list[LaneResult]) -> tuple[LaneResult, ...]:
+    order = {name: index for index, name in enumerate(LANE_ORDER)}
+    return tuple(sorted(results, key=lambda result: order.get(result.name, len(order))))
 
 
 def run_lanes(
@@ -170,19 +213,22 @@ def run_lanes(
     *,
     jobs: int,
     keep_worktrees: bool = False,
-) -> int:
+) -> GateResult:
+    start = time.monotonic()
     if not lanes:
         print("No local-fast lanes selected.")
-        return 0
+        return GateResult(0, 0.0, 0, ())
     worker_count = max(1, min(jobs, len(lanes)))
     print(f"Running {len(lanes)} local-fast lanes with {worker_count} workers.")
     failures: list[LaneResult] = []
+    results: list[LaneResult] = []
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         futures = {
             executor.submit(run_lane, lane, keep_worktrees=keep_worktrees): lane for lane in lanes
         }
         for future in as_completed(futures):
             result = future.result()
+            results.append(result)
             status = "pass" if result.returncode == 0 else "fail"
             print(f"[{status}] {result.name} lane in {result.elapsed:.1f}s")
             if result.returncode != 0:
@@ -194,8 +240,32 @@ def run_lanes(
                 f"[fail] {failure.name} lane exited {failure.returncode}",
                 file=sys.stderr,
             )
-        return 1
-    return 0
+    return GateResult(
+        1 if failures else 0,
+        time.monotonic() - start,
+        worker_count,
+        _sort_lane_results(results),
+    )
+
+
+def write_summary_json(path: Path, result: GateResult) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "returncode": result.returncode,
+        "elapsed_seconds": round(result.elapsed, 3),
+        "worker_count": result.worker_count,
+        "lanes": [
+            {
+                "name": lane.name,
+                "returncode": lane.returncode,
+                "elapsed_seconds": round(lane.elapsed, 3),
+                "check_count": lane.check_count,
+                "worktree": str(lane.worktree) if lane.worktree else None,
+            }
+            for lane in result.lanes
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def print_dry_run(lanes: list[Lane]) -> None:
@@ -216,6 +286,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--profile", choices=("pr", "full"), default="pr")
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--jobs", type=int, default=_default_jobs())
+    parser.add_argument("--lane", action="append", choices=LANE_ORDER)
+    parser.add_argument("--skip-lane", action="append", choices=LANE_ORDER)
+    parser.add_argument("--summary-json", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--keep-worktrees", action="store_true")
     parser.add_argument(
@@ -240,14 +313,21 @@ def main(argv: list[str] | None = None) -> int:
         profile=args.profile,
         python=args.python,
     )
-    lanes = group_checks(checks)
+    lanes = filter_lanes(
+        group_checks(checks),
+        include=tuple(args.lane or ()),
+        skip=tuple(args.skip_lane or ()),
+    )
     for note in notes:
         print(f"[note] {note}")
     print("[note] local-fast runs selected committed-HEAD checks in isolated temp worktrees.")
     if args.dry_run:
         print_dry_run(lanes)
         return 0
-    return run_lanes(lanes, jobs=args.jobs, keep_worktrees=args.keep_worktrees)
+    result = run_lanes(lanes, jobs=args.jobs, keep_worktrees=args.keep_worktrees)
+    if args.summary_json:
+        write_summary_json(args.summary_json, result)
+    return result.returncode
 
 
 if __name__ == "__main__":
