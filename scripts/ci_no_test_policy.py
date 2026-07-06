@@ -69,6 +69,7 @@ def is_contract_file(path: str) -> bool:
         or path in MAINTAINER_SCRIPT_CONTRACT_FILES
         or path in GATE_CONFIG_CONTRACT_FILES
         or path == "pyproject.toml"
+        or path.startswith(".github/actions/")
         or (path.startswith(".github/workflows/") and path.endswith((".yml", ".yaml")))
     ) and not path.startswith("src/tests/")
 

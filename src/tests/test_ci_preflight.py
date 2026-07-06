@@ -176,6 +176,40 @@ def test_local_fast_summary_json_records_lane_timings(tmp_path: Path) -> None:
     }
 
 
+def test_local_fast_omits_deleted_worktree_paths(monkeypatch, tmp_path: Path) -> None:
+    worktree = tmp_path / "cheap"
+    removed: list[Path] = []
+    lane = local_fast_gate.Lane(
+        name="cheap",
+        checks=(Check("whitespace", ("python", "-V")),),
+    )
+    monkeypatch.setattr(local_fast_gate, "_create_worktree", lambda _name: worktree)
+    monkeypatch.setattr(local_fast_gate, "_remove_worktree", removed.append)
+    monkeypatch.setattr(local_fast_gate, "_run_check", lambda *args, **_kwargs: 0)
+
+    result = local_fast_gate.run_lane(lane, keep_worktrees=False)
+
+    assert result.worktree is None
+    assert removed == [worktree]
+
+
+def test_local_fast_kept_worktree_paths_remain_in_summary(monkeypatch, tmp_path: Path) -> None:
+    worktree = tmp_path / "cheap"
+    removed: list[Path] = []
+    lane = local_fast_gate.Lane(
+        name="cheap",
+        checks=(Check("whitespace", ("python", "-V")),),
+    )
+    monkeypatch.setattr(local_fast_gate, "_create_worktree", lambda _name: worktree)
+    monkeypatch.setattr(local_fast_gate, "_remove_worktree", removed.append)
+    monkeypatch.setattr(local_fast_gate, "_run_check", lambda *args, **_kwargs: 0)
+
+    result = local_fast_gate.run_lane(lane, keep_worktrees=True)
+
+    assert result.worktree == worktree
+    assert removed == []
+
+
 def test_preflight_graph_lfs_pointer_verification(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(ci_preflight, "REPO_ROOT", tmp_path)
     artifact = tmp_path / "graph" / "wiki-graph.tar.gz"

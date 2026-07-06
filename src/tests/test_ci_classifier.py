@@ -224,6 +224,7 @@ def test_no_test_policy_treats_all_workflows_as_contract_files() -> None:
 
 def test_no_test_policy_requires_tests_for_gate_runtime_scripts() -> None:
     for script in (
+        ".github/actions/setup/action.yml",
         "scripts/ci_classifier.py",
         "scripts/local_fast_gate.py",
         "scripts/no_mistakes_run.sh",

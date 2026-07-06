@@ -173,6 +173,7 @@ def _run_check(check: Check, *, cwd: Path, index: int, total: int, lane: str) ->
 def run_lane(lane: Lane, *, keep_worktrees: bool) -> LaneResult:
     start = time.monotonic()
     worktree = _create_worktree(lane.name)
+    summary_worktree = worktree if keep_worktrees else None
     try:
         for index, check in enumerate(lane.checks, start=1):
             returncode = _run_check(
@@ -188,9 +189,15 @@ def run_lane(lane: Lane, *, keep_worktrees: bool) -> LaneResult:
                     returncode,
                     time.monotonic() - start,
                     len(lane.checks),
-                    worktree,
+                    summary_worktree,
                 )
-        return LaneResult(lane.name, 0, time.monotonic() - start, len(lane.checks), worktree)
+        return LaneResult(
+            lane.name,
+            0,
+            time.monotonic() - start,
+            len(lane.checks),
+            summary_worktree,
+        )
     finally:
         if not keep_worktrees:
             _remove_worktree(worktree)
