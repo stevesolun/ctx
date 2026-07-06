@@ -27,7 +27,11 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
         _add_text(tf, "converted-index.md", "`/Users/steves/ctx/converted`\n")
         _add_text(tf, "log.md", "local export: /Users/steves/ctx C:\\Users\\steves\\ctx\n")
         _add_text(tf, "versions-catalog.md", "`C:\\Users\\steves\\ctx\\versions`\n")
-        _add_text(tf, "entities/skills/current.md", "# Current Skill\nSource: /Users/steves/ctx\n")
+        _add_text(
+            tf,
+            "entities/skills/current.md",
+            "# Current Skill\nSource: /Users/steves/ctx\nLinux: /home/steves/ctx\n",
+        )
         _add_text(tf, "entities/skills/empty.md", "")
         _add_text(tf, "entities/agents/reviewer.md", "# Reviewer Agent\n")
         _add_text(tf, "entities/mcp-servers/github.md", "# GitHub MCP\n")
@@ -74,7 +78,9 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
     assert "<host-user-path>" in harness_text
 
     pages = load_merged_wiki_pages(tmp_path / "extracted" / "wiki-packs")
-    assert pages["entities/skills/current.md"] == "# Current Skill\nSource: <host-user-path>\n"
+    assert pages["entities/skills/current.md"] == (
+        "# Current Skill\nSource: <host-user-path>\nLinux: <host-user-path>\n"
+    )
     assert pages["entities/skills/empty.md"] == "<!-- empty markdown page -->\n"
     assert pages["entities/agents/reviewer.md"] == "# Reviewer Agent\n"
     assert pages["entities/mcp-servers/github.md"] == "# GitHub MCP\n"
@@ -93,7 +99,7 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
     repacked_pages = load_merged_wiki_pages(tmp_path / "extracted-again" / "wiki-packs")
     assert (
         repacked_pages["entities/skills/current.md"]
-        == "# Current Skill\nSource: <host-user-path>\n"
+        == "# Current Skill\nSource: <host-user-path>\nLinux: <host-user-path>\n"
     )
     assert repacked_pages["entities/agents/reviewer.md"] == "# Reviewer Agent\n"
     assert repacked_pages["entities/mcp-servers/github.md"] == "# GitHub MCP\n"
