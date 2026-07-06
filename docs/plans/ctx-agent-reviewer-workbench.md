@@ -82,8 +82,9 @@ Every pair returns this shape:
 pair: string
 surface: string
 status: pass | finding | blocked | human-decision
-actor_summary: string
-critic_verdict: string
+finding:
+  summary: string
+  category: feature-gap | bug | ux | security | docs | gate | architecture | none
 evidence:
   files: []
   commands: []
@@ -98,6 +99,9 @@ fix_recommendation:
   scope: string
   suggested_files: []
   validation: []
+reviewer_verdict:
+  status: accepted | needs-evidence | duplicate | human-decision | invalid
+  notes: string
 tracker_update:
   file: qa/feature_status.csv | qa/bug_smoke_status.csv | none
   row_key: string
