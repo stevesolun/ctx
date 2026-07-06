@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import shlex
 from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
 
+from scripts import ci_preflight
 from scripts.ci_preflight import _run_no_test_policy_for_files
 from scripts.ci_preflight import Check
 from scripts.ci_preflight import PUBLIC_DOCS_TRACKER_TESTS
@@ -76,9 +78,34 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
 def test_preflight_runs_graph_validation_for_graph_artifacts() -> None:
     names = _names_for(["graph/wiki-graph.tar.gz"])
 
+    assert names.index("hydrate graph LFS") < names.index("graph artifact validation")
     assert "graph artifact validation" in names
     assert "no-test policy" not in names
     assert "unit-linux equivalent" not in names
+
+
+def test_preflight_graph_lfs_pointer_verification(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(ci_preflight, "REPO_ROOT", tmp_path)
+    artifact = tmp_path / "graph" / "wiki-graph.tar.gz"
+    artifact.parent.mkdir()
+    payload = b"hydrated graph payload"
+    expected_sha256 = hashlib.sha256(payload).hexdigest()
+    artifact.write_text(
+        "version https://git-lfs.github.com/spec/v1\n"
+        f"oid sha256:{expected_sha256}\n"
+        f"size {len(payload)}\n",
+        encoding="utf-8",
+    )
+
+    pointer = ci_preflight._read_lfs_pointer(artifact)
+
+    assert pointer == ci_preflight.LfsPointer(
+        "graph/wiki-graph.tar.gz",
+        expected_sha256,
+        len(payload),
+    )
+    artifact.write_bytes(payload)
+    ci_preflight._verify_hydrated_lfs_pointer(pointer)
 
 
 def test_preflight_no_test_policy_invocation_uses_current_dirty_file_set() -> None:
