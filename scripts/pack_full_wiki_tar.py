@@ -166,6 +166,11 @@ def _rewrite_tar_with_pack(
                                 extracted.read().decode("utf-8", errors="replace")
                             )
                             _add_text(dst, name=name, text=text)
+                        elif _should_redact_text_member(name):
+                            text = _redact_host_user_paths(
+                                extracted.read().decode("utf-8", errors="replace")
+                            )
+                            _add_text(dst, name=name, text=text)
                         else:
                             member.name = name
                             dst.addfile(member, extracted)
@@ -291,6 +296,10 @@ def _should_skip_expanded_markdown_member(name: str) -> bool:
         and "/" in name
         and not name.startswith("entities/harnesses/")
     )
+
+
+def _should_redact_text_member(name: str) -> bool:
+    return name.startswith("graphify-out/") and name.endswith((".json", ".jsonl"))
 
 
 def _add_text(tf: tarfile.TarFile, *, name: str, text: str) -> None:

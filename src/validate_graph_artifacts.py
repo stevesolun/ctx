@@ -112,6 +112,7 @@ _LOCAL_GENERATED_MARKDOWN = frozenset(
         "versions-catalog.md",
     }
 )
+_REQUIRED_EXPANDED_MARKDOWN = frozenset({"graphify-out/graph-report.md"})
 _MAX_MARKDOWN_MEMBER_BYTES = 10 * 1024 * 1024
 _PREVIEW_HTML_FILES = (
     "sample-top60.html",
@@ -324,7 +325,7 @@ def _validate_wiki_pack_payload(
     expected_export_id: str,
 ) -> dict[str, str]:
     if not any(name.startswith(_WIKI_PACK_PREFIX) for name in names):
-        return {}
+        raise GraphArtifactError("wiki graph archive is missing wiki-packs/")
     try:
         entries = discover_wiki_pack_manifests(packs_dir)
         pages = load_merged_wiki_pages(packs_dir)
@@ -388,6 +389,7 @@ def _scan_graph_pack_payload(
     export_id = graph.graph.get("export_id") or graph.graph.get("ctx_pack_base_export_id")
     if not isinstance(export_id, str) or not export_id.strip():
         export_id = None
+    _validate_graph_object_no_host_paths(graph, context=context)
     if not deep:
         return 0, 0, 0, 0, 0, export_id
     return _scan_graph_object(graph, export_id=export_id)
@@ -545,6 +547,49 @@ def _validate_archive_markdown_payload(name: str, payload: bytes, *, context: st
         raise GraphArtifactError(f"{context} markdown contains host path: {name}")
     if name in _LOCAL_GENERATED_MARKDOWN:
         raise GraphArtifactError(f"{context} contains local generated markdown: {name}")
+    if context == "archive" and _is_expanded_full_archive_markdown(name):
+        raise GraphArtifactError(f"{context} contains expanded markdown member: {name}")
+
+
+def _is_expanded_full_archive_markdown(name: str) -> bool:
+    return (
+        name.endswith(".md")
+        and name not in _REQUIRED_EXPANDED_MARKDOWN
+        and "/" in name
+        and not name.startswith("entities/harnesses/")
+    )
+
+
+def _validate_no_host_user_path_bytes(name: str, payload: bytes, *, context: str) -> None:
+    if _HOST_USER_PATH_RE.search(payload):
+        raise GraphArtifactError(f"{context} contains host path: {name}")
+
+
+def _validate_no_host_user_path_value(value: Any, *, context: str) -> None:
+    if isinstance(value, str):
+        if _HOST_USER_PATH_RE.search(value.encode("utf-8", errors="replace")):
+            raise GraphArtifactError(f"{context} contains host path")
+    elif isinstance(value, dict):
+        for child in value.values():
+            _validate_no_host_user_path_value(child, context=context)
+    elif isinstance(value, list):
+        for child in value:
+            _validate_no_host_user_path_value(child, context=context)
+
+
+def _validate_graph_object_no_host_paths(graph: Any, *, context: str) -> None:
+    graph_meta = getattr(graph, "graph", None)
+    if isinstance(graph_meta, dict):
+        _validate_no_host_user_path_value(graph_meta, context=f"{context} graph metadata")
+    for node_id, attrs in graph.nodes(data=True):
+        if isinstance(attrs, dict):
+            _validate_no_host_user_path_value(attrs, context=f"{context} graph node {node_id!r}")
+    for source, target, attrs in graph.edges(data=True):
+        if isinstance(attrs, dict):
+            _validate_no_host_user_path_value(
+                attrs,
+                context=f"{context} graph edge {source!r}->{target!r}",
+            )
 
 
 def _read_archive_markdown_payload(
@@ -619,6 +664,11 @@ def _scan_graph_json(stream: IO[bytes]) -> tuple[int, int, int, int, int, str | 
     while chunk := stream.read(1024 * 1024):
         old_tail = tail
         data = tail + chunk
+        _validate_no_host_user_path_bytes(
+            "graphify-out/graph.json",
+            data,
+            context="graph.json",
+        )
         _validate_graph_edge_score_fields(data)
         _validate_graph_edge_weight_drift(data)
         if export_id is None:
@@ -1378,8 +1428,10 @@ def _read_tar_json(tf: tarfile.TarFile, member: tarfile.TarInfo, name: str) -> A
     f = tf.extractfile(member)
     if f is None:
         raise GraphArtifactError(f"{member.name} could not be read")
+    payload = f.read()
+    _validate_no_host_user_path_bytes(name, payload, context="archive JSON")
     try:
-        return json.loads(f.read().decode("utf-8"))
+        return json.loads(payload.decode("utf-8"))
     except json.JSONDecodeError as exc:
         raise GraphArtifactError(f"{name} is not valid JSON: {exc}") from exc
 

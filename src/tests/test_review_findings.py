@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import sys
+import tarfile
+from contextlib import nullcontext
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +24,7 @@ import ci_no_test_policy  # noqa: E402
 import pack_full_wiki_tar  # noqa: E402
 import sync_huggingface  # noqa: E402
 import validate_graph_artifacts as vga  # noqa: E402
+from ctx import dashboard_entities  # noqa: E402
 from ctx.core.wiki import wiki_queue_worker  # noqa: E402
 from ctx.utils._secret_scan import find_inline_secret_arg  # noqa: E402
 
@@ -36,6 +40,13 @@ class _FakeHfApi:
     def upload_folder(self, **kwargs: Any) -> _FakeCommitInfo:
         self.calls.append(("upload_folder", kwargs))
         return _FakeCommitInfo()
+
+
+def _add_tar_text(tf: tarfile.TarFile, name: str, text: str) -> None:
+    payload = text.encode("utf-8")
+    info = tarfile.TarInfo(name)
+    info.size = len(payload)
+    tf.addfile(info, BytesIO(payload))
 
 
 def test_artifact_promotion_retry_allows_completed_promotion_recovery(tmp_path: Path) -> None:
@@ -410,6 +421,34 @@ def test_mcp_env_placeholders_do_not_expand_credentials_into_argv_by_default(
     assert cfg.args[1] == "${MCP_API_KEY}"
 
 
+def test_mcp_env_placeholder_expansion_checks_option_context() -> None:
+    from ctx.adapters.generic.tools import McpServerConfig, mcp_router
+
+    cfg = McpServerConfig(
+        name="argvserver",
+        command="server",
+        args=("--api-key", "${OPENAI_KEY}"),
+        env={"OPENAI_KEY": "argv-only-secret"},
+    )
+
+    with pytest.raises(ValueError, match="secret-looking argument '--api-key'"):
+        mcp_router._expand_config_args(cfg, mcp_router._child_env_for_config(cfg))
+
+
+def test_mcp_env_placeholder_expansion_rejects_bearer_header() -> None:
+    from ctx.adapters.generic.tools import McpServerConfig, mcp_router
+
+    cfg = McpServerConfig(
+        name="argvserver",
+        command="server",
+        args=("--header=Bearer ${MCP_AUTH}",),
+        env={"MCP_AUTH": "headersecret"},
+    )
+
+    with pytest.raises(ValueError, match="secret-looking argument 'Bearer'"):
+        mcp_router._expand_config_args(cfg, mcp_router._child_env_for_config(cfg))
+
+
 def test_artifact_promotion_rejects_repo_graph_target_from_untrusted_project(
     monkeypatch: Any,
     tmp_path: Path,
@@ -438,3 +477,173 @@ def test_artifact_promotion_rejects_repo_graph_target_from_untrusted_project(
             str(staged),
             str(target),
         )
+
+
+def test_repack_full_wiki_tar_redacts_graph_json_host_paths(tmp_path: Path) -> None:
+    source = tmp_path / "wiki-graph.tar.gz"
+    target = tmp_path / "wiki-graph-packed.tar.gz"
+    with tarfile.open(source, "w:gz") as tf:
+        _add_tar_text(tf, "index.md", "# Wiki\n")
+        _add_tar_text(
+            tf,
+            "entities/skills/example.md",
+            "# Example\n",
+        )
+        _add_tar_text(
+            tf,
+            "graphify-out/graph-export-manifest.json",
+            json.dumps({"export_id": "test-export"}),
+        )
+        _add_tar_text(
+            tf,
+            "graphify-out/graph.json",
+            json.dumps(
+                {
+                    "graph": {"export_id": "test-export"},
+                    "nodes": [
+                        {
+                            "id": "skill:example",
+                            "source_keys": ["/Users/steves/ctx/entities/skills/example.md"],
+                        }
+                    ],
+                    "edges": [],
+                }
+            ),
+        )
+
+    pack_full_wiki_tar.repack_full_wiki_tar(source, target)
+
+    with tarfile.open(target, "r:gz") as tf:
+        graph_payload = tf.extractfile("graphify-out/graph.json")
+        assert graph_payload is not None
+        graph_json = graph_payload.read().decode("utf-8")
+    assert "/Users/" not in graph_json
+    assert "<host-user-path>" in graph_json
+
+
+def test_graph_validation_rejects_host_paths_in_graph_json() -> None:
+    payload = json.dumps(
+        {
+            "graph": {"export_id": "test-export"},
+            "nodes": [
+                {
+                    "id": "skill:example",
+                    "source_keys": ["/Users/steves/ctx/entities/skills/example.md"],
+                }
+            ],
+            "edges": [],
+        }
+    ).encode("utf-8")
+
+    with pytest.raises(vga.GraphArtifactError, match="graph.json contains host path"):
+        vga._scan_graph_json(BytesIO(payload))
+
+
+def test_full_archive_contract_requires_wiki_pack_and_rejects_expanded_markdown(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(vga.GraphArtifactError, match="missing wiki-packs"):
+        vga._validate_wiki_pack_payload(set(), tmp_path, expected_export_id="test-export")
+
+    with pytest.raises(vga.GraphArtifactError, match="expanded markdown member"):
+        vga._validate_archive_markdown_payload(
+            "entities/skills/example.md",
+            b"# Example\n",
+            context="archive",
+        )
+
+
+def test_artifact_promotion_uses_target_validator_for_json_without_payload_validator(
+    tmp_path: Path,
+) -> None:
+    wiki = tmp_path / "wiki"
+    target = wiki / "graphify-out" / "graph.json"
+    staged = target.with_name("graph.json.staged")
+    target.parent.mkdir(parents=True)
+    target.write_text('{"nodes":[],"edges":[],"graph":{}}\n', encoding="utf-8")
+    staged.write_text("not-json\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid JSON artifact"):
+        wiki_queue_worker._handle_artifact_promotion(
+            wiki,
+            {
+                "staged_path": "graphify-out/graph.json.staged",
+                "target_path": "graphify-out/graph.json",
+                "validator": "none",
+            },
+        )
+    assert target.read_text(encoding="utf-8") == '{"nodes":[],"edges":[],"graph":{}}\n'
+    assert staged.exists()
+
+
+def test_artifact_promotion_uses_target_validator_for_tar_without_payload_validator(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    target = repo / "graph" / "wiki-graph-runtime.tar.gz"
+    staged = target.with_name("wiki-graph-runtime.tar.gz.staged")
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"old-tar")
+    staged.write_bytes(b"not-a-tar")
+    monkeypatch.setattr(wiki_queue_worker, "_source_root", lambda: repo.resolve())
+
+    with pytest.raises(ValueError, match="invalid tar.gz artifact"):
+        wiki_queue_worker._handle_artifact_promotion(
+            tmp_path / "wiki",
+            {
+                "staged_path": str(staged),
+                "target_path": str(target),
+            },
+        )
+    assert target.read_bytes() == b"old-tar"
+    assert staged.exists()
+
+
+def test_entity_search_fallback_returns_wiki_relative_path(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    entity_path = wiki / "entities" / "skills" / "python-patterns.md"
+    entity_path.parent.mkdir(parents=True)
+    entity_path.write_text("# Python Patterns\n", encoding="utf-8")
+    deps = dashboard_entities.EntityCrudDeps(
+        is_safe_slug=lambda _value: True,
+        normalize_entity_type=lambda value: "skill" if value in (None, "skill") else None,
+        wiki_entity_detail=lambda _slug, _etype: None,
+        wiki_entity_target_path=lambda slug, _etype: wiki / f"{slug}.md",
+        wiki_entity_path=lambda _slug, _etype: entity_path,
+        iter_wiki_entity_paths=lambda _etype: [("python-patterns", "skill", entity_path)],
+        wiki_relative_path=lambda path: path.relative_to(wiki).as_posix(),
+        read_manifest=lambda: {"load": []},
+        perform_unload=lambda _slug, _etype: (True, "unloaded"),
+        queue_entity_refresh=lambda *_args: None,
+        file_lock=lambda _path: nullcontext(),
+        write_entity_text=lambda _path, _content: None,
+        parse_frontmatter=lambda text: ({}, text),
+        frontmatter_tags=lambda _value: [],
+        frontmatter_text=lambda value: str(value or ""),
+        display_slug=lambda value: value,
+        display_label=lambda value: str(value),
+        entity_wiki_href=lambda slug, _etype: f"/wiki/{slug}?type=skill",
+        scan_skill_content=lambda _slug, _content: (True, "ok"),
+    )
+
+    results = dashboard_entities.search_wiki_entities("patterns", "skill", deps=deps)
+
+    assert results[0]["path"] == "entities/skills/python-patterns.md"
+    assert str(tmp_path) not in results[0]["path"]
+
+
+def test_lfs_pointer_probe_does_not_full_read_hydrated_artifact(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    artifact = tmp_path / "graph" / "wiki-graph.tar.gz"
+    artifact.parent.mkdir()
+    artifact.write_bytes(b"hydrated graph payload")
+
+    def fail_read_bytes(_path: Path) -> bytes:
+        raise AssertionError("read_bytes should not be used for prefix probing")
+
+    monkeypatch.setattr(Path, "read_bytes", fail_read_bytes)
+
+    assert ci_preflight._read_lfs_pointer(artifact) is None

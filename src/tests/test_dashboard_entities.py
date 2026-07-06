@@ -30,6 +30,7 @@ def test_skill_upsert_requires_security_gate_before_write(tmp_path: Path) -> Non
         wiki_entity_target_path=lambda slug, _etype: tmp_path / f"{slug}.md",
         wiki_entity_path=lambda _slug, _etype: None,
         iter_wiki_entity_paths=lambda _etype: [],
+        wiki_relative_path=lambda path: path.relative_to(tmp_path).as_posix(),
         read_manifest=lambda: {"load": []},
         perform_unload=lambda _slug, _etype: (True, "unloaded"),
         queue_entity_refresh=lambda *args: queued.append(args),  # type: ignore[arg-type]

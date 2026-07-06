@@ -237,6 +237,7 @@ _iter_wiki_entity_paths = _wiki_call(_wiki_service.iter_entity_paths)
 _wiki_entity_detail = _wiki_call(_wiki_service.entity_detail)
 _wiki_pack_entity_from_relpath = _wiki_service.pack_entity_from_relpath
 _read_wiki_entity_text = _wiki_call(_wiki_service.read_entity_text)
+_wiki_relative_path = _wiki_call(_wiki_service.wiki_relative_path)
 
 
 def _search_wiki_entities(
@@ -311,6 +312,7 @@ def _entity_crud_deps() -> dashboard_entities.EntityCrudDeps:
         wiki_entity_target_path=_wiki_entity_target_path,
         wiki_entity_path=_wiki_entity_path,
         iter_wiki_entity_paths=_iter_wiki_entity_paths,
+        wiki_relative_path=_wiki_relative_path,
         read_manifest=_read_manifest,
         perform_unload=_perform_unload,
         queue_entity_refresh=lambda entity_type, slug, entity_path, content, action: (

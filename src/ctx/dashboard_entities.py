@@ -24,6 +24,7 @@ class EntityCrudDeps:
     wiki_entity_target_path: Callable[[str, str], Path]
     wiki_entity_path: Callable[[str, str | None], Path | None]
     iter_wiki_entity_paths: Callable[[str | None], list[tuple[str, str, Path]]]
+    wiki_relative_path: Callable[[Path], str | None]
     read_manifest: Callable[[], dict[str, Any]]
     perform_unload: Callable[[str, str], tuple[bool, str]]
     queue_entity_refresh: Callable[[str, str, Path, str, str], None]
@@ -270,12 +271,14 @@ def search_wiki_entities(
         if isinstance(detail, dict):
             frontmatter = detail.get("frontmatter")
             body = str(detail.get("body") or "")[:4096]
+            relpath = str(detail.get("path") or "")
         else:
             try:
                 head = path.read_text(encoding="utf-8", errors="replace")[:4096]
             except OSError:
                 continue
             frontmatter, body = deps.parse_frontmatter(head)
+            relpath = deps.wiki_relative_path(path) or ""
         if not isinstance(frontmatter, dict):
             frontmatter = {}
         tags = deps.frontmatter_tags(frontmatter.get("tags", ""))
@@ -297,7 +300,7 @@ def search_wiki_entities(
                 "title": title,
                 "description": description,
                 "tags": tags[:12],
-                "path": str(path),
+                "path": relpath,
                 "href": deps.entity_wiki_href(slug, current_type),
             }
         )

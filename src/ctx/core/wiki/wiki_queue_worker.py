@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import socket
 import subprocess
@@ -21,7 +22,12 @@ from ctx.core.graph.graph_packs import (
 )
 from ctx.core.graph.graph_store import ensure_graph_store
 from ctx.core.graph.incremental_attach import attach_entity
-from ctx.core.wiki.artifact_promotion import promote_staged_artifact
+from ctx.core.wiki.artifact_promotion import (
+    ArtifactValidator,
+    promote_staged_artifact,
+    validate_gzip_json_artifact,
+    validate_json_artifact,
+)
 from ctx.core.wiki import wiki_queue
 from ctx.core.wiki.pack_compaction import (
     compact_active_pack_sets,
@@ -587,15 +593,62 @@ def _handle_artifact_promotion(wiki_path: Path, payload: dict[str, Any]) -> str:
         _required_payload_string(payload, "target_path"),
     )
     validator = payload.get("validator")
-    validate = None
-    if validator == "wiki-tar":
-        from import_skills_sh_catalog import _validate_wiki_tarball_candidate  # noqa: PLC0415
-
-        validate = _validate_wiki_tarball_candidate
-    elif validator not in (None, "", "none"):
+    if validator not in (None, "", "none", "wiki-tar"):
         raise ValueError(f"unsupported artifact validator: {validator}")
+    validate = _artifact_validator_for_target(target)
     result = promote_staged_artifact(staged, target, validate=validate)
     return f"promoted artifact to {result.target}"
+
+
+def _artifact_validator_for_target(target: Path) -> ArtifactValidator | None:
+    name = target.name
+    if name == "wiki-graph.tar.gz":
+        from import_skills_sh_catalog import _validate_wiki_tarball_candidate  # noqa: PLC0415
+
+        return _validate_wiki_tarball_candidate
+    if name == "wiki-graph-runtime.tar.gz":
+        return _validate_tar_gz_artifact
+    if name.endswith(".jsonl.gz"):
+        return _validate_gzip_jsonl_artifact
+    if name.endswith(".json.gz"):
+        return validate_gzip_json_artifact
+    if name.endswith(".jsonl"):
+        return _validate_jsonl_artifact
+    if name.endswith(".json"):
+        return validate_json_artifact
+    return None
+
+
+def _validate_tar_gz_artifact(path: Path) -> None:
+    import tarfile
+
+    try:
+        with tarfile.open(path, "r:gz"):
+            pass
+    except tarfile.TarError as exc:
+        raise ValueError(f"invalid tar.gz artifact: {path}") from exc
+
+
+def _validate_jsonl_artifact(path: Path) -> None:
+    try:
+        with path.open("rt", encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    json.loads(line)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid JSONL artifact: {path}") from exc
+
+
+def _validate_gzip_jsonl_artifact(path: Path) -> None:
+    import gzip
+
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    json.loads(line)
+    except (OSError, EOFError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid gzip JSONL artifact: {path}") from exc
 
 
 def _resolve_artifact_promotion_paths(

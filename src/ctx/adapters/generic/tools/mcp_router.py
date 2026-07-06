@@ -57,7 +57,7 @@ from ctx.telemetry import (
     telemetry_span,
     traceparent_from_span,
 )
-from ctx.utils._secret_scan import secret_key_like
+from ctx.utils._secret_scan import find_inline_secret_arg, secret_key_like
 
 _logger = logging.getLogger(__name__)
 
@@ -266,7 +266,18 @@ def _expand_config_args(config: "McpServerConfig", env: dict[str, str]) -> tuple
                         f"{name!r}; pass secrets through the child environment or set "
                         "allow_argv_secret_expansion=True only for trusted local servers"
                     )
-    return tuple(_expand_env_placeholders(arg, env) for arg in config.args)
+    expanded = tuple(_expand_env_placeholders(arg, env) for arg in config.args)
+    if not config.allow_argv_secret_expansion:
+        secret_arg = find_inline_secret_arg(list(expanded))
+        bearer_arg = next((arg for arg in expanded if _BEARER_RE.search(arg)), None)
+        if secret_arg is not None or bearer_arg is not None:
+            marker = secret_arg if secret_arg is not None else "Bearer"
+            raise ValueError(
+                f"MCP server {config.name!r} argv expands an env var into secret-looking "
+                f"argument {marker!r}; pass secrets through the child environment or set "
+                "allow_argv_secret_expansion=True only for trusted local servers"
+            )
+    return expanded
 
 
 def _popen_process_group_kwargs() -> dict[str, Any]:

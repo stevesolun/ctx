@@ -288,12 +288,12 @@ def _write_runtime_archive(
 def _write_archive(
     graph_dir: Path,
     *,
-    include_converted: bool = True,
+    include_converted: bool = False,
     converted_skill_text: str = "# Example\n",
     include_graph: bool = True,
     graph_artifact: str = "graph.json",
     graph_pack_dir: Path | None = None,
-    include_expanded_entity_pages: bool = True,
+    include_expanded_entity_pages: bool = False,
     include_wiki_pack: bool = True,
     wiki_pack_dir: Path | None = None,
     include_original: bool = False,
@@ -997,7 +997,18 @@ def test_validate_graph_artifacts_rejects_missing_converted_catalog_path(
         converted_path="converted/skills-sh-example-skill/SKILL.md",
     )
     (tmp_path / "communities.json").write_text("{}", encoding="utf-8")
-    _write_archive(tmp_path, include_converted=False, include_wiki_pack=False)
+    pack_root = tmp_path / "wiki-pack-missing-converted"
+    write_wiki_base_pack(
+        pack_dir=pack_root / "base-export-test",
+        pack_id="base-export-test",
+        base_export_id="export-test",
+        pages={
+            "index.md": "# Wiki\n",
+            "entities/skills/skills-sh-example-skill.md": "# Example\n",
+            "entities/harnesses/langgraph.md": "# LangGraph\n",
+        },
+    )
+    _write_archive(tmp_path, wiki_pack_dir=pack_root)
 
     with pytest.raises(GraphArtifactError, match="missing converted Skills.sh body"):
         validate_graph_artifacts(tmp_path)
@@ -1011,12 +1022,21 @@ def test_validate_graph_artifacts_rejects_missing_skill_bundle_reference(
         converted_path="converted/skills-sh-example-skill/SKILL.md",
     )
     (tmp_path / "communities.json").write_text("{}", encoding="utf-8")
-    _write_archive(
-        tmp_path,
-        converted_skill_text=(
-            "# Example\n\nUse `resources/implementation-playbook.md` for the implementation flow.\n"
-        ),
+    pack_root = tmp_path / "wiki-pack-missing-bundle"
+    write_wiki_base_pack(
+        pack_dir=pack_root / "base-export-test",
+        pack_id="base-export-test",
+        base_export_id="export-test",
+        pages={
+            "index.md": "# Wiki\n",
+            "entities/skills/skills-sh-example-skill.md": "# Example\n",
+            "entities/harnesses/langgraph.md": "# LangGraph\n",
+            "converted/skills-sh-example-skill/SKILL.md": (
+                "# Example\n\nUse `resources/implementation-playbook.md` for the implementation flow.\n"
+            ),
+        },
     )
+    _write_archive(tmp_path, wiki_pack_dir=pack_root)
 
     with pytest.raises(GraphArtifactError, match="missing bundled skill file"):
         validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
@@ -1157,7 +1177,7 @@ def test_validate_graph_artifacts_rejects_oversized_tar_markdown(
         converted_path="converted/skills-sh-example-skill/SKILL.md",
     )
     monkeypatch.setattr(graph_validator, "_MAX_MARKDOWN_MEMBER_BYTES", 1024)
-    _write_archive(tmp_path, converted_skill_text="x" * 1025)
+    _write_archive(tmp_path, include_converted=True, converted_skill_text="x" * 1025)
 
     with pytest.raises(
         GraphArtifactError,

@@ -81,6 +81,7 @@ GRAPH_LFS_MAX_FALLBACK_SIZES = {
     "graph/wiki-graph-runtime.tar.gz": 150_000_000,
 }
 LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1"
+LFS_POINTER_MAX_BYTES = 4096
 
 
 @dataclass(frozen=True)
@@ -157,12 +158,15 @@ def _diffs_for_files(base_ref: str, files: list[str]) -> dict[str, str]:
 def _read_lfs_pointer(path: Path) -> LfsPointer | None:
     if not path.exists():
         return None
-    prefix = path.read_bytes()[: len(LFS_POINTER_PREFIX)]
-    if prefix.decode("utf-8", errors="replace") != LFS_POINTER_PREFIX:
-        return None
+    prefix_bytes = LFS_POINTER_PREFIX.encode("utf-8")
+    with path.open("rb") as fh:
+        prefix = fh.read(len(prefix_bytes))
+        if prefix != prefix_bytes:
+            return None
+        pointer_bytes = prefix + fh.read(LFS_POINTER_MAX_BYTES - len(prefix_bytes))
     expected_oid = ""
     expected_size = 0
-    pointer = path.read_text(encoding="utf-8", errors="replace")
+    pointer = pointer_bytes.decode("utf-8", errors="replace")
     for line in pointer.splitlines():
         if line.startswith("oid sha256:"):
             expected_oid = line.split(":", 1)[1].strip()
