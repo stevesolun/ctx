@@ -152,8 +152,8 @@ jobs:
           current_tag = os.environ.get("TAG_NAME", "")
           expected_graph_assets = {
               "graph/wiki-graph.tar.gz": {
-                  "sha256": "6b1599e2335a66eb2c48de3d23f982e57aac6049b2716c2c276bcbf3e0262fb8",
-                  "size": 295154507,
+                  "sha256": "23cf6950e959b3b3167dd942937ecb94e056afae181b0685e213c17635951918",
+                  "size": 295151127,
               },
               "graph/wiki-graph-runtime.tar.gz": {
                   "sha256": "d4a39836aab5f558b546842580b2e20c523b9a9ab901ed681f84c09b5c4d6515",
