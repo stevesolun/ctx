@@ -365,8 +365,8 @@ jobs:
           release_asset_poll_seconds = 10
           expected_graph_assets = {
               "graph/wiki-graph.tar.gz": {
-                  "sha256": "23cf6950e959b3b3167dd942937ecb94e056afae181b0685e213c17635951918",
-                  "size": 295151127,
+                  "sha256": "2ce8a945c17a7345df9d27d8f101319a9f963b0fc85d399f104630bc06a7c4a0",
+                  "size": 295151086,
               },
               "graph/wiki-graph-runtime.tar.gz": {
                   "sha256": "d4a39836aab5f558b546842580b2e20c523b9a9ab901ed681f84c09b5c4d6515",
