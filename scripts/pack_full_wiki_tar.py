@@ -15,8 +15,22 @@ from ctx.core.wiki.wiki_packs import load_merged_wiki_pages, write_wiki_base_pac
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 _PATH_CHAR = r"[^`\"'<>|\s\r\n)]"
 _PATH_TOKEN = rf"{_PATH_CHAR}+"
-_PATH_SPACED_COMPONENT = rf"(?: {_PATH_CHAR}*[\\/]{_PATH_CHAR}*| {_PATH_CHAR}*\.{_PATH_CHAR}+)"
+_PATH_TERMINAL_WORD = r"[A-Z0-9][^`\"'<>|/\\\s\r\n)]*"
+_PATH_SPACED_COMPONENT = (
+    rf"(?: {_PATH_CHAR}*[\\/]{_PATH_CHAR}*| {_PATH_CHAR}*\.{_PATH_CHAR}+"
+    rf"|(?: {_PATH_TERMINAL_WORD})+)"
+)
 _PATH_BOUNDARY = r"(?:^|(?<=[`\"'(<\[\s=,:]))"
+_QUOTED_PATH_BOUNDARY = r"(?<=[`\"'(<\[])"
+_QUOTED_PATH_TOKEN = r"[^`\"'<>|\r\n)]+"
+_QUOTED_PATH_END = r"(?=[`\"')>\]])"
+_QUOTED_WINDOWS_USER_PATH_RE = re.compile(
+    rf"(?i){_QUOTED_PATH_BOUNDARY}[A-Z]:[\\/]+Users[\\/]+{_QUOTED_PATH_TOKEN}{_QUOTED_PATH_END}"
+)
+_QUOTED_POSIX_USER_PATH_RE = re.compile(
+    rf"{_QUOTED_PATH_BOUNDARY}(?:(?i:file:///)|/)(?:Users|home)/"
+    rf"{_QUOTED_PATH_TOKEN}{_QUOTED_PATH_END}"
+)
 _WINDOWS_USER_PATH_RE = re.compile(
     rf"(?i)\b[A-Z]:[\\/]+Users[\\/]+{_PATH_TOKEN}(?:{_PATH_SPACED_COMPONENT})*"
 )
@@ -213,7 +227,9 @@ def _normalise_page_text(text: str) -> str:
 
 
 def _redact_host_user_paths(text: str) -> str:
-    redacted = _WINDOWS_USER_PATH_RE.sub("<host-user-path>", text)
+    redacted = _QUOTED_WINDOWS_USER_PATH_RE.sub("<host-user-path>", text)
+    redacted = _QUOTED_POSIX_USER_PATH_RE.sub("<host-user-path>", redacted)
+    redacted = _WINDOWS_USER_PATH_RE.sub("<host-user-path>", redacted)
     redacted = _POSIX_USER_PATH_RE.sub("<host-user-path>", redacted)
     return _POSIX_USER_PATH_PREFIX_RE.sub("<host-user-path>", redacted)
 

@@ -34,6 +34,7 @@ TOKEN_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"),
 )
+ENV_VAR_NAME_RE = re.compile(r"[A-Z_][A-Z0-9_]*")
 
 
 def secret_key_like(key: str) -> bool:
@@ -68,9 +69,25 @@ def _value_has_token_pattern(value: str) -> bool:
     return any(pattern.search(value) for pattern in TOKEN_VALUE_PATTERNS)
 
 
-def _secret_arg_allows_indirection(key: str) -> bool:
+def _secret_arg_indirection_kind(key: str) -> str | None:
     normalized = re.sub(r"[^a-z0-9]+", "_", key.lstrip("-").lower()).strip("_")
-    return normalized.endswith(("_file", "_path", "_env", "_var"))
+    for kind in ("file", "path", "env", "var"):
+        if normalized.endswith(f"_{kind}"):
+            return kind
+    return None
+
+
+def _secret_arg_allows_indirection(key: str, value: str) -> bool:
+    kind = _secret_arg_indirection_kind(key)
+    if kind in {"file", "path"}:
+        return True
+    if kind in {"env", "var"}:
+        stripped = value.strip()
+        return placeholder_secret_value(stripped) or (
+            not _value_has_token_pattern(stripped)
+            and ENV_VAR_NAME_RE.fullmatch(stripped) is not None
+        )
+    return False
 
 
 def find_inline_secret(obj: object, *, path: str = "") -> str | None:
@@ -100,17 +117,21 @@ def find_inline_secret(obj: object, *, path: str = "") -> str | None:
 
 def find_inline_secret_arg(tokens: list[str]) -> str | None:
     for token in tokens:
-        assignment = SECRET_ASSIGNMENT_RE.search(token)
-        if assignment and not placeholder_secret_value(assignment.group(2)):
-            return assignment.group(1)
         if token.startswith("--") and "=" in token:
             key, value = token.split("=", 1)
-            if (
-                secret_key_like(key)
-                and not _secret_arg_allows_indirection(key)
-                and not placeholder_secret_value(value)
-            ):
-                return key
+            if secret_key_like(key):
+                if not placeholder_secret_value(value) and not _secret_arg_allows_indirection(
+                    key, value
+                ):
+                    return key
+                continue
+        assignment = SECRET_ASSIGNMENT_RE.search(token)
+        if (
+            assignment
+            and not placeholder_secret_value(assignment.group(2))
+            and not _secret_arg_allows_indirection(assignment.group(1), assignment.group(2))
+        ):
+            return assignment.group(1)
 
     for index, token in enumerate(tokens[:-1]):
         if not token.startswith("-"):
@@ -119,10 +140,10 @@ def find_inline_secret_arg(tokens: list[str]) -> str | None:
         value = tokens[index + 1]
         if (
             secret_key_like(key)
-            and not _secret_arg_allows_indirection(token)
             and value
             and not value.startswith("-")
             and not placeholder_secret_value(value)
+            and not _secret_arg_allows_indirection(token, value)
         ):
             return token
 
