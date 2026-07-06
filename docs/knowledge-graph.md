@@ -52,17 +52,18 @@ the harness pages used by `ctx-harness-install`:
 ctx-init --graph
 ```
 
-To expand every shipped skill/agent/MCP entity page, harness page,
-skill page, concept page, converted micro-skill pipeline,
-and Obsidian vault metadata, request the full wiki artifact explicitly:
+To install the full shipped wiki, including the wiki-pack base for
+skill/agent/MCP entity pages, skill pages, concept pages, converted
+micro-skill pipelines, direct harness pages, and Obsidian vault metadata,
+request the full wiki artifact explicitly:
 
 ```bash
 ctx-init --graph --graph-install-mode full
 ```
 
 Manual extraction is still supported for offline/source installs. Extract the
-full tarball into your `~/.claude/skill-wiki/` when you want local markdown
-wiki browsing:
+full tarball into your `~/.claude/skill-wiki/` when you want local wiki
+browsing through ctx's merged pack/local view:
 
 ```bash
 mkdir -p ~/.claude/skill-wiki
@@ -417,12 +418,22 @@ Graphify exports stage and validate each generated artifact before atomic
 promotion. `graph.json`, `graph-delta.json`, `communities.json`,
 `graph-report.md`, and `graph-export-manifest.json` each get a sibling
 `*.promotion.json` file with candidate, current, and `last_good` hashes plus
-rollback metadata. Queue-driven promotion only accepts known graph targets
-under `<wiki>/graphify-out/` and known release/cache artifacts under the repo
-`graph/` directory, always from sibling `<target>.staged` files. The manifest
-is promoted last, so a crash between artifact promotion and manifest promotion
-is detected as an incomplete export and the next run rebuilds instead of
-trusting mixed graph files.
+rollback metadata. Queue-driven promotion accepts only graphify artifacts named
+`graph.json`, `graph-delta.json`, `communities.json`, `graph-report.md`, or
+`graph-export-manifest.json` under `<wiki>/graphify-out/`, plus the release
+artifacts allowlisted under repo `graph/`, and always from sibling
+`<target>.staged` files. Staged and target symlinks are rejected. Validators are
+selected from the target suffix: JSON, JSONL, gzip JSON, gzip JSONL, full wiki
+tar, and runtime graph tar each get the matching structural check before
+promotion. The manifest is promoted last, so a crash between artifact promotion
+and manifest promotion is detected as an incomplete export and the next run
+rebuilds instead of trusting mixed graph files.
+
+Artifact validation also treats privacy and fanout as release contracts: archive
+JSON, graph-pack node/edge metadata, markdown members, and merged wiki-pack
+markdown must not contain host-user paths; markdown members are capped at
+10 MiB; local generated markdown such as `catalog.md`, `converted-index.md`,
+`log.md`, and `versions-catalog.md` must stay out of the full archive.
 
 ## Current artifact record
 

@@ -26,6 +26,18 @@ pytest -q -m integration           # embedding precision/recall tests
 pytest --cov=src -q                # with coverage report
 ```
 
+Before opening a PR, run the local gate:
+
+```bash
+python scripts/ci_preflight.py --profile pr
+```
+
+The preflight uses the same changed-file classifier as CI. Its no-test policy
+treats source, workflows, `pyproject.toml`, `scripts/ci_*`, maintainer graph/sync
+scripts, and `.no-mistakes.yaml` as contract files; include focused
+`src/tests/...` coverage unless the diff is a proven version or stats-only
+release metadata update.
+
 ## Documentation changes
 
 Public docs surfaces are release-tracked in the canonical
@@ -73,6 +85,19 @@ then `/tmp/ctx-verify-venv/bin`; the first owner-only venv containing
 `pytest`, `ruff`, and `mypy` wins and is exposed as
 `CTX_NO_MISTAKES_PYTHON_BIN_RESOLVED`. `CTX_NO_MISTAKES_CODEX_RESOURCES` and
 `CTX_NO_MISTAKES_REAL_CODEX` override the Codex resource directory or binary.
+The repo disables review-stage no-mistakes auto-fixes (`auto_fix.review: 0`) so
+review findings stay human-approved; rebase, test, document, lint, and CI stages
+still allow three automated repair attempts.
+
+## Release publishing
+
+PyPI publishes must run from a version tag that matches `pyproject.toml`; manual
+PyPI workflow dispatch is disabled. The publish workflow resolves the full and
+runtime graph tarballs from matching GitHub release cache assets first. If a
+checked-out Git LFS pointer is newer than the cache, it performs a targeted
+`git lfs pull` for that artifact only, enforces the configured pointer size cap,
+verifies SHA-256 and byte size, then runs graph validation before building and
+publishing the package.
 
 ## Commit conventions
 

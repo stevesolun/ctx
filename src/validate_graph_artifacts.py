@@ -1271,6 +1271,7 @@ def validate_runtime_graph_archive(
     expected_harnesses: set[str] | None = None,
     expected_export_id: str | None = None,
 ) -> str:
+    """Validate a runtime graph tarball and return its shared export ID."""
     return _validate_runtime_graph_archive(
         tarball,
         expected_harnesses=DEFAULT_HARNESSES if expected_harnesses is None else expected_harnesses,

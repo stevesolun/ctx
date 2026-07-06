@@ -141,6 +141,13 @@ Example config:
 Parent secrets are not inherited unless you set `inherit_env: true`; prefer
 explicit `env` keys for servers that need credentials. `${tmp_path}` expands
 to a pytest temporary directory so filesystem probes can avoid real user data.
+For lower-level `McpServerConfig` users, `$ENVVAR` and `${ENVVAR}` placeholders
+inside `args` expand from the final child environment immediately before spawn.
+Non-secret placeholders can be used for ports or paths. Sensitive placeholders
+are rejected by default because they would expose the value in child argv; use
+`credential_env` or explicit `env` for servers that read secrets from the
+environment. Set `allow_argv_secret_expansion=True` only for trusted local
+servers that cannot avoid argv credentials.
 
 ---
 
@@ -230,7 +237,10 @@ metadata. Pass credentials with `--mcp-env name:ENVVAR` only to servers that
 read secrets from their child environment, or configure the server to read a
 secret file/path argument instead. Sensitive `$ENVVAR` and `${ENVVAR}` argv
 placeholders are rejected by default because resolving them would expose the
-secret in the child process argv.
+secret in the child process argv. Secret indirection flags such as
+`--token-file`, `--api-key-path`, `--credential-env`, and
+`--client-secret-var` are accepted only when their values look like paths,
+placeholders, or environment variable names rather than literal secrets.
 
 Planning and review modes are opt-in flags on `ctx run`. Use `--planner` to
 produce a structured spec before generation, `--evaluator` to grade and revise

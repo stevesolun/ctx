@@ -75,7 +75,7 @@ Examples from that tracker:
 pip install claude-ctx
 ctx-init                    # terminal wizard: hooks, graph, model, harness goal
 ctx-init --graph --hooks --model-mode skip  # fast runtime graph + Claude Code hooks
-ctx-init --graph --graph-install-mode full  # expand the full markdown wiki locally
+ctx-init --graph --graph-install-mode full  # install the full packed wiki locally
 ctx-init --wizard           # force the same wizard from scripts/tests
 ctx-init --model-mode custom --model openai/gpt-5.5 --goal "build a CAD agent"
 ```
@@ -95,18 +95,18 @@ recommendations, and the 207 harness pages needed by
 ctx-init --graph
 ```
 
-The full LLM-wiki artifact remains available for local browsing, Obsidian, and
-expanded markdown pages:
+The full LLM-wiki artifact remains available for local browsing and Obsidian.
+High-fanout skill, agent, MCP, converted, and concept pages are stored in
+`wiki-packs/` instead of expanded as individual files:
 
 ```bash
 ctx-init --graph --graph-install-mode full
 ```
 
-The full `wiki-graph.tar.gz` includes the shipped skill index,
-68,494 skill entity pages under `entities/skills/`, 67,024 hydrated
-installable `SKILL.md` files under `converted/`,
-and 207 harness pages under
-`entities/harnesses/`.
+The full `wiki-graph.tar.gz` includes the shipped skill index, 68,494 skill
+entity pages, 67,024 hydrated installable `SKILL.md` files, and the wiki-pack
+base that serves those pages through ctx. Harness pages remain directly
+available under `entities/harnesses/`.
 
 > **Windows:** PowerShell's built-in `tar.exe` does not support
 > `--force-local`; use `tar -xzf graph\wiki-graph.tar.gz -C "$env:USERPROFILE\.claude\skill-wiki"`.

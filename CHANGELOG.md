@@ -32,9 +32,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Redacted runtime lifecycle free-text fields before storing local events so
   evidence, commands, summaries, triggers, reasons, and statuses do not retain
   secrets or local filesystem paths.
-- Expanded MCP argv `$ENVVAR` placeholders only at child-process spawn time so
-  secret values can reach trusted servers without being persisted in configs or
-  session metadata.
+- Expanded MCP argv `$ENVVAR` placeholders only at child-process spawn time and
+  rejected sensitive placeholder expansion by default, with explicit trusted
+  opt-in for servers that cannot avoid argv credentials.
 - Validated backup `top_files` overrides as top-level filenames only and added
   dry-run support to legacy `backup_mirror prune --keep`.
 - Hardened `ctx-mcp-enrich` checkpoint and frontmatter handling so malformed
@@ -335,8 +335,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Shipped `graph/wiki-graph-runtime.tar.gz` as the default graph install
-  artifact for `ctx-init --graph`; full markdown wiki expansion remains
-  available with `--graph-install-mode full`.
+  artifact for `ctx-init --graph`; full wiki install remains available with
+  `--graph-install-mode full`.
 
 ### Fixed
 

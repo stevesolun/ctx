@@ -39,7 +39,7 @@ with persistent memory that gets smarter every session.
     source checkouts use `graph/wiki-graph-runtime.tar.gz`, while pip installs
     download the matching GitHub release asset. Use
     `ctx-init --graph --graph-install-mode full` when you want the full
-    markdown LLM-wiki expanded locally.
+    packed LLM-wiki installed locally.
 
     Custom-model users can run
     `ctx-init --model-mode custom --model <provider/model> --goal "<task>"`

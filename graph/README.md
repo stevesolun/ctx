@@ -26,7 +26,7 @@ The runtime recommendation paths use this graph in these ways:
 | File | Contents |
 |---|---|
 | `wiki-graph-runtime.tar.gz` | Fast install artifact used by default `ctx-init --graph`: `graphify-out/*`, the skill index, 207 harness pages, wiki index files, and Obsidian metadata needed for recommendations and harness dry-runs without expanding every entity page |
-| `wiki-graph.tar.gz` | Full LLM-wiki: entity pages, converted skill bodies, mirrored agent bodies, concept pages, `graphify-out/graph.json`, `graph-delta.json`, export manifest, communities, skill indexes, SkillSpector stamps, and Obsidian metadata |
+| `wiki-graph.tar.gz` | Full LLM-wiki: direct harness/root pages, wiki-packed skill/agent/MCP/converted/concept pages, `graphify-out/graph.json`, `graph-delta.json`, export manifest, communities, skill indexes, SkillSpector stamps, and Obsidian metadata |
 | `skillspector-audit.jsonl.gz` | Compact per-skill audit records produced by a ctx-run static `--no-llm` pass with [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector). This is not NVIDIA endorsement or certification. The same gzip is embedded in `wiki-graph.tar.gz` as `security/skillspector-audit.jsonl.gz`. |
 | Skill catalog gzip | Compressed skill index for the 67,024 body-backed skill entries shipped in the wiki |
 | `communities.json` | Current Louvain community export |
@@ -91,6 +91,7 @@ store refresh path.
 - `graphify-out/graph-delta.json` - delta export for the latest graph generation
 - `graphify-out/graph-export-manifest.json` - export manifest tying graph, delta, communities, and report to one generation
 - `graphify-out/communities.json` - community export
+- `wiki-packs/base-<export-id>/` - packed high-fanout wiki pages for skills, agents, MCP servers, converted bodies, and concepts
 - `SCHEMA.md`, `index.md` - wiki contract and root index
 - `.obsidian/` - vault metadata for local graph browsing
 
@@ -99,8 +100,11 @@ local generated markdown catalogs such as `catalog.md`, `converted-index.md`,
 `log.md`, and `versions-catalog.md` are not shipped. Local micro-skill
 conversion may keep `.original` files for traceability, but the packaged
 tarball excludes them so users do not ingest raw long bodies after conversion.
-Markdown payloads are also scrubbed of host-user paths during repack and the
-artifact validator rejects `/Users/...` and `C:\Users\...` signatures.
+Markdown payloads are also scrubbed of host-user paths during repack. The
+artifact validator rejects host-user paths in archive JSON, graph-pack node/edge
+metadata, markdown members, and merged wiki-pack markdown; markdown members are
+capped at 10 MiB, and local generated markdown catalogs must not appear outside
+the packed root/index contract.
 
 ## Extract
 
@@ -342,15 +346,29 @@ The repack command above is for Git Bash/MSYS. In Linux/macOS shells omit
 `--force-local`; in PowerShell use `tar -czf` without `--force-local`.
 
 Both flows validate candidates before atomic promotion. Queue-driven artifact
-promotion accepts only known graph artifacts under `<wiki>/graphify-out/` or
-repo `graph/`, and the staged file must be the target sibling named
-`<target>.staged`. Each promoted artifact gets a sibling `*.promotion.json` file
-with current, candidate, and `last_good` hashes for review or rollback. The
-graph, delta, communities, report, and export manifest are shipped together and
-carry the same export ID so validation can reject mixed or partially refreshed
-graph generations. Raw `.original` backups, transient `.lock` files, `.ctx/`
-queue state, local generated markdown catalogs, and host-user paths must not
-appear in the shipped tarball.
+promotion accepts only `graph.json`, `graph-delta.json`, `communities.json`,
+`graph-report.md`, and `graph-export-manifest.json` under
+`<wiki>/graphify-out/`, or the allowlisted release artifacts under repo
+`graph/`: `wiki-graph.tar.gz`, `wiki-graph-runtime.tar.gz`,
+`wiki-graph-stats.json`, `skills-sh-catalog.json.gz`,
+`skillspector-audit.jsonl.gz`, `entity-overlays.jsonl`, `communities.json`,
+`dedup-report.{json,md}`, and `tag-backfill.{json,md}`. The staged file must be
+the target sibling named `<target>.staged`, and staged/target symlinks are
+rejected. The worker chooses validators from the target type: JSON, JSONL, gzip
+JSON, gzip JSONL, full wiki tar, and runtime graph tar. Each promoted artifact
+gets a sibling `*.promotion.json` file with current, candidate, and `last_good`
+hashes for review or rollback. The graph, delta, communities, report, and
+export manifest are shipped together and carry the same export ID so validation
+can reject mixed or partially refreshed graph generations. Raw `.original`
+backups, transient `.lock` files, `.ctx/` queue state, local generated markdown
+catalogs, and host-user paths must not appear in the shipped tarball.
+
+Version-tag PyPI publishes use the same graph artifact contract. The publish
+workflow resolves the full and runtime tarballs from previous release or graph
+cache assets first; if a checked-out LFS pointer is newer than the cache, it
+hydrates only that artifact with a size-capped `git lfs pull`, verifies the
+pointer SHA-256 and byte size, validates graph artifacts, uploads release
+assets, then publishes the package.
 
 ## Implementation Notes
 
