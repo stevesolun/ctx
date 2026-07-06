@@ -146,6 +146,10 @@ def test_secret_arg_indirection_validates_env_reference_values() -> None:
     assert find_inline_secret_arg(["--token-env", "secret-value"]) == "--token-env"
     assert find_inline_secret_arg(["--token_env=GITHUB_TOKEN"]) is None
     assert find_inline_secret_arg(["--api_key_path=/run/secrets/openai"]) is None
+    assert find_inline_secret_arg(["--api-key-path", "hunter2"]) == "--api-key-path"
+    assert find_inline_secret_arg(["--api-key-file=secret-value"]) == "--api-key-file"
+    assert find_inline_secret_arg(["--api_key_path=./secrets/openai"]) is None
+    assert find_inline_secret_arg(["--api-key-path=${OPENAI_API_KEY_PATH}"]) is None
 
 
 def test_no_test_policy_treats_no_mistakes_config_as_contract_file() -> None:
@@ -183,6 +187,7 @@ def test_host_user_path_redaction_covers_key_value_delimiters() -> None:
         b"cwd=/Users/steves/ctx\n",
         b"source:/home/steves/wiki\n",
         b"path,C:\\Users\\steves\\ctx\n",
+        b"url=file:///C:/Users/alice/ctx\n",
     ],
 )
 def test_graph_markdown_host_path_scan_covers_key_value_delimiters(payload: bytes) -> None:
@@ -190,8 +195,18 @@ def test_graph_markdown_host_path_scan_covers_key_value_delimiters(payload: byte
         vga._validate_archive_markdown_payload("log.md", payload, context="archive")
 
 
-def test_graph_workflow_searches_release_cache_before_lfs_fallback() -> None:
-    workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text(encoding="utf-8")
+@pytest.mark.parametrize(
+    "workflow_path",
+    [
+        ".github/workflows/huggingface-sync.yml",
+        ".github/workflows/publish.yml",
+        ".github/workflows/test.yml",
+    ],
+)
+def test_graph_workflow_searches_release_cache_before_lfs_fallback(
+    workflow_path: str,
+) -> None:
+    workflow = (ROOT / workflow_path).read_text(encoding="utf-8")
     resolve_script = workflow[workflow.index("def hydrate_from_release") :]
 
     release_search = resolve_script.index("for release in load_releases():")
@@ -200,6 +215,10 @@ def test_graph_workflow_searches_release_cache_before_lfs_fallback() -> None:
     )
 
     assert release_search < lfs_fallback
+    assert (
+        "hydrate_from_lfs(path_name, expected_oid, expected_size, hydrated_min_size)"
+        not in resolve_script[:release_search]
+    )
     assert 'if expected_oid != fallback["sha256"]' not in resolve_script
 
 

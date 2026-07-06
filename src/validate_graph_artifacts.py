@@ -101,7 +101,8 @@ _EDGE_SCORE_FIELDS = (
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 _HOST_USER_PATH_RE = re.compile(
     rb"(?:^|(?<=[`\"'(<\[\s=,:]))"
-    rb"(?:(?i:file:///(?:Users|home)/)|[A-Za-z]:[\\/]+Users[\\/]|/(?:Users|home)/)"
+    rb"(?:(?i:file:///(?:[A-Z]:[\\/]+Users[\\/]|(?:Users|home)/))"
+    rb"|[A-Za-z]:[\\/]+Users[\\/]|/(?:Users|home)/)"
 )
 _LOCAL_GENERATED_MARKDOWN = frozenset(
     {

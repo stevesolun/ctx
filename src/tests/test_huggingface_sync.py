@@ -162,7 +162,7 @@ def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:
     assert "HF_TOKEN: ${{ secrets.HF_TOKEN }}" in text
     assert "lfs: false" in text
     assert "Resolving graph artifacts from release cache, or targeted Git LFS" in text
-    assert "hydrating from targeted Git LFS without polling" in text
+    assert "searching release caches before targeted Git LFS" in text
     assert '"git", "lfs", "pull", "--include", path_name' in text
     assert "verify_hydrated_file(artifact, expected_oid, expected_size)" in text
     assert 'tag_name.startswith("graph-artifacts-")' in text

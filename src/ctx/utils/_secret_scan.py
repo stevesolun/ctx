@@ -35,6 +35,7 @@ TOKEN_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"),
 )
 ENV_VAR_NAME_RE = re.compile(r"[A-Z_][A-Z0-9_]*")
+PATH_SHAPED_VALUE_RE = re.compile(r"(?:^file://|^[A-Za-z]:[\\/]|^~?[\\/]|^\.\.?[\\/]|[\\/])")
 
 
 def secret_key_like(key: str) -> bool:
@@ -79,10 +80,10 @@ def _secret_arg_indirection_kind(key: str) -> str | None:
 
 def _secret_arg_allows_indirection(key: str, value: str) -> bool:
     kind = _secret_arg_indirection_kind(key)
+    stripped = value.strip()
     if kind in {"file", "path"}:
-        return True
+        return placeholder_secret_value(stripped) or PATH_SHAPED_VALUE_RE.search(stripped) is not None
     if kind in {"env", "var"}:
-        stripped = value.strip()
         return placeholder_secret_value(stripped) or (
             not _value_has_token_pattern(stripped)
             and ENV_VAR_NAME_RE.fullmatch(stripped) is not None

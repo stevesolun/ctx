@@ -460,10 +460,8 @@ jobs:
                   if not pointer_matches_static_release_cache(pointer, fallback):
                       print(
                           f"Pointer for {path_name} is newer than the static release cache; "
-                          "hydrating from targeted Git LFS without polling."
+                          "searching release caches before targeted Git LFS."
                       )
-                      hydrate_from_lfs(path_name, expected_oid, expected_size, hydrated_min_size)
-                      return
 
               deadline = time.monotonic() + release_asset_wait_seconds
               while True:
