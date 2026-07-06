@@ -76,6 +76,10 @@ GRAPH_LFS_ARTIFACTS = (
     "graph/wiki-graph.tar.gz",
     "graph/wiki-graph-runtime.tar.gz",
 )
+GRAPH_LFS_MAX_FALLBACK_SIZES = {
+    "graph/wiki-graph.tar.gz": 350_000_000,
+    "graph/wiki-graph-runtime.tar.gz": 150_000_000,
+}
 LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1"
 
 
@@ -214,6 +218,14 @@ def hydrate_graph_lfs_artifacts() -> int:
     env.setdefault("GIT_LFS_DIALTIMEOUT", "120")
     env.setdefault("GIT_LFS_TLSTIMEOUT", "120")
     for pointer in pointers:
+        max_size = GRAPH_LFS_MAX_FALLBACK_SIZES[pointer.path]
+        if pointer.size > max_size:
+            print(
+                f"Refusing Git LFS fallback for {pointer.path}: "
+                f"pointer size {pointer.size} exceeds cap {max_size}",
+                file=sys.stderr,
+            )
+            return 1
         print(f"Hydrating {pointer.path} from Git LFS sha256:{pointer.sha256} size:{pointer.size}")
         proc = subprocess.run(
             ["git", "lfs", "pull", "--include", pointer.path, "--exclude", ""],

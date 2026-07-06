@@ -247,11 +247,12 @@ def _export_card_inputs(repo: Path, export_dir: Path) -> None:
 
 
 def _copy_export_file(repo_root: Path, export_root: Path, rel: Path) -> None:
-    source = (repo_root / rel).resolve()
+    raw_source = repo_root / rel
+    if raw_source.is_symlink():
+        raise ValueError(f"refusing to follow symlink during HF sync: {rel}")
+    source = raw_source.resolve()
     if source != repo_root and not source.is_relative_to(repo_root):
         raise ValueError(f"unsafe source path: {rel}")
-    if source.is_symlink():
-        raise ValueError(f"refusing to follow symlink during HF sync: {rel}")
     if not source.is_file():
         return
     target = (export_root / rel).resolve()
