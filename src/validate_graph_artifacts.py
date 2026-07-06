@@ -99,7 +99,17 @@ _EDGE_SCORE_FIELDS = (
     "token_sim",
 )
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
-_HOST_USER_PATH_RE = re.compile(rb"(?:[A-Za-z]:[\\/]+Users[\\/]|/Users/)")
+_HOST_USER_PATH_RE = re.compile(
+    rb"(?:^|(?<=[`\"'(<\s]))(?:[A-Za-z]:[\\/]+Users[\\/]|/(?:Users|home)/)"
+)
+_LOCAL_GENERATED_MARKDOWN = frozenset(
+    {
+        "catalog.md",
+        "converted-index.md",
+        "log.md",
+        "versions-catalog.md",
+    }
+)
 _PREVIEW_HTML_FILES = (
     "sample-top60.html",
     "viz-ai-agents.html",
@@ -526,6 +536,8 @@ def _read_tar_member_bytes(tf: tarfile.TarFile, member: tarfile.TarInfo) -> byte
 def _validate_archive_markdown_payload(name: str, payload: bytes, *, context: str) -> None:
     if _HOST_USER_PATH_RE.search(payload):
         raise GraphArtifactError(f"{context} markdown contains host path: {name}")
+    if name in _LOCAL_GENERATED_MARKDOWN:
+        raise GraphArtifactError(f"{context} contains local generated markdown: {name}")
 
 
 def _count_lines(payload: bytes) -> int:

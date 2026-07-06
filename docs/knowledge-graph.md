@@ -417,11 +417,12 @@ Graphify exports stage and validate each generated artifact before atomic
 promotion. `graph.json`, `graph-delta.json`, `communities.json`,
 `graph-report.md`, and `graph-export-manifest.json` each get a sibling
 `*.promotion.json` file with candidate, current, and `last_good` hashes plus
-rollback metadata. Queue-driven promotion only accepts those known graph
-targets under `<wiki>/graphify-out/` from sibling `<target>.staged` files. The
-manifest is promoted last, so a crash between artifact promotion and manifest
-promotion is detected as an incomplete export and the next run rebuilds instead
-of trusting mixed graph files.
+rollback metadata. Queue-driven promotion only accepts known graph targets
+under `<wiki>/graphify-out/` and known release/cache artifacts under the repo
+`graph/` directory, always from sibling `<target>.staged` files. The manifest
+is promoted last, so a crash between artifact promotion and manifest promotion
+is detected as an incomplete export and the next run rebuilds instead of
+trusting mixed graph files.
 
 ## Current artifact record
 

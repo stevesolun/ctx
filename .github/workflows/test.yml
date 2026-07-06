@@ -373,6 +373,10 @@ jobs:
                   "size": 110283462,
               },
           }
+          max_lfs_fallback_sizes = {
+              "graph/wiki-graph.tar.gz": 350_000_000,
+              "graph/wiki-graph-runtime.tar.gz": 150_000_000,
+          }
 
           def load_releases() -> list[dict]:
               return json.loads(subprocess.check_output(
@@ -419,6 +423,12 @@ jobs:
 
           def hydrate_from_lfs(path_name: str, expected_oid: str, expected_size: int, hydrated_min_size: int) -> None:
               graph_tar = Path(path_name)
+              max_size = max_lfs_fallback_sizes[path_name]
+              if expected_size > max_size:
+                  raise SystemExit(
+                      f"Refusing Git LFS fallback for {path_name}: "
+                      f"pointer size {expected_size} exceeds cap {max_size}"
+                  )
               print(f"Pointer for {path_name} is not in release cache; hydrating from targeted Git LFS.")
               env = os.environ.copy()
               env.setdefault("GIT_LFS_SKIP_SMUDGE", "1")

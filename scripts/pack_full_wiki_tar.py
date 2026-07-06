@@ -19,7 +19,10 @@ _PATH_SPACED_COMPONENT = rf"(?: {_PATH_CHAR}*[\\/]{_PATH_CHAR}*| {_PATH_CHAR}*\.
 _WINDOWS_USER_PATH_RE = re.compile(
     rf"(?i)\b[A-Z]:[\\/]+Users[\\/]+{_PATH_TOKEN}(?:{_PATH_SPACED_COMPONENT})*"
 )
-_POSIX_USER_PATH_RE = re.compile(rf"/(?:Users|home)/{_PATH_TOKEN}(?:{_PATH_SPACED_COMPONENT})*")
+_POSIX_USER_PATH_RE = re.compile(
+    rf"(?:^|(?<=[`\"'(<\s]))/(?:Users|home)/{_PATH_TOKEN}"
+    rf"(?:{_PATH_SPACED_COMPONENT})*"
+)
 _GRAPH_MANIFEST = "graphify-out/graph-export-manifest.json"
 _REQUIRED_EXPANDED_MARKDOWN = frozenset({"graphify-out/graph-report.md"})
 _LOCAL_GENERATED_MARKDOWN = frozenset(

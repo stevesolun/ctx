@@ -322,7 +322,7 @@ def from_ctx_config() -> BackupConfig:
     except Exception:
         base_raw = {}
 
-    merged: dict[str, Any] = dict(base_raw) if isinstance(base_raw, dict) else {}
+    merged: dict[str, Any] = _sanitize_user_override(base_raw) if isinstance(base_raw, dict) else {}
 
     user_override = Path(os.path.expanduser("~/.claude/backup-config.json"))
     if user_override.is_file():
