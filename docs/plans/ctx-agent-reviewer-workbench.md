@@ -46,7 +46,7 @@ Inputs:
 Output:
 
 - One canonical review board with owner, status, evidence path, and blocker
-  state.
+  state, derived from the canonical CSVs. Do not create a third tracker file.
 
 ### Feature Mapper + Feature Reviewer
 
@@ -152,6 +152,25 @@ Then CTO merges them into:
 - Keep validation cheap until ready. Use focused tests and `local-fast`; reserve
   no-mistakes and PR CI for the final integrated batch.
 
+## Canonical Tracker Hygiene
+
+Before any agent or CTO step writes tracker rows, validate the canonical CSVs:
+
+- Parse `qa/feature_status.csv` as CSV and require unique non-empty
+  `feature_id` values.
+- Parse `qa/bug_smoke_status.csv` as CSV and require unique non-empty
+  `finding_id` values.
+- Check proposed new row keys against both files before writing; collisions
+  must become `needs-cto-review`, not silent overwrites.
+- Check stale status/evidence markers before writing: historical phrases such
+  as `pending no-mistakes`, bare `TODO`, obsolete blocker text, or retest claims
+  without matching `last_verified_at` and evidence.
+- If a stale row is found, preserve the old text in review notes, add current
+  evidence, and update status only after the critic verifies the behavior.
+- Treat the "canonical review board" as a derived view over these CSVs with
+  owner, status, evidence path, and blocker state. Do not create a separate
+  board file unless the user explicitly approves it.
+
 ## CTO Orchestrator
 
 The CTO orchestrator owns the shared review board and makes final calls.
@@ -215,199 +234,40 @@ tracker_update:
 
 The CTO may reject any result without concrete evidence.
 
-## Review Pairs
+## Detailed Pair Contracts
 
-### 1. Feature Mapper Pair
+The canonical team roster is `CTX Review Workbench Team` above. This section
+adds execution contracts only, so agents do not maintain a second divergent
+team list.
 
-Actor: Feature Mapper.
-
-- Discover user-visible features across CLI, API, MCP, dashboard, telemetry,
-  graph/wiki, skill management, agent management, harnesses, Loopflow adapter,
-  importers, sync jobs, and packaging.
-- Map each feature to current tests and docs.
-- Propose missing user stories.
-
-Critic: Feature Coverage Reviewer.
-
-- Check whether each proposed feature is real in code.
-- Check whether the expected behavior is based on code, not wishful docs.
-- Reject duplicate or vague feature rows.
-
-Primary outputs:
-
-- `qa/feature_status.csv` updates.
-- Missing-story findings for `qa/bug_smoke_status.csv`.
-
-### 2. Runtime/API/MCP Pair
-
-Actor: Runtime/API/MCP Reviewer.
-
-- Review `src/ctx/api.py`, `src/ctx/mcp_server/`, generic adapters, runtime
-  lifecycle, tool routing, and permission enforcement.
-- Exercise API and MCP boundaries from a user perspective.
-
-Critic: Contract Reviewer.
-
-- Check schema stability, error payloads, backwards compatibility, permission
-  semantics, and trace propagation.
-- Verify that behavior is test-backed.
-
-Primary outputs:
-
-- Contract findings.
-- Permission or trace-propagation gaps.
-- Focused tests for API/MCP regressions.
-
-### 3. Telemetry/Enterprise Pair
-
-Actor: Telemetry Enterprise Reviewer.
-
-- Review traces, metrics, logs, events, token usage KPIs, exporters, retention,
-  and local privacy defaults.
-- Check skill, MCP, and agent lifecycle token attribution.
-
-Critic: Privacy and Governance Reviewer.
-
-- Check redaction, hashed errors, salt boundaries, nested trace propagation,
-  exporter opt-in safety, and enterprise docs.
-- Treat secrets, host paths, and user prompts as sensitive by default.
-
-Primary outputs:
-
-- Telemetry privacy findings.
-- Enterprise-readiness gaps.
-- Runbook/doc mismatches.
-
-### 4. Dashboard/UX Pair
-
-Actor: Dashboard Flow Reviewer.
-
-- Walk dashboard pages and main flows: home, docs, graph, loaded entities,
-  recommendations, skills, ops, config, wiki, and telemetry surfaces.
-- Capture browser evidence for visual or interaction findings.
-
-Critic: UX Critic.
-
-- Check copy accuracy, empty states, broken links, stale counters, layout
-  regressions, inaccessible controls, and misleading success/error states.
-- Reject UX findings without screenshot or rendered artifact evidence when a
-  visual surface exists.
-
-Primary outputs:
-
-- UX findings in `qa/bug_smoke_status.csv`.
-- Browser reproduction steps.
-
-### 5. Graph/Wiki/Recommendation Pair
-
-Actor: Graph and Recommendation Reviewer.
-
-- Review graph artifacts, wiki packs, semantic edges, entity overlays,
-  recommendation surfaces, subgroup selection, and Loopflow recommendation
-  behavior.
-- Check explainability for skills, agents, MCPs, harnesses, and ctx MCP tools.
-
-Critic: Evidence Reviewer.
-
-- Verify every recommendation can be traced to code, graph data, registry data,
-  or test fixtures.
-- Check stale graph artifact handling and LFS hydration expectations.
-
-Primary outputs:
-
-- Recommendation correctness findings.
-- Graph artifact or stale-doc findings.
-
-### 6. QA/Gate Pair
-
-Actor: QA Gate Reviewer.
-
-- Run focused tests, `scripts/no_mistakes_run.sh fast`, CI classifier checks,
-  no-test policy checks, and local gate timing summaries.
-- Identify slow, flaky, redundant, or missing gates.
-
-Critic: Gate Critic.
-
-- Check whether the test evidence actually proves the reviewed behavior.
-- Separate local CPU bottlenecks from GitHub-hosted runner delays and
-  no-mistakes agent overhead.
-
-Primary outputs:
-
-- Gate efficiency findings.
-- Test coverage gaps.
-- Local-fast timing reports.
-
-### 7. Security/Supply-Chain Pair
-
-Actor: Security Reviewer.
-
-- Review install scripts, Hugging Face sync, Git LFS artifacts, external skill
-  imports, MCP ingestion, exporters, and generated artifacts.
-- Look for secret leaks, path traversal, unsafe subprocess usage, and poisoned
-  metadata risks.
-
-Critic: Red-Team Reviewer.
-
-- Try adversarial skill, MCP, agent, DSL, and artifact inputs.
-- Check whether failures are explicit, safe, and recoverable.
-
-Primary outputs:
-
-- Security findings.
-- Repro inputs.
-- Minimal hardening recommendations.
-
-### 8. Docs/Runbook Pair
-
-Actor: Docs Validator.
-
-- Compare docs to code behavior for install, CLI usage, dashboard, telemetry,
-  Loopflow, graph artifacts, HF sync, and gates.
-
-Critic: Evidence Editor.
-
-- Reject unsupported claims, stale prose, and docs that do not tell the user how
-  to verify behavior.
-- Check whether docs require public nav changes or should remain internal.
-
-Primary outputs:
-
-- Docs drift findings.
-- Concrete command examples.
-
-### 9. Loopflow/DSL Pair
-
-Actor: DSL Adapter Reviewer.
-
-- Review the Loopflow adapter and generic DSL host story.
-- Check permissions for skills, harnesses, MCPs, agents, ctx MCP server tools,
-  recommendations, and agent loops.
-
-Critic: DSL Author Reviewer.
-
-- Evaluate from the Loopflow author's perspective: does ctx add useful
-  recommendation and runtime guidance without stealing control from the DSL?
-- Check whether users with their own LLM can still receive ctx recommendations.
-
-Primary outputs:
-
-- Adapter UX findings.
-- Permission model findings.
-- Demo gaps.
+| Canonical pair | First local review focus | Primary tracker target |
+| --- | --- | --- |
+| QA/Test Gate Agent + Gate Critic | Run `scripts/no_mistakes_run.sh fast`, focused pytest, CI classifier checks, no-test policy checks, and local gate timing summaries. Identify slow, flaky, redundant, or missing local gates. Separate local CPU bottlenecks from GitHub-hosted runner delays and no-mistakes agent overhead. | `qa/bug_smoke_status.csv` for gate findings |
+| Feature Mapper + Feature Reviewer | Discover user-visible features, map each to current tests/docs, and reject vague or duplicate rows. | `qa/feature_status.csv`; missing-story findings in `qa/bug_smoke_status.csv` |
+| Runtime/API/MCP Agent + Contract Reviewer | Exercise API and MCP boundaries from a user perspective; check schema stability, error payloads, backwards compatibility, permissions, and trace propagation. | `qa/bug_smoke_status.csv` for contract gaps |
+| Telemetry/Enterprise Agent + Privacy Reviewer | Verify traces, metrics, logs, events, token usage KPIs, exporters, retention, local defaults, redaction, hashed errors, salt boundaries, and exporter opt-in safety. | `qa/bug_smoke_status.csv` for telemetry/privacy gaps |
+| Dashboard/UX Agent + UX Critic | Walk dashboard pages and capture browser evidence for visual or interaction findings. Reject visual UX findings without screenshot or rendered artifact evidence. | `qa/bug_smoke_status.csv` for UX findings |
+| Graph/Wiki/Recommendation Agent + Evidence Reviewer | Verify graph artifacts, wiki packs, recommendations, subgroup selection, explainability, permission awareness, and LFS hydration expectations. | `qa/bug_smoke_status.csv` for graph/recommendation findings |
+| Security/Supply Chain Agent + Red-Team Reviewer | Review install scripts, Hugging Face sync, Git LFS artifacts, external imports, MCP ingestion, exporters, generated artifacts, and adversarial skill/MCP/DSL inputs. | `qa/bug_smoke_status.csv` for security findings |
+| Docs/Runbook Agent + Docs Reviewer | Compare docs to code behavior and reject unsupported claims, stale prose, or instructions without command/test/source evidence. | `qa/bug_smoke_status.csv` for docs drift |
+| Loopflow/DSL Integration Agent + DSL Author Reviewer | Check permissions, harnesses, skills, MCPs, agents, recommendations, and agent loops from the DSL author's perspective. | `qa/bug_smoke_status.csv` for adapter UX/permission findings |
 
 ## First Wave
 
-Run these pairs first because they give the most leverage:
+Run these pairs first because local-fast is the review bottleneck reducer and
+tracker hygiene must be clean before broader feature mapping:
 
-1. Feature Mapper Pair.
-2. QA/Gate Pair.
-3. Runtime/API/MCP Pair.
-4. Telemetry/Enterprise Pair.
-5. Loopflow/DSL Pair.
+1. QA/Test Gate Agent + Gate Critic.
+2. Feature Mapper + Feature Reviewer.
+3. Runtime/API/MCP Agent + Contract Reviewer.
+4. Telemetry/Enterprise Agent + Privacy Reviewer.
+5. Loopflow/DSL Integration Agent + DSL Author Reviewer.
 
 First-wave success criteria:
 
+- Local-fast lanes are run first and `.gate/local-fast.json` is inspected.
+- Canonical tracker IDs are checked for collisions before any row update.
+- Stale tracker status/evidence text is identified before any row update.
 - Every reviewed surface has a row or explicit deferral in canonical trackers.
 - Every finding has repro evidence.
 - Every fix candidate has a scoped validation command.
