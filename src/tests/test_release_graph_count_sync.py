@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 from urllib.parse import quote
 
 import yaml  # type: ignore[import-untyped]
@@ -48,6 +49,21 @@ def _workflow_job_steps(path: str, job_name: str) -> list[dict[str, object]]:
     steps = workflow["jobs"][job_name]["steps"]
     assert isinstance(steps, list)
     return steps
+
+
+def _head_lfs_pointer(path: str) -> dict[str, int | str]:
+    pointer = subprocess.check_output(
+        ["git", "cat-file", "-p", f"HEAD:{path}"],
+        text=True,
+    )
+    values: dict[str, int | str] = {}
+    for line in pointer.splitlines():
+        if line.startswith("oid sha256:"):
+            values["sha256"] = line.split(":", 1)[1].strip()
+        elif line.startswith("size "):
+            values["size"] = int(line.split(" ", 1)[1].strip())
+    assert values.keys() == {"sha256", "size"}
+    return values
 
 
 def _graph_contract_counts() -> dict[str, int]:
@@ -97,6 +113,24 @@ def test_pr_graph_check_runs_repo_stats_after_artifact_validation() -> None:
     assert 'python -m pip install ".[dev]"' in str(steps[install_index]["run"])
     assert stats_index > artifact_index
     assert steps[stats_index]["run"] == "python src/update_repo_stats.py --check"
+
+
+def test_graph_release_metadata_matches_committed_lfs_pointers() -> None:
+    full = _head_lfs_pointer("graph/wiki-graph.tar.gz")
+    runtime = _head_lfs_pointer("graph/wiki-graph-runtime.tar.gz")
+    stats = json.loads(Path("graph/wiki-graph-stats.json").read_text(encoding="utf-8"))
+
+    assert stats["artifact"] == {"path": "graph/wiki-graph.tar.gz", **full}
+
+    for workflow_path in (
+        ".github/workflows/test.yml",
+        ".github/workflows/publish.yml",
+        ".github/workflows/huggingface-sync.yml",
+    ):
+        workflow = Path(workflow_path).read_text(encoding="utf-8")
+        for pointer in (full, runtime):
+            assert f'"sha256": "{pointer["sha256"]}"' in workflow
+            assert f'"size": {pointer["size"]}' in workflow
 
 
 def test_public_docs_and_readmes_expose_current_graph_counts() -> None:
