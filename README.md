@@ -148,9 +148,11 @@ It uses the same changed-file classifier as GitHub Actions, then runs the
 matching local checks: stats, ruff format/check, mypy, pip check, unit
 coverage, canaries, package build, twine, docs, graph validation, browser, and
 similarity gates as needed. For docs changes, that docs gate runs the public
-docs tracker checks before the strict MkDocs build. Use `--profile full` before
-release work to force the source/package gates even for docs-only or graph-only
-changes.
+docs tracker checks before the strict MkDocs build. When graph artifacts are
+changed and still checked out as Git LFS pointers, preflight hydrates only the
+required tarballs, checks the pointer SHA-256 and size caps, then validates the
+artifacts. Use `--profile full` before release work to force the
+source/package gates even for docs-only or graph-only changes.
 
 The **`ctx-monitor`** dashboard shows currently loaded skills, agents, MCP servers, installed harness records, selectable recommendations (`/recommend`), and generic-harness validation/escalation plus tool-selection/token-usage state (`/runtime`). It provides load/unload buttons where ctx owns the live action, a graph view (`/graph?slug=...`), the LLM-wiki entity browser (`/wiki/<slug>`), a filterable skills grid, a session timeline, audit/runtime log views, and a live SSE event stream. Installed harness records appear in `/loaded`; harness pages appear in `/wiki` and `/graph`. Harness install/update/uninstall actions stay in `ctx-harness-install`.
 

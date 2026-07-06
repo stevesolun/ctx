@@ -90,7 +90,10 @@ See `src/backup_config.py` and the `backup` section of
 
 To override per user, drop a partial config at
 `~/.claude/backup-config.json`. Fields you omit fall back to the repo
-default. Example:
+default. Invalid `top_files` entries are ignored with a `[backup-config]`
+stderr warning; if every supplied `top_files` entry is invalid, the effective
+config falls back to the defaults instead of disabling top-level backups.
+Example:
 
 ```json
 {

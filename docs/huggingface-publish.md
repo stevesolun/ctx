@@ -21,9 +21,11 @@ by git.
 
 Every push to `main` runs `.github/workflows/huggingface-sync.yml`. The job
 checks out source without spending Git LFS bandwidth, hydrates the required
-graph artifacts from the latest GitHub release assets, installs the sync
-dependencies, and calls `scripts/sync_huggingface.py`. It publishes only when
-the repository secret `HF_TOKEN` is configured. On the canonical
+graph artifacts from matching GitHub release cache assets, and falls back to a
+targeted `git lfs pull` only when a pointer is newer than the cache and within
+the configured size cap. It then installs the sync dependencies and calls
+`scripts/sync_huggingface.py`. It publishes only when the repository secret
+`HF_TOKEN` is configured. On the canonical
 `stevesolun/ctx` repository, a missing token is a hard failure so main cannot
 silently drift from the dataset repo. On forks, a missing token still exits
 successfully with a notice because forks are not trusted publishing sources.

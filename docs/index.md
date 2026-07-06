@@ -55,6 +55,9 @@ with persistent memory that gets smarter every session.
     runs the matching local gates before you open a PR: stats, ruff
     format/check, mypy, pip check, unit coverage, canaries, package build,
     twine, docs, graph validation, browser, and similarity checks as needed.
+    When graph artifacts are still Git LFS pointers, preflight hydrates only
+    the required tarballs, verifies their pointer SHA-256 and size caps, then
+    validates the artifacts.
     Use `--profile full` before release work to force the source/package gates
     even for docs-only or graph-only changes. Docs changes run public docs
     tracker checks before the strict MkDocs build, including bug-smoke,
