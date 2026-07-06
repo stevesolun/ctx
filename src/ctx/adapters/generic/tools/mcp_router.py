@@ -47,7 +47,7 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 from ctx.adapters.generic.providers.base import ToolDefinition
 from ctx.telemetry import (
@@ -57,6 +57,7 @@ from ctx.telemetry import (
     telemetry_span,
     traceparent_from_span,
 )
+from ctx.utils._secret_scan import find_inline_secret_arg, secret_key_like
 
 _logger = logging.getLogger(__name__)
 
@@ -88,13 +89,18 @@ _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _RESERVED_SERVER_NAMES = frozenset({"ctx"})
 _SENSITIVE_ASSIGNMENT_RE = re.compile(
     r"(?i)\b([A-Z0-9_-]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|"
-    r"CREDENTIAL|AUTHORIZATION)[A-Z0-9_-]*)\s*([:=])\s*([^\s]+)"
+    r"PASSWD|PRIVATE[_-]?KEY|CREDENTIAL|ACCESS[_-]?KEY|"
+    r"CLIENT[_-]?SECRET|AUTHORIZATION|BEARER)[A-Z0-9_-]*)\s*([:=])\s*([^\s]+)"
 )
 _BEARER_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")
 _TOKEN_VALUE_RE = re.compile(
     r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat|hf|sk|xox[baprs])"
     r"[_-]?[A-Za-z0-9_./+=-]{8,}\b"
 )
+_ENV_PLACEHOLDER_RE = re.compile(
+    r"\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<bare>[A-Za-z_][A-Za-z0-9_]*))"
+)
+_MIN_LITERAL_SECRET_LENGTH = 4
 
 
 def _duration_ms(started: float) -> float:
@@ -187,14 +193,25 @@ def _validate_env_name(name: str) -> None:
         raise ValueError(f"invalid MCP credential env var name: {name!r}")
 
 
-def _redact_sensitive_text(text: str) -> str:
+def _redact_sensitive_text(text: str, literal_values: Iterable[str] = ()) -> str:
     """Remove likely credential values from diagnostics before retention."""
     text = _BEARER_RE.sub("Bearer [REDACTED]", text)
     text = _SENSITIVE_ASSIGNMENT_RE.sub(
         lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]",
         text,
     )
-    return _TOKEN_VALUE_RE.sub("[REDACTED]", text)
+    text = _TOKEN_VALUE_RE.sub("[REDACTED]", text)
+    for value in sorted(
+        {
+            value
+            for value in literal_values
+            if len(value) >= _MIN_LITERAL_SECRET_LENGTH and "[REDACTED]" not in value
+        },
+        key=len,
+        reverse=True,
+    ):
+        text = text.replace(value, "[REDACTED]")
+    return text
 
 
 def _child_env_for_config(config: "McpServerConfig") -> dict[str, str]:
@@ -204,6 +221,65 @@ def _child_env_for_config(config: "McpServerConfig") -> dict[str, str]:
             env[key] = os.environ[key]
     env.update(config.env)
     return env
+
+
+def _stderr_redaction_values(config: "McpServerConfig", env: dict[str, str]) -> tuple[str, ...]:
+    credential_keys = {key.upper() for key in config.credential_env}
+    values = []
+    for key, value in env.items():
+        if key.upper() in credential_keys or secret_key_like(key):
+            values.append(value)
+    return tuple(dict.fromkeys(values))
+
+
+def _env_placeholder_names(value: str) -> tuple[str, ...]:
+    names: list[str] = []
+    for match in _ENV_PLACEHOLDER_RE.finditer(value):
+        name = match.group("braced") or match.group("bare")
+        if name is not None:
+            names.append(name)
+    return tuple(names)
+
+
+def _is_sensitive_env_reference(config: "McpServerConfig", name: str) -> bool:
+    credential_keys = {key.upper() for key in config.credential_env}
+    return name.upper() in credential_keys or secret_key_like(name)
+
+
+def _expand_env_placeholders(value: str, env: dict[str, str]) -> str:
+    def replace_match(match: re.Match[str]) -> str:
+        name = match.group("braced") or match.group("bare")
+        if name is None:
+            return match.group(0)
+        return env.get(name, match.group(0))
+
+    return _ENV_PLACEHOLDER_RE.sub(replace_match, value)
+
+
+def _expand_config_args(config: "McpServerConfig", env: dict[str, str]) -> tuple[str, ...]:
+    if not config.expand_argv_env:
+        return config.args
+    if not config.allow_argv_secret_expansion:
+        for arg in config.args:
+            for name in _env_placeholder_names(arg):
+                if name in env and _is_sensitive_env_reference(config, name):
+                    raise ValueError(
+                        f"MCP server {config.name!r} argv references sensitive env var "
+                        f"{name!r}; pass secrets through the child environment or set "
+                        "allow_argv_secret_expansion=True only for trusted local servers"
+                    )
+    expanded = tuple(_expand_env_placeholders(arg, env) for arg in config.args)
+    if not config.allow_argv_secret_expansion:
+        secret_arg = find_inline_secret_arg(list(expanded))
+        bearer_arg = next((arg for arg in expanded if _BEARER_RE.search(arg)), None)
+        if secret_arg is not None or bearer_arg is not None:
+            marker = secret_arg if secret_arg is not None else "Bearer"
+            raise ValueError(
+                f"MCP server {config.name!r} argv expands an env var into secret-looking "
+                f"argument {marker!r}; pass secrets through the child environment or set "
+                "allow_argv_secret_expansion=True only for trusted local servers"
+            )
+    return expanded
 
 
 def _popen_process_group_kwargs() -> dict[str, Any]:
@@ -282,6 +358,12 @@ class McpServerConfig:
     so there is no shell interpolation — a server config cannot inject
     shell metacharacters into the spawn call.
 
+    ``args`` are literal by default. Set ``expand_argv_env=True`` to expand
+    ``$ENVVAR`` or ``${ENVVAR}`` placeholders from the final child environment
+    immediately before spawn. Sensitive env vars are not expanded into argv
+    unless ``allow_argv_secret_expansion`` is explicitly enabled for a trusted
+    local server.
+
     ``env`` is the explicit child overlay. Parent secrets are not
     inherited by default; only a small process-basics allowlist
     (PATH, temp/home, locale, Windows runtime vars) is passed through.
@@ -299,6 +381,8 @@ class McpServerConfig:
     startup_timeout: float = 10.0
     request_timeout: float = 30.0
     inherit_env: bool = False
+    allow_argv_secret_expansion: bool = False
+    expand_argv_env: bool = False
 
     def __post_init__(self) -> None:
         _validate_server_name(self.name)
@@ -337,6 +421,7 @@ class McpClient:
         # thread so a chatty server doesn't block the pipe.
         self._stderr_lines: list[str] = []
         self._stderr_thread: threading.Thread | None = None
+        self._stderr_redaction_values: tuple[str, ...] = ()
 
     # ── lifecycle ──────────────────────────────────────────────────────────
 
@@ -347,11 +432,13 @@ class McpClient:
 
         self._stdout_frames = queue.Queue()
         env = _child_env_for_config(self._config)
+        self._stderr_redaction_values = _stderr_redaction_values(self._config, env)
 
         command = _resolve_executable(self._config.command, env)
+        args = _expand_config_args(self._config, env)
         try:
             self._proc = subprocess.Popen(
-                [command, *self._config.args],
+                [command, *args],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -360,6 +447,7 @@ class McpClient:
                 **_popen_process_group_kwargs(),
             )
         except OSError as exc:
+            self._stderr_redaction_values = ()
             raise McpServerError(
                 f"{self._config.name}: failed to start MCP command {self._config.command!r}: {exc}"
             ) from exc
@@ -367,7 +455,11 @@ class McpClient:
 
         # Drain stderr in the background so a verbose server can't fill
         # the OS pipe buffer and deadlock us.
-        self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
+        self._stderr_thread = threading.Thread(
+            target=self._drain_stderr,
+            args=(self._stderr_redaction_values,),
+            daemon=True,
+        )
         self._stderr_thread.start()
         self._stdout_thread = threading.Thread(target=self._drain_stdout, daemon=True)
         self._stdout_thread.start()
@@ -395,6 +487,7 @@ class McpClient:
         proc = self._proc
         self._proc = None
         if proc is None:
+            self._stderr_redaction_values = ()
             return
         try:
             # Close stdin to signal the server to exit cleanly.
@@ -424,6 +517,7 @@ class McpClient:
                 thread.join(timeout=0.2)
         self._stdout_thread = None
         self._stderr_thread = None
+        self._stderr_redaction_values = ()
 
     def __enter__(self) -> "McpClient":
         self.start()
@@ -649,7 +743,7 @@ class McpClient:
         finally:
             self._stdout_frames.put(None)
 
-    def _drain_stderr(self) -> None:
+    def _drain_stderr(self, redaction_values: tuple[str, ...]) -> None:
         """Consume stderr in the background; keep the last ~200 lines."""
         proc = self._proc
         if proc is None or proc.stderr is None:
@@ -659,7 +753,7 @@ class McpClient:
                 line = raw.decode("utf-8", errors="replace").rstrip()
                 if not line:
                     continue
-                self._stderr_lines.append(_redact_sensitive_text(line))
+                self._stderr_lines.append(_redact_sensitive_text(line, redaction_values))
                 # Cap memory usage on a chatty server.
                 if len(self._stderr_lines) > 200:
                     del self._stderr_lines[:-200]

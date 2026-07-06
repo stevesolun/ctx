@@ -20,6 +20,15 @@ RELEASE_GENERATED_STATS_FILES = {
     "docs/index.md",
     "docs/knowledge-graph.md",
 }
+MAINTAINER_SCRIPT_CONTRACT_FILES = {
+    "scripts/clean_host_contract.py",
+    "scripts/graph_artifact_guard.py",
+    "scripts/pack_full_wiki_tar.py",
+    "scripts/sync_huggingface.py",
+}
+GATE_CONFIG_CONTRACT_FILES = {
+    ".no-mistakes.yaml",
+}
 VERSION_LINE_RE = re.compile(r'version = "\d+\.\d+\.\d+(?:[-+._a-zA-Z0-9]*)?"')
 INIT_VERSION_LINE_RE = re.compile(r'__version__ = "\d+\.\d+\.\d+(?:[-+._a-zA-Z0-9]*)?"')
 TEST_COUNT_STATS_RE = re.compile(
@@ -55,7 +64,8 @@ def is_contract_file(path: str) -> bool:
     return (
         (path.startswith("src/") and path.endswith((".py", ".json")))
         or path.startswith("scripts/ci_")
-        or path == "scripts/clean_host_contract.py"
+        or path in MAINTAINER_SCRIPT_CONTRACT_FILES
+        or path in GATE_CONFIG_CONTRACT_FILES
         or path == "pyproject.toml"
         or (path.startswith(".github/workflows/") and path.endswith((".yml", ".yaml")))
     ) and not path.startswith("src/tests/")

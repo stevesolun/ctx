@@ -70,6 +70,9 @@ export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 export PIP_DISABLE_PIP_VERSION_CHECK="${PIP_DISABLE_PIP_VERSION_CHECK:-1}"
 
 case "${action}" in
+  fast)
+    exec python scripts/local_fast_gate.py --profile pr "${@:2}"
+    ;;
   test)
     exec python scripts/ci_preflight.py --profile pr
     ;;
@@ -82,7 +85,7 @@ case "${action}" in
     exec python -m ruff format src hooks scripts
     ;;
   *)
-    echo "Usage: scripts/no_mistakes_run.sh {test|lint|format}" >&2
+    echo "Usage: scripts/no_mistakes_run.sh {fast|test|lint|format}" >&2
     exit 64
     ;;
 esac

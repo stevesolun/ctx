@@ -21,12 +21,19 @@ by git.
 
 Every push to `main` runs `.github/workflows/huggingface-sync.yml`. The job
 checks out source without spending Git LFS bandwidth, hydrates the required
-graph artifacts from the latest GitHub release assets, installs the sync
-dependencies, and calls `scripts/sync_huggingface.py`. It publishes only when
-the repository secret `HF_TOKEN` is configured. On the canonical
+graph artifacts from matching GitHub release cache assets, and falls back to a
+targeted `git lfs pull` only when a pointer is newer than the cache and within
+the configured size cap. It then installs the sync dependencies and calls
+`scripts/sync_huggingface.py`. It publishes only when the repository secret
+`HF_TOKEN` is configured. On the canonical
 `stevesolun/ctx` repository, a missing token is a hard failure so main cannot
 silently drift from the dataset repo. On forks, a missing token still exits
 successfully with a notice because forks are not trusted publishing sources.
+
+When only repo-card inputs changed (`README.md`, `CHANGELOG.md`, or files under
+`docs/`), the workflow uses card-only upload mode. Source, test, workflow, graph,
+or packaging changes always run the full dataset sync so tracked files cannot
+drift behind GitHub.
 
 The sync script is still the contract: it exports the tracked git snapshot,
 adds Hugging Face repo-card metadata, validates README/docs stats, verifies the
@@ -41,10 +48,10 @@ uploaded `README.md`, and refuses to publish if the full wiki tarball, runtime
 wiki tarball, or compressed skill index is missing, too small, or still a Git
 LFS pointer.
 
-The script prefers Hugging Face's resumable large-folder uploader when the
-remote already has no stale paths. If the remote contains files that are not in
-the current git snapshot, the script falls back to a single clean replacement
-commit so deleted local files cannot survive remotely.
+Full sync uploads the exported tree with `delete_patterns="*"`, so files removed
+from the current git snapshot are removed remotely in the same commit.
+Card-only sync exports only `README.md`, `CHANGELOG.md`, and tracked `docs/**`
+inputs, then replaces just those remote paths.
 
 Do not paste the token into a command line. Prompt for it, set it only for the
 current process, and clear it after the upload.
@@ -63,6 +70,12 @@ try {
   }
   Remove-Item Env:\HF_TOKEN -ErrorAction SilentlyContinue
 }
+```
+
+For a README/changelog/docs-only refresh:
+
+```powershell
+python scripts/sync_huggingface.py --repo . --repo-id Stevesolun/ctx --repo-type dataset --card-only
 ```
 
 ## Verify

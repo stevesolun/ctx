@@ -214,7 +214,7 @@ def entity_detail(
     return {
         "slug": slug,
         "type": detected_type,
-        "path": str(path),
+        "path": wiki_relative_path(wiki_dir, path) or "",
         "frontmatter": frontmatter,
         "body": body,
     }

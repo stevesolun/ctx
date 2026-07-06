@@ -33,8 +33,9 @@ Commands:
         Restore the snapshot over the live tree. Without --dry-run this
         overwrites live files; with --dry-run it prints what would change.
 
-    python src/backup_mirror.py prune --keep <N>
-        Delete all but the N newest snapshots. Legacy mode.
+    python src/backup_mirror.py prune --keep <N> [--dry-run]
+        Delete all but the N newest snapshots. Legacy mode. With
+        ``--dry-run`` it prints what would be removed without deleting.
 
     python src/backup_mirror.py prune --policy [--dry-run] [--json]
         Apply the configured retention policy (keep_latest + keep_daily).
@@ -645,27 +646,47 @@ def _delete_snapshot_dirs(
     backups_dir) or any path that fails the containment check.
     """
     removed: list[str] = []
-    for snap in snaps_to_remove:
+    for snap in _safe_prune_snapshots(snaps_to_remove, backups_dir):
         snap_path = Path(snap.path)
-        if snap_path.is_symlink() or not _contained(snap_path, backups_dir):
-            continue
         shutil.rmtree(snap_path, ignore_errors=True)
         removed.append(snap.snapshot_id)
     return removed
 
 
-def prune_snapshots(keep: int, backups_dir: Path | None = None) -> tuple[str, ...]:
+def _safe_prune_snapshots(
+    snaps_to_remove: Iterable[SnapshotInfo],
+    backups_dir: Path,
+) -> list[SnapshotInfo]:
+    safe: list[SnapshotInfo] = []
+    for snap in snaps_to_remove:
+        snap_path = Path(snap.path)
+        if snap_path.is_symlink() or not _contained(snap_path, backups_dir):
+            continue
+        safe.append(snap)
+    return safe
+
+
+def prune_snapshots(
+    keep: int,
+    backups_dir: Path | None = None,
+    *,
+    dry_run: bool = False,
+) -> tuple[str, ...]:
     """Legacy prune: keep only the ``keep`` newest snapshots.
 
     Retained for backward compatibility. New callers should prefer
     :func:`prune_by_policy`, which honours both ``keep_latest`` and
-    ``keep_daily`` from the active :class:`BackupRetention`.
+    ``keep_daily`` from the active :class:`BackupRetention`. When
+    ``dry_run`` is true, return the snapshot IDs that would be removed without
+    deleting their directories.
     """
     if keep < 0:
         raise ValueError(f"keep must be >= 0, got {keep}")
     backups_dir = backups_dir if backups_dir is not None else BACKUPS_DIR
     snaps = list_snapshots(backups_dir)
     to_remove = snaps[keep:]
+    if dry_run:
+        return tuple(s.snapshot_id for s in _safe_prune_snapshots(to_remove, backups_dir))
     return tuple(_delete_snapshot_dirs(to_remove, backups_dir))
 
 
@@ -702,11 +723,18 @@ def prune_by_policy(
     snaps = list_snapshots(backups_dir)
     plan = plan_prune(snaps, policy, now=now)
 
-    if dry_run:
-        return plan
-
     by_id = {s.snapshot_id: s for s in snaps}
     to_remove = [by_id[i] for i in plan.delete if i in by_id]
+    if dry_run:
+        safe_delete = {snap.snapshot_id for snap in _safe_prune_snapshots(to_remove, backups_dir)}
+        pruned_delete = tuple(i for i in plan.delete if i in safe_delete)
+        return RetentionPlan(
+            keep=plan.keep,
+            delete=pruned_delete,
+            protected_by_latest=plan.protected_by_latest,
+            protected_by_daily=plan.protected_by_daily,
+        )
+
     removed = _delete_snapshot_dirs(to_remove, backups_dir)
     # Any snapshot in plan.delete that we refused to touch (symlink or
     # containment failure) stays on disk — surface that honestly by
@@ -916,10 +944,11 @@ def cmd_prune(args: argparse.Namespace) -> int:
     if args.keep is None:
         print("prune requires either --policy or --keep N", file=sys.stderr)
         return 2
-    removed = prune_snapshots(args.keep)
+    removed = prune_snapshots(args.keep, dry_run=args.dry_run)
     for r in removed:
-        print(f"removed {r}")
-    print(f"kept {args.keep} newest snapshot(s); removed {len(removed)}.")
+        print(f"{'would remove' if args.dry_run else 'removed'} {r}")
+    action = "would remove" if args.dry_run else "removed"
+    print(f"kept {args.keep} newest snapshot(s); {action} {len(removed)}.")
     return 0
 
 

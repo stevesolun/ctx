@@ -1256,6 +1256,137 @@ def test_process_next_maintenance_job_retries_handler_failure(
     assert "tar refresh failed" in str(current.last_error)
 
 
+def test_process_next_artifact_promotion_rejects_outside_target_before_move(
+    tmp_path: Path,
+) -> None:
+    wiki = tmp_path / "wiki"
+    staged = wiki / "graphify-out" / "graph.json.staged"
+    staged.parent.mkdir(parents=True)
+    staged.write_text('{"nodes":[],"edges":[],"graph":{}}\n', encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("old\n", encoding="utf-8")
+    queued = wiki_queue.enqueue_maintenance_job(
+        wiki,
+        kind=wiki_queue.ARTIFACT_PROMOTION_JOB,
+        payload={
+            "staged_path": str(staged),
+            "target_path": str(outside),
+        },
+        source="test",
+        now=10.0,
+    )
+
+    result = wiki_queue_worker.process_next(wiki, worker_id="worker-a", now=20.0)
+
+    assert result is not None
+    assert result.job_id == queued.id
+    assert result.kind == wiki_queue.ARTIFACT_PROMOTION_JOB
+    assert result.status == wiki_queue.STATUS_PENDING
+    assert "target_path is not an allowed artifact target" in result.message
+    assert outside.read_text(encoding="utf-8") == "old\n"
+    assert staged.read_text(encoding="utf-8") == '{"nodes":[],"edges":[],"graph":{}}\n'
+    assert not outside.with_name("outside.txt.promotion.json").exists()
+
+
+def test_process_next_artifact_promotion_allows_known_graph_target(
+    tmp_path: Path,
+) -> None:
+    wiki = tmp_path / "wiki"
+    target = wiki / "graphify-out" / "graph.json"
+    staged = target.with_name("graph.json.staged")
+    target.parent.mkdir(parents=True)
+    target.write_text('{"nodes":["old"],"edges":[],"graph":{}}\n', encoding="utf-8")
+    staged.write_text('{"nodes":[],"edges":[],"graph":{}}\n', encoding="utf-8")
+    queued = wiki_queue.enqueue_maintenance_job(
+        wiki,
+        kind=wiki_queue.ARTIFACT_PROMOTION_JOB,
+        payload={
+            "staged_path": "graphify-out/graph.json.staged",
+            "target_path": "graphify-out/graph.json",
+        },
+        source="test",
+        now=10.0,
+    )
+
+    result = wiki_queue_worker.process_next(wiki, worker_id="worker-a", now=20.0)
+
+    assert result is not None
+    assert result.job_id == queued.id
+    assert result.kind == wiki_queue.ARTIFACT_PROMOTION_JOB
+    assert result.status == wiki_queue.STATUS_SUCCEEDED
+    assert result.message == f"promoted artifact to {target.resolve()}"
+    assert target.read_text(encoding="utf-8") == '{"nodes":[],"edges":[],"graph":{}}\n'
+    assert not staged.exists()
+    assert target.with_name("graph.json.promotion.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "payload", "message"),
+    (
+        ("graph.json", {"nodes": [], "graph": {}}, "missing edges list"),
+        (
+            "graph-delta.json",
+            {"version": 1, "full_rebuild": False, "export_id": "export-test"},
+            "missing nodes list",
+        ),
+        ("communities.json", {"export_id": "export-test"}, "missing communities object"),
+        (
+            "graph-export-manifest.json",
+            {
+                "version": 1,
+                "export_id": "export-test",
+                "artifacts": {"graph": "graph.json"},
+                "counts": {"nodes": 1, "edges": 0, "communities": 0},
+            },
+            "invalid artifacts map",
+        ),
+    ),
+)
+def test_artifact_promotion_uses_target_specific_graph_json_validators(
+    tmp_path: Path,
+    name: str,
+    payload: dict[str, Any],
+    message: str,
+) -> None:
+    target = tmp_path / "wiki" / "graphify-out" / name
+    target.parent.mkdir(parents=True)
+    staged = target.with_name(f"{target.name}.staged")
+    staged.write_text(json.dumps(payload), encoding="utf-8")
+    validator = wiki_queue_worker._artifact_validator_for_target(target)
+
+    assert validator is not None
+    with pytest.raises(ValueError, match=message):
+        validator(staged)
+
+
+def test_artifact_promotion_manifest_validator_accepts_graph_packs(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "wiki" / "graphify-out" / "graph-export-manifest.json"
+    target.parent.mkdir(parents=True)
+    staged = target.with_name(f"{target.name}.staged")
+    staged.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "export_id": "export-test",
+                "artifacts": {
+                    "graph": "packs",
+                    "delta": "graph-delta.json",
+                    "communities": "communities.json",
+                    "report": "graph-report.md",
+                },
+                "counts": {"nodes": 1, "edges": 0, "communities": 0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    validator = wiki_queue_worker._artifact_validator_for_target(target)
+
+    assert validator is not None
+    validator(staged)
+
+
 def test_tar_refresh_handler_uses_from_catalog_for_catalog_payload(
     tmp_path: Path,
     monkeypatch: Any,

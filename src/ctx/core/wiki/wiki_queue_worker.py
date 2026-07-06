@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import socket
 import subprocess
@@ -21,7 +22,12 @@ from ctx.core.graph.graph_packs import (
 )
 from ctx.core.graph.graph_store import ensure_graph_store
 from ctx.core.graph.incremental_attach import attach_entity
-from ctx.core.wiki.artifact_promotion import promote_staged_artifact
+from ctx.core.wiki.artifact_promotion import (
+    ArtifactValidator,
+    promote_staged_artifact,
+    validate_gzip_json_artifact,
+    validate_json_artifact,
+)
 from ctx.core.wiki import wiki_queue
 from ctx.core.wiki.pack_compaction import (
     compact_active_pack_sets,
@@ -41,6 +47,30 @@ _ENTITY_SUBJECT_TYPES = {
 }
 _DEFAULT_ATTACH_MIN_FINAL_WEIGHT = 0.03
 _VECTOR_INDEX_META_NAME = "vector-index.meta.json"
+_WIKI_GRAPH_PROMOTION_TARGET_NAMES = frozenset(
+    {
+        "communities.json",
+        "graph-delta.json",
+        "graph-export-manifest.json",
+        "graph-report.md",
+        "graph.json",
+    }
+)
+_REPO_GRAPH_PROMOTION_TARGET_NAMES = frozenset(
+    {
+        "communities.json",
+        "dedup-report.json",
+        "dedup-report.md",
+        "entity-overlays.jsonl",
+        "skills-sh-catalog.json.gz",
+        "skillspector-audit.jsonl.gz",
+        "tag-backfill.json",
+        "tag-backfill.md",
+        "wiki-graph-runtime.tar.gz",
+        "wiki-graph-stats.json",
+        "wiki-graph.tar.gz",
+    }
+)
 MaintenanceHandler = Callable[[Path, dict[str, Any]], str]
 
 
@@ -556,19 +586,264 @@ def _handle_tar_refresh(_wiki_path: Path, payload: dict[str, Any]) -> str:
     return "tar refresh completed"
 
 
-def _handle_artifact_promotion(_wiki_path: Path, payload: dict[str, Any]) -> str:
-    staged = Path(_required_payload_string(payload, "staged_path"))
-    target = Path(_required_payload_string(payload, "target_path"))
+def _handle_artifact_promotion(wiki_path: Path, payload: dict[str, Any]) -> str:
+    staged, target = _resolve_artifact_promotion_paths(
+        wiki_path,
+        _required_payload_string(payload, "staged_path"),
+        _required_payload_string(payload, "target_path"),
+    )
     validator = payload.get("validator")
-    validate = None
-    if validator == "wiki-tar":
-        from import_skills_sh_catalog import _validate_wiki_tarball_candidate  # noqa: PLC0415
-
-        validate = _validate_wiki_tarball_candidate
-    elif validator not in (None, "", "none"):
+    if validator not in (None, "", "none", "wiki-tar"):
         raise ValueError(f"unsupported artifact validator: {validator}")
+    validate = _artifact_validator_for_target(target)
     result = promote_staged_artifact(staged, target, validate=validate)
     return f"promoted artifact to {result.target}"
+
+
+def _artifact_validator_for_target(target: Path) -> ArtifactValidator | None:
+    name = target.name
+    if name == "wiki-graph.tar.gz":
+        from import_skills_sh_catalog import _validate_wiki_tarball_candidate  # noqa: PLC0415
+
+        return _validate_wiki_tarball_candidate
+    if name == "wiki-graph-runtime.tar.gz":
+        return _validate_runtime_graph_tar_gz_artifact
+    if name.endswith(".jsonl.gz"):
+        return _validate_gzip_jsonl_artifact
+    if name.endswith(".json.gz"):
+        return validate_gzip_json_artifact
+    if name.endswith(".jsonl"):
+        return _validate_jsonl_artifact
+    if name == "graph.json":
+        return _validate_graph_json_artifact
+    if name == "graph-delta.json":
+        return _validate_graph_delta_json_artifact
+    if name == "communities.json":
+        return _validate_communities_json_artifact
+    if name == "graph-export-manifest.json":
+        return _validate_graph_export_manifest_artifact
+    if name.endswith(".json"):
+        return validate_json_artifact
+    return None
+
+
+def _validate_tar_gz_artifact(path: Path) -> None:
+    import tarfile
+
+    try:
+        with tarfile.open(path, "r:gz"):
+            pass
+    except tarfile.TarError as exc:
+        raise ValueError(f"invalid tar.gz artifact: {path}") from exc
+
+
+def _validate_runtime_graph_tar_gz_artifact(path: Path) -> None:
+    import tarfile
+
+    from validate_graph_artifacts import (  # noqa: PLC0415
+        GraphArtifactError,
+        validate_runtime_graph_archive,
+    )
+
+    _validate_tar_gz_artifact(path)
+    try:
+        validate_runtime_graph_archive(path)
+    except (GraphArtifactError, OSError, tarfile.TarError) as exc:
+        raise ValueError(f"invalid runtime graph artifact: {path}: {exc}") from exc
+
+
+def _validate_jsonl_artifact(path: Path) -> None:
+    try:
+        with path.open("rt", encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    json.loads(line)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid JSONL artifact: {path}") from exc
+
+
+def _validate_gzip_jsonl_artifact(path: Path) -> None:
+    import gzip
+
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    json.loads(line)
+    except (OSError, EOFError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid gzip JSONL artifact: {path}") from exc
+
+
+def _read_json_object_artifact(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid JSON artifact: {path}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"invalid JSON artifact: {path} must contain an object")
+    return data
+
+
+def _validate_graph_json_artifact(path: Path) -> None:
+    data = _read_json_object_artifact(path)
+    if not isinstance(data.get("nodes"), list):
+        raise ValueError(f"invalid graph.json artifact: {path} missing nodes list")
+    if not isinstance(data.get("edges"), list):
+        raise ValueError(f"invalid graph.json artifact: {path} missing edges list")
+    if not isinstance(data.get("graph"), dict):
+        raise ValueError(f"invalid graph.json artifact: {path} missing graph object")
+
+
+def _validate_graph_delta_json_artifact(path: Path) -> None:
+    data = _read_json_object_artifact(path)
+    if data.get("version") != 1:
+        raise ValueError(f"invalid graph-delta.json artifact: {path} version must be 1")
+    if not isinstance(data.get("full_rebuild"), bool):
+        raise ValueError(f"invalid graph-delta.json artifact: {path} missing full_rebuild bool")
+    if not isinstance(data.get("export_id"), str) or not data["export_id"].strip():
+        raise ValueError(f"invalid graph-delta.json artifact: {path} missing export_id")
+    if data["full_rebuild"]:
+        for key in ("node_count", "edge_count"):
+            if isinstance(data.get(key), bool) or not isinstance(data.get(key), int):
+                raise ValueError(f"invalid graph-delta.json artifact: {path} missing {key} int")
+    else:
+        if not isinstance(data.get("nodes"), list):
+            raise ValueError(f"invalid graph-delta.json artifact: {path} missing nodes list")
+        if not isinstance(data.get("edges"), list):
+            raise ValueError(f"invalid graph-delta.json artifact: {path} missing edges list")
+
+
+def _validate_communities_json_artifact(path: Path) -> None:
+    data = _read_json_object_artifact(path)
+    if not isinstance(data.get("export_id"), str) or not data["export_id"].strip():
+        raise ValueError(f"invalid communities.json artifact: {path} missing export_id")
+    if not isinstance(data.get("communities"), dict):
+        raise ValueError(f"invalid communities.json artifact: {path} missing communities object")
+    if isinstance(data.get("total_communities"), bool) or not isinstance(
+        data.get("total_communities"), int
+    ):
+        raise ValueError(f"invalid communities.json artifact: {path} missing total_communities int")
+
+
+def _validate_graph_export_manifest_artifact(path: Path) -> None:
+    data = _read_json_object_artifact(path)
+    if data.get("version") != 1:
+        raise ValueError(f"invalid graph-export-manifest artifact: {path} version must be 1")
+    if not isinstance(data.get("export_id"), str) or not data["export_id"].strip():
+        raise ValueError(f"invalid graph-export-manifest artifact: {path} missing export_id")
+    artifacts = data.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise ValueError(f"invalid graph-export-manifest artifact: {path} missing artifacts object")
+    expected_artifacts = {
+        "delta": "graph-delta.json",
+        "communities": "communities.json",
+        "report": "graph-report.md",
+    }
+    if set(artifacts) != {"graph", *expected_artifacts}:
+        raise ValueError(f"invalid graph-export-manifest artifact: {path} invalid artifacts map")
+    if artifacts.get("graph") not in {"graph.json", "packs"}:
+        raise ValueError(f"invalid graph-export-manifest artifact: {path} invalid graph artifact")
+    for key, expected in expected_artifacts.items():
+        if artifacts.get(key) != expected:
+            raise ValueError(
+                f"invalid graph-export-manifest artifact: {path} invalid artifacts map"
+            )
+    counts = data.get("counts")
+    if not isinstance(counts, dict):
+        raise ValueError(f"invalid graph-export-manifest artifact: {path} missing counts object")
+    for key in ("nodes", "edges", "communities"):
+        if isinstance(counts.get(key), bool) or not isinstance(counts.get(key), int):
+            raise ValueError(f"invalid graph-export-manifest artifact: {path} missing {key} count")
+
+
+def _resolve_artifact_promotion_paths(
+    wiki_path: Path,
+    raw_staged_path: str,
+    raw_target_path: str,
+) -> tuple[Path, Path]:
+    wiki_root = Path(wiki_path).expanduser().resolve()
+    repo_root = _source_root()
+    target = _resolve_artifact_target_path(raw_target_path, wiki_root, repo_root)
+    staged = _resolve_staged_artifact_path(raw_staged_path, target, wiki_root, repo_root)
+    expected_staged = target.with_name(f"{target.name}.staged")
+    if staged != expected_staged:
+        raise ValueError(
+            f"artifact promotion staged_path must be the target sibling {expected_staged}"
+        )
+    reject_symlink_path(staged)
+    reject_symlink_path(target)
+    return staged, target
+
+
+def _resolve_artifact_target_path(
+    raw_target_path: str,
+    wiki_root: Path,
+    repo_root: Path | None,
+) -> Path:
+    bases = (wiki_root,) if repo_root is None else (wiki_root, repo_root)
+    for base in bases:
+        target = _resolve_payload_path(raw_target_path, base)
+        if _is_allowed_artifact_target(target, wiki_root, repo_root):
+            return target
+    target = _resolve_payload_path(raw_target_path, wiki_root)
+    raise ValueError(f"artifact promotion target_path is not an allowed artifact target: {target}")
+
+
+def _resolve_staged_artifact_path(
+    raw_staged_path: str,
+    target: Path,
+    wiki_root: Path,
+    repo_root: Path | None,
+) -> Path:
+    path = Path(raw_staged_path).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    expected_staged = target.with_name(f"{target.name}.staged")
+    bases = (
+        (target.parent, wiki_root) if repo_root is None else (target.parent, wiki_root, repo_root)
+    )
+    for base in bases:
+        staged = (base / path).resolve()
+        if staged == expected_staged:
+            return staged
+    return (wiki_root / path).resolve()
+
+
+def _resolve_payload_path(raw_path: str, base: Path) -> Path:
+    path = Path(raw_path).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    return (base / path).resolve()
+
+
+def _is_allowed_artifact_target(target: Path, wiki_root: Path, repo_root: Path | None) -> bool:
+    if target.parent == wiki_root / "graphify-out":
+        return target.name in _WIKI_GRAPH_PROMOTION_TARGET_NAMES
+    if repo_root is not None and target.parent == repo_root / "graph":
+        return target.name in _REPO_GRAPH_PROMOTION_TARGET_NAMES
+    return False
+
+
+def _source_root() -> Path | None:
+    source = Path(__file__).resolve()
+    for parent in source.parents:
+        if _is_ctx_source_root(parent, source):
+            return parent
+    return None
+
+
+def _is_ctx_source_root(parent: Path, source: Path) -> bool:
+    pyproject = parent / "pyproject.toml"
+    repo_source = parent / "src" / "ctx" / "core" / "wiki" / "wiki_queue_worker.py"
+    if not pyproject.is_file() or not repo_source.is_file():
+        return False
+    try:
+        return (
+            'name = "claude-ctx"' in pyproject.read_text(encoding="utf-8")
+            and repo_source.resolve() == source
+        )
+    except OSError:
+        return False
 
 
 def _handle_pack_compaction(wiki_path: Path, payload: dict[str, Any]) -> str:

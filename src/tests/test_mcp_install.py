@@ -329,6 +329,22 @@ class TestInstallMcp:
             }
         ]
 
+    def test_already_installed_dry_run_does_not_reconcile_manifest(
+        self,
+        wiki_dir: Path,
+        isolated_manifest: Path,
+    ) -> None:
+        _write_entity(
+            wiki_dir,
+            "gh",
+            {"status": "installed", "install_cmd": "npx -y old-pkg"},
+        )
+
+        r = mcp_install.install_mcp("gh", wiki_dir=wiki_dir, auto=True, dry_run=True)
+
+        assert r.status == "skipped-existing"
+        assert install_utils.load_manifest()["load"] == []
+
     def test_force_overrides_skip(
         self,
         wiki_dir: Path,

@@ -161,8 +161,10 @@ def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:
 
     assert "HF_TOKEN: ${{ secrets.HF_TOKEN }}" in text
     assert "lfs: false" in text
-    assert "git lfs pull" not in text
-    assert "Resolving graph artifacts from matching release assets" in text
+    assert "Resolving graph artifacts from release cache, or targeted Git LFS" in text
+    assert "searching release caches before targeted Git LFS" in text
+    assert '"git", "lfs", "pull", "--include", path_name' in text
+    assert "verify_hydrated_file(artifact, expected_oid, expected_size)" in text
     assert 'tag_name.startswith("graph-artifacts-")' in text
     assert "latest_tag" not in text
     for artifact in _required_hydrated_artifacts():
@@ -172,6 +174,8 @@ def test_hf_sync_workflow_uses_secret_and_hardened_script() -> None:
     assert "--repo-type dataset" in text
     assert "--repo-type model" not in text
     assert "Classify sync scope" in text
+    assert 'card_only_prefixes = ("docs/",)' in text
+    assert 'card_only_prefixes = (".github/", "docs/", "src/tests/")' not in text
     assert "card_only_files" in text
     assert 'SYNC_MODE" == "card"' in text
     assert "--card-only" in text

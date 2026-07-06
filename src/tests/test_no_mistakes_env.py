@@ -70,7 +70,7 @@ def test_no_mistakes_repo_config_defines_deterministic_commands() -> None:
         "lint": "scripts/no_mistakes_run.sh lint",
         "format": "scripts/no_mistakes_run.sh format",
     }
-    assert config["auto_fix"]["review"] == 3
+    assert config["auto_fix"]["review"] == 0
     assert config["auto_fix"]["test"] == 3
     assert config["auto_fix"]["lint"] == 3
 

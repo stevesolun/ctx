@@ -26,6 +26,27 @@ pytest -q -m integration           # embedding precision/recall tests
 pytest --cov=src -q                # with coverage report
 ```
 
+Before opening a PR, run the local fast gate on committed branch history:
+
+```bash
+scripts/no_mistakes_run.sh fast
+```
+
+This selects the same PR checks as CI, groups independent work into lanes, and
+runs those lanes in isolated temporary git worktrees so local CPU, graph, docs,
+package, and test checks can run in parallel. It is the fast front door; the
+serial preflight/no-mistakes gate remains the authoritative final check:
+
+```bash
+python scripts/ci_preflight.py --profile pr
+```
+
+The preflight uses the same changed-file classifier as CI. Its no-test policy
+treats source, workflows, `pyproject.toml`, `scripts/ci_*`, maintainer graph/sync
+scripts, and `.no-mistakes.yaml` as contract files; include focused
+`src/tests/...` coverage unless the diff is a proven version or stats-only
+release metadata update.
+
 ## Documentation changes
 
 Public docs surfaces are release-tracked in the canonical
@@ -67,9 +88,25 @@ ruff check --fix src hooks scripts
 Maintainer no-mistakes agents can use `scripts/no_mistakes_codex_env.sh` as
 the Codex wrapper for this repo. It prepends the verified project Python venv
 when present and owner-only, plus Codex-bundled resources, without installing
-or upgrading system packages. Set `CTX_NO_MISTAKES_PYTHON_BIN` to override the
-Python venv explicitly; `CTX_NO_MISTAKES_CODEX_RESOURCES` and
+or upgrading system packages. Candidate venvs are checked in this order:
+`CTX_NO_MISTAKES_PYTHON_BIN`, `$PWD/.venv/bin`, this repository's `.venv/bin`,
+then `/tmp/ctx-verify-venv/bin`; the first owner-only venv containing
+`pytest`, `ruff`, and `mypy` wins and is exposed as
+`CTX_NO_MISTAKES_PYTHON_BIN_RESOLVED`. `CTX_NO_MISTAKES_CODEX_RESOURCES` and
 `CTX_NO_MISTAKES_REAL_CODEX` override the Codex resource directory or binary.
+The repo disables review-stage no-mistakes auto-fixes (`auto_fix.review: 0`) so
+review findings stay human-approved; rebase, test, document, lint, and CI stages
+still allow three automated repair attempts.
+
+## Release publishing
+
+PyPI publishes must run from a version tag that matches `pyproject.toml`; manual
+PyPI workflow dispatch is disabled. The publish workflow resolves the full and
+runtime graph tarballs from matching GitHub release cache assets first. If a
+checked-out Git LFS pointer is newer than the cache, it performs a targeted
+`git lfs pull` for that artifact only, enforces the configured pointer size cap,
+verifies SHA-256 and byte size, then runs graph validation before building and
+publishing the package.
 
 ## Commit conventions
 

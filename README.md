@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-4480_inventory-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-4575_inventory-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![Graph](https://img.shields.io/badge/Graph-79%2C958_nodes_/_1%2C778%2C069_edges-red.svg)](https://stevesolun.github.io/ctx/knowledge-graph/)
 [![Skills](https://img.shields.io/badge/Skills-68%2C494-blue.svg)](https://stevesolun.github.io/ctx/catalog/?type=skill)
 [![Agents](https://img.shields.io/badge/Agents-467-purple.svg)](https://stevesolun.github.io/ctx/catalog/?type=agent)
@@ -75,7 +75,7 @@ Examples from that tracker:
 pip install claude-ctx
 ctx-init                    # terminal wizard: hooks, graph, model, harness goal
 ctx-init --graph --hooks --model-mode skip  # fast runtime graph + Claude Code hooks
-ctx-init --graph --graph-install-mode full  # expand the full markdown wiki locally
+ctx-init --graph --graph-install-mode full  # install the full packed wiki locally
 ctx-init --wizard           # force the same wizard from scripts/tests
 ctx-init --model-mode custom --model openai/gpt-5.5 --goal "build a CAD agent"
 ```
@@ -95,17 +95,17 @@ recommendations, and the 207 harness pages needed by
 ctx-init --graph
 ```
 
-The full LLM-wiki artifact remains available for local browsing, Obsidian, and
-expanded markdown pages:
+The full LLM-wiki artifact remains available for local browsing and Obsidian.
+High-fanout skill, agent, MCP, converted, and concept pages are stored in
+`wiki-packs/` instead of expanded as individual files:
 
 ```bash
 ctx-init --graph --graph-install-mode full
 ```
 
-The full `wiki-graph.tar.gz` includes the shipped skill index,
-68,494 skill entity pages under `entities/skills/`, 67,024 hydrated
-installable `SKILL.md` files under `converted/`,
-and 207 harness pages under
+The full `wiki-graph.tar.gz` includes the shipped skill index and a wiki-pack
+base containing 68,494 skill entity pages plus 67,024 hydrated installable
+`SKILL.md` files. Harness pages remain directly available under
 `entities/harnesses/`.
 
 > **Windows:** PowerShell's built-in `tar.exe` does not support
@@ -138,19 +138,31 @@ ctx-telemetry-export --dry-run --json       # inspect privacy-redacted telemetry
 ctx-monitor serve          # local dashboard: http://127.0.0.1:8765/
 ```
 
-Before pushing, run the local PR gate:
+Before pushing, run the two-tier local PR gate. Start with the fast committed-HEAD
+gate:
+
+```bash
+scripts/no_mistakes_run.sh fast
+```
+
+That runner selects the same checks as PR preflight, groups independent checks
+into isolated temporary worktree lanes, and runs them in parallel. Treat it as
+the fast front door; the serial preflight/no-mistakes path remains the
+authoritative final local gate:
 
 ```bash
 python scripts/ci_preflight.py --profile pr
 ```
 
-It uses the same changed-file classifier as GitHub Actions, then runs the
+Preflight uses the same changed-file classifier as GitHub Actions, then runs the
 matching local checks: stats, ruff format/check, mypy, pip check, unit
 coverage, canaries, package build, twine, docs, graph validation, browser, and
 similarity gates as needed. For docs changes, that docs gate runs the public
-docs tracker checks before the strict MkDocs build. Use `--profile full` before
-release work to force the source/package gates even for docs-only or graph-only
-changes.
+docs tracker checks before the strict MkDocs build. When graph artifacts are
+changed and still checked out as Git LFS pointers, preflight hydrates only the
+required tarballs, checks the pointer SHA-256 and size caps, then validates the
+artifacts. Use `--profile full` before release work to force the
+source/package gates even for docs-only or graph-only changes.
 
 The **`ctx-monitor`** dashboard shows currently loaded skills, agents, MCP servers, installed harness records, selectable recommendations (`/recommend`), and generic-harness validation/escalation plus tool-selection/token-usage state (`/runtime`). It provides load/unload buttons where ctx owns the live action, a graph view (`/graph?slug=...`), the LLM-wiki entity browser (`/wiki/<slug>`), a filterable skills grid, a session timeline, audit/runtime log views, and a live SSE event stream. Installed harness records appear in `/loaded`; harness pages appear in `/wiki` and `/graph`. Harness install/update/uninstall actions stay in `ctx-harness-install`.
 

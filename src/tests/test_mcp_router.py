@@ -12,6 +12,7 @@ so there's no cross-test state.
 from __future__ import annotations
 
 import json
+import io
 import subprocess
 import sys
 import time
@@ -238,6 +239,10 @@ class TestClientRobustness:
             ("OPENAI_API_KEY=sk-proj-abcdefghijklmnop", ("sk-proj-abcdefghijklmnop",)),
             ("SLACK_BOT_TOKEN=xoxb-1234567890-secret", ("xoxb-1234567890-secret",)),
             ("db_password: supersecretpassword", ("supersecretpassword",)),
+            ("PRIVATE_KEY=supersecretprivatekey", ("supersecretprivatekey",)),
+            ("ACCESS_KEY=supersecretaccesskey", ("supersecretaccesskey",)),
+            ("SERVICE_PASSWD=supersecretpasswd", ("supersecretpasswd",)),
+            ("BEARER=supersecretbearer", ("supersecretbearer",)),
         ],
     )
     def test_redact_sensitive_text_matrix(
@@ -360,6 +365,38 @@ class TestClientRobustness:
         assert "Authorization:" in stderr_tail
         assert "[REDACTED]" in stderr_tail
 
+    def test_stderr_redacts_credential_env_values(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        secret = "argv-only-secret"
+        monkeypatch.setenv("MCP_API_KEY", secret)
+        cfg = _make_config(
+            extra_env={
+                "FAKE_MCP_NOISY_STDERR": "1",
+                "FAKE_MCP_STDERR_LINE": secret,
+            },
+            credential_env=("MCP_API_KEY",),
+        )
+
+        with McpClient(cfg) as client:
+            client.list_tools()
+            _wait_until(lambda: "[REDACTED]" in client._stderr_tail())
+            stderr_tail = client._stderr_tail()
+
+        assert secret not in stderr_tail
+        assert "[REDACTED]" in stderr_tail
+
+    def test_stderr_drain_uses_thread_redaction_snapshot(self) -> None:
+        secret = "late-secret"
+        client = McpClient(_make_config())
+        client._proc = type("Proc", (), {"stderr": io.BytesIO(f"{secret}\n".encode())})()  # type: ignore[assignment]
+        client._stderr_redaction_values = ()
+
+        client._drain_stderr((secret,))
+
+        assert client._stderr_lines == ["[REDACTED]"]
+
     def test_request_before_start_raises(self) -> None:
         client = McpClient(_make_config())
         with pytest.raises(RuntimeError, match="not started"):
@@ -440,6 +477,93 @@ class TestClientRobustness:
         monkeypatch.setenv("CTX_LEGACY_INHERIT_TEST", "visible")
         with McpClient(_make_config(inherit_env=True)) as client:
             assert client.call_tool("echo_env", {"name": "CTX_LEGACY_INHERIT_TEST"}) == "visible"
+
+    def test_env_placeholders_are_literal_by_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("MCP_API_KEY", "argv-only-secret")
+        cfg = McpServerConfig(
+            name="argvserver",
+            command="server",
+            args=("--api-key", "${MCP_API_KEY}", "--header=Bearer $MCP_API_KEY"),
+            credential_env=("MCP_API_KEY",),
+        )
+
+        assert mcp_router._expand_config_args(cfg, mcp_router._child_env_for_config(cfg)) == (
+            "--api-key",
+            "${MCP_API_KEY}",
+            "--header=Bearer $MCP_API_KEY",
+        )
+
+    def test_sensitive_env_placeholders_are_not_expanded_into_argv_by_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("MCP_API_KEY", "argv-only-secret")
+        cfg = McpServerConfig(
+            name="argvserver",
+            command="server",
+            args=("--api-key", "${MCP_API_KEY}", "--header=Bearer $MCP_API_KEY"),
+            credential_env=("MCP_API_KEY",),
+            expand_argv_env=True,
+        )
+
+        with pytest.raises(ValueError, match="sensitive env var 'MCP_API_KEY'"):
+            mcp_router._expand_config_args(cfg, mcp_router._child_env_for_config(cfg))
+
+    @pytest.mark.parametrize(
+        "env_name",
+        ("MCP_PRIVATE_KEY", "MCP_ACCESS_KEY", "SERVICE_PASSWD", "MCP_BEARER"),
+    )
+    def test_sensitive_env_placeholder_key_markers_are_rejected_by_default(
+        self,
+        env_name: str,
+    ) -> None:
+        cfg = McpServerConfig(
+            name="argvserver",
+            command="server",
+            args=(f"--auth=${{{env_name}}}",),
+            env={env_name: "argv-only-secret"},
+            expand_argv_env=True,
+        )
+        env = mcp_router._child_env_for_config(cfg)
+
+        with pytest.raises(ValueError, match=env_name):
+            mcp_router._expand_config_args(cfg, env)
+        assert "argv-only-secret" in mcp_router._stderr_redaction_values(cfg, env)
+
+    def test_non_secret_env_placeholders_expand_when_enabled(self) -> None:
+        cfg = McpServerConfig(
+            name="argvserver",
+            command="server",
+            args=("--port=${MCP_PORT}",),
+            env={"MCP_PORT": "8123"},
+            expand_argv_env=True,
+        )
+
+        assert mcp_router._expand_config_args(cfg, mcp_router._child_env_for_config(cfg)) == (
+            "--port=8123",
+        )
+
+    def test_argv_secret_expansion_requires_explicit_opt_in(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("MCP_API_KEY", "argv-only-secret")
+        cfg = McpServerConfig(
+            name="argvserver",
+            command="server",
+            args=("--api-key", "${MCP_API_KEY}"),
+            credential_env=("MCP_API_KEY",),
+            allow_argv_secret_expansion=True,
+            expand_argv_env=True,
+        )
+
+        assert mcp_router._expand_config_args(cfg, mcp_router._child_env_for_config(cfg)) == (
+            "--api-key",
+            "argv-only-secret",
+        )
 
 
 # ── McpRouter ─────────────────────────────────────────────────────────────────

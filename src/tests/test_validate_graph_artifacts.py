@@ -13,6 +13,7 @@ import pytest
 import yaml  # type: ignore[import-untyped]
 import networkx as nx
 
+import validate_graph_artifacts as graph_validator
 from ctx.core.graph.graph_packs import build_pack_manifest, write_base_pack, write_pack_manifest
 from ctx.core.wiki.wiki_packs import write_wiki_base_pack
 from scripts.ci_preflight import GRAPH_VALIDATE_ARGS
@@ -27,6 +28,7 @@ from validate_graph_artifacts import (
     _safe_tar_name,
     _scan_graph_json,
     validate_graph_artifacts,
+    validate_runtime_graph_archive,
 )
 
 _PREVIEW_HTML_FILES = (
@@ -287,17 +289,18 @@ def _write_runtime_archive(
 def _write_archive(
     graph_dir: Path,
     *,
-    include_converted: bool = True,
+    include_converted: bool = False,
     converted_skill_text: str = "# Example\n",
     include_graph: bool = True,
     graph_artifact: str = "graph.json",
     graph_pack_dir: Path | None = None,
-    include_expanded_entity_pages: bool = True,
+    include_expanded_entity_pages: bool = False,
     include_wiki_pack: bool = True,
     wiki_pack_dir: Path | None = None,
     include_original: bool = False,
     include_lock: bool = False,
     include_queue: bool = False,
+    top_level_log: str | None = None,
     include_delta: bool = True,
     include_report: bool = True,
     include_manifest: bool = True,
@@ -333,6 +336,8 @@ def _write_archive(
         wiki_pack_dir = _write_test_wiki_pack(graph_dir, export_id=manifest_export_id)
     with tarfile.open(graph_dir / "wiki-graph.tar.gz", "w:gz") as tf:
         _add_text(tf, "./index.md", "# Wiki\n")
+        if top_level_log is not None:
+            _add_text(tf, "./log.md", top_level_log)
         if include_wiki_pack and wiki_pack_dir is not None:
             for path in sorted(wiki_pack_dir.rglob("*")):
                 if path.is_file():
@@ -985,6 +990,39 @@ def test_validate_graph_artifacts_rejects_artifact_export_id_mismatch(
         validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
 
 
+def test_validate_graph_artifacts_rejects_runtime_graph_json_host_path(
+    tmp_path: Path,
+) -> None:
+    _write_catalog(
+        tmp_path,
+        converted_path="converted/skills-sh-example-skill/SKILL.md",
+    )
+    _write_archive(tmp_path)
+    graph = {
+        "graph": {"export_id": "export-test"},
+        "nodes": [
+            {
+                "id": "skill:skills-sh-example-skill",
+                "type": "skill",
+                "source_catalog": "skills.sh",
+                "metadata": {"source_path": "/Users/alice/private-notes.md"},
+            },
+            {"id": "harness:langgraph", "type": "harness"},
+        ],
+        "edges": [
+            {
+                "source": "skill:skills-sh-example-skill",
+                "target": "harness:langgraph",
+                "semantic_sim": 0.91,
+            },
+        ],
+    }
+    _write_runtime_archive(tmp_path, graph=graph)
+
+    with pytest.raises(GraphArtifactError, match="host path"):
+        validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
+
+
 def test_validate_graph_artifacts_rejects_missing_converted_catalog_path(
     tmp_path: Path,
 ) -> None:
@@ -993,7 +1031,18 @@ def test_validate_graph_artifacts_rejects_missing_converted_catalog_path(
         converted_path="converted/skills-sh-example-skill/SKILL.md",
     )
     (tmp_path / "communities.json").write_text("{}", encoding="utf-8")
-    _write_archive(tmp_path, include_converted=False, include_wiki_pack=False)
+    pack_root = tmp_path / "wiki-pack-missing-converted"
+    write_wiki_base_pack(
+        pack_dir=pack_root / "base-export-test",
+        pack_id="base-export-test",
+        base_export_id="export-test",
+        pages={
+            "index.md": "# Wiki\n",
+            "entities/skills/skills-sh-example-skill.md": "# Example\n",
+            "entities/harnesses/langgraph.md": "# LangGraph\n",
+        },
+    )
+    _write_archive(tmp_path, wiki_pack_dir=pack_root)
 
     with pytest.raises(GraphArtifactError, match="missing converted Skills.sh body"):
         validate_graph_artifacts(tmp_path)
@@ -1007,12 +1056,21 @@ def test_validate_graph_artifacts_rejects_missing_skill_bundle_reference(
         converted_path="converted/skills-sh-example-skill/SKILL.md",
     )
     (tmp_path / "communities.json").write_text("{}", encoding="utf-8")
-    _write_archive(
-        tmp_path,
-        converted_skill_text=(
-            "# Example\n\nUse `resources/implementation-playbook.md` for the implementation flow.\n"
-        ),
+    pack_root = tmp_path / "wiki-pack-missing-bundle"
+    write_wiki_base_pack(
+        pack_dir=pack_root / "base-export-test",
+        pack_id="base-export-test",
+        base_export_id="export-test",
+        pages={
+            "index.md": "# Wiki\n",
+            "entities/skills/skills-sh-example-skill.md": "# Example\n",
+            "entities/harnesses/langgraph.md": "# LangGraph\n",
+            "converted/skills-sh-example-skill/SKILL.md": (
+                "# Example\n\nUse `resources/implementation-playbook.md` for the implementation flow.\n"
+            ),
+        },
     )
+    _write_archive(tmp_path, wiki_pack_dir=pack_root)
 
     with pytest.raises(GraphArtifactError, match="missing bundled skill file"):
         validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
@@ -1094,6 +1152,35 @@ def test_validate_graph_artifacts_rejects_corrupt_graph_pack(tmp_path: Path) -> 
         validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
 
 
+def test_validate_runtime_graph_archive_rejects_host_path_graph_pack_node_id(
+    tmp_path: Path,
+) -> None:
+    graph = nx.Graph()
+    graph.add_node("/Users/steves/private", type="skill")
+    pack_root = tmp_path / "graph-pack-source-export-test"
+    write_base_pack(
+        pack_dir=pack_root / "base-export-test",
+        pack_id="base-export-test",
+        base_export_id="export-test",
+        config_hash="config-sha",
+        model_id="bge-small-en-v1.5",
+        graph=graph,
+    )
+    _write_runtime_archive(
+        tmp_path,
+        graph={},
+        include_graph=False,
+        graph_artifact="packs",
+        graph_pack_dir=pack_root,
+    )
+
+    with pytest.raises(GraphArtifactError, match="host path"):
+        validate_runtime_graph_archive(
+            tmp_path / "wiki-graph-runtime.tar.gz",
+            expected_harnesses=set(),
+        )
+
+
 def test_validate_graph_artifacts_rejects_original_backup_members(tmp_path: Path) -> None:
     _write_catalog(
         tmp_path,
@@ -1116,6 +1203,50 @@ def test_validate_graph_artifacts_rejects_lock_members(tmp_path: Path) -> None:
 
     with pytest.raises(GraphArtifactError, match="lock member"):
         validate_graph_artifacts(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "host_path",
+    [
+        "/Users/steves/ctx/graph",
+        "file:///Users/steves/ctx/graph",
+        "file:///home/steves/ctx/graph",
+        "C:\\Users\\steves\\ctx\\graph",
+    ],
+)
+def test_validate_graph_artifacts_rejects_host_paths_in_tar_markdown(
+    tmp_path: Path,
+    host_path: str,
+) -> None:
+    _write_catalog(
+        tmp_path,
+        converted_path="converted/skills-sh-example-skill/SKILL.md",
+    )
+    _write_archive(tmp_path, top_level_log=f"export log: {host_path}\n")
+
+    with pytest.raises(
+        GraphArtifactError,
+        match=r"archive markdown contains host path: log\.md",
+    ):
+        validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
+
+
+def test_validate_graph_artifacts_rejects_oversized_tar_markdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_catalog(
+        tmp_path,
+        converted_path="converted/skills-sh-example-skill/SKILL.md",
+    )
+    monkeypatch.setattr(graph_validator, "_MAX_MARKDOWN_MEMBER_BYTES", 1024)
+    _write_archive(tmp_path, include_converted=True, converted_skill_text="x" * 1025)
+
+    with pytest.raises(
+        GraphArtifactError,
+        match=r"archive markdown member too large: converted/skills-sh-example-skill/SKILL\.md",
+    ):
+        validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
 
 
 def test_validate_graph_artifacts_rejects_transient_queue_state(tmp_path: Path) -> None:
@@ -1536,11 +1667,13 @@ def test_validator_default_floors_match_preflight_contract() -> None:
     assert values["--min-semantic-edges"] == str(DEFAULT_MIN_SEMANTIC_EDGES)
 
 
-def test_graph_only_workflow_waits_for_release_asset_upload() -> None:
+def test_graph_only_workflow_uses_release_cache_or_targeted_lfs() -> None:
     workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
     steps = workflow["jobs"]["graph-check"]["steps"]
     resolve_step = next(
-        step for step in steps if step.get("name") == "Resolve graph artifacts from release assets"
+        step
+        for step in steps
+        if step.get("name") == "Resolve graph artifacts from release assets or targeted LFS"
     )
     script = resolve_step["run"]
 
@@ -1548,3 +1681,6 @@ def test_graph_only_workflow_waits_for_release_asset_upload() -> None:
     assert "while True:" in script
     assert "Waiting for matching release asset" in script
     assert "time.sleep(release_asset_poll_seconds)" in script
+    assert "Pointer for {path_name} is not in release cache" in script
+    assert '"git", "lfs", "pull", "--include", path_name' in script
+    assert "verify_hydrated_file(graph_tar, expected_oid, expected_size)" in script

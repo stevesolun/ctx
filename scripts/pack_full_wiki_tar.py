@@ -13,8 +13,51 @@ from pathlib import Path, PurePosixPath
 from ctx.core.wiki.wiki_packs import load_merged_wiki_pages, write_wiki_base_pack
 
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+_PATH_CHAR = r"[^`\"'<>|\s\r\n)]"
+_PATH_TOKEN = rf"{_PATH_CHAR}+"
+_PATH_TERMINAL_WORD = r"[A-Z0-9][^`\"'<>|/\\\s\r\n)]*"
+_PATH_LOWER_PROSE_WORDS = (
+    r"(?:a|an|and|are|as|at|by|for|from|in|is|of|on|or|the|to|was|were|with|without)"
+)
+_PATH_LOWER_TERMINAL_WORD = (
+    rf"(?!(?:{_PATH_LOWER_PROSE_WORDS})(?=$|[\s),.;:!?]))"
+    r"[a-z][^`\"'<>|/\\\s\r\n),.;:!?]*"
+)
+_PATH_TERMINAL_END = r"(?=$|[\r\n`\"'),.;:!?>\]])"
+_PATH_SPACED_COMPONENT = (
+    rf"(?: {_PATH_CHAR}*[\\/]{_PATH_CHAR}*| {_PATH_CHAR}*\.{_PATH_CHAR}+"
+    rf"|(?: {_PATH_TERMINAL_WORD})+"
+    rf"|(?: {_PATH_LOWER_TERMINAL_WORD}){{1,2}}{_PATH_TERMINAL_END})"
+)
+_PATH_BOUNDARY = r"(?:^|(?<=[`\"'(<\[\s=,:]))"
+_QUOTED_PATH_BOUNDARY = r"(?<=[`\"'(<\[])"
+_QUOTED_PATH_TOKEN = r"[^`\"'<>|\r\n)]+"
+_QUOTED_PATH_END = r"(?=[`\"')>\]])"
+_QUOTED_WINDOWS_USER_PATH_RE = re.compile(
+    rf"(?i){_QUOTED_PATH_BOUNDARY}[A-Z]:[\\/]+Users[\\/]+{_QUOTED_PATH_TOKEN}{_QUOTED_PATH_END}"
+)
+_QUOTED_POSIX_USER_PATH_RE = re.compile(
+    rf"{_QUOTED_PATH_BOUNDARY}(?:(?i:file:///)|/)(?:Users|home)/"
+    rf"{_QUOTED_PATH_TOKEN}{_QUOTED_PATH_END}"
+)
+_WINDOWS_USER_PATH_RE = re.compile(
+    rf"(?i)\b[A-Z]:[\\/]+Users[\\/]+{_PATH_TOKEN}(?:{_PATH_SPACED_COMPONENT})*"
+)
+_POSIX_USER_PATH_RE = re.compile(
+    rf"{_PATH_BOUNDARY}(?:(?i:file:///)|/)(?:Users|home)/{_PATH_TOKEN}"
+    rf"(?:{_PATH_SPACED_COMPONENT})*"
+)
+_POSIX_USER_PATH_PREFIX_RE = re.compile(rf"{_PATH_BOUNDARY}(?:(?i:file:///)|/)(?:Users|home)/")
 _GRAPH_MANIFEST = "graphify-out/graph-export-manifest.json"
 _REQUIRED_EXPANDED_MARKDOWN = frozenset({"graphify-out/graph-report.md"})
+_LOCAL_GENERATED_MARKDOWN = frozenset(
+    {
+        "catalog.md",
+        "converted-index.md",
+        "log.md",
+        "versions-catalog.md",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -60,7 +103,13 @@ def repack_full_wiki_tar(source: Path, target: Path | None = None) -> RepackStat
         if not export_id:
             raise ValueError(f"{source} is missing graph export id")
         if existing_pack_root.exists():
-            pages.update(load_merged_wiki_pages(existing_pack_root))
+            pages.update(
+                {
+                    name: _normalise_page_text(text)
+                    for name, text in load_merged_wiki_pages(existing_pack_root).items()
+                    if _should_pack_markdown_page(name)
+                }
+            )
 
         pack_root = tmp_root / "wiki-packs"
         write_wiki_base_pack(
@@ -112,8 +161,19 @@ def _rewrite_tar_with_pack(
                     if extracted is None:
                         raise ValueError(f"archive file is unreadable: {member.name}")
                     with extracted:
-                        member.name = name
-                        dst.addfile(member, extracted)
+                        if name.endswith(".md"):
+                            text = _normalise_page_text(
+                                extracted.read().decode("utf-8", errors="replace")
+                            )
+                            _add_text(dst, name=name, text=text)
+                        elif _should_redact_text_member(name):
+                            text = _redact_host_user_paths(
+                                extracted.read().decode("utf-8", errors="replace")
+                            )
+                            _add_text(dst, name=name, text=text)
+                        else:
+                            member.name = name
+                            dst.addfile(member, extracted)
                     written_names.add(name)
                 elif member.isdir():
                     member.name = name
@@ -122,9 +182,9 @@ def _rewrite_tar_with_pack(
                 else:
                     raise ValueError(f"unsupported archive member: {member.name}")
             for name in sorted(_REQUIRED_EXPANDED_MARKDOWN - written_names):
-                text = pages.get(name)
-                if text is not None:
-                    _add_text(dst, name=name, text=text)
+                required_text = pages.get(name)
+                if required_text is not None:
+                    _add_text(dst, name=name, text=required_text)
             for path in sorted(pack_root.rglob("*")):
                 if path.is_file():
                     dst.add(path, arcname=path.relative_to(pack_root.parent).as_posix())
@@ -175,7 +235,17 @@ def _validate_pack_payload(pack_root: Path, expected_pages: dict[str, str]) -> N
 
 
 def _normalise_page_text(text: str) -> str:
-    return text if text.strip() else "<!-- empty markdown page -->\n"
+    if not text.strip():
+        return "<!-- empty markdown page -->\n"
+    return _redact_host_user_paths(text)
+
+
+def _redact_host_user_paths(text: str) -> str:
+    redacted = _QUOTED_WINDOWS_USER_PATH_RE.sub("<host-user-path>", text)
+    redacted = _QUOTED_POSIX_USER_PATH_RE.sub("<host-user-path>", redacted)
+    redacted = _WINDOWS_USER_PATH_RE.sub("<host-user-path>", redacted)
+    redacted = _POSIX_USER_PATH_RE.sub("<host-user-path>", redacted)
+    return _POSIX_USER_PATH_PREFIX_RE.sub("<host-user-path>", redacted)
 
 
 def _safe_tar_name(raw_name: str) -> str:
@@ -212,15 +282,27 @@ def _is_high_fanout_entity_page(name: str) -> bool:
 
 
 def _should_pack_markdown_page(name: str) -> bool:
-    return name.endswith(".md") and not name.startswith("wiki-packs/")
+    return (
+        name.endswith(".md")
+        and name not in _LOCAL_GENERATED_MARKDOWN
+        and not name.startswith("wiki-packs/")
+    )
 
 
 def _should_skip_expanded_markdown_member(name: str) -> bool:
-    return (
+    return name in _LOCAL_GENERATED_MARKDOWN or (
         name.endswith(".md")
         and name not in _REQUIRED_EXPANDED_MARKDOWN
         and "/" in name
         and not name.startswith("entities/harnesses/")
+    )
+
+
+def _should_redact_text_member(name: str) -> bool:
+    return (
+        name.startswith("graphify-out/")
+        and not name.startswith("graphify-out/packs/")
+        and name.endswith((".json", ".jsonl"))
     )
 
 

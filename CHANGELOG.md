@@ -20,12 +20,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `src`, `hooks`, and `scripts`.
 - Made canonical Hugging Face sync fail when `HF_TOKEN` is missing while forks
   still skip safely without publishing.
+- Made `ctx-mcp-add` stream JSONL inputs, extended Hugging Face card-only sync
+  to upload README, changelog, and docs inputs, and let PR graph checks fall
+  back to targeted Git LFS hydration for new graph artifact pointers.
+- Tightened graph/wiki artifact packaging by omitting local generated markdown,
+  redacting host-user paths from packed markdown, and restricting queue-driven
+  artifact promotion to known sibling staged targets.
 
 ### Fixed
 
 - Redacted runtime lifecycle free-text fields before storing local events so
   evidence, commands, summaries, triggers, reasons, and statuses do not retain
   secrets or local filesystem paths.
+- Expanded MCP argv `$ENVVAR` placeholders only at child-process spawn time and
+  rejected sensitive placeholder expansion by default, with explicit trusted
+  opt-in for servers that cannot avoid argv credentials.
+- Validated backup `top_files` overrides as top-level filenames only and added
+  dry-run support to legacy `backup_mirror prune --keep`.
 - Hardened `ctx-mcp-enrich` checkpoint and frontmatter handling so malformed
   checkpoints reset cleanly, processed slugs clear stale failures, body keys are
   not rewritten, and non-positive flush cadences fail fast.
@@ -324,8 +335,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Shipped `graph/wiki-graph-runtime.tar.gz` as the default graph install
-  artifact for `ctx-init --graph`; full markdown wiki expansion remains
-  available with `--graph-install-mode full`.
+  artifact for `ctx-init --graph`; full wiki install remains available with
+  `--graph-install-mode full`.
 
 ### Fixed
 

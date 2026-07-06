@@ -899,6 +899,53 @@ class TestAddMcpCliInput:
 
         assert (wiki / "entities" / "mcp-servers" / "b" / "bom-stdin-mcp.md").exists()
 
+    def test_from_jsonl_streams_without_read_text(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        import mcp_add  # noqa: PLC0415
+
+        record_path = tmp_path / "mcp.jsonl"
+        record_path.write_text(
+            json.dumps(
+                {
+                    "name": "streamed-jsonl-mcp",
+                    "description": "MCP loaded from a streamed JSONL file.",
+                    "sources": ["test"],
+                    "github_url": "https://github.com/example/streamed-jsonl-mcp",
+                    "tags": ["testing"],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        wiki = tmp_path / "wiki"
+
+        def _fail_read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+            raise AssertionError(f"unexpected read_text for {self}")
+
+        monkeypatch.setattr(Path, "read_text", _fail_read_text)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "mcp_add.py",
+                "--from-jsonl",
+                str(record_path),
+                "--wiki",
+                str(wiki),
+            ],
+        )
+        monkeypatch.setattr("mcp_add.check_intake", _fake_allow)
+        monkeypatch.setattr("mcp_add.record_embedding", _fake_record_embedding)
+        monkeypatch.setattr("mcp_add.update_index", lambda *a, **k: None)
+        monkeypatch.setattr("mcp_add.append_log", lambda *a, **k: None)
+
+        mcp_add.main()
+
+        assert (wiki / "entities" / "mcp-servers" / "s" / "streamed-jsonl-mcp.md").exists()
+
     def test_rejected_batch_exits_nonzero(
         self,
         monkeypatch: pytest.MonkeyPatch,

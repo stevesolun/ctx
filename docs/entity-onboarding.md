@@ -81,6 +81,11 @@ The durable wiki worker drains `entity-upsert`, `graph-export`,
 `skill-index-refresh`, `tar-refresh`, and `artifact-promotion` jobs. Use
 `ctx-wiki-worker --wiki ~/.claude/skill-wiki --limit 1` for a controlled
 single-job drain, or omit `--limit` to drain the ready queue.
+Artifact-promotion jobs must target known `<wiki>/graphify-out/` graph outputs
+or allowlisted repo `graph/` release artifacts, and their staged path must be
+the target sibling named `<target>.staged`. The worker rejects staged/target
+symlinks and selects the JSON/JSONL/gzip/tar validator from the target file
+type before promotion.
 
 For a manual attach dry-run against an existing vector index:
 
@@ -191,6 +196,7 @@ ctx-agent-add --agent-path ./code-reviewer.md --name code-reviewer
 ctx-agent-add --agent-path ./code-reviewer.md --name code-reviewer --update-existing
 
 ctx-mcp-add --from-json ./github-mcp.json
+ctx-mcp-fetch --source pulsemcp --limit 50 | ctx-mcp-add --from-stdin
 ctx-mcp-add --from-json ./github-mcp.json --update-existing
 
 ctx-harness-add --from-json ./text-to-cad-harness.json
@@ -302,9 +308,20 @@ ctx-mcp-add --from-json ./github-mcp.json
 ```
 
 MCP pages live under `entities/mcp-servers/<shard>/<slug>.md`. The add command
-detects existing pages by slug and, when possible, canonical GitHub URL. If a
-match exists, ctx prints the update review and skips replacement unless
+accepts a single JSON object with `--from-json` or streams JSONL records from
+`--from-jsonl`/`--from-stdin` without preloading the whole batch. It detects
+existing pages by slug and, when possible, canonical GitHub URL. If a match
+exists, ctx prints the update review and skips replacement unless
 `--update-existing` is passed.
+
+Runtime install is separate from catalog add. Use
+`ctx-mcp-install <slug> --dry-run` to inspect the Claude MCP command without
+mutating local state. If the server is already installed, dry-run reports
+`skipped-existing` and does not reconcile `skill-manifest.json`; run without
+`--dry-run` to refresh the manifest record, or add `--force` when you need to
+reinstall the Claude MCP entry. Inline secret-looking arguments are rejected; use
+environment variables, secret-file/path flags, or `--cmd-json` placeholders
+instead of literal tokens.
 
 ## Add a Harness
 

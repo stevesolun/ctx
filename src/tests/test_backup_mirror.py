@@ -18,6 +18,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import backup_mirror as bm  # noqa: E402
+from backup_config import BackupRetention  # noqa: E402
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
@@ -55,6 +56,24 @@ def _seed_home(home: Path) -> None:
     mem.mkdir(parents=True)
     (mem / "user_role.md").write_text("role: dev\n", encoding="utf-8")
     (mem / "MEMORY.md").write_text("- [role](user_role.md)\n", encoding="utf-8")
+
+
+def _plant_external_snapshot_symlink(tmp_path: Path) -> Path:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "canary.txt").write_text("must-not-be-deleted")
+    (outside / "manifest.json").write_text(
+        json.dumps(
+            {
+                "snapshot_id": "99999999T999999Z.evil",
+                "created_at": 9_999_999_999.0,
+                "entries": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (bm.BACKUPS_DIR / "99999999T999999Z.evil").symlink_to(outside)
+    return outside
 
 
 # ── create_snapshot ─────────────────────────────────────────────────────────
@@ -354,11 +373,7 @@ def test_prune_refuses_symlink_outside_backups(fake_home, tmp_path):
         pytest.skip("symlink creation often requires admin on Windows")
     _seed_home(fake_home)
     bm.create_snapshot(now=1.0)
-    # Plant a symlink inside backups_dir pointing outside.
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "canary.txt").write_text("must-not-be-deleted")
-    (bm.BACKUPS_DIR / "99999999T999999Z.evil").symlink_to(outside)
+    outside = _plant_external_snapshot_symlink(tmp_path)
     bm.prune_snapshots(keep=0)
     # Canary still exists -- symlinked dir was not removed.
     assert (outside / "canary.txt").exists()
@@ -386,6 +401,38 @@ def test_prune_with_keep_zero_removes_all(fake_home):
     removed = bm.prune_snapshots(keep=0)
     assert len(removed) == 2
     assert bm.list_snapshots() == []
+
+
+def test_prune_dry_run_excludes_symlink_outside_backups(fake_home, tmp_path):
+    if sys.platform == "win32":
+        pytest.skip("symlink creation often requires admin on Windows")
+    _seed_home(fake_home)
+    real = bm.create_snapshot(now=1.0)
+    outside = _plant_external_snapshot_symlink(tmp_path)
+
+    removed = bm.prune_snapshots(keep=0, dry_run=True)
+
+    assert removed == (real.name,)
+    assert (outside / "canary.txt").exists()
+    assert (bm.BACKUPS_DIR / "99999999T999999Z.evil").exists()
+
+
+def test_prune_policy_dry_run_excludes_symlink_outside_backups(fake_home, tmp_path):
+    if sys.platform == "win32":
+        pytest.skip("symlink creation often requires admin on Windows")
+    _seed_home(fake_home)
+    real = bm.create_snapshot(now=1.0)
+    outside = _plant_external_snapshot_symlink(tmp_path)
+
+    plan = bm.prune_by_policy(
+        BackupRetention(keep_latest=0, keep_daily=0),
+        dry_run=True,
+        now=10.0,
+    )
+
+    assert plan.delete == (real.name,)
+    assert (outside / "canary.txt").exists()
+    assert (bm.BACKUPS_DIR / "99999999T999999Z.evil").exists()
 
 
 def test_prune_negative_raises(fake_home):
@@ -463,3 +510,15 @@ def test_cli_prune_keeps_newest(fake_home):
     rc = bm.main(["prune", "--keep", "1"])
     assert rc == 0
     assert len(bm.list_snapshots()) == 1
+
+
+def test_cli_prune_keep_dry_run_does_not_delete(fake_home, capsys):
+    _seed_home(fake_home)
+    bm.create_snapshot(now=1.0)
+    bm.create_snapshot(now=2.0)
+    bm.create_snapshot(now=3.0)
+    rc = bm.main(["prune", "--keep", "1", "--dry-run"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "would remove" in out
+    assert len(bm.list_snapshots()) == 3

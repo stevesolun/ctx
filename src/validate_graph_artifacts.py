@@ -99,6 +99,21 @@ _EDGE_SCORE_FIELDS = (
     "token_sim",
 )
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+_HOST_USER_PATH_RE = re.compile(
+    rb"(?:^|(?<=[`\"'(<\[\s=,:]))"
+    rb"(?:(?i:file:///(?:[A-Z]:[\\/]+Users[\\/]|(?:Users|home)/))"
+    rb"|(?i:[A-Z]:[\\/]+Users[\\/])|/(?:Users|home)/)"
+)
+_LOCAL_GENERATED_MARKDOWN = frozenset(
+    {
+        "catalog.md",
+        "converted-index.md",
+        "log.md",
+        "versions-catalog.md",
+    }
+)
+_REQUIRED_EXPANDED_MARKDOWN = frozenset({"graphify-out/graph-report.md"})
+_MAX_MARKDOWN_MEMBER_BYTES = 10 * 1024 * 1024
 _PREVIEW_HTML_FILES = (
     "sample-top60.html",
     "viz-ai-agents.html",
@@ -310,7 +325,7 @@ def _validate_wiki_pack_payload(
     expected_export_id: str,
 ) -> dict[str, str]:
     if not any(name.startswith(_WIKI_PACK_PREFIX) for name in names):
-        return {}
+        raise GraphArtifactError("wiki graph archive is missing wiki-packs/")
     try:
         entries = discover_wiki_pack_manifests(packs_dir)
         pages = load_merged_wiki_pages(packs_dir)
@@ -374,6 +389,7 @@ def _scan_graph_pack_payload(
     export_id = graph.graph.get("export_id") or graph.graph.get("ctx_pack_base_export_id")
     if not isinstance(export_id, str) or not export_id.strip():
         export_id = None
+    _validate_graph_object_no_host_paths(graph, context=context)
     if not deep:
         return 0, 0, 0, 0, 0, export_id
     return _scan_graph_object(graph, export_id=export_id)
@@ -514,6 +530,87 @@ def _safe_tar_name(raw_name: str) -> str:
     return "/".join(parts)
 
 
+def _read_tar_member_bytes(tf: tarfile.TarFile, member: tarfile.TarInfo) -> bytes:
+    f = tf.extractfile(member)
+    if f is None:
+        raise GraphArtifactError(f"{member.name} could not be read")
+    with f:
+        return f.read()
+
+
+def _validate_archive_markdown_payload(name: str, payload: bytes, *, context: str) -> None:
+    if len(payload) > _MAX_MARKDOWN_MEMBER_BYTES:
+        raise GraphArtifactError(
+            f"{context} markdown member too large: {name} ({len(payload)} bytes)",
+        )
+    if _HOST_USER_PATH_RE.search(payload):
+        raise GraphArtifactError(f"{context} markdown contains host path: {name}")
+    if name in _LOCAL_GENERATED_MARKDOWN:
+        raise GraphArtifactError(f"{context} contains local generated markdown: {name}")
+    if context == "archive" and _is_expanded_full_archive_markdown(name):
+        raise GraphArtifactError(f"{context} contains expanded markdown member: {name}")
+
+
+def _is_expanded_full_archive_markdown(name: str) -> bool:
+    return (
+        name.endswith(".md")
+        and name not in _REQUIRED_EXPANDED_MARKDOWN
+        and "/" in name
+        and not name.startswith("entities/harnesses/")
+    )
+
+
+def _validate_no_host_user_path_bytes(name: str, payload: bytes, *, context: str) -> None:
+    if _HOST_USER_PATH_RE.search(payload):
+        raise GraphArtifactError(f"{context} contains host path: {name}")
+
+
+def _validate_no_host_user_path_value(value: Any, *, context: str) -> None:
+    if isinstance(value, str):
+        if _HOST_USER_PATH_RE.search(value.encode("utf-8", errors="replace")):
+            raise GraphArtifactError(f"{context} contains host path")
+    elif isinstance(value, dict):
+        for child in value.values():
+            _validate_no_host_user_path_value(child, context=context)
+    elif isinstance(value, list):
+        for child in value:
+            _validate_no_host_user_path_value(child, context=context)
+
+
+def _validate_graph_object_no_host_paths(graph: Any, *, context: str) -> None:
+    graph_meta = getattr(graph, "graph", None)
+    if isinstance(graph_meta, dict):
+        _validate_no_host_user_path_value(graph_meta, context=f"{context} graph metadata")
+    for node_id, attrs in graph.nodes(data=True):
+        _validate_no_host_user_path_value(node_id, context=f"{context} graph node id")
+        if isinstance(attrs, dict):
+            _validate_no_host_user_path_value(attrs, context=f"{context} graph node {node_id!r}")
+    for source, target, attrs in graph.edges(data=True):
+        _validate_no_host_user_path_value(source, context=f"{context} graph edge source")
+        _validate_no_host_user_path_value(target, context=f"{context} graph edge target")
+        if isinstance(attrs, dict):
+            _validate_no_host_user_path_value(
+                attrs,
+                context=f"{context} graph edge {source!r}->{target!r}",
+            )
+
+
+def _read_archive_markdown_payload(
+    tf: tarfile.TarFile,
+    member: tarfile.TarInfo,
+    name: str,
+    *,
+    context: str,
+) -> bytes:
+    if member.size > _MAX_MARKDOWN_MEMBER_BYTES:
+        raise GraphArtifactError(
+            f"{context} markdown member too large: {name} ({member.size} bytes)",
+        )
+    payload = _read_tar_member_bytes(tf, member)
+    _validate_archive_markdown_payload(name, payload, context=context)
+    return payload
+
+
 def _count_lines(payload: bytes) -> int:
     return len(payload.decode("utf-8", errors="replace").splitlines())
 
@@ -570,6 +667,11 @@ def _scan_graph_json(stream: IO[bytes]) -> tuple[int, int, int, int, int, str | 
     while chunk := stream.read(1024 * 1024):
         old_tail = tail
         data = tail + chunk
+        _validate_no_host_user_path_bytes(
+            "graphify-out/graph.json",
+            data,
+            context="graph.json",
+        )
         _validate_graph_edge_score_fields(data)
         _validate_graph_edge_weight_drift(data)
         if export_id is None:
@@ -590,9 +692,24 @@ def _scan_graph_json(stream: IO[bytes]) -> tuple[int, int, int, int, int, str | 
     return nodes, edges, semantic_edges, skills_sh_nodes, harness_nodes, export_id
 
 
-def _scan_graph_export_id(stream: IO[bytes], *, max_bytes: int = 1024 * 1024) -> str | None:
-    payload = stream.read(max_bytes)
-    return _extract_graph_export_id(payload)
+def _scan_graph_export_id(
+    stream: IO[bytes],
+    *,
+    max_bytes: int = 1024 * 1024,
+    name: str = "graphify-out/graph.json",
+    context: str = "graph.json",
+) -> str | None:
+    export_id: str | None = None
+    probe = b""
+    tail = b""
+    while chunk := stream.read(1024 * 1024):
+        data = tail + chunk
+        _validate_no_host_user_path_bytes(name, data, context=context)
+        if export_id is None and len(probe) < max_bytes:
+            probe += chunk[: max_bytes - len(probe)]
+            export_id = _extract_graph_export_id(probe)
+        tail = data[-65536:]
+    return export_id
 
 
 def _extract_graph_export_id(payload: bytes) -> str | None:
@@ -876,11 +993,20 @@ def validate_graph_artifacts(
                 raise GraphArtifactError(
                     f"archive contains transient queue state: {member.name}",
                 )
+            markdown_payload: bytes | None = None
+            if member.isfile() and name.endswith(".md"):
+                markdown_payload = _read_archive_markdown_payload(
+                    tf,
+                    member,
+                    name,
+                    context="archive",
+                )
             if member.isfile() and _is_converted_skill_page(name):
-                f = tf.extractfile(member)
-                if f is None:
-                    raise GraphArtifactError(f"{member.name} could not be read")
-                payload = f.read()
+                payload = (
+                    markdown_payload
+                    if markdown_payload is not None
+                    else _read_tar_member_bytes(tf, member)
+                )
                 for ref in _iter_skill_bundle_refs(payload):
                     skill_bundle_refs.append((name, ref, _skill_bundle_target_name(name, ref)))
                 if deep and name.startswith("converted/skills-sh-"):
@@ -925,10 +1051,12 @@ def validate_graph_artifacts(
                     raise GraphArtifactError(f"{name} did not contain a JSON object")
                 manifest = data
             elif member.isfile() and name == "graphify-out/graph-report.md":
-                f = tf.extractfile(member)
-                if f is None:
-                    raise GraphArtifactError(f"{member.name} could not be read")
-                _record_export_id(export_ids, name, _export_id_from_report(f.read()))
+                payload = (
+                    markdown_payload
+                    if markdown_payload is not None
+                    else _read_tar_member_bytes(tf, member)
+                )
+                _record_export_id(export_ids, name, _export_id_from_report(payload))
             elif member.isfile() and name == "graphify-out/dashboard-neighborhoods.sqlite3":
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sqlite3")
                 tmp.close()
@@ -940,10 +1068,12 @@ def validate_graph_artifacts(
                 _copy_wiki_pack_tar_member(tf, member, name, wiki_packs_dir)
             elif member.isfile() and deep and name.startswith("converted/skills-sh-"):
                 if name.endswith("/SKILL.md") or "/references/" in name:
-                    f = tf.extractfile(member)
-                    if f is None:
-                        raise GraphArtifactError(f"{member.name} could not be read")
-                    lines = _count_lines(f.read())
+                    payload = (
+                        markdown_payload
+                        if markdown_payload is not None
+                        else _read_tar_member_bytes(tf, member)
+                    )
+                    lines = _count_lines(payload)
                     limit = line_threshold if name.endswith("/SKILL.md") else max_stage_lines
                     if lines > limit:
                         raise GraphArtifactError(
@@ -1000,6 +1130,8 @@ def validate_graph_artifacts(
         wiki_pack_tmp.cleanup()
     for page_name, text in wiki_pack_pages.items():
         payload = text.encode("utf-8")
+        if page_name.endswith(".md"):
+            _validate_archive_markdown_payload(page_name, payload, context="wiki pack")
         if _is_converted_skill_page(page_name):
             for ref in _iter_skill_bundle_refs(payload):
                 skill_bundle_refs.append(
@@ -1136,6 +1268,20 @@ def _validate_graph_packs(packs_dir: Path) -> None:
         raise GraphArtifactError(f"graph pack validation failed: {exc}") from exc
 
 
+def validate_runtime_graph_archive(
+    tarball: Path,
+    *,
+    expected_harnesses: set[str] | None = None,
+    expected_export_id: str | None = None,
+) -> str:
+    """Validate a runtime graph tarball and return its shared export ID."""
+    return _validate_runtime_graph_archive(
+        tarball,
+        expected_harnesses=DEFAULT_HARNESSES if expected_harnesses is None else expected_harnesses,
+        expected_export_id=expected_export_id,
+    )
+
+
 def _validate_runtime_graph_archive(
     tarball: Path,
     *,
@@ -1168,6 +1314,14 @@ def _validate_runtime_graph_archive(
                 raise GraphArtifactError(
                     f"runtime archive contains transient queue state: {member.name}",
                 )
+            markdown_payload: bytes | None = None
+            if member.isfile() and name.endswith(".md"):
+                markdown_payload = _read_archive_markdown_payload(
+                    tf,
+                    member,
+                    name,
+                    context="runtime archive",
+                )
             if member.isfile() and name == "graphify-out/graph.json":
                 f = tf.extractfile(member)
                 if f is None:
@@ -1185,10 +1339,12 @@ def _validate_runtime_graph_archive(
                     raise GraphArtifactError(f"{name} did not contain a JSON object")
                 manifest = data
             elif member.isfile() and name == "graphify-out/graph-report.md":
-                f = tf.extractfile(member)
-                if f is None:
-                    raise GraphArtifactError(f"{member.name} could not be read")
-                _record_export_id(export_ids, name, _export_id_from_report(f.read()))
+                payload = (
+                    markdown_payload
+                    if markdown_payload is not None
+                    else _read_tar_member_bytes(tf, member)
+                )
+                _record_export_id(export_ids, name, _export_id_from_report(payload))
             elif member.isfile() and name == "graphify-out/dashboard-neighborhoods.sqlite3":
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sqlite3")
                 tmp.close()
@@ -1304,8 +1460,10 @@ def _read_tar_json(tf: tarfile.TarFile, member: tarfile.TarInfo, name: str) -> A
     f = tf.extractfile(member)
     if f is None:
         raise GraphArtifactError(f"{member.name} could not be read")
+    payload = f.read()
+    _validate_no_host_user_path_bytes(name, payload, context="archive JSON")
     try:
-        return json.loads(f.read().decode("utf-8"))
+        return json.loads(payload.decode("utf-8"))
     except json.JSONDecodeError as exc:
         raise GraphArtifactError(f"{name} is not valid JSON: {exc}") from exc
 

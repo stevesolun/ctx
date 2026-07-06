@@ -5,7 +5,7 @@ commands:
 
 auto_fix:
   rebase: 3
-  review: 3
+  review: 0
   test: 3
   document: 3
   lint: 3

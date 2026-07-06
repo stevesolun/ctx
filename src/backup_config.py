@@ -41,6 +41,27 @@ ALWAYS_EXCLUDE: frozenset[str] = frozenset(
 _ALLOWED_SCOPES: frozenset[str] = frozenset({"full", "incremental", "hybrid"})
 
 
+def _validate_top_file(value: str) -> str:
+    """Validate a top-level file name from backup.top_files."""
+    value = value.strip()
+    if not value:
+        raise ValueError("top_files[] must be a non-empty filename")
+    parts = value.replace("\\", "/").split("/")
+    if any(part == ".." for part in parts):
+        raise ValueError(f"top_files[]: {value!r} contains '..' path traversal")
+    if value == ".":
+        raise ValueError("top_files[]: '.' is not a filename")
+    if value.startswith(("//", "\\\\")):
+        raise ValueError(f"top_files[]: {value!r} is a UNC path")
+    if len(value) >= 2 and value[1] == ":":
+        raise ValueError(f"top_files[]: {value!r} contains a drive letter")
+    if value.startswith(("/", "\\")):
+        raise ValueError(f"top_files[]: {value!r} is absolute")
+    if "/" in value or "\\" in value:
+        raise ValueError(f"top_files[]: {value!r} contains a path separator")
+    return value
+
+
 # ── Schema ──────────────────────────────────────────────────────────────────
 
 
@@ -81,6 +102,7 @@ class BackupConfig:
     # Phase 2 implements incremental/hybrid. Phase 1 only honours "full".
     scope: str = "full"
     max_file_bytes: int = 5 * 1024 * 1024  # 5 MB
+    # Top-level filenames under ~/.claude only; paths and traversal are rejected.
     top_files: tuple[str, ...] = (
         "settings.json",
         "skill-manifest.json",
@@ -115,11 +137,10 @@ class BackupConfig:
             raise ValueError(f"retention.keep_daily must be >= 0, got {self.retention.keep_daily}")
         if "{timestamp}" not in self.name_format:
             raise ValueError(f"name_format must contain '{{timestamp}}', got {self.name_format!r}")
+        validated_top = tuple(_validate_top_file(str(name)) for name in self.top_files)
         # Silently drop ALWAYS_EXCLUDE names from top_files. frozen
         # dataclass requires object.__setattr__ for the rewrite.
-        filtered_top = tuple(
-            name for name in self.top_files if Path(name).name not in ALWAYS_EXCLUDE
-        )
+        filtered_top = tuple(name for name in validated_top if name not in ALWAYS_EXCLUDE)
         if filtered_top != self.top_files:
             object.__setattr__(self, "top_files", filtered_top)
 
@@ -198,6 +219,41 @@ def _coerce_trees(raw: Any, default: tuple[BackupTree, ...]) -> tuple[BackupTree
     return tuple(out)
 
 
+def _coerce_user_top_files(raw: Any) -> tuple[str, ...] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        _warn_ignored_config("top_files override must be a list")
+        return None
+    out: list[str] = []
+    for entry in raw:
+        try:
+            out.append(_validate_top_file(str(entry)))
+        except ValueError as exc:
+            _warn_ignored_config(f"ignoring top_files entry: {exc}")
+    return tuple(out)
+
+
+def _sanitize_user_override(raw: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(raw)
+    if "top_files" in sanitized:
+        raw_top_files = sanitized["top_files"]
+        top_files = _coerce_user_top_files(raw_top_files)
+        if top_files is None:
+            sanitized.pop("top_files", None)
+        elif not top_files and raw_top_files:
+            sanitized.pop("top_files", None)
+        else:
+            sanitized["top_files"] = list(top_files)
+    return sanitized
+
+
+def _warn_ignored_config(message: str) -> None:
+    import sys as _sys
+
+    print(f"[backup-config] {message}", file=_sys.stderr)
+
+
 def _coerce_retention(raw: Any) -> BackupRetention:
     if not isinstance(raw, dict):
         return BackupRetention()
@@ -266,14 +322,14 @@ def from_ctx_config() -> BackupConfig:
     except Exception:
         base_raw = {}
 
-    merged: dict[str, Any] = dict(base_raw) if isinstance(base_raw, dict) else {}
+    merged: dict[str, Any] = _sanitize_user_override(base_raw) if isinstance(base_raw, dict) else {}
 
     user_override = Path(os.path.expanduser("~/.claude/backup-config.json"))
     if user_override.is_file():
         try:
             user_raw = json.loads(user_override.read_text(encoding="utf-8"))
             if isinstance(user_raw, dict):
-                _deep_merge(merged, user_raw)
+                _deep_merge(merged, _sanitize_user_override(user_raw))
         except (OSError, json.JSONDecodeError):
             pass
 

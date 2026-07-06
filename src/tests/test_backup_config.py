@@ -92,6 +92,24 @@ def test_name_format_without_timestamp_placeholder_rejected():
         bc.BackupConfig(name_format="backup_{reason}")
 
 
+@pytest.mark.parametrize(
+    "top_file",
+    [
+        "../settings.json",
+        "nested/settings.json",
+        r"nested\settings.json",
+        "/tmp/settings.json",
+        r"\tmp\settings.json",
+        "C:settings.json",
+        r"C:\settings.json",
+        r"\\server\share\settings.json",
+    ],
+)
+def test_top_files_reject_unsafe_entries(top_file: str):
+    with pytest.raises(ValueError, match="top_files"):
+        bc.load_backup_config({"top_files": [top_file]})
+
+
 # ── ALWAYS_EXCLUDE safety net ───────────────────────────────────────────────
 
 

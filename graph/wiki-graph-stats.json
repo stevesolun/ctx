@@ -2,8 +2,8 @@
   "schema_version": 1,
   "artifact": {
     "path": "graph/wiki-graph.tar.gz",
-    "size": 296113770,
-    "sha256": "d051d4f21208abe3e73975a9c30650150138d88919c27979d725be936a6ea10a"
+    "size": 295151086,
+    "sha256": "2ce8a945c17a7345df9d27d8f101319a9f963b0fc85d399f104630bc06a7c4a0"
   },
   "source": "validated graph artifact release contract",
   "counts": {
