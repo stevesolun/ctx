@@ -116,6 +116,24 @@ def test_no_mistakes_run_script_uses_trusted_python_for_configured_commands(
     env["FAKE_PYTHON_LOG"] = str(log_path)
 
     subprocess.run(
+        ["bash", str(script_dir / "no_mistakes_run.sh"), "fast", "--lane", "static"],
+        cwd=repo,
+        env=env,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "bash",
+            str(script_dir / "no_mistakes_run.sh"),
+            "fast",
+            "--summary-json",
+            "custom.json",
+        ],
+        cwd=repo,
+        env=env,
+        check=True,
+    )
+    subprocess.run(
         ["bash", str(script_dir / "no_mistakes_run.sh"), "test"],
         cwd=repo,
         env=env,
@@ -129,6 +147,14 @@ def test_no_mistakes_run_script_uses_trusted_python_for_configured_commands(
     )
 
     assert log_path.read_text(encoding="utf-8").splitlines() == [
+        (
+            "['scripts/local_fast_gate.py', '--profile', 'pr', '--summary-json', "
+            "'.gate/local-fast.json', '--lane', 'static']"
+        ),
+        (
+            "['scripts/local_fast_gate.py', '--profile', 'pr', '--summary-json', "
+            "'.gate/local-fast.json', '--summary-json', 'custom.json']"
+        ),
         "['scripts/ci_preflight.py', '--profile', 'pr']",
         "['-m', 'ruff', 'check', '.']",
         "['-m', 'ruff', 'format', '--check', 'src', 'hooks', 'scripts']",

@@ -71,7 +71,7 @@ export PIP_DISABLE_PIP_VERSION_CHECK="${PIP_DISABLE_PIP_VERSION_CHECK:-1}"
 
 case "${action}" in
   fast)
-    exec python scripts/local_fast_gate.py --profile pr "${@:2}"
+    exec python scripts/local_fast_gate.py --profile pr --summary-json .gate/local-fast.json "${@:2}"
     ;;
   test)
     exec python scripts/ci_preflight.py --profile pr
