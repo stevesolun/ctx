@@ -34,7 +34,8 @@ scripts/no_mistakes_run.sh fast
 
 This selects the same PR checks as CI, groups independent work into lanes, and
 runs those lanes in isolated temporary git worktrees so local CPU, graph, docs,
-package, and test checks can run in parallel. It is the fast front door; the
+package, and test checks can run in parallel. It writes lane timing evidence to
+`.gate/local-fast.json` by default. It is the fast front door; the
 serial preflight/no-mistakes gate remains the authoritative final check:
 
 ```bash

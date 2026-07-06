@@ -18,6 +18,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   suite.
 - Added `ruff format --check` to local preflight and main static CI gates for
   `src`, `hooks`, and `scripts`.
+- Made `scripts/no_mistakes_run.sh fast` write local-fast lane timing evidence
+  to `.gate/local-fast.json` by default.
 - Made canonical Hugging Face sync fail when `HF_TOKEN` is missing while forks
   still skip safely without publishing.
 - Made `ctx-mcp-add` stream JSONL inputs, extended Hugging Face card-only sync
