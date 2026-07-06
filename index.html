@@ -1444,8 +1444,9 @@ to record the model profile and surface harness recommendations.</p>
 <p><code>scripts/no_mistakes_run.sh fast</code> is the fast front door: it selects the
 same PR checks, splits independent work into isolated temporary worktree
 lanes, and runs them in parallel against committed branch history. The
-lane filters support fast reruns such as
-<code>scripts/no_mistakes_run.sh fast --lane static --lane unit --summary-json .gate/local-fast.json</code>.
+wrapper writes lane timing evidence to <code>.gate/local-fast.json</code> by default,
+and lane filters support fast reruns such as
+<code>scripts/no_mistakes_run.sh fast --lane static --lane unit</code>.
 The serial preflight/no-mistakes path remains the authoritative final local
 gate. Preflight uses the same changed-file classifier as GitHub Actions and
 runs the matching local gates before you open a PR: stats, ruff
