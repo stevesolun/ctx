@@ -16,10 +16,10 @@ Authoritative numbers from the shipped tarball. The curated-core snapshot
 is **12,934 nodes** (1,470 curated skills + 467 agents + 10,790 MCP servers + 207 harnesses). Harness pages under `entities/harnesses/` are ingested into
 local rebuilds and the separate harness recommendation path. The
 tarball also carries **68,494 skill pages**; **67,024**
-skill bodies are hydrated as installable `SKILL.md` files under
-`converted/`; the **28,612** entries over the configured line
-limit were converted to gated micro-skill orchestrators. Full original bodies
-are used during graph rebuilds for semantic similarity, but
+skill bodies are hydrated as installable `SKILL.md` files in the wiki-pack
+base under `converted/`; the **28,612** entries over the configured line limit
+were converted to gated micro-skill orchestrators. Full original bodies are
+used during graph rebuilds for semantic similarity, but
 `SKILL.md.original` backups, transient `.lock` files, `.ctx/` queue state,
 local generated markdown catalogs, and host-user paths are omitted from the
 shipped tarball.

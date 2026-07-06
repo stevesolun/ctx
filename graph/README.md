@@ -50,7 +50,7 @@ right path for recommendations and first-time installs because it avoids
 expanding hundreds of thousands of markdown files while still shipping the
 harness pages needed by `ctx-harness-install --dry-run`. Use
 `ctx-init --graph --graph-install-mode full` or manual full extraction when you
-want local wiki browsing, Obsidian, or the converted skill body tree.
+want local wiki browsing, Obsidian, or wiki-packed converted skill bodies.
 
 ## Modular Pack Model
 
@@ -78,13 +78,13 @@ store refresh path.
 
 ## What Is Inside `wiki-graph.tar.gz`
 
-- `entities/skills/` - all skill entity pages
-- `entities/agents/` - agent entity pages
-- `entities/mcp-servers/<shard>/` - sharded MCP server entity pages
+- `entities/skills/` - directory placeholder; skill pages are packed under `wiki-packs/`
+- `entities/agents/` - directory placeholder; agent pages are packed under `wiki-packs/`
+- `entities/mcp-servers/<shard>/` - sharded MCP server pages packed under `wiki-packs/`
 - `entities/harnesses/` - harness entity pages
-- `converted/` - installable skill bodies
-- `converted-agents/` - mirrored agent bodies
-- `concepts/` - community concept pages
+- `converted/` - non-markdown conversion metadata; installable skill bodies are packed under `wiki-packs/`
+- `converted-agents/` - mirrored agent pages packed under `wiki-packs/`
+- `concepts/` - community concept pages packed under `wiki-packs/`
 - `external-catalogs/` - machine-readable skill index, summary, and coverage metadata
 - `security/skillspector-audit.jsonl.gz` - per-skill SkillSpector audit records
 - `graphify-out/graph.json` - NetworkX node-link graph

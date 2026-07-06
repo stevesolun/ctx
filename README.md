@@ -103,10 +103,10 @@ High-fanout skill, agent, MCP, converted, and concept pages are stored in
 ctx-init --graph --graph-install-mode full
 ```
 
-The full `wiki-graph.tar.gz` includes the shipped skill index, 68,494 skill
-entity pages, 67,024 hydrated installable `SKILL.md` files, and the wiki-pack
-base that serves those pages through ctx. Harness pages remain directly
-available under `entities/harnesses/`.
+The full `wiki-graph.tar.gz` includes the shipped skill index and a wiki-pack
+base containing 68,494 skill entity pages plus 67,024 hydrated installable
+`SKILL.md` files. Harness pages remain directly available under
+`entities/harnesses/`.
 
 > **Windows:** PowerShell's built-in `tar.exe` does not support
 > `--force-local`; use `tar -xzf graph\wiki-graph.tar.gz -C "$env:USERPROFILE\.claude\skill-wiki"`.
@@ -138,13 +138,23 @@ ctx-telemetry-export --dry-run --json       # inspect privacy-redacted telemetry
 ctx-monitor serve          # local dashboard: http://127.0.0.1:8765/
 ```
 
-Before pushing, run the local PR gate:
+Before pushing, run the two-tier local PR gate. Start with the fast committed-HEAD
+gate:
+
+```bash
+scripts/no_mistakes_run.sh fast
+```
+
+That runner selects the same checks as PR preflight, groups independent checks
+into isolated temporary worktree lanes, and runs them in parallel. Treat it as
+the fast front door; the serial preflight/no-mistakes path remains the
+authoritative final local gate:
 
 ```bash
 python scripts/ci_preflight.py --profile pr
 ```
 
-It uses the same changed-file classifier as GitHub Actions, then runs the
+Preflight uses the same changed-file classifier as GitHub Actions, then runs the
 matching local checks: stats, ruff format/check, mypy, pip check, unit
 coverage, canaries, package build, twine, docs, graph validation, browser, and
 similarity gates as needed. For docs changes, that docs gate runs the public

@@ -48,10 +48,15 @@ with persistent memory that gets smarter every session.
 !!! tip "Before pushing"
 
     ```bash
+    scripts/no_mistakes_run.sh fast
     python scripts/ci_preflight.py --profile pr
     ```
 
-    The preflight uses the same changed-file classifier as GitHub Actions and
+    `scripts/no_mistakes_run.sh fast` is the fast front door: it selects the
+    same PR checks, splits independent work into isolated temporary worktree
+    lanes, and runs them in parallel against committed branch history. The
+    serial preflight/no-mistakes path remains the authoritative final local
+    gate. Preflight uses the same changed-file classifier as GitHub Actions and
     runs the matching local gates before you open a PR: stats, ruff
     format/check, mypy, pip check, unit coverage, canaries, package build,
     twine, docs, graph validation, browser, and similarity checks as needed.
