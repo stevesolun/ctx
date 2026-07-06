@@ -53,7 +53,7 @@ def test_artifact_promotion_retry_allows_completed_promotion_recovery(tmp_path: 
     wiki = tmp_path / "wiki"
     target = wiki / "graphify-out" / "graph.json"
     target.parent.mkdir(parents=True)
-    payload = b'{"nodes":[]}\n'
+    payload = b'{"nodes":[],"edges":[],"graph":{}}\n'
     target.write_bytes(payload)
     staged = target.with_name(f"{target.name}.staged")
     metadata = target.with_name(f"{target.name}.promotion.json")
@@ -416,8 +416,11 @@ def test_mcp_env_placeholders_do_not_expand_credentials_into_argv_by_default(
 
     env = mcp_router._child_env_for_config(cfg)
 
-    with pytest.raises(ValueError, match="sensitive env var 'MCP_API_KEY'"):
-        mcp_router._expand_config_args(cfg, env)
+    assert mcp_router._expand_config_args(cfg, env) == (
+        "--api-key",
+        "${MCP_API_KEY}",
+        "--header=Bearer $MCP_API_KEY",
+    )
     assert cfg.args[1] == "${MCP_API_KEY}"
 
 
@@ -429,6 +432,7 @@ def test_mcp_env_placeholder_expansion_checks_option_context() -> None:
         command="server",
         args=("--api-key", "${OPENAI_KEY}"),
         env={"OPENAI_KEY": "argv-only-secret"},
+        expand_argv_env=True,
     )
 
     with pytest.raises(ValueError, match="secret-looking argument '--api-key'"):
@@ -443,6 +447,7 @@ def test_mcp_env_placeholder_expansion_rejects_bearer_header() -> None:
         command="server",
         args=("--header=Bearer ${MCP_AUTH}",),
         env={"MCP_AUTH": "headersecret"},
+        expand_argv_env=True,
     )
 
     with pytest.raises(ValueError, match="secret-looking argument 'Bearer'"):

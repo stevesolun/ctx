@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import tarfile
+from hashlib import sha256
 from pathlib import Path
 
 from ctx.core.wiki.wiki_packs import load_merged_wiki_pages
@@ -128,4 +129,64 @@ def test_repack_full_wiki_tar_redacts_file_uri_host_paths(tmp_path: Path) -> Non
     pages = load_merged_wiki_pages(tmp_path / "extracted" / "wiki-packs")
     assert pages["entities/skills/current.md"] == (
         "macOS: <host-user-path>\nLinux: <host-user-path>\n"
+    )
+
+
+def test_repack_full_wiki_tar_preserves_graph_pack_checksums(tmp_path: Path) -> None:
+    source = tmp_path / "wiki-graph.tar.gz"
+    target = tmp_path / "wiki-graph-packed.tar.gz"
+    graph_pack_payload = (
+        '{"graph":{"export_id":"test-export"},"nodes":[{"id":"/Users/steves/private"}],'
+        '"edges":[]}\n'
+    )
+    graph_pack_manifest = {
+        "schema_version": 1,
+        "pack_id": "base-test-export",
+        "pack_type": "base",
+        "base_export_id": "test-export",
+        "parent_export_id": None,
+        "config_hash": "config-sha",
+        "model_id": "test-model",
+        "node_count": 1,
+        "edge_count": 0,
+        "tombstone_count": 0,
+        "checksums": {"graph.json": sha256(graph_pack_payload.encode("utf-8")).hexdigest()},
+    }
+    with tarfile.open(source, "w:gz") as tf:
+        _add_text(
+            tf,
+            "graphify-out/graph-export-manifest.json",
+            json.dumps({"export_id": "test-export"}),
+        )
+        _add_text(
+            tf,
+            "graphify-out/graph.json",
+            '{"nodes":[{"id":"/Users/steves/private"}],"edges":[]}\n',
+        )
+        _add_text(
+            tf,
+            "graphify-out/packs/base-test-export/graph-pack-manifest.json",
+            json.dumps(graph_pack_manifest),
+        )
+        _add_text(tf, "graphify-out/packs/base-test-export/graph.json", graph_pack_payload)
+
+    repack_full_wiki_tar(source, target)
+
+    with tarfile.open(target, "r:gz") as tf:
+        top_graph = tf.extractfile("graphify-out/graph.json")
+        pack_graph = tf.extractfile("graphify-out/packs/base-test-export/graph.json")
+        pack_manifest = tf.extractfile(
+            "graphify-out/packs/base-test-export/graph-pack-manifest.json"
+        )
+        assert top_graph is not None
+        assert pack_graph is not None
+        assert pack_manifest is not None
+        top_graph_text = top_graph.read().decode("utf-8")
+        pack_graph_text = pack_graph.read().decode("utf-8")
+        manifest = json.loads(pack_manifest.read().decode("utf-8"))
+
+    assert "/Users/steves/private" not in top_graph_text
+    assert "/Users/steves/private" in pack_graph_text
+    assert (
+        manifest["checksums"]["graph.json"] == sha256(pack_graph_text.encode("utf-8")).hexdigest()
     )

@@ -614,6 +614,14 @@ def _artifact_validator_for_target(target: Path) -> ArtifactValidator | None:
         return validate_gzip_json_artifact
     if name.endswith(".jsonl"):
         return _validate_jsonl_artifact
+    if name == "graph.json":
+        return _validate_graph_json_artifact
+    if name == "graph-delta.json":
+        return _validate_graph_delta_json_artifact
+    if name == "communities.json":
+        return _validate_communities_json_artifact
+    if name == "graph-export-manifest.json":
+        return _validate_graph_export_manifest_artifact
     if name.endswith(".json"):
         return validate_json_artifact
     return None
@@ -664,6 +672,88 @@ def _validate_gzip_jsonl_artifact(path: Path) -> None:
                     json.loads(line)
     except (OSError, EOFError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"invalid gzip JSONL artifact: {path}") from exc
+
+
+def _read_json_object_artifact(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid JSON artifact: {path}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"invalid JSON artifact: {path} must contain an object")
+    return data
+
+
+def _validate_graph_json_artifact(path: Path) -> None:
+    data = _read_json_object_artifact(path)
+    if not isinstance(data.get("nodes"), list):
+        raise ValueError(f"invalid graph.json artifact: {path} missing nodes list")
+    if not isinstance(data.get("edges"), list):
+        raise ValueError(f"invalid graph.json artifact: {path} missing edges list")
+    if not isinstance(data.get("graph"), dict):
+        raise ValueError(f"invalid graph.json artifact: {path} missing graph object")
+
+
+def _validate_graph_delta_json_artifact(path: Path) -> None:
+    data = _read_json_object_artifact(path)
+    if data.get("version") != 1:
+        raise ValueError(f"invalid graph-delta.json artifact: {path} version must be 1")
+    if not isinstance(data.get("full_rebuild"), bool):
+        raise ValueError(f"invalid graph-delta.json artifact: {path} missing full_rebuild bool")
+    if not isinstance(data.get("export_id"), str) or not data["export_id"].strip():
+        raise ValueError(f"invalid graph-delta.json artifact: {path} missing export_id")
+    if data["full_rebuild"]:
+        for key in ("node_count", "edge_count"):
+            if isinstance(data.get(key), bool) or not isinstance(data.get(key), int):
+                raise ValueError(f"invalid graph-delta.json artifact: {path} missing {key} int")
+    else:
+        if not isinstance(data.get("nodes"), list):
+            raise ValueError(f"invalid graph-delta.json artifact: {path} missing nodes list")
+        if not isinstance(data.get("edges"), list):
+            raise ValueError(f"invalid graph-delta.json artifact: {path} missing edges list")
+
+
+def _validate_communities_json_artifact(path: Path) -> None:
+    data = _read_json_object_artifact(path)
+    if not isinstance(data.get("export_id"), str) or not data["export_id"].strip():
+        raise ValueError(f"invalid communities.json artifact: {path} missing export_id")
+    if not isinstance(data.get("communities"), dict):
+        raise ValueError(f"invalid communities.json artifact: {path} missing communities object")
+    if isinstance(data.get("total_communities"), bool) or not isinstance(
+        data.get("total_communities"), int
+    ):
+        raise ValueError(f"invalid communities.json artifact: {path} missing total_communities int")
+
+
+def _validate_graph_export_manifest_artifact(path: Path) -> None:
+    data = _read_json_object_artifact(path)
+    if data.get("version") != 1:
+        raise ValueError(f"invalid graph-export-manifest artifact: {path} version must be 1")
+    if not isinstance(data.get("export_id"), str) or not data["export_id"].strip():
+        raise ValueError(f"invalid graph-export-manifest artifact: {path} missing export_id")
+    artifacts = data.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise ValueError(f"invalid graph-export-manifest artifact: {path} missing artifacts object")
+    expected_artifacts = {
+        "delta": "graph-delta.json",
+        "communities": "communities.json",
+        "report": "graph-report.md",
+    }
+    if set(artifacts) != {"graph", *expected_artifacts}:
+        raise ValueError(f"invalid graph-export-manifest artifact: {path} invalid artifacts map")
+    if artifacts.get("graph") not in {"graph.json", "packs"}:
+        raise ValueError(f"invalid graph-export-manifest artifact: {path} invalid graph artifact")
+    for key, expected in expected_artifacts.items():
+        if artifacts.get(key) != expected:
+            raise ValueError(
+                f"invalid graph-export-manifest artifact: {path} invalid artifacts map"
+            )
+    counts = data.get("counts")
+    if not isinstance(counts, dict):
+        raise ValueError(f"invalid graph-export-manifest artifact: {path} missing counts object")
+    for key in ("nodes", "edges", "communities"):
+        if isinstance(counts.get(key), bool) or not isinstance(counts.get(key), int):
+            raise ValueError(f"invalid graph-export-manifest artifact: {path} missing {key} count")
 
 
 def _resolve_artifact_promotion_paths(

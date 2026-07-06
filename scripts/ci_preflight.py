@@ -267,6 +267,20 @@ def hydrate_graph_lfs_artifacts() -> int:
     return 0
 
 
+def _run_whitespace_check(base_ref: str) -> int:
+    base = _diff_base(base_ref)
+    commands = (
+        ["diff", "--check", base, "HEAD"],
+        ["diff", "--cached", "--check"],
+        ["diff", "--check"],
+    )
+    for args in commands:
+        proc = subprocess.run(["git", *args], check=False)
+        if proc.returncode != 0:
+            return proc.returncode
+    return 0
+
+
 def select_checks(
     *,
     base_ref: str,
@@ -276,7 +290,7 @@ def select_checks(
 ) -> tuple[list[Check], list[str]]:
     flags = classify_paths(files)
     checks: list[Check] = [
-        Check("whitespace", ("git", "diff", "--check")),
+        Check("whitespace", (python, __file__, "--base", base_ref, "--internal-whitespace")),
         Check("repo stats", (python, "src/update_repo_stats.py", "--check")),
     ]
     notes = [
@@ -534,6 +548,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument(
+        "--internal-whitespace",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args(argv)
 
     if not shutil.which("git"):
@@ -541,6 +560,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.internal_hydrate_graph_lfs:
         return hydrate_graph_lfs_artifacts()
+    if args.internal_whitespace:
+        return _run_whitespace_check(args.base)
 
     files = changed_files(args.base)
     if args.internal_no_test_policy:

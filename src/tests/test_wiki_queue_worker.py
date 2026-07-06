@@ -1320,6 +1320,73 @@ def test_process_next_artifact_promotion_allows_known_graph_target(
     assert target.with_name("graph.json.promotion.json").exists()
 
 
+@pytest.mark.parametrize(
+    ("name", "payload", "message"),
+    (
+        ("graph.json", {"nodes": [], "graph": {}}, "missing edges list"),
+        (
+            "graph-delta.json",
+            {"version": 1, "full_rebuild": False, "export_id": "export-test"},
+            "missing nodes list",
+        ),
+        ("communities.json", {"export_id": "export-test"}, "missing communities object"),
+        (
+            "graph-export-manifest.json",
+            {
+                "version": 1,
+                "export_id": "export-test",
+                "artifacts": {"graph": "graph.json"},
+                "counts": {"nodes": 1, "edges": 0, "communities": 0},
+            },
+            "invalid artifacts map",
+        ),
+    ),
+)
+def test_artifact_promotion_uses_target_specific_graph_json_validators(
+    tmp_path: Path,
+    name: str,
+    payload: dict[str, Any],
+    message: str,
+) -> None:
+    target = tmp_path / "wiki" / "graphify-out" / name
+    target.parent.mkdir(parents=True)
+    staged = target.with_name(f"{target.name}.staged")
+    staged.write_text(json.dumps(payload), encoding="utf-8")
+    validator = wiki_queue_worker._artifact_validator_for_target(target)
+
+    assert validator is not None
+    with pytest.raises(ValueError, match=message):
+        validator(staged)
+
+
+def test_artifact_promotion_manifest_validator_accepts_graph_packs(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "wiki" / "graphify-out" / "graph-export-manifest.json"
+    target.parent.mkdir(parents=True)
+    staged = target.with_name(f"{target.name}.staged")
+    staged.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "export_id": "export-test",
+                "artifacts": {
+                    "graph": "packs",
+                    "delta": "graph-delta.json",
+                    "communities": "communities.json",
+                    "report": "graph-report.md",
+                },
+                "counts": {"nodes": 1, "edges": 0, "communities": 0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    validator = wiki_queue_worker._artifact_validator_for_target(target)
+
+    assert validator is not None
+    validator(staged)
+
+
 def test_tar_refresh_handler_uses_from_catalog_for_catalog_payload(
     tmp_path: Path,
     monkeypatch: Any,

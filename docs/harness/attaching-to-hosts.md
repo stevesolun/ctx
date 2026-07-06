@@ -141,13 +141,12 @@ Example config:
 Parent secrets are not inherited unless you set `inherit_env: true`; prefer
 explicit `env` keys for servers that need credentials. `${tmp_path}` expands
 to a pytest temporary directory so filesystem probes can avoid real user data.
-For lower-level `McpServerConfig` users, `$ENVVAR` and `${ENVVAR}` placeholders
-inside `args` expand from the final child environment immediately before spawn.
-Non-secret placeholders can be used for ports or paths. Sensitive placeholders
-are rejected by default because they would expose the value in child argv; use
-`credential_env` or explicit `env` for servers that read secrets from the
-environment. Set `allow_argv_secret_expansion=True` only for trusted local
-servers that cannot avoid argv credentials.
+For lower-level `McpServerConfig` users, `args` are literal by default. Set
+`expand_argv_env=True` to expand `$ENVVAR` and `${ENVVAR}` placeholders from the
+final child environment immediately before spawn. Sensitive placeholders are
+rejected unless `allow_argv_secret_expansion=True` is also set for trusted local
+servers that cannot avoid argv credentials; prefer `credential_env` or explicit
+`env` for servers that read secrets from the environment.
 
 ---
 

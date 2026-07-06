@@ -478,6 +478,24 @@ class TestClientRobustness:
         with McpClient(_make_config(inherit_env=True)) as client:
             assert client.call_tool("echo_env", {"name": "CTX_LEGACY_INHERIT_TEST"}) == "visible"
 
+    def test_env_placeholders_are_literal_by_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("MCP_API_KEY", "argv-only-secret")
+        cfg = McpServerConfig(
+            name="argvserver",
+            command="server",
+            args=("--api-key", "${MCP_API_KEY}", "--header=Bearer $MCP_API_KEY"),
+            credential_env=("MCP_API_KEY",),
+        )
+
+        assert mcp_router._expand_config_args(cfg, mcp_router._child_env_for_config(cfg)) == (
+            "--api-key",
+            "${MCP_API_KEY}",
+            "--header=Bearer $MCP_API_KEY",
+        )
+
     def test_sensitive_env_placeholders_are_not_expanded_into_argv_by_default(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -488,6 +506,7 @@ class TestClientRobustness:
             command="server",
             args=("--api-key", "${MCP_API_KEY}", "--header=Bearer $MCP_API_KEY"),
             credential_env=("MCP_API_KEY",),
+            expand_argv_env=True,
         )
 
         with pytest.raises(ValueError, match="sensitive env var 'MCP_API_KEY'"):
@@ -506,6 +525,7 @@ class TestClientRobustness:
             command="server",
             args=(f"--auth=${{{env_name}}}",),
             env={env_name: "argv-only-secret"},
+            expand_argv_env=True,
         )
         env = mcp_router._child_env_for_config(cfg)
 
@@ -513,12 +533,13 @@ class TestClientRobustness:
             mcp_router._expand_config_args(cfg, env)
         assert "argv-only-secret" in mcp_router._stderr_redaction_values(cfg, env)
 
-    def test_non_secret_env_placeholders_still_expand(self) -> None:
+    def test_non_secret_env_placeholders_expand_when_enabled(self) -> None:
         cfg = McpServerConfig(
             name="argvserver",
             command="server",
             args=("--port=${MCP_PORT}",),
             env={"MCP_PORT": "8123"},
+            expand_argv_env=True,
         )
 
         assert mcp_router._expand_config_args(cfg, mcp_router._child_env_for_config(cfg)) == (
@@ -536,6 +557,7 @@ class TestClientRobustness:
             args=("--api-key", "${MCP_API_KEY}"),
             credential_env=("MCP_API_KEY",),
             allow_argv_secret_expansion=True,
+            expand_argv_env=True,
         )
 
         assert mcp_router._expand_config_args(cfg, mcp_router._child_env_for_config(cfg)) == (

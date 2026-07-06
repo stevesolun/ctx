@@ -582,9 +582,12 @@ def _validate_graph_object_no_host_paths(graph: Any, *, context: str) -> None:
     if isinstance(graph_meta, dict):
         _validate_no_host_user_path_value(graph_meta, context=f"{context} graph metadata")
     for node_id, attrs in graph.nodes(data=True):
+        _validate_no_host_user_path_value(node_id, context=f"{context} graph node id")
         if isinstance(attrs, dict):
             _validate_no_host_user_path_value(attrs, context=f"{context} graph node {node_id!r}")
     for source, target, attrs in graph.edges(data=True):
+        _validate_no_host_user_path_value(source, context=f"{context} graph edge source")
+        _validate_no_host_user_path_value(target, context=f"{context} graph edge target")
         if isinstance(attrs, dict):
             _validate_no_host_user_path_value(
                 attrs,

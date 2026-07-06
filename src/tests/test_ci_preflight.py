@@ -90,6 +90,22 @@ def test_preflight_runs_graph_validation_for_graph_artifacts() -> None:
     assert graph_lane.checks[0].argv[1] == "scripts/ci_preflight.py"
 
 
+def test_local_fast_whitespace_check_runs_against_base() -> None:
+    whitespace = next(
+        check for check in _checks_for(["src/ctx/cli/run.py"]) if check.name == "whitespace"
+    )
+    lanes = local_fast_gate.group_checks([whitespace])
+
+    assert lanes[0].name == "cheap"
+    assert lanes[0].checks[0].argv == (
+        "python",
+        "scripts/ci_preflight.py",
+        "--base",
+        "origin/main",
+        "--internal-whitespace",
+    )
+
+
 def test_preflight_graph_lfs_pointer_verification(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(ci_preflight, "REPO_ROOT", tmp_path)
     artifact = tmp_path / "graph" / "wiki-graph.tar.gz"

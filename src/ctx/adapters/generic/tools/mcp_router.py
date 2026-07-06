@@ -257,6 +257,8 @@ def _expand_env_placeholders(value: str, env: dict[str, str]) -> str:
 
 
 def _expand_config_args(config: "McpServerConfig", env: dict[str, str]) -> tuple[str, ...]:
+    if not config.expand_argv_env:
+        return config.args
     if not config.allow_argv_secret_expansion:
         for arg in config.args:
             for name in _env_placeholder_names(arg):
@@ -356,10 +358,11 @@ class McpServerConfig:
     so there is no shell interpolation — a server config cannot inject
     shell metacharacters into the spawn call.
 
-    ``args`` may contain ``$ENVVAR`` or ``${ENVVAR}`` placeholders. They
-    expand from the final child environment immediately before spawn. Sensitive
-    env vars are not expanded into argv unless ``allow_argv_secret_expansion``
-    is explicitly enabled for a trusted local server.
+    ``args`` are literal by default. Set ``expand_argv_env=True`` to expand
+    ``$ENVVAR`` or ``${ENVVAR}`` placeholders from the final child environment
+    immediately before spawn. Sensitive env vars are not expanded into argv
+    unless ``allow_argv_secret_expansion`` is explicitly enabled for a trusted
+    local server.
 
     ``env`` is the explicit child overlay. Parent secrets are not
     inherited by default; only a small process-basics allowlist
@@ -379,6 +382,7 @@ class McpServerConfig:
     request_timeout: float = 30.0
     inherit_env: bool = False
     allow_argv_secret_expansion: bool = False
+    expand_argv_env: bool = False
 
     def __post_init__(self) -> None:
         _validate_server_name(self.name)

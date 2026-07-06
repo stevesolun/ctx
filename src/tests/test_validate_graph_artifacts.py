@@ -28,6 +28,7 @@ from validate_graph_artifacts import (
     _safe_tar_name,
     _scan_graph_json,
     validate_graph_artifacts,
+    validate_runtime_graph_archive,
 )
 
 _PREVIEW_HTML_FILES = (
@@ -1149,6 +1150,35 @@ def test_validate_graph_artifacts_rejects_corrupt_graph_pack(tmp_path: Path) -> 
 
     with pytest.raises(GraphArtifactError, match="graph pack"):
         validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
+
+
+def test_validate_runtime_graph_archive_rejects_host_path_graph_pack_node_id(
+    tmp_path: Path,
+) -> None:
+    graph = nx.Graph()
+    graph.add_node("/Users/steves/private", type="skill")
+    pack_root = tmp_path / "graph-pack-source-export-test"
+    write_base_pack(
+        pack_dir=pack_root / "base-export-test",
+        pack_id="base-export-test",
+        base_export_id="export-test",
+        config_hash="config-sha",
+        model_id="bge-small-en-v1.5",
+        graph=graph,
+    )
+    _write_runtime_archive(
+        tmp_path,
+        graph={},
+        include_graph=False,
+        graph_artifact="packs",
+        graph_pack_dir=pack_root,
+    )
+
+    with pytest.raises(GraphArtifactError, match="host path"):
+        validate_runtime_graph_archive(
+            tmp_path / "wiki-graph-runtime.tar.gz",
+            expected_harnesses=set(),
+        )
 
 
 def test_validate_graph_artifacts_rejects_original_backup_members(tmp_path: Path) -> None:

@@ -299,7 +299,11 @@ def _should_skip_expanded_markdown_member(name: str) -> bool:
 
 
 def _should_redact_text_member(name: str) -> bool:
-    return name.startswith("graphify-out/") and name.endswith((".json", ".jsonl"))
+    return (
+        name.startswith("graphify-out/")
+        and not name.startswith("graphify-out/packs/")
+        and name.endswith((".json", ".jsonl"))
+    )
 
 
 def _add_text(tf: tarfile.TarFile, *, name: str, text: str) -> None:
