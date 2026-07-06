@@ -239,6 +239,10 @@ class TestClientRobustness:
             ("OPENAI_API_KEY=sk-proj-abcdefghijklmnop", ("sk-proj-abcdefghijklmnop",)),
             ("SLACK_BOT_TOKEN=xoxb-1234567890-secret", ("xoxb-1234567890-secret",)),
             ("db_password: supersecretpassword", ("supersecretpassword",)),
+            ("PRIVATE_KEY=supersecretprivatekey", ("supersecretprivatekey",)),
+            ("ACCESS_KEY=supersecretaccesskey", ("supersecretaccesskey",)),
+            ("SERVICE_PASSWD=supersecretpasswd", ("supersecretpasswd",)),
+            ("BEARER=supersecretbearer", ("supersecretbearer",)),
         ],
     )
     def test_redact_sensitive_text_matrix(
@@ -488,6 +492,26 @@ class TestClientRobustness:
 
         with pytest.raises(ValueError, match="sensitive env var 'MCP_API_KEY'"):
             mcp_router._expand_config_args(cfg, mcp_router._child_env_for_config(cfg))
+
+    @pytest.mark.parametrize(
+        "env_name",
+        ("MCP_PRIVATE_KEY", "MCP_ACCESS_KEY", "SERVICE_PASSWD", "MCP_BEARER"),
+    )
+    def test_sensitive_env_placeholder_key_markers_are_rejected_by_default(
+        self,
+        env_name: str,
+    ) -> None:
+        cfg = McpServerConfig(
+            name="argvserver",
+            command="server",
+            args=(f"--auth=${{{env_name}}}",),
+            env={env_name: "argv-only-secret"},
+        )
+        env = mcp_router._child_env_for_config(cfg)
+
+        with pytest.raises(ValueError, match=env_name):
+            mcp_router._expand_config_args(cfg, env)
+        assert "argv-only-secret" in mcp_router._stderr_redaction_values(cfg, env)
 
     def test_non_secret_env_placeholders_still_expand(self) -> None:
         cfg = McpServerConfig(

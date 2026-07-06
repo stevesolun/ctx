@@ -57,6 +57,7 @@ from ctx.telemetry import (
     telemetry_span,
     traceparent_from_span,
 )
+from ctx.utils._secret_scan import secret_key_like
 
 _logger = logging.getLogger(__name__)
 
@@ -88,15 +89,13 @@ _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _RESERVED_SERVER_NAMES = frozenset({"ctx"})
 _SENSITIVE_ASSIGNMENT_RE = re.compile(
     r"(?i)\b([A-Z0-9_-]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|"
-    r"CREDENTIAL|AUTHORIZATION)[A-Z0-9_-]*)\s*([:=])\s*([^\s]+)"
+    r"PASSWD|PRIVATE[_-]?KEY|CREDENTIAL|ACCESS[_-]?KEY|"
+    r"CLIENT[_-]?SECRET|AUTHORIZATION|BEARER)[A-Z0-9_-]*)\s*([:=])\s*([^\s]+)"
 )
 _BEARER_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")
 _TOKEN_VALUE_RE = re.compile(
     r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat|hf|sk|xox[baprs])"
     r"[_-]?[A-Za-z0-9_./+=-]{8,}\b"
-)
-_SENSITIVE_ENV_KEY_RE = re.compile(
-    r"(?i)(API[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTHORIZATION)"
 )
 _ENV_PLACEHOLDER_RE = re.compile(
     r"\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<bare>[A-Za-z_][A-Za-z0-9_]*))"
@@ -228,7 +227,7 @@ def _stderr_redaction_values(config: "McpServerConfig", env: dict[str, str]) -> 
     credential_keys = {key.upper() for key in config.credential_env}
     values = []
     for key, value in env.items():
-        if key.upper() in credential_keys or _SENSITIVE_ENV_KEY_RE.search(key):
+        if key.upper() in credential_keys or secret_key_like(key):
             values.append(value)
     return tuple(dict.fromkeys(values))
 
@@ -244,7 +243,7 @@ def _env_placeholder_names(value: str) -> tuple[str, ...]:
 
 def _is_sensitive_env_reference(config: "McpServerConfig", name: str) -> bool:
     credential_keys = {key.upper() for key in config.credential_env}
-    return name.upper() in credential_keys or _SENSITIVE_ENV_KEY_RE.search(name) is not None
+    return name.upper() in credential_keys or secret_key_like(name)
 
 
 def _expand_env_placeholders(value: str, env: dict[str, str]) -> str:
