@@ -82,7 +82,9 @@ def _secret_arg_allows_indirection(key: str, value: str) -> bool:
     kind = _secret_arg_indirection_kind(key)
     stripped = value.strip()
     if kind in {"file", "path"}:
-        return placeholder_secret_value(stripped) or PATH_SHAPED_VALUE_RE.search(stripped) is not None
+        return (
+            placeholder_secret_value(stripped) or PATH_SHAPED_VALUE_RE.search(stripped) is not None
+        )
     if kind in {"env", "var"}:
         return placeholder_secret_value(stripped) or (
             not _value_has_token_pattern(stripped)

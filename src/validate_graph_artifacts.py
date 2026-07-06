@@ -102,7 +102,7 @@ _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 _HOST_USER_PATH_RE = re.compile(
     rb"(?:^|(?<=[`\"'(<\[\s=,:]))"
     rb"(?:(?i:file:///(?:[A-Z]:[\\/]+Users[\\/]|(?:Users|home)/))"
-    rb"|[A-Za-z]:[\\/]+Users[\\/]|/(?:Users|home)/)"
+    rb"|(?i:[A-Z]:[\\/]+Users[\\/])|/(?:Users|home)/)"
 )
 _LOCAL_GENERATED_MARKDOWN = frozenset(
     {
