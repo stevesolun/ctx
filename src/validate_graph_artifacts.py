@@ -689,9 +689,24 @@ def _scan_graph_json(stream: IO[bytes]) -> tuple[int, int, int, int, int, str | 
     return nodes, edges, semantic_edges, skills_sh_nodes, harness_nodes, export_id
 
 
-def _scan_graph_export_id(stream: IO[bytes], *, max_bytes: int = 1024 * 1024) -> str | None:
-    payload = stream.read(max_bytes)
-    return _extract_graph_export_id(payload)
+def _scan_graph_export_id(
+    stream: IO[bytes],
+    *,
+    max_bytes: int = 1024 * 1024,
+    name: str = "graphify-out/graph.json",
+    context: str = "graph.json",
+) -> str | None:
+    export_id: str | None = None
+    probe = b""
+    tail = b""
+    while chunk := stream.read(1024 * 1024):
+        data = tail + chunk
+        _validate_no_host_user_path_bytes(name, data, context=context)
+        if export_id is None and len(probe) < max_bytes:
+            probe += chunk[: max_bytes - len(probe)]
+            export_id = _extract_graph_export_id(probe)
+        tail = data[-65536:]
+    return export_id
 
 
 def _extract_graph_export_id(payload: bytes) -> str | None:
@@ -1248,6 +1263,19 @@ def _validate_graph_packs(packs_dir: Path) -> None:
         discover_pack_manifests(packs_dir)
     except GraphPackManifestError as exc:
         raise GraphArtifactError(f"graph pack validation failed: {exc}") from exc
+
+
+def validate_runtime_graph_archive(
+    tarball: Path,
+    *,
+    expected_harnesses: set[str] | None = None,
+    expected_export_id: str | None = None,
+) -> str:
+    return _validate_runtime_graph_archive(
+        tarball,
+        expected_harnesses=DEFAULT_HARNESSES if expected_harnesses is None else expected_harnesses,
+        expected_export_id=expected_export_id,
+    )
 
 
 def _validate_runtime_graph_archive(

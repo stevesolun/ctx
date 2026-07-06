@@ -607,7 +607,7 @@ def _artifact_validator_for_target(target: Path) -> ArtifactValidator | None:
 
         return _validate_wiki_tarball_candidate
     if name == "wiki-graph-runtime.tar.gz":
-        return _validate_tar_gz_artifact
+        return _validate_runtime_graph_tar_gz_artifact
     if name.endswith(".jsonl.gz"):
         return _validate_gzip_jsonl_artifact
     if name.endswith(".json.gz"):
@@ -627,6 +627,21 @@ def _validate_tar_gz_artifact(path: Path) -> None:
             pass
     except tarfile.TarError as exc:
         raise ValueError(f"invalid tar.gz artifact: {path}") from exc
+
+
+def _validate_runtime_graph_tar_gz_artifact(path: Path) -> None:
+    import tarfile
+
+    from validate_graph_artifacts import (  # noqa: PLC0415
+        GraphArtifactError,
+        validate_runtime_graph_archive,
+    )
+
+    _validate_tar_gz_artifact(path)
+    try:
+        validate_runtime_graph_archive(path)
+    except (GraphArtifactError, OSError, tarfile.TarError) as exc:
+        raise ValueError(f"invalid runtime graph artifact: {path}: {exc}") from exc
 
 
 def _validate_jsonl_artifact(path: Path) -> None:

@@ -600,6 +600,34 @@ def test_artifact_promotion_uses_target_validator_for_tar_without_payload_valida
     assert staged.exists()
 
 
+def test_artifact_promotion_rejects_incomplete_runtime_tar_without_payload_validator(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    target = repo / "graph" / "wiki-graph-runtime.tar.gz"
+    staged = target.with_name("wiki-graph-runtime.tar.gz.staged")
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"old-tar")
+    payload = b'{"graph":{"export_id":"export-test"},"nodes":[],"edges":[]}'
+    info = tarfile.TarInfo("graphify-out/graph.json")
+    info.size = len(payload)
+    with tarfile.open(staged, "w:gz") as tf:
+        tf.addfile(info, BytesIO(payload))
+    monkeypatch.setattr(wiki_queue_worker, "_source_root", lambda: repo.resolve())
+
+    with pytest.raises(ValueError, match="invalid runtime graph artifact"):
+        wiki_queue_worker._handle_artifact_promotion(
+            tmp_path / "wiki",
+            {
+                "staged_path": str(staged),
+                "target_path": str(target),
+            },
+        )
+    assert target.read_bytes() == b"old-tar"
+    assert staged.exists()
+
+
 def test_entity_search_fallback_returns_wiki_relative_path(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     entity_path = wiki / "entities" / "skills" / "python-patterns.md"

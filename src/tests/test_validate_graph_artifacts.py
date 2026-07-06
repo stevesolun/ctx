@@ -989,6 +989,39 @@ def test_validate_graph_artifacts_rejects_artifact_export_id_mismatch(
         validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
 
 
+def test_validate_graph_artifacts_rejects_runtime_graph_json_host_path(
+    tmp_path: Path,
+) -> None:
+    _write_catalog(
+        tmp_path,
+        converted_path="converted/skills-sh-example-skill/SKILL.md",
+    )
+    _write_archive(tmp_path)
+    graph = {
+        "graph": {"export_id": "export-test"},
+        "nodes": [
+            {
+                "id": "skill:skills-sh-example-skill",
+                "type": "skill",
+                "source_catalog": "skills.sh",
+                "metadata": {"source_path": "/Users/alice/private-notes.md"},
+            },
+            {"id": "harness:langgraph", "type": "harness"},
+        ],
+        "edges": [
+            {
+                "source": "skill:skills-sh-example-skill",
+                "target": "harness:langgraph",
+                "semantic_sim": 0.91,
+            },
+        ],
+    }
+    _write_runtime_archive(tmp_path, graph=graph)
+
+    with pytest.raises(GraphArtifactError, match="host path"):
+        validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
+
+
 def test_validate_graph_artifacts_rejects_missing_converted_catalog_path(
     tmp_path: Path,
 ) -> None:
