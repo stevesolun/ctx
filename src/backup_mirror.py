@@ -646,13 +646,24 @@ def _delete_snapshot_dirs(
     backups_dir) or any path that fails the containment check.
     """
     removed: list[str] = []
+    for snap in _safe_prune_snapshots(snaps_to_remove, backups_dir):
+        snap_path = Path(snap.path)
+        shutil.rmtree(snap_path, ignore_errors=True)
+        removed.append(snap.snapshot_id)
+    return removed
+
+
+def _safe_prune_snapshots(
+    snaps_to_remove: Iterable[SnapshotInfo],
+    backups_dir: Path,
+) -> list[SnapshotInfo]:
+    safe: list[SnapshotInfo] = []
     for snap in snaps_to_remove:
         snap_path = Path(snap.path)
         if snap_path.is_symlink() or not _contained(snap_path, backups_dir):
             continue
-        shutil.rmtree(snap_path, ignore_errors=True)
-        removed.append(snap.snapshot_id)
-    return removed
+        safe.append(snap)
+    return safe
 
 
 def prune_snapshots(
@@ -675,7 +686,7 @@ def prune_snapshots(
     snaps = list_snapshots(backups_dir)
     to_remove = snaps[keep:]
     if dry_run:
-        return tuple(s.snapshot_id for s in to_remove)
+        return tuple(s.snapshot_id for s in _safe_prune_snapshots(to_remove, backups_dir))
     return tuple(_delete_snapshot_dirs(to_remove, backups_dir))
 
 
@@ -712,11 +723,18 @@ def prune_by_policy(
     snaps = list_snapshots(backups_dir)
     plan = plan_prune(snaps, policy, now=now)
 
-    if dry_run:
-        return plan
-
     by_id = {s.snapshot_id: s for s in snaps}
     to_remove = [by_id[i] for i in plan.delete if i in by_id]
+    if dry_run:
+        safe_delete = {snap.snapshot_id for snap in _safe_prune_snapshots(to_remove, backups_dir)}
+        pruned_delete = tuple(i for i in plan.delete if i in safe_delete)
+        return RetentionPlan(
+            keep=plan.keep,
+            delete=pruned_delete,
+            protected_by_latest=plan.protected_by_latest,
+            protected_by_daily=plan.protected_by_daily,
+        )
+
     removed = _delete_snapshot_dirs(to_remove, backups_dir)
     # Any snapshot in plan.delete that we refused to touch (symlink or
     # containment failure) stays on disk — surface that honestly by

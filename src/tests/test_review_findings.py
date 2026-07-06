@@ -321,7 +321,7 @@ def test_hf_card_sync_checks_repo_stats_before_export(
     assert calls == ["stats", "export", "api:hf-token", "ensure", "upload"]
 
 
-def test_mcp_env_placeholders_expand_at_spawn_without_persisting_secret(
+def test_mcp_env_placeholders_do_not_expand_credentials_into_argv_by_default(
     monkeypatch: Any,
 ) -> None:
     from ctx.adapters.generic.tools import McpServerConfig, mcp_router
@@ -335,11 +335,7 @@ def test_mcp_env_placeholders_expand_at_spawn_without_persisting_secret(
     )
 
     env = mcp_router._child_env_for_config(cfg)
-    expanded = mcp_router._expand_config_args(cfg, env)
 
-    assert expanded == (
-        "--api-key",
-        "argv-only-secret",
-        "--header=Bearer argv-only-secret",
-    )
+    with pytest.raises(ValueError, match="sensitive env var 'MCP_API_KEY'"):
+        mcp_router._expand_config_args(cfg, env)
     assert cfg.args[1] == "${MCP_API_KEY}"

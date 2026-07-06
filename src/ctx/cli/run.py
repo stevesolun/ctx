@@ -255,8 +255,8 @@ def _parse_mcp_spec(spec: str) -> McpServerConfig:
         Example: filesystem:npx -y @modelcontextprotocol/server-filesystem /data
         The part before the colon is the name; the part after is the
         command + args (split on whitespace, no shell). Secret-looking
-        inline args are rejected; pass credentials as ${ENVVAR} placeholders
-        paired with --mcp-env.
+        inline args are rejected; pass credentials through the child
+        environment with --mcp-env.
 
       name (bare)
         Names that match a known preset get a default invocation.
@@ -286,8 +286,8 @@ def _parse_mcp_spec(spec: str) -> McpServerConfig:
         if secret_arg is not None:
             raise SystemExit(
                 f"--mcp inline command for server {name!r} contains secret-looking "
-                f"argv {secret_arg!r}; use ${{ENVVAR}} in argv with "
-                f"--mcp-env {name}:ENVVAR instead"
+                f"argv {secret_arg!r}; use --mcp-env {name}:ENVVAR and configure "
+                "the server to read that environment variable instead"
             )
         if name == "filesystem" and len(parts) == 1:
             filesystem_preset = _MCP_PRESETS["filesystem"]

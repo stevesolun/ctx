@@ -1126,6 +1126,8 @@ def test_validate_graph_artifacts_rejects_lock_members(tmp_path: Path) -> None:
     "host_path",
     [
         "/Users/steves/ctx/graph",
+        "file:///Users/steves/ctx/graph",
+        "file:///home/steves/ctx/graph",
         "C:\\Users\\steves\\ctx\\graph",
     ],
 )

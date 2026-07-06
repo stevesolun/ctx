@@ -12,6 +12,7 @@ so there's no cross-test state.
 from __future__ import annotations
 
 import json
+import io
 import subprocess
 import sys
 import time
@@ -382,6 +383,16 @@ class TestClientRobustness:
         assert secret not in stderr_tail
         assert "[REDACTED]" in stderr_tail
 
+    def test_stderr_drain_uses_thread_redaction_snapshot(self) -> None:
+        secret = "late-secret"
+        client = McpClient(_make_config())
+        client._proc = type("Proc", (), {"stderr": io.BytesIO(f"{secret}\n".encode())})()  # type: ignore[assignment]
+        client._stderr_redaction_values = ()
+
+        client._drain_stderr((secret,))
+
+        assert client._stderr_lines == ["[REDACTED]"]
+
     def test_request_before_start_raises(self) -> None:
         client = McpClient(_make_config())
         with pytest.raises(RuntimeError, match="not started"):
@@ -462,6 +473,51 @@ class TestClientRobustness:
         monkeypatch.setenv("CTX_LEGACY_INHERIT_TEST", "visible")
         with McpClient(_make_config(inherit_env=True)) as client:
             assert client.call_tool("echo_env", {"name": "CTX_LEGACY_INHERIT_TEST"}) == "visible"
+
+    def test_sensitive_env_placeholders_are_not_expanded_into_argv_by_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("MCP_API_KEY", "argv-only-secret")
+        cfg = McpServerConfig(
+            name="argvserver",
+            command="server",
+            args=("--api-key", "${MCP_API_KEY}", "--header=Bearer $MCP_API_KEY"),
+            credential_env=("MCP_API_KEY",),
+        )
+
+        with pytest.raises(ValueError, match="sensitive env var 'MCP_API_KEY'"):
+            mcp_router._expand_config_args(cfg, mcp_router._child_env_for_config(cfg))
+
+    def test_non_secret_env_placeholders_still_expand(self) -> None:
+        cfg = McpServerConfig(
+            name="argvserver",
+            command="server",
+            args=("--port=${MCP_PORT}",),
+            env={"MCP_PORT": "8123"},
+        )
+
+        assert mcp_router._expand_config_args(cfg, mcp_router._child_env_for_config(cfg)) == (
+            "--port=8123",
+        )
+
+    def test_argv_secret_expansion_requires_explicit_opt_in(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("MCP_API_KEY", "argv-only-secret")
+        cfg = McpServerConfig(
+            name="argvserver",
+            command="server",
+            args=("--api-key", "${MCP_API_KEY}"),
+            credential_env=("MCP_API_KEY",),
+            allow_argv_secret_expansion=True,
+        )
+
+        assert mcp_router._expand_config_args(cfg, mcp_router._child_env_for_config(cfg)) == (
+            "--api-key",
+            "argv-only-secret",
+        )
 
 
 # ── McpRouter ─────────────────────────────────────────────────────────────────

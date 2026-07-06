@@ -104,3 +104,28 @@ def test_repack_full_wiki_tar_moves_high_fanout_pages_into_wiki_pack(
     assert repacked_pages["entities/agents/reviewer.md"] == "# Reviewer Agent\n"
     assert repacked_pages["entities/mcp-servers/github.md"] == "# GitHub MCP\n"
     assert "catalog.md" not in repacked_pages
+
+
+def test_repack_full_wiki_tar_redacts_file_uri_host_paths(tmp_path: Path) -> None:
+    source = tmp_path / "wiki-graph.tar.gz"
+    target = tmp_path / "wiki-graph-packed.tar.gz"
+    with tarfile.open(source, "w:gz") as tf:
+        _add_text(
+            tf,
+            "entities/skills/current.md",
+            "macOS: file:///Users/steves/ctx\nLinux: file:///home/steves/ctx\n",
+        )
+        _add_text(
+            tf,
+            "graphify-out/graph-export-manifest.json",
+            json.dumps({"export_id": "test-export"}),
+        )
+
+    repack_full_wiki_tar(source, target)
+
+    with tarfile.open(target, "r:gz") as tf:
+        tf.extractall(tmp_path / "extracted")
+    pages = load_merged_wiki_pages(tmp_path / "extracted" / "wiki-packs")
+    assert pages["entities/skills/current.md"] == (
+        "macOS: <host-user-path>\nLinux: <host-user-path>\n"
+    )
