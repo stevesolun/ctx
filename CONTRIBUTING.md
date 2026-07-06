@@ -26,7 +26,16 @@ pytest -q -m integration           # embedding precision/recall tests
 pytest --cov=src -q                # with coverage report
 ```
 
-Before opening a PR, run the local gate:
+Before opening a PR, run the local fast gate on committed branch history:
+
+```bash
+scripts/no_mistakes_run.sh fast
+```
+
+This selects the same PR checks as CI, groups independent work into lanes, and
+runs those lanes in isolated temporary git worktrees so local CPU, graph, docs,
+package, and test checks can run in parallel. It is the fast front door; the
+serial preflight/no-mistakes gate remains the authoritative final check:
 
 ```bash
 python scripts/ci_preflight.py --profile pr

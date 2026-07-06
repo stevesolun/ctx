@@ -362,6 +362,8 @@ jobs:
 
           repo = os.environ["GITHUB_REPOSITORY"]
           release_asset_wait_seconds = 300
+          if os.environ.get("GITHUB_EVENT_NAME") == "pull_request":
+              release_asset_wait_seconds = 0
           release_asset_poll_seconds = 10
           expected_graph_assets = {
               "graph/wiki-graph.tar.gz": {
@@ -437,6 +439,7 @@ jobs:
               env.setdefault("GIT_LFS_ACTIVITYTIMEOUT", "600")
               env.setdefault("GIT_LFS_DIALTIMEOUT", "120")
               env.setdefault("GIT_LFS_TLSTIMEOUT", "120")
+              env.setdefault("GIT_LFS_CONCURRENTTRANSFERS", "1")
               subprocess.check_call(
                   ["git", "lfs", "pull", "--include", path_name, "--exclude", ""],
                   env=env,

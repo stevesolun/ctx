@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml  # type: ignore[import-untyped]
 
 from scripts import ci_preflight
+from scripts import local_fast_gate
 from scripts.ci_preflight import _run_no_test_policy_for_files
 from scripts.ci_preflight import Check
 from scripts.ci_preflight import PUBLIC_DOCS_TRACKER_TESTS
@@ -77,11 +78,16 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
 
 def test_preflight_runs_graph_validation_for_graph_artifacts() -> None:
     names = _names_for(["graph/wiki-graph.tar.gz"])
+    lanes = local_fast_gate.group_checks(_checks_for(["graph/wiki-graph.tar.gz"]))
+    graph_lane = next(lane for lane in lanes if lane.name == "graph")
+    graph_names = [check.name for check in graph_lane.checks]
 
     assert names.index("hydrate graph LFS") < names.index("graph artifact validation")
     assert "graph artifact validation" in names
     assert "no-test policy" not in names
     assert "unit-linux equivalent" not in names
+    assert graph_names == ["hydrate graph LFS", "graph artifact validation"]
+    assert graph_lane.checks[0].argv[1] == "scripts/ci_preflight.py"
 
 
 def test_preflight_graph_lfs_pointer_verification(tmp_path: Path, monkeypatch) -> None:
@@ -207,6 +213,24 @@ def test_preflight_full_profile_forces_source_gates_for_docs_changes() -> None:
 
 def test_preflight_runs_browser_and_similarity_when_classified() -> None:
     names = _names_for([".github/workflows/test.yml"])
+    lanes = local_fast_gate.group_checks(_checks_for([".github/workflows/test.yml"]))
+    lane_names = [lane.name for lane in lanes]
+    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
+    graph_steps = workflow["jobs"]["graph-check"]["steps"]
+    graph_resolver_script = next(
+        step["run"]
+        for step in graph_steps
+        if step.get("name") == "Resolve graph artifacts from release assets or targeted LFS"
+    )
 
     assert "browser monitor security" in names
     assert "similarity precision/recall" in names
+    assert "cheap" in lane_names
+    assert "static" in lane_names
+    assert "unit" in lane_names
+    assert "feature" in lane_names
+    assert "package" in lane_names
+    assert "release_asset_wait_seconds = 300" in graph_resolver_script
+    assert 'os.environ.get("GITHUB_EVENT_NAME") == "pull_request"' in graph_resolver_script
+    assert "release_asset_wait_seconds = 0" in graph_resolver_script
+    assert 'env.setdefault("GIT_LFS_CONCURRENTTRANSFERS", "1")' in graph_resolver_script
