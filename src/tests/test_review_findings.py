@@ -159,6 +159,7 @@ def test_secret_arg_indirection_validates_env_reference_values() -> None:
         == "--token-env"
     )
     assert find_inline_secret_arg(["--token-env", "secret-value"]) == "--token-env"
+    assert find_inline_secret_arg(["--token-env=ABCDEF1234567890"]) == "--token-env"
     assert find_inline_secret_arg(["--token_env=GITHUB_TOKEN"]) is None
     assert find_inline_secret_arg(["--api_key_path=/run/secrets/openai"]) is None
     assert find_inline_secret_arg(["--api-key-path", "hunter2"]) == "--api-key-path"
