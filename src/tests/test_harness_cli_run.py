@@ -216,6 +216,19 @@ class TestParseMcpSpec:
         with pytest.raises(SystemExit, match="--mcp-env"):
             _parse_mcp_spec(spec)
 
+    def test_explicit_form_allows_secret_indirection_args(self) -> None:
+        cfg = _parse_mcp_spec(
+            "fs:npx server --token-file /run/secrets/token --credential-env GITHUB_TOKEN"
+        )
+
+        assert cfg.args == (
+            "server",
+            "--token-file",
+            "/run/secrets/token",
+            "--credential-env",
+            "GITHUB_TOKEN",
+        )
+
     def test_filesystem_colon_path_uses_preset_command(self) -> None:
         cfg = _parse_mcp_spec("filesystem:/tmp/project")
         assert cfg.name == "filesystem"

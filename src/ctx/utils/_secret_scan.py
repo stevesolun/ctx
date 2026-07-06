@@ -68,6 +68,11 @@ def _value_has_token_pattern(value: str) -> bool:
     return any(pattern.search(value) for pattern in TOKEN_VALUE_PATTERNS)
 
 
+def _secret_arg_allows_indirection(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", key.lstrip("-").lower()).strip("_")
+    return normalized.endswith(("_file", "_path", "_env", "_var"))
+
+
 def find_inline_secret(obj: object, *, path: str = "") -> str | None:
     """Return the first path that appears to contain an inline secret."""
     if isinstance(obj, dict):
@@ -100,7 +105,11 @@ def find_inline_secret_arg(tokens: list[str]) -> str | None:
             return assignment.group(1)
         if token.startswith("--") and "=" in token:
             key, value = token.split("=", 1)
-            if secret_key_like(key) and not placeholder_secret_value(value):
+            if (
+                secret_key_like(key)
+                and not _secret_arg_allows_indirection(key)
+                and not placeholder_secret_value(value)
+            ):
                 return key
 
     for index, token in enumerate(tokens[:-1]):
@@ -110,6 +119,7 @@ def find_inline_secret_arg(tokens: list[str]) -> str | None:
         value = tokens[index + 1]
         if (
             secret_key_like(key)
+            and not _secret_arg_allows_indirection(token)
             and value
             and not value.startswith("-")
             and not placeholder_secret_value(value)

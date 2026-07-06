@@ -47,6 +47,13 @@ def test_find_inline_secret_arg_allows_env_references() -> None:
     assert find_inline_secret_arg(["GITHUB_TOKEN=${GITHUB_TOKEN}"]) is None
 
 
+def test_find_inline_secret_arg_allows_secret_indirection_flags() -> None:
+    assert find_inline_secret_arg(["--token-file", "/run/secrets/github"]) is None
+    assert find_inline_secret_arg(["--credential-env", "GITHUB_TOKEN"]) is None
+    assert find_inline_secret_arg(["--api-key-path=/run/secrets/openai"]) is None
+    assert find_inline_secret_arg(["--client-secret-var=CLIENT_SECRET"]) is None
+
+
 def test_redact_secret_text_masks_assignment_and_token_shapes() -> None:
     text = (
         "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456 "
