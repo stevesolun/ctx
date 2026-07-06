@@ -47,6 +47,11 @@ scripts, and `.no-mistakes.yaml` as contract files; include focused
 `src/tests/...` coverage unless the diff is a proven version or stats-only
 release metadata update.
 
+GitHub PRs skip the broad OS/Python `test` matrix for ordinary changes.
+Changes under `.github/workflows/**` set `ci_changed`, run the full
+Ubuntu/Windows/macOS pytest matrix on the PR, and make the stable required
+aggregate fail if that matrix is skipped.
+
 ## Documentation changes
 
 Public docs surfaces are release-tracked in the canonical

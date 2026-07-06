@@ -37,6 +37,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   opt-in for servers that cannot avoid argv credentials.
 - Validated backup `top_files` overrides as top-level filenames only and added
   dry-run support to legacy `backup_mirror prune --keep`.
+- Ran the full OS/Python pytest matrix on PRs that change CI workflows and made
+  the stable required aggregate reject skipped matrix jobs for those PRs;
+  POSIX-only no-mistakes shell-wrapper regressions now skip on Windows.
 - Hardened `ctx-mcp-enrich` checkpoint and frontmatter handling so malformed
   checkpoints reset cleanly, processed slugs clear stale failures, body keys are
   not rewritten, and non-positive flush cadences fail fast.
