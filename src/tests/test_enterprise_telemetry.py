@@ -171,6 +171,74 @@ def test_sanitize_payload_hashes_common_path_key_shapes() -> None:
     assert "acme" not in payload_json
 
 
+def test_local_redacted_payload_strings_hash_host_paths(tmp_path: Path) -> None:
+    path = tmp_path / "events.jsonl"
+    export_path = tmp_path / "exported-events.jsonl"
+
+    event = record_event(
+        "ctx.api.recommend_bundle",
+        source="ctx-api",
+        payload={
+            "safe_note": (
+                "opened /Users/example/private-repo/app.py and "
+                r"C:\Users\example\private-repo\app.py"
+            ),
+            "result_count": 1,
+        },
+        path=path,
+        trusted_root=tmp_path,
+        config={"path": str(path), "export": {"enabled": False}},
+    )
+
+    assert event is not None
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    safe_note = raw["payload"]["safe_note"]
+    assert safe_note.startswith("opened [path_hash:sha256:")
+    assert safe_note.count("[path_hash:sha256:") == 2
+    raw_text = path.read_text(encoding="utf-8")
+    assert "/Users/example/private-repo" not in raw_text
+    assert "private-repo" not in raw_text
+
+    result = export_events(
+        path,
+        trusted_root=tmp_path,
+        config={
+            "path": str(path),
+            "export": {
+                "enabled": True,
+                "sink": "local_jsonl",
+                "path": str(export_path),
+            },
+        },
+    )
+
+    assert result.exported == 1
+    exported_text = export_path.read_text(encoding="utf-8")
+    assert "/Users/example/private-repo" not in exported_text
+    assert "private-repo" not in exported_text
+    assert exported_text.count("[path_hash:sha256:") == 2
+
+
+def test_local_redacted_nested_payload_strings_hash_host_paths() -> None:
+    payload = telemetry.sanitize_payload(
+        {
+            "safe_note": "see /home/alice/private-repo/app.py",
+            "nested": {
+                "items": [
+                    r"C:\Users\alice\private-repo\tool.py",
+                    "~/workspace/private-repo/readme.md",
+                ]
+            },
+        },
+        config={"mode": "local_redacted", "privacy": {"hash_salt": "tenant-a"}},
+    )
+
+    payload_text = json.dumps(payload)
+    assert payload_text.count("[path_hash:sha256:") == 3
+    assert "/home/alice/private-repo" not in payload_text
+    assert "private-repo" not in payload_text
+
+
 def test_telemetry_span_propagates_trace_to_nested_events(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
 
@@ -390,6 +458,70 @@ def test_export_metrics_posts_otlp_resource_metrics(
     assert "sess-raw-private" not in text
     assert "ctx.session.hash" in text
     assert "ctx.metric.query_hash" in text
+
+
+def test_export_metrics_resanitizes_legacy_attributes_for_otlp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "metrics.jsonl"
+    legacy_metric = TelemetryMetric(
+        schema_version=METRIC_SCHEMA_VERSION,
+        metric_id="legacy-raw-metric",
+        ts="2026-06-28T00:00:00Z",
+        name="ctx.api.requests",
+        instrument="counter",
+        value=1,
+        source="ctx-api",
+        privacy_mode="local_redacted",
+        attributes={
+            "query": "private acme query",
+            "safe_note": "opened /Users/example/private-repo/app.py",
+        },
+    )
+    path.write_text(
+        json.dumps(asdict(legacy_metric), separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    calls: list[dict[str, Any]] = []
+
+    def fake_post_otlp_http(
+        payload: dict[str, Any],
+        settings: dict[str, Any],
+    ) -> None:
+        calls.append(payload)
+
+    monkeypatch.setattr(telemetry, "_post_otlp_http", fake_post_otlp_http)
+
+    result = export_metrics(
+        path,
+        trusted_root=tmp_path,
+        config={
+            "metrics": {
+                "enabled": True,
+                "path": str(path),
+                "export": {
+                    "enabled": True,
+                    "sink": "otlp_http",
+                    "otlp": {
+                        "endpoint": "https://collector.example:4318/v1/metrics",
+                        "allowed_hosts": ["collector.example"],
+                    },
+                },
+            },
+            "privacy": {"hash_salt": "tenant-a"},
+        },
+    )
+
+    assert result.exported == 1
+    assert result.failed == 0
+    payload_text = json.dumps(calls[0])
+    assert "private acme query" not in payload_text
+    assert "/Users/example/private-repo" not in payload_text
+    assert "private-repo" not in payload_text
+    assert "ctx.metric.query_hash" in payload_text
+    assert "ctx.metric.safe_note" in payload_text
+    assert "[path_hash:sha256:" in payload_text
 
 
 def test_metrics_export_checkpoint_is_independent_from_event_checkpoint(
@@ -882,6 +1014,73 @@ def test_export_events_hashes_legacy_session_id_for_otlp(
     assert "legacy-session-private" not in json.dumps(payload)
 
 
+def test_export_events_resanitizes_legacy_payload_for_otlp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    legacy_event = TelemetryEvent(
+        schema_version=SCHEMA_VERSION,
+        event_id="legacy-raw-payload",
+        ts="2026-06-28T00:00:00Z",
+        event_name="ctx.mcp.request",
+        source="ctx-mcp-server",
+        outcome="ok",
+        privacy_mode="local_redacted",
+        payload={
+            "query": "private acme query",
+            "path": "/Users/example/private-repo/app.py",
+            "safe_note": "opened /Users/example/private-repo/app.py",
+        },
+    )
+    path.write_text(
+        json.dumps(asdict(legacy_event), separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    calls: list[dict[str, Any]] = []
+
+    def fake_post_otlp_http(
+        payload: dict[str, Any],
+        settings: dict[str, Any],
+    ) -> None:
+        calls.append(payload)
+
+    monkeypatch.setattr(telemetry, "_post_otlp_http", fake_post_otlp_http)
+
+    result = export_events(
+        path,
+        trusted_root=tmp_path,
+        config={
+            "path": str(path),
+            "privacy": {"hash_salt": "tenant-a"},
+            "export": {
+                "enabled": True,
+                "sink": "otlp_http",
+                "otlp": {
+                    "endpoint": "https://collector.example:4318/v1/logs",
+                    "allowed_hosts": ["collector.example"],
+                },
+            },
+        },
+    )
+
+    assert result.exported == 1
+    assert result.failed == 0
+    payload = calls[0]
+    log_record = payload["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]
+    attributes = {item["key"]: item["value"] for item in log_record["attributes"]}
+    assert "ctx.payload.query" not in attributes
+    assert "ctx.payload.path" not in attributes
+    assert attributes["ctx.payload.query_hash"]["stringValue"].startswith("sha256:")
+    assert attributes["ctx.payload.path_hash"]["stringValue"].startswith("sha256:")
+    safe_note = attributes["ctx.payload.safe_note"]["stringValue"]
+    assert safe_note.startswith("opened [path_hash:sha256:")
+    payload_text = json.dumps(payload)
+    assert "private acme query" not in payload_text
+    assert "/Users/example/private-repo" not in payload_text
+    assert "private-repo" not in payload_text
+
+
 @pytest.mark.parametrize(
     ("endpoint", "match"),
     [
@@ -1162,6 +1361,121 @@ def test_export_events_checkpoint_skips_already_exported_events(tmp_path: Path) 
     assert replay.attempted == 3
     assert replay.exported == 3
     assert len(export_path.read_text(encoding="utf-8").splitlines()) == 6
+
+
+def test_record_event_continuous_export_drains_backlog_before_checkpoint(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    export_path = tmp_path / "exported-events.jsonl"
+    checkpoint_path = tmp_path / "checkpoint.json"
+    first = record_event(
+        "ctx.api.recommend_bundle",
+        source="ctx-test",
+        path=path,
+        trusted_root=tmp_path,
+        config={"path": str(path), "export": {"enabled": False}},
+    )
+    config = {
+        "path": str(path),
+        "export": {
+            "enabled": True,
+            "sink": "local_jsonl",
+            "path": str(export_path),
+            "checkpoint_path": str(checkpoint_path),
+        },
+    }
+    second = record_event(
+        "ctx.mcp.request",
+        source="ctx-test",
+        path=path,
+        trusted_root=tmp_path,
+        config=config,
+    )
+
+    assert first is not None
+    assert second is not None
+    assert checkpoint_path.exists()
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    assert checkpoint["last_event_id"] == second.event_id
+    status = json.loads(Path(str(path) + ".export-status.json").read_text(encoding="utf-8"))
+    assert status["attempted"] == 2
+    assert status["exported"] == 2
+    assert status["checkpoint_advanced"] is True
+    assert status["checkpoint_after_event_id"] == second.event_id
+    exported_ids = [
+        json.loads(line)["event_id"]
+        for line in export_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert exported_ids == [first.event_id, second.event_id]
+
+    later = export_events(path, trusted_root=tmp_path, config=config)
+
+    assert later.attempted == 0
+    assert later.exported == 0
+    assert later.checkpoint_after_event_id == second.event_id
+
+
+def test_record_metric_continuous_export_drains_backlog_before_checkpoint(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "metrics.jsonl"
+    export_path = tmp_path / "exported-metrics.jsonl"
+    checkpoint_path = tmp_path / "metric-checkpoint.json"
+    first = record_counter(
+        "ctx.api.requests",
+        value=1,
+        path=path,
+        trusted_root=tmp_path,
+        config={
+            "metrics": {
+                "enabled": True,
+                "path": str(path),
+                "export": {"enabled": False},
+            },
+        },
+    )
+    config = {
+        "metrics": {
+            "enabled": True,
+            "path": str(path),
+            "export": {
+                "enabled": True,
+                "sink": "local_jsonl",
+                "path": str(export_path),
+                "checkpoint_path": str(checkpoint_path),
+            },
+        },
+    }
+    second = record_counter(
+        "ctx.api.requests",
+        value=2,
+        path=path,
+        trusted_root=tmp_path,
+        config=config,
+    )
+
+    assert first is not None
+    assert second is not None
+    assert checkpoint_path.exists()
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    assert checkpoint["last_metric_id"] == second.metric_id
+    status = json.loads(Path(str(path) + ".export-status.json").read_text(encoding="utf-8"))
+    assert status["attempted"] == 2
+    assert status["exported"] == 2
+    assert status["checkpoint_advanced"] is True
+    assert status["checkpoint_after_metric_id"] == second.metric_id
+    exported_ids = [
+        json.loads(line)["metric_id"]
+        for line in export_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert exported_ids == [first.metric_id, second.metric_id]
+
+    later = export_metrics(path, trusted_root=tmp_path, config=config)
+
+    assert later.attempted == 0
+    assert later.exported == 0
+    assert later.checkpoint_after_metric_id == second.metric_id
 
 
 def test_export_events_ignores_checkpoint_for_different_destination(tmp_path: Path) -> None:
