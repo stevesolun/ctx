@@ -321,7 +321,7 @@ class RuntimeLifecycleStore:
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, sort_keys=True) + "\n")
         _record_runtime_lifecycle_telemetry(event)
-        return {"ok": True, "event": event, "events_path": str(path), "recorded": True}
+        return {"ok": True, "event": event, "recorded": True}
 
     def _events_for_session(self, session_id: str) -> list[dict[str, Any]]:
         path = self.events_path

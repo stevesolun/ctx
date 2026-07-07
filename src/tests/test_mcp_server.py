@@ -400,6 +400,8 @@ class TestToolsCall:
         assert result["isError"] is False
         payload = json.loads(result["content"][0]["text"])
         assert payload["ok"] is True
+        assert "events_path" not in payload
+        assert str(tmp_path) not in result["content"][0]["text"]
         event = json.loads((tmp_path / "runtime" / "events.jsonl").read_text())
         assert event["action"] == "load_requested"
 
