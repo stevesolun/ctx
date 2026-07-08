@@ -225,6 +225,7 @@ per-process monitor token injected into the rendered page.
 | `/` | Home: seven stat cards (loaded, sidecars, wiki entities, graph nodes, runtime checks, audit events, sessions), grade distribution pills, recent sessions table, recent audit events |
 | `/loaded` | **Currently-loaded skills, agents, MCP servers, and installed harness records** from `~/.claude/skill-manifest.json` plus `~/.claude/harness-installs/*.json`; skill/agent/MCP rows expose supported live actions |
 | `/skills` | Every sidecar as a filterable **card grid**: left sidebar (search by slug, grade checkboxes, skill/agent/MCP toggle, hide-floored), card shows grade pill + raw score + links to sidecar/wiki/graph |
+| `/skillspector` | SkillSpector audit tab for ctx-run static scan results over skill bodies, with status, severity, tag, graph-family, query, and limit filters plus a link to `/api/skillspector.json` |
 | `/skill/<slug>` | Full sidecar breakdown: four-signal score (telemetry · intake · graph · routing), hard-floor reason, computed_at timestamp, per-skill audit timeline |
 | `/wiki` | **Wiki entity index** - bounded card-grid sample of up to 500 pages per dashboard-supported entity type, merging installed wiki-pack pages with local-only entity files not shadowed by a pack page or tombstone. Includes sharded MCP server pages and flat harness pages. Left sidebar: text search over the visible sample (slug, description, tag), skill/agent/MCP/harness checkboxes. |
 | `/wiki/<slug>?type=<entity>` | Dashboard-supported wiki entity page rendered from the merged pack/local source: markdown body + full frontmatter table + grade banner + deep links to sidecar and graph-neighborhood views. The optional `type` query disambiguates duplicate slugs such as `langgraph`; omitted types are inferred from frontmatter or path when possible. |
@@ -250,10 +251,13 @@ per-process monitor token injected into the rendered page.
 | `GET /api/sessions.json` | All sessions with aggregated counts |
 | `GET /api/manifest.json` | Raw `skill-manifest.json` passthrough |
 | `GET /api/status.json` | `{queue, artifacts, telemetry}` payload: durable queue counts/recent jobs, graph/wiki artifact file status and promotion metadata, plus telemetry spool/export health including malformed records and exporter errors |
+| `GET /api/grades.json` | Grade distribution used by the home page: `{grades: {A, B, C, D, F}, total}`, reusing the KPI summary when available and falling back to sidecar counts |
+| `GET /api/sidecars.json?q=<text>&type=<entity>&grade=A&hide_floor=1&limit=50` | Filtered sidecar page payload for `/skills`: matching items, totals, pagination bounds, active type/grade filters, and hide-floor state |
 | `GET /api/skill/<slug>.json` | Raw sidecar for one slug; missing or unsafe slugs return JSON `{detail: ...}` with HTTP 404 |
 | `GET /api/graph/<slug>.json?type=<entity>&hops=1&limit=40` | Dashboard-shaped skill/agent/MCP/harness `{nodes, edges, center}`; `type` is optional but recommended for duplicate slugs, `hops` is [1, 3], `limit` is [5, 150]. |
 | `GET /api/kpi.json` | `DashboardSummary` passthrough — `{total, by_subject, grade_counts, lifecycle_counts, category_breakdown, hard_floor_counts, low_quality_candidates, archived, generated_at}`. Returns `{total: 0, detail: "no sidecars yet"}` when the quality directory is empty |
 | `GET /api/runtime.json` | Runtime lifecycle summary: source path, validation count, failed/error count, open-escalation count, latest validation, recent validations, open escalations, session IDs, `tool_selection`, `token_usage`, `token_usage_history`, and `recent_tool_usage`. |
+| `GET /api/skillspector.json?q=<text>&status=<status>&severity=<severity>&tag=<tag>&family=<family>&limit=100` | SkillSpector audit payload for `/skillspector`: summary counts, available filters, filtered records, audit path, and audit availability |
 | `GET /api/config.json` | Effective/default/user config payload used by the Config tab. |
 | `GET /api/entities/search.json?q=<text>&type=<entity>&limit=80` | Wiki entity search results for Manage, Config, and entity picker flows, with wiki-relative `path` values. |
 | `GET /api/entity/<slug>.json?type=<entity>` | Frontmatter, wiki-relative `path`, and Markdown body for one wiki entity from the same merged pack/local source as `/wiki/<slug>`. |

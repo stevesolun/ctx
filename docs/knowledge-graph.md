@@ -448,7 +448,7 @@ the wiki content and the checked-in graph build configuration.
 
 ## Pre-ship gates
 
-Two advisory gates run before the tarball is repackaged. Both produce
+Three advisory gates run before the tarball is repackaged. All three produce
 review reports and never auto-modify the inventory.
 
 - **`ctx-dedup-check`** — flags entity pairs (skill ↔ skill, skill ↔

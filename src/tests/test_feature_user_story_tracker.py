@@ -42,6 +42,7 @@ CANONICAL_STATUSES = ACTIONABLE_STATUSES | {
     "Deprecated",
 }
 CANONICAL_STATUS_OVERRIDES: dict[str, dict[str, str]] = {}
+ALLOWED_UNPARENTED_DASHBOARD_API_DUPLICATE_ROUTES: frozenset[str] = frozenset()
 
 
 def _tracker_rows() -> list[dict[str, str]]:
@@ -226,6 +227,42 @@ def test_canonical_feature_status_tracker_merges_supporting_ledgers() -> None:
             assert "out of scope" in row["validation_status"].lower()
 
     assert set(CANONICAL_STATUS_OVERRIDES) <= canonical_ids
+
+
+def test_canonical_dashboard_api_duplicate_routes_are_modeled() -> None:
+    rows_by_route: dict[str, list[dict[str, str]]] = {}
+    for row in _canonical_tracker_rows():
+        rows_by_route.setdefault(row["entrypoint_or_route"], []).append(row)
+
+    for route, rows in rows_by_route.items():
+        if route in ALLOWED_UNPARENTED_DASHBOARD_API_DUPLICATE_ROUTES:
+            continue
+        if not route.startswith("/api/") or len(rows) < 2:
+            continue
+        if {row["surface"] for row in rows} != {"Dashboard API"}:
+            continue
+
+        row_ids = {row["feature_id"] for row in rows}
+        roots = [row for row in rows if not row["parent_feature_id"]]
+        children = [row for row in rows if row["parent_feature_id"] in row_ids]
+        assert len(roots) == 1, f"{route} must have exactly one unparented canonical root"
+        assert roots[0]["source_tracker"] == "docs/qa/feature-user-story-status.csv"
+        assert len(children) == len(rows) - 1, (
+            f"{route} duplicate Dashboard API rows must parent-link to the canonical root"
+        )
+        assert {row["parent_feature_id"] for row in children} == {roots[0]["feature_id"]}
+
+
+def test_canonical_doc_nav_rows_have_page_specific_evidence() -> None:
+    for row in _canonical_tracker_rows():
+        if not row["feature_id"].startswith("DOC-NAV-"):
+            continue
+
+        route = row["entrypoint_or_route"]
+        assert route.startswith("docs/"), f"{row['feature_id']} does not point at docs/"
+        assert route in row["evidence"], (
+            f"{row['feature_id']} evidence must name the specific nav page"
+        )
 
 
 def test_feature_user_story_tracker_has_no_empty_core_fields() -> None:

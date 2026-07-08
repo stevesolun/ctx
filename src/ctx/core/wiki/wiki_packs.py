@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -22,6 +23,7 @@ from ctx.utils._fs_utils import atomic_write_text
 WIKI_PACK_MANIFEST = "wiki-pack-manifest.json"
 WIKI_PACK_SCHEMA_VERSION = 1
 WIKI_PACK_TYPES = frozenset({"base", "overlay"})
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 WikiPackType = Literal["base", "overlay"]
 
@@ -663,7 +665,7 @@ def _checksums(value: object) -> dict[str, str]:
             raise WikiPackManifestError("wiki pack manifest checksum names must be strings")
         name = raw_name.replace("\\", "/").strip()
         _validate_relative_name(name, "checksum name")
-        if not isinstance(raw_digest, str) or len(raw_digest) != 64:
+        if not isinstance(raw_digest, str) or not _SHA256_RE.match(raw_digest):
             raise WikiPackManifestError(
                 f"wiki pack manifest checksum for {name} must be a SHA-256 hex digest"
             )

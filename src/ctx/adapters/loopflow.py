@@ -32,6 +32,15 @@ _ENTITY_TO_GROUP = {"agent": "agents", "mcp-server": "mcps", "skill": "skills"}
 _GROUP_TO_ENTITY = {"skills": "skill", "agents": "agent", "mcps": "mcp-server"}
 _CAPABILITY_KEYS = ("skills", "agents", "mcps", "harnesses")
 _ALL_CAPABILITY_GRANTS = frozenset(_CAPABILITY_KEYS)
+_READ_ONLY_MCP_TOOL_NAMES = frozenset(
+    {
+        "ctx__recommend_bundle",
+        "ctx__graph_query",
+        "ctx__recommend_related",
+        "ctx__wiki_search",
+        "ctx__wiki_get",
+    }
+)
 _HARNESS_REQUIREMENT_FLAGS = {
     "runtime": "--harness-runtime",
     "autonomy": "--harness-autonomy",
@@ -65,6 +74,10 @@ def _parse_permissions(values: list[str] | None) -> set[str]:
     return permissions
 
 
+def _ordered_permissions(permissions: set[str]) -> list[str]:
+    return [key for key in _CAPABILITY_KEYS if key in permissions]
+
+
 def parse_loop_file(path: Path) -> dict[str, Any]:
     """Extract the LoopFlow fields ctx needs from a .loop file.
 
@@ -88,6 +101,11 @@ def parse_loop_file(path: Path) -> dict[str, Any]:
     ]
     if done_when:
         fields["done_when"] = done_when
+    permission_grants: set[str] = set()
+    for match in re.finditer(r"^\s*ctx\s+grants?\s*:\s*(.+)$", text, flags=re.MULTILINE):
+        permission_grants.update(_parse_permissions([match.group(1)]))
+    if permission_grants:
+        fields["permissions"] = _ordered_permissions(permission_grants)
     return fields
 
 
@@ -272,9 +290,12 @@ def _harness_command(
 
 
 def _ctx_mcp_tool_names(permissions: set[str]) -> list[str]:
-    if not _ALL_CAPABILITY_GRANTS <= permissions:
+    if "mcps" not in permissions:
         return []
-    return ctx_api.ctx_core_tool_names()
+    tool_names = ctx_api.ctx_core_tool_names()
+    if _ALL_CAPABILITY_GRANTS <= permissions:
+        return tool_names
+    return [name for name in tool_names if name in _READ_ONLY_MCP_TOOL_NAMES]
 
 
 def _normalize_harness_requirements(
@@ -407,11 +428,11 @@ def recommend_for_loop(
         warnings.append(
             "ignored unknown harness requirement(s): " + ", ".join(unknown_requirement_keys)
         )
-    should_recommend_harness = "harnesses" in granted and (
-        own_llm or bool(model_provider) or bool(model)
-    )
+    should_recommend_harness = "harnesses" in granted and own_llm
     if "harnesses" in granted and not should_recommend_harness:
-        warnings.append("harnesses permission granted but no user-owned LLM/model was declared")
+        warnings.append(
+            "harnesses permission granted but --own-llm/user-owned model consent was not declared"
+        )
     if should_recommend_harness:
         harness_query_parts = [
             goal or ranking_query,
@@ -514,7 +535,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--permissions",
         action="append",
-        help="Comma-separated capability grants: skills, agents, mcps, harnesses.",
+        help=(
+            "Comma-separated capability grants: skills, agents, mcps, harnesses. "
+            "Overrides ctx grants in a .loop file."
+        ),
     )
     parser.add_argument(
         "--loop-kind",
@@ -540,8 +564,9 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    cli_permissions_provided = args.permissions is not None
     try:
-        permissions = _parse_permissions(args.permissions)
+        permissions = _parse_permissions(args.permissions) if cli_permissions_provided else set()
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -551,6 +576,10 @@ def main(argv: list[str] | None = None) -> int:
             loop_fields = parse_loop_file(args.loop_file)
         except OSError as exc:
             parser.error(f"could not read --loop-file {args.loop_file}: {exc}")
+        except ValueError as exc:
+            parser.error(f"could not parse --loop-file {args.loop_file}: {exc}")
+    if not cli_permissions_provided:
+        permissions = set(loop_fields.get("permissions", []))
     goal = args.goal or str(loop_fields.get("goal") or "")
     if not goal:
         parser.error("--goal or a loop file with goal: is required")

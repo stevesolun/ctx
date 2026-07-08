@@ -136,9 +136,7 @@ _PATH_TEXT_SEGMENT_RE = r"[^/\\\s'\"`<>|:;,\)\]]+"
 _POSIX_LOCAL_HOST_PATH_RE = re.compile(
     rf"(?<![\w./-])/(?:Users|home|private|tmp|var)(?:/{_PATH_TEXT_SEGMENT_RE})+"
 )
-_TILDE_LOCAL_HOST_PATH_RE = re.compile(
-    rf"(?<![\w./-])~(?:/{_PATH_TEXT_SEGMENT_RE})+"
-)
+_TILDE_LOCAL_HOST_PATH_RE = re.compile(rf"(?<![\w./-])~(?:/{_PATH_TEXT_SEGMENT_RE})+")
 _WINDOWS_LOCAL_HOST_PATH_RE = re.compile(
     r"(?<![\w./-])[A-Za-z]:[\\/](?:[^/\\\s'\"`<>|:;,\)\]]+[\\/])*"
     r"[^/\\\s'\"`<>|:;,\)\]]+"

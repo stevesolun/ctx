@@ -53,13 +53,18 @@ Public functions:
         by default) — lets callers pre-build a custom CtxCoreToolbox
         pointed at a non-default location.
 
-Adapter support helpers:
+Adapter support helpers, not part of the stable public import contract:
 
     ctx_core_tool_names()
         Return ctx-core tool names exposed by the shared toolbox.
 
     recommendation_graph()
         Return the shared recommendation graph for adapter-side ranking.
+
+These remain module-level support for first-party adapters. They are
+intentionally omitted from ``__all__`` and from top-level ``ctx``
+re-exports; third-party callers that need adapter plumbing should use
+``CtxCoreToolbox`` directly.
 
 Plan 001 Phase H9.
 """

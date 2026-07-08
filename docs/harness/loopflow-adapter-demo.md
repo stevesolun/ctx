@@ -27,6 +27,7 @@ loop "select ctx capabilities":
   goal: mcp agent loop local ollama filesystem
   look at: the repo plan, AGENTS.md, and the last failure
   done when "pytest src/tests/test_loopflow_adapter.py -q" passes
+  ctx grants: skills, mcps, harnesses
   each cycle: plan, then act, then observe
   when it fails: reflect, then plan again
 ```
@@ -193,13 +194,27 @@ logic, and ctx refreshes recommendations based on what just failed.
 The adapter fails closed:
 
 - `--permissions skills` only returns skill recommendations.
-- `--permissions mcps` only returns MCP server recommendations unless all
-  capability groups are granted, which lets ctx MCP tools operate safely across
-  skills, agents, MCPs, and harnesses.
-- `--permissions harnesses` returns no harnesses unless `--own-llm`,
-  `--model-provider`, or `--model` is present.
+- `--permissions mcps` returns MCP server recommendations and exposes only
+  read-only ctx MCP tools: recommendation, graph query, and wiki lookup.
+- Lifecycle MCP tools such as load, mark-used, validation, escalation, unload,
+  and session tools are exposed only when all capability groups are granted:
+  `skills`, `agents`, `mcps`, and `harnesses`.
+- `--permissions harnesses` returns no harnesses unless `--own-llm` is present.
+  `--model-provider` and `--model` improve ranking and dry-run command metadata;
+  they are not user-owned model consent.
 - `agent_loop.harness_install` is always a `--dry-run` command. It shows what
   would be installed; it does not mutate the host.
+
+`.loop` files can request ctx grants with one small line:
+
+```loop
+ctx grants: skills, mcps, harnesses
+```
+
+CLI/API grants take precedence. If the command passes `--permissions`, those
+grants replace the `.loop` line. If the API caller passes `permissions=...`,
+that explicit set is authoritative. If neither is present, the `.loop` grants
+are used; if none are present anywhere, the adapter returns no capabilities.
 
 This lets a LoopFlow user decide whether a loop may use skills, agents, MCPs,
 or harnesses without giving ctx authority to bypass the loop's own gates.
