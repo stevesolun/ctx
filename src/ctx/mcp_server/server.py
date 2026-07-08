@@ -60,15 +60,17 @@ Plan 001 Phase H8.
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Iterable
 
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.providers import ToolCall
+from ctx.core.entity_types import RECOMMENDABLE_ENTITY_TYPES, normalize_entity_type
 from ctx.telemetry import (
     hash_identifier,
     parse_traceparent,
@@ -100,10 +102,15 @@ class _ServerState:
 
     initialized: bool = False
     toolbox: CtxCoreToolbox | None = None
+    allowed_tool_names: frozenset[str] | None = None
+    allowed_entity_types: frozenset[str] | None = None
 
     def ensure_toolbox(self) -> CtxCoreToolbox:
         if self.toolbox is None:
-            self.toolbox = CtxCoreToolbox()
+            self.toolbox = CtxCoreToolbox(
+                allowed_tool_names=self.allowed_tool_names,
+                allowed_entity_types=self.allowed_entity_types,
+            )
         return self.toolbox
 
 
@@ -166,7 +173,7 @@ def _handle_tools_call(state: _ServerState, params: dict[str, Any]) -> dict[str,
     if not isinstance(arguments, dict):
         raise _JsonRpcError(_ErrorCode.INVALID_PARAMS, "params.arguments must be an object")
 
-    if not toolbox.owns(name):
+    if not toolbox.owns(name) or not toolbox.allows(name):
         raise _JsonRpcError(
             _ErrorCode.METHOD_NOT_FOUND,
             f"tool not found: {name!r}. Known prefix: ctx__",
@@ -390,6 +397,40 @@ def _record_mcp_request(
         pass
 
 
+def _csv_items(values: Iterable[str] | None) -> list[str]:
+    if values is None:
+        return []
+    items: list[str] = []
+    for value in values:
+        items.extend(piece.strip() for piece in value.split(",") if piece.strip())
+    return items
+
+
+def _normalise_allowed_tool_names(
+    tool_names: Iterable[str] | None,
+) -> frozenset[str] | None:
+    if tool_names is None:
+        return None
+    return frozenset(str(name).strip() for name in tool_names if str(name).strip())
+
+
+def _normalise_allowed_entity_types(
+    entity_types: Iterable[str] | None,
+) -> frozenset[str] | None:
+    if entity_types is None:
+        return None
+    normalised: list[str] = []
+    for raw in entity_types:
+        entity_type = normalize_entity_type(raw, allowed=RECOMMENDABLE_ENTITY_TYPES)
+        if entity_type is None:
+            raise ValueError(
+                "allowed entity types must be one of " + ", ".join(RECOMMENDABLE_ENTITY_TYPES)
+            )
+        if entity_type not in normalised:
+            normalised.append(entity_type)
+    return frozenset(normalised)
+
+
 class _JsonRpcError(Exception):
     """Raised inside a handler to emit an RPC-level error response."""
 
@@ -406,6 +447,9 @@ class _JsonRpcError(Exception):
 def run_server(
     stdin: BinaryIO | None = None,
     stdout: BinaryIO | None = None,
+    *,
+    allowed_tool_names: Iterable[str] | None = None,
+    allowed_entity_types: Iterable[str] | None = None,
 ) -> int:
     """Read JSON-RPC frames from ``stdin`` until EOF, write to ``stdout``.
 
@@ -418,7 +462,10 @@ def run_server(
     """
     in_stream: BinaryIO = stdin if stdin is not None else sys.stdin.buffer
     out_stream: BinaryIO = stdout if stdout is not None else sys.stdout.buffer
-    state = _ServerState()
+    state = _ServerState(
+        allowed_tool_names=_normalise_allowed_tool_names(allowed_tool_names),
+        allowed_entity_types=_normalise_allowed_entity_types(allowed_entity_types),
+    )
 
     try:
         while True:
@@ -635,8 +682,29 @@ def _write_error(
 # ── CLI entry ─────────────────────────────────────────────────────────────
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``ctx-mcp-server`` console script."""
+    parser = argparse.ArgumentParser(description="Run the ctx MCP stdio server.")
+    parser.add_argument(
+        "--allow-tools",
+        action="append",
+        help="Comma-separated ctx tool names to expose. Omit to expose all ctx tools.",
+    )
+    parser.add_argument(
+        "--entity-types",
+        action="append",
+        help=(
+            "Comma-separated entity types allowed in read/query results. "
+            "Omit to expose every recommendable entity type."
+        ),
+    )
+    args = parser.parse_args(argv)
+    allowed_entity_types = _csv_items(args.entity_types) if args.entity_types is not None else None
+    try:
+        _normalise_allowed_entity_types(allowed_entity_types)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     # Keep logging on stderr so it doesn't corrupt the stdout JSON-RPC
     # stream. Level defaults to WARNING — hosts typically don't want
     # debug noise unless the user opts in.
@@ -645,7 +713,10 @@ def main() -> int:
         level=logging.WARNING,
         format="%(asctime)s ctx-mcp-server %(levelname)s %(message)s",
     )
-    return run_server()
+    return run_server(
+        allowed_tool_names=_csv_items(args.allow_tools) if args.allow_tools is not None else None,
+        allowed_entity_types=allowed_entity_types,
+    )
 
 
 if __name__ == "__main__":

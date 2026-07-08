@@ -30,6 +30,7 @@ _PERMISSION_ALIASES = {
 }
 _ENTITY_TO_GROUP = {"agent": "agents", "mcp-server": "mcps", "skill": "skills"}
 _GROUP_TO_ENTITY = {"skills": "skill", "agents": "agent", "mcps": "mcp-server"}
+_MCP_SCOPE_ENTITY_BY_GROUP = {"skills": "skill", "agents": "agent", "mcps": "mcp-server"}
 _CAPABILITY_KEYS = ("skills", "agents", "mcps", "harnesses")
 _ALL_CAPABILITY_GRANTS = frozenset(_CAPABILITY_KEYS)
 _READ_ONLY_MCP_TOOL_NAMES = frozenset(
@@ -298,6 +299,22 @@ def _ctx_mcp_tool_names(permissions: set[str]) -> list[str]:
     return [name for name in tool_names if name in _READ_ONLY_MCP_TOOL_NAMES]
 
 
+def _ctx_mcp_server_args(permissions: set[str], tool_names: list[str]) -> list[str]:
+    if not tool_names or _ALL_CAPABILITY_GRANTS <= permissions:
+        return []
+    entity_types = [
+        entity_type
+        for group, entity_type in _MCP_SCOPE_ENTITY_BY_GROUP.items()
+        if group in permissions
+    ]
+    return [
+        "--allow-tools",
+        ",".join(tool_names),
+        "--entity-types",
+        ",".join(entity_types),
+    ]
+
+
 def _normalize_harness_requirements(
     requirements: dict[str, str],
 ) -> tuple[dict[str, str], list[str]]:
@@ -465,6 +482,7 @@ def recommend_for_loop(
     if skill_names:
         use_skills = "use skills: " + ", ".join(skill_names)
     mcp_server_tools = _ctx_mcp_tool_names(granted)
+    mcp_server_args = _ctx_mcp_server_args(granted, mcp_server_tools)
     use_tools = 'use tools from the "ctx" server' if mcp_server_tools else None
     mcp_server_command = "ctx-mcp-server" if mcp_server_tools else None
 
@@ -484,6 +502,7 @@ def recommend_for_loop(
         "mcp_server": {
             "name": "ctx",
             "command": mcp_server_command,
+            "args": mcp_server_args,
             "tools": mcp_server_tools,
         },
         "capabilities": capability_bundle,

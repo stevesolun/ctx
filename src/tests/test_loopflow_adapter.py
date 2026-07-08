@@ -22,6 +22,15 @@ _EXPECTED_READ_ONLY_MCP_TOOL_NAMES = [
 ]
 
 
+def _expected_scoped_mcp_args(*entity_types: str) -> list[str]:
+    return [
+        "--allow-tools",
+        ",".join(_EXPECTED_READ_ONLY_MCP_TOOL_NAMES),
+        "--entity-types",
+        ",".join(entity_types),
+    ]
+
+
 class _FakeGraph:
     def number_of_nodes(self) -> int:
         return 10
@@ -139,6 +148,7 @@ def test_recommend_for_loop_respects_capability_permissions(
     assert payload["mcp_server"] == {
         "name": "ctx",
         "command": "ctx-mcp-server",
+        "args": _expected_scoped_mcp_args("skill", "mcp-server"),
         "tools": _EXPECTED_READ_ONLY_MCP_TOOL_NAMES,
     }
 
@@ -154,6 +164,7 @@ def test_mcp_server_tools_are_filtered_by_permission_groups(monkeypatch) -> None
     assert mcps_only["mcp_server"] == {
         "name": "ctx",
         "command": "ctx-mcp-server",
+        "args": _expected_scoped_mcp_args("mcp-server"),
         "tools": _EXPECTED_READ_ONLY_MCP_TOOL_NAMES,
     }
 
@@ -164,6 +175,7 @@ def test_mcp_server_tools_are_filtered_by_permission_groups(monkeypatch) -> None
     assert core_recommendations["mcp_server"] == {
         "name": "ctx",
         "command": "ctx-mcp-server",
+        "args": _expected_scoped_mcp_args("skill", "agent", "mcp-server"),
         "tools": _EXPECTED_READ_ONLY_MCP_TOOL_NAMES,
     }
     assert not {
@@ -182,6 +194,7 @@ def test_mcp_server_tools_are_filtered_by_permission_groups(monkeypatch) -> None
         permissions={"skills", "agents", "mcps", "harnesses"},
     )
     assert all_grants["mcp_server"]["command"] == "ctx-mcp-server"
+    assert all_grants["mcp_server"]["args"] == []
     expected_tool_names = ctx_api.ctx_core_tool_names()
     assert all_grants["mcp_server"]["tools"] == expected_tool_names
     assert {
@@ -223,6 +236,7 @@ def test_missing_and_empty_permissions_stay_empty(monkeypatch) -> None:
         assert payload["mcp_server"] == {
             "name": "ctx",
             "command": None,
+            "args": [],
             "tools": [],
         }
 
@@ -254,6 +268,7 @@ def test_loopflow_skill_hint_requires_skills_permission(monkeypatch) -> None:
     assert payload["mcp_server"] == {
         "name": "ctx",
         "command": "ctx-mcp-server",
+        "args": _expected_scoped_mcp_args("mcp-server"),
         "tools": _EXPECTED_READ_ONLY_MCP_TOOL_NAMES,
     }
 
@@ -285,6 +300,7 @@ def test_loopflow_tool_hint_requires_mcps_permission(monkeypatch) -> None:
     assert payload["mcp_server"] == {
         "name": "ctx",
         "command": None,
+        "args": [],
         "tools": [],
     }
 
@@ -860,6 +876,7 @@ def test_main_uses_loop_file_ctx_grants_when_cli_permissions_absent(
     assert payload["mcp_server"] == {
         "name": "ctx",
         "command": "ctx-mcp-server",
+        "args": _expected_scoped_mcp_args("skill", "mcp-server"),
         "tools": _EXPECTED_READ_ONLY_MCP_TOOL_NAMES,
     }
 
