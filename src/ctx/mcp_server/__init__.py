@@ -18,6 +18,8 @@ Tools exposed:
       runtime lifecycle records and session state
 
 Console script: ``ctx-mcp-server``.
+Use ``--allow-tools`` and ``--entity-types`` to expose a scoped subset for
+permissioned adapters.
 
 Host examples that can attach this server:
   Claude Code:        claude mcp add ctx-wiki -- ctx-mcp-server

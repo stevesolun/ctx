@@ -137,9 +137,12 @@ The shipped config keeps telemetry local:
 `local_redacted` removes or hashes raw input fields such as `query`, `prompt`,
 `tool_input`, `stdout`, `stderr`, repo names, secrets, `paths`, dotted or
 hyphenated path keys such as `ctx.repo.path` and `repo-path`, and keys that
-normalize to `_path` or `_paths` suffixes. The only accepted modes are
-`local_redacted`, `disabled`, `off`, and `none`; unknown modes fail closed
-instead of emitting raw fields.
+normalize to `_path` or `_paths` suffixes. It also scans arbitrary string
+payload values for local host paths such as `/Users/...`, `/home/...`, `~/...`,
+and Windows drive paths, replacing each match with
+`[path_hash:sha256:...]`. The only accepted modes are `local_redacted`,
+`disabled`, `off`, and `none`; unknown modes fail closed instead of emitting
+raw fields.
 
 Runtime lifecycle records apply the same local-redacted posture to their
 evidence-bearing strings. Top-level `reason`, `evidence`, `command`, `summary`,
@@ -261,6 +264,11 @@ advance the checkpoint past malformed pending records; retrying after repair may
 re-export already delivered events, so downstream collectors should deduplicate
 by `event_id`.
 
+Manual and continuous exporters re-sanitize legacy local records at the export
+boundary before writing `local_jsonl` or sending OTLP, so older spool entries
+that predate current redaction rules do not leak raw query, path, repo, stdout,
+stderr, token, or secret payload values.
+
 ## Retention
 
 Retention is explicit operator action, never a background deletion. Plan first:
@@ -306,6 +314,13 @@ overrides live at `~/.claude/skill-system-config.json`.
 `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` overrides the configured logs endpoint.
 `OTEL_EXPORTER_OTLP_ENDPOINT` is also supported and automatically appends
 `/v1/logs`.
+
+Continuous export drains the pending spool before advancing the checkpoint, not
+just the event or metric that triggered the write. If all pending well-formed
+records export successfully and no malformed pending records remain, the
+checkpoint advances to the last exported id. If malformed pending records or a
+checkpoint anomaly are present, ctx records `status: degraded` and leaves the
+checkpoint in place so an operator can repair or intentionally replay.
 
 ## Collector Examples
 

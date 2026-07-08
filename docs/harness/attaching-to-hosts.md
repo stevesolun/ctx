@@ -38,6 +38,11 @@ Claude on the next turn, alongside runtime lifecycle tools such as
 `ctx__load_entity`, `ctx__mark_entity_used`, and `ctx__session_state`.
 Ask "What skills help with FastAPI auth?" and it will call them.
 
+For permissioned adapters that should expose only read/query tools, start the
+same server with `--allow-tools` and `--entity-types`. For example,
+`ctx-mcp-server --allow-tools ctx__recommend_bundle,ctx__wiki_search,ctx__wiki_get --entity-types skill,mcp-server`
+limits tool discovery and read results to the named tools and entity types.
+
 ### Claude Agent SDK (Python)
 
 ```python
@@ -288,8 +293,8 @@ The adapter emits a JSON contract with:
   engine;
 - `related_recommendations` after the loop passes selected and rejected
   recommendation IDs;
-- optional harness recommendations only when the loop declares a user-owned,
-  API, or local model.
+- optional harness recommendations only when the loop gives explicit
+  user-owned/API/local model consent with `--own-llm` or `own_llm=True`.
 
 For LoopFlow, keep the `.loop` file in charge and call ctx before the plan:
 
@@ -298,6 +303,10 @@ python -m ctx.adapters.loopflow \
   --loop-file rate-limit.loop \
   --permissions skills,agents,mcps
 ```
+
+`.loop` files can also grant ctx capabilities with
+`ctx grants: skills, mcps, harnesses`. CLI `--permissions` override those file
+grants; when neither is present, the adapter returns no capabilities.
 
 Add `--last-failure-file .loopflow/last-failure.txt` only after the loop has
 written that file; omit it on the first run. The adapter uses that failure text
@@ -367,11 +376,14 @@ plan_context = recommend_for_loop(
 )
 ```
 
-Load only the groups that are explicitly granted in `permissions`. If
-`harnesses` is granted without `--own-llm`, `--model-provider`, or `--model`,
-the adapter returns a warning and no harness recommendations. The ctx MCP
-command and tool list are also permission-filtered; ctx tools that can operate
-across all capability groups only appear when all of those groups are granted.
+Load only the groups that are explicitly granted in `permissions`.
+`--model-provider` and `--model` are ranking metadata, not ownership consent:
+if `harnesses` is granted without `--own-llm`, the adapter returns a warning
+and no harness recommendations. The ctx MCP command and tool list are also
+permission-filtered. A partial `mcps` grant exposes only read-only ctx tools and
+adds `mcp_server.args` with `--allow-tools` / `--entity-types`; lifecycle write
+tools appear only when `skills`, `agents`, `mcps`, and `harnesses` are all
+granted.
 
 ---
 

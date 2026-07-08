@@ -30,7 +30,7 @@ Supported recommendable entity types are shared through `ctx.core.entity_types.R
 - `mcp-server`
 - `harness`
 
-The current `ctx__recommend_bundle` core tool recommends `skill`, `agent`, and `mcp-server`. Harnesses are recommended as companion rows when model/provider context exists, and LoopFlow can request harness recommendations when `own_llm`, `model_provider`, or `model` is supplied.
+The current `ctx__recommend_bundle` core tool recommends `skill`, `agent`, and `mcp-server`. Harnesses are recommended as companion rows when model/provider context exists, and LoopFlow can request harness recommendations only when explicit user-owned model consent is supplied through `own_llm`; `model_provider` and `model` are ranking metadata.
 
 ## Existing Knowledge Graph Model
 

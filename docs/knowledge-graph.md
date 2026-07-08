@@ -215,9 +215,11 @@ The graph backs these recommendation paths:
   those records, the same recommender falls back to the index file.
 - Harness recommendations are a separate path for custom/API/local
   model onboarding (`ctx-init --model-mode custom ...`),
-  `ctx-harness-install`, and LoopFlow/agent-loop adapter calls that declare a
-  user-owned/API/local model. They use the same graph filtered to `harness`
-  nodes and the higher harness match floor from `config.json`.
+  `ctx-harness-install`, and LoopFlow/agent-loop adapter calls that pass
+  explicit user-owned/API/local model consent. Model/provider fields can
+  improve ranking, but the LoopFlow adapter does not treat them as consent by
+  themselves. Harness paths use the same graph filtered to `harness` nodes and
+  the higher harness match floor from `config.json`.
 - Repository scans still start from stack detections, then turn that profile
   into the same tag/query bundle used by the execution recommender. If a
   shipped graph is unavailable, scan output falls back to the legacy installed
@@ -272,6 +274,10 @@ Pack directories live inside the installed wiki:
   wiki-packs/base-<export-id>/
   wiki-packs/overlay-<id>/
 ```
+
+Pack manifests require every checksum value to be a lowercase 64-character
+SHA-256 hex digest. Non-hex placeholders are rejected before merged graph/wiki
+readers can trust the pack contents.
 
 Overlay packs are the normal local-update path. Full rebuilds are still needed
 when you intentionally refresh the release artifact, change global scoring
@@ -434,6 +440,9 @@ JSON, graph-pack node/edge metadata, markdown members, and merged wiki-pack
 markdown must not contain host-user paths; markdown members are capped at
 10 MiB; local generated markdown such as `catalog.md`, `converted-index.md`,
 `log.md`, and `versions-catalog.md` must stay out of the full archive.
+When a shipped root artifact has sibling promotion metadata, validation also
+checks the `current` snapshot against the actual artifact size and SHA-256 so
+stale promotion records cannot describe a different file.
 
 ## Current artifact record
 

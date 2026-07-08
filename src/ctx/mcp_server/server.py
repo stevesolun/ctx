@@ -22,6 +22,9 @@ Install into any MCP-aware host:
 
     <host-specific config pointing at the ``ctx-mcp-server`` binary>
 
+Permissioned adapters can pass ``--allow-tools`` and ``--entity-types`` to
+expose only selected ctx tools and entity types.
+
 Tools exposed (same as ctx.adapters.generic.ctx_core_tools — that
 module is the source of truth for the tool catalogue):
 

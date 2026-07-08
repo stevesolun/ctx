@@ -39,6 +39,11 @@ deciding how to place selected entities into context. Per-entity
 token usage is recorded only when the host supplies explicit
 ``ctx__mark_entity_used.token_usage`` attribution.
 
+Hosts that need a narrower permission surface can construct
+``CtxCoreToolbox`` with ``allowed_tool_names`` and ``allowed_entity_types``.
+That filters both tool discovery and read/query results before a model sees
+them.
+
 Plan 001 Phase H6.
 """
 

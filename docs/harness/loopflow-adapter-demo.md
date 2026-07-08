@@ -88,6 +88,7 @@ stable.
   "mcp_server": {
     "name": "ctx",
     "command": "ctx-mcp-server",
+    "args": [],
     "tools": [
       "ctx__recommend_bundle",
       "ctx__graph_query",
@@ -176,6 +177,7 @@ if ctx_payload["mcp_server"]["command"]:
     runner.register_mcp_server(
         name=ctx_payload["mcp_server"]["name"],
         command=ctx_payload["mcp_server"]["command"],
+        args=ctx_payload["mcp_server"]["args"],
     )
 
 if ctx_payload["loopflow"]["use_skills"]:
