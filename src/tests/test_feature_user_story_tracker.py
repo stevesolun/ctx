@@ -279,6 +279,13 @@ def test_feature_user_story_tracker_covers_all_console_scripts() -> None:
     assert [marker for marker in required_runtime_markers if marker not in tracker] == []
 
 
+def test_canonical_feature_status_tracks_harness_install_safety_flags() -> None:
+    tracker = "\n".join(_row_text(row) for row in _canonical_tracker_rows())
+    required_flags = ("--approve-commands", "--run-verify", "--keep-files")
+
+    assert [flag for flag in required_flags if flag not in tracker] == []
+
+
 def test_feature_user_story_tracker_covers_monitor_route_inventory() -> None:
     route_patterns: list[str] = []
     route_patterns.extend(href for _key, _label, href in monitor_routes.NAV_ROUTES)
