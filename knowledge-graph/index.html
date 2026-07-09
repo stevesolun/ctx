@@ -1814,9 +1814,11 @@ The helper <code>resolve_graph.load_graph()</code> does this for you.</p>
   those records, the same recommender falls back to the index file.</li>
 <li>Harness recommendations are a separate path for custom/API/local
   model onboarding (<code>ctx-init --model-mode custom ...</code>),
-  <code>ctx-harness-install</code>, and LoopFlow/agent-loop adapter calls that declare a
-  user-owned/API/local model. They use the same graph filtered to <code>harness</code>
-  nodes and the higher harness match floor from <code>config.json</code>.</li>
+  <code>ctx-harness-install</code>, and LoopFlow/agent-loop adapter calls that pass
+  explicit user-owned/API/local model consent. Model/provider fields can
+  improve ranking, but the LoopFlow adapter does not treat them as consent by
+  themselves. Harness paths use the same graph filtered to <code>harness</code> nodes and
+  the higher harness match floor from <code>config.json</code>.</li>
 <li>Repository scans still start from stack detections, then turn that profile
   into the same tag/query bundle used by the execution recommender. If a
   shipped graph is unavailable, scan output falls back to the legacy installed
@@ -1863,6 +1865,9 @@ are not present in a pack or tombstone still participate in the catalog.</p>
 </span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>  wiki-packs/base-&lt;export-id&gt;/
 </span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>  wiki-packs/overlay-&lt;id&gt;/
 </span></code></pre></div>
+<p>Pack manifests require every checksum value to be a lowercase 64-character
+SHA-256 hex digest. Non-hex placeholders are rejected before merged graph/wiki
+readers can trust the pack contents.</p>
 <p>Overlay packs are the normal local-update path. Full rebuilds are still needed
 when you intentionally refresh the release artifact, change global scoring
 configuration, rebuild communities, or compact a long chain of overlays into a
@@ -1988,7 +1993,10 @@ rebuilds instead of trusting mixed graph files.</p>
 JSON, graph-pack node/edge metadata, markdown members, and merged wiki-pack
 markdown must not contain host-user paths; markdown members are capped at
 10 MiB; local generated markdown such as <code>catalog.md</code>, <code>converted-index.md</code>,
-<code>log.md</code>, and <code>versions-catalog.md</code> must stay out of the full archive.</p>
+<code>log.md</code>, and <code>versions-catalog.md</code> must stay out of the full archive.
+When a shipped root artifact has sibling promotion metadata, validation also
+checks the <code>current</code> snapshot against the actual artifact size and SHA-256 so
+stale promotion records cannot describe a different file.</p>
 <h2 id="current-artifact-record">Current artifact record<a class="headerlink" href="#current-artifact-record" title="Permanent link">&para;</a></h2>
 <p>This page is intentionally current-state only. Older graph sizes made the public
 page look stale even when the headline table was correct, so historical refresh
@@ -1998,7 +2006,7 @@ notes live in <code>CHANGELOG.md</code> instead of being repeated here.</p>
 and <strong>280,275 slug-token edges</strong>. The current build is fully reproducible from
 the wiki content and the checked-in graph build configuration.</p>
 <h2 id="pre-ship-gates">Pre-ship gates<a class="headerlink" href="#pre-ship-gates" title="Permanent link">&para;</a></h2>
-<p>Two advisory gates run before the tarball is repackaged. Both produce
+<p>Three advisory gates run before the tarball is repackaged. All three produce
 review reports and never auto-modify the inventory.</p>
 <ul>
 <li><strong><code>ctx-dedup-check</code></strong> — flags entity pairs (skill ↔ skill, skill ↔

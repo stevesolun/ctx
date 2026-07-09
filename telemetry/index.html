@@ -1631,9 +1631,12 @@ the host or runner to provide usage for that specific entity.</p>
 <p><code>local_redacted</code> removes or hashes raw input fields such as <code>query</code>, <code>prompt</code>,
 <code>tool_input</code>, <code>stdout</code>, <code>stderr</code>, repo names, secrets, <code>paths</code>, dotted or
 hyphenated path keys such as <code>ctx.repo.path</code> and <code>repo-path</code>, and keys that
-normalize to <code>_path</code> or <code>_paths</code> suffixes. The only accepted modes are
-<code>local_redacted</code>, <code>disabled</code>, <code>off</code>, and <code>none</code>; unknown modes fail closed
-instead of emitting raw fields.</p>
+normalize to <code>_path</code> or <code>_paths</code> suffixes. It also scans arbitrary string
+payload values for local host paths such as <code>/Users/...</code>, <code>/home/...</code>, <code>~/...</code>,
+and Windows drive paths, replacing each match with
+<code>[path_hash:sha256:...]</code>. The only accepted modes are <code>local_redacted</code>,
+<code>disabled</code>, <code>off</code>, and <code>none</code>; unknown modes fail closed instead of emitting
+raw fields.</p>
 <p>Runtime lifecycle records apply the same local-redacted posture to their
 evidence-bearing strings. Top-level <code>reason</code>, <code>evidence</code>, <code>command</code>, <code>summary</code>,
 <code>trigger</code>, and <code>status</code> values, plus nested security-scan text, are stored only
@@ -1729,6 +1732,10 @@ records or a checkpoint id that no longer appears in the spool. ctx does not
 advance the checkpoint past malformed pending records; retrying after repair may
 re-export already delivered events, so downstream collectors should deduplicate
 by <code>event_id</code>.</p>
+<p>Manual and continuous exporters re-sanitize legacy local records at the export
+boundary before writing <code>local_jsonl</code> or sending OTLP, so older spool entries
+that predate current redaction rules do not leak raw query, path, repo, stdout,
+stderr, token, or secret payload values.</p>
 <h2 id="retention">Retention<a class="headerlink" href="#retention" title="Permanent link">&para;</a></h2>
 <p>Retention is explicit operator action, never a background deletion. Plan first:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>ctx-telemetry-retention<span class="w"> </span>plan<span class="w"> </span>--signal<span class="w"> </span>all<span class="w"> </span>--json
@@ -1762,6 +1769,12 @@ overrides live at <code>~/.claude/skill-system-config.json</code>.</p>
 <p><code>OTEL_EXPORTER_OTLP_LOGS_ENDPOINT</code> overrides the configured logs endpoint.
 <code>OTEL_EXPORTER_OTLP_ENDPOINT</code> is also supported and automatically appends
 <code>/v1/logs</code>.</p>
+<p>Continuous export drains the pending spool before advancing the checkpoint, not
+just the event or metric that triggered the write. If all pending well-formed
+records export successfully and no malformed pending records remain, the
+checkpoint advances to the last exported id. If malformed pending records or a
+checkpoint anomaly are present, ctx records <code>status: degraded</code> and leaves the
+checkpoint in place so an operator can repair or intentionally replay.</p>
 <h2 id="collector-examples">Collector Examples<a class="headerlink" href="#collector-examples" title="Permanent link">&para;</a></h2>
 <p>Use an OpenTelemetry Collector between ctx and the observability backend. That
 keeps ctx vendor-neutral and gives enterprise operators one place to add

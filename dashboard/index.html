@@ -1925,6 +1925,10 @@ per-process monitor token injected into the rendered page.</p>
 <td>Every sidecar as a filterable <strong>card grid</strong>: left sidebar (search by slug, grade checkboxes, skill/agent/MCP toggle, hide-floored), card shows grade pill + raw score + links to sidecar/wiki/graph</td>
 </tr>
 <tr>
+<td><code>/skillspector</code></td>
+<td>SkillSpector audit tab for ctx-run static scan results over skill bodies, with status, severity, tag, graph-family, query, and limit filters plus a link to <code>/api/skillspector.json</code></td>
+</tr>
+<tr>
 <td><code>/skill/&lt;slug&gt;</code></td>
 <td>Full sidecar breakdown: four-signal score (telemetry · intake · graph · routing), hard-floor reason, computed_at timestamp, per-skill audit timeline</td>
 </tr>
@@ -2016,6 +2020,14 @@ per-process monitor token injected into the rendered page.</p>
 <td><code>{queue, artifacts, telemetry}</code> payload: durable queue counts/recent jobs, graph/wiki artifact file status and promotion metadata, plus telemetry spool/export health including malformed records and exporter errors</td>
 </tr>
 <tr>
+<td><code>GET /api/grades.json</code></td>
+<td>Grade distribution used by the home page: <code>{grades: {A, B, C, D, F}, total}</code>, reusing the KPI summary when available and falling back to sidecar counts</td>
+</tr>
+<tr>
+<td><code>GET /api/sidecars.json?q=&lt;text&gt;&amp;type=&lt;entity&gt;&amp;grade=A&amp;hide_floor=1&amp;limit=50</code></td>
+<td>Filtered sidecar page payload for <code>/skills</code>: matching items, totals, pagination bounds, active type/grade filters, and hide-floor state</td>
+</tr>
+<tr>
 <td><code>GET /api/skill/&lt;slug&gt;.json</code></td>
 <td>Raw sidecar for one slug; missing or unsafe slugs return JSON <code>{detail: ...}</code> with HTTP 404</td>
 </tr>
@@ -2030,6 +2042,10 @@ per-process monitor token injected into the rendered page.</p>
 <tr>
 <td><code>GET /api/runtime.json</code></td>
 <td>Runtime lifecycle summary: source path, validation count, failed/error count, open-escalation count, latest validation, recent validations, open escalations, session IDs, <code>tool_selection</code>, <code>token_usage</code>, <code>token_usage_history</code>, and <code>recent_tool_usage</code>.</td>
+</tr>
+<tr>
+<td><code>GET /api/skillspector.json?q=&lt;text&gt;&amp;status=&lt;status&gt;&amp;severity=&lt;severity&gt;&amp;tag=&lt;tag&gt;&amp;family=&lt;family&gt;&amp;limit=100</code></td>
+<td>SkillSpector audit payload for <code>/skillspector</code>: summary counts, available filters, filtered records, audit path, and audit availability</td>
 </tr>
 <tr>
 <td><code>GET /api/config.json</code></td>

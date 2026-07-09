@@ -1412,9 +1412,10 @@ burn fewer tokens and local models waste less CPU/GPU work.</p>
 <p>Watches what you develop, walks a knowledge graph of <strong>68,494 skill pages, 467 agents, 10,790 MCP servers, and 207 cataloged harnesses</strong>, and recommends the
 right execution bundle on the fly. The live execution bundle is skills,
 agents, and MCP servers only; custom/API/local model users and external loop
-adapters get separate harness recommendations based on model choice and task
-goal. You decide what to load, install, or adopt. Powered by a Karpathy LLM wiki
-with persistent memory that gets smarter every session.</p>
+adapters get separate harness recommendations after explicit user-owned model
+consent, ranked by model choice and task goal. You decide what to load,
+install, or adopt. Powered by a Karpathy LLM wiki with persistent memory that
+gets smarter every session.</p>
 <div class="admonition tip">
 <p class="admonition-title">Install</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>claude-ctx
@@ -1529,9 +1530,9 @@ graph-based discovery:</p>
   agents, and MCP servers in real time — <strong>nothing loads or
   installs without your approval</strong>.</li>
 <li>During custom/API/local model onboarding and LoopFlow/agent-loop adapter
-  calls, <code>ctx-init</code>, <code>ctx-harness-install</code>, and
-  <code>python -m ctx.adapters.loopflow</code> use the same graph to recommend harnesses
-  above the configured harness match floor.</li>
+  calls with explicit user-owned model consent, <code>ctx-init</code>,
+  <code>ctx-harness-install</code>, and <code>python -m ctx.adapters.loopflow</code> use the same
+  graph to recommend harnesses above the configured harness match floor.</li>
 </ul>
 <p>The result: you always know what skills, agents, and MCP servers are available
 for your current task, and which harness fits when you choose your own model.
@@ -1604,7 +1605,7 @@ A/B/C/D/F.</p>
 <p><strong>Source snapshot</strong></p>
 <hr />
 <p>Current main is <strong>v1.0.21</strong> — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-4,584 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+4,606 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
 ships console scripts including <code>ctx-init</code>,
 <code>ctx-monitor</code> (local dashboard with graph + wiki + load/unload for
 skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),

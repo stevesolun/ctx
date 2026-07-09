@@ -1642,6 +1642,10 @@ surface; the transport and permission contract decide what each loop sees.</p>
 Claude on the next turn, alongside runtime lifecycle tools such as
 <code>ctx__load_entity</code>, <code>ctx__mark_entity_used</code>, and <code>ctx__session_state</code>.
 Ask "What skills help with FastAPI auth?" and it will call them.</p>
+<p>For permissioned adapters that should expose only read/query tools, start the
+same server with <code>--allow-tools</code> and <code>--entity-types</code>. For example,
+<code>ctx-mcp-server --allow-tools ctx__recommend_bundle,ctx__wiki_search,ctx__wiki_get --entity-types skill,mcp-server</code>
+limits tool discovery and read results to the named tools and entity types.</p>
 <h3 id="claude-agent-sdk-python">Claude Agent SDK (Python)<a class="headerlink" href="#claude-agent-sdk-python" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">anthropic</span><span class="w"> </span><span class="kn">import</span> <span class="n">Anthropic</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">claude_agent_sdk</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClaudeAgentOptions</span><span class="p">,</span> <span class="n">McpServerConfig</span>
@@ -1836,14 +1840,17 @@ ctx which capabilities it may load before planning.</p>
   engine;</li>
 <li><code>related_recommendations</code> after the loop passes selected and rejected
   recommendation IDs;</li>
-<li>optional harness recommendations only when the loop declares a user-owned,
-  API, or local model.</li>
+<li>optional harness recommendations only when the loop gives explicit
+  user-owned/API/local model consent with <code>--own-llm</code> or <code>own_llm=True</code>.</li>
 </ul>
 <p>For LoopFlow, keep the <code>.loop</code> file in charge and call ctx before the plan:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.adapters.loopflow<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span>--loop-file<span class="w"> </span>rate-limit.loop<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span>--permissions<span class="w"> </span>skills,agents,mcps
 </span></code></pre></div>
+<p><code>.loop</code> files can also grant ctx capabilities with
+<code>ctx grants: skills, mcps, harnesses</code>. CLI <code>--permissions</code> override those file
+grants; when neither is present, the adapter returns no capabilities.</p>
 <p>Add <code>--last-failure-file .loopflow/last-failure.txt</code> only after the loop has
 written that file; omit it on the first run. The adapter uses that failure text
 for recommendation ranking and returns only <code>context.last_failure_present</code>, not
@@ -1896,11 +1903,14 @@ session, grant harnesses and pass the model profile:</p>
 </span><span id="__span-18-12"><a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;anthropic/claude-opus-4.7&quot;</span><span class="p">,</span>
 </span><span id="__span-18-13"><a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="p">)</span>
 </span></code></pre></div>
-<p>Load only the groups that are explicitly granted in <code>permissions</code>. If
-<code>harnesses</code> is granted without <code>--own-llm</code>, <code>--model-provider</code>, or <code>--model</code>,
-the adapter returns a warning and no harness recommendations. The ctx MCP
-command and tool list are also permission-filtered; ctx tools that can operate
-across all capability groups only appear when all of those groups are granted.</p>
+<p>Load only the groups that are explicitly granted in <code>permissions</code>.
+<code>--model-provider</code> and <code>--model</code> are ranking metadata, not ownership consent:
+if <code>harnesses</code> is granted without <code>--own-llm</code>, the adapter returns a warning
+and no harness recommendations. The ctx MCP command and tool list are also
+permission-filtered. A partial <code>mcps</code> grant exposes only read-only ctx tools and
+adds <code>mcp_server.args</code> with <code>--allow-tools</code> / <code>--entity-types</code>; lifecycle write
+tools appear only when <code>skills</code>, <code>agents</code>, <code>mcps</code>, and <code>harnesses</code> are all
+granted.</p>
 <hr />
 <h2 id="installed-harness-attachment">Installed harness attachment<a class="headerlink" href="#installed-harness-attachment" title="Permanent link">&para;</a></h2>
 <p><code>ctx-harness-install &lt;slug&gt;</code> creates <code>.ctx/attach/</code> inside the installed
