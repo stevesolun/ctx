@@ -8,8 +8,11 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+import networkx as nx
 import pytest
 import ctx.api as ctx_api
+from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
+from ctx.adapters.generic.providers import ToolCall
 from ctx.adapters import loopflow
 
 
@@ -434,6 +437,52 @@ def test_loopflow_local_no_key_loop_hides_non_loadable_skill_recommendations(
     assert payload["loopflow"]["use_skills"] == "use skills: local-javascript-helper"
 
 
+def test_loopflow_primary_capabilities_apply_context_policy(monkeypatch) -> None:
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del query, permissions, top_k
+        return [
+            {
+                "name": "local-go-helper",
+                "type": "skill",
+                "installable": True,
+                "load_status": "local-wiki",
+                "matching_tags": ["go", "api"],
+                "score": 91,
+            },
+            {
+                "name": "local-python-helper",
+                "type": "skill",
+                "installable": True,
+                "load_status": "local-wiki",
+                "matching_tags": ["python", "api"],
+                "score": 88,
+            },
+        ]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+
+    payload = loopflow.recommend_for_loop(
+        goal="LoCoBench python feature_implementation. No local API keys. Need local files.",
+        permissions={"skills"},
+        top_k=1,
+    )
+
+    assert payload["capabilities"]["skills"] == [
+        {
+            "name": "local-python-helper",
+            "type": "skill",
+            "score": 88,
+            "installable": True,
+            "load_status": "local-wiki",
+        }
+    ]
+
+
 def test_loopflow_local_no_key_loop_filters_related_recommendations(monkeypatch) -> None:
     monkeypatch.setattr(loopflow, "_recommend_capability_rows", lambda *args, **kwargs: [])
 
@@ -497,6 +546,46 @@ def test_loopflow_local_no_key_loop_filters_related_recommendations(monkeypatch)
             "selection_state": "suggested_related",
         }
     ]
+
+
+def test_related_recommendations_include_availability_metadata(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    converted = wiki / "converted" / "local-helper"
+    converted.mkdir(parents=True)
+    (converted / "SKILL.md").write_text("# Local helper\n", encoding="utf-8")
+
+    graph = nx.Graph()
+    graph.add_node("skill:seed", label="seed", type="skill", tags=["python"])
+    graph.add_node(
+        "skill:local-helper",
+        label="local-helper",
+        type="skill",
+        tags=["python", "api"],
+        status="cataloged",
+    )
+    graph.add_edge("skill:seed", "skill:local-helper", weight=1.0, shared_tags=["python"])
+
+    graph_dir = wiki / "graphify-out"
+    graph_dir.mkdir(parents=True)
+    (graph_dir / "graph.json").write_text(
+        json.dumps(nx.node_link_data(graph, edges="edges")),
+        encoding="utf-8",
+    )
+
+    payload = json.loads(
+        CtxCoreToolbox(wiki_dir=wiki).dispatch(
+            ToolCall(
+                id="c1",
+                name="ctx__recommend_related",
+                arguments={"selected": ["skill:seed"], "top_n": 1},
+            )
+        )
+    )
+
+    assert payload["results"][0]["id"] == "skill:local-helper"
+    assert payload["results"][0]["installable"] is True
+    assert payload["results"][0]["load_status"] == "local-wiki"
+    assert payload["results"][0]["source_path"] == "converted/local-helper/SKILL.md"
 
 
 def test_loopflow_local_filter_uses_enriched_wiki_availability(

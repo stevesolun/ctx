@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import ctx.cli.recommend as recommend_cli
 
@@ -252,38 +253,47 @@ def test_recommend_cli_suppresses_primary_bundle_with_session_state(monkeypatch,
 
 
 def test_recommend_cli_filters_related_with_context_policy(monkeypatch, capsys) -> None:
+    calls: list[int] = []
+    rows: list[dict[str, Any]] = [
+        {
+            "id": "skill:remote-api",
+            "name": "remote-api",
+            "type": "skill",
+            "status": "available",
+            "source_catalog": "skill-index",
+            "install_command": "ctx-skill-install remote-api",
+            "matching_tags": ["python", "api"],
+        },
+        {
+            "id": "skill:go-api",
+            "name": "go-api",
+            "type": "skill",
+            "installable": True,
+            "load_status": "local-wiki",
+            "matching_tags": ["go", "api"],
+        },
+        {
+            "id": "skill:python-api",
+            "name": "python-api",
+            "type": "skill",
+            "installable": True,
+            "load_status": "local-wiki",
+            "matching_tags": ["python", "api"],
+        },
+    ]
+
+    def fake_recommend_related(
+        selected: list[str],
+        *,
+        rejected: list[str],
+        top_n: int,
+    ) -> list[dict[str, Any]]:
+        del selected, rejected
+        calls.append(top_n)
+        return rows[:top_n]
+
     monkeypatch.setattr(recommend_cli, "recommend_bundle", lambda query, **kwargs: [])
-    monkeypatch.setattr(
-        recommend_cli,
-        "recommend_related",
-        lambda selected, *, rejected, top_n: [
-            {
-                "id": "skill:remote-api",
-                "name": "remote-api",
-                "type": "skill",
-                "status": "available",
-                "source_catalog": "skill-index",
-                "install_command": "ctx-skill-install remote-api",
-                "matching_tags": ["python", "api"],
-            },
-            {
-                "id": "skill:go-api",
-                "name": "go-api",
-                "type": "skill",
-                "installable": True,
-                "load_status": "local-wiki",
-                "matching_tags": ["go", "api"],
-            },
-            {
-                "id": "skill:python-api",
-                "name": "python-api",
-                "type": "skill",
-                "installable": True,
-                "load_status": "local-wiki",
-                "matching_tags": ["python", "api"],
-            },
-        ],
-    )
+    monkeypatch.setattr(recommend_cli, "recommend_related", fake_recommend_related)
 
     exit_code = recommend_cli.main(
         [
@@ -295,12 +305,15 @@ def test_recommend_cli_filters_related_with_context_policy(monkeypatch, capsys) 
             "--no-api-keys",
             "--language",
             "python",
+            "--related-top-n",
+            "1",
             "--json",
         ]
     )
 
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
+    assert calls and calls[0] > 1
     assert payload["selection"]["related_results"] == [
         {
             "id": "skill:python-api",

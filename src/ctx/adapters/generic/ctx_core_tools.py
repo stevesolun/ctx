@@ -967,18 +967,13 @@ class CtxCoreToolbox:
             if candidate_keys & excluded:
                 continue
             shared_tags = r.get("shared_tags", [])
+            related_row = dict(r)
+            related_row["matching_tags"] = shared_tags
             row = _with_recommendation_selection_metadata(
-                {
-                    "name": r["name"],
-                    "type": r["type"],
-                    "score": r["score"],
-                    "normalized_score": r.get("normalized_score"),
-                    "matching_tags": shared_tags,
-                    "shared_tags": shared_tags,
-                    "status": r.get("status"),
-                    "via": r.get("via", []),
-                }
+                _base_recommendation_row(related_row, wiki_dir=self._wiki_dir_resolved())
             )
+            row["shared_tags"] = shared_tags
+            row["via"] = r.get("via", [])
             row["selection_state"] = "suggested_related"
             row["related_to"] = r.get("via", [])
             row["reason"] = _related_recommendation_reason(row)
@@ -2090,17 +2085,31 @@ def _resolve_related_recommendation_rows(
         node_data = graph.nodes.get(node_id, {})
         entity_type = str(node_data.get("type") or node_id.split(":", 1)[0])
         name = str(node_data.get("label") or node_id.split(":", 1)[-1])
-        results.append(
-            {
-                "name": name,
-                "type": entity_type,
-                "score": round(score, 2),
-                "normalized_score": round(score / max_score, 4),
-                "shared_tags": shared_tags_map.get(node_id, [])[:8],
-                "via": via.get(node_id, [])[:4],
-                "status": node_data.get("status"),
-            }
-        )
+        result = {
+            "name": name,
+            "type": entity_type,
+            "score": round(score, 2),
+            "normalized_score": round(score / max_score, 4),
+            "shared_tags": shared_tags_map.get(node_id, [])[:8],
+            "via": via.get(node_id, [])[:4],
+        }
+        for key in (
+            "external",
+            "external_catalog",
+            "source_catalog",
+            "status",
+            "source",
+            "skill_id",
+            "installs",
+            "detail_url",
+            "install_command",
+            "category",
+            "invoke_command",
+            "security_review",
+        ):
+            if key in node_data:
+                result[key] = node_data.get(key)
+        results.append(result)
     return results
 
 

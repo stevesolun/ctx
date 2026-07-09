@@ -264,6 +264,7 @@ def _group_bundle(
     permissions: set[str],
     excluded: set[str] | None = None,
     local_loadable_skills_only: bool = False,
+    context: dict[str, Any] | None = None,
     top_k: int,
 ) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {key: [] for key in ("skills", "agents", "mcps")}
@@ -280,6 +281,8 @@ def _group_bundle(
         if _row_selection_keys(row, name) & excluded_keys:
             continue
         if group == "skills" and local_loadable_skills_only and not _is_loadable_skill_row(row):
+            continue
+        if context is not None and _recommendation_context_skip_reason(row, context) is not None:
             continue
         seen.add(identity)
         if len(grouped[group]) < top_k:
@@ -480,9 +483,12 @@ def recommend_for_loop(
     excluded_ids = _selection_keys(selected_ids + rejected_ids)
     local_loadable_skills_only = _is_local_no_key_query(ranking_query)
     recommendation_context = _recommendation_context_from_args(ranking_query, {})
+    context_filters_active = any(
+        bool(recommendation_context.get(key)) for key in ("local_code_task", "no_api_keys")
+    )
     if granted.intersection({"skills", "agents", "mcps"}):
         fetch_top_k = safe_top_k
-        if excluded_ids or local_loadable_skills_only:
+        if excluded_ids or local_loadable_skills_only or context_filters_active:
             fetch_top_k = min(50, safe_top_k + len(excluded_ids) + 5)
         rows = _recommend_capability_rows(
             ranking_query,
@@ -495,6 +501,7 @@ def recommend_for_loop(
                 permissions=granted,
                 excluded=excluded_ids,
                 local_loadable_skills_only=local_loadable_skills_only,
+                context=recommendation_context,
                 top_k=safe_top_k,
             )
         )

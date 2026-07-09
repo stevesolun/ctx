@@ -131,11 +131,9 @@ def _recommendation_filter_args(args: argparse.Namespace) -> dict[str, Any]:
 def _filter_related_results(
     rows: list[dict[str, Any]],
     *,
-    query: str,
-    args: argparse.Namespace,
+    context: dict[str, Any],
     top_n: int,
 ) -> list[dict[str, Any]]:
-    context = _recommendation_context_from_args(query, _recommendation_filter_args(args))
     filtered: list[dict[str, Any]] = []
     for row in rows:
         if _recommendation_context_skip_reason(row, context) is not None:
@@ -144,6 +142,21 @@ def _filter_related_results(
         if len(filtered) >= top_n:
             break
     return filtered
+
+
+def _recommendation_context_filters_active(context: dict[str, Any]) -> bool:
+    return any(bool(context.get(key)) for key in ("local_code_task", "no_api_keys", "language"))
+
+
+def _related_fetch_top_n(
+    *,
+    top_n: int,
+    excluded_count: int,
+    context: dict[str, Any],
+) -> int:
+    if not _recommendation_context_filters_active(context):
+        return top_n
+    return min(50, top_n + excluded_count + 25)
 
 
 def _render_row(row: dict[str, Any], *, index: int | None = None) -> str:
@@ -218,15 +231,20 @@ def main(argv: list[str] | None = None) -> int:
         include_baseline_context=args.include_baseline_context,
     )
     related_rejected = _split_selection_values(rejected + active + related_baseline_context)
+    related_context = _recommendation_context_from_args(query, _recommendation_filter_args(args))
+    related_fetch_top_n = _related_fetch_top_n(
+        top_n=related_top_n,
+        excluded_count=len(related_rejected),
+        context=related_context,
+    )
     raw_related_results = (
-        recommend_related(selected, rejected=related_rejected, top_n=related_top_n)
+        recommend_related(selected, rejected=related_rejected, top_n=related_fetch_top_n)
         if selected
         else []
     )
     related_results = _filter_related_results(
         raw_related_results,
-        query=query,
-        args=args,
+        context=related_context,
         top_n=related_top_n,
     )
     if args.json:
