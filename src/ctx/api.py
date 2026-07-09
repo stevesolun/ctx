@@ -30,8 +30,22 @@ Four delivery paths, in increasing order of coupling to ctx:
 
 Public functions:
 
-    recommend_bundle(query, *, top_k=5)
-        Free-text → ranked skill/agent/MCP execution bundle.
+    recommend_bundle(
+        query,
+        *,
+        top_k=5,
+        selected=None,
+        rejected=None,
+        active_context=None,
+        baseline_context=None,
+        include_baseline_context=False,
+        include_unavailable=False,
+        local_code_task=None,
+        no_api_keys=None,
+        language=None,
+    )
+        Free-text → ranked skill/agent/MCP execution bundle with selection,
+        availability, baseline-context, and local/no-key/language filters.
 
     recommend_related(selected, *, rejected=None, max_hops=2, top_n=5)
         Selected recommendation IDs → related filtered recommendations.
@@ -255,9 +269,15 @@ def recommend_bundle(
 ) -> list[dict[str, Any]]:
     """Return a top-K ranked recommendation bundle for a free-text query.
 
-    Each entry is a dict with: ``name``, ``type``, ``score``,
-    ``matching_tags``. Empty list on any error (missing graph,
-    empty query, etc.); the CLI/MCP versions surface errors as
+    ``selected``/``rejected`` suppress prior decisions, ``active_context`` and
+    ``baseline_context`` suppress already-present host context, and
+    ``local_code_task``/``no_api_keys``/``language`` narrow results for local
+    coding loops. Set ``include_baseline_context`` or ``include_unavailable``
+    to opt back into those rows. Each entry uses the enriched recommendation
+    contract: ``id``, ``name``, ``type``, ``score``, ``matching_tags``,
+    ``tags``, ``installable``, ``load_status``, ``source_path``, selection
+    metadata, ``tldr``, and ``reason`` when available. Empty list on any error
+    (missing graph, empty query, etc.); the CLI/MCP versions surface errors as
     structured payload, but library callers usually just want a list.
 
     Example:

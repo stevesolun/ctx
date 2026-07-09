@@ -171,7 +171,14 @@ from ctx import (
 
 # Inside your agent loop:
 def on_user_turn(query: str):
-    bundle = recommend_bundle(query, top_k=5)
+    bundle = recommend_bundle(
+        query,
+        top_k=5,
+        active_context=["mcp-server:codex-cli"],
+        local_code_task=True,
+        no_api_keys=True,
+        language="python",
+    )
     for entry in bundle:
         print(f"  [{entry['type']:>11}] {entry['name']}  (score {entry['score']:.1f})")
 
@@ -187,7 +194,14 @@ def on_user_turn(query: str):
 
 The first call to any of these lazy-loads the graph + wiki once;
 subsequent calls are O(walk) cheap. Safe to call from inside your
-own while-loop on every turn.
+own while-loop on every turn. `recommend_bundle()` accepts
+`selected`, `rejected`, `active_context`, and `baseline_context` to keep
+already-present context out of new load suggestions. It also accepts
+`local_code_task`, `no_api_keys`, `language`, `include_baseline_context`, and
+`include_unavailable` when a local/no-key coding loop needs stricter filtering.
+Returned rows include availability metadata (`installable`, `load_status`, and
+`source_path`) so hosts can distinguish local wiki entries from manual or
+external-install rows.
 
 Advanced: build a `CtxCoreToolbox` directly if you need to point at
 a non-default wiki/graph path:
@@ -293,6 +307,10 @@ The adapter emits a JSON contract with:
   engine;
 - `related_recommendations` after the loop passes selected and rejected
   recommendation IDs;
+- availability metadata on returned rows so loops can load local wiki entries
+  and leave external/manual rows for explicit action;
+- inferred local/no-key/language filtering for goals such as LoCoBench
+  `feature_implementation` tasks with no API keys;
 - optional harness recommendations only when the loop gives explicit
   user-owned/API/local model consent with `--own-llm` or `own_llm=True`.
 
@@ -325,9 +343,10 @@ python -m ctx.adapters.loopflow \
 ```
 
 Selected and rejected values may be recommendation IDs such as
-`mcp-server:ollama` or bare names. Returned `related_recommendations` exclude
-both sets and keep the same `id`, `tldr`, `reason`, `selected`, and
-`selection_state` semantics as the ctx API/core toolbox.
+`mcp-server:ollama` or bare names. They suppress both primary capability rows
+and returned `related_recommendations`, which keep the same `id`, `tldr`,
+`reason`, `selected`, `selection_state`, and availability semantics as the ctx
+API/core toolbox.
 
 The returned payload includes LoopFlow-ready hints for the granted groups:
 
@@ -335,9 +354,10 @@ The returned payload includes LoopFlow-ready hints for the granted groups:
 use skills: security-review, code-review
 ```
 
-Only installed/local skill rows are named in `loopflow.use_skills`. Installable
-catalog skills remain under `capabilities.skills` with `status: available` and
-their `install_command` metadata.
+Only local wiki skill rows are named in `loopflow.use_skills`. Catalog skills
+remain under `capabilities.skills` with `status: available`,
+`load_status: external-install-required`, and `install_command` metadata when
+the current context allows non-local recommendations.
 
 When the LoopFlow run uses its own LLM rather than a hosted Claude Code
 session, grant harnesses and pass the model profile:

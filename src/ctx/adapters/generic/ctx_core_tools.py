@@ -11,10 +11,26 @@ the MCP router's separator convention so the harness can route to
 the toolbox via the same tool-dispatch path it already uses for
 MCP servers):
 
-    ctx__recommend_bundle(query, top_k=5)
+    ctx__recommend_bundle(
+        query,
+        top_k=5,
+        selected=None,
+        rejected=None,
+        active_context=None,
+        baseline_context=None,
+        include_baseline_context=False,
+        include_unavailable=False,
+        local_code_task=None,
+        no_api_keys=None,
+        language=None,
+    )
         Free-text → top-K cross-type bundle (skill + agent + MCP).
-        Tokenizes the query into tags, walks the graph, and returns
-        enriched rows with id, tldr, reason, and selection metadata.
+        Tokenizes the query into tags, walks the graph, suppresses
+        selected/rejected/active/default-baseline context, and returns
+        enriched rows with id, tags, availability, tldr, reason, selection
+        metadata, baseline_context, and context_policy. Local/no-key/language
+        hints can hide unavailable, external-service, generic-planning, or
+        wrong-language rows unless include_unavailable opts them back in.
 
     ctx__recommend_related(selected, rejected=None, max_hops=2, top_n=5)
         Selected/rejected recommendation IDs → graph-related rows.
