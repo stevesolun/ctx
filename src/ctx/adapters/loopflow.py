@@ -200,6 +200,9 @@ def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
         "category",
         "invoke_command",
         "security_review",
+        "installable",
+        "load_status",
+        "source_path",
         "selected",
         "selection_state",
         "related_to",
@@ -214,6 +217,9 @@ def _is_loadable_skill_row(row: dict[str, Any]) -> bool:
     status = str(row.get("status") or "").strip().lower()
     source_catalog = str(row.get("source_catalog") or "").strip().lower()
     install_command = str(row.get("install_command") or "").strip()
+    load_status = str(row.get("load_status") or "").strip().lower()
+    if load_status and load_status != "local-wiki":
+        return False
     if status in {"available", "remote-cataloged"}:
         return False
     if source_catalog == "skill-index" or install_command:
@@ -221,14 +227,48 @@ def _is_loadable_skill_row(row: dict[str, Any]) -> bool:
     return True
 
 
+def _selection_key(value: str) -> str:
+    item = value.strip().lower()
+    if item.startswith("mcp:"):
+        return "mcp-server:" + item.split(":", 1)[1]
+    return item
+
+
+def _selection_keys(values: list[str]) -> set[str]:
+    keys: set[str] = set()
+    for value in values:
+        item = value.strip()
+        if item:
+            keys.add(_selection_key(item))
+    return keys
+
+
+def _is_local_no_key_query(query: str) -> bool:
+    lower = query.lower()
+    return any(
+        marker in lower
+        for marker in (
+            "no api keys",
+            "no local api keys",
+            "local files",
+            "local repo",
+            "feature_implementation",
+            "feature implementation",
+        )
+    )
+
+
 def _group_bundle(
     rows: list[dict[str, Any]],
     *,
     permissions: set[str],
+    excluded: set[str] | None = None,
+    local_loadable_skills_only: bool = False,
     top_k: int,
 ) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {key: [] for key in ("skills", "agents", "mcps")}
     seen: set[tuple[str, str]] = set()
+    excluded_keys = excluded or set()
     for row in rows:
         group = _ENTITY_TO_GROUP.get(str(row.get("type") or ""))
         name = str(row.get("name") or "").strip()
@@ -236,6 +276,10 @@ def _group_bundle(
             continue
         identity = (group, name)
         if identity in seen:
+            continue
+        if _selection_key(str(row.get("id") or f"{row.get('type')}:{name}")) in excluded_keys:
+            continue
+        if group == "skills" and local_loadable_skills_only and not _is_loadable_skill_row(row):
             continue
         seen.add(identity)
         if len(grouped[group]) < top_k:
@@ -247,10 +291,12 @@ def _filter_related_rows(
     rows: list[dict[str, Any]],
     *,
     permissions: set[str],
+    excluded: set[str] | None = None,
     top_k: int,
 ) -> list[dict[str, Any]]:
     filtered: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
+    excluded_keys = excluded or set()
     for row in rows:
         group = _ENTITY_TO_GROUP.get(str(row.get("type") or ""))
         name = str(row.get("name") or "").strip()
@@ -258,6 +304,8 @@ def _filter_related_rows(
             continue
         identity = (group, name)
         if identity in seen:
+            continue
+        if _selection_key(str(row.get("id") or f"{row.get('type')}:{name}")) in excluded_keys:
             continue
         seen.add(identity)
         filtered.append(_compact_row(row))
@@ -419,15 +467,24 @@ def recommend_for_loop(
         "mcps": [],
         "harnesses": [],
     }
+    selected_ids = [value.strip() for value in (selected or []) if value.strip()]
+    rejected_ids = [value.strip() for value in (rejected or []) if value.strip()]
+    excluded_ids = _selection_keys(selected_ids + rejected_ids)
     if granted.intersection({"skills", "agents", "mcps"}):
         rows = _recommend_capability_rows(
             ranking_query,
             permissions=granted,
             top_k=safe_top_k,
         )
-        capability_bundle.update(_group_bundle(rows, permissions=granted, top_k=safe_top_k))
-    selected_ids = [value.strip() for value in (selected or []) if value.strip()]
-    rejected_ids = [value.strip() for value in (rejected or []) if value.strip()]
+        capability_bundle.update(
+            _group_bundle(
+                rows,
+                permissions=granted,
+                excluded=excluded_ids,
+                local_loadable_skills_only=_is_local_no_key_query(ranking_query),
+                top_k=safe_top_k,
+            )
+        )
     related_recommendations: list[dict[str, Any]] = []
     if selected_ids and granted.intersection({"skills", "agents", "mcps"}):
         related_recommendations = _filter_related_rows(
@@ -437,6 +494,7 @@ def recommend_for_loop(
                 top_n=50,
             ),
             permissions=granted,
+            excluded=excluded_ids,
             top_k=safe_top_k,
         )
 

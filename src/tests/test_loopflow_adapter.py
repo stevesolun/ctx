@@ -133,9 +133,9 @@ def test_recommend_for_loop_respects_capability_permissions(
         "mcps": True,
         "harnesses": False,
     }
-    assert [row["name"] for row in payload["capabilities"]["skills"]] == ["playwright-debug"]
+    assert payload["capabilities"]["skills"] == []
     assert payload["capabilities"]["agents"] == []
-    assert [row["name"] for row in payload["capabilities"]["mcps"]] == ["filesystem"]
+    assert payload["capabilities"]["mcps"] == []
     assert payload["related_recommendations"] == [
         {
             "id": "skill:browser-test-plan",
@@ -348,6 +348,53 @@ def test_loopflow_skill_hint_excludes_installable_catalog_skills(monkeypatch) ->
         {"name": "remote-tests", "type": "skill", "score": 70, "status": "available"},
     ]
     assert payload["loopflow"]["use_skills"] == "use skills: security-review"
+
+
+def test_loopflow_local_no_key_loop_hides_non_loadable_skill_recommendations(
+    monkeypatch,
+) -> None:
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del query, permissions, top_k
+        return [
+            {
+                "name": "remote-api-planner",
+                "type": "skill",
+                "status": "available",
+                "source_catalog": "skill-index",
+                "install_command": "npx skills add remote-api-planner",
+                "score": 92,
+            },
+            {
+                "name": "local-javascript-helper",
+                "type": "skill",
+                "installable": True,
+                "load_status": "local-wiki",
+                "score": 88,
+            },
+        ]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+
+    payload = loopflow.recommend_for_loop(
+        goal="LoCoBench javascript feature_implementation. No local API keys. Need local files.",
+        permissions={"skills"},
+    )
+
+    assert payload["capabilities"]["skills"] == [
+        {
+            "name": "local-javascript-helper",
+            "type": "skill",
+            "score": 88,
+            "installable": True,
+            "load_status": "local-wiki",
+        }
+    ]
+    assert payload["loopflow"]["use_skills"] == "use skills: local-javascript-helper"
 
 
 def test_loopflow_skill_hint_requires_returned_skill_capabilities(monkeypatch) -> None:
