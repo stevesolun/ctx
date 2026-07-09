@@ -160,3 +160,127 @@ def test_no_mistakes_run_script_uses_trusted_python_for_configured_commands(
         "['-m', 'ruff', 'format', '--check', 'src', 'hooks', 'scripts']",
         "['-m', 'mypy', 'src']",
     ]
+
+
+@posix_shell_only
+def test_no_mistakes_gate_requires_explicit_intent(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    script_dir = repo / "scripts"
+    script_dir.mkdir(parents=True)
+    shutil.copy2(
+        Path("scripts/no_mistakes_run.sh"),
+        script_dir / "no_mistakes_run.sh",
+    )
+
+    fake_bin = repo / ".venv" / "bin"
+    fake_bin.mkdir(parents=True)
+    (repo / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+    log_path = tmp_path / "python-args.log"
+    _write_executable(
+        fake_bin / "python",
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys\n"
+        "if len(sys.argv) > 1 and sys.argv[1] == '-':\n"
+        "    sys.stdin.read()\n"
+        "    raise SystemExit(0)\n"
+        "pathlib.Path(os.environ['FAKE_PYTHON_LOG']).write_text(repr(sys.argv[1:]))\n",
+    )
+
+    env = os.environ.copy()
+    env["CTX_NO_MISTAKES_PYTHON_BIN"] = str(fake_bin)
+    env["FAKE_PYTHON_LOG"] = str(log_path)
+
+    result = subprocess.run(
+        ["bash", str(script_dir / "no_mistakes_run.sh"), "gate"],
+        cwd=repo,
+        env=env,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert result.returncode == 64
+    assert "gate requires --intent or --intent-file" in result.stderr
+    assert not log_path.exists()
+
+
+@posix_shell_only
+@pytest.mark.parametrize("intent_source", ("argument", "file"))
+def test_no_mistakes_gate_runs_local_fast_before_axi_run(
+    tmp_path: Path,
+    intent_source: str,
+) -> None:
+    repo = tmp_path / "repo"
+    script_dir = repo / "scripts"
+    script_dir.mkdir(parents=True)
+    shutil.copy2(
+        Path("scripts/no_mistakes_run.sh"),
+        script_dir / "no_mistakes_run.sh",
+    )
+
+    fake_bin = repo / ".venv" / "bin"
+    fake_bin.mkdir(parents=True)
+    (repo / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+    python_log = tmp_path / "python-args.log"
+    no_mistakes_log = tmp_path / "no-mistakes-args.log"
+    _write_executable(
+        fake_bin / "python",
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys\n"
+        "if len(sys.argv) > 1 and sys.argv[1] == '-':\n"
+        "    sys.stdin.read()\n"
+        "    raise SystemExit(0)\n"
+        "log = pathlib.Path(os.environ['FAKE_PYTHON_LOG'])\n"
+        "with log.open('a', encoding='utf-8') as fh:\n"
+        "    fh.write(repr(sys.argv[1:]) + '\\n')\n",
+    )
+    fake_cmd_dir = tmp_path / "bin"
+    fake_cmd_dir.mkdir()
+    _write_executable(
+        fake_cmd_dir / "no-mistakes",
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys\n"
+        "pathlib.Path(os.environ['FAKE_NO_MISTAKES_LOG']).write_text("
+        "repr(sys.argv[1:]) + '\\n', encoding='utf-8')\n",
+    )
+
+    env = os.environ.copy()
+    env["CTX_NO_MISTAKES_PYTHON_BIN"] = str(fake_bin)
+    env["FAKE_PYTHON_LOG"] = str(python_log)
+    env["FAKE_NO_MISTAKES_LOG"] = str(no_mistakes_log)
+    env["PATH"] = f"{fake_cmd_dir}{os.pathsep}{env['PATH']}"
+    intent_args = ["--intent", "speed lane split"]
+    if intent_source == "file":
+        intent_path = tmp_path / "intent.txt"
+        intent_path.write_text("speed lane split\n", encoding="utf-8")
+        intent_args = ["--intent-file", str(intent_path)]
+
+    subprocess.run(
+        [
+            "bash",
+            str(script_dir / "no_mistakes_run.sh"),
+            "gate",
+            *intent_args,
+            "--skip",
+            "ci",
+            "--yes",
+        ],
+        cwd=repo,
+        env=env,
+        check=True,
+    )
+
+    assert python_log.read_text(encoding="utf-8").splitlines() == [
+        (
+            "['scripts/local_fast_gate.py', '--profile', 'smoke', '--summary-json', "
+            "'.gate/local-fast-smoke.json']"
+        ),
+        (
+            "['scripts/local_fast_gate.py', '--profile', 'pr', '--summary-json', "
+            "'.gate/local-fast.json']"
+        ),
+    ]
+    assert no_mistakes_log.read_text(encoding="utf-8").strip() == (
+        "['axi', 'run', '--intent', 'speed lane split', '--skip', 'ci', '--yes']"
+    )

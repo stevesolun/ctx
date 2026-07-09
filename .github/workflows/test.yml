@@ -117,7 +117,7 @@ jobs:
 
       - name: Run tests with coverage gate
         # Bump this number as the coverage sprint ships - never lower it.
-        run: pytest -q -m "not browser and not integration" --cov=src --cov-report=term-missing --cov-fail-under=40
+        run: pytest -q -m "not browser and not integration" --cov=src --cov-report=term-missing --cov-fail-under=40 -n auto --dist=loadfile --max-worker-restart=0
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7

@@ -26,10 +26,25 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.ci_preflight import Check  # noqa: E402
+from scripts.ci_preflight import PROFILE_CHOICES  # noqa: E402
 from scripts.ci_preflight import changed_files  # noqa: E402
 from scripts.ci_preflight import select_checks  # noqa: E402
 
-LANE_ORDER = ("cheap", "static", "unit", "docs", "graph", "feature", "package", "misc")
+LANE_ORDER = (
+    "cheap",
+    "static",
+    "unit",
+    "canary",
+    "contract",
+    "clean-host",
+    "docs",
+    "graph",
+    "telemetry",
+    "similarity",
+    "browser",
+    "package",
+    "misc",
+)
 CHECK_LANES = {
     "whitespace": "cheap",
     "repo stats": "cheap",
@@ -39,16 +54,16 @@ CHECK_LANES = {
     "mypy": "static",
     "pip check": "static",
     "unit-linux equivalent": "unit",
-    "A-Z canary": "unit",
-    "contract compatibility local": "unit",
-    "clean host contract": "unit",
+    "A-Z canary": "canary",
+    "contract compatibility local": "contract",
+    "clean host contract": "clean-host",
     "public docs tracker": "docs",
     "docs strict build": "docs",
     "hydrate graph LFS": "graph",
     "graph artifact validation": "graph",
-    "telemetry enterprise": "feature",
-    "similarity precision/recall": "feature",
-    "browser monitor security": "feature",
+    "telemetry enterprise": "telemetry",
+    "similarity precision/recall": "similarity",
+    "browser monitor security": "browser",
     "clean preflight dist": "package",
     "build wheel": "package",
     "twine check": "package",
@@ -283,7 +298,7 @@ def _default_jobs() -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="origin/main")
-    parser.add_argument("--profile", choices=("pr", "full"), default="pr")
+    parser.add_argument("--profile", choices=PROFILE_CHOICES, default="pr")
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--jobs", type=int, default=_default_jobs())
     parser.add_argument("--lane", action="append", choices=LANE_ORDER)

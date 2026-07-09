@@ -43,6 +43,13 @@ def _workflow_docs_tracker_tests() -> tuple[str, ...]:
     return tuple(argv[5:])
 
 
+def _workflow_unit_linux_coverage_command() -> list[str]:
+    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["unit-linux"]["steps"]
+    run = next(step["run"] for step in steps if step.get("name") == "Run tests with coverage gate")
+    return shlex.split(run)
+
+
 def test_pr_docs_workflow_tracker_tests_match_preflight() -> None:
     assert _workflow_docs_tracker_tests() == PUBLIC_DOCS_TRACKER_TESTS
 
@@ -67,6 +74,18 @@ def test_preflight_runs_docs_gate_for_docs_changes() -> None:
 
 def test_preflight_runs_source_gates_for_source_changes() -> None:
     names = _names_for(["src/ctx/adapters/generic/loop.py"])
+    workflow_unit_command = _workflow_unit_linux_coverage_command()
+    unit_check = next(
+        check
+        for check in _checks_for(["src/ctx/adapters/generic/loop.py"])
+        if check.name == "unit-linux equivalent"
+    )
+    lanes = local_fast_gate.group_checks(_checks_for(["src/ctx/adapters/generic/loop.py"]))
+    lanes_by_name = {
+        lane.name: [check.name for check in lane.checks]
+        for lane in lanes
+        if lane.name in {"unit", "canary", "contract", "clean-host"}
+    }
 
     assert "no-test policy" in names
     assert "ruff format" in names
@@ -75,6 +94,39 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
     assert "unit-linux equivalent" in names
     assert "A-Z canary" in names
     assert "clean host contract" in names
+    assert lanes_by_name == {
+        "unit": ["unit-linux equivalent"],
+        "canary": ["A-Z canary"],
+        "contract": ["contract compatibility local"],
+        "clean-host": ["clean host contract"],
+    }
+    assert unit_check.argv[-4:] == (
+        "-n",
+        "auto",
+        "--dist=loadfile",
+        "--max-worker-restart=0",
+    )
+    assert workflow_unit_command[-4:] == list(unit_check.argv[-4:])
+
+
+def test_preflight_smoke_profile_runs_only_fast_source_gates() -> None:
+    names = _names_for(["src/ctx/adapters/generic/loop.py"], profile="smoke")
+
+    assert "whitespace" in names
+    assert "repo stats" in names
+    assert "no-test policy" in names
+    assert "ruff format" in names
+    assert "ruff" in names
+    assert "mypy" not in names
+    assert "unit-linux equivalent" not in names
+    assert "build wheel" not in names
+
+
+def test_preflight_smoke_profile_keeps_docs_tracker_without_strict_build() -> None:
+    names = _names_for(["docs/index.md"], profile="smoke")
+
+    assert "public docs tracker" in names
+    assert "docs strict build" not in names
 
 
 def test_preflight_runs_graph_validation_for_graph_artifacts() -> None:
@@ -112,8 +164,8 @@ def test_local_fast_lane_filters_are_composable() -> None:
 
     filtered = local_fast_gate.filter_lanes(
         lanes,
-        include=("static", "unit", "feature"),
-        skip=("feature",),
+        include=("static", "unit", "browser"),
+        skip=("browser",),
     )
 
     assert [lane.name for lane in filtered] == ["static", "unit"]
@@ -139,6 +191,27 @@ def test_local_fast_main_accepts_repeated_lane_args(monkeypatch, capsys) -> None
     assert "[lane] static" in out
     assert "[lane] unit" in out
     assert "[lane] package" not in out
+
+
+def test_local_fast_main_accepts_smoke_profile(monkeypatch, capsys) -> None:
+    checks = [
+        Check("ruff", ("python", "-m", "ruff", "check", "src")),
+        Check("mypy", ("python", "-m", "mypy", "src")),
+    ]
+    seen_profiles: list[str] = []
+    monkeypatch.setattr(local_fast_gate.shutil, "which", lambda _name: "/usr/bin/git")
+    monkeypatch.setattr(local_fast_gate, "changed_files", lambda _base: ["src/ctx/cli/run.py"])
+
+    def fake_select_checks(**kwargs):
+        seen_profiles.append(kwargs["profile"])
+        return checks[:1], []
+
+    monkeypatch.setattr(local_fast_gate, "select_checks", fake_select_checks)
+
+    assert local_fast_gate.main(["--dry-run", "--profile", "smoke"]) == 0
+
+    assert seen_profiles == ["smoke"]
+    assert "[lane] static" in capsys.readouterr().out
 
 
 def test_local_fast_summary_json_records_lane_timings(tmp_path: Path) -> None:
@@ -348,7 +421,12 @@ def test_preflight_runs_browser_and_similarity_when_classified() -> None:
     assert "cheap" in lane_names
     assert "static" in lane_names
     assert "unit" in lane_names
-    assert "feature" in lane_names
+    assert "canary" in lane_names
+    assert "contract" in lane_names
+    assert "clean-host" in lane_names
+    assert "telemetry" in lane_names
+    assert "similarity" in lane_names
+    assert "browser" in lane_names
     assert "package" in lane_names
     assert "release_asset_wait_seconds = 300" in graph_resolver_script
     assert 'os.environ.get("GITHUB_EVENT_NAME") == "pull_request"' in graph_resolver_script

@@ -49,29 +49,42 @@ gets smarter every session.
 !!! tip "Before pushing"
 
     ```bash
+    scripts/no_mistakes_run.sh fast --profile smoke
     scripts/no_mistakes_run.sh fast
-    python scripts/ci_preflight.py --profile pr
+    scripts/no_mistakes_run.sh gate --intent "narrow task statement for this branch"
     ```
 
-    `scripts/no_mistakes_run.sh fast` is the fast front door: it selects the
-    same PR checks, splits independent work into isolated temporary worktree
-    lanes, and runs them in parallel against committed branch history. The
-    wrapper writes lane timing evidence to `.gate/local-fast.json` by default,
-    and lane filters support fast reruns such as
-    `scripts/no_mistakes_run.sh fast --lane static --lane unit`.
-    The serial preflight/no-mistakes path remains the authoritative final local
-    gate. Preflight uses the same changed-file classifier as GitHub Actions and
-    runs the matching local gates before you open a PR: stats, ruff
-    format/check, mypy, pip check, unit coverage, canaries, package build,
-    twine, docs, graph validation, browser, and similarity checks as needed.
+    `scripts/no_mistakes_run.sh fast --profile smoke` is the quick first pass:
+    it keeps cheap invariants, no-test policy, ruff, and public docs tracker
+    checks while deferring slow unit, package, graph, browser, similarity,
+    telemetry, and strict docs lanes. `scripts/no_mistakes_run.sh fast` is the
+    full fast front door before no-mistakes or PR: it selects the same PR
+    checks, splits independent work into isolated temporary worktree lanes, and
+    runs them in parallel against committed branch history. The wrapper writes
+    lane timing evidence to `.gate/local-fast.json` by default, and lane filters
+    support fast reruns such as
+    `scripts/no_mistakes_run.sh fast --lane static --lane unit`. Unit-family
+    checks run as separate `unit`, `canary`, `contract`, and `clean-host` lanes
+    so the broad coverage pass no longer serializes the canary and clean-host
+    smoke checks.
+    `scripts/no_mistakes_run.sh gate --intent ...` refuses implicit/stale
+    intent, runs smoke + full local-fast first, then starts no-mistakes with the
+    explicit branch objective. The serial preflight/no-mistakes path remains
+    available when you need to inspect individual checks. Preflight uses the
+    same changed-file classifier as GitHub Actions and runs the matching local
+    gates before you open a PR: stats, ruff format/check, mypy, pip check, unit
+    coverage, canaries, package build, twine, docs, graph validation, browser,
+    and similarity checks as needed.
     When graph artifacts are still Git LFS pointers, preflight hydrates only
     the required tarballs, verifies their pointer SHA-256 and size caps, then
     validates the artifacts.
     Use `--profile full` before release work to force the source/package gates
     even for docs-only or graph-only changes. Docs changes run public docs
     tracker checks before the strict MkDocs build, including bug-smoke,
-    feature, dashboard, and toolbox coverage. Public docs surfaces are
-    release-tracked: when
+    feature, dashboard, and toolbox coverage. Always pass an explicit narrow
+    no-mistakes intent so review/test/doc agents validate this branch instead
+    of inferring a stale broader goal from local transcripts. Public docs
+    surfaces are release-tracked: when
     `mkdocs.yml` adds, removes, or moves a nav `.md` page, or public linked
     assets under `docs/assets/javascripts/`, `docs/services/`, or
     `docs/toolbox/templates/` change, update the relevant supporting ledger
@@ -239,7 +252,7 @@ ones are flagged. New ones self-ingest.
     ---
 
     Current main is **v1.0.21** — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-    4,635 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+    4,641 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
     ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),

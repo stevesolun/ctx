@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-4635_inventory-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-4641_inventory-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![Graph](https://img.shields.io/badge/Graph-79%2C958_nodes_/_1%2C778%2C069_edges-red.svg)](https://stevesolun.github.io/ctx/knowledge-graph/)
 [![Skills](https://img.shields.io/badge/Skills-68%2C494-blue.svg)](https://stevesolun.github.io/ctx/catalog/?type=skill)
 [![Agents](https://img.shields.io/badge/Agents-467-purple.svg)](https://stevesolun.github.io/ctx/catalog/?type=agent)
@@ -144,39 +144,56 @@ ctx-monitor serve          # local dashboard: http://127.0.0.1:8765/
 `--local-code-task`, `--no-api-keys`, and `--language` so loops can recover
 from partial choices without re-suggesting active or baseline host context.
 
-Before pushing, run the two-tier local PR gate. Start with the fast committed-HEAD
-gate:
+Before pushing, run the two-tier local PR gate. Start with the smoke profile
+when you want quick feedback before paying for the heavier lanes:
+
+```bash
+scripts/no_mistakes_run.sh fast --profile smoke
+```
+
+Then run the full fast committed-HEAD gate:
 
 ```bash
 scripts/no_mistakes_run.sh fast
 ```
 
-That runner selects the same checks as PR preflight, groups independent checks
-into isolated temporary worktree lanes, and runs them in parallel. Treat it as
-the fast front door. It writes lane timing evidence to `.gate/local-fast.json`
-by default; use lane filters for quick reruns after a failed lane:
+That runner selects checks from the same classifier as PR preflight, groups
+independent checks into isolated temporary worktree lanes, and runs them in
+parallel. The smoke profile keeps cheap invariants, no-test policy, ruff, and
+public docs tracker checks while deferring slow unit, package, graph, browser,
+similarity, telemetry, and strict docs lanes to the normal PR profile. Treat the
+normal profile as the fast front door before no-mistakes or PR. It writes lane
+timing evidence to `.gate/local-fast.json` by default; use lane filters for
+quick reruns after a failed lane:
 
 ```bash
 scripts/no_mistakes_run.sh fast --lane static --lane unit
+scripts/no_mistakes_run.sh fast --lane unit --lane canary --lane contract --lane clean-host
 scripts/no_mistakes_run.sh fast --skip-lane graph
 scripts/no_mistakes_run.sh fast --summary-json /tmp/local-fast.json
 ```
 
-The serial preflight/no-mistakes path remains the authoritative final local gate:
+Use the gate wrapper when the branch is ready for no-mistakes. It refuses
+implicit/stale intent, runs smoke + full local-fast first, then starts
+no-mistakes with the explicit branch objective:
 
 ```bash
-python scripts/ci_preflight.py --profile pr
+scripts/no_mistakes_run.sh gate --intent "narrow task statement for this branch"
 ```
 
-Preflight uses the same changed-file classifier as GitHub Actions, then runs the
-matching local checks: stats, ruff format/check, mypy, pip check, unit
-coverage, canaries, package build, twine, docs, graph validation, browser, and
-similarity gates as needed. For docs changes, that docs gate runs the public
-docs tracker checks before the strict MkDocs build. When graph artifacts are
-changed and still checked out as Git LFS pointers, preflight hydrates only the
-required tarballs, checks the pointer SHA-256 and size caps, then validates the
-artifacts. Use `--profile full` before release work to force the
-source/package gates even for docs-only or graph-only changes.
+The serial preflight/no-mistakes path remains available when you need to inspect
+individual checks. Preflight uses the same changed-file classifier as GitHub
+Actions, then runs the matching local checks: stats, ruff format/check, mypy,
+pip check, unit coverage, canaries, package build, twine, docs, graph
+validation, browser, and similarity gates as needed. For docs changes, that
+docs gate runs the public docs tracker checks before the strict MkDocs build.
+When graph artifacts are changed and still checked out as Git LFS pointers,
+preflight hydrates only the required tarballs, checks the pointer SHA-256 and
+size caps, then validates the artifacts. Use `--profile full` before release
+work to force the source/package gates even for docs-only or graph-only changes.
+Always pass an explicit narrow no-mistakes intent so review/test/doc agents
+validate this branch instead of inferring a stale broader goal from local
+transcripts.
 
 The **`ctx-monitor`** dashboard shows currently loaded skills, agents, MCP servers, installed harness records, selectable recommendations (`/recommend`), and generic-harness validation/escalation plus tool-selection/token-usage state (`/runtime`). It provides load/unload buttons where ctx owns the live action, a graph view (`/graph?slug=...`), the LLM-wiki entity browser (`/wiki/<slug>`), a filterable skills grid, a session timeline, audit/runtime log views, and a live SSE event stream. Installed harness records appear in `/loaded`; harness pages appear in `/wiki` and `/graph`. Harness install/update/uninstall actions stay in `ctx-harness-install`.
 

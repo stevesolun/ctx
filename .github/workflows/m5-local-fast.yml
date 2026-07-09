@@ -1,0 +1,53 @@
+name: M5 local-fast accelerator
+
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m5-local-fast-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  local-fast:
+    name: M5 local-fast
+    runs-on: [self-hosted, macOS, ARM64, ctx-m5]
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          lfs: false
+
+      - name: Set up local Python 3.12 venv
+        run: |
+          /opt/homebrew/opt/python@3.12/bin/python3.12 --version
+          /opt/homebrew/opt/python@3.12/bin/python3.12 -m venv .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev,browser,embeddings]" -r requirements-docs.txt build twine
+
+      - name: Install browser runtime
+        run: python -m playwright install chromium
+
+      - name: Run local-fast on M5
+        run: python scripts/local_fast_gate.py --profile pr --summary-json .gate/m5-local-fast.json
+
+      - name: Upload timing evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: m5-local-fast
+          path: .gate/m5-local-fast.json
+          include-hidden-files: true
+          retention-days: 14
