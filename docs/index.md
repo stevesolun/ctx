@@ -51,8 +51,7 @@ gets smarter every session.
     ```bash
     scripts/no_mistakes_run.sh fast --profile smoke
     scripts/no_mistakes_run.sh fast
-    python scripts/ci_preflight.py --profile pr
-    no-mistakes axi run --intent "narrow task statement for this branch"
+    scripts/no_mistakes_run.sh gate --intent "narrow task statement for this branch"
     ```
 
     `scripts/no_mistakes_run.sh fast --profile smoke` is the quick first pass:
@@ -68,11 +67,14 @@ gets smarter every session.
     checks run as separate `unit`, `canary`, `contract`, and `clean-host` lanes
     so the broad coverage pass no longer serializes the canary and clean-host
     smoke checks.
-    The serial preflight/no-mistakes path remains the authoritative final local
-    gate. Preflight uses the same changed-file classifier as GitHub Actions and
-    runs the matching local gates before you open a PR: stats, ruff
-    format/check, mypy, pip check, unit coverage, canaries, package build,
-    twine, docs, graph validation, browser, and similarity checks as needed.
+    `scripts/no_mistakes_run.sh gate --intent ...` refuses implicit/stale
+    intent, runs smoke + full local-fast first, then starts no-mistakes with the
+    explicit branch objective. The serial preflight/no-mistakes path remains
+    available when you need to inspect individual checks. Preflight uses the
+    same changed-file classifier as GitHub Actions and runs the matching local
+    gates before you open a PR: stats, ruff format/check, mypy, pip check, unit
+    coverage, canaries, package build, twine, docs, graph validation, browser,
+    and similarity checks as needed.
     When graph artifacts are still Git LFS pointers, preflight hydrates only
     the required tarballs, verifies their pointer SHA-256 and size caps, then
     validates the artifacts.
@@ -250,7 +252,7 @@ ones are flagged. New ones self-ingest.
     ---
 
     Current main is **v1.0.21** — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-    4,638 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+    4,641 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
     ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),
