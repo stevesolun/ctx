@@ -489,7 +489,9 @@ def recommend_for_loop(
     )
     if granted.intersection({"skills", "agents", "mcps"}):
         fetch_top_k = safe_top_k
-        if excluded_ids or local_loadable_skills_only or context_filters_active:
+        if context_filters_active:
+            fetch_top_k = 50
+        elif excluded_ids or local_loadable_skills_only:
             fetch_top_k = min(50, safe_top_k + len(excluded_ids) + 5)
         rows = _recommend_capability_rows(
             ranking_query,

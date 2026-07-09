@@ -187,7 +187,7 @@ def test_loopflow_excludes_bare_selection_names_and_backfills(monkeypatch) -> No
         top_k=1,
     )
 
-    assert calls == [7]
+    assert calls == [50]
     assert payload["capabilities"]["skills"] == [
         {"id": "skill:python-patterns", "name": "python-patterns", "type": "skill", "score": 80}
     ]
@@ -494,26 +494,31 @@ def test_loopflow_language_context_overfetches_primary_candidates(monkeypatch) -
     ) -> list[dict[str, Any]]:
         del query, permissions
         fetch_counts.append(top_k)
-        return [
+        rows = [
             {
-                "name": "generic-api-helper",
+                "name": f"generic-api-helper-{index}",
                 "type": "skill",
                 "installable": True,
                 "load_status": "local-wiki",
                 "matching_tags": ["api"],
                 "tags": ["go", "api"],
-                "score": 91,
-            },
-            {
-                "name": "backend-api-helper",
-                "type": "skill",
-                "installable": True,
-                "load_status": "local-wiki",
-                "matching_tags": ["api"],
-                "tags": ["python", "api"],
-                "score": 88,
-            },
+                "score": 100 - index,
+            }
+            for index in range(min(top_k, 6))
         ]
+        if top_k > 6:
+            rows.append(
+                {
+                    "name": "backend-api-helper",
+                    "type": "skill",
+                    "installable": True,
+                    "load_status": "local-wiki",
+                    "matching_tags": ["api"],
+                    "tags": ["python", "api"],
+                    "score": 88,
+                }
+            )
+        return rows
 
     monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
 
@@ -523,7 +528,7 @@ def test_loopflow_language_context_overfetches_primary_candidates(monkeypatch) -
         top_k=1,
     )
 
-    assert fetch_counts == [6]
+    assert fetch_counts == [50]
     assert payload["capabilities"]["skills"] == [
         {
             "name": "backend-api-helper",
@@ -671,7 +676,7 @@ def test_loopflow_local_filter_uses_enriched_wiki_availability(
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         del graph, tags, query, min_normalized_score, kwargs
-        assert top_n == 6
+        assert top_n == 50
         assert entity_types == ("skill",)
         return [
             {"name": "cataloged-only", "type": "skill", "score": 91},

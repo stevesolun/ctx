@@ -590,7 +590,7 @@ def _recommend_external_catalog(
 
     signal_set = set(signals)
     query_l = (query or " ".join(signals)).lower()
-    scored: list[tuple[float, dict[str, Any], set[str]]] = []
+    scored: list[tuple[float, dict[str, Any], set[str], set[str]]] = []
     for skill in skills:
         name = str(skill.get("name") or skill.get("skill_id") or "")
         full_id = str(skill.get("id") or "")
@@ -615,7 +615,7 @@ def _recommend_external_catalog(
             score += min(math.log10(installs + 1) * 8.0, 48.0)
         if score <= 0:
             continue
-        scored.append((score, skill, matching))
+        scored.append((score, skill, matching, tags))
 
     ranked = sorted(scored, key=lambda item: -item[0])[:top_n]
     return [
@@ -639,7 +639,7 @@ def _recommend_external_catalog(
             "invoke_command": skill.get("invoke_command"),
             "security_review": skill.get("security_review"),
         }
-        for score, skill, matching in ranked
+        for score, skill, matching, tags in ranked
     ]
 
 
