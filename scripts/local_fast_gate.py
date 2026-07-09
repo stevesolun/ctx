@@ -30,7 +30,19 @@ from scripts.ci_preflight import PROFILE_CHOICES  # noqa: E402
 from scripts.ci_preflight import changed_files  # noqa: E402
 from scripts.ci_preflight import select_checks  # noqa: E402
 
-LANE_ORDER = ("cheap", "static", "unit", "docs", "graph", "feature", "package", "misc")
+LANE_ORDER = (
+    "cheap",
+    "static",
+    "unit",
+    "canary",
+    "contract",
+    "clean-host",
+    "docs",
+    "graph",
+    "feature",
+    "package",
+    "misc",
+)
 CHECK_LANES = {
     "whitespace": "cheap",
     "repo stats": "cheap",
@@ -40,9 +52,9 @@ CHECK_LANES = {
     "mypy": "static",
     "pip check": "static",
     "unit-linux equivalent": "unit",
-    "A-Z canary": "unit",
-    "contract compatibility local": "unit",
-    "clean host contract": "unit",
+    "A-Z canary": "canary",
+    "contract compatibility local": "contract",
+    "clean host contract": "clean-host",
     "public docs tracker": "docs",
     "docs strict build": "docs",
     "hydrate graph LFS": "graph",

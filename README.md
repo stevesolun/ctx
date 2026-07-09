@@ -168,6 +168,7 @@ quick reruns after a failed lane:
 
 ```bash
 scripts/no_mistakes_run.sh fast --lane static --lane unit
+scripts/no_mistakes_run.sh fast --lane unit --lane canary --lane contract --lane clean-host
 scripts/no_mistakes_run.sh fast --skip-lane graph
 scripts/no_mistakes_run.sh fast --summary-json /tmp/local-fast.json
 ```

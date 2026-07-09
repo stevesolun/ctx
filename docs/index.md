@@ -64,7 +64,10 @@ gets smarter every session.
     runs them in parallel against committed branch history. The wrapper writes
     lane timing evidence to `.gate/local-fast.json` by default, and lane filters
     support fast reruns such as
-    `scripts/no_mistakes_run.sh fast --lane static --lane unit`.
+    `scripts/no_mistakes_run.sh fast --lane static --lane unit`. Unit-family
+    checks run as separate `unit`, `canary`, `contract`, and `clean-host` lanes
+    so the broad coverage pass no longer serializes the canary and clean-host
+    smoke checks.
     The serial preflight/no-mistakes path remains the authoritative final local
     gate. Preflight uses the same changed-file classifier as GitHub Actions and
     runs the matching local gates before you open a PR: stats, ruff

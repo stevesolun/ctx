@@ -67,6 +67,12 @@ def test_preflight_runs_docs_gate_for_docs_changes() -> None:
 
 def test_preflight_runs_source_gates_for_source_changes() -> None:
     names = _names_for(["src/ctx/adapters/generic/loop.py"])
+    lanes = local_fast_gate.group_checks(_checks_for(["src/ctx/adapters/generic/loop.py"]))
+    lanes_by_name = {
+        lane.name: [check.name for check in lane.checks]
+        for lane in lanes
+        if lane.name in {"unit", "canary", "contract", "clean-host"}
+    }
 
     assert "no-test policy" in names
     assert "ruff format" in names
@@ -75,6 +81,12 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
     assert "unit-linux equivalent" in names
     assert "A-Z canary" in names
     assert "clean host contract" in names
+    assert lanes_by_name == {
+        "unit": ["unit-linux equivalent"],
+        "canary": ["A-Z canary"],
+        "contract": ["contract compatibility local"],
+        "clean-host": ["clean host contract"],
+    }
 
 
 def test_preflight_smoke_profile_runs_only_fast_source_gates() -> None:
@@ -389,6 +401,9 @@ def test_preflight_runs_browser_and_similarity_when_classified() -> None:
     assert "cheap" in lane_names
     assert "static" in lane_names
     assert "unit" in lane_names
+    assert "canary" in lane_names
+    assert "contract" in lane_names
+    assert "clean-host" in lane_names
     assert "feature" in lane_names
     assert "package" in lane_names
     assert "release_asset_wait_seconds = 300" in graph_resolver_script
