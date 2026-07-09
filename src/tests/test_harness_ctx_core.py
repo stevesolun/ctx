@@ -28,6 +28,7 @@ from ctx.adapters.generic.ctx_core_tools import (
     _clamp_int,
     _excerpt,
     _file_signature,
+    _infer_query_language,
     _query_to_tags,
     make_tool_executor,
 )
@@ -1500,6 +1501,181 @@ class TestRecommendBundle:
         # python + web + api should score fastapi-pro highly (3 tags match).
         names = [r["name"] for r in result["results"]]
         assert "fastapi-pro" in names
+
+    def test_context_policy_load_uses_local_skill_loadability(self, tmp_path: Path) -> None:
+        graph = nx.Graph()
+        graph.add_node(
+            "skill:local-security",
+            label="local-security",
+            type="skill",
+            tags=["security"],
+        )
+        graph.add_node(
+            "skill:remote-security",
+            label="remote-security",
+            type="skill",
+            tags=["security"],
+            status="available",
+            source_catalog="skill-index",
+            install_command="ctx-skill-install remote-security",
+        )
+        graph_path = tmp_path / "graph.json"
+        graph_path.write_text(json.dumps(nx.node_link_data(graph, edges="edges")), encoding="utf-8")
+        wiki = tmp_path / "wiki"
+        for slug in ("local-security", "remote-security"):
+            converted = wiki / "converted" / slug
+            converted.mkdir(parents=True)
+            (converted / "SKILL.md").write_text("# " + slug + "\n", encoding="utf-8")
+        toolbox = CtxCoreToolbox(
+            wiki_dir=wiki,
+            graph_path=graph_path,
+            lifecycle_dir=tmp_path / "runtime",
+        )
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__recommend_bundle",
+                    arguments={"query": "security", "top_k": 5},
+                )
+            )
+        )
+
+        result_ids = {row["id"] for row in result["results"]}
+        assert {"skill:local-security", "skill:remote-security"} <= result_ids
+        assert set(result["context_policy"]["load"]) == {"skill:local-security"}
+        assert "skill:remote-security" in result["context_policy"]["manual"]
+
+        filtered = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c2",
+                    name="ctx__recommend_bundle",
+                    arguments={"query": "security", "top_k": 5, "no_api_keys": True},
+                )
+            )
+        )
+        filtered_ids = {row["id"] for row in filtered["results"]}
+        assert "skill:local-security" in filtered_ids
+        assert "skill:remote-security" not in filtered_ids
+
+    def test_language_inference_resolves_common_word_aliases(self) -> None:
+        assert _infer_query_language("go through python tests") == "python"
+        assert _infer_query_language("python tree node bug") == "python"
+        assert _infer_query_language("go through tests") is None
+        assert _infer_query_language("tree node bug") is None
+        assert _infer_query_language("locobench go feature implementation") == "go"
+
+    def test_explicit_language_aliases_filter_as_canonical(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        graph = nx.Graph()
+        graph.add_node(
+            "skill:python-api",
+            label="python-api",
+            type="skill",
+            tags=["python", "api"],
+        )
+        graph.add_node(
+            "skill:go-api",
+            label="go-api",
+            type="skill",
+            tags=["go", "api"],
+        )
+        graph_path = tmp_path / "graph.json"
+        graph_path.write_text(json.dumps(nx.node_link_data(graph, edges="edges")), encoding="utf-8")
+        toolbox = CtxCoreToolbox(
+            wiki_dir=tmp_path / "wiki",
+            graph_path=graph_path,
+            lifecycle_dir=tmp_path / "runtime",
+        )
+
+        py_result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__recommend_bundle",
+                    arguments={"query": "api", "top_k": 5, "language": "py"},
+                )
+            )
+        )
+        go_result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c2",
+                    name="ctx__recommend_bundle",
+                    arguments={"query": "api", "top_k": 5, "language": "golang"},
+                )
+            )
+        )
+
+        assert {row["id"] for row in py_result["results"]} == {"skill:python-api"}
+        assert {row["id"] for row in go_result["results"]} == {"skill:go-api"}
+
+    def test_context_filters_use_full_graph_tags(self, tmp_path: Path) -> None:
+        graph = nx.Graph()
+        graph.add_node(
+            "skill:generic-api-helper",
+            label="generic-api-helper",
+            type="skill",
+            tags=["go", "api"],
+        )
+        graph.add_node(
+            "skill:backend-api-helper",
+            label="backend-api-helper",
+            type="skill",
+            tags=["python", "api"],
+        )
+        graph.add_node(
+            "skill:cloud-helper",
+            label="cloud-helper",
+            type="skill",
+            tags=["openai", "api"],
+        )
+        graph.add_node(
+            "skill:safe-api-helper",
+            label="safe-api-helper",
+            type="skill",
+            tags=["local", "api"],
+        )
+        graph_path = tmp_path / "graph.json"
+        graph_path.write_text(json.dumps(nx.node_link_data(graph, edges="edges")), encoding="utf-8")
+        toolbox = CtxCoreToolbox(
+            wiki_dir=tmp_path / "wiki",
+            graph_path=graph_path,
+            lifecycle_dir=tmp_path / "runtime",
+        )
+
+        language_result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__recommend_bundle",
+                    arguments={"query": "api", "top_k": 5, "language": "python"},
+                )
+            )
+        )
+        no_key_result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c2",
+                    name="ctx__recommend_bundle",
+                    arguments={
+                        "query": "api",
+                        "top_k": 5,
+                        "no_api_keys": True,
+                        "include_unavailable": True,
+                    },
+                )
+            )
+        )
+
+        assert "skill:backend-api-helper" in {row["id"] for row in language_result["results"]}
+        assert "skill:generic-api-helper" not in {row["id"] for row in language_result["results"]}
+        assert "skill:safe-api-helper" in {row["id"] for row in no_key_result["results"]}
+        assert "skill:cloud-helper" not in {row["id"] for row in no_key_result["results"]}
 
     def test_companion_harnesses_are_separate_from_dev_results(
         self,

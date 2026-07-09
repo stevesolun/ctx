@@ -2,8 +2,9 @@
 harness can consume its recommendations.
 
 Tools exposed:
-  ctx__recommend_bundle(query, top_k=5)
-      top-K skill/agent/MCP recommendations with selection metadata
+  ctx__recommend_bundle(query, top_k=5, selected=None, rejected=None, ...)
+      top-K skill/agent/MCP recommendations with selection, context,
+      availability, and local/no-key/language filtering metadata
   ctx__recommend_related(selected, rejected=None, max_hops=2, top_n=5)
       graph-backed suggestions after a partial selection
   ctx__graph_query(seeds, max_hops=2, top_n=10)

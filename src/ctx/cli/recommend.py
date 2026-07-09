@@ -8,6 +8,11 @@ import sys
 from typing import Any
 
 from ctx import recommend_bundle, recommend_related
+from ctx.adapters.generic.ctx_core_tools import (
+    _DEFAULT_BASELINE_CONTEXT,
+    _recommendation_context_from_args,
+    _recommendation_context_skip_reason,
+)
 from ctx_config import cfg
 
 
@@ -44,6 +49,42 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Rejected recommendation ID/name. May be repeated or comma-separated.",
     )
     parser.add_argument(
+        "--active",
+        action="append",
+        default=[],
+        help="Already active ctx entity ID/name. May be repeated or comma-separated.",
+    )
+    parser.add_argument(
+        "--baseline-context",
+        action="append",
+        default=[],
+        help=(
+            "Baseline host ctx entity ID/name to suppress as an optional recommendation. "
+            "May be repeated or comma-separated."
+        ),
+    )
+    parser.add_argument(
+        "--include-baseline-context",
+        action="store_true",
+        help="Show baseline context as normal recommendations.",
+    )
+    parser.add_argument(
+        "--show-unavailable",
+        action="store_true",
+        help="Include non-local or non-loadable recommendations.",
+    )
+    parser.add_argument(
+        "--local-code-task",
+        action="store_true",
+        help="Apply local repo/code-task recommendation filters.",
+    )
+    parser.add_argument(
+        "--no-api-keys",
+        action="store_true",
+        help="Suppress recommendations that require external API/service credentials.",
+    )
+    parser.add_argument("--language", help="Optional scenario/programming language hint.")
+    parser.add_argument(
         "--related-top-n",
         type=int,
         default=cfg.recommendation_top_k,
@@ -62,6 +103,60 @@ def _split_selection_values(values: list[str] | None) -> list[str]:
                 selections.append(item)
                 seen.add(item)
     return selections
+
+
+def _effective_baseline_context(
+    baseline_context: list[str],
+    *,
+    include_baseline_context: bool,
+) -> list[str]:
+    if include_baseline_context:
+        return []
+    return baseline_context or list(_DEFAULT_BASELINE_CONTEXT)
+
+
+def _recommendation_filter_args(args: argparse.Namespace) -> dict[str, Any]:
+    context_args: dict[str, Any] = {}
+    if args.show_unavailable:
+        context_args["include_unavailable"] = True
+    if args.local_code_task:
+        context_args["local_code_task"] = True
+    if args.no_api_keys:
+        context_args["no_api_keys"] = True
+    if args.language:
+        context_args["language"] = args.language
+    return context_args
+
+
+def _filter_related_results(
+    rows: list[dict[str, Any]],
+    *,
+    context: dict[str, Any],
+    top_n: int,
+) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        if _recommendation_context_skip_reason(row, context) is not None:
+            continue
+        filtered.append(row)
+        if len(filtered) >= top_n:
+            break
+    return filtered
+
+
+def _recommendation_context_filters_active(context: dict[str, Any]) -> bool:
+    return any(bool(context.get(key)) for key in ("local_code_task", "no_api_keys", "language"))
+
+
+def _related_fetch_top_n(
+    *,
+    top_n: int,
+    excluded_count: int,
+    context: dict[str, Any],
+) -> int:
+    if not _recommendation_context_filters_active(context):
+        return top_n
+    return min(50, top_n + excluded_count + 25)
 
 
 def _render_row(row: dict[str, Any], *, index: int | None = None) -> str:
@@ -109,16 +204,57 @@ def main(argv: list[str] | None = None) -> int:
     related_top_n = max(1, min(int(args.related_top_n), cfg.recommendation_top_k))
     selected = _split_selection_values(args.selected)
     rejected = _split_selection_values(args.rejected)
-    results = recommend_bundle(query, top_k=top_k)
-    related_results = (
-        recommend_related(selected, rejected=rejected, top_n=related_top_n) if selected else []
+    active = _split_selection_values(args.active)
+    baseline_context = _split_selection_values(args.baseline_context)
+    bundle_kwargs: dict[str, Any] = {"top_k": top_k}
+    if selected:
+        bundle_kwargs["selected"] = selected
+    if rejected:
+        bundle_kwargs["rejected"] = rejected
+    if active:
+        bundle_kwargs["active_context"] = active
+    if baseline_context:
+        bundle_kwargs["baseline_context"] = baseline_context
+    if args.include_baseline_context:
+        bundle_kwargs["include_baseline_context"] = True
+    if args.show_unavailable:
+        bundle_kwargs["include_unavailable"] = True
+    if args.local_code_task:
+        bundle_kwargs["local_code_task"] = True
+    if args.no_api_keys:
+        bundle_kwargs["no_api_keys"] = True
+    if args.language:
+        bundle_kwargs["language"] = args.language
+    results = recommend_bundle(query, **bundle_kwargs)
+    related_baseline_context = _effective_baseline_context(
+        baseline_context,
+        include_baseline_context=args.include_baseline_context,
+    )
+    related_rejected = _split_selection_values(rejected + active + related_baseline_context)
+    related_context = _recommendation_context_from_args(query, _recommendation_filter_args(args))
+    related_fetch_top_n = _related_fetch_top_n(
+        top_n=related_top_n,
+        excluded_count=len(related_rejected),
+        context=related_context,
+    )
+    raw_related_results = (
+        recommend_related(selected, rejected=related_rejected, top_n=related_fetch_top_n)
+        if selected
+        else []
+    )
+    related_results = _filter_related_results(
+        raw_related_results,
+        context=related_context,
+        top_n=related_top_n,
     )
     if args.json:
         payload: dict[str, Any] = {"query": query, "results": results}
-        if selected or rejected:
+        if selected or rejected or active or baseline_context:
             payload["selection"] = {
                 "selected": selected,
                 "rejected": rejected,
+                "active_context": active,
+                "baseline_context": baseline_context,
                 "related_results": related_results,
             }
         print(json.dumps(payload, indent=2))

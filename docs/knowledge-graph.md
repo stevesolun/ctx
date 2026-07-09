@@ -210,7 +210,11 @@ The graph backs these recommendation paths:
   signals when available. Imported skill results are normal `skill` nodes with
   detail URLs, install commands, duplicate
   hints, gated micro-skill loaders when over the line threshold, and
-  quality/security metadata. If an older
+  quality/security metadata. Recommendation contracts also carry each row's
+  full tags plus wiki availability fields (`installable`, `load_status`, and
+  `source_path`), suppress selected/rejected/active/default-baseline context,
+  and can filter unavailable, external-service, generic-planning, or
+  wrong-language rows for local/no-key coding loops. If an older
   extracted wiki has the skill index JSON but no graph nodes for
   those records, the same recommender falls back to the index file.
 - Harness recommendations are a separate path for custom/API/local

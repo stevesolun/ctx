@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
-[![Tests](https://img.shields.io/badge/Tests-4618_inventory-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-4635_inventory-brightgreen.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![Graph](https://img.shields.io/badge/Graph-79%2C958_nodes_/_1%2C778%2C069_edges-red.svg)](https://stevesolun.github.io/ctx/knowledge-graph/)
 [![Skills](https://img.shields.io/badge/Skills-68%2C494-blue.svg)](https://stevesolun.github.io/ctx/catalog/?type=skill)
 [![Agents](https://img.shields.io/badge/Agents-467-purple.svg)](https://stevesolun.github.io/ctx/catalog/?type=agent)
@@ -127,7 +127,8 @@ ctx-harness-install text-to-cad --dry-run   # inspect before cloning/running any
 ctx-harness-install text-to-cad             # install after reviewing the plan
 ctx-harness-install text-to-cad --update --dry-run
 ctx-harness-install text-to-cad --uninstall --dry-run
-ctx-recommend "fix FastAPI auth" --selected skill:fastapi-pro --json  # related suggestions
+ctx-recommend "fix FastAPI auth" --selected skill:fastapi-pro --active mcp-server:codex-cli --json
+ctx-recommend "LoCoBench python feature_implementation no API keys" --local-code-task --no-api-keys --language python --json
 python -m ctx --help      # same run/resume/sessions CLI as the ctx script
 python -m ctx.adapters.loopflow --goal "fix checkout e2e" --permissions skills,agents,mcps
 ctx-skill-quality list     # four-signal quality score for every skill
@@ -137,6 +138,11 @@ ctx-toolbox run --event pre-commit          # run a council on the current diff
 ctx-telemetry-export --dry-run --json       # inspect privacy-redacted telemetry spool
 ctx-monitor serve          # local dashboard: http://127.0.0.1:8765/
 ```
+
+`ctx-recommend` accepts `--selected`, `--rejected`, `--active`,
+`--baseline-context`, `--include-baseline-context`, `--show-unavailable`,
+`--local-code-task`, `--no-api-keys`, and `--language` so loops can recover
+from partial choices without re-suggesting active or baseline host context.
 
 Before pushing, run the two-tier local PR gate. Start with the fast committed-HEAD
 gate:

@@ -30,8 +30,22 @@ Four delivery paths, in increasing order of coupling to ctx:
 
 Public functions:
 
-    recommend_bundle(query, *, top_k=5)
-        Free-text → ranked skill/agent/MCP execution bundle.
+    recommend_bundle(
+        query,
+        *,
+        top_k=5,
+        selected=None,
+        rejected=None,
+        active_context=None,
+        baseline_context=None,
+        include_baseline_context=False,
+        include_unavailable=False,
+        local_code_task=None,
+        no_api_keys=None,
+        language=None,
+    )
+        Free-text → ranked skill/agent/MCP execution bundle with selection,
+        availability, baseline-context, and local/no-key/language filters.
 
     recommend_related(selected, *, rejected=None, max_hops=2, top_n=5)
         Selected recommendation IDs → related filtered recommendations.
@@ -243,12 +257,27 @@ def recommend_bundle(
     query: str,
     *,
     top_k: int = 5,
+    selected: list[str] | None = None,
+    rejected: list[str] | None = None,
+    active_context: list[str] | None = None,
+    baseline_context: list[str] | None = None,
+    include_baseline_context: bool = False,
+    include_unavailable: bool = False,
+    local_code_task: bool | None = None,
+    no_api_keys: bool | None = None,
+    language: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return a top-K ranked recommendation bundle for a free-text query.
 
-    Each entry is a dict with: ``name``, ``type``, ``score``,
-    ``matching_tags``. Empty list on any error (missing graph,
-    empty query, etc.); the CLI/MCP versions surface errors as
+    ``selected``/``rejected`` suppress prior decisions, ``active_context`` and
+    ``baseline_context`` suppress already-present host context, and
+    ``local_code_task``/``no_api_keys``/``language`` narrow results for local
+    coding loops. Set ``include_baseline_context`` or ``include_unavailable``
+    to opt back into those rows. Each entry uses the enriched recommendation
+    contract: ``id``, ``name``, ``type``, ``score``, ``matching_tags``,
+    ``tags``, ``installable``, ``load_status``, ``source_path``, selection
+    metadata, ``tldr``, and ``reason`` when available. Empty list on any error
+    (missing graph, empty query, etc.); the CLI/MCP versions surface errors as
     structured payload, but library callers usually just want a list.
 
     Example:
@@ -259,10 +288,29 @@ def recommend_bundle(
         for entry in bundle:
             print(f"{entry['type']:>11}  {entry['name']}  (score {entry['score']:.1f})")
     """
-    payload = _call(
-        "ctx__recommend_bundle",
-        {"query": query, "top_k": top_k},
-    )
+    args: dict[str, Any] = {
+        "query": query,
+        "top_k": top_k,
+    }
+    if selected:
+        args["selected"] = selected
+    if rejected:
+        args["rejected"] = rejected
+    if active_context:
+        args["active_context"] = active_context
+    if baseline_context:
+        args["baseline_context"] = baseline_context
+    if include_baseline_context:
+        args["include_baseline_context"] = include_baseline_context
+    if include_unavailable:
+        args["include_unavailable"] = include_unavailable
+    if local_code_task is not None:
+        args["local_code_task"] = local_code_task
+    if no_api_keys is not None:
+        args["no_api_keys"] = no_api_keys
+    if language is not None:
+        args["language"] = language
+    payload = _call("ctx__recommend_bundle", args)
     return payload.get("results", []) if "error" not in payload else []
 
 

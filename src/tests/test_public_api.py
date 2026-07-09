@@ -76,6 +76,11 @@ def synthetic_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "# FastAPI Harness\nRun custom model loops for FastAPI work.\n",
         encoding="utf-8",
     )
+    converted = wiki / "converted" / "fastapi-pro"
+    converted.mkdir(parents=True)
+    (converted / "SKILL.md").write_text(
+        "# FastAPI Pro\nBuild FastAPI services.\n", encoding="utf-8"
+    )
 
     # Graph
     G = nx.Graph()
@@ -273,12 +278,28 @@ class TestRecommendBundle:
         fastapi = next(row for row in bundle if row["name"] == "fastapi-pro")
 
         assert fastapi["id"] == f"{fastapi['type']}:{fastapi['name']}"
+        assert fastapi["installable"] is True
+        assert fastapi["load_status"] == "local-wiki"
+        assert fastapi["source_path"] == "converted/fastapi-pro/SKILL.md"
         assert fastapi["selected"] is False
         assert fastapi["selection_state"] == "suggested"
         assert isinstance(fastapi["tldr"], str)
         assert fastapi["tldr"]
         assert isinstance(fastapi["reason"], str)
         assert fastapi["reason"]
+
+    def test_recommend_bundle_suppresses_rejected_and_baseline_context(
+        self,
+        synthetic_home: Path,
+    ) -> None:
+        bundle = ctx.recommend_bundle(
+            "fastapi web api filesystem",
+            rejected=["skill:fastapi-pro"],
+            baseline_context=["mcp-server:filesystem"],
+        )
+        ids = {row["id"] for row in bundle}
+        assert "skill:fastapi-pro" not in ids
+        assert "mcp-server:filesystem" not in ids
 
     def test_execution_bundle_excludes_harnesses_and_caps_to_five(
         self,

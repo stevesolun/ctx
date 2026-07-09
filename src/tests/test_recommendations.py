@@ -528,6 +528,45 @@ def test_skill_index_can_rank_when_graph_has_no_match(tmp_path) -> None:
     assert out[0]["install_command"] == "npx skills add https://open.feishu.cn"
 
 
+def test_skill_index_sidecar_results_keep_each_entry_tags(tmp_path) -> None:
+    wiki = tmp_path / "wiki"
+    graph_dir = wiki / "graphify-out"
+    graph_dir.mkdir(parents=True)
+    catalog_dir = wiki / "external-catalogs" / "skills-sh"
+    catalog_dir.mkdir(parents=True)
+    (catalog_dir / "catalog.json").write_text(
+        json.dumps(
+            {
+                "skills": [
+                    {
+                        "id": "example.com/python-helper",
+                        "source": "example.com",
+                        "skill_id": "python-helper",
+                        "name": "python-helper",
+                        "tags": ["python", "api"],
+                    },
+                    {
+                        "id": "example.com/go-helper",
+                        "source": "example.com",
+                        "skill_id": "go-helper",
+                        "name": "go-helper",
+                        "tags": ["go", "cli"],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    G = _build_graph([("unrelated-docs", ["docs"])])
+    G.graph["ctx_graph_path"] = str(graph_dir / "graph.json")
+
+    out = recommend_by_tags(G, ["python"], top_n=1, query="python")
+
+    assert out[0]["name"] == "example.com/python-helper"
+    assert out[0]["matching_tags"] == ["python"]
+    assert out[0]["tags"] == ["api", "python"]
+
+
 def test_skill_index_graph_node_ranks_without_sidecar_catalog() -> None:
     G = _build_graph([("unrelated-python", ["python"])])
     G.graph["source_catalog_nodes"] = {"skills.sh": 1}

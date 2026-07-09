@@ -107,13 +107,23 @@ stable.
   },
   "capabilities": {
     "skills": [
-      {"name": "oocx-tfplan2md-agent-model-selection", "type": "skill", "status": "installed"},
+      {
+        "name": "oocx-tfplan2md-agent-model-selection",
+        "type": "skill",
+        "status": "installed",
+        "installable": true,
+        "load_status": "local-wiki",
+        "source_path": "converted/oocx-tfplan2md-agent-model-selection/SKILL.md"
+      },
       {
         "name": "nickcrew-claude-ctx-plugin-tool-selection",
         "type": "skill",
         "status": "available",
         "source_catalog": "skill-index",
-        "install_command": "ctx-skill-install nickcrew-claude-ctx-plugin-tool-selection"
+        "install_command": "ctx-skill-install nickcrew-claude-ctx-plugin-tool-selection",
+        "installable": false,
+        "load_status": "external-install-required",
+        "source_path": "ctx-skill-install nickcrew-claude-ctx-plugin-tool-selection"
       }
     ],
     "agents": [
@@ -136,6 +146,9 @@ stable.
       "type": "mcp-server",
       "tldr": "mcp-server recommendation.",
       "reason": "related via local-ollama-file-operations; normalized score 1.000",
+      "installable": true,
+      "load_status": "local-wiki",
+      "source_path": "entities/mcp-servers/ol/ollama.md",
       "selected": false,
       "selection_state": "suggested_related"
     }
@@ -196,6 +209,9 @@ logic, and ctx refreshes recommendations based on what just failed.
 The adapter fails closed:
 
 - `--permissions skills` only returns skill recommendations.
+- Goals that imply local files, `feature_implementation`, no API keys, or a
+  clear programming language overfetch and then hide non-local, credentialed,
+  generic-planning, or wrong-language capability and related rows.
 - `--permissions mcps` returns MCP server recommendations and exposes only
   read-only ctx MCP tools: recommendation, graph query, and wiki lookup.
 - Lifecycle MCP tools such as load, mark-used, validation, escalation, unload,

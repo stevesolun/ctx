@@ -28,7 +28,7 @@ expose only selected ctx tools and entity types.
 Tools exposed (same as ctx.adapters.generic.ctx_core_tools — that
 module is the source of truth for the tool catalogue):
 
-    ctx__recommend_bundle(query, top_k=5)
+    ctx__recommend_bundle(query, top_k=5, selected=None, rejected=None, ...)
     ctx__recommend_related(selected, rejected=None, max_hops=2, top_n=5)
     ctx__graph_query(seeds, max_hops=2, top_n=10)
     ctx__wiki_search(query, top_n=15)

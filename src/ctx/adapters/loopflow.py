@@ -12,6 +12,12 @@ import sys
 from typing import Any
 
 import ctx.api as ctx_api
+from ctx.adapters.generic.ctx_core_tools import (
+    _base_recommendation_row,
+    _is_local_loadable_skill_row,
+    _recommendation_context_from_args,
+    _recommendation_context_skip_reason,
+)
 from ctx.core.resolve.recommendations import query_to_tags, recommend_by_tags
 from ctx_init import _harness_requirements_text, recommend_harnesses
 
@@ -200,6 +206,9 @@ def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
         "category",
         "invoke_command",
         "security_review",
+        "installable",
+        "load_status",
+        "source_path",
         "selected",
         "selection_state",
         "related_to",
@@ -211,24 +220,56 @@ def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _is_loadable_skill_row(row: dict[str, Any]) -> bool:
-    status = str(row.get("status") or "").strip().lower()
-    source_catalog = str(row.get("source_catalog") or "").strip().lower()
-    install_command = str(row.get("install_command") or "").strip()
-    if status in {"available", "remote-cataloged"}:
-        return False
-    if source_catalog == "skill-index" or install_command:
-        return False
-    return True
+    return _is_local_loadable_skill_row(row)
+
+
+def _selection_key(value: str) -> str:
+    item = value.strip().lower()
+    if item.startswith("mcp:"):
+        return "mcp-server:" + item.split(":", 1)[1]
+    return item
+
+
+def _selection_keys(values: list[str]) -> set[str]:
+    keys: set[str] = set()
+    for value in values:
+        item = value.strip()
+        if item:
+            keys.add(_selection_key(item))
+    return keys
+
+
+def _row_selection_keys(row: dict[str, Any], name: str) -> set[str]:
+    return _selection_keys([str(row.get("id") or f"{row.get('type')}:{name}"), name])
+
+
+def _is_local_no_key_query(query: str) -> bool:
+    lower = query.lower()
+    return any(
+        marker in lower
+        for marker in (
+            "no api keys",
+            "no local api keys",
+            "local files",
+            "local repo",
+            "feature_implementation",
+            "feature implementation",
+        )
+    )
 
 
 def _group_bundle(
     rows: list[dict[str, Any]],
     *,
     permissions: set[str],
+    excluded: set[str] | None = None,
+    local_loadable_skills_only: bool = False,
+    context: dict[str, Any] | None = None,
     top_k: int,
 ) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {key: [] for key in ("skills", "agents", "mcps")}
     seen: set[tuple[str, str]] = set()
+    excluded_keys = excluded or set()
     for row in rows:
         group = _ENTITY_TO_GROUP.get(str(row.get("type") or ""))
         name = str(row.get("name") or "").strip()
@@ -236,6 +277,12 @@ def _group_bundle(
             continue
         identity = (group, name)
         if identity in seen:
+            continue
+        if _row_selection_keys(row, name) & excluded_keys:
+            continue
+        if group == "skills" and local_loadable_skills_only and not _is_loadable_skill_row(row):
+            continue
+        if context is not None and _recommendation_context_skip_reason(row, context) is not None:
             continue
         seen.add(identity)
         if len(grouped[group]) < top_k:
@@ -247,10 +294,14 @@ def _filter_related_rows(
     rows: list[dict[str, Any]],
     *,
     permissions: set[str],
+    excluded: set[str] | None = None,
+    local_loadable_skills_only: bool = False,
+    context: dict[str, Any] | None = None,
     top_k: int,
 ) -> list[dict[str, Any]]:
     filtered: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
+    excluded_keys = excluded or set()
     for row in rows:
         group = _ENTITY_TO_GROUP.get(str(row.get("type") or ""))
         name = str(row.get("name") or "").strip()
@@ -258,6 +309,12 @@ def _filter_related_rows(
             continue
         identity = (group, name)
         if identity in seen:
+            continue
+        if _row_selection_keys(row, name) & excluded_keys:
+            continue
+        if group == "skills" and local_loadable_skills_only and not _is_loadable_skill_row(row):
+            continue
+        if context is not None and _recommendation_context_skip_reason(row, context) is not None:
             continue
         seen.add(identity)
         filtered.append(_compact_row(row))
@@ -351,7 +408,7 @@ def _recommend_capability_rows(
         return []
     from ctx_config import cfg  # noqa: PLC0415
 
-    return recommend_by_tags(
+    raw_rows = recommend_by_tags(
         graph,
         tags,
         top_n=top_k * len(entity_types),
@@ -359,6 +416,8 @@ def _recommend_capability_rows(
         entity_types=tuple(entity_types),
         min_normalized_score=cfg.recommendation_min_normalized_score,
     )
+    wiki_dir = ctx_api.default_wiki_dir()
+    return [_base_recommendation_row(row, wiki_dir=wiki_dir) for row in raw_rows]
 
 
 def recommend_for_loop(
@@ -419,15 +478,36 @@ def recommend_for_loop(
         "mcps": [],
         "harnesses": [],
     }
+    selected_ids = [value.strip() for value in (selected or []) if value.strip()]
+    rejected_ids = [value.strip() for value in (rejected or []) if value.strip()]
+    excluded_ids = _selection_keys(selected_ids + rejected_ids)
+    local_loadable_skills_only = _is_local_no_key_query(ranking_query)
+    recommendation_context = _recommendation_context_from_args(ranking_query, {})
+    context_filters_active = any(
+        bool(recommendation_context.get(key))
+        for key in ("local_code_task", "no_api_keys", "language")
+    )
     if granted.intersection({"skills", "agents", "mcps"}):
+        fetch_top_k = safe_top_k
+        if context_filters_active:
+            fetch_top_k = 50
+        elif excluded_ids or local_loadable_skills_only:
+            fetch_top_k = min(50, safe_top_k + len(excluded_ids) + 5)
         rows = _recommend_capability_rows(
             ranking_query,
             permissions=granted,
-            top_k=safe_top_k,
+            top_k=fetch_top_k,
         )
-        capability_bundle.update(_group_bundle(rows, permissions=granted, top_k=safe_top_k))
-    selected_ids = [value.strip() for value in (selected or []) if value.strip()]
-    rejected_ids = [value.strip() for value in (rejected or []) if value.strip()]
+        capability_bundle.update(
+            _group_bundle(
+                rows,
+                permissions=granted,
+                excluded=excluded_ids,
+                local_loadable_skills_only=local_loadable_skills_only,
+                context=recommendation_context,
+                top_k=safe_top_k,
+            )
+        )
     related_recommendations: list[dict[str, Any]] = []
     if selected_ids and granted.intersection({"skills", "agents", "mcps"}):
         related_recommendations = _filter_related_rows(
@@ -437,6 +517,9 @@ def recommend_for_loop(
                 top_n=50,
             ),
             permissions=granted,
+            excluded=excluded_ids,
+            local_loadable_skills_only=local_loadable_skills_only,
+            context=recommendation_context,
             top_k=safe_top_k,
         )
 
