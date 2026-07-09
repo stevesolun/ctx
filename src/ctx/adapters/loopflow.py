@@ -12,7 +12,10 @@ import sys
 from typing import Any
 
 import ctx.api as ctx_api
-from ctx.adapters.generic.ctx_core_tools import _base_recommendation_row
+from ctx.adapters.generic.ctx_core_tools import (
+    _base_recommendation_row,
+    _is_local_loadable_skill_row,
+)
 from ctx.core.resolve.recommendations import query_to_tags, recommend_by_tags
 from ctx_init import _harness_requirements_text, recommend_harnesses
 
@@ -215,17 +218,7 @@ def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _is_loadable_skill_row(row: dict[str, Any]) -> bool:
-    status = str(row.get("status") or "").strip().lower()
-    source_catalog = str(row.get("source_catalog") or "").strip().lower()
-    install_command = str(row.get("install_command") or "").strip()
-    load_status = str(row.get("load_status") or "").strip().lower()
-    if load_status and load_status != "local-wiki":
-        return False
-    if status in {"available", "remote-cataloged"}:
-        return False
-    if source_catalog == "skill-index" or install_command:
-        return False
-    return True
+    return _is_local_loadable_skill_row(row)
 
 
 def _selection_key(value: str) -> str:

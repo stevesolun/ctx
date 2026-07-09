@@ -96,6 +96,7 @@ _RELATED_BLOCKED_STATUSES = {
     "stale",
     "unavailable",
 }
+_REMOTE_SKILL_LOAD_STATUSES = {"available", "remote-cataloged"}
 _DEFAULT_BASELINE_CONTEXT = ("mcp-server:codex-cli",)
 _LOCAL_CODE_QUERY_MARKERS = (
     "local files",
@@ -1748,6 +1749,28 @@ def _recommendation_availability(
     return result
 
 
+def _is_local_loadable_skill_row(row: Mapping[str, Any]) -> bool:
+    status = str(row.get("status") or "").strip().lower()
+    source_catalog = str(row.get("source_catalog") or "").strip().lower()
+    install_command = str(row.get("install_command") or "").strip()
+    load_status = str(row.get("load_status") or "").strip().lower()
+    if load_status and load_status != "local-wiki":
+        return False
+    if status in _REMOTE_SKILL_LOAD_STATUSES:
+        return False
+    if source_catalog == "skill-index" or install_command:
+        return False
+    return True
+
+
+def _is_loadable_recommendation_row(row: Mapping[str, Any]) -> bool:
+    if not row.get("installable"):
+        return False
+    if str(row.get("type") or "").strip() == "skill":
+        return _is_local_loadable_skill_row(row)
+    return True
+
+
 def _recommendation_context_from_args(query: str, args: Mapping[str, Any]) -> dict[str, Any]:
     query_lower = query.lower()
     no_api_keys = _optional_bool(args.get("no_api_keys"))
@@ -1802,7 +1825,11 @@ def _recommendation_context_skip_reason(
     no_api_keys = bool(context.get("no_api_keys"))
     include_unavailable = bool(context.get("include_unavailable"))
     text_tokens = set(_recommendation_text_tokens(_recommendation_context_text(row)))
-    if (local_code_task or no_api_keys) and not include_unavailable and not row.get("installable"):
+    if (
+        (local_code_task or no_api_keys)
+        and not include_unavailable
+        and not _is_loadable_recommendation_row(row)
+    ):
         return "not locally loadable for local/no-key context"
     if no_api_keys and text_tokens & _EXTERNAL_SERVICE_TOKENS:
         return "external service requires credentials"
@@ -1858,8 +1885,8 @@ def _recommendation_context_policy(
     return {
         "baseline": baseline_context,
         "keep": keep,
-        "load": [row["id"] for row in results if row.get("installable")],
-        "manual": [row["id"] for row in results if not row.get("installable")],
+        "load": [row["id"] for row in results if _is_loadable_recommendation_row(row)],
+        "manual": [row["id"] for row in results if not _is_loadable_recommendation_row(row)],
         "unload": [],
         "replace": [],
     }

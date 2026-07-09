@@ -121,6 +121,54 @@ def test_recommend_cli_json_includes_selection_payload(monkeypatch, capsys) -> N
     }
 
 
+def test_recommend_cli_related_excludes_session_context(monkeypatch, capsys) -> None:
+    calls: list[tuple[list[str], list[str], int]] = []
+
+    monkeypatch.setattr(
+        recommend_cli,
+        "recommend_bundle",
+        lambda query, **kwargs: [{"id": "skill:new-skill", "name": "new-skill"}],
+    )
+
+    def fake_recommend_related(
+        selected: list[str],
+        *,
+        rejected: list[str],
+        top_n: int,
+    ) -> list[dict[str, str]]:
+        calls.append((selected, rejected, top_n))
+        return []
+
+    monkeypatch.setattr(recommend_cli, "recommend_related", fake_recommend_related)
+
+    exit_code = recommend_cli.main(
+        [
+            "build",
+            "api",
+            "--selected",
+            "skill:fastapi-pro",
+            "--rejected",
+            "skill:skip",
+            "--active",
+            "mcp-server:codex-cli",
+            "--baseline-context",
+            "skill:baseline-helper",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert calls == [
+        (
+            ["skill:fastapi-pro"],
+            ["skill:skip", "mcp-server:codex-cli", "skill:baseline-helper"],
+            5,
+        )
+    ]
+    assert payload["selection"]["related_results"] == []
+
+
 def test_recommend_cli_suppresses_primary_bundle_with_session_state(monkeypatch, capsys) -> None:
     bundle_calls: list[tuple[str, dict[str, object]]] = []
 

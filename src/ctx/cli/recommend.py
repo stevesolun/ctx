@@ -167,8 +167,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.language:
         bundle_kwargs["language"] = args.language
     results = recommend_bundle(query, **bundle_kwargs)
+    related_rejected = _split_selection_values(
+        rejected + active + ([] if args.include_baseline_context else baseline_context)
+    )
     related_results = (
-        recommend_related(selected, rejected=rejected, top_n=related_top_n) if selected else []
+        recommend_related(selected, rejected=related_rejected, top_n=related_top_n)
+        if selected
+        else []
     )
     if args.json:
         payload: dict[str, Any] = {"query": query, "results": results}

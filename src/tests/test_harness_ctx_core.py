@@ -1502,6 +1502,64 @@ class TestRecommendBundle:
         names = [r["name"] for r in result["results"]]
         assert "fastapi-pro" in names
 
+    def test_context_policy_load_uses_local_skill_loadability(self, tmp_path: Path) -> None:
+        graph = nx.Graph()
+        graph.add_node(
+            "skill:local-security",
+            label="local-security",
+            type="skill",
+            tags=["security"],
+        )
+        graph.add_node(
+            "skill:remote-security",
+            label="remote-security",
+            type="skill",
+            tags=["security"],
+            status="available",
+            source_catalog="skill-index",
+            install_command="ctx-skill-install remote-security",
+        )
+        graph_path = tmp_path / "graph.json"
+        graph_path.write_text(json.dumps(nx.node_link_data(graph, edges="edges")), encoding="utf-8")
+        wiki = tmp_path / "wiki"
+        for slug in ("local-security", "remote-security"):
+            converted = wiki / "converted" / slug
+            converted.mkdir(parents=True)
+            (converted / "SKILL.md").write_text("# " + slug + "\n", encoding="utf-8")
+        toolbox = CtxCoreToolbox(
+            wiki_dir=wiki,
+            graph_path=graph_path,
+            lifecycle_dir=tmp_path / "runtime",
+        )
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__recommend_bundle",
+                    arguments={"query": "security", "top_k": 5},
+                )
+            )
+        )
+
+        result_ids = {row["id"] for row in result["results"]}
+        assert {"skill:local-security", "skill:remote-security"} <= result_ids
+        assert set(result["context_policy"]["load"]) == {"skill:local-security"}
+        assert "skill:remote-security" in result["context_policy"]["manual"]
+
+        filtered = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c2",
+                    name="ctx__recommend_bundle",
+                    arguments={"query": "security", "top_k": 5, "no_api_keys": True},
+                )
+            )
+        )
+        filtered_ids = {row["id"] for row in filtered["results"]}
+        assert "skill:local-security" in filtered_ids
+        assert "skill:remote-security" not in filtered_ids
+
     def test_language_inference_resolves_common_word_aliases(self) -> None:
         assert _infer_query_language("go through python tests") == "python"
         assert _infer_query_language("python tree node bug") == "python"
