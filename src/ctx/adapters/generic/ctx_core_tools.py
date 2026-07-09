@@ -52,6 +52,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
@@ -94,6 +95,56 @@ _RELATED_BLOCKED_STATUSES = {
     "removed",
     "stale",
     "unavailable",
+}
+_DEFAULT_BASELINE_CONTEXT = ("mcp-server:codex-cli",)
+_LOCAL_CODE_QUERY_MARKERS = (
+    "local files",
+    "local repo",
+    "local repository",
+    "feature_implementation",
+    "feature implementation",
+    "codex cli",
+)
+_NO_API_KEY_QUERY_MARKERS = (
+    "no api keys",
+    "no local api keys",
+    "without api keys",
+    "no external api",
+)
+_EXTERNAL_SERVICE_TOKENS = {
+    "anthropic",
+    "aws",
+    "azure",
+    "deployer",
+    "deployment",
+    "gemini",
+    "google",
+    "keyvault",
+    "notion",
+    "openai",
+    "stripe",
+    "vercel",
+}
+_GENERIC_PLANNING_TOKENS = {
+    "archiving",
+    "planner",
+    "planning",
+    "prioritization",
+    "product",
+    "prompt",
+    "spec",
+}
+_LANGUAGE_TOKEN_ALIASES = {
+    "c": frozenset({"c"}),
+    "cpp": frozenset({"cpp", "c++", "cplusplus"}),
+    "csharp": frozenset({"csharp", "c#", "dotnet"}),
+    "go": frozenset({"go", "golang"}),
+    "java": frozenset({"java"}),
+    "javascript": frozenset({"javascript", "js", "node"}),
+    "php": frozenset({"php"}),
+    "python": frozenset({"python", "py"}),
+    "rust": frozenset({"rust", "rs"}),
+    "typescript": frozenset({"typescript", "ts"}),
 }
 SUPPORTED_RESPONSE_FORMATS = ("json", "gcf")
 _RESPONSE_FORMAT_PROPERTY = {
@@ -375,6 +426,58 @@ class CtxCoreToolbox:
                                 "Opt in to local embedding-based query scoring. "
                                 "Default false keeps recommendations latency-safe."
                             ),
+                        },
+                        "selected": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Already selected recommendation IDs or names to suppress.",
+                        },
+                        "rejected": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Rejected recommendation IDs or names to suppress.",
+                        },
+                        "active_context": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Already active ctx entity IDs or names to keep out of load suggestions.",
+                        },
+                        "baseline_context": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Host-provided baseline ctx entity IDs. "
+                                "Defaults to mcp-server:codex-cli."
+                            ),
+                        },
+                        "include_baseline_context": {
+                            "type": "boolean",
+                            "description": "Return baseline context as normal recommendations. Default false.",
+                        },
+                        "include_unavailable": {
+                            "type": "boolean",
+                            "description": (
+                                "Include non-local or non-loadable rows. Default false for "
+                                "local/no-key coding contexts."
+                            ),
+                        },
+                        "local_code_task": {
+                            "type": "boolean",
+                            "description": (
+                                "Hint that the task is a local repo/code edit, used to demote "
+                                "generic planning/deployment recommendations."
+                            ),
+                        },
+                        "no_api_keys": {
+                            "type": "boolean",
+                            "description": (
+                                "Hint that no API keys are available, used to suppress "
+                                "external-service recommendations."
+                            ),
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": "Optional scenario/programming language hint.",
                         },
                         "output_format": dict(_RESPONSE_FORMAT_PROPERTY),
                         "_response_format": dict(_RESPONSE_FORMAT_PROPERTY),
@@ -743,40 +846,45 @@ class CtxCoreToolbox:
                 {"query": query, "tags": tags, "results": [], "companion_harnesses": []},
                 _response_format_from_args(args),
             )
+        selected = _selection_values_from_args(args, "selected")
+        rejected = _selection_values_from_args(args, "rejected")
+        active_context = _selection_values_from_args(args, "active_context")
+        include_baseline = bool(_optional_bool(args.get("include_baseline_context")) or False)
+        baseline_context = _selection_values_from_args(args, "baseline_context")
+        if not baseline_context and not include_baseline:
+            baseline_context = list(_DEFAULT_BASELINE_CONTEXT)
+        excluded = _recommendation_selection_keys(
+            selected + rejected + active_context + ([] if include_baseline else baseline_context)
+        )
+        recommendation_context = _recommendation_context_from_args(query, args)
+        raw_top_n = min(50, top_k + len(excluded) + 25)
         raw = recommend_by_tags(
             graph,
             tags,
-            top_n=top_k,
+            top_n=raw_top_n,
             query=query,
             entity_types=entity_types,
             min_normalized_score=cfg.recommendation_min_normalized_score,
             use_semantic_query=use_semantic_query,
             semantic_cache_dir=semantic_cache_dir,
         )
-        results = [
-            _with_recommendation_selection_metadata(
-                {
-                    "name": r["name"],
-                    "type": r["type"],
-                    "score": r["score"],
-                    "normalized_score": r.get("normalized_score"),
-                    "matching_tags": r.get("matching_tags", []),
-                    "external": r.get("external", False),
-                    "external_catalog": r.get("external_catalog"),
-                    "source_catalog": r.get("source_catalog"),
-                    "status": r.get("status"),
-                    "source": r.get("source"),
-                    "skill_id": r.get("skill_id"),
-                    "installs": r.get("installs"),
-                    "detail_url": r.get("detail_url"),
-                    "install_command": r.get("install_command"),
-                    "category": r.get("category"),
-                    "invoke_command": r.get("invoke_command"),
-                    "security_review": r.get("security_review"),
-                }
+        results: list[dict[str, Any]] = []
+        wiki_dir = self._wiki_dir_resolved()
+        for r in raw:
+            row = _with_recommendation_selection_metadata(
+                _base_recommendation_row(r, wiki_dir=wiki_dir)
             )
-            for r in raw
-        ]
+            candidate_keys = _recommendation_selection_keys(
+                [_recommendation_identity(row), str(row.get("name") or "")]
+            )
+            if candidate_keys & excluded:
+                continue
+            skip_reason = _recommendation_context_skip_reason(row, recommendation_context)
+            if skip_reason is not None:
+                continue
+            results.append(row)
+            if len(results) >= top_k:
+                break
         model_provider = _optional_str(args.get("model_provider"))
         model = _optional_str(args.get("model"))
         companion_harnesses = (
@@ -793,6 +901,17 @@ class CtxCoreToolbox:
             {
                 "query": query,
                 "tags": tags,
+                "baseline_context": baseline_context,
+                "selection": {
+                    "selected": selected,
+                    "rejected": rejected,
+                    "active_context": active_context,
+                },
+                "context_policy": _recommendation_context_policy(
+                    baseline_context=baseline_context,
+                    active_context=active_context,
+                    results=results,
+                ),
                 "results": results,
                 "companion_harnesses": companion_harnesses,
             },
@@ -1485,6 +1604,11 @@ def _query_to_tags(query: str) -> list[str]:
     return query_to_tags(query)
 
 
+def _selection_values_from_args(args: Mapping[str, Any], key: str) -> list[str]:
+    raw = args.get(key) or []
+    return _recommendation_selection_values(raw) if isinstance(raw, list) else []
+
+
 def _optional_str(raw: Any) -> str | None:
     if not isinstance(raw, str):
         return None
@@ -1503,6 +1627,210 @@ def _recommendation_identity(row: Mapping[str, Any]) -> str:
     entity_type = str(row.get("type") or "tool").strip() or "tool"
     name = str(row.get("name") or "unknown").strip() or "unknown"
     return f"{entity_type}:{name}"
+
+
+def _base_recommendation_row(row: Mapping[str, Any], *, wiki_dir: Path | None) -> dict[str, Any]:
+    base = {
+        "name": row["name"],
+        "type": row["type"],
+        "score": row["score"],
+        "normalized_score": row.get("normalized_score"),
+        "matching_tags": row.get("matching_tags", []),
+        "external": row.get("external", False),
+        "external_catalog": row.get("external_catalog"),
+        "source_catalog": row.get("source_catalog"),
+        "status": row.get("status"),
+        "source": row.get("source"),
+        "skill_id": row.get("skill_id"),
+        "installs": row.get("installs"),
+        "detail_url": row.get("detail_url"),
+        "install_command": row.get("install_command"),
+        "category": row.get("category"),
+        "invoke_command": row.get("invoke_command"),
+        "security_review": row.get("security_review"),
+    }
+    base.update(_recommendation_availability(base, wiki_dir=wiki_dir))
+    return base
+
+
+def _recommendation_availability(
+    row: Mapping[str, Any],
+    *,
+    wiki_dir: Path | None,
+) -> dict[str, Any]:
+    entity_type = str(row.get("type") or "").strip()
+    slug = str(row.get("name") or "").strip()
+    install_command = str(row.get("install_command") or "").strip()
+    source_catalog = str(row.get("source_catalog") or "").strip()
+    status = str(row.get("status") or "").strip().lower()
+    result: dict[str, Any] = {
+        "installable": False,
+        "load_status": "unknown",
+        "source_path": None,
+    }
+    if not slug:
+        result["load_status"] = "missing-slug"
+        return result
+    if wiki_dir is None:
+        result["load_status"] = "wiki-unavailable"
+        return result
+    if entity_type == "skill":
+        converted = wiki_dir / "converted" / slug
+        if converted.is_dir() and not converted.is_symlink():
+            for candidate in (converted / "SKILL.md", converted / "SKILL.md.original"):
+                if candidate.is_file() and not candidate.is_symlink():
+                    result.update(
+                        {
+                            "installable": True,
+                            "load_status": "local-wiki",
+                            "source_path": str(candidate),
+                        }
+                    )
+                    return result
+            result.update({"load_status": "wiki-no-loadable-body", "source_path": str(converted)})
+            return result
+        entity_path = entity_page_path(wiki_dir, "skill", slug)
+        if entity_path is not None and entity_path.exists():
+            result.update({"load_status": "wiki-no-loadable-body", "source_path": str(entity_path)})
+            return result
+        if source_catalog or install_command or status in {"available", "remote-cataloged"}:
+            result.update(
+                {
+                    "load_status": "external-install-required",
+                    "source_path": install_command or None,
+                }
+            )
+            return result
+        result["load_status"] = "not-in-wiki"
+        return result
+    try:
+        entity_path = entity_page_path(wiki_dir, entity_type, slug)
+    except Exception:  # noqa: BLE001 - metadata only; invalid type stays unknown.
+        return result
+    if entity_path is not None and entity_path.exists():
+        result.update(
+            {
+                "installable": True,
+                "load_status": "local-wiki",
+                "source_path": str(entity_path),
+            }
+        )
+    elif source_catalog or install_command or status in {"available", "remote-cataloged"}:
+        result.update(
+            {
+                "load_status": "external-install-required",
+                "source_path": install_command or None,
+            }
+        )
+    else:
+        result["load_status"] = "not-in-wiki"
+    return result
+
+
+def _recommendation_context_from_args(query: str, args: Mapping[str, Any]) -> dict[str, Any]:
+    query_lower = query.lower()
+    no_api_keys = _optional_bool(args.get("no_api_keys"))
+    local_code_task = _optional_bool(args.get("local_code_task"))
+    language = _optional_str(args.get("language")) or _infer_query_language(query_lower)
+    include_unavailable = bool(_optional_bool(args.get("include_unavailable")) or False)
+    return {
+        "no_api_keys": (
+            no_api_keys
+            if no_api_keys is not None
+            else any(marker in query_lower for marker in _NO_API_KEY_QUERY_MARKERS)
+        ),
+        "local_code_task": (
+            local_code_task
+            if local_code_task is not None
+            else any(marker in query_lower for marker in _LOCAL_CODE_QUERY_MARKERS)
+        ),
+        "language": language,
+        "include_unavailable": include_unavailable,
+    }
+
+
+def _infer_query_language(query_lower: str) -> str | None:
+    if match := re.search(r"\blocobench\s+([a-z+#]+)\b", query_lower):
+        raw = match.group(1)
+        for language, aliases in _LANGUAGE_TOKEN_ALIASES.items():
+            if raw == language or raw in aliases:
+                return language
+    tokens = set(_recommendation_text_tokens(query_lower))
+    for language, aliases in _LANGUAGE_TOKEN_ALIASES.items():
+        if tokens & aliases:
+            return language
+    return None
+
+
+def _recommendation_context_skip_reason(
+    row: Mapping[str, Any],
+    context: Mapping[str, Any],
+) -> str | None:
+    local_code_task = bool(context.get("local_code_task"))
+    no_api_keys = bool(context.get("no_api_keys"))
+    include_unavailable = bool(context.get("include_unavailable"))
+    text_tokens = set(_recommendation_text_tokens(_recommendation_context_text(row)))
+    if (local_code_task or no_api_keys) and not include_unavailable and not row.get("installable"):
+        return "not locally loadable for local/no-key context"
+    if no_api_keys and text_tokens & _EXTERNAL_SERVICE_TOKENS:
+        return "external service requires credentials"
+    if local_code_task and text_tokens & _GENERIC_PLANNING_TOKENS:
+        return "generic planning workflow for local code task"
+    language = str(context.get("language") or "").strip().lower()
+    if language:
+        target_aliases = _LANGUAGE_TOKEN_ALIASES.get(language, frozenset({language}))
+        other_language_hits = {
+            lang
+            for lang, aliases in _LANGUAGE_TOKEN_ALIASES.items()
+            if lang != language and text_tokens & aliases
+        }
+        if other_language_hits and not (text_tokens & target_aliases):
+            return "wrong language recommendation"
+    return None
+
+
+def _recommendation_context_text(row: Mapping[str, Any]) -> str:
+    values: list[str] = []
+    for key in (
+        "name",
+        "type",
+        "source",
+        "source_catalog",
+        "status",
+        "skill_id",
+        "detail_url",
+        "install_command",
+        "category",
+        "invoke_command",
+    ):
+        value = row.get(key)
+        if value:
+            values.append(str(value))
+    tags = row.get("matching_tags") or []
+    if isinstance(tags, list):
+        values.extend(str(tag) for tag in tags)
+    return " ".join(values)
+
+
+def _recommendation_text_tokens(value: str) -> list[str]:
+    return re.findall(r"[a-z0-9+#]+", value.lower())
+
+
+def _recommendation_context_policy(
+    *,
+    baseline_context: list[str],
+    active_context: list[str],
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    keep = _recommendation_selection_values(baseline_context + active_context)
+    return {
+        "baseline": baseline_context,
+        "keep": keep,
+        "load": [row["id"] for row in results if row.get("installable")],
+        "manual": [row["id"] for row in results if not row.get("installable")],
+        "unload": [],
+        "replace": [],
+    }
 
 
 def _recommendation_tags(row: Mapping[str, Any]) -> list[str]:

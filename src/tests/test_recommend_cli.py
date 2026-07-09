@@ -9,7 +9,7 @@ def test_recommend_cli_text(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         recommend_cli,
         "recommend_bundle",
-        lambda query, *, top_k: [
+        lambda query, **kwargs: [
             {
                 "id": "skill:fastapi-pro",
                 "name": "fastapi-pro",
@@ -39,7 +39,7 @@ def test_recommend_cli_text_shows_workflow_action(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         recommend_cli,
         "recommend_bundle",
-        lambda query, *, top_k: [
+        lambda query, **kwargs: [
             {
                 "name": "no-mistakes",
                 "type": "skill",
@@ -64,7 +64,7 @@ def test_recommend_cli_json(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         recommend_cli,
         "recommend_bundle",
-        lambda query, *, top_k: [{"name": "code-reviewer", "type": "agent"}],
+        lambda query, **kwargs: [{"name": "code-reviewer", "type": "agent"}],
     )
 
     exit_code = recommend_cli.main(["review", "code", "--json"])
@@ -81,7 +81,7 @@ def test_recommend_cli_json_includes_selection_payload(monkeypatch, capsys) -> N
     monkeypatch.setattr(
         recommend_cli,
         "recommend_bundle",
-        lambda query, *, top_k: [{"id": "skill:fastapi-pro", "name": "fastapi-pro"}],
+        lambda query, **kwargs: [{"id": "skill:fastapi-pro", "name": "fastapi-pro"}],
     )
 
     def fake_recommend_related(
@@ -115,15 +115,67 @@ def test_recommend_cli_json_includes_selection_payload(monkeypatch, capsys) -> N
     assert payload["selection"] == {
         "selected": ["skill:fastapi-pro"],
         "rejected": ["mcp:legacy-api"],
+        "active_context": [],
+        "baseline_context": [],
         "related_results": [{"id": "agent:api-reviewer", "name": "api-reviewer"}],
     }
+
+
+def test_recommend_cli_suppresses_primary_bundle_with_session_state(monkeypatch, capsys) -> None:
+    bundle_calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_recommend_bundle(query: str, **kwargs: object) -> list[dict[str, str]]:
+        bundle_calls.append((query, kwargs))
+        return [{"id": "skill:new-skill", "name": "new-skill"}]
+
+    monkeypatch.setattr(recommend_cli, "recommend_bundle", fake_recommend_bundle)
+    monkeypatch.setattr(recommend_cli, "recommend_related", lambda *args, **kwargs: [])
+
+    exit_code = recommend_cli.main(
+        [
+            "build",
+            "api",
+            "--selected",
+            "skill:fastapi-pro",
+            "--rejected",
+            "skill:skip",
+            "--active",
+            "mcp-server:codex-cli",
+            "--baseline-context",
+            "mcp-server:codex-cli",
+            "--local-code-task",
+            "--no-api-keys",
+            "--language",
+            "python",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["results"] == [{"id": "skill:new-skill", "name": "new-skill"}]
+    assert bundle_calls == [
+        (
+            "build api",
+            {
+                "top_k": 5,
+                "selected": ["skill:fastapi-pro"],
+                "rejected": ["skill:skip"],
+                "active_context": ["mcp-server:codex-cli"],
+                "baseline_context": ["mcp-server:codex-cli"],
+                "local_code_task": True,
+                "no_api_keys": True,
+                "language": "python",
+            },
+        )
+    ]
 
 
 def test_recommend_cli_text_renders_related_recommendations(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         recommend_cli,
         "recommend_bundle",
-        lambda query, *, top_k: [
+        lambda query, **kwargs: [
             {"id": "skill:fastapi-pro", "name": "fastapi-pro", "type": "skill"}
         ],
     )
@@ -160,7 +212,7 @@ def test_recommend_cli_empty_prints_threshold_message(monkeypatch, capsys) -> No
     monkeypatch.setattr(
         recommend_cli,
         "recommend_bundle",
-        lambda query, *, top_k: [],
+        lambda query, **kwargs: [],
     )
 
     exit_code = recommend_cli.main(["unclear"])

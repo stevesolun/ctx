@@ -243,6 +243,15 @@ def recommend_bundle(
     query: str,
     *,
     top_k: int = 5,
+    selected: list[str] | None = None,
+    rejected: list[str] | None = None,
+    active_context: list[str] | None = None,
+    baseline_context: list[str] | None = None,
+    include_baseline_context: bool = False,
+    include_unavailable: bool = False,
+    local_code_task: bool | None = None,
+    no_api_keys: bool | None = None,
+    language: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return a top-K ranked recommendation bundle for a free-text query.
 
@@ -259,10 +268,29 @@ def recommend_bundle(
         for entry in bundle:
             print(f"{entry['type']:>11}  {entry['name']}  (score {entry['score']:.1f})")
     """
-    payload = _call(
-        "ctx__recommend_bundle",
-        {"query": query, "top_k": top_k},
-    )
+    args: dict[str, Any] = {
+        "query": query,
+        "top_k": top_k,
+    }
+    if selected:
+        args["selected"] = selected
+    if rejected:
+        args["rejected"] = rejected
+    if active_context:
+        args["active_context"] = active_context
+    if baseline_context:
+        args["baseline_context"] = baseline_context
+    if include_baseline_context:
+        args["include_baseline_context"] = include_baseline_context
+    if include_unavailable:
+        args["include_unavailable"] = include_unavailable
+    if local_code_task is not None:
+        args["local_code_task"] = local_code_task
+    if no_api_keys is not None:
+        args["no_api_keys"] = no_api_keys
+    if language is not None:
+        args["language"] = language
+    payload = _call("ctx__recommend_bundle", args)
     return payload.get("results", []) if "error" not in payload else []
 
 

@@ -44,6 +44,42 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Rejected recommendation ID/name. May be repeated or comma-separated.",
     )
     parser.add_argument(
+        "--active",
+        action="append",
+        default=[],
+        help="Already active ctx entity ID/name. May be repeated or comma-separated.",
+    )
+    parser.add_argument(
+        "--baseline-context",
+        action="append",
+        default=[],
+        help=(
+            "Baseline host ctx entity ID/name to suppress as an optional recommendation. "
+            "May be repeated or comma-separated."
+        ),
+    )
+    parser.add_argument(
+        "--include-baseline-context",
+        action="store_true",
+        help="Show baseline context as normal recommendations.",
+    )
+    parser.add_argument(
+        "--show-unavailable",
+        action="store_true",
+        help="Include non-local or non-loadable recommendations.",
+    )
+    parser.add_argument(
+        "--local-code-task",
+        action="store_true",
+        help="Apply local repo/code-task recommendation filters.",
+    )
+    parser.add_argument(
+        "--no-api-keys",
+        action="store_true",
+        help="Suppress recommendations that require external API/service credentials.",
+    )
+    parser.add_argument("--language", help="Optional scenario/programming language hint.")
+    parser.add_argument(
         "--related-top-n",
         type=int,
         default=cfg.recommendation_top_k,
@@ -109,16 +145,39 @@ def main(argv: list[str] | None = None) -> int:
     related_top_n = max(1, min(int(args.related_top_n), cfg.recommendation_top_k))
     selected = _split_selection_values(args.selected)
     rejected = _split_selection_values(args.rejected)
-    results = recommend_bundle(query, top_k=top_k)
+    active = _split_selection_values(args.active)
+    baseline_context = _split_selection_values(args.baseline_context)
+    bundle_kwargs: dict[str, Any] = {"top_k": top_k}
+    if selected:
+        bundle_kwargs["selected"] = selected
+    if rejected:
+        bundle_kwargs["rejected"] = rejected
+    if active:
+        bundle_kwargs["active_context"] = active
+    if baseline_context:
+        bundle_kwargs["baseline_context"] = baseline_context
+    if args.include_baseline_context:
+        bundle_kwargs["include_baseline_context"] = True
+    if args.show_unavailable:
+        bundle_kwargs["include_unavailable"] = True
+    if args.local_code_task:
+        bundle_kwargs["local_code_task"] = True
+    if args.no_api_keys:
+        bundle_kwargs["no_api_keys"] = True
+    if args.language:
+        bundle_kwargs["language"] = args.language
+    results = recommend_bundle(query, **bundle_kwargs)
     related_results = (
         recommend_related(selected, rejected=rejected, top_n=related_top_n) if selected else []
     )
     if args.json:
         payload: dict[str, Any] = {"query": query, "results": results}
-        if selected or rejected:
+        if selected or rejected or active or baseline_context:
             payload["selection"] = {
                 "selected": selected,
                 "rejected": rejected,
+                "active_context": active,
+                "baseline_context": baseline_context,
                 "related_results": related_results,
             }
         print(json.dumps(payload, indent=2))
