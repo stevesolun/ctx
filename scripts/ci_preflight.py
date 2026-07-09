@@ -30,6 +30,7 @@ PUBLIC_DOCS_TRACKER_TESTS = (
     "src/tests/test_dashboard_user_story_tracker.py",
     "src/tests/test_toolbox_cli.py",
 )
+PROFILE_CHOICES = ("smoke", "pr", "full")
 
 
 GRAPH_VALIDATE_ARGS = (
@@ -298,6 +299,7 @@ def select_checks(
         "same contracts on this host."
     ]
 
+    smoke_profile = profile == "smoke"
     source_required = profile == "full" or (not flags["docs_only"] and not flags["graph_only"])
     policy_required = not flags["docs_only"] and not flags["graph_only"]
     if policy_required:
@@ -316,72 +318,76 @@ def select_checks(
                     (python, "-m", "ruff", "format", "--check", "src", "hooks", "scripts"),
                 ),
                 Check("ruff", (python, "-m", "ruff", "check", "src", "hooks", "scripts")),
-                Check("mypy", (python, "-m", "mypy", "src")),
-                Check("pip check", (python, "-m", "pip", "check")),
-                Check(
-                    "unit-linux equivalent",
-                    (
-                        python,
-                        "-m",
-                        "pytest",
-                        "-q",
-                        "-m",
-                        "not browser and not integration",
-                        "--cov=src",
-                        "--cov-report=term-missing",
-                        "--cov-fail-under=40",
-                    ),
-                ),
-                Check(
-                    "A-Z canary",
-                    (
-                        python,
-                        "-m",
-                        "pytest",
-                        "-q",
-                        "--no-cov",
-                        "src/tests/test_alive_loop_e2e.py",
-                        "src/tests/test_fuzz_yaml_rendering.py",
-                    ),
-                ),
-                Check(
-                    "contract compatibility local",
-                    (
-                        python,
-                        "-m",
-                        "pytest",
-                        "-q",
-                        "--no-cov",
-                        "src/tests/test_clean_host_contract.py",
-                        "src/tests/test_package_scaffold.py",
-                    ),
-                ),
-                Check(
-                    "clean host contract",
-                    (python, "scripts/clean_host_contract.py", "--fast"),
-                ),
             ]
         )
+        if not smoke_profile:
+            checks.extend(
+                [
+                    Check("mypy", (python, "-m", "mypy", "src")),
+                    Check("pip check", (python, "-m", "pip", "check")),
+                    Check(
+                        "unit-linux equivalent",
+                        (
+                            python,
+                            "-m",
+                            "pytest",
+                            "-q",
+                            "-m",
+                            "not browser and not integration",
+                            "--cov=src",
+                            "--cov-report=term-missing",
+                            "--cov-fail-under=40",
+                        ),
+                    ),
+                    Check(
+                        "A-Z canary",
+                        (
+                            python,
+                            "-m",
+                            "pytest",
+                            "-q",
+                            "--no-cov",
+                            "src/tests/test_alive_loop_e2e.py",
+                            "src/tests/test_fuzz_yaml_rendering.py",
+                        ),
+                    ),
+                    Check(
+                        "contract compatibility local",
+                        (
+                            python,
+                            "-m",
+                            "pytest",
+                            "-q",
+                            "--no-cov",
+                            "src/tests/test_clean_host_contract.py",
+                            "src/tests/test_package_scaffold.py",
+                        ),
+                    ),
+                    Check(
+                        "clean host contract",
+                        (python, "scripts/clean_host_contract.py", "--fast"),
+                    ),
+                ]
+            )
 
     if flags["docs_changed"]:
-        checks.extend(
-            [
-                Check(
-                    "public docs tracker",
-                    (
-                        python,
-                        "-m",
-                        "pytest",
-                        "-q",
-                        "--no-cov",
-                        *PUBLIC_DOCS_TRACKER_TESTS,
-                    ),
+        checks.append(
+            Check(
+                "public docs tracker",
+                (
+                    python,
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "--no-cov",
+                    *PUBLIC_DOCS_TRACKER_TESTS,
                 ),
-                Check("docs strict build", (python, "-m", "mkdocs", "build", "--strict")),
-            ]
+            )
         )
+        if not smoke_profile:
+            checks.append(Check("docs strict build", (python, "-m", "mkdocs", "build", "--strict")))
 
-    if profile == "full" or flags["telemetry_changed"]:
+    if not smoke_profile and (profile == "full" or flags["telemetry_changed"]):
         checks.append(
             Check(
                 "telemetry enterprise",
@@ -399,13 +405,13 @@ def select_checks(
             )
         )
 
-    if flags["graph_artifact_changed"]:
+    if not smoke_profile and flags["graph_artifact_changed"]:
         checks.append(
             Check("hydrate graph LFS", (python, __file__, "--internal-hydrate-graph-lfs"))
         )
         checks.append(Check("graph artifact validation", (python, *GRAPH_VALIDATE_ARGS)))
 
-    if source_required and flags["similarity_changed"]:
+    if not smoke_profile and source_required and flags["similarity_changed"]:
         checks.append(
             Check(
                 "similarity precision/recall",
@@ -423,7 +429,7 @@ def select_checks(
             )
         )
 
-    if source_required and flags["browser_changed"]:
+    if not smoke_profile and source_required and flags["browser_changed"]:
         checks.append(
             Check(
                 "browser monitor security",
@@ -440,7 +446,7 @@ def select_checks(
             )
         )
 
-    if source_required:
+    if not smoke_profile and source_required:
         out_dir = ".ci-preflight-dist"
         twine_script = (
             "import glob, subprocess, sys; "
@@ -467,6 +473,8 @@ def select_checks(
         notes.insert(0, f"Changed files vs {base_ref}: {len(files)}")
     else:
         notes.insert(0, "No changed files detected; running baseline cheap checks only.")
+    if smoke_profile:
+        notes.append("Smoke profile skips slow PR gates; run --profile pr before no-mistakes/PR.")
 
     return checks, notes
 
@@ -524,9 +532,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--profile",
-        choices=("pr", "full"),
+        choices=PROFILE_CHOICES,
         default="pr",
-        help="pr mirrors required PR checks; full forces source gates for any change set",
+        help=(
+            "smoke runs cheap first-pass checks; pr mirrors required PR checks; "
+            "full forces source gates for any change set"
+        ),
     )
     parser.add_argument(
         "--python",

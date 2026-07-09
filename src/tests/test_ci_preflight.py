@@ -77,6 +77,26 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
     assert "clean host contract" in names
 
 
+def test_preflight_smoke_profile_runs_only_fast_source_gates() -> None:
+    names = _names_for(["src/ctx/adapters/generic/loop.py"], profile="smoke")
+
+    assert "whitespace" in names
+    assert "repo stats" in names
+    assert "no-test policy" in names
+    assert "ruff format" in names
+    assert "ruff" in names
+    assert "mypy" not in names
+    assert "unit-linux equivalent" not in names
+    assert "build wheel" not in names
+
+
+def test_preflight_smoke_profile_keeps_docs_tracker_without_strict_build() -> None:
+    names = _names_for(["docs/index.md"], profile="smoke")
+
+    assert "public docs tracker" in names
+    assert "docs strict build" not in names
+
+
 def test_preflight_runs_graph_validation_for_graph_artifacts() -> None:
     names = _names_for(["graph/wiki-graph.tar.gz"])
     lanes = local_fast_gate.group_checks(_checks_for(["graph/wiki-graph.tar.gz"]))
@@ -139,6 +159,27 @@ def test_local_fast_main_accepts_repeated_lane_args(monkeypatch, capsys) -> None
     assert "[lane] static" in out
     assert "[lane] unit" in out
     assert "[lane] package" not in out
+
+
+def test_local_fast_main_accepts_smoke_profile(monkeypatch, capsys) -> None:
+    checks = [
+        Check("ruff", ("python", "-m", "ruff", "check", "src")),
+        Check("mypy", ("python", "-m", "mypy", "src")),
+    ]
+    seen_profiles: list[str] = []
+    monkeypatch.setattr(local_fast_gate.shutil, "which", lambda _name: "/usr/bin/git")
+    monkeypatch.setattr(local_fast_gate, "changed_files", lambda _base: ["src/ctx/cli/run.py"])
+
+    def fake_select_checks(**kwargs):
+        seen_profiles.append(kwargs["profile"])
+        return checks[:1], []
+
+    monkeypatch.setattr(local_fast_gate, "select_checks", fake_select_checks)
+
+    assert local_fast_gate.main(["--dry-run", "--profile", "smoke"]) == 0
+
+    assert seen_profiles == ["smoke"]
+    assert "[lane] static" in capsys.readouterr().out
 
 
 def test_local_fast_summary_json_records_lane_timings(tmp_path: Path) -> None:

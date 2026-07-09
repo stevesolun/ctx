@@ -26,6 +26,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.ci_preflight import Check  # noqa: E402
+from scripts.ci_preflight import PROFILE_CHOICES  # noqa: E402
 from scripts.ci_preflight import changed_files  # noqa: E402
 from scripts.ci_preflight import select_checks  # noqa: E402
 
@@ -283,7 +284,7 @@ def _default_jobs() -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="origin/main")
-    parser.add_argument("--profile", choices=("pr", "full"), default="pr")
+    parser.add_argument("--profile", choices=PROFILE_CHOICES, default="pr")
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--jobs", type=int, default=_default_jobs())
     parser.add_argument("--lane", action="append", choices=LANE_ORDER)
