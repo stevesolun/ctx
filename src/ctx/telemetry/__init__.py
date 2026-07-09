@@ -13,13 +13,14 @@ import ipaddress
 import json
 import math
 import os
+import re
 import secrets
 import sys
 import traceback
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
@@ -131,6 +132,20 @@ _RAW_VALUE_KEY_SUFFIXES = (
     "_project_url",
 )
 _SCALAR_TYPES = (str, int, float, bool, type(None))
+_PATH_TEXT_SEGMENT_RE = r"[^/\\\s'\"`<>|:;,\)\]]+"
+_POSIX_LOCAL_HOST_PATH_RE = re.compile(
+    rf"(?<![\w./-])/(?:Users|home|private|tmp|var)(?:/{_PATH_TEXT_SEGMENT_RE})+"
+)
+_TILDE_LOCAL_HOST_PATH_RE = re.compile(rf"(?<![\w./-])~(?:/{_PATH_TEXT_SEGMENT_RE})+")
+_WINDOWS_LOCAL_HOST_PATH_RE = re.compile(
+    r"(?<![\w./-])[A-Za-z]:[\\/](?:[^/\\\s'\"`<>|:;,\)\]]+[\\/])*"
+    r"[^/\\\s'\"`<>|:;,\)\]]+"
+)
+_LOCAL_HOST_PATH_PATTERNS = (
+    _POSIX_LOCAL_HOST_PATH_RE,
+    _TILDE_LOCAL_HOST_PATH_RE,
+    _WINDOWS_LOCAL_HOST_PATH_RE,
+)
 
 
 def _raw_value_key_like(normalized_key: str) -> bool:
@@ -594,38 +609,38 @@ def record_event(
         return None
     if settings["export_enabled"]:
         started_at = _now_iso()
-        result = _export_events([event], settings=settings, trusted_root=trusted_root)
-        checkpoint_path = _export_checkpoint_path(
-            settings,
-            source_path=target,
-            trusted_root=trusted_root,
-        )
-        checkpoint_before_event_id = _read_export_checkpoint(
-            checkpoint_path,
+        pending = _events_pending_export(
+            target,
             settings=settings,
-            source_path=target,
+            trusted_root=trusted_root,
+            include_exported=False,
         )
+        last_event = pending.events[-1] if pending.events else None
+        result = _export_events(pending.events, settings=settings, trusted_root=trusted_root)
+        checkpoint_path = pending.checkpoint_path
+        checkpoint_before_event_id = pending.checkpoint_before_event_id
         checkpoint_after_event_id = checkpoint_before_event_id
         checkpoint_advanced = False
         last_success_at = None
         last_success_event_id = None
-        if result.failed == 0 and result.exported:
-            _write_export_checkpoint(
-                settings,
-                source_path=target,
-                event=event,
-                trusted_root=trusted_root,
-            )
-            checkpoint_after_event_id = event.event_id
-            checkpoint_advanced = checkpoint_after_event_id != checkpoint_before_event_id
+        if result.failed == 0 and result.exported and last_event is not None:
             last_success_at = _now_iso()
-            last_success_event_id = event.event_id
+            last_success_event_id = last_event.event_id
+            if pending.malformed_pending_records == 0:
+                _write_export_checkpoint(
+                    settings,
+                    source_path=target,
+                    event=last_event,
+                    trusted_root=trusted_root,
+                )
+                checkpoint_after_event_id = last_event.event_id
+                checkpoint_advanced = checkpoint_after_event_id != checkpoint_before_event_id
         status_path = _export_status_path(
             settings,
             source_path=target,
             trusted_root=trusted_root,
         )
-        status = "failed" if result.failed else ("ok" if result.exported else "noop")
+        status = _export_status(result, pending=pending)
         final_result = ExportResult(
             attempted=result.attempted,
             exported=result.exported,
@@ -635,11 +650,15 @@ def record_event(
             error_kind=result.error_kind,
             checkpoint_path=str(checkpoint_path),
             last_event_id=checkpoint_after_event_id,
+            malformed_records=pending.malformed_total_records,
+            malformed_pending_records=pending.malformed_pending_records,
+            malformed_first_line=pending.malformed_first_line,
+            malformed_last_line=pending.malformed_last_line,
             status_path=str(status_path),
             checkpoint_before_event_id=checkpoint_before_event_id,
             checkpoint_after_event_id=checkpoint_after_event_id,
             checkpoint_advanced=checkpoint_advanced,
-            checkpoint_found=checkpoint_before_event_id is not None,
+            checkpoint_found=pending.checkpoint_found,
             destination_hash=_export_destination_hash(settings),
             last_success_at=last_success_at,
             last_success_event_id=last_success_event_id,
@@ -1904,6 +1923,38 @@ def _is_forbidden_otlp_ip(host: str) -> bool:
     )
 
 
+def _sanitize_event_for_export(
+    event: TelemetryEvent,
+    settings: Mapping[str, Any],
+) -> TelemetryEvent:
+    payload = _sanitize_payload(
+        dict(event.payload),
+        privacy_mode=event.privacy_mode,
+        hash_salt=settings["hash_salt"],
+        max_keys=int(settings["max_payload_keys"]),
+        max_value_len=int(settings["max_payload_value_chars"]),
+    )
+    if payload == dict(event.payload):
+        return event
+    return replace(event, payload=payload)
+
+
+def _sanitize_metric_for_export(
+    metric: TelemetryMetric,
+    settings: Mapping[str, Any],
+) -> TelemetryMetric:
+    attributes = _sanitize_payload(
+        dict(metric.attributes),
+        privacy_mode=metric.privacy_mode,
+        hash_salt=settings["hash_salt"],
+        max_keys=int(settings["max_payload_keys"]),
+        max_value_len=int(settings["max_payload_value_chars"]),
+    )
+    if attributes == dict(metric.attributes):
+        return metric
+    return replace(metric, attributes=attributes)
+
+
 def _export_events(
     events: list[TelemetryEvent],
     *,
@@ -1914,10 +1965,15 @@ def _export_events(
     if not events:
         return ExportResult(attempted=0, exported=0, failed=0, sink=sink)
     try:
+        sanitized_events = [_sanitize_event_for_export(event, settings) for event in events]
         if sink == "local_jsonl":
-            _export_local_jsonl(events, Path(str(settings["export_path"])), trusted_root)
+            _export_local_jsonl(
+                sanitized_events,
+                Path(str(settings["export_path"])),
+                trusted_root,
+            )
         elif sink == "otlp_http":
-            _post_otlp_http(_otlp_logs_payload(events, settings), settings)
+            _post_otlp_http(_otlp_logs_payload(sanitized_events, settings), settings)
         else:
             return ExportResult(
                 attempted=len(events),
@@ -1946,38 +2002,38 @@ def _export_recorded_metric(
     trusted_root: Path | None,
 ) -> None:
     started_at = _now_iso()
-    result = _export_metrics([metric], settings=settings, trusted_root=trusted_root)
-    checkpoint_path = _metric_export_checkpoint_path(
-        settings,
-        source_path=source_path,
-        trusted_root=trusted_root,
-    )
-    checkpoint_before_metric_id = _read_metric_export_checkpoint(
-        checkpoint_path,
+    pending = _metrics_pending_export(
+        source_path,
         settings=settings,
-        source_path=source_path,
+        trusted_root=trusted_root,
+        include_exported=False,
     )
+    last_metric = pending.metrics[-1] if pending.metrics else None
+    result = _export_metrics(pending.metrics, settings=settings, trusted_root=trusted_root)
+    checkpoint_path = pending.checkpoint_path
+    checkpoint_before_metric_id = pending.checkpoint_before_metric_id
     checkpoint_after_metric_id = checkpoint_before_metric_id
     checkpoint_advanced = False
     last_success_at = None
     last_success_metric_id = None
-    if result.failed == 0 and result.exported:
-        _write_metric_export_checkpoint(
-            settings,
-            source_path=source_path,
-            metric=metric,
-            trusted_root=trusted_root,
-        )
-        checkpoint_after_metric_id = metric.metric_id
-        checkpoint_advanced = checkpoint_after_metric_id != checkpoint_before_metric_id
+    if result.failed == 0 and result.exported and last_metric is not None:
         last_success_at = _now_iso()
-        last_success_metric_id = metric.metric_id
+        last_success_metric_id = last_metric.metric_id
+        if pending.malformed_pending_records == 0:
+            _write_metric_export_checkpoint(
+                settings,
+                source_path=source_path,
+                metric=last_metric,
+                trusted_root=trusted_root,
+            )
+            checkpoint_after_metric_id = last_metric.metric_id
+            checkpoint_advanced = checkpoint_after_metric_id != checkpoint_before_metric_id
     status_path = _metric_export_status_path(
         settings,
         source_path=source_path,
         trusted_root=trusted_root,
     )
-    status = "failed" if result.failed else ("ok" if result.exported else "noop")
+    status = _metric_export_status(result, pending=pending)
     final_result = MetricExportResult(
         attempted=result.attempted,
         exported=result.exported,
@@ -1987,11 +2043,15 @@ def _export_recorded_metric(
         error_kind=result.error_kind,
         checkpoint_path=str(checkpoint_path),
         last_metric_id=checkpoint_after_metric_id,
+        malformed_records=pending.malformed_total_records,
+        malformed_pending_records=pending.malformed_pending_records,
+        malformed_first_line=pending.malformed_first_line,
+        malformed_last_line=pending.malformed_last_line,
         status_path=str(status_path),
         checkpoint_before_metric_id=checkpoint_before_metric_id,
         checkpoint_after_metric_id=checkpoint_after_metric_id,
         checkpoint_advanced=checkpoint_advanced,
-        checkpoint_found=checkpoint_before_metric_id is not None,
+        checkpoint_found=pending.checkpoint_found,
         destination_hash=_metric_export_destination_hash(settings),
         last_success_at=last_success_at,
         last_success_metric_id=last_success_metric_id,
@@ -2016,14 +2076,15 @@ def _export_metrics(
     if not metrics:
         return MetricExportResult(attempted=0, exported=0, failed=0, sink=sink)
     try:
+        sanitized_metrics = [_sanitize_metric_for_export(metric, settings) for metric in metrics]
         if sink == "local_jsonl":
             _export_local_metrics_jsonl(
-                metrics,
+                sanitized_metrics,
                 Path(str(settings["metric_export_path"])),
                 trusted_root,
             )
         elif sink == "otlp_http":
-            _post_otlp_http(_otlp_metrics_payload(metrics, settings), settings)
+            _post_otlp_http(_otlp_metrics_payload(sanitized_metrics, settings), settings)
         else:
             return MetricExportResult(
                 attempted=len(metrics),
@@ -2562,7 +2623,11 @@ def _otlp_metrics_payload(
                     {
                         "scope": {"name": "ctx.telemetry", "version": METRIC_SCHEMA_VERSION},
                         "metrics": [
-                            _otlp_metric_record(metric, settings=settings) for metric in metrics
+                            _otlp_metric_record(
+                                _sanitize_metric_for_export(metric, settings),
+                                settings=settings,
+                            )
+                            for metric in metrics
                         ],
                     }
                 ],
@@ -2661,6 +2726,13 @@ def _otlp_log_record(event: TelemetryEvent, *, settings: Mapping[str, Any]) -> d
     session_hash = event.session_hash
     if session_hash is None and event.session_id:
         session_hash = hash_identifier(event.session_id, salt=settings["hash_salt"])
+    payload = _sanitize_payload(
+        dict(event.payload),
+        privacy_mode=event.privacy_mode,
+        hash_salt=settings["hash_salt"],
+        max_keys=int(settings["max_payload_keys"]),
+        max_value_len=int(settings["max_payload_value_chars"]),
+    )
     attributes = {
         "event.name": event.event_name,
         "ctx.schema_version": event.schema_version,
@@ -2668,7 +2740,7 @@ def _otlp_log_record(event: TelemetryEvent, *, settings: Mapping[str, Any]) -> d
         "ctx.source": event.source,
         "ctx.outcome": event.outcome,
         "ctx.privacy_mode": event.privacy_mode,
-        **{f"ctx.payload.{key}": value for key, value in event.payload.items()},
+        **{f"ctx.payload.{key}": value for key, value in payload.items()},
     }
     optional = {
         "ctx.session.hash": session_hash,
@@ -2723,6 +2795,21 @@ def _otlp_value(value: Any) -> dict[str, Any]:
     return {"stringValue": json.dumps(value, sort_keys=True, default=str)}
 
 
+def _redact_local_host_paths(
+    text: str,
+    *,
+    hash_salt: str | bytes | None,
+) -> str:
+    redacted = text
+
+    def replacement(match: re.Match[str]) -> str:
+        return f"[path_hash:{hash_identifier(match.group(0), salt=hash_salt)}]"
+
+    for pattern in _LOCAL_HOST_PATH_PATTERNS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
+
+
 def _sanitize_payload(
     payload: Mapping[str, Any],
     *,
@@ -2769,6 +2856,8 @@ def _sanitize_value(
     if isinstance(value, _SCALAR_TYPES):
         if isinstance(value, str):
             text = redact_secret_text(value)
+            if privacy_mode == DEFAULT_PRIVACY_MODE:
+                text = _redact_local_host_paths(text, hash_salt=hash_salt)
             if len(text) > max_value_len:
                 return text[:max_value_len] + "...[truncated]"
             return text

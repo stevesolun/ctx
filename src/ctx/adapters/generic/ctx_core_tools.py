@@ -39,6 +39,11 @@ deciding how to place selected entities into context. Per-entity
 token usage is recorded only when the host supplies explicit
 ``ctx__mark_entity_used.token_usage`` attribution.
 
+Hosts that need a narrower permission surface can construct
+``CtxCoreToolbox`` with ``allowed_tool_names`` and ``allowed_entity_types``.
+That filters both tool discovery and read/query results before a model sees
+them.
+
 Plan 001 Phase H6.
 """
 
@@ -49,7 +54,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from ctx.adapters.generic.providers import ToolCall, ToolDefinition
 from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
@@ -59,6 +64,7 @@ from ctx.core.entity_types import (
     entity_relpath,
     entity_page_path,
     entity_wikilink,
+    normalize_entity_type,
 )
 from ctx.telemetry import hash_identifier, record_event, record_exception, telemetry_span
 
@@ -298,11 +304,15 @@ class CtxCoreToolbox:
         graph_path: Path | None = None,
         lifecycle_dir: Path | None = None,
         bound_session_id: str | None = None,
+        allowed_tool_names: Iterable[str] | None = None,
+        allowed_entity_types: Iterable[str] | None = None,
     ) -> None:
         self._wiki_dir = wiki_dir
         self._graph_path = graph_path
         self._lifecycle = RuntimeLifecycleStore(lifecycle_dir)
         self._bound_session_id = str(bound_session_id or "").strip() or None
+        self._allowed_tool_names = _normalise_allowed_tool_names(allowed_tool_names)
+        self._allowed_entity_types = _normalise_allowed_entity_types(allowed_entity_types)
         self._graph: Any | None = None  # networkx.Graph
         self._pages: list[Any] | None = None  # list[SkillPage]
         self._graph_signature: GraphSignature | None = None
@@ -499,6 +509,8 @@ class CtxCoreToolbox:
             ),
         ]
         definitions.extend(_lifecycle_tool_definitions(self._bound_session_id))
+        if self._allowed_tool_names is not None:
+            definitions = [td for td in definitions if td.name in self._allowed_tool_names]
         return definitions
 
     def dispatch(self, call: ToolCall) -> str:
@@ -511,6 +523,8 @@ class CtxCoreToolbox:
         """
         if not call.name.startswith(_NAMESPACE):
             raise ValueError(f"CtxCoreToolbox got a non-ctx call {call.name!r}")
+        if self._allowed_tool_names is not None and call.name not in self._allowed_tool_names:
+            raise ValueError(f"ctx-core tool not allowed: {call.name!r}")
         local_name = call.name[len(_NAMESPACE) :]
         args = call.arguments or {}
         started = time.perf_counter()
@@ -579,6 +593,10 @@ class CtxCoreToolbox:
         """True when this toolbox is the dispatcher for the given name."""
         return tool_name.startswith(_NAMESPACE)
 
+    def allows(self, tool_name: str) -> bool:
+        """True when this toolbox is allowed to expose the given ctx tool."""
+        return self._allowed_tool_names is None or tool_name in self._allowed_tool_names
+
     # ── Individual dispatchers ──────────────────────────────────────────
 
     def _dispatch_recommend(self, args: dict[str, Any]) -> str:
@@ -619,12 +637,22 @@ class CtxCoreToolbox:
         if use_semantic_query:
             self._refresh_semantic_cache_signature()
             semantic_cache_dir = _semantic_cache_dir(self._wiki_dir_resolved())
+        entity_types = tuple(
+            entity_type
+            for entity_type in ("skill", "agent", "mcp-server")
+            if self._entity_type_allowed(entity_type)
+        )
+        if not entity_types:
+            return _encode_response(
+                {"query": query, "tags": tags, "results": [], "companion_harnesses": []},
+                _response_format_from_args(args),
+            )
         raw = recommend_by_tags(
             graph,
             tags,
             top_n=top_k,
             query=query,
-            entity_types=("skill", "agent", "mcp-server"),
+            entity_types=entity_types,
             min_normalized_score=cfg.recommendation_min_normalized_score,
             use_semantic_query=use_semantic_query,
             semantic_cache_dir=semantic_cache_dir,
@@ -662,7 +690,7 @@ class CtxCoreToolbox:
                 model_provider=model_provider,
                 model=model,
             )
-            if model_provider or model
+            if (model_provider or model) and self._entity_type_allowed("harness")
             else []
         )
         return _encode_response(
@@ -714,6 +742,8 @@ class CtxCoreToolbox:
         )
         results: list[dict[str, Any]] = []
         for r in raw:
+            if not self._entity_type_allowed(str(r.get("type") or "")):
+                continue
             candidate_keys = _recommendation_selection_keys(
                 [_recommendation_identity(r), str(r.get("name") or "")]
             )
@@ -780,6 +810,7 @@ class CtxCoreToolbox:
                 "via": r.get("via", []),
             }
             for r in raw
+            if self._entity_type_allowed(str(r.get("type") or ""))
         ]
         return _encode_response(
             {"seeds": seeds, "results": results},
@@ -792,7 +823,11 @@ class CtxCoreToolbox:
             return json.dumps({"error": "query must be non-empty", "results": []})
         top_n = _clamp_int(args.get("top_n"), default=15, lo=1, hi=100)
 
-        pages = self._ensure_pages()
+        pages = [
+            page
+            for page in self._ensure_pages()
+            if self._entity_type_allowed(str(page.entity_type))
+        ]
         if not pages:
             return json.dumps(
                 {
@@ -836,6 +871,8 @@ class CtxCoreToolbox:
                     ),
                 }
             )
+        if entity_type and not self._entity_type_allowed(entity_type):
+            return json.dumps({"error": f"entity_type {entity_type!r} is not allowed"})
 
         # Validate — ctx-core's validator rejects traversal shapes.
         from ctx.core.wiki.wiki_utils import validate_skill_name  # noqa: PLC0415
@@ -849,7 +886,18 @@ class CtxCoreToolbox:
         if wiki is None:
             return json.dumps({"error": "wiki_dir not configured"})
 
-        candidates = _wiki_get_candidates(wiki, slug, entity_type or None)
+        candidate_entity_types = (
+            (entity_type,)
+            if entity_type
+            else tuple(
+                allowed_type
+                for allowed_type in RECOMMENDABLE_ENTITY_TYPES
+                if self._entity_type_allowed(allowed_type)
+            )
+        )
+        if not candidate_entity_types:
+            return json.dumps({"error": "no entity types are allowed"})
+        candidates = _wiki_get_candidates(wiki, slug, candidate_entity_types)
         try:
             pack_pages = _wiki_pack_pages(wiki)
         except Exception as exc:  # noqa: BLE001 - surface corrupt pack state to callers.
@@ -885,6 +933,9 @@ class CtxCoreToolbox:
                 ],
             }
         )
+
+    def _entity_type_allowed(self, entity_type: str) -> bool:
+        return self._allowed_entity_types is None or entity_type in self._allowed_entity_types
 
     def _dispatch_lifecycle(self, args: dict[str, Any], name: str) -> str:
         try:
@@ -1107,13 +1158,37 @@ def _wiki_entity_link(slug: str, entity_type: str) -> str:
 def _wiki_get_candidates(
     wiki: Path,
     slug: str,
-    entity_type: str | None,
+    entity_types: Iterable[str],
 ) -> list[tuple[str, Path, str]]:
-    entity_types = [entity_type] if entity_type else list(RECOMMENDABLE_ENTITY_TYPES)
     return [
         (typ, _wiki_entity_path(wiki, slug, typ), _wiki_entity_link(slug, typ))
         for typ in entity_types
     ]
+
+
+def _normalise_allowed_tool_names(
+    tool_names: Iterable[str] | None,
+) -> frozenset[str] | None:
+    if tool_names is None:
+        return None
+    return frozenset(str(name).strip() for name in tool_names if str(name).strip())
+
+
+def _normalise_allowed_entity_types(
+    entity_types: Iterable[str] | None,
+) -> frozenset[str] | None:
+    if entity_types is None:
+        return None
+    normalised: list[str] = []
+    for raw in entity_types:
+        entity_type = normalize_entity_type(raw, allowed=RECOMMENDABLE_ENTITY_TYPES)
+        if entity_type is None:
+            raise ValueError(
+                "allowed_entity_types must contain only " + ", ".join(RECOMMENDABLE_ENTITY_TYPES)
+            )
+        if entity_type not in normalised:
+            normalised.append(entity_type)
+    return frozenset(normalised)
 
 
 def _wiki_pack_pages(wiki: Path) -> dict[str, str] | None:

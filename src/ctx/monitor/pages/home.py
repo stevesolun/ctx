@@ -5,9 +5,17 @@ from __future__ import annotations
 import html
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import quote
 
 LayoutFn = Callable[[str, str], str]
 FormatCountFn = Callable[[int], str]
+
+
+def _audit_subject_href(row: dict[str, Any]) -> str:
+    subject = str(row.get("subject") or "")
+    subject_type = str(row.get("subject_type") or "")
+    suffix = f"?type={quote(subject_type)}" if subject_type else ""
+    return f"/wiki/{quote(subject)}{suffix}"
 
 
 def render_home(
@@ -49,7 +57,7 @@ def render_home(
     audit_rows = "".join(
         f"<tr><td class='muted'>{html.escape((row.get('ts') or '')[-8:])}</td>"
         f"<td><span class='pill'>{html.escape(row.get('event', ''))}</span></td>"
-        f"<td><a href='/wiki/{html.escape(row.get('subject', ''))}'><code>{html.escape(row.get('subject', ''))}</code></a></td>"
+        f"<td><a href='{html.escape(_audit_subject_href(row))}'><code>{html.escape(row.get('subject', ''))}</code></a></td>"
         "</tr>"
         for row in reversed(recent_audit)
     )

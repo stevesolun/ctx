@@ -939,6 +939,36 @@ def test_validate_graph_artifacts_rejects_stale_root_communities(
         )
 
 
+@pytest.mark.parametrize("target_name", ["wiki-graph.tar.gz", "wiki-graph-runtime.tar.gz"])
+def test_validate_graph_artifacts_rejects_stale_promotion_current_sha256(
+    tmp_path: Path,
+    target_name: str,
+) -> None:
+    _write_catalog(
+        tmp_path,
+        converted_path="converted/skills-sh-example-skill/SKILL.md",
+    )
+    _write_archive(tmp_path)
+    target = tmp_path / target_name
+    target.with_name(f"{target.name}.promotion.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "promoted",
+                "current": {
+                    "exists": True,
+                    "size": target.stat().st_size,
+                    "sha256": "0" * 64,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(GraphArtifactError, match="promotion metadata current sha256 mismatch"):
+        validate_graph_artifacts(tmp_path, expected_harnesses={"langgraph"})
+
+
 @pytest.mark.parametrize(
     ("archive_kwargs", "missing_name"),
     [

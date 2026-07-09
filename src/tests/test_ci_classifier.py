@@ -212,6 +212,8 @@ def test_no_test_policy_covers_ci_package_contract_files() -> None:
 
     assert "scripts/ci_no_test_policy.py" in workflow
     assert "python -m ruff format --check src hooks scripts" in workflow
+    assert "release metadata-only changes" in workflow
+    assert "no-tests-needed label" in workflow
 
 
 def test_no_test_policy_treats_all_workflows_as_contract_files() -> None:
@@ -233,6 +235,19 @@ def test_no_test_policy_requires_tests_for_gate_runtime_scripts() -> None:
 
         assert result.passed is False
         assert result.contract_files == (script,)
+
+
+def test_no_test_policy_allows_no_tests_needed_label_for_contract_changes() -> None:
+    result = evaluate_policy(
+        ["src/ctx/api.py"],
+        ("no-tests-needed",),
+        {"src/ctx/api.py": "+def adapter_only_helper():\n"},
+    )
+
+    assert result.passed is True
+    assert result.message == "Policy exempted by no-tests-needed label."
+    assert result.contract_files == ("src/ctx/api.py",)
+    assert result.test_files == ()
 
 
 def test_no_test_policy_requires_tests_for_release_sync_artifact_scripts() -> None:

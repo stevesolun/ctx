@@ -33,6 +33,7 @@ from typing import Any
 import pytest
 
 import ctx.mcp_server.server as mcp_server
+from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.tools import (
     McpClient,
     McpServerConfig,
@@ -43,6 +44,7 @@ from ctx.mcp_server.server import (
     _HANDLERS,
     _NOTIFICATIONS,
     _ServerState,
+    _JsonRpcError,
     _handle_initialize,
     _handle_tools_call,
     _handle_tools_list,
@@ -67,6 +69,13 @@ _EXPECTED_TOOL_NAMES = {
     "ctx__unload_entity",
     "ctx__session_end",
     "ctx__session_state",
+}
+_READ_ONLY_TOOL_NAMES = {
+    "ctx__recommend_bundle",
+    "ctx__recommend_related",
+    "ctx__graph_query",
+    "ctx__wiki_search",
+    "ctx__wiki_get",
 }
 
 
@@ -110,6 +119,48 @@ def _mcp_subprocess_env(wiki: Path, graph_path: Path) -> dict[str, str]:
         "CTX_GRAPH_PATH": str(graph_path),
         "PYTHONPATH": pythonpath,
     }
+
+
+def _build_overlapping_scope_graph(tmp_path: Path) -> Path:
+    import networkx as nx
+
+    graph = nx.Graph()
+    graph.add_node(
+        "skill:python-patterns",
+        label="python-patterns",
+        type="skill",
+        tags=["python", "patterns"],
+    )
+    graph.add_node(
+        "mcp-server:python-patterns",
+        label="python-patterns",
+        type="mcp-server",
+        tags=["python", "filesystem"],
+    )
+    out_dir = tmp_path / "graphify-out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "graph.json"
+    path.write_text(json.dumps(nx.node_link_data(graph, edges="edges")), encoding="utf-8")
+    return path
+
+
+def _build_overlapping_scope_wiki(tmp_path: Path) -> Path:
+    wiki = tmp_path / "wiki"
+    skills = wiki / "entities" / "skills"
+    mcps = wiki / "entities" / "mcp-servers" / "p"
+    skills.mkdir(parents=True)
+    mcps.mkdir(parents=True)
+    (skills / "python-patterns.md").write_text(
+        "---\nname: python-patterns\ntitle: Python Patterns\n"
+        "tags: [python, patterns]\nstatus: cataloged\n---\n# skill body\n",
+        encoding="utf-8",
+    )
+    (mcps / "python-patterns.md").write_text(
+        "---\nname: python-patterns\ntitle: Python Patterns MCP\n"
+        "type: mcp-server\ntags: [python, filesystem]\nstatus: cataloged\n---\n# mcp body\n",
+        encoding="utf-8",
+    )
+    return wiki
 
 
 @pytest.fixture()
@@ -270,6 +321,13 @@ class TestToolsList:
         assert "inputSchema" in tool
         assert tool["inputSchema"]["type"] == "object"
 
+    def test_scoped_state_returns_only_allowed_tools(self) -> None:
+        state = _ServerState(allowed_tool_names=frozenset(_READ_ONLY_TOOL_NAMES))
+
+        result = _handle_tools_list(state, {})
+
+        assert {tool["name"] for tool in result["tools"]} == _READ_ONLY_TOOL_NAMES
+
 
 # ── tools/call ──────────────────────────────────────────────────────────────
 
@@ -330,6 +388,24 @@ class TestToolsCall:
         )
         assert frames[0]["error"]["code"] == _ErrorCode.METHOD_NOT_FOUND
 
+    def test_scoped_state_rejects_disallowed_tool_call(self) -> None:
+        state = _ServerState(allowed_tool_names=frozenset(_READ_ONLY_TOOL_NAMES))
+
+        with pytest.raises(_JsonRpcError) as ei:
+            _handle_tools_call(
+                state,
+                {
+                    "name": "ctx__load_entity",
+                    "arguments": {
+                        "session_id": "s-1",
+                        "entity_type": "skill",
+                        "slug": "python-patterns",
+                    },
+                },
+            )
+
+        assert ei.value.code == _ErrorCode.METHOD_NOT_FOUND
+
     def test_unknown_ctx_tool_returns_is_error_true(self) -> None:
         """An unknown ctx__* subtool is a data-level error, not RPC-level."""
         frames = _drive(
@@ -376,6 +452,55 @@ class TestToolsCall:
         result = frames[0]["result"]
         assert result["isError"] is True
 
+    def test_scoped_read_tools_filter_entity_results(self, tmp_path: Path) -> None:
+        toolbox = CtxCoreToolbox(
+            wiki_dir=_build_overlapping_scope_wiki(tmp_path),
+            graph_path=_build_overlapping_scope_graph(tmp_path),
+            allowed_tool_names=_READ_ONLY_TOOL_NAMES,
+            allowed_entity_types={"mcp-server"},
+        )
+        state = _ServerState(
+            toolbox=toolbox,
+            allowed_tool_names=frozenset(_READ_ONLY_TOOL_NAMES),
+            allowed_entity_types=frozenset({"mcp-server"}),
+        )
+
+        recommend_result = _handle_tools_call(
+            state,
+            {
+                "name": "ctx__recommend_bundle",
+                "arguments": {"query": "python", "top_k": 5, "model": "local-model"},
+            },
+        )
+        recommend_payload = json.loads(recommend_result["content"][0]["text"])
+        assert recommend_result["isError"] is False
+        assert recommend_payload["results"]
+        assert {row["type"] for row in recommend_payload["results"]} == {"mcp-server"}
+        assert recommend_payload["companion_harnesses"] == []
+
+        search_result = _handle_tools_call(
+            state,
+            {
+                "name": "ctx__wiki_search",
+                "arguments": {"query": "python", "top_n": 10},
+            },
+        )
+        search_payload = json.loads(search_result["content"][0]["text"])
+        assert search_payload["results"]
+        assert {row["entity_type"] for row in search_payload["results"]} == {"mcp-server"}
+
+        get_result = _handle_tools_call(
+            state,
+            {
+                "name": "ctx__wiki_get",
+                "arguments": {"slug": "python-patterns"},
+            },
+        )
+        get_payload = json.loads(get_result["content"][0]["text"])
+        assert get_payload["entity_type"] == "mcp-server"
+        assert "mcp body" in get_payload["body"]
+        assert "skill body" not in get_payload["body"]
+
     def test_lifecycle_tool_call_records_event(
         self,
         tmp_path: Path,
@@ -400,6 +525,8 @@ class TestToolsCall:
         assert result["isError"] is False
         payload = json.loads(result["content"][0]["text"])
         assert payload["ok"] is True
+        assert "events_path" not in payload
+        assert str(tmp_path) not in result["content"][0]["text"]
         event = json.loads((tmp_path / "runtime" / "events.jsonl").read_text())
         assert event["action"] == "load_requested"
 

@@ -165,6 +165,12 @@ class TestPublicApiShape:
             "wiki_search",
         }
     )
+    _ADAPTER_SUPPORT_NAMES = frozenset(
+        {
+            "ctx_core_tool_names",
+            "recommendation_graph",
+        }
+    )
 
     def test_top_level_exports(self) -> None:
         assert self._REQUIRED_NAMES <= set(ctx.__all__)
@@ -188,6 +194,13 @@ class TestPublicApiShape:
         assert ctx.graph_query is ctx.api.graph_query
         assert ctx.wiki_search is ctx.api.wiki_search
         assert ctx.wiki_get is ctx.api.wiki_get
+
+    def test_adapter_support_helpers_are_not_public_reexports(self) -> None:
+        for name in self._ADAPTER_SUPPORT_NAMES:
+            assert hasattr(ctx.api, name), f"ctx.api.{name} missing"
+            assert name not in ctx.api.__all__
+            assert name not in ctx.__all__
+            assert not hasattr(ctx, name), f"ctx.{name} should stay adapter-only"
 
 
 # ── Signatures (pinning the kwarg shape) ──────────────────────────────────
@@ -229,6 +242,10 @@ class TestSignatures:
     def test_list_all_entities_signature(self) -> None:
         sig = inspect.signature(ctx.list_all_entities)
         assert sig.parameters["entity_type"].default is None
+
+    def test_adapter_helper_signatures(self) -> None:
+        assert list(inspect.signature(ctx.api.ctx_core_tool_names).parameters) == []
+        assert list(inspect.signature(ctx.api.recommendation_graph).parameters) == []
 
 
 # ── End-to-end function behaviour ─────────────────────────────────────────
@@ -551,3 +568,25 @@ class TestCtxCoreToolboxRexport:
             "ctx__session_end",
             "ctx__session_state",
         }
+
+
+class TestAdapterSupportHelpers:
+    def test_ctx_core_tool_names_returns_shared_toolbox_names(
+        self,
+        synthetic_home: Path,
+    ) -> None:
+        names = ctx.api.ctx_core_tool_names()
+        toolbox_names = [
+            definition.name for definition in ctx.api._get_toolbox().tool_definitions()
+        ]
+
+        assert names == toolbox_names
+        assert "ctx__recommend_bundle" in names
+        assert "ctx__recommend_related" in names
+
+    def test_recommendation_graph_returns_shared_graph(self, synthetic_home: Path) -> None:
+        graph = ctx.api.recommendation_graph()
+
+        assert graph is ctx.api.recommendation_graph()
+        assert graph.has_node("skill:python-patterns")
+        assert graph.has_node("skill:fastapi-pro")

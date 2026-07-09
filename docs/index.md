@@ -17,9 +17,10 @@ burn fewer tokens and local models waste less CPU/GPU work.
 Watches what you develop, walks a knowledge graph of **68,494 skill pages, 467 agents, 10,790 MCP servers, and 207 cataloged harnesses**, and recommends the
 right execution bundle on the fly. The live execution bundle is skills,
 agents, and MCP servers only; custom/API/local model users and external loop
-adapters get separate harness recommendations based on model choice and task
-goal. You decide what to load, install, or adopt. Powered by a Karpathy LLM wiki
-with persistent memory that gets smarter every session.
+adapters get separate harness recommendations after explicit user-owned model
+consent, ranked by model choice and task goal. You decide what to load,
+install, or adopt. Powered by a Karpathy LLM wiki with persistent memory that
+gets smarter every session.
 
 !!! tip "Install"
 
@@ -145,9 +146,9 @@ graph-based discovery:
   agents, and MCP servers in real time — **nothing loads or
   installs without your approval**.
 - During custom/API/local model onboarding and LoopFlow/agent-loop adapter
-  calls, `ctx-init`, `ctx-harness-install`, and
-  `python -m ctx.adapters.loopflow` use the same graph to recommend harnesses
-  above the configured harness match floor.
+  calls with explicit user-owned model consent, `ctx-init`,
+  `ctx-harness-install`, and `python -m ctx.adapters.loopflow` use the same
+  graph to recommend harnesses above the configured harness match floor.
 
 The result: you always know what skills, agents, and MCP servers are available
 for your current task, and which harness fits when you choose your own model.
@@ -235,7 +236,7 @@ ones are flagged. New ones self-ingest.
     ---
 
     Current main is **v1.0.21** — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-    4,584 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+    4,606 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
     ships console scripts including `ctx-init`,
     `ctx-monitor` (local dashboard with graph + wiki + load/unload for
     skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),

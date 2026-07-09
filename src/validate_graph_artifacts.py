@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import json
 import math
 import re
@@ -268,6 +269,48 @@ def _require_real_file(path: Path) -> None:
         prefix = f.read(len(GIT_LFS_POINTER_PREFIX))
     if prefix == GIT_LFS_POINTER_PREFIX:
         raise GraphArtifactError(f"{path} is a Git LFS pointer, not hydrated content")
+
+
+def _validate_promotion_metadata_current(target: Path) -> None:
+    metadata_path = target.with_name(f"{target.name}.promotion.json")
+    if not metadata_path.is_file():
+        return
+    try:
+        record = _load_json(metadata_path)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GraphArtifactError(f"promotion metadata is not valid JSON: {metadata_path}") from exc
+    if not isinstance(record, dict):
+        raise GraphArtifactError(f"promotion metadata must be a JSON object: {metadata_path}")
+    current = record.get("current")
+    if not isinstance(current, dict):
+        raise GraphArtifactError(f"promotion metadata missing current snapshot: {metadata_path}")
+    if current.get("exists") is not True:
+        raise GraphArtifactError(
+            f"promotion metadata current exists mismatch for {target.name}: "
+            f"metadata {current.get('exists')!r}, actual True",
+        )
+    actual_size = target.stat().st_size
+    metadata_size = current.get("size")
+    if metadata_size != actual_size:
+        raise GraphArtifactError(
+            f"promotion metadata current size mismatch for {target.name}: "
+            f"metadata {metadata_size!r}, actual {actual_size}",
+        )
+    actual_sha256 = _sha256_file(target)
+    metadata_sha256 = current.get("sha256")
+    if metadata_sha256 != actual_sha256:
+        raise GraphArtifactError(
+            f"promotion metadata current sha256 mismatch for {target.name}: "
+            f"metadata {metadata_sha256!r}, actual {actual_sha256}",
+        )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _copy_tar_member_to_path(
@@ -935,6 +978,7 @@ def validate_graph_artifacts(
     overlay_path = graph_dir / "entity-overlays.jsonl"
     for path in (tarball, runtime_tarball, catalog_path, communities_path, overlay_path):
         _require_real_file(path)
+        _validate_promotion_metadata_current(path)
     _validate_graph_packs(graph_dir / "packs")
 
     expected_harnesses = DEFAULT_HARNESSES if expected_harnesses is None else expected_harnesses

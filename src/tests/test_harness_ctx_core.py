@@ -930,6 +930,8 @@ class TestRuntimeLifecycle:
         for name, arguments in calls:
             result = json.loads(toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments)))
             assert result["ok"] is True
+            assert "events_path" not in result
+            assert str(tmp_path) not in json.dumps(result)
 
         events = [
             json.loads(line)

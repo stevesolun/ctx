@@ -405,7 +405,14 @@ def test_home_page_module_renders_stats_and_recent_activity() -> None:
             "open_escalations_total": 0,
         },
         audit_lines=12,
-        recent_audit=[{"ts": "2026-06-21T01:02:03Z", "event": "skill.loaded", "subject": "python"}],
+        recent_audit=[
+            {
+                "ts": "2026-06-21T01:02:03Z",
+                "event": "skill.loaded",
+                "subject": "python",
+                "subject_type": "skill",
+            }
+        ],
         layout=lambda _title, body: body,
         format_count=lambda value: f"{value:,}",
     )
@@ -415,6 +422,7 @@ def test_home_page_module_renders_stats_and_recent_activity() -> None:
     assert "1,000 skills" in html
     assert "sess-1234567890" in html
     assert "skill.loaded" in html
+    assert "href='/wiki/python?type=skill'" in html
     assert "home-sidecar-count" in html
 
 

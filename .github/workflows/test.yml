@@ -816,13 +816,11 @@ jobs:
           lfs: false
 
       - name: Enforce test-coverage-per-PR policy
-        # Policy: any product or CI/package contract change
-        # must be accompanied by at least one test file change in the
-        # same PR. Exemptions:
-        #   - Pure docs / comment changes (matched by a trivial heuristic)
-        #   - Config JSON (src/config.json) — schema changes get tests
-        #     for the accessor, not the JSON itself.
-        #   - Changes ONLY inside __pycache__, .pyc files, etc.
+        # Policy: product or CI/package contract changes must include
+        # at least one src/tests/ change in the same PR. Exemptions are
+        # intentionally narrow and implemented in scripts/ci_no_test_policy.py:
+        # release metadata-only changes, or a maintainer-applied
+        # no-tests-needed label for changes where tests are genuinely not useful.
         run: |
           set -euo pipefail
           BASE="${{ github.event.pull_request.base.sha }}"

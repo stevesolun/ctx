@@ -42,6 +42,22 @@ def test_wiki_base_pack_manifest_round_trips(tmp_path: Path) -> None:
     )
 
 
+def test_wiki_pack_manifest_rejects_non_hex_checksum() -> None:
+    payload = {
+        "schema_version": 1,
+        "pack_id": "base-export-1",
+        "pack_type": "base",
+        "base_export_id": "wiki-export-1",
+        "parent_export_id": None,
+        "page_count": 1,
+        "tombstone_count": 0,
+        "checksums": {"pages.jsonl": "z" * 64},
+    }
+
+    with pytest.raises(WikiPackManifestError, match="SHA-256 hex digest"):
+        wiki_packs.WikiPackManifest.from_mapping(payload)
+
+
 def test_load_merged_wiki_pages_applies_overlay_and_tombstones(tmp_path: Path) -> None:
     packs_dir = tmp_path / "wiki-packs"
     write_wiki_base_pack(

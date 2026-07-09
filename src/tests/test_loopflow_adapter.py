@@ -13,6 +13,24 @@ import ctx.api as ctx_api
 from ctx.adapters import loopflow
 
 
+_EXPECTED_READ_ONLY_MCP_TOOL_NAMES = [
+    "ctx__recommend_bundle",
+    "ctx__graph_query",
+    "ctx__recommend_related",
+    "ctx__wiki_search",
+    "ctx__wiki_get",
+]
+
+
+def _expected_scoped_mcp_args(*entity_types: str) -> list[str]:
+    return [
+        "--allow-tools",
+        ",".join(_EXPECTED_READ_ONLY_MCP_TOOL_NAMES),
+        "--entity-types",
+        ",".join(entity_types),
+    ]
+
+
 class _FakeGraph:
     def number_of_nodes(self) -> int:
         return 10
@@ -27,6 +45,7 @@ def test_parse_loop_file_reads_loopflow_context(tmp_path: Path) -> None:
                 "  goal: requests are rate-limited per API key",
                 '  done when "pnpm test rate-limit" passes',
                 "  look at: the API, middleware, and the last failure",
+                "  ctx grants: skills, mcp",
             ]
         )
         + "\n",
@@ -39,6 +58,7 @@ def test_parse_loop_file_reads_loopflow_context(tmp_path: Path) -> None:
     assert parsed["goal"] == "requests are rate-limited per API key"
     assert parsed["look_at"] == ["the API", "middleware", "and the last failure"]
     assert parsed["done_when"] == ['"pnpm test rate-limit" passes']
+    assert parsed["permissions"] == ["skills", "mcps"]
 
 
 def test_recommend_for_loop_respects_capability_permissions(
@@ -127,8 +147,9 @@ def test_recommend_for_loop_respects_capability_permissions(
     ]
     assert payload["mcp_server"] == {
         "name": "ctx",
-        "command": None,
-        "tools": [],
+        "command": "ctx-mcp-server",
+        "args": _expected_scoped_mcp_args("skill", "mcp-server"),
+        "tools": _EXPECTED_READ_ONLY_MCP_TOOL_NAMES,
     }
 
 
@@ -142,8 +163,9 @@ def test_mcp_server_tools_are_filtered_by_permission_groups(monkeypatch) -> None
     )
     assert mcps_only["mcp_server"] == {
         "name": "ctx",
-        "command": None,
-        "tools": [],
+        "command": "ctx-mcp-server",
+        "args": _expected_scoped_mcp_args("mcp-server"),
+        "tools": _EXPECTED_READ_ONLY_MCP_TOOL_NAMES,
     }
 
     core_recommendations = loopflow.recommend_for_loop(
@@ -152,15 +174,27 @@ def test_mcp_server_tools_are_filtered_by_permission_groups(monkeypatch) -> None
     )
     assert core_recommendations["mcp_server"] == {
         "name": "ctx",
-        "command": None,
-        "tools": [],
+        "command": "ctx-mcp-server",
+        "args": _expected_scoped_mcp_args("skill", "agent", "mcp-server"),
+        "tools": _EXPECTED_READ_ONLY_MCP_TOOL_NAMES,
     }
+    assert not {
+        "ctx__observe_dev_event",
+        "ctx__load_entity",
+        "ctx__mark_entity_used",
+        "ctx__record_validation",
+        "ctx__record_escalation",
+        "ctx__unload_entity",
+        "ctx__session_end",
+        "ctx__session_state",
+    }.intersection(core_recommendations["mcp_server"]["tools"])
 
     all_grants = loopflow.recommend_for_loop(
         goal="recommend every capability",
         permissions={"skills", "agents", "mcps", "harnesses"},
     )
     assert all_grants["mcp_server"]["command"] == "ctx-mcp-server"
+    assert all_grants["mcp_server"]["args"] == []
     expected_tool_names = ctx_api.ctx_core_tool_names()
     assert all_grants["mcp_server"]["tools"] == expected_tool_names
     assert {
@@ -202,6 +236,7 @@ def test_missing_and_empty_permissions_stay_empty(monkeypatch) -> None:
         assert payload["mcp_server"] == {
             "name": "ctx",
             "command": None,
+            "args": [],
             "tools": [],
         }
 
@@ -228,12 +263,13 @@ def test_loopflow_skill_hint_requires_skills_permission(monkeypatch) -> None:
     assert payload["permissions"]["skills"] is False
     assert payload["capabilities"]["skills"] == []
     assert [row["name"] for row in payload["capabilities"]["mcps"]] == ["filesystem"]
-    assert payload["loopflow"]["use_tools"] is None
+    assert payload["loopflow"]["use_tools"] == 'use tools from the "ctx" server'
     assert payload["loopflow"]["use_skills"] is None
     assert payload["mcp_server"] == {
         "name": "ctx",
-        "command": None,
-        "tools": [],
+        "command": "ctx-mcp-server",
+        "args": _expected_scoped_mcp_args("mcp-server"),
+        "tools": _EXPECTED_READ_ONLY_MCP_TOOL_NAMES,
     }
 
 
@@ -264,6 +300,7 @@ def test_loopflow_tool_hint_requires_mcps_permission(monkeypatch) -> None:
     assert payload["mcp_server"] == {
         "name": "ctx",
         "command": None,
+        "args": [],
         "tools": [],
     }
 
@@ -555,7 +592,19 @@ def test_harnesses_require_user_owned_llm(monkeypatch) -> None:
     )
     assert blocked["capabilities"]["harnesses"] == []
     assert blocked["warnings"] == [
-        "harnesses permission granted but no user-owned LLM/model was declared"
+        "harnesses permission granted but --own-llm/user-owned model consent was not declared"
+    ]
+    assert calls == []
+
+    metadata_only = loopflow.recommend_for_loop(
+        goal="run with a private model",
+        permissions={"harnesses"},
+        model_provider="ollama",
+        model="llama3.1",
+    )
+    assert metadata_only["capabilities"]["harnesses"] == []
+    assert metadata_only["warnings"] == [
+        "harnesses permission granted but --own-llm/user-owned model consent was not declared"
     ]
     assert calls == []
 
@@ -777,8 +826,117 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
     assert payload["context"]["last_failure_present"] is True
     assert "python -m ctx.adapters.loopflow" in payload["agent_loop"]["before_plan"]
     assert "python -m ctx.adapters.loopflow" in payload["loopflow"]["before_plan"]
-    assert payload["loopflow"]["use_tools"] is None
+    assert payload["loopflow"]["use_tools"] == 'use tools from the "ctx" server'
     assert payload["loopflow"]["use_skills"] == "use skills: security-review"
+
+
+def test_main_uses_loop_file_ctx_grants_when_cli_permissions_absent(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    loop_file = tmp_path / "review.loop"
+    loop_file.write_text(
+        "\n".join(
+            [
+                'loop "review upload":',
+                "  goal: no high-severity upload findings",
+                "  ctx grants: skills, mcps",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del query, top_k
+        assert permissions == {"skills", "mcps"}
+        return [
+            {"name": "security-review", "type": "skill"},
+            {"name": "filesystem", "type": "mcp-server"},
+        ]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+    monkeypatch.setattr(loopflow, "recommend_harnesses", lambda *args, **kwargs: [])
+
+    assert loopflow.main(["--loop-file", str(loop_file), "--compact"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["permissions"] == {
+        "skills": True,
+        "agents": False,
+        "mcps": True,
+        "harnesses": False,
+    }
+    assert payload["mcp_server"] == {
+        "name": "ctx",
+        "command": "ctx-mcp-server",
+        "args": _expected_scoped_mcp_args("skill", "mcp-server"),
+        "tools": _EXPECTED_READ_ONLY_MCP_TOOL_NAMES,
+    }
+
+
+def test_main_cli_permissions_override_loop_file_ctx_grants(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    loop_file = tmp_path / "review.loop"
+    loop_file.write_text(
+        "\n".join(
+            [
+                'loop "review upload":',
+                "  goal: no high-severity upload findings",
+                "  ctx grants: skills",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del query, top_k
+        assert permissions == {"mcps"}
+        return [
+            {"name": "security-review", "type": "skill"},
+            {"name": "filesystem", "type": "mcp-server"},
+        ]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+    monkeypatch.setattr(loopflow, "recommend_harnesses", lambda *args, **kwargs: [])
+
+    assert (
+        loopflow.main(
+            [
+                "--loop-file",
+                str(loop_file),
+                "--permissions",
+                "mcps",
+                "--compact",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["permissions"] == {
+        "skills": False,
+        "agents": False,
+        "mcps": True,
+        "harnesses": False,
+    }
+    assert payload["capabilities"]["skills"] == []
+    assert payload["capabilities"]["mcps"] == [{"name": "filesystem", "type": "mcp-server"}]
 
 
 def test_look_at_paths_are_sanitized_in_public_payload(monkeypatch) -> None:
