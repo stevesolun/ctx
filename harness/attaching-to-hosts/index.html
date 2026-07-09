@@ -1744,22 +1744,36 @@ servers that cannot avoid argv credentials; prefer <code>credential_env</code> o
 </span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
 </span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="c1"># Inside your agent loop:</span>
 </span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="k">def</span><span class="w"> </span><span class="nf">on_user_turn</span><span class="p">(</span><span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
-</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="n">bundle</span> <span class="o">=</span> <span class="n">recommend_bundle</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
-</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>    <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">bundle</span><span class="p">:</span>
-</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  [</span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">&gt;11</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">  (score </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">&#39;score&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
-</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>
-</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>    <span class="n">related</span> <span class="o">=</span> <span class="n">recommend_related</span><span class="p">([</span><span class="s2">&quot;skill:fastapi-pro&quot;</span><span class="p">],</span> <span class="n">rejected</span><span class="o">=</span><span class="p">[],</span> <span class="n">top_n</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
-</span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>    <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">related</span><span class="p">:</span>
-</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  related: </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> - </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">&#39;reason&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-</span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>
-</span><span id="__span-8-20"><a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>    <span class="c1"># User asks about a specific slug you saw in the bundle:</span>
-</span><span id="__span-8-21"><a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>    <span class="n">page</span> <span class="o">=</span> <span class="n">wiki_get</span><span class="p">(</span><span class="s2">&quot;fastapi-pro&quot;</span><span class="p">)</span>
-</span><span id="__span-8-22"><a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>    <span class="k">if</span> <span class="n">page</span><span class="p">:</span>
-</span><span id="__span-8-23"><a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a>        <span class="n">inject_into_context</span><span class="p">(</span><span class="n">page</span><span class="p">[</span><span class="s2">&quot;body&quot;</span><span class="p">])</span>
+</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="n">bundle</span> <span class="o">=</span> <span class="n">recommend_bundle</span><span class="p">(</span>
+</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>        <span class="n">query</span><span class="p">,</span>
+</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>        <span class="n">top_k</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>        <span class="n">active_context</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;mcp-server:codex-cli&quot;</span><span class="p">],</span>
+</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>        <span class="n">local_code_task</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>        <span class="n">no_api_keys</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>        <span class="n">language</span><span class="o">=</span><span class="s2">&quot;python&quot;</span><span class="p">,</span>
+</span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>    <span class="p">)</span>
+</span><span id="__span-8-20"><a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>    <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">bundle</span><span class="p">:</span>
+</span><span id="__span-8-21"><a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  [</span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">&gt;11</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">  (score </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">&#39;score&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+</span><span id="__span-8-22"><a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>
+</span><span id="__span-8-23"><a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a>    <span class="n">related</span> <span class="o">=</span> <span class="n">recommend_related</span><span class="p">([</span><span class="s2">&quot;skill:fastapi-pro&quot;</span><span class="p">],</span> <span class="n">rejected</span><span class="o">=</span><span class="p">[],</span> <span class="n">top_n</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+</span><span id="__span-8-24"><a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a>    <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">related</span><span class="p">:</span>
+</span><span id="__span-8-25"><a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  related: </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> - </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">&#39;reason&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span><span id="__span-8-26"><a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a>
+</span><span id="__span-8-27"><a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a>    <span class="c1"># User asks about a specific slug you saw in the bundle:</span>
+</span><span id="__span-8-28"><a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a>    <span class="n">page</span> <span class="o">=</span> <span class="n">wiki_get</span><span class="p">(</span><span class="s2">&quot;fastapi-pro&quot;</span><span class="p">)</span>
+</span><span id="__span-8-29"><a id="__codelineno-8-29" name="__codelineno-8-29" href="#__codelineno-8-29"></a>    <span class="k">if</span> <span class="n">page</span><span class="p">:</span>
+</span><span id="__span-8-30"><a id="__codelineno-8-30" name="__codelineno-8-30" href="#__codelineno-8-30"></a>        <span class="n">inject_into_context</span><span class="p">(</span><span class="n">page</span><span class="p">[</span><span class="s2">&quot;body&quot;</span><span class="p">])</span>
 </span></code></pre></div>
 <p>The first call to any of these lazy-loads the graph + wiki once;
 subsequent calls are O(walk) cheap. Safe to call from inside your
-own while-loop on every turn.</p>
+own while-loop on every turn. <code>recommend_bundle()</code> accepts
+<code>selected</code>, <code>rejected</code>, <code>active_context</code>, and <code>baseline_context</code> to keep
+already-present context out of new load suggestions. It also accepts
+<code>local_code_task</code>, <code>no_api_keys</code>, <code>language</code>, <code>include_baseline_context</code>, and
+<code>include_unavailable</code> when a local/no-key coding loop needs stricter filtering.
+Returned rows include availability metadata (<code>installable</code>, <code>load_status</code>, and
+<code>source_path</code>) so hosts can distinguish local wiki entries from manual or
+external-install rows.</p>
 <p>Advanced: build a <code>CtxCoreToolbox</code> directly if you need to point at
 a non-default wiki/graph path:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
@@ -1840,6 +1854,10 @@ ctx which capabilities it may load before planning.</p>
   engine;</li>
 <li><code>related_recommendations</code> after the loop passes selected and rejected
   recommendation IDs;</li>
+<li>availability metadata on returned rows so loops can load local wiki entries
+  and leave external/manual rows for explicit action;</li>
+<li>inferred local/no-key/language filtering for goals such as LoCoBench
+  <code>feature_implementation</code> tasks with no API keys;</li>
 <li>optional harness recommendations only when the loop gives explicit
   user-owned/API/local model consent with <code>--own-llm</code> or <code>own_llm=True</code>.</li>
 </ul>
@@ -1864,15 +1882,17 @@ back before the next plan:</p>
 </span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">  </span>--rejected<span class="w"> </span>legacy-reviewer
 </span></code></pre></div>
 <p>Selected and rejected values may be recommendation IDs such as
-<code>mcp-server:ollama</code> or bare names. Returned <code>related_recommendations</code> exclude
-both sets and keep the same <code>id</code>, <code>tldr</code>, <code>reason</code>, <code>selected</code>, and
-<code>selection_state</code> semantics as the ctx API/core toolbox.</p>
+<code>mcp-server:ollama</code> or bare names. They suppress both primary capability rows
+and returned <code>related_recommendations</code>, which keep the same <code>id</code>, <code>tldr</code>,
+<code>reason</code>, <code>selected</code>, <code>selection_state</code>, and availability semantics as the ctx
+API/core toolbox.</p>
 <p>The returned payload includes LoopFlow-ready hints for the granted groups:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>use skills: security-review, code-review
 </span></code></pre></div>
-<p>Only installed/local skill rows are named in <code>loopflow.use_skills</code>. Installable
-catalog skills remain under <code>capabilities.skills</code> with <code>status: available</code> and
-their <code>install_command</code> metadata.</p>
+<p>Only local wiki skill rows are named in <code>loopflow.use_skills</code>. Catalog skills
+remain under <code>capabilities.skills</code> with <code>status: available</code>,
+<code>load_status: external-install-required</code>, and <code>install_command</code> metadata when
+the current context allows non-local recommendations.</p>
 <p>When the LoopFlow run uses its own LLM rather than a hosted Claude Code
 session, grant harnesses and pass the model profile:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>python<span class="w"> </span>-m<span class="w"> </span>ctx.adapters.loopflow<span class="w"> </span><span class="se">\</span>

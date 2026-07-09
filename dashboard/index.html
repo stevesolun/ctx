@@ -1741,9 +1741,11 @@ servers, and harness pages in wiki/graph views. Harness installation,
 update, and uninstall run through <code>ctx-harness-install</code>; dashboard
 load/unload POSTs reject harnesses with the exact dry-run command to use.
 Quality scoring is shown for sidecar-backed skills, agents, and MCP servers.
-The <code>/recommend</code> page exposes the same selectable recommendation flow as the
-CLI/API: query, top-k, selected and rejected IDs, select-all/select-none helpers,
-TLDR/reason text, and related suggestions for partially selected bundles.
+The <code>/recommend</code> page exposes the browser selectable recommendation flow:
+query, top-k, selected and rejected IDs, select-all/select-none helpers,
+TLDR/reason text, and related suggestions for partially selected bundles. The
+CLI/API expose additional active-context, baseline-context, availability,
+local/no-key, and language controls for host loops.
 Generic/API/local harnesses that call ctx-core validation tools write to
 the runtime lifecycle ledger. The dashboard exposes that ledger at
 <code>/runtime</code> and as JSON at <code>/api/runtime.json</code>, including validation and
@@ -1950,7 +1952,7 @@ per-process monitor token injected into the rendered page.</p>
 </tr>
 <tr>
 <td><code>/recommend</code></td>
-<td>Selectable recommendation page: query and top-k controls, repeated selected/rejected ID inputs, select-all/select-none helpers, recommendation state, TLDR/reason text, and graph-backed related suggestions for partial selections.</td>
+<td>Selectable recommendation page: query and top-k controls, repeated selected/rejected ID inputs, select-all/select-none helpers, recommendation state, TLDR/reason text, and graph-backed related suggestions for partial selections. Advanced active/baseline context and local/no-key filters are CLI/API controls.</td>
 </tr>
 <tr>
 <td><code>/manage</code></td>

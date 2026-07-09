@@ -1529,6 +1529,9 @@ graph-based discovery:</p>
   stack signals, walks the graph, and <strong>recommends</strong> relevant skills,
   agents, and MCP servers in real time — <strong>nothing loads or
   installs without your approval</strong>.</li>
+<li>Recommendation calls can suppress already selected, rejected, active, or
+  baseline context and can filter local/no-key or language-mismatched rows
+  before they enter a plan.</li>
 <li>During custom/API/local model onboarding and LoopFlow/agent-loop adapter
   calls with explicit user-owned model consent, <code>ctx-init</code>,
   <code>ctx-harness-install</code>, and <code>python -m ctx.adapters.loopflow</code> use the same
@@ -1605,7 +1608,7 @@ A/B/C/D/F.</p>
 <p><strong>Source snapshot</strong></p>
 <hr />
 <p>Current main is <strong>v1.0.21</strong> — MIT, CI-matrixed (Ubuntu 3.12 plus Windows/macOS 3.11/3.12),
-4,618 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
+4,635 test inventory. Adds enterprise OpenTelemetry-ready telemetry and
 ships console scripts including <code>ctx-init</code>,
 <code>ctx-monitor</code> (local dashboard with graph + wiki + load/unload for
 skills, agents, and MCP servers, plus Harness Setup for user-owned LLMs),

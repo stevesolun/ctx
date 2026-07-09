@@ -1809,7 +1809,11 @@ The helper <code>resolve_graph.load_graph()</code> does this for you.</p>
   signals when available. Imported skill results are normal <code>skill</code> nodes with
   detail URLs, install commands, duplicate
   hints, gated micro-skill loaders when over the line threshold, and
-  quality/security metadata. If an older
+  quality/security metadata. Recommendation contracts also carry each row's
+  full tags plus wiki availability fields (<code>installable</code>, <code>load_status</code>, and
+  <code>source_path</code>), suppress selected/rejected/active/default-baseline context,
+  and can filter unavailable, external-service, generic-planning, or
+  wrong-language rows for local/no-key coding loops. If an older
   extracted wiki has the skill index JSON but no graph nodes for
   those records, the same recommender falls back to the index file.</li>
 <li>Harness recommendations are a separate path for custom/API/local
