@@ -33,14 +33,11 @@ jobs:
           fetch-depth: 0
           lfs: false
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            requirements-docs.txt
+      - name: Set up local Python 3.12 venv
+        run: |
+          /opt/homebrew/opt/python@3.12/bin/python3.12 --version
+          /opt/homebrew/opt/python@3.12/bin/python3.12 -m venv .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
         run: |
