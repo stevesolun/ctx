@@ -396,7 +396,7 @@ def recommend_by_tags(
                     sem_score = {}
 
     signal_set = set(signals)
-    scored: list[tuple[str, float, str, dict[str, Any], set[str]]] = []
+    scored: list[tuple[str, float, str, dict[str, Any], set[str], set[str]]] = []
     for node_id, data in graph.nodes(data=True):
         node_data = dict(data)
         if _truthy_flag(node_data.get("never_load")):
@@ -442,7 +442,7 @@ def recommend_by_tags(
             continue
 
         score += math.log1p(graph.degree(node_id))
-        scored.append((label, score, node_id, node_data, matching_tags))
+        scored.append((label, score, node_id, node_data, matching_tags, node_tags))
 
     ranked = sorted(
         scored,
@@ -455,7 +455,7 @@ def recommend_by_tags(
     )
     top_score = ranked[0][1] if ranked else 0.0
     graph_results: list[dict[str, Any]] = []
-    for label, score, _node_id, node_data, matching_tags in ranked:
+    for label, score, _node_id, node_data, matching_tags, node_tags in ranked:
         normalized_score = round(score / top_score, 4) if top_score else 0.0
         if normalized_score < min_score:
             continue
@@ -466,6 +466,7 @@ def recommend_by_tags(
                 "score": round(score, 1),
                 "normalized_score": normalized_score,
                 "matching_tags": sorted(matching_tags),
+                "tags": sorted(node_tags),
                 "external": node_data.get("external", False),
                 "external_catalog": node_data.get("external_catalog"),
                 "source_catalog": _public_source_catalog(node_data.get("source_catalog")),
@@ -624,6 +625,7 @@ def _recommend_external_catalog(
             "score": round(score, 1),
             "normalized_score": 0.0,
             "matching_tags": sorted(matching),
+            "tags": sorted(tags),
             "external": False,
             "external_catalog": None,
             "source_catalog": "skill-index",

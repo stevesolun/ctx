@@ -484,7 +484,8 @@ def recommend_for_loop(
     local_loadable_skills_only = _is_local_no_key_query(ranking_query)
     recommendation_context = _recommendation_context_from_args(ranking_query, {})
     context_filters_active = any(
-        bool(recommendation_context.get(key)) for key in ("local_code_task", "no_api_keys")
+        bool(recommendation_context.get(key))
+        for key in ("local_code_task", "no_api_keys", "language")
     )
     if granted.intersection({"skills", "agents", "mcps"}):
         fetch_top_k = safe_top_k

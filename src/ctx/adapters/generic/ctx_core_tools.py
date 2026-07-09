@@ -1633,6 +1633,7 @@ def _base_recommendation_row(row: Mapping[str, Any], *, wiki_dir: Path | None) -
         "score": row["score"],
         "normalized_score": row.get("normalized_score"),
         "matching_tags": row.get("matching_tags", []),
+        "tags": row.get("tags", []),
         "external": row.get("external", False),
         "external_catalog": row.get("external_catalog"),
         "source_catalog": row.get("source_catalog"),
@@ -1880,9 +1881,10 @@ def _recommendation_context_text(row: Mapping[str, Any]) -> str:
         value = row.get(key)
         if value:
             values.append(str(value))
-    tags = row.get("matching_tags") or []
-    if isinstance(tags, list):
-        values.extend(str(tag) for tag in tags)
+    for key in ("matching_tags", "shared_tags", "tags"):
+        tags = row.get(key) or []
+        if isinstance(tags, list):
+            values.extend(str(tag) for tag in tags)
     return " ".join(values)
 
 
@@ -2091,6 +2093,7 @@ def _resolve_related_recommendation_rows(
             "score": round(score, 2),
             "normalized_score": round(score / max_score, 4),
             "shared_tags": shared_tags_map.get(node_id, [])[:8],
+            "tags": [str(tag).lower() for tag in node_data.get("tags", []) if tag],
             "via": via.get(node_id, [])[:4],
         }
         for key in (

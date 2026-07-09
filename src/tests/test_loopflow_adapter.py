@@ -483,6 +483,58 @@ def test_loopflow_primary_capabilities_apply_context_policy(monkeypatch) -> None
     ]
 
 
+def test_loopflow_language_context_overfetches_primary_candidates(monkeypatch) -> None:
+    fetch_counts: list[int] = []
+
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del query, permissions
+        fetch_counts.append(top_k)
+        return [
+            {
+                "name": "generic-api-helper",
+                "type": "skill",
+                "installable": True,
+                "load_status": "local-wiki",
+                "matching_tags": ["api"],
+                "tags": ["go", "api"],
+                "score": 91,
+            },
+            {
+                "name": "backend-api-helper",
+                "type": "skill",
+                "installable": True,
+                "load_status": "local-wiki",
+                "matching_tags": ["api"],
+                "tags": ["python", "api"],
+                "score": 88,
+            },
+        ]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+
+    payload = loopflow.recommend_for_loop(
+        goal="LoCoBench python api helper",
+        permissions={"skills"},
+        top_k=1,
+    )
+
+    assert fetch_counts == [6]
+    assert payload["capabilities"]["skills"] == [
+        {
+            "name": "backend-api-helper",
+            "type": "skill",
+            "score": 88,
+            "installable": True,
+            "load_status": "local-wiki",
+        }
+    ]
+
+
 def test_loopflow_local_no_key_loop_filters_related_recommendations(monkeypatch) -> None:
     monkeypatch.setattr(loopflow, "_recommend_capability_rows", lambda *args, **kwargs: [])
 
@@ -583,6 +635,7 @@ def test_related_recommendations_include_availability_metadata(tmp_path: Path) -
     )
 
     assert payload["results"][0]["id"] == "skill:local-helper"
+    assert payload["results"][0]["tags"] == ["python", "api"]
     assert payload["results"][0]["installable"] is True
     assert payload["results"][0]["load_status"] == "local-wiki"
     assert payload["results"][0]["source_path"] == "converted/local-helper/SKILL.md"
@@ -692,7 +745,7 @@ def test_mcps_only_uses_type_filtered_recommendations(monkeypatch) -> None:
     monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
 
     payload = loopflow.recommend_for_loop(
-        goal="python task",
+        goal="backend task",
         permissions={"mcps"},
         top_k=1,
     )
@@ -727,7 +780,7 @@ def test_agents_only_uses_type_filtered_recommendations(monkeypatch) -> None:
     monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
 
     payload = loopflow.recommend_for_loop(
-        goal="python task",
+        goal="backend task",
         permissions={"agents"},
         top_k=2,
     )
@@ -765,7 +818,7 @@ def test_multi_grant_recommendations_use_single_combined_graph_call(monkeypatch)
     monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
 
     payload = loopflow.recommend_for_loop(
-        goal="python task",
+        goal="backend task",
         permissions={"skills", "agents", "mcps"},
         top_k=2,
     )
