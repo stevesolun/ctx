@@ -12,6 +12,7 @@ import sys
 from typing import Any
 
 import ctx.api as ctx_api
+from ctx.adapters.generic.ctx_core_tools import _base_recommendation_row
 from ctx.core.resolve.recommendations import query_to_tags, recommend_by_tags
 from ctx_init import _harness_requirements_text, recommend_harnesses
 
@@ -243,6 +244,10 @@ def _selection_keys(values: list[str]) -> set[str]:
     return keys
 
 
+def _row_selection_keys(row: dict[str, Any], name: str) -> set[str]:
+    return _selection_keys([str(row.get("id") or f"{row.get('type')}:{name}"), name])
+
+
 def _is_local_no_key_query(query: str) -> bool:
     lower = query.lower()
     return any(
@@ -277,7 +282,7 @@ def _group_bundle(
         identity = (group, name)
         if identity in seen:
             continue
-        if _selection_key(str(row.get("id") or f"{row.get('type')}:{name}")) in excluded_keys:
+        if _row_selection_keys(row, name) & excluded_keys:
             continue
         if group == "skills" and local_loadable_skills_only and not _is_loadable_skill_row(row):
             continue
@@ -305,7 +310,7 @@ def _filter_related_rows(
         identity = (group, name)
         if identity in seen:
             continue
-        if _selection_key(str(row.get("id") or f"{row.get('type')}:{name}")) in excluded_keys:
+        if _row_selection_keys(row, name) & excluded_keys:
             continue
         seen.add(identity)
         filtered.append(_compact_row(row))
@@ -399,7 +404,7 @@ def _recommend_capability_rows(
         return []
     from ctx_config import cfg  # noqa: PLC0415
 
-    return recommend_by_tags(
+    raw_rows = recommend_by_tags(
         graph,
         tags,
         top_n=top_k * len(entity_types),
@@ -407,6 +412,8 @@ def _recommend_capability_rows(
         entity_types=tuple(entity_types),
         min_normalized_score=cfg.recommendation_min_normalized_score,
     )
+    wiki_dir = ctx_api.default_wiki_dir()
+    return [_base_recommendation_row(row, wiki_dir=wiki_dir) for row in raw_rows]
 
 
 def recommend_for_loop(
@@ -470,18 +477,22 @@ def recommend_for_loop(
     selected_ids = [value.strip() for value in (selected or []) if value.strip()]
     rejected_ids = [value.strip() for value in (rejected or []) if value.strip()]
     excluded_ids = _selection_keys(selected_ids + rejected_ids)
+    local_loadable_skills_only = _is_local_no_key_query(ranking_query)
     if granted.intersection({"skills", "agents", "mcps"}):
+        fetch_top_k = safe_top_k
+        if excluded_ids or local_loadable_skills_only:
+            fetch_top_k = min(50, safe_top_k + len(excluded_ids) + 5)
         rows = _recommend_capability_rows(
             ranking_query,
             permissions=granted,
-            top_k=safe_top_k,
+            top_k=fetch_top_k,
         )
         capability_bundle.update(
             _group_bundle(
                 rows,
                 permissions=granted,
                 excluded=excluded_ids,
-                local_loadable_skills_only=_is_local_no_key_query(ranking_query),
+                local_loadable_skills_only=local_loadable_skills_only,
                 top_k=safe_top_k,
             )
         )

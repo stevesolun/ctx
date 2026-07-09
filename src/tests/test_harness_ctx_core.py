@@ -28,6 +28,7 @@ from ctx.adapters.generic.ctx_core_tools import (
     _clamp_int,
     _excerpt,
     _file_signature,
+    _infer_query_language,
     _query_to_tags,
     make_tool_executor,
 )
@@ -1500,6 +1501,11 @@ class TestRecommendBundle:
         # python + web + api should score fastapi-pro highly (3 tags match).
         names = [r["name"] for r in result["results"]]
         assert "fastapi-pro" in names
+
+    def test_language_inference_resolves_common_word_aliases(self) -> None:
+        assert _infer_query_language("go through python tests") == "python"
+        assert _infer_query_language("python tree node bug") == "python"
+        assert _infer_query_language("locobench go feature implementation") == "go"
 
     def test_companion_harnesses_are_separate_from_dev_results(
         self,

@@ -146,6 +146,7 @@ _LANGUAGE_TOKEN_ALIASES = {
     "rust": frozenset({"rust", "rs"}),
     "typescript": frozenset({"typescript", "ts"}),
 }
+_AMBIGUOUS_LANGUAGE_TOKEN_ALIASES = frozenset({"go", "node"})
 SUPPORTED_RESPONSE_FORMATS = ("json", "gcf")
 _RESPONSE_FORMAT_PROPERTY = {
     "type": "string",
@@ -1653,6 +1654,16 @@ def _base_recommendation_row(row: Mapping[str, Any], *, wiki_dir: Path | None) -
     return base
 
 
+def _recommendation_source_ref(path: Path, *, wiki_dir: Path) -> str:
+    try:
+        return path.relative_to(wiki_dir).as_posix()
+    except ValueError:
+        try:
+            return path.resolve().relative_to(wiki_dir.resolve()).as_posix()
+        except (OSError, ValueError):
+            return path.name
+
+
 def _recommendation_availability(
     row: Mapping[str, Any],
     *,
@@ -1683,15 +1694,25 @@ def _recommendation_availability(
                         {
                             "installable": True,
                             "load_status": "local-wiki",
-                            "source_path": str(candidate),
+                            "source_path": _recommendation_source_ref(candidate, wiki_dir=wiki_dir),
                         }
                     )
                     return result
-            result.update({"load_status": "wiki-no-loadable-body", "source_path": str(converted)})
+            result.update(
+                {
+                    "load_status": "wiki-no-loadable-body",
+                    "source_path": _recommendation_source_ref(converted, wiki_dir=wiki_dir),
+                }
+            )
             return result
         entity_path = entity_page_path(wiki_dir, "skill", slug)
         if entity_path is not None and entity_path.exists():
-            result.update({"load_status": "wiki-no-loadable-body", "source_path": str(entity_path)})
+            result.update(
+                {
+                    "load_status": "wiki-no-loadable-body",
+                    "source_path": _recommendation_source_ref(entity_path, wiki_dir=wiki_dir),
+                }
+            )
             return result
         if source_catalog or install_command or status in {"available", "remote-cataloged"}:
             result.update(
@@ -1712,7 +1733,7 @@ def _recommendation_availability(
             {
                 "installable": True,
                 "load_status": "local-wiki",
-                "source_path": str(entity_path),
+                "source_path": _recommendation_source_ref(entity_path, wiki_dir=wiki_dir),
             }
         )
     elif source_catalog or install_command or status in {"available", "remote-cataloged"}:
@@ -1756,9 +1777,20 @@ def _infer_query_language(query_lower: str) -> str | None:
             if raw == language or raw in aliases:
                 return language
     tokens = set(_recommendation_text_tokens(query_lower))
-    for language, aliases in _LANGUAGE_TOKEN_ALIASES.items():
-        if tokens & aliases:
-            return language
+    hits = {
+        language: matched
+        for language, aliases in _LANGUAGE_TOKEN_ALIASES.items()
+        if (matched := tokens & aliases)
+    }
+    if len(hits) == 1:
+        return next(iter(hits))
+    strong_hits = {
+        language
+        for language, matched in hits.items()
+        if matched - _AMBIGUOUS_LANGUAGE_TOKEN_ALIASES
+    }
+    if len(strong_hits) == 1:
+        return next(iter(strong_hits))
     return None
 
 

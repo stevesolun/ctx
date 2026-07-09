@@ -280,7 +280,7 @@ class TestRecommendBundle:
         assert fastapi["id"] == f"{fastapi['type']}:{fastapi['name']}"
         assert fastapi["installable"] is True
         assert fastapi["load_status"] == "local-wiki"
-        assert fastapi["source_path"].replace("\\", "/").endswith("converted/fastapi-pro/SKILL.md")
+        assert fastapi["source_path"] == "converted/fastapi-pro/SKILL.md"
         assert fastapi["selected"] is False
         assert fastapi["selection_state"] == "suggested"
         assert isinstance(fastapi["tldr"], str)

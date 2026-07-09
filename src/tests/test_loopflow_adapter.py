@@ -72,7 +72,7 @@ def test_recommend_for_loop_respects_capability_permissions(
     ) -> list[dict[str, Any]]:
         assert "checkout e2e" in query
         assert permissions == {"skills", "mcps"}
-        assert top_k == 2
+        assert top_k == 9
         return [
             {"name": "playwright-debug", "type": "skill", "score": 91},
             {"name": "browser-agent", "type": "agent", "score": 85},
@@ -151,6 +151,43 @@ def test_recommend_for_loop_respects_capability_permissions(
         "args": _expected_scoped_mcp_args("skill", "mcp-server"),
         "tools": _EXPECTED_READ_ONLY_MCP_TOOL_NAMES,
     }
+
+
+def test_loopflow_excludes_bare_selection_names_and_backfills(monkeypatch) -> None:
+    calls: list[int] = []
+
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del query, permissions
+        calls.append(top_k)
+        return [
+            {"id": "skill:fastapi-pro", "name": "fastapi-pro", "type": "skill", "score": 99},
+            {
+                "id": "skill:python-patterns",
+                "name": "python-patterns",
+                "type": "skill",
+                "score": 80,
+            },
+        ]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+    monkeypatch.setattr(loopflow.ctx_api, "recommend_related", lambda *args, **kwargs: [])
+
+    payload = loopflow.recommend_for_loop(
+        goal="python api",
+        permissions={"skills"},
+        selected=["fastapi-pro"],
+        top_k=1,
+    )
+
+    assert calls == [7]
+    assert payload["capabilities"]["skills"] == [
+        {"id": "skill:python-patterns", "name": "python-patterns", "type": "skill", "score": 80}
+    ]
 
 
 def test_mcp_server_tools_are_filtered_by_permission_groups(monkeypatch) -> None:
@@ -395,6 +432,63 @@ def test_loopflow_local_no_key_loop_hides_non_loadable_skill_recommendations(
         }
     ]
     assert payload["loopflow"]["use_skills"] == "use skills: local-javascript-helper"
+
+
+def test_loopflow_local_filter_uses_enriched_wiki_availability(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    wiki = tmp_path / "wiki"
+    skills = wiki / "entities" / "skills"
+    skills.mkdir(parents=True)
+    (skills / "cataloged-only.md").write_text(
+        "---\nname: cataloged-only\ntags: [python]\n---\n# Cataloged\n",
+        encoding="utf-8",
+    )
+    converted = wiki / "converted" / "local-helper"
+    converted.mkdir(parents=True)
+    (converted / "SKILL.md").write_text("# Local helper\n", encoding="utf-8")
+
+    monkeypatch.setattr(loopflow, "query_to_tags", lambda query: ["python"])
+    monkeypatch.setattr(loopflow, "_recommendation_graph", lambda: _FakeGraph())
+    monkeypatch.setattr(loopflow.ctx_api, "default_wiki_dir", lambda: wiki)
+
+    def fake_recommend_by_tags(
+        graph: Any,
+        tags: list[str],
+        *,
+        top_n: int,
+        query: str | None,
+        entity_types: tuple[str, ...] | set[str] | None,
+        min_normalized_score: float,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        del graph, tags, query, min_normalized_score, kwargs
+        assert top_n == 6
+        assert entity_types == ("skill",)
+        return [
+            {"name": "cataloged-only", "type": "skill", "score": 91},
+            {"name": "local-helper", "type": "skill", "score": 80},
+        ]
+
+    monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
+
+    payload = loopflow.recommend_for_loop(
+        goal="LoCoBench python feature_implementation. No local API keys. Need local files.",
+        permissions={"skills"},
+        top_k=1,
+    )
+
+    assert payload["capabilities"]["skills"] == [
+        {
+            "name": "local-helper",
+            "type": "skill",
+            "score": 80,
+            "installable": True,
+            "load_status": "local-wiki",
+            "source_path": "converted/local-helper/SKILL.md",
+        }
+    ]
 
 
 def test_loopflow_skill_hint_requires_returned_skill_capabilities(monkeypatch) -> None:
