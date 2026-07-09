@@ -43,6 +43,13 @@ def _workflow_docs_tracker_tests() -> tuple[str, ...]:
     return tuple(argv[5:])
 
 
+def _workflow_unit_linux_coverage_command() -> list[str]:
+    workflow = yaml.safe_load(Path(".github/workflows/test.yml").read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["unit-linux"]["steps"]
+    run = next(step["run"] for step in steps if step.get("name") == "Run tests with coverage gate")
+    return shlex.split(run)
+
+
 def test_pr_docs_workflow_tracker_tests_match_preflight() -> None:
     assert _workflow_docs_tracker_tests() == PUBLIC_DOCS_TRACKER_TESTS
 
@@ -67,6 +74,12 @@ def test_preflight_runs_docs_gate_for_docs_changes() -> None:
 
 def test_preflight_runs_source_gates_for_source_changes() -> None:
     names = _names_for(["src/ctx/adapters/generic/loop.py"])
+    workflow_unit_command = _workflow_unit_linux_coverage_command()
+    unit_check = next(
+        check
+        for check in _checks_for(["src/ctx/adapters/generic/loop.py"])
+        if check.name == "unit-linux equivalent"
+    )
     lanes = local_fast_gate.group_checks(_checks_for(["src/ctx/adapters/generic/loop.py"]))
     lanes_by_name = {
         lane.name: [check.name for check in lane.checks]
@@ -87,6 +100,13 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
         "contract": ["contract compatibility local"],
         "clean-host": ["clean host contract"],
     }
+    assert unit_check.argv[-4:] == (
+        "-n",
+        "auto",
+        "--dist=loadfile",
+        "--max-worker-restart=0",
+    )
+    assert workflow_unit_command[-4:] == list(unit_check.argv[-4:])
 
 
 def test_preflight_smoke_profile_runs_only_fast_source_gates() -> None:

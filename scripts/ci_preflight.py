@@ -337,6 +337,10 @@ def select_checks(
                             "--cov=src",
                             "--cov-report=term-missing",
                             "--cov-fail-under=40",
+                            "-n",
+                            "auto",
+                            "--dist=loadfile",
+                            "--max-worker-restart=0",
                         ),
                     ),
                     Check(
