@@ -8,6 +8,7 @@ import sys
 from typing import Any
 
 from ctx import recommend_bundle, recommend_related
+from ctx.adapters.generic.ctx_core_tools import _DEFAULT_BASELINE_CONTEXT
 from ctx_config import cfg
 
 
@@ -100,6 +101,16 @@ def _split_selection_values(values: list[str] | None) -> list[str]:
     return selections
 
 
+def _effective_baseline_context(
+    baseline_context: list[str],
+    *,
+    include_baseline_context: bool,
+) -> list[str]:
+    if include_baseline_context:
+        return []
+    return baseline_context or list(_DEFAULT_BASELINE_CONTEXT)
+
+
 def _render_row(row: dict[str, Any], *, index: int | None = None) -> str:
     name = str(row.get("name") or row.get("slug") or "")
     entity_type = str(row.get("type") or row.get("entity_type") or "skill")
@@ -167,9 +178,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.language:
         bundle_kwargs["language"] = args.language
     results = recommend_bundle(query, **bundle_kwargs)
-    related_rejected = _split_selection_values(
-        rejected + active + ([] if args.include_baseline_context else baseline_context)
+    related_baseline_context = _effective_baseline_context(
+        baseline_context,
+        include_baseline_context=args.include_baseline_context,
     )
+    related_rejected = _split_selection_values(rejected + active + related_baseline_context)
     related_results = (
         recommend_related(selected, rejected=related_rejected, top_n=related_top_n)
         if selected

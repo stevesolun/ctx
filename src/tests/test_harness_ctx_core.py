@@ -1563,7 +1563,56 @@ class TestRecommendBundle:
     def test_language_inference_resolves_common_word_aliases(self) -> None:
         assert _infer_query_language("go through python tests") == "python"
         assert _infer_query_language("python tree node bug") == "python"
+        assert _infer_query_language("go through tests") is None
+        assert _infer_query_language("tree node bug") is None
         assert _infer_query_language("locobench go feature implementation") == "go"
+
+    def test_explicit_language_aliases_filter_as_canonical(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        graph = nx.Graph()
+        graph.add_node(
+            "skill:python-api",
+            label="python-api",
+            type="skill",
+            tags=["python", "api"],
+        )
+        graph.add_node(
+            "skill:go-api",
+            label="go-api",
+            type="skill",
+            tags=["go", "api"],
+        )
+        graph_path = tmp_path / "graph.json"
+        graph_path.write_text(json.dumps(nx.node_link_data(graph, edges="edges")), encoding="utf-8")
+        toolbox = CtxCoreToolbox(
+            wiki_dir=tmp_path / "wiki",
+            graph_path=graph_path,
+            lifecycle_dir=tmp_path / "runtime",
+        )
+
+        py_result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__recommend_bundle",
+                    arguments={"query": "api", "top_k": 5, "language": "py"},
+                )
+            )
+        )
+        go_result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c2",
+                    name="ctx__recommend_bundle",
+                    arguments={"query": "api", "top_k": 5, "language": "golang"},
+                )
+            )
+        )
+
+        assert {row["id"] for row in py_result["results"]} == {"skill:python-api"}
+        assert {row["id"] for row in go_result["results"]} == {"skill:go-api"}
 
     def test_companion_harnesses_are_separate_from_dev_results(
         self,

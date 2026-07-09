@@ -111,7 +111,7 @@ def test_recommend_cli_json_includes_selection_payload(monkeypatch, capsys) -> N
 
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
-    assert calls == [(["skill:fastapi-pro"], ["mcp:legacy-api"], 2)]
+    assert calls == [(["skill:fastapi-pro"], ["mcp:legacy-api", "mcp-server:codex-cli"], 2)]
     assert payload["selection"] == {
         "selected": ["skill:fastapi-pro"],
         "rejected": ["mcp:legacy-api"],
@@ -167,6 +167,38 @@ def test_recommend_cli_related_excludes_session_context(monkeypatch, capsys) -> 
         )
     ]
     assert payload["selection"]["related_results"] == []
+
+
+def test_recommend_cli_related_keeps_included_default_baseline(monkeypatch, capsys) -> None:
+    calls: list[tuple[list[str], list[str], int]] = []
+
+    monkeypatch.setattr(recommend_cli, "recommend_bundle", lambda query, **kwargs: [])
+
+    def fake_recommend_related(
+        selected: list[str],
+        *,
+        rejected: list[str],
+        top_n: int,
+    ) -> list[dict[str, str]]:
+        calls.append((selected, rejected, top_n))
+        return []
+
+    monkeypatch.setattr(recommend_cli, "recommend_related", fake_recommend_related)
+
+    exit_code = recommend_cli.main(
+        [
+            "build",
+            "api",
+            "--selected",
+            "skill:fastapi-pro",
+            "--include-baseline-context",
+            "--json",
+        ]
+    )
+
+    assert json.loads(capsys.readouterr().out)["selection"]["related_results"] == []
+    assert exit_code == 0
+    assert calls == [(["skill:fastapi-pro"], [], 5)]
 
 
 def test_recommend_cli_suppresses_primary_bundle_with_session_state(monkeypatch, capsys) -> None:

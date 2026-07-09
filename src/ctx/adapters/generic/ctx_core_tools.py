@@ -1775,7 +1775,9 @@ def _recommendation_context_from_args(query: str, args: Mapping[str, Any]) -> di
     query_lower = query.lower()
     no_api_keys = _optional_bool(args.get("no_api_keys"))
     local_code_task = _optional_bool(args.get("local_code_task"))
-    language = _optional_str(args.get("language")) or _infer_query_language(query_lower)
+    language = _normalize_language_hint(_optional_str(args.get("language"))) or (
+        _infer_query_language(query_lower)
+    )
     include_unavailable = bool(_optional_bool(args.get("include_unavailable")) or False)
     return {
         "no_api_keys": (
@@ -1793,12 +1795,27 @@ def _recommendation_context_from_args(query: str, args: Mapping[str, Any]) -> di
     }
 
 
+def _normalize_language_hint(value: str | None) -> str | None:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return None
+    return _canonical_language_alias(raw) or raw
+
+
+def _canonical_language_alias(value: str) -> str | None:
+    raw = value.strip().lower()
+    if not raw:
+        return None
+    for language, aliases in _LANGUAGE_TOKEN_ALIASES.items():
+        if raw == language or raw in aliases:
+            return language
+    return None
+
+
 def _infer_query_language(query_lower: str) -> str | None:
     if match := re.search(r"\blocobench\s+([a-z+#]+)\b", query_lower):
-        raw = match.group(1)
-        for language, aliases in _LANGUAGE_TOKEN_ALIASES.items():
-            if raw == language or raw in aliases:
-                return language
+        if language := _canonical_language_alias(match.group(1)):
+            return language
     tokens = set(_recommendation_text_tokens(query_lower))
     hits = {
         language: matched
@@ -1806,7 +1823,10 @@ def _infer_query_language(query_lower: str) -> str | None:
         if (matched := tokens & aliases)
     }
     if len(hits) == 1:
-        return next(iter(hits))
+        language, matched = next(iter(hits.items()))
+        if matched - _AMBIGUOUS_LANGUAGE_TOKEN_ALIASES:
+            return language
+        return None
     strong_hits = {
         language
         for language, matched in hits.items()
