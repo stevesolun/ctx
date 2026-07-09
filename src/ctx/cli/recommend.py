@@ -8,7 +8,11 @@ import sys
 from typing import Any
 
 from ctx import recommend_bundle, recommend_related
-from ctx.adapters.generic.ctx_core_tools import _DEFAULT_BASELINE_CONTEXT
+from ctx.adapters.generic.ctx_core_tools import (
+    _DEFAULT_BASELINE_CONTEXT,
+    _recommendation_context_from_args,
+    _recommendation_context_skip_reason,
+)
 from ctx_config import cfg
 
 
@@ -111,6 +115,37 @@ def _effective_baseline_context(
     return baseline_context or list(_DEFAULT_BASELINE_CONTEXT)
 
 
+def _recommendation_filter_args(args: argparse.Namespace) -> dict[str, Any]:
+    context_args: dict[str, Any] = {}
+    if args.show_unavailable:
+        context_args["include_unavailable"] = True
+    if args.local_code_task:
+        context_args["local_code_task"] = True
+    if args.no_api_keys:
+        context_args["no_api_keys"] = True
+    if args.language:
+        context_args["language"] = args.language
+    return context_args
+
+
+def _filter_related_results(
+    rows: list[dict[str, Any]],
+    *,
+    query: str,
+    args: argparse.Namespace,
+    top_n: int,
+) -> list[dict[str, Any]]:
+    context = _recommendation_context_from_args(query, _recommendation_filter_args(args))
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        if _recommendation_context_skip_reason(row, context) is not None:
+            continue
+        filtered.append(row)
+        if len(filtered) >= top_n:
+            break
+    return filtered
+
+
 def _render_row(row: dict[str, Any], *, index: int | None = None) -> str:
     name = str(row.get("name") or row.get("slug") or "")
     entity_type = str(row.get("type") or row.get("entity_type") or "skill")
@@ -183,10 +218,16 @@ def main(argv: list[str] | None = None) -> int:
         include_baseline_context=args.include_baseline_context,
     )
     related_rejected = _split_selection_values(rejected + active + related_baseline_context)
-    related_results = (
+    raw_related_results = (
         recommend_related(selected, rejected=related_rejected, top_n=related_top_n)
         if selected
         else []
+    )
+    related_results = _filter_related_results(
+        raw_related_results,
+        query=query,
+        args=args,
+        top_n=related_top_n,
     )
     if args.json:
         payload: dict[str, Any] = {"query": query, "results": results}

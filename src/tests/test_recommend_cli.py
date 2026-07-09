@@ -251,6 +251,68 @@ def test_recommend_cli_suppresses_primary_bundle_with_session_state(monkeypatch,
     ]
 
 
+def test_recommend_cli_filters_related_with_context_policy(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(recommend_cli, "recommend_bundle", lambda query, **kwargs: [])
+    monkeypatch.setattr(
+        recommend_cli,
+        "recommend_related",
+        lambda selected, *, rejected, top_n: [
+            {
+                "id": "skill:remote-api",
+                "name": "remote-api",
+                "type": "skill",
+                "status": "available",
+                "source_catalog": "skill-index",
+                "install_command": "ctx-skill-install remote-api",
+                "matching_tags": ["python", "api"],
+            },
+            {
+                "id": "skill:go-api",
+                "name": "go-api",
+                "type": "skill",
+                "installable": True,
+                "load_status": "local-wiki",
+                "matching_tags": ["go", "api"],
+            },
+            {
+                "id": "skill:python-api",
+                "name": "python-api",
+                "type": "skill",
+                "installable": True,
+                "load_status": "local-wiki",
+                "matching_tags": ["python", "api"],
+            },
+        ],
+    )
+
+    exit_code = recommend_cli.main(
+        [
+            "build",
+            "api",
+            "--selected",
+            "skill:fastapi-pro",
+            "--local-code-task",
+            "--no-api-keys",
+            "--language",
+            "python",
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["selection"]["related_results"] == [
+        {
+            "id": "skill:python-api",
+            "name": "python-api",
+            "type": "skill",
+            "installable": True,
+            "load_status": "local-wiki",
+            "matching_tags": ["python", "api"],
+        }
+    ]
+
+
 def test_recommend_cli_text_renders_related_recommendations(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         recommend_cli,

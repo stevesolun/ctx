@@ -434,6 +434,71 @@ def test_loopflow_local_no_key_loop_hides_non_loadable_skill_recommendations(
     assert payload["loopflow"]["use_skills"] == "use skills: local-javascript-helper"
 
 
+def test_loopflow_local_no_key_loop_filters_related_recommendations(monkeypatch) -> None:
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", lambda *args, **kwargs: [])
+
+    def fake_recommend_related(
+        selected: list[str],
+        *,
+        rejected: list[str] | None = None,
+        max_hops: int = 2,
+        top_n: int = 5,
+    ) -> list[dict[str, Any]]:
+        assert selected == ["skill:local-helper"]
+        assert rejected == []
+        assert max_hops == 2
+        assert top_n == 50
+        return [
+            {
+                "id": "skill:remote-api",
+                "name": "remote-api",
+                "type": "skill",
+                "status": "available",
+                "source_catalog": "skill-index",
+                "install_command": "ctx-skill-install remote-api",
+                "selection_state": "suggested_related",
+            },
+            {
+                "id": "skill:go-api",
+                "name": "go-api",
+                "type": "skill",
+                "installable": True,
+                "load_status": "local-wiki",
+                "matching_tags": ["go", "api"],
+                "selection_state": "suggested_related",
+            },
+            {
+                "id": "skill:python-api",
+                "name": "python-api",
+                "type": "skill",
+                "installable": True,
+                "load_status": "local-wiki",
+                "matching_tags": ["python", "api"],
+                "selection_state": "suggested_related",
+            },
+        ]
+
+    monkeypatch.setattr(loopflow.ctx_api, "recommend_related", fake_recommend_related)
+
+    payload = loopflow.recommend_for_loop(
+        goal="LoCoBench python feature_implementation. No local API keys. Need local files.",
+        permissions={"skills"},
+        selected=["skill:local-helper"],
+        top_k=3,
+    )
+
+    assert payload["related_recommendations"] == [
+        {
+            "id": "skill:python-api",
+            "name": "python-api",
+            "type": "skill",
+            "installable": True,
+            "load_status": "local-wiki",
+            "selection_state": "suggested_related",
+        }
+    ]
+
+
 def test_loopflow_local_filter_uses_enriched_wiki_availability(
     tmp_path: Path,
     monkeypatch,
