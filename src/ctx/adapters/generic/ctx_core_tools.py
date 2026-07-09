@@ -269,7 +269,15 @@ _CORE_EVENT_NAMES = {
     "graph_query": "ctx.core.graph_query",
     "wiki_search": "ctx.core.wiki_search",
     "wiki_get": "ctx.core.wiki_get",
+    "loop_provision": "ctx.core.loop_provision",
+    "loop_topup": "ctx.core.loop_topup",
 }
+_LOOP_PROVISION_TOOL_NAMES = frozenset(
+    {
+        f"{_NAMESPACE}loop_provision",
+        f"{_NAMESPACE}loop_topup",
+    }
+)
 _LIFECYCLE_LOCAL_NAMES = frozenset(
     {
         "observe_dev_event",
@@ -507,10 +515,92 @@ class CtxCoreToolbox:
                     "required": ["slug"],
                 },
             ),
+            ToolDefinition(
+                name=f"{_NAMESPACE}loop_provision",
+                description=(
+                    "Opt-in write tool for harness loops. Recommends and installs "
+                    "loadable skills for a goal into the configured skills "
+                    "directory. Hidden unless the host explicitly allows this "
+                    "tool name."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "goal": {
+                            "type": "string",
+                            "description": "The loop goal the skills should support.",
+                        },
+                        "intent": {
+                            "type": "string",
+                            "description": (
+                                "Optional recommendation query override; defaults to goal."
+                            ),
+                        },
+                        "top_k": {
+                            "type": "integer",
+                            "description": "How many skills to consider. Default/max 5.",
+                            "minimum": 1,
+                            "maximum": 5,
+                        },
+                        "dry_run": {
+                            "type": "boolean",
+                            "description": "Preview without writing files. Default false.",
+                        },
+                        "security_scan": {
+                            "type": "boolean",
+                            "description": (
+                                "Run SkillSpector before installing each skill. Default false."
+                            ),
+                        },
+                    },
+                    "required": ["goal"],
+                },
+            ),
+            ToolDefinition(
+                name=f"{_NAMESPACE}loop_topup",
+                description=(
+                    "Opt-in write tool for harness loops. After a failed loop "
+                    "cycle, recommends and installs additional loadable skills "
+                    "for the goal plus reflection, excluding already loaded "
+                    "skills. Hidden unless the host explicitly allows this tool "
+                    "name."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "goal": {"type": "string"},
+                        "reflection": {
+                            "type": "string",
+                            "description": "Why the last loop cycle failed.",
+                        },
+                        "loaded": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Skill slugs already loaded.",
+                        },
+                        "top_k": {
+                            "type": "integer",
+                            "description": "How many skills to consider. Default/max 5.",
+                            "minimum": 1,
+                            "maximum": 5,
+                        },
+                        "dry_run": {
+                            "type": "boolean",
+                            "description": "Preview without writing files. Default false.",
+                        },
+                        "security_scan": {
+                            "type": "boolean",
+                            "description": (
+                                "Run SkillSpector before installing each skill. Default false."
+                            ),
+                        },
+                    },
+                    "required": ["goal", "reflection"],
+                },
+            ),
         ]
         definitions.extend(_lifecycle_tool_definitions(self._bound_session_id))
-        if self._allowed_tool_names is not None:
-            definitions = [td for td in definitions if td.name in self._allowed_tool_names]
+        definitions = [td for td in definitions if self.allows(td.name)]
         return definitions
 
     def dispatch(self, call: ToolCall) -> str:
@@ -523,7 +613,7 @@ class CtxCoreToolbox:
         """
         if not call.name.startswith(_NAMESPACE):
             raise ValueError(f"CtxCoreToolbox got a non-ctx call {call.name!r}")
-        if self._allowed_tool_names is not None and call.name not in self._allowed_tool_names:
+        if not self.allows(call.name):
             raise ValueError(f"ctx-core tool not allowed: {call.name!r}")
         local_name = call.name[len(_NAMESPACE) :]
         args = call.arguments or {}
@@ -547,6 +637,10 @@ class CtxCoreToolbox:
                     result = self._dispatch_wiki_search(args)
                 elif local_name == "wiki_get":
                     result = self._dispatch_wiki_get(args)
+                elif local_name == "loop_provision":
+                    result = self._dispatch_loop_provision(args)
+                elif local_name == "loop_topup":
+                    result = self._dispatch_loop_topup(args)
                 elif local_name == "observe_dev_event":
                     result = self._dispatch_lifecycle(args, "observe_dev_event")
                 elif local_name == "load_entity":
@@ -595,7 +689,9 @@ class CtxCoreToolbox:
 
     def allows(self, tool_name: str) -> bool:
         """True when this toolbox is allowed to expose the given ctx tool."""
-        return self._allowed_tool_names is None or tool_name in self._allowed_tool_names
+        if self._allowed_tool_names is not None:
+            return tool_name in self._allowed_tool_names
+        return tool_name not in _LOOP_PROVISION_TOOL_NAMES
 
     # ── Individual dispatchers ──────────────────────────────────────────
 
@@ -936,6 +1032,82 @@ class CtxCoreToolbox:
 
     def _entity_type_allowed(self, entity_type: str) -> bool:
         return self._allowed_entity_types is None or entity_type in self._allowed_entity_types
+
+    def _dispatch_loop_provision(self, args: dict[str, Any]) -> str:
+        goal = str(args.get("goal", "")).strip()
+        intent = _optional_str(args.get("intent"))
+        return self._dispatch_loop_provision_impl(
+            goal=(intent or goal).strip(),
+            reflection="",
+            args=args,
+            exclude=[],
+        )
+
+    def _dispatch_loop_topup(self, args: dict[str, Any]) -> str:
+        goal = str(args.get("goal", "")).strip()
+        reflection = str(args.get("reflection", "")).strip()
+        loaded_raw = args.get("loaded") or []
+        loaded = (
+            [str(slug).strip() for slug in loaded_raw if str(slug).strip()]
+            if isinstance(loaded_raw, list)
+            else []
+        )
+        return self._dispatch_loop_provision_impl(
+            goal=goal,
+            reflection=reflection,
+            args=args,
+            exclude=loaded,
+        )
+
+    def _dispatch_loop_provision_impl(
+        self,
+        *,
+        goal: str,
+        reflection: str,
+        args: dict[str, Any],
+        exclude: list[str],
+    ) -> str:
+        if not goal:
+            return json.dumps(
+                {
+                    "error": "goal (or intent) must be non-empty",
+                    "use_skills": [],
+                    "installed": [],
+                    "skipped": [],
+                }
+            )
+        from ctx_config import cfg  # noqa: PLC0415
+
+        wiki = self._wiki_dir_resolved()
+        if wiki is None:
+            return json.dumps(
+                {
+                    "error": "wiki directory not configured; cannot install skills",
+                    "use_skills": [],
+                    "installed": [],
+                    "skipped": [],
+                }
+            )
+        top_k = _clamp_int(
+            args.get("top_k"),
+            default=cfg.recommendation_top_k,
+            lo=1,
+            hi=cfg.recommendation_top_k,
+        )
+
+        from ctx.adapters.generic.loop_tools import provision_skills  # noqa: PLC0415
+
+        result = provision_skills(
+            wiki_dir=wiki,
+            skills_dir=cfg.skills_dir,
+            goal=goal,
+            reflection=reflection,
+            top_k=top_k,
+            dry_run=bool(args.get("dry_run")),
+            exclude=exclude,
+            security_scan=bool(args.get("security_scan")),
+        )
+        return json.dumps(result)
 
     def _dispatch_lifecycle(self, args: dict[str, Any], name: str) -> str:
         try:
