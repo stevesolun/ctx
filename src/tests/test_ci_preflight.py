@@ -164,8 +164,8 @@ def test_local_fast_lane_filters_are_composable() -> None:
 
     filtered = local_fast_gate.filter_lanes(
         lanes,
-        include=("static", "unit", "feature"),
-        skip=("feature",),
+        include=("static", "unit", "browser"),
+        skip=("browser",),
     )
 
     assert [lane.name for lane in filtered] == ["static", "unit"]
@@ -424,7 +424,9 @@ def test_preflight_runs_browser_and_similarity_when_classified() -> None:
     assert "canary" in lane_names
     assert "contract" in lane_names
     assert "clean-host" in lane_names
-    assert "feature" in lane_names
+    assert "telemetry" in lane_names
+    assert "similarity" in lane_names
+    assert "browser" in lane_names
     assert "package" in lane_names
     assert "release_asset_wait_seconds = 300" in graph_resolver_script
     assert 'os.environ.get("GITHUB_EVENT_NAME") == "pull_request"' in graph_resolver_script
