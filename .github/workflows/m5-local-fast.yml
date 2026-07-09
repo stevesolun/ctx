@@ -2,12 +2,6 @@ name: M5 local-fast accelerator
 
 on:
   workflow_dispatch:
-  push:
-    branches-ignore:
-      - main
-  pull_request:
-    branches:
-      - main
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -22,7 +16,6 @@ concurrency:
 jobs:
   local-fast:
     name: M5 local-fast
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: [self-hosted, macOS, ARM64, ctx-m5]
     timeout-minutes: 25
 
