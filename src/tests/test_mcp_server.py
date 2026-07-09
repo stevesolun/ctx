@@ -77,6 +77,10 @@ _READ_ONLY_TOOL_NAMES = {
     "ctx__wiki_search",
     "ctx__wiki_get",
 }
+_LOOP_PROVISION_TOOL_NAMES = {
+    "ctx__loop_provision",
+    "ctx__loop_topup",
+}
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -311,6 +315,7 @@ class TestToolsList:
         assert "error" not in response
         tool_names = {t["name"] for t in response["result"]["tools"]}
         assert tool_names == _EXPECTED_TOOL_NAMES
+        assert tool_names.isdisjoint(_LOOP_PROVISION_TOOL_NAMES)
 
     def test_tool_shape_is_mcp_standard(self) -> None:
         frames = _drive(_encode_request(1, "tools/list"))
@@ -327,6 +332,13 @@ class TestToolsList:
         result = _handle_tools_list(state, {})
 
         assert {tool["name"] for tool in result["tools"]} == _READ_ONLY_TOOL_NAMES
+
+    def test_state_can_explicitly_allow_loop_provision_tools(self) -> None:
+        state = _ServerState(allowed_tool_names=frozenset(_LOOP_PROVISION_TOOL_NAMES))
+
+        result = _handle_tools_list(state, {})
+
+        assert {tool["name"] for tool in result["tools"]} == _LOOP_PROVISION_TOOL_NAMES
 
 
 # ── tools/call ──────────────────────────────────────────────────────────────
@@ -387,6 +399,18 @@ class TestToolsCall:
             )
         )
         assert frames[0]["error"]["code"] == _ErrorCode.METHOD_NOT_FOUND
+
+    def test_default_state_rejects_loop_provision_tool_call(self) -> None:
+        with pytest.raises(_JsonRpcError) as ei:
+            _handle_tools_call(
+                _ServerState(),
+                {
+                    "name": "ctx__loop_provision",
+                    "arguments": {"goal": "install loop skills", "dry_run": True},
+                },
+            )
+
+        assert ei.value.code == _ErrorCode.METHOD_NOT_FOUND
 
     def test_scoped_state_rejects_disallowed_tool_call(self) -> None:
         state = _ServerState(allowed_tool_names=frozenset(_READ_ONLY_TOOL_NAMES))
