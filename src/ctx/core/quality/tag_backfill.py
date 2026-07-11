@@ -205,30 +205,12 @@ def _split_frontmatter(text: str) -> tuple[str, str, str]:
     or an HTML comment from a strix/mattpocock import header).
     ``body_after`` is the markdown body after the closing ``---``.
     """
-    if not text.lstrip().startswith("---"):
-        return text, "", ""
-    # First --- could be after an HTML comment (strix/mattpocock import header)
-    open_match = _FM_OPEN.match(text)
+    # The opening delimiter can follow an importer attribution comment.
+    open_match = _FM_OPEN.search(text)
     if not open_match:
-        # find first ---
-        first = text.find("---")
-        if first < 0:
-            return text, "", ""
-        # we want everything before the line containing the leading ---
-        prefix_end = text.rfind("\n", 0, first) + 1
-        prefix = text[:prefix_end]
-        rest = text[prefix_end:]
-        if not rest.startswith("---"):
-            return text, "", ""
-        try:
-            close = rest.index("\n---", 3)
-        except ValueError:
-            return text, "", ""
-        fm = rest[3:close].strip("\n")
-        body_after = rest[close + 4 :].lstrip("\n")
-        return prefix, body_after, fm
-    prefix = ""
-    rest = text
+        return text, "", ""
+    prefix = text[: open_match.start()]
+    rest = text[open_match.start() :]
     try:
         close = rest.index("\n---", 3)
     except ValueError:
