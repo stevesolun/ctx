@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 import shlex
 import sys
 import tomllib
@@ -463,3 +464,21 @@ def test_readme_shows_user_story_examples_from_tracker() -> None:
     assert [
         name for name in tool_names if not any(name in _row_text(row) for row in mcp_core_rows)
     ] == []
+
+    inventory_match = re.search(r"Tests-([0-9]+)_inventory", readme)
+    assert inventory_match is not None
+    expected = f"{int(inventory_match.group(1)):,}"
+    claim_pattern = re.compile(
+        r"\bcurrent(?:\s+at)?\s+([0-9][0-9,]*)\s+(?:test\s+)?inventory\b",
+        re.IGNORECASE,
+    )
+
+    claims: list[tuple[str, str]] = []
+    for row in [*tracker_rows, *_canonical_tracker_rows()]:
+        for value in row.values():
+            if not value:
+                continue
+            claims.extend((row["feature_id"], match) for match in claim_pattern.findall(value))
+
+    assert claims
+    assert [(feature_id, count) for feature_id, count in claims if count != expected] == []
