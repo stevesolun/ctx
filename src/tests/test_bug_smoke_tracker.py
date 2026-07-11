@@ -17,7 +17,7 @@ STATUSES = {
     "Blocked/Human Decision",
     "False Positive",
 }
-FIX_STATUSES = {"Fixed", "Blocked", "Not Started", "N/A"}
+FIX_STATUSES = {"Fixed", "Blocked", "In Progress", "Not Started", "N/A"}
 CLOSED_NEXT_ACTION_PREFIX = "Closed;"
 
 
