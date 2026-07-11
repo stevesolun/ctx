@@ -193,6 +193,17 @@ def test_canonical_feature_status_tracker_merges_supporting_ledgers() -> None:
         assert None not in row, f"{row.get('feature_id', '<unknown>')} has extra CSV columns"
         for key in required:
             assert row[key].strip(), f"{row.get('feature_id', '<unknown>')} missing {key}"
+        evidence_text = f"{row['source_evidence']} {row['test_command_or_steps']}"
+        evidence_paths = re.findall(
+            r"(?:(?:src|scripts|hooks|docs|qa)/|\.github/)[A-Za-z0-9_./*?{}-]+",
+            evidence_text,
+        )
+        for evidence_path in evidence_paths:
+            if any(marker in evidence_path for marker in "*?{}"):
+                continue
+            assert (repo_root / evidence_path).exists(), (
+                f"{row['feature_id']} references missing evidence path {evidence_path}"
+            )
         assert row["source_tracker"] in {
             "docs/qa/feature-user-story-status.csv",
             "docs/qa/dashboard-user-story-status.csv",
