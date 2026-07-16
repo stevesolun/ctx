@@ -32,6 +32,7 @@ jobs:
       similarity_changed: ${{ steps.classify.outputs.similarity_changed }}
       source_changed: ${{ steps.classify.outputs.source_changed }}
       telemetry_changed: ${{ steps.classify.outputs.telemetry_changed }}
+      windows_changed: ${{ steps.classify.outputs.windows_changed }}
     steps:
       - name: Checkout with full history
         uses: actions/checkout@v5
@@ -222,6 +223,32 @@ jobs:
 
       - name: Run tests without coverage
         run: pytest -q -m "not browser and not integration" --no-cov
+
+  windows-high-risk:
+    name: "Windows high-risk importers"
+    needs: classify
+    if: ${{ github.event_name != 'pull_request' || needs.classify.outputs.windows_changed == 'true' }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+
+      - name: Run focused Windows importer tests
+        run: python -m pytest -q --no-cov src/tests/test_import_designdotmd_skills.py src/tests/test_import_mattpocock_skills.py
 
   contract-compat:
     name: "Contract compatibility (${{ matrix.os }})"
@@ -850,6 +877,7 @@ jobs:
       - clean-host-contract
       - no-test-no-merge
       - telemetry-enterprise
+      - windows-high-risk
     if: ${{ always() }}
     steps:
       - name: Checkout

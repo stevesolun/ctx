@@ -42,6 +42,7 @@ def test_docs_only_classification() -> None:
         "similarity_changed": False,
         "source_changed": False,
         "telemetry_changed": False,
+        "windows_changed": False,
     }
 
 
@@ -183,6 +184,7 @@ def test_workflow_change_fails_open_for_future_gates() -> None:
     assert flags["similarity_changed"] is True
     assert flags["source_changed"] is True
     assert flags["telemetry_changed"] is True
+    assert flags["windows_changed"] is True
     assert flags["docs_changed"] is False
     assert flags["docs_only"] is False
 
@@ -576,6 +578,21 @@ def test_browser_security_paths_are_classified() -> None:
     assert flags["source_changed"] is True
 
 
+def test_windows_high_risk_paths_are_classified_selectively() -> None:
+    for path in (
+        "src/import_designdotmd_skills.py",
+        "src/import_mattpocock_skills.py",
+        "src/tests/test_import_designdotmd_skills.py",
+        "src/tests/test_import_mattpocock_skills.py",
+        "scripts/ci_classifier.py",
+        "scripts/ci_required.py",
+        ".github/workflows/test.yml",
+    ):
+        assert classify_paths([path])["windows_changed"] is True
+
+    assert classify_paths(["src/ctx/api.py"])["windows_changed"] is False
+
+
 def test_similarity_paths_are_classified() -> None:
     flags = classify_paths(["src/ctx/core/graph/semantic_edges.py"])
 
@@ -680,6 +697,47 @@ def test_ci_required_rejects_full_matrix_skip_on_ci_changed_pr() -> None:
     assert failed_required_jobs(needs, event_name="pull_request") == {
         "test": "skipped",
     }
+
+
+def test_ci_required_allows_targeted_windows_skip_on_unrelated_pr() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {"windows_changed": "false"},
+        },
+        **{"windows-high-risk": {"result": "skipped"}},
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {}
+    assert failed_required_jobs(needs, event_name="push") == {
+        "windows-high-risk": "skipped",
+    }
+
+
+def test_ci_required_rejects_targeted_windows_skip_on_high_risk_pr() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {"windows_changed": "true"},
+        },
+        **{"windows-high-risk": {"result": "skipped"}},
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "windows-high-risk": "skipped",
+    }
+
+
+def test_ci_required_rejects_windows_skip_for_missing_or_malformed_output() -> None:
+    for outputs in ({}, {"windows_changed": "unknown"}):
+        needs = _required_needs(
+            classify={"result": "success", "outputs": outputs},
+            **{"windows-high-risk": {"result": "skipped"}},
+        )
+
+        assert failed_required_jobs(needs, event_name="pull_request") == {
+            "windows-high-risk": "skipped",
+        }
 
 
 def test_ci_required_allows_heavy_jobs_to_skip_on_docs_only_pr() -> None:
@@ -948,3 +1006,18 @@ def test_workflow_runs_full_pytest_matrix_for_ci_changed_prs() -> None:
 
     assert "needs: classify" in pytest_job
     assert "needs.classify.outputs.ci_changed == 'true'" in pytest_job
+
+
+def test_workflow_runs_targeted_windows_high_risk_importer_gate() -> None:
+    workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
+    windows_job = workflow.split("\n  windows-high-risk:\n", maxsplit=1)[1].split(
+        "\n  contract-compat:", maxsplit=1
+    )[0]
+
+    assert "windows_changed: ${{ steps.classify.outputs.windows_changed }}" in workflow
+    assert "needs.classify.outputs.windows_changed == 'true'" in windows_job
+    assert "runs-on: windows-latest" in windows_job
+    assert 'python-version: "3.12"' in windows_job
+    assert "src/tests/test_import_designdotmd_skills.py" in windows_job
+    assert "src/tests/test_import_mattpocock_skills.py" in windows_job
+    assert "matrix:" not in windows_job

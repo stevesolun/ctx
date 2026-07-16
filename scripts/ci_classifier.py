@@ -20,6 +20,7 @@ OUTPUT_NAMES = (
     "similarity_changed",
     "source_changed",
     "telemetry_changed",
+    "windows_changed",
 )
 
 DOCS_PATTERNS = (
@@ -108,6 +109,15 @@ TELEMETRY_PATTERNS = (
     "src/tests/test_mcp_server.py",
     "src/tests/test_public_api.py",
 )
+WINDOWS_PATTERNS = (
+    ".github/workflows/test.yml",
+    "scripts/ci_classifier.py",
+    "scripts/ci_required.py",
+    "src/import_designdotmd_skills.py",
+    "src/import_mattpocock_skills.py",
+    "src/tests/test_import_designdotmd_skills.py",
+    "src/tests/test_import_mattpocock_skills.py",
+)
 
 
 def _matches(path: str, patterns: Iterable[str]) -> bool:
@@ -144,6 +154,7 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
         "source_changed": ci_changed or any(_matches(path, SOURCE_PATTERNS) for path in files),
         "telemetry_changed": ci_changed
         or any(_matches(path, TELEMETRY_PATTERNS) for path in files),
+        "windows_changed": any(_matches(path, WINDOWS_PATTERNS) for path in files),
     }
 
 
