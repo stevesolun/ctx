@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING
 
 import yaml  # type: ignore[import-untyped]
 
+from ctx.utils._fs_utils import safe_atomic_write_text
+
 if TYPE_CHECKING:
     from mcp_entity import McpRecord
 
@@ -330,7 +332,8 @@ def generate_mcp_page(record: McpRecord) -> str:
 
 def generate_missing_skills(dry_run: bool = False) -> int:
     """Generate entity pages for all skills missing from the wiki."""
-    SKILL_ENTITIES.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        SKILL_ENTITIES.mkdir(parents=True, exist_ok=True)
 
     installed = {d.name for d in SKILLS_DIR.iterdir() if d.is_dir()}
     existing = {p.stem for p in SKILL_ENTITIES.glob("*.md")}
@@ -347,7 +350,7 @@ def generate_missing_skills(dry_run: bool = False) -> int:
             print(f"  [DRY RUN] Would create: {name}.md")
         else:
             page_content = generate_skill_page(name)
-            (SKILL_ENTITIES / f"{name}.md").write_text(page_content, encoding="utf-8")
+            safe_atomic_write_text(SKILL_ENTITIES / f"{name}.md", page_content, encoding="utf-8")
             created += 1
             if created % 100 == 0:
                 print(f"  ... {created}/{len(missing)} created")
@@ -358,7 +361,8 @@ def generate_missing_skills(dry_run: bool = False) -> int:
 
 def generate_missing_agents(dry_run: bool = False) -> int:
     """Generate entity pages for all agents missing from the wiki."""
-    AGENT_ENTITIES.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        AGENT_ENTITIES.mkdir(parents=True, exist_ok=True)
 
     # Collect all agent .md files: top-level AND nested in subdirectories
     agent_files: dict[str, Path] = {}
@@ -383,7 +387,7 @@ def generate_missing_agents(dry_run: bool = False) -> int:
             print(f"  [DRY RUN] Would create: {name}.md")
         else:
             page_content = generate_agent_page(name, agent_files[name])
-            (AGENT_ENTITIES / f"{name}.md").write_text(page_content, encoding="utf-8")
+            safe_atomic_write_text(AGENT_ENTITIES / f"{name}.md", page_content, encoding="utf-8")
             created += 1
             if created % 50 == 0:
                 print(f"  ... {created}/{len(missing)} created")

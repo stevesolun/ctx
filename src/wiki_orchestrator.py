@@ -67,13 +67,19 @@ class HealthReport:
     index_count_wrong: bool = False
     skipped_modules: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    sync_failures: list[str] = field(default_factory=list)
 
     def deduct(self, points: int, reason: str) -> None:
         self.score = max(0, self.score - points)
         self.warnings.append(f"[-{points}] {reason}")
 
     def render(self) -> str:
-        out = [f"Health Score: {self.score}/100", ""]
+        display_score = min(self.score, 99) if self.sync_failures else self.score
+        out = [f"Health Score: {display_score}/100"]
+        if self.sync_failures:
+            count = len(self.sync_failures)
+            out.append(f"Sync Status: FAILED ({count} failure{'s' if count != 1 else ''})")
+        out.append("")
         if self.skipped_modules:
             out.append("Skipped modules (not yet installed):")
             out.extend(f"  - {m}" for m in self.skipped_modules)
@@ -88,12 +94,37 @@ class HealthReport:
 # ---------------------------------------------------------------------------
 
 
-def _try_import(name: str, report: HealthReport) -> Any | None:
-    """Load a sibling .py script. Returns module or None; logs skips gracefully.
+@dataclass(frozen=True)
+class ModuleLoadResult:
+    """Outcome of loading an optional orchestrator module."""
+
+    module: Any | None
+    error: str | None = None
+
+    @property
+    def absent(self) -> bool:
+        return self.module is None and self.error is None
+
+    @property
+    def failed(self) -> bool:
+        return self.error is not None
+
+
+def _load_module(name: str, report: HealthReport) -> ModuleLoadResult:
+    """Load a module and distinguish absence from a failed import.
 
     Registers in sys.modules before exec so @dataclass decorators that inspect
     cls.__module__ resolve correctly.
     """
+    if name == "wiki_sync":
+        try:
+            from ctx.core.wiki import wiki_sync
+        except Exception as exc:
+            error = f"import error: {exc}"
+            report.skipped_modules.append(f"{name} ({error})")
+            return ModuleLoadResult(None, error)
+        return ModuleLoadResult(wiki_sync)
+
     if name == "wiki_lint":
 
         class _PackageWikiLint:
@@ -101,25 +132,32 @@ def _try_import(name: str, report: HealthReport) -> Any | None:
             def run_lint(wiki_dir: Path) -> list[str]:
                 return _run_package_lint(Path(wiki_dir))
 
-        return _PackageWikiLint
+        return ModuleLoadResult(_PackageWikiLint)
 
     path = SCRIPT_DIR / f"{name}.py"
     if not path.exists():
         report.skipped_modules.append(name)
-        return None
-    spec = importlib.util.spec_from_file_location(name, path)
-    if not spec or not spec.loader:
-        report.skipped_modules.append(name)
-        return None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
+        return ModuleLoadResult(None)
     try:
+        spec = importlib.util.spec_from_file_location(name, path)
+        if not spec or not spec.loader:
+            error = "loader unavailable"
+            report.skipped_modules.append(f"{name} ({error})")
+            return ModuleLoadResult(None, error)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
         spec.loader.exec_module(mod)  # type: ignore[union-attr]
     except Exception as exc:
         sys.modules.pop(name, None)
-        report.skipped_modules.append(f"{name} (import error: {exc})")
-        return None
-    return mod
+        error = f"import error: {exc}"
+        report.skipped_modules.append(f"{name} ({error})")
+        return ModuleLoadResult(None, error)
+    return ModuleLoadResult(mod)
+
+
+def _try_import(name: str, report: HealthReport) -> Any | None:
+    """Compatibility wrapper returning only the loaded module, if any."""
+    return _load_module(name, report).module
 
 
 # ---------------------------------------------------------------------------
@@ -334,12 +372,23 @@ def run_sync(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: AR
     acc = HealthReport()  # accumulates sync-phase warnings; merged into final check
     log = print
 
+    def record_failure(message: str) -> None:
+        acc.sync_failures.append(message)
+        acc.warnings.append(f"  {message}")
+
     # Step 1 — ensure wiki structure
     log("\nStep 1: Ensure wiki structure")
     ws = _try_import("wiki_sync", acc)
     if ws and hasattr(ws, "ensure_wiki"):
-        ws.ensure_wiki(str(wiki_dir))
-        log("  structure OK")
+        try:
+            ws.ensure_wiki(str(wiki_dir))
+            log("  structure OK")
+        except Exception as exc:
+            record_failure(f"[wiki_sync.ensure_wiki] {exc}")
+            log("  wiki_sync.ensure_wiki failed - continuing")
+    else:
+        record_failure("[wiki_sync.ensure_wiki] unavailable; step skipped")
+        log("  wiki_sync.ensure_wiki unavailable - skipping")
 
     # Step 2 — inventory skills
     log("\nStep 2: Scan skill directories")
@@ -358,7 +407,8 @@ def run_sync(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: AR
                     continue
                 try:
                     n = len(skill_md.read_text(encoding="utf-8", errors="replace").splitlines())
-                except Exception:
+                except Exception as exc:
+                    record_failure(f"[scan] {skill_md}: {exc}")
                     continue
                 if n > cfg.line_threshold:
                     out = wiki_dir / "converted" / item.name
@@ -367,9 +417,10 @@ def run_sync(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: AR
                         bc.convert_skill(str(skill_md), str(out))
                         converted_count += 1
                     except Exception as exc:
-                        acc.warnings.append(f"  [convert] {item.name}: {exc}")
+                        record_failure(f"[convert] {item.name}: {exc}")
         log(f"  {converted_count} converted/refreshed")
     else:
+        record_failure("[batch_convert.convert_skill] unavailable; step skipped")
         log("  batch_convert unavailable — skipping")
 
     # Step 4 — upsert entity pages
@@ -385,25 +436,32 @@ def run_sync(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: AR
                     if ws.upsert_skill_page(str(wiki_dir), item.name, info):
                         new_pages.append(item.name)
                 except Exception as exc:
-                    acc.warnings.append(f"  [upsert] {item.name}: {exc}")
+                    record_failure(f"[upsert] {item.name}: {exc}")
         log(f"  {len(new_pages)} new entity pages")
+    else:
+        record_failure("[wiki_sync.upsert_skill_page] unavailable; step skipped")
+        log("  wiki_sync.upsert_skill_page unavailable - skipping")
 
     # Step 5 — link entity pages to converted pipelines
     log("\nStep 5: Link entity pages to converted pipelines")
     lc = _try_import("link_conversions", acc)
-    if lc and hasattr(lc, "link_all"):
+    if lc and hasattr(lc, "run"):
         try:
-            lc.link_all(str(wiki_dir))
-            log("  link_conversions.link_all complete")
+            result = lc.run(wiki_dir, cfg.skills_dir)
+            errors = list(getattr(result, "errors", []))
+            for error in errors:
+                record_failure(f"[link_conversions] {error}")
+            log(f"  link_conversions.run complete ({len(errors)} errors)")
         except Exception as exc:
-            acc.warnings.append(f"  [link_conversions] {exc}")
+            record_failure(f"[link_conversions] {exc}")
     else:
+        record_failure("[link_conversions.run] unavailable; step skipped")
         log("  link_conversions unavailable — skipping")
 
     # Step 6 — rebuild catalog.md
     log("\nStep 6: Rebuild catalogs")
     cb = _try_import("catalog_builder", acc)
-    if cb and hasattr(cb, "build_catalog"):
+    if cb and hasattr(cb, "build_catalog") and hasattr(cb, "update_wiki_index"):
         try:
             stats = cb.build_catalog(
                 wiki_dir=wiki_dir,
@@ -411,11 +469,13 @@ def run_sync(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: AR
                 agents_dir=cfg.agents_dir,
                 extra_dirs=cfg.extra_skill_dirs,
             )
-            if hasattr(cb, "update_wiki_index"):
-                cb.update_wiki_index(wiki_dir, stats)
+            cb.update_wiki_index(wiki_dir, stats)
             log(f"  catalog.md: {stats.get('total', '?')} items")
         except Exception as exc:
-            acc.warnings.append(f"  [catalog_builder] {exc}")
+            record_failure(f"[catalog_builder] {exc}")
+    else:
+        record_failure("[catalog_builder] required API unavailable; step skipped")
+        log("  catalog_builder unavailable - skipping")
     # rebuild versions-catalog.md
     vc = _try_import("versions_catalog", acc)
     if vc and hasattr(vc, "find_dual_version_skills") and hasattr(vc, "build_versions_catalog"):
@@ -430,7 +490,10 @@ def run_sync(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: AR
             else:
                 log("  versions-catalog.md: no dual-version skills")
         except Exception as exc:
-            acc.warnings.append(f"  [versions_catalog] {exc}")
+            record_failure(f"[versions_catalog] {exc}")
+    else:
+        record_failure("[versions_catalog] required API unavailable; step skipped")
+        log("  versions_catalog unavailable - skipping")
 
     # Step 7 — rebuild index.md page counts
     log("\nStep 7: Rebuild index.md page counts")
@@ -438,7 +501,10 @@ def run_sync(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: AR
         try:
             ws.update_index(str(wiki_dir), new_pages)
         except Exception as exc:
-            acc.warnings.append(f"  [update_index] {exc}")
+            record_failure(f"[update_index] {exc}")
+    else:
+        record_failure("[wiki_sync.update_index] unavailable; step skipped")
+        log("  wiki_sync.update_index unavailable - skipping")
     log(f"  {_actual_page_count(wiki_dir)} total pages on disk")
 
     # Step 8 — lint pass
@@ -451,8 +517,9 @@ def run_sync(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: AR
                 acc.warnings.append(f"  [lint] {issue}")
             log(f"  lint: {len(issues)} issues")
         except Exception as exc:
-            acc.warnings.append(f"  [wiki_lint] {exc}")
+            record_failure(f"[wiki_lint] {exc}")
     else:
+        record_failure("[wiki_lint.run_lint] unavailable; step skipped")
         log("  wiki_lint unavailable — skipping")
 
     # Step 9 — append log entry
@@ -470,7 +537,10 @@ def run_sync(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: AR
             ws.append_log(str(wiki_dir), "orchestrator-sync", "full-sync", details)
             log("  log.md updated")
         except Exception as exc:
-            acc.warnings.append(f"  [append_log] {exc}")
+            record_failure(f"[append_log] {exc}")
+    else:
+        record_failure("[wiki_sync.append_log] unavailable; step skipped")
+        log("  wiki_sync.append_log unavailable - skipping")
 
     # Step 10 — final health score
     log("\nStep 10: Compute final health score")
@@ -479,6 +549,9 @@ def run_sync(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: AR
         if m not in final.skipped_modules:
             final.skipped_modules.append(m)
     final.warnings = [w for w in acc.warnings if w not in final.warnings] + final.warnings
+    final.sync_failures = list(acc.sync_failures)
+    if final.sync_failures:
+        final.score = min(final.score, 99)
     return final
 
 
@@ -536,8 +609,16 @@ def run_add(wiki_dir: Path, skill_path_or_name: str) -> None:
     skill_name = _resolve_add_name(skill_path_or_name)
 
     r = HealthReport()
-    sa = _try_import("skill_add", r)
-    if sa and hasattr(sa, "add_skill"):
+    skill_add_load = _load_module("skill_add", r)
+    if skill_add_load.failed:
+        print(f"skill_add load failed: {skill_add_load.error}", file=sys.stderr)
+        sys.exit(1)
+
+    sa = skill_add_load.module
+    if sa is not None:
+        if not hasattr(sa, "add_skill"):
+            print("skill_add.add_skill unavailable; refusing legacy fallback.", file=sys.stderr)
+            sys.exit(1)
         try:
             sa.add_skill(
                 source_path=Path(skill_path_or_name),
@@ -549,6 +630,7 @@ def run_add(wiki_dir: Path, skill_path_or_name: str) -> None:
             return
         except Exception as exc:
             print(f"skill_add.add_skill raised: {exc}", file=sys.stderr)
+            sys.exit(1)
 
     ws = _try_import("wiki_sync", r)
     if not (ws and hasattr(ws, "upsert_skill_page")):
@@ -649,8 +731,8 @@ def main() -> None:
         sys.exit(0 if report.score >= 70 else 1)
     elif args.sync:
         report = run_sync(wiki_dir, verbose=args.verbose)
-        print("\n" + report.render(), file=utf8_out)
-        sys.exit(0 if report.score >= 70 else 1)
+        print("\n" + report.render(), file=utf8_out, flush=True)
+        sys.exit(0 if report.score >= 70 and not report.sync_failures else 1)
 
 
 if __name__ == "__main__":

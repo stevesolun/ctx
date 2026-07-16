@@ -11,6 +11,8 @@ import sys
 import unittest.mock as mock
 from pathlib import Path
 
+import pytest
+
 # Ensure the project root is importable regardless of working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -45,6 +47,41 @@ def _minimal_wiki_for_orchestrator(tmp_path: Path) -> Path:
     )
     (wiki / "SCHEMA.md").write_text(schema_text, encoding="utf-8")
     return wiki
+
+
+def _complete_sync_modules() -> dict[str, mock.Mock]:
+    wiki_sync = mock.Mock(spec=["ensure_wiki", "upsert_skill_page", "update_index", "append_log"])
+    batch_convert = mock.Mock(spec=["convert_skill"])
+    link_conversions = mock.Mock(spec=["run"])
+    link_conversions.run.return_value = mock.Mock(errors=[])
+    catalog_builder = mock.Mock(spec=["build_catalog", "update_wiki_index"])
+    catalog_builder.build_catalog.return_value = {"total": 0}
+    versions_catalog = mock.Mock(spec=["find_dual_version_skills", "build_versions_catalog"])
+    versions_catalog.find_dual_version_skills.return_value = []
+    wiki_lint = mock.Mock(spec=["run_lint"])
+    wiki_lint.run_lint.return_value = []
+    return {
+        "wiki_sync": wiki_sync,
+        "batch_convert": batch_convert,
+        "link_conversions": link_conversions,
+        "catalog_builder": catalog_builder,
+        "versions_catalog": versions_catalog,
+        "wiki_lint": wiki_lint,
+    }
+
+
+def _run_sync_with_modules(
+    wiki: Path,
+    modules: dict[str, mock.Mock],
+) -> wo.HealthReport:
+    with (
+        mock.patch.object(wo, "_try_import", side_effect=lambda name, _report: modules[name]),
+        mock.patch.object(wo.cfg, "all_skill_dirs", return_value=[]),
+        mock.patch.object(wo, "_skill_names_on_disk", return_value=[]),
+        mock.patch.object(wo, "_actual_page_count", return_value=0),
+        mock.patch.object(wo, "run_check", return_value=wo.HealthReport()),
+    ):
+        return wo.run_sync(wiki)
 
 
 class TestOrchestratorHealthScorePerfect:
@@ -200,3 +237,175 @@ class TestOrchestratorStatusReturnsCounts:
         assert any(
             "[lint]" in warning and "no-frontmatter" in warning for warning in report.warnings
         )
+
+
+class TestOrchestratorAddFallback:
+    def test_canonical_runtime_failure_exits_without_legacy_fallback(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        canonical = mock.Mock()
+        canonical.add_skill.side_effect = RuntimeError("canonical boom")
+
+        with (
+            mock.patch.object(
+                wo,
+                "_load_module",
+                return_value=wo.ModuleLoadResult(canonical),
+            ) as load_module,
+            mock.patch.object(wo, "_try_import") as try_import,
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                wo.run_add(tmp_path / "wiki", "valid-skill")
+
+        assert exc_info.value.code == 1
+        load_module.assert_called_once()
+        try_import.assert_not_called()
+        canonical.add_skill.assert_called_once_with(
+            source_path=Path("valid-skill"),
+            name="valid-skill",
+            wiki_path=tmp_path / "wiki",
+            skills_dir=wo.cfg.skills_dir,
+        )
+        captured = capsys.readouterr()
+        assert "skill_add.add_skill raised: canonical boom" in captured.err
+        assert "Entity page" not in captured.out
+
+    def test_absent_canonical_module_uses_legacy_fallback(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        wiki = tmp_path / "wiki"
+        legacy = mock.Mock()
+        legacy.upsert_skill_page.return_value = True
+
+        with (
+            mock.patch.object(wo, "SCRIPT_DIR", tmp_path),
+            mock.patch.object(wo, "_try_import", return_value=legacy) as try_import,
+        ):
+            wo.run_add(wiki, "valid-skill")
+
+        try_import.assert_called_once()
+        legacy.upsert_skill_page.assert_called_once_with(
+            str(wiki),
+            "valid-skill",
+            {"path": "valid-skill", "reason": "manually added via orchestrator"},
+        )
+        legacy.update_index.assert_called_once_with(str(wiki), ["valid-skill"])
+        legacy.append_log.assert_called_once_with(
+            str(wiki), "add-skill", "valid-skill", ["Path: valid-skill"]
+        )
+        assert "Entity page created: valid-skill" in capsys.readouterr().out
+
+    def test_canonical_import_failure_exits_without_legacy_fallback(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        (tmp_path / "skill_add.py").write_text(
+            'raise RuntimeError("loader boom")\n', encoding="utf-8"
+        )
+
+        with (
+            mock.patch.object(wo, "SCRIPT_DIR", tmp_path),
+            mock.patch.object(wo, "_try_import") as try_import,
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                wo.run_add(tmp_path / "wiki", "valid-skill")
+
+        assert exc_info.value.code == 1
+        try_import.assert_not_called()
+        assert "skill_add load failed: import error: loader boom" in capsys.readouterr().err
+
+
+class TestOrchestratorSyncFailures:
+    def test_try_import_uses_canonical_wiki_sync_package(self) -> None:
+        from ctx.core.wiki import wiki_sync
+
+        report = wo.HealthReport()
+
+        assert wo._try_import("wiki_sync", report) is wiki_sync
+        assert report.skipped_modules == []
+
+    def test_run_sync_uses_link_conversions_run(self, tmp_path: Path) -> None:
+        modules = _complete_sync_modules()
+
+        report = _run_sync_with_modules(tmp_path / "wiki", modules)
+
+        modules["link_conversions"].run.assert_called_once_with(
+            tmp_path / "wiki", wo.cfg.skills_dir
+        )
+        assert report.sync_failures == []
+
+    def test_run_sync_reports_missing_step_capability(self, tmp_path: Path) -> None:
+        modules = _complete_sync_modules()
+        modules["wiki_sync"] = mock.Mock(spec=["upsert_skill_page", "update_index", "append_log"])
+
+        report = _run_sync_with_modules(tmp_path / "wiki", modules)
+
+        expected = "[wiki_sync.ensure_wiki] unavailable; step skipped"
+        assert report.sync_failures == [expected]
+        assert report.score == 99
+        assert any(expected in warning for warning in report.warnings)
+
+    def test_run_sync_records_ensure_wiki_exception_and_continues(self, tmp_path: Path) -> None:
+        modules = _complete_sync_modules()
+        modules["wiki_sync"].ensure_wiki.side_effect = RuntimeError("init boom")
+
+        report = _run_sync_with_modules(tmp_path / "wiki", modules)
+
+        expected = "[wiki_sync.ensure_wiki] init boom"
+        assert report.sync_failures == [expected]
+        assert report.score == 99
+        assert any(expected in warning for warning in report.warnings)
+        modules["link_conversions"].run.assert_called_once()
+        modules["wiki_sync"].append_log.assert_called_once()
+
+    def test_run_sync_surfaces_link_conversion_result_errors(self, tmp_path: Path) -> None:
+        modules = _complete_sync_modules()
+        modules["link_conversions"].run.return_value = mock.Mock(
+            errors=["demo-skill: pipeline boom"]
+        )
+
+        report = _run_sync_with_modules(tmp_path / "wiki", modules)
+
+        expected = "[link_conversions] demo-skill: pipeline boom"
+        assert report.sync_failures == [expected]
+        assert report.score == 99
+        assert any(expected in warning for warning in report.warnings)
+
+    def test_sync_cli_exits_nonzero_for_partial_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+    ) -> None:
+        report = wo.HealthReport(
+            score=100,
+            warnings=["  [link_conversions] pipeline boom"],
+            sync_failures=["[link_conversions] pipeline boom"],
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["wiki_orchestrator.py", "--wiki", str(tmp_path / "wiki"), "--sync"],
+        )
+
+        with mock.patch.object(wo, "run_sync", return_value=report):
+            with pytest.raises(SystemExit) as exc_info:
+                wo.main()
+
+        assert exc_info.value.code == 1
+        captured = capfd.readouterr()
+        assert "Health Score: 99/100" in captured.out
+        assert "Health Score: 100/100" not in captured.out
+        assert "Sync Status: FAILED (1 failure)" in captured.out
+
+
+def test_run_status_missing_wiki_exits_nonzero_without_creating_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing_wiki = tmp_path / "missing-wiki"
+
+    with pytest.raises(SystemExit) as exc_info:
+        wo.run_status(missing_wiki)
+
+    assert exc_info.value.code == 1
+    assert not missing_wiki.exists()
+    assert f"Wiki not found at {missing_wiki}" in capsys.readouterr().out
