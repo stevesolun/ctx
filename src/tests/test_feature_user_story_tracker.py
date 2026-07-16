@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import csv
 import re
 import shlex
@@ -23,6 +24,7 @@ TRACKER = repo_root / "docs" / "qa" / "feature-user-story-status.csv"
 DASHBOARD_TRACKER = repo_root / "docs" / "qa" / "dashboard-user-story-status.csv"
 TOOL_SELECTION_TRACKER = repo_root / "qa" / "tool-selection-token-history" / "tracker.csv"
 CANONICAL_TRACKER = repo_root / "qa" / "feature_status.csv"
+SOURCE_ROOT = repo_root / "src"
 MKDOCS = repo_root / "mkdocs.yml"
 README = repo_root / "README.md"
 PASS_STATUSES = {"Tested Pass", "Retested Pass"}
@@ -64,6 +66,24 @@ def _tool_selection_tracker_rows() -> list[dict[str, str]]:
 def _canonical_tracker_rows() -> list[dict[str, str]]:
     with CANONICAL_TRACKER.open(newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
+
+
+def _is_substantive_python_module(path: Path) -> bool:
+    relative = path.relative_to(SOURCE_ROOT)
+    if relative == Path("__init__.py") or relative.parts[0] == "tests":
+        return False
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    meaningful = [
+        node
+        for node in tree.body
+        if not (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        )
+        and not (isinstance(node, ast.ImportFrom) and node.module == "__future__")
+    ]
+    return path.name != "__init__.py" or bool(meaningful)
 
 
 def _tracker_text() -> str:
@@ -239,6 +259,24 @@ def test_canonical_feature_status_tracker_merges_supporting_ledgers() -> None:
             assert "out of scope" in row["validation_status"].lower()
 
     assert set(CANONICAL_STATUS_OVERRIDES) <= canonical_ids
+
+
+def test_canonical_tracker_attributes_every_substantive_python_module() -> None:
+    exact_source_paths = {
+        match
+        for row in _canonical_tracker_rows()
+        for match in re.findall(
+            r"\bsrc/[A-Za-z0-9_./-]+\.py\b",
+            row["source_evidence"],
+        )
+    }
+    production_modules = {
+        path.relative_to(repo_root).as_posix()
+        for path in SOURCE_ROOT.rglob("*.py")
+        if _is_substantive_python_module(path)
+    }
+
+    assert sorted(production_modules - exact_source_paths) == []
 
 
 def test_canonical_dashboard_api_duplicate_routes_are_modeled() -> None:
