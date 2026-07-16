@@ -8,8 +8,62 @@ repo_root="$(cd -- "${script_dir}/.." && pwd -P)"
 pwd_ctx_python_bin="${PWD}/.venv/bin"
 repo_ctx_python_bin="${repo_root}/.venv/bin"
 fallback_ctx_python_bin="/tmp/ctx-verify-venv/bin"
-codex_resources="${CTX_NO_MISTAKES_CODEX_RESOURCES:-/Applications/Codex.app/Contents/Resources}"
-real_codex="${CTX_NO_MISTAKES_REAL_CODEX:-${codex_resources}/codex}"
+wrapper_path="${script_dir}/$(basename -- "${BASH_SOURCE[0]}")"
+
+is_runnable_codex() {
+  local candidate="$1"
+
+  [[ -f "${candidate}" && -x "${candidate}" ]] || return 1
+  [[ "${candidate}" -ef "${wrapper_path}" ]] && return 1
+  return 0
+}
+
+resolve_real_codex() {
+  local candidate
+  local path_codex
+
+  if [[ -n "${CTX_NO_MISTAKES_REAL_CODEX:-}" ]]; then
+    is_runnable_codex "${CTX_NO_MISTAKES_REAL_CODEX}" || {
+      echo "Configured Codex executable is not runnable: ${CTX_NO_MISTAKES_REAL_CODEX}" >&2
+      return 127
+    }
+    printf '%s\n' "${CTX_NO_MISTAKES_REAL_CODEX}"
+    return 0
+  fi
+
+  if [[ -n "${CTX_NO_MISTAKES_CODEX_RESOURCES:-}" ]]; then
+    candidate="${CTX_NO_MISTAKES_CODEX_RESOURCES}/codex"
+    is_runnable_codex "${candidate}" || {
+      echo "Configured Codex resources do not contain a runnable codex: ${candidate}" >&2
+      return 127
+    }
+    printf '%s\n' "${candidate}"
+    return 0
+  fi
+
+  for candidate in \
+    "/Applications/Codex.app/Contents/Resources/codex" \
+    "/Applications/ChatGPT.app/Contents/Resources/codex" \
+    "${HOME:-}/Applications/Codex.app/Contents/Resources/codex" \
+    "${HOME:-}/Applications/ChatGPT.app/Contents/Resources/codex"; do
+    if is_runnable_codex "${candidate}"; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  path_codex="$(command -v codex 2>/dev/null || true)"
+  if [[ -n "${path_codex}" ]] && is_runnable_codex "${path_codex}"; then
+    printf '%s\n' "${path_codex}"
+    return 0
+  fi
+
+  echo "Unable to find a runnable Codex executable; set CTX_NO_MISTAKES_REAL_CODEX." >&2
+  return 127
+}
+
+real_codex="$(resolve_real_codex)"
+codex_resources="${CTX_NO_MISTAKES_CODEX_RESOURCES:-$(dirname -- "${real_codex}")}"
 
 is_trusted_python_bin() {
   local bin_dir="$1"
