@@ -115,8 +115,10 @@ WINDOWS_PATTERNS = (
     "scripts/ci_required.py",
     "src/import_designdotmd_skills.py",
     "src/import_mattpocock_skills.py",
+    "src/import_strix_skills.py",
     "src/tests/test_import_designdotmd_skills.py",
     "src/tests/test_import_mattpocock_skills.py",
+    "src/tests/test_import_strix_skills.py",
 )
 
 

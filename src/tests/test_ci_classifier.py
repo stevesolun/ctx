@@ -582,8 +582,10 @@ def test_windows_high_risk_paths_are_classified_selectively() -> None:
     for path in (
         "src/import_designdotmd_skills.py",
         "src/import_mattpocock_skills.py",
+        "src/import_strix_skills.py",
         "src/tests/test_import_designdotmd_skills.py",
         "src/tests/test_import_mattpocock_skills.py",
+        "src/tests/test_import_strix_skills.py",
         "scripts/ci_classifier.py",
         "scripts/ci_required.py",
         ".github/workflows/test.yml",
@@ -1020,4 +1022,5 @@ def test_workflow_runs_targeted_windows_high_risk_importer_gate() -> None:
     assert 'python-version: "3.12"' in windows_job
     assert "src/tests/test_import_designdotmd_skills.py" in windows_job
     assert "src/tests/test_import_mattpocock_skills.py" in windows_job
+    assert "src/tests/test_import_strix_skills.py" in windows_job
     assert "matrix:" not in windows_job
