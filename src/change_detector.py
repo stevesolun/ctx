@@ -89,8 +89,15 @@ def _sha256_file(path: Path) -> str | None:
 def _iter_top_files(cfg: BackupConfig, claude_home: Path) -> Iterable[tuple[str, Path]]:
     for name in cfg.top_files:
         src = claude_home / name
-        if src.is_file() and not src.is_symlink():
-            yield (name, src)
+        try:
+            st = os.lstat(src)
+        except OSError:
+            continue
+        if not _stat.S_ISREG(st.st_mode):
+            continue
+        if st.st_size > cfg.max_file_bytes:
+            continue
+        yield (name, src)
 
 
 def _iter_tree_files(cfg: BackupConfig, claude_home: Path) -> Iterable[tuple[str, Path]]:
@@ -112,6 +119,8 @@ def _iter_tree_files(cfg: BackupConfig, claude_home: Path) -> Iterable[tuple[str
                     continue
                 rel = src.relative_to(root)
                 dest_rel = (Path(tree.dest) / rel).as_posix()
+                if cfg.is_excluded(dest_rel):
+                    continue
                 yield (dest_rel, src)
 
 
@@ -140,6 +149,8 @@ def _iter_memory_files(cfg: BackupConfig, claude_home: Path) -> Iterable[tuple[s
                     continue
                 rel = src.relative_to(memory_dir)
                 dest_rel = (Path("memory") / slug_dir.name / rel).as_posix()
+                if cfg.is_excluded(dest_rel):
+                    continue
                 yield (dest_rel, src)
 
 
@@ -231,7 +242,12 @@ def detect_changes(
             baseline_snapshot=None,
         )
 
-    baseline = _load_snapshot_hashes(last_snapshot)
+    configured_top_files = frozenset(cfg.top_files)
+    baseline = {
+        dest: digest
+        for dest, digest in _load_snapshot_hashes(last_snapshot).items()
+        if dest in configured_top_files or not cfg.is_excluded(dest)
+    }
     baseline_id = _snapshot_id(last_snapshot)
 
     new: list[str] = []
