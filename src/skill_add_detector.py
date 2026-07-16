@@ -3,10 +3,10 @@
 skill_add_detector.py -- PostToolUse hook: detect when a new skill is written to a skill dir.
 
 When Claude writes a SKILL.md file (via Write/Edit tools), this detects it and
-registers the new skill in the wiki catalog and index automatically.
+registers the new skill in the wiki catalog automatically.
 
-Called by PostToolUse hook:
-    python skill_add_detector.py --tool <name> --input <json>
+Called by the installed PostToolUse hook:
+    python -m skill_add_detector --from-stdin
 
 If the file is longer than the configured line threshold, the hook converts it
 to a micro-skill pipeline under the wiki's converted/ directory immediately.
@@ -30,6 +30,9 @@ import os
 import re
 import sys
 from pathlib import Path
+
+from ctx.utils._file_lock import file_lock
+from ctx.utils._fs_utils import safe_atomic_write_text
 
 try:
     from ctx_config import cfg as _cfg
@@ -65,7 +68,7 @@ def validate_user_supplied_slug(name: str) -> str:
     For files already accepted on disk use
     ``wiki_utils.validate_skill_name`` (Tier-1, lenient).
     """
-    if not isinstance(name, str) or not _SKILL_DIR_RE.match(name):
+    if not isinstance(name, str) or not _SKILL_DIR_RE.fullmatch(name):
         raise ValueError(
             f"invalid skill name extracted from path: {name!r} (must match {_SKILL_DIR_RE.pattern})"
         )
@@ -87,31 +90,51 @@ def load_registry() -> list[str]:
 
 def extract_written_path(tool_name: str, tool_input: dict) -> str | None:
     """Extract the file path being written from tool input."""
-    if tool_name == "Write":
-        return tool_input.get("file_path")
-    elif tool_name == "Edit":
-        return tool_input.get("file_path")
-    return None
+    if tool_name not in SKILL_TRIGGERS:
+        return None
+    file_path = tool_input.get("file_path")
+    return file_path if isinstance(file_path, str) else None
 
 
-def is_in_skill_dir(file_path: str, skill_dirs: list[str]) -> bool:
-    """Check if a file path is inside one of the registered skill directories."""
-    p = Path(file_path).resolve()
+def _is_path_in_skill_dirs(path: Path, skill_dirs: list[str]) -> bool:
+    """Return whether an already-resolved path is under a registered directory."""
     for d in skill_dirs:
         try:
-            p.relative_to(Path(d).resolve())
+            path.relative_to(Path(d).resolve(strict=True))
             return True
-        except ValueError:
+        except (OSError, RuntimeError, TypeError, ValueError):
             continue
     return False
 
 
-def count_lines(file_path: str) -> int:
-    """Count lines in a file safely."""
+def is_in_skill_dir(file_path: str, skill_dirs: list[str]) -> bool:
+    """Check if a file path is inside one of the registered skill directories."""
     try:
-        return len(Path(file_path).read_text(encoding="utf-8", errors="replace").splitlines())
-    except Exception:
-        return 0
+        resolved_path = Path(file_path).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return _is_path_in_skill_dirs(resolved_path, skill_dirs)
+
+
+def resolve_skill_path(file_path: str, skill_dirs: list[str]) -> Path | None:
+    """Resolve and validate one existing regular ``SKILL.md`` path."""
+    try:
+        resolved_path = Path(file_path).resolve(strict=True)
+        if resolved_path.name != "SKILL.md" or not resolved_path.is_file():
+            return None
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if not _is_path_in_skill_dirs(resolved_path, skill_dirs):
+        return None
+    return resolved_path
+
+
+def count_lines(file_path: Path) -> int | None:
+    """Count lines, distinguishing an unreadable file from an empty one."""
+    try:
+        return len(file_path.read_text(encoding="utf-8", errors="replace").splitlines())
+    except (OSError, UnicodeError):
+        return None
 
 
 def _escape_md_cell(s: str) -> str:
@@ -127,22 +150,28 @@ def _escape_md_cell(s: str) -> str:
 
 
 def register_skill_in_catalog(file_path: str, skill_name: str, lines: int) -> None:
-    """Append a new skill entry to catalog.md."""
-    if not CATALOG_PATH.exists():
-        return
-    content = CATALOG_PATH.read_text(encoding="utf-8")
-    # Match against the structured table row (e.g. "| fastapi-pro |"), NOT a
-    # naive substring — otherwise a skill named "react" would be skipped if
-    # catalog rows mention "react-pro" or paths containing "react".
-    if f"| {skill_name} |" in content:
-        return
-    over_flag = "⚠" if lines > LINE_THRESHOLD else ""
-    safe_path = _escape_md_cell(file_path)
-    entry = f"| {skill_name} | skill | {lines} | {over_flag} | `{safe_path}` |"
-    # Insert before the last line
-    lines_list = content.splitlines()
-    lines_list.append(entry)
-    CATALOG_PATH.write_text("\n".join(lines_list) + "\n", encoding="utf-8")
+    """Insert or refresh exactly one skill entry in catalog.md."""
+    with file_lock(CATALOG_PATH):
+        if not CATALOG_PATH.exists():
+            return
+        content = CATALOG_PATH.read_text(encoding="utf-8")
+        over_flag = "⚠" if lines > LINE_THRESHOLD else ""
+        safe_path = _escape_md_cell(file_path)
+        entry = f"| {skill_name} | skill | {lines} | {over_flag} | `{safe_path}` |"
+        updated_lines: list[str] = []
+        replaced = False
+        for line in content.splitlines():
+            row = line.lstrip()
+            cells = row.split("|", 2) if row.startswith("|") else []
+            if len(cells) == 3 and cells[1].strip() == skill_name:
+                if not replaced:
+                    updated_lines.append(entry)
+                    replaced = True
+                continue
+            updated_lines.append(line)
+        if not replaced:
+            updated_lines.append(entry)
+        safe_atomic_write_text(CATALOG_PATH, "\n".join(updated_lines) + "\n", encoding="utf-8")
 
 
 def maybe_convert_to_micro_skill(
@@ -219,30 +248,26 @@ def main() -> None:
     if not file_path:
         sys.exit(0)
 
-    # Only care about SKILL.md files
-    if not file_path.endswith("SKILL.md"):
-        sys.exit(0)
-
     skill_dirs = load_registry()
-    if not is_in_skill_dir(file_path, skill_dirs):
+    resolved_path = resolve_skill_path(file_path, skill_dirs)
+    if resolved_path is None:
         sys.exit(0)
 
     # New skill detected in a skill directory.
-    # Resolve to an absolute path before extracting the parent name so that
-    # traversal sequences like "/tmp/../../etc/foo" are normalised away first.
-    # We already know the resolved path is inside a registered skill dir
-    # (is_in_skill_dir uses resolve() internally), so extracting .parent.name
-    # from the resolved path gives us the real directory name.
-    resolved_path = Path(file_path).resolve()
     raw_name = resolved_path.parent.name
     try:
         skill_name = validate_user_supplied_slug(raw_name)
     except ValueError:
         sys.exit(0)
-    lines = count_lines(file_path)
+    lines = count_lines(resolved_path)
+    if lines is None:
+        sys.exit(0)
 
     # Register in catalog
-    register_skill_in_catalog(file_path, skill_name, lines)
+    try:
+        register_skill_in_catalog(str(resolved_path), skill_name, lines)
+    except (OSError, UnicodeError, ValueError):
+        sys.exit(0)
 
     if lines > LINE_THRESHOLD:
         converted, detail = maybe_convert_to_micro_skill(
