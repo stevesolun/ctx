@@ -3,15 +3,58 @@
 from __future__ import annotations
 
 import json
+import re
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
 from ctx.utils._file_lock import file_lock
 from ctx.utils._fs_utils import atomic_write_text
+from ctx.utils._secret_scan import redact_secret_text
 
 
 CONFIG_REMOVE = object()
+_REDACTED = "[redacted]"
+_CONFIG_KEY_BOUNDARY_RE = re.compile(
+    r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|[^A-Za-z0-9]+"
+)
+_CONFIG_SECRET_WORDS = frozenset(
+    {
+        "apikey",
+        "authorization",
+        "bearer",
+        "credential",
+        "credentials",
+        "passwd",
+        "password",
+        "secret",
+        "secrets",
+    }
+)
+_CONFIG_SECRET_KEY_PAIRS = frozenset(
+    {
+        ("access", "key"),
+        ("api", "key"),
+        ("private", "key"),
+    }
+)
+_CONFIG_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?P<prefix>(?P<key_quote>[\"']?)(?P<key>[A-Za-z_][A-Za-z0-9_.-]*)"
+    r"(?P=key_quote)\s*=\s*)"
+    r"(?P<value>\"[^\"\r\n]*\"|'[^'\r\n]*'|"
+    r"(?:(?i:Bearer|Basic)\s+)?[^\s,;\r\n}\]]+)"
+)
+_AUTHORIZATION_HEADER_RE = re.compile(
+    r"(?P<prefix>[\"']?authorization[\"']?\s*:\s*)"
+    r"(?P<value>\"[^\"\r\n]*\"|'[^'\r\n]*'|[^,;\r\n}\"']+)",
+    re.IGNORECASE,
+)
+_BEARER_VALUE_RE = re.compile(
+    r"(?P<prefix>\bbearer\s+)"
+    r"(?P<value>\"[^\"\r\n]*\"|'[^'\r\n]*'|[^\s,;\r\n}\"']+)",
+    re.IGNORECASE,
+)
+_BEARER_PREFIX_RE = re.compile(r"\Abearer\s+", re.IGNORECASE)
 
 
 def read_default_config_raw() -> dict[str, Any]:
@@ -381,15 +424,92 @@ def coerce_config_value(spec: dict[str, Any], raw_value: Any) -> Any:
     return value
 
 
+def _config_key_is_secret(key: str) -> bool:
+    parts = tuple(part.lower() for part in _CONFIG_KEY_BOUNDARY_RE.split(key) if part)
+    if not parts:
+        return False
+    if any(part in _CONFIG_SECRET_WORDS for part in parts):
+        return True
+    if parts[-1] == "token":
+        return True
+    return any(pair in _CONFIG_SECRET_KEY_PAIRS for pair in zip(parts, parts[1:]))
+
+
+def _redact_text_literal(value: str, replacement: str = _REDACTED) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return f"{value[0]}{replacement}{value[-1]}"
+    return replacement
+
+
+def _redact_secret_assignment(match: re.Match[str]) -> str:
+    if not _config_key_is_secret(match.group("key")):
+        return match.group(0)
+    return f"{match.group('prefix')}{_redact_text_literal(match.group('value'))}"
+
+
+def _redact_bearer_value(match: re.Match[str]) -> str:
+    return f"{match.group('prefix')}{_redact_text_literal(match.group('value'))}"
+
+
+def _redact_authorization_header(match: re.Match[str]) -> str:
+    raw_value = match.group("value")
+    is_quoted = len(raw_value) >= 2 and raw_value[0] == raw_value[-1] and raw_value[0] in {'"', "'"}
+    value = raw_value[1:-1] if is_quoted else raw_value
+    bearer = _BEARER_PREFIX_RE.match(value)
+    replacement = f"{value[: bearer.end()]}{_REDACTED}" if bearer else _REDACTED
+    return f"{match.group('prefix')}{_redact_text_literal(raw_value, replacement)}"
+
+
+def _redact_config_text(value: str) -> str:
+    redacted = _CONFIG_SECRET_ASSIGNMENT_RE.sub(_redact_secret_assignment, value)
+    redacted = _BEARER_VALUE_RE.sub(_redact_bearer_value, redacted)
+    redacted = _AUTHORIZATION_HEADER_RE.sub(_redact_authorization_header, redacted)
+    return redact_secret_text(redacted)
+
+
+def _config_argv_flag_is_secret(value: str) -> bool:
+    return value.startswith("-") and "=" not in value and _config_key_is_secret(value.lstrip("-"))
+
+
+def _redact_config_list(value: list[Any]) -> list[Any]:
+    redacted: list[Any] = []
+    redact_next = False
+    for child in value:
+        if redact_next and not (isinstance(child, str) and child.startswith("-")):
+            redacted.append(_REDACTED)
+            redact_next = False
+            continue
+        redact_next = False
+        redacted.append(_redact_config_value(child))
+        if isinstance(child, str) and _config_argv_flag_is_secret(child):
+            redact_next = True
+    return redacted
+
+
+def _redact_config_value(value: Any, *, key: str = "") -> Any:
+    if key and _config_key_is_secret(key):
+        return _REDACTED
+    if isinstance(value, dict):
+        return {
+            child_key: _redact_config_value(child, key=str(child_key))
+            for child_key, child in value.items()
+        }
+    if isinstance(value, list):
+        return _redact_config_list(value)
+    if isinstance(value, str):
+        return _redact_config_text(value)
+    return value
+
+
 def effective_config_payload(user_config_path: Path) -> dict[str, Any]:
     defaults = read_default_config_raw()
     user = read_user_config_raw(user_config_path)
     effective = json.loads(json.dumps(defaults))
     deep_merge_config(effective, user)
     return {
-        "defaults": defaults,
-        "user": user,
-        "effective": effective,
+        "defaults": _redact_config_value(defaults),
+        "user": _redact_config_value(user),
+        "effective": _redact_config_value(effective),
         "path": str(user_config_path),
     }
 
