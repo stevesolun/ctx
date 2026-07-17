@@ -627,7 +627,13 @@ def test_destination_symlink_escape_is_rejected(
         target_is_directory=True,
     )
 
-    with pytest.raises(ValueError, match=r"skill dir .* resolves outside target_dir"):
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"skill dir .* resolves (?:outside target_dir|"
+            r"through a reparse point beneath target_dir)"
+        ),
+    ):
         importer.deploy_entry(
             design_import.entry,
             design_import.manifest,
@@ -669,7 +675,13 @@ def test_final_skill_symlink_escape_is_rejected_without_following_it(
     skill_dir.mkdir(parents=True)
     _symlink_or_skip(skill_dir / "SKILL.md", outside_skill)
 
-    with pytest.raises(ValueError, match=r"SKILL\.md .* resolves outside target_dir"):
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"SKILL\.md .* resolves (?:outside target_dir|"
+            r"through a reparse point beneath target_dir)"
+        ),
+    ):
         importer.deploy_entry(
             design_import.entry,
             design_import.manifest,
@@ -1062,7 +1074,7 @@ def test_symlink_beneath_resolved_target_is_rejected(
         target_is_directory=True,
     )
 
-    with pytest.raises(ValueError, match=r"symlink beneath target_dir"):
+    with pytest.raises(ValueError, match=r"(?:symlink|reparse point) beneath target_dir"):
         importer.deploy_entry(
             design_import.entry,
             design_import.manifest,

@@ -347,7 +347,7 @@ def _prepare_entry(
             raise ValueError(
                 f"source_path: {source_path_raw!r} has unterminated attribution header"
             )
-        body = imported_body.lstrip("\n")
+        body = imported_body.lstrip("\r\n")
     content = header + body
 
     support_paths: list[Path] = []

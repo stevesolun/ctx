@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -180,7 +181,8 @@ def test_install_copies_attribution_and_support_files(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     old_header = "<!-- mattpocock-import: upstream=old rev=old license=old -->\n"
-    import_tree.source_skill.write_text(old_header + import_tree.source_body, encoding="utf-8")
+    source = (old_header + import_tree.source_body).replace("\n", "\r\n").encode("utf-8")
+    import_tree.source_skill.write_bytes(source)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -676,8 +678,11 @@ def test_rejects_destination_support_symlink_escape(
 def test_missing_source_has_actionable_error(import_tree: ImportTree) -> None:
     entry = {**import_tree.entry, "source_path": "missing/SKILL.md"}
 
-    with pytest.raises(FileNotFoundError, match="Source skill missing: .*missing/SKILL.md"):
+    with pytest.raises(FileNotFoundError) as exc_info:
         importer.deploy_entry(entry, import_tree.manifest, import_tree.target, dry_run=False)
+    assert str(exc_info.value) == (
+        f"Source skill missing: {import_tree.import_root / 'missing' / 'SKILL.md'}"
+    )
 
 
 def test_missing_manifest_exits_with_build_guidance(
@@ -1123,18 +1128,21 @@ def test_precommit_destination_swap_does_not_partially_install_entry(
     helper.write_bytes(b"stale helper")
     outside = import_tree.target.parent / "precommit-sentinel.txt"
     outside.write_text("outside sentinel\n", encoding="utf-8")
-    original_revalidate = importer._revalidate_staged_writes
+    original_validate = importer._validate_expected_destination
+    swapped = False
 
-    def swap_notice_before_revalidation(
-        prepared: importer._PreparedEntry,
-        directories: dict[Path, importer._OpenedDirectory],
-        staged_writes: list[importer._StagedWrite],
+    def swap_notice_before_validation(
+        write: importer._PreparedWrite,
+        metadata: os.stat_result | None,
     ) -> None:
-        notice.unlink()
-        _symlink_or_skip(notice, outside)
-        original_revalidate(prepared, directories, staged_writes)
+        nonlocal swapped
+        if not swapped:
+            notice.unlink()
+            _symlink_or_skip(notice, outside)
+            swapped = True
+        original_validate(write, metadata)
 
-    monkeypatch.setattr(importer, "_revalidate_staged_writes", swap_notice_before_revalidation)
+    monkeypatch.setattr(importer, "_validate_expected_destination", swap_notice_before_validation)
 
     with pytest.raises(ValueError, match=r"NOTICE\.txt.*changed after preflight"):
         importer.deploy_entry(
@@ -1144,6 +1152,7 @@ def test_precommit_destination_swap_does_not_partially_install_entry(
             dry_run=False,
         )
 
+    assert swapped is True
     assert skill.read_text(encoding="utf-8") == "stale skill\n"
     assert helper.read_bytes() == b"stale helper"
     assert outside.read_text(encoding="utf-8") == "outside sentinel\n"

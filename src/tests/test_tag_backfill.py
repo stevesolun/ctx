@@ -122,7 +122,7 @@ def test_discovery_finds_empty_skills_and_agents_but_skips_curated(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
     empty_skill = _write_skill(tmp_path, "empty-skill", _entity_text("empty-skill"))
     _write_skill(
         tmp_path,
@@ -143,7 +143,7 @@ def test_run_and_apply_backfill_preserves_body_and_becomes_idempotent(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
     source = _write_skill(
         tmp_path,
         "python-fastapi",
@@ -184,7 +184,7 @@ def test_main_report_only_writes_reports_without_mutating_entities(
     monkeypatch,
     capsys,
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
     source = _write_skill(tmp_path, "python-helper", _entity_text("python-helper"))
     before = source.read_text(encoding="utf-8")
     markdown_report = tmp_path / "reports" / "tags.md"
@@ -207,7 +207,7 @@ def test_main_report_only_writes_reports_without_mutating_entities(
 
 
 def test_main_apply_updates_empty_tags(tmp_path: Path, monkeypatch, capsys) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
     source = _write_agent(tmp_path, "security-agent", _entity_text("security-agent"))
 
     result = tag_backfill.main(
