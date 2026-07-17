@@ -9,6 +9,7 @@ pwd_ctx_python_bin="${PWD}/.venv/bin"
 repo_ctx_python_bin="${repo_root}/.venv/bin"
 fallback_ctx_python_bin="/tmp/ctx-verify-venv/bin"
 wrapper_path="${script_dir}/$(basename -- "${BASH_SOURCE[0]}")"
+default_codex_app_paths="/Applications/Codex.app/Contents/Resources/codex:/Applications/ChatGPT.app/Contents/Resources/codex:${HOME:-}/Applications/Codex.app/Contents/Resources/codex:${HOME:-}/Applications/ChatGPT.app/Contents/Resources/codex"
 
 is_runnable_codex() {
   local candidate="$1"
@@ -21,6 +22,8 @@ is_runnable_codex() {
 resolve_real_codex() {
   local candidate
   local path_codex
+  local codex_app_paths
+  local codex_app_candidates=()
 
   if [[ -n "${CTX_NO_MISTAKES_REAL_CODEX:-}" ]]; then
     is_runnable_codex "${CTX_NO_MISTAKES_REAL_CODEX}" || {
@@ -41,16 +44,17 @@ resolve_real_codex() {
     return 0
   fi
 
-  for candidate in \
-    "/Applications/Codex.app/Contents/Resources/codex" \
-    "/Applications/ChatGPT.app/Contents/Resources/codex" \
-    "${HOME:-}/Applications/Codex.app/Contents/Resources/codex" \
-    "${HOME:-}/Applications/ChatGPT.app/Contents/Resources/codex"; do
-    if is_runnable_codex "${candidate}"; then
-      printf '%s\n' "${candidate}"
-      return 0
-    fi
-  done
+  codex_app_paths="${CTX_NO_MISTAKES_CODEX_APP_PATHS-${default_codex_app_paths}}"
+  if [[ -n "${codex_app_paths}" ]]; then
+    IFS=: read -r -a codex_app_candidates <<<"${codex_app_paths}"
+    for candidate in "${codex_app_candidates[@]}"; do
+      [[ -n "${candidate}" ]] || continue
+      if is_runnable_codex "${candidate}"; then
+        printf '%s\n' "${candidate}"
+        return 0
+      fi
+    done
+  fi
 
   path_codex="$(command -v codex 2>/dev/null || true)"
   if [[ -n "${path_codex}" ]] && is_runnable_codex "${path_codex}"; then

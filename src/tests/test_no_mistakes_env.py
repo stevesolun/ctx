@@ -204,6 +204,100 @@ def test_no_mistakes_wrapper_rejects_bad_explicit_resources(tmp_path: Path) -> N
     )
 
 
+@posix_shell_only
+def test_no_mistakes_wrapper_discovers_known_app_candidate(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    script_dir = repo / "scripts"
+    script_dir.mkdir(parents=True)
+    wrapper = script_dir / "no_mistakes_codex_env.sh"
+    shutil.copy2(Path("scripts/no_mistakes_codex_env.sh"), wrapper)
+
+    fake_codex = tmp_path / "ChatGPT.app" / "Contents" / "Resources" / "codex"
+    fake_codex.parent.mkdir(parents=True)
+    _write_executable(fake_codex, "#!/bin/sh\nprintf 'known-app=%s\\n' \"$0\"\n")
+
+    env = os.environ.copy()
+    env.pop("CTX_NO_MISTAKES_REAL_CODEX", None)
+    env.pop("CTX_NO_MISTAKES_CODEX_RESOURCES", None)
+    env["CTX_NO_MISTAKES_CODEX_APP_PATHS"] = str(fake_codex)
+    env["PATH"] = "/usr/bin:/bin"
+
+    result = subprocess.run(
+        ["bash", str(wrapper), "--version"],
+        cwd=repo,
+        env=env,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert result.stdout.strip() == f"known-app={fake_codex}"
+    assert "/Applications/ChatGPT.app/Contents/Resources/codex" in wrapper.read_text(
+        encoding="utf-8"
+    )
+
+
+@posix_shell_only
+def test_no_mistakes_wrapper_falls_back_to_path(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    script_dir = repo / "scripts"
+    script_dir.mkdir(parents=True)
+    wrapper = script_dir / "no_mistakes_codex_env.sh"
+    shutil.copy2(Path("scripts/no_mistakes_codex_env.sh"), wrapper)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_codex = fake_bin / "codex"
+    _write_executable(fake_codex, "#!/bin/sh\nprintf 'path=%s\\n' \"$0\"\n")
+
+    env = os.environ.copy()
+    env.pop("CTX_NO_MISTAKES_REAL_CODEX", None)
+    env.pop("CTX_NO_MISTAKES_CODEX_RESOURCES", None)
+    env["CTX_NO_MISTAKES_CODEX_APP_PATHS"] = ""
+    env["PATH"] = f"{fake_bin}{os.pathsep}/usr/bin{os.pathsep}/bin"
+
+    result = subprocess.run(
+        ["bash", str(wrapper), "--version"],
+        cwd=repo,
+        env=env,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert result.stdout.strip() == f"path={fake_codex}"
+
+
+@posix_shell_only
+def test_no_mistakes_wrapper_fails_when_no_codex_is_available(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    script_dir = repo / "scripts"
+    script_dir.mkdir(parents=True)
+    wrapper = script_dir / "no_mistakes_codex_env.sh"
+    shutil.copy2(Path("scripts/no_mistakes_codex_env.sh"), wrapper)
+
+    env = os.environ.copy()
+    env.pop("CTX_NO_MISTAKES_REAL_CODEX", None)
+    env.pop("CTX_NO_MISTAKES_CODEX_RESOURCES", None)
+    env["CTX_NO_MISTAKES_CODEX_APP_PATHS"] = ""
+    env["PATH"] = "/usr/bin:/bin"
+
+    result = subprocess.run(
+        ["bash", str(wrapper), "--version"],
+        cwd=repo,
+        env=env,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert result.returncode == 127
+    assert "Unable to find a runnable Codex executable" in result.stderr
+
+
 def test_no_mistakes_repo_config_defines_deterministic_commands() -> None:
     config = yaml.safe_load(Path(".no-mistakes.yaml").read_text(encoding="utf-8"))
 
