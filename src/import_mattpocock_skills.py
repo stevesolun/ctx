@@ -979,10 +979,7 @@ def _read_source_via_directory_fds(
 ) -> tuple[bytes, int]:
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     file_flags = (
-        os.O_RDONLY
-        | os.O_NOFOLLOW
-        | getattr(os, "O_NONBLOCK", 0)
-        | getattr(os, "O_BINARY", 0)
+        os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     )
     current_fd = os.open(root.anchor, directory_flags)
     try:
@@ -1106,9 +1103,7 @@ def _guard_checked_parents(
                 try:
                     path.mkdir(mode=0o755)
                 except FileExistsError:
-                    raise ValueError(
-                        f"destination parent {path} changed after preflight"
-                    ) from None
+                    raise ValueError(f"destination parent {path} changed after preflight") from None
                 metadata = _lstat_optional(path)
             if metadata is None:
                 raise ValueError(f"destination parent {path} changed after preflight")

@@ -642,8 +642,7 @@ def _resolve_add_source(skill_path_or_name: str) -> tuple[Path, str]:
     expected_source = skills_dir_resolved / skill_name / "SKILL.md"
     if source_resolved != expected_source or not source_resolved.is_file():
         print(
-            f"Error: --add source '{raw}' must resolve to the installed file "
-            f"'{expected_source}'.",
+            f"Error: --add source '{raw}' must resolve to the installed file '{expected_source}'.",
             file=sys.stderr,
         )
         sys.exit(1)

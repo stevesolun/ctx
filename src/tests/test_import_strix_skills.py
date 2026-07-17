@@ -247,9 +247,7 @@ def test_checked_path_fallback_installs_and_updates_atomically(
     guard_depth = 0
 
     @contextmanager
-    def guarded_paths(
-        _target: Path, guarded: Path, *, create_missing: bool = True
-    ) -> Any:
+    def guarded_paths(_target: Path, guarded: Path, *, create_missing: bool = True) -> Any:
         nonlocal guard_depth
         if create_missing:
             guarded.mkdir(parents=True, exist_ok=True)

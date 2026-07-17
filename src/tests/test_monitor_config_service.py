@@ -109,10 +109,7 @@ def test_effective_config_payload_preserves_nonsecret_token_config(tmp_path: Pat
     assert payload["defaults"]["graph"]["token_edges"] == defaults["graph"]["token_edges"]
     assert payload["user"]["graph"]["edge_weights"]["slug_tokens"] == 0.25
     assert payload["user"]["graph"]["token_edges"]["dense_token_threshold"] == 17
-    assert (
-        payload["user"]["graph"]["token_edges"]["shared_token_saturation"]
-        == "[redacted]"
-    )
+    assert payload["user"]["graph"]["token_edges"]["shared_token_saturation"] == "[redacted]"
     assert payload["user"]["slug_tokens"] == "[redacted]"
     assert payload["user"]["token_budget"] == "[redacted]"
     assert payload["user"]["other"]["dense_token_threshold"] == "[redacted]"

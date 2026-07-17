@@ -64,10 +64,8 @@ def test_split_frontmatter_leaves_malformed_sources_untouched() -> None:
         "# No frontmatter\n",
         "---\nname: unclosed\n",
         "# Body\n\n---\ntags: []\n---\nTrailing body\n",
-        "<!-- unknown-import: upstream=https://example.test -->\n"
-        "---\nname: helper\n---\n",
-        "<!-- strix-import: upstream=https://example.test -->\n"
-        "---\nname: helper\n---\n",
+        "<!-- unknown-import: upstream=https://example.test -->\n---\nname: helper\n---\n",
+        "<!-- strix-import: upstream=https://example.test -->\n---\nname: helper\n---\n",
         "----\nname: helper\n----\n",
     ):
         assert tag_backfill._split_frontmatter(text) == (text, "", "")

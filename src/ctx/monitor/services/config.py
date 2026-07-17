@@ -38,9 +38,7 @@ _CONFIG_SECRET_KEY_PAIRS = frozenset(
         ("private", "key"),
     }
 )
-_CONFIG_NONSECRET_TOKEN_PATH_TYPES: dict[
-    tuple[str, ...], type[Any] | tuple[type[Any], ...]
-] = {
+_CONFIG_NONSECRET_TOKEN_PATH_TYPES: dict[tuple[str, ...], type[Any] | tuple[type[Any], ...]] = {
     ("graph", "edge_weights", "slug_tokens"): (int, float),
     ("graph", "token_edges"): dict,
     ("graph", "token_edges", "dense_token_threshold"): int,
@@ -480,9 +478,7 @@ def _config_argv_flag_is_secret(value: str) -> bool:
 
 
 def _config_path_is_known_nonsecret(path: tuple[str, ...], value: Any) -> bool:
-    expected_type = _CONFIG_NONSECRET_TOKEN_PATH_TYPES.get(
-        tuple(part.lower() for part in path)
-    )
+    expected_type = _CONFIG_NONSECRET_TOKEN_PATH_TYPES.get(tuple(part.lower() for part in path))
     if expected_type is None or isinstance(value, bool):
         return False
     return isinstance(value, expected_type)

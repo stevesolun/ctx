@@ -56,9 +56,7 @@ _DARWIN_SYSTEM_SYMLINKS: dict[Path, Path] = {
     Path("/tmp"): Path("/private/tmp"),
     Path("/var"): Path("/private/var"),
 }
-_DIRECTORY_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(
-    os, "O_NOFOLLOW", 0
-)
+_DIRECTORY_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 _TEMP_OPEN_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
 _WINDOWS_FILE_READ_ATTRIBUTES = 0x80
 _WINDOWS_FILE_SHARE_READ = 0x1
@@ -210,7 +208,7 @@ def secure_directory(
             parent_fd = _open_anchored_directory(absolute.parent, create=create)
             if parent_fd is None:
                 raise FileNotFoundError(absolute.parent)
-            directory_fd = -1
+            directory_fd: int | None = None
             try:
                 try:
                     os.mkdir(absolute.name, mode=0o700, dir_fd=parent_fd)
@@ -226,7 +224,7 @@ def secure_directory(
                     raise ValueError(f"directory {absolute} changed while opening")
                 yield _SecureDirectory(absolute, directory_fd)
             finally:
-                if directory_fd != -1:
+                if directory_fd is not None:
                     os.close(directory_fd)
                 os.close(parent_fd)
             return
@@ -313,8 +311,7 @@ def _lstat_optional(path: Path) -> os.stat_result | None:
 def _is_reparse_point(path: Path, metadata: os.stat_result) -> bool:
     is_junction = getattr(path, "is_junction", None)
     return bool(
-        getattr(metadata, "st_file_attributes", 0)
-        & _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
+        getattr(metadata, "st_file_attributes", 0) & _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
     ) or (callable(is_junction) and is_junction())
 
 

@@ -576,9 +576,7 @@ def _validate_pack_count(
 
 
 def _serialise_jsonl(rows: list[dict[str, Any]]) -> str:
-    return "".join(
-        json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in rows
-    )
+    return "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in rows)
 
 
 def _read_jsonl_objects(path: Path) -> list[dict[str, Any]]:
