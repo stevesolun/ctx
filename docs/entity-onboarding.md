@@ -213,14 +213,17 @@ Removal has three separate meanings. First decide which one you need.
 
 - **Catalog removal** stops ctx from showing the entity in the wiki, graph, and
   recommendations. Use the dashboard: `ctx-monitor serve`, open **Manage**,
-  search for the slug and type, then choose **Delete selected**. This deletes
-  the wiki page and queues an `entity-upsert` delete plus graph refresh. When
-  active wiki packs exist, draining the worker records a wiki tombstone so the
-  removed relative path stays hidden even if it still exists in a base pack or
-  stale local file.
-- **Runtime unload** removes a currently loaded entity from the live manifest.
-  Use the dashboard **Loaded** page. MCP unloads call the Claude MCP removal
-  path when available; skill and agent unloads remove the manifest row.
+  search for the slug and type, then choose **Delete selected**. If the entity
+  is currently loaded, Manage first attempts to unload it; if unloading fails,
+  deletion stops and the wiki page is kept. Otherwise, Manage unlinks the page
+  and queues an `entity-upsert` delete plus graph refresh. When active wiki
+  packs exist, draining the worker records a wiki tombstone so the removed
+  relative path stays hidden even if it still exists in a base pack or stale
+  local file.
+- **Runtime unload** removes a currently loaded entity from the live manifest
+  while keeping its catalog entry. Use the dashboard **Loaded** page. MCP
+  unloads call the Claude MCP removal path when available; skill and agent
+  unloads remove the manifest row.
 - **Installed-file removal** is type-specific. Use
   `ctx-harness-install <slug> --uninstall` for harness checkouts,
   `ctx-mcp-uninstall <slug>` for installed MCPs, and `ctx-lifecycle archive`
