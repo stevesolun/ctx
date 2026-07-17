@@ -2,7 +2,7 @@
 """
 wiki_visualize.py -- Interactive knowledge graph visualization.
 
-The full graph (2,167 nodes, 593K edges) is too large to render at once.
+The full graph is too large to render at once.
 Users MUST specify boundaries to get a feasible visualization.
 
 Usage:

@@ -16,7 +16,7 @@ untested.
 
 ## What we'll use
 
-- **ctx-monitor** (rc8+) to watch the audit log live via SSE. The
+- **ctx-monitor** to watch the audit log live via SSE. The
   test agent keeps the dashboard open at
   `http://127.0.0.1:8765/session/<test-session-id>` and screenshots
   the audit timeline before/after.
@@ -28,12 +28,11 @@ untested.
 
 ## Preconditions
 
-1. `claude-ctx` 0.5.0-rc8 installed from PyPI.
-2. `~/.claude/skill-wiki/` pre-built (2,253 nodes, 454K edges).
-3. `~/.claude/skills/` has ≥ 1,500 skills installed.
-4. `~/.claude/settings.json` has all rc7 hooks wired
-   (PostToolUse: context_monitor + skill_add_detector + skill_suggest
-   + backup_on_change; Stop: usage_tracker + quality_on_session_end).
+1. The current `claude-ctx` checkout installed (`pip install -e .`).
+2. `~/.claude/skill-wiki/graphify-out/graph.json` pre-built.
+3. `~/.claude/skills/` contains installed skills.
+4. `~/.claude/settings.json` has the hooks listed in
+   [Live load / unload verification — Hook registration](playbook-live-load-unload.md#1-hook-registration).
 5. Stale-threshold override for the test run. Write it into
    `~/.claude/skill-system-config.json` — there is no env var
    shortcut; the threshold only comes from config:
@@ -60,28 +59,17 @@ Pick a skill whose sidecar has:
 - `intake.score >= 0.8` (structurally valid), AND
 - **tag overlap with `context_monitor.KEYWORD_SIGNALS`** — otherwise
   the skill can never surface through the observe→suggest path
-  (learned the hard way on rc8's verification run), AND
+  in this scenario, AND
 - not a meta-skill (`skill-router`, `file-reading`, etc.).
 
 ```bash
 python - <<'PY'
 import json, random, re
 from pathlib import Path
+from ctx.adapters.claude_code.hooks.context_monitor import KEYWORD_SIGNALS
 
 # Seed: installed KEYWORD_SIGNALS from context_monitor.
-# Load dynamically to survive future vocabulary changes.
-import importlib.util
-src = Path.home() / ".claude" / "skills"  # may differ per install
-spec_path = None
-for candidate in [
-    Path(__file__).resolve().parents[1] / "src" / "context_monitor.py",
-    Path.home() / ".local" / "lib" / "python3.11" / "site-packages" / "context_monitor.py",
-]:
-    if candidate.exists():
-        spec_path = candidate; break
-spec = importlib.util.spec_from_file_location("_cm", spec_path)
-cm = importlib.util.module_from_spec(spec); spec.loader.exec_module(cm)
-keywords = set(cm.KEYWORD_SIGNALS.keys())
+keywords = set(KEYWORD_SIGNALS)
 
 sidecar_dir = Path.home() / ".claude" / "skill-quality"
 candidates: list[str] = []
@@ -120,31 +108,26 @@ Record the picked slug. Call it `$TARGET`.
 Look at the target skill's `tags`. Synthesize a PostToolUse payload
 whose `tool_input.file_path` or content contains 3+ of those tags
 (crossing the `UNMATCHED_SIGNAL_THRESHOLD` in
-`context_monitor.py`).
+the packaged context monitor).
 
-Pipe it into `context_monitor.py --from-stdin` 3 times. On the
-third call, ctx should add $TARGET to
-`~/.claude/pending-skills.json` under `graph_suggestions`.
+Use the current invocation in
+[Live load / unload verification — Observe](playbook-live-load-unload.md#2-observe-context-monitor-detects-a-known-signal)
+to feed this payload three times. On the third call, ctx should add $TARGET to
+`~/.claude/pending-skills.json` under `graph_suggestions`:
 
-```bash
-for i in 1 2 3; do
-  echo '{"session_id":"random-load-test","tool_name":"Write",
-         "tool_input":{"file_path":"app/<tag-heavy-path>.py",
-         "content":"<content with target tags>"}}' \
-    | python -m context_monitor --from-stdin
-done
-
-cat ~/.claude/pending-skills.json | python -m json.tool | head -30
+```json
+{"session_id":"random-load-test","tool_name":"Write","tool_input":{"file_path":"app/<tag-heavy-path>.py","content":"<content with target tags>"}}
 ```
+
+Then inspect `~/.claude/pending-skills.json`.
 
 **Expected**: `graph_suggestions` array contains $TARGET with a
 non-empty `shared_tags` list and `score > 0`.
 
-### Step 3 — Run skill_suggest.py, verify the suggestion surfaces
+### Step 3 — Verify the bundle suggestion surfaces
 
-```bash
-python -m skill_suggest
-```
+Run the current command in
+[Live load / unload verification — Suggest](playbook-live-load-unload.md#3-suggest-bundle-orchestrator-surfaces-pending-entities).
 
 **Expected**: stdout is valid JSON with
 `hookSpecificOutput.additionalContext` containing $TARGET's slug or
@@ -213,11 +196,11 @@ the session payload there in production). **Do NOT use `< /dev/null`**
 gets a synthesized id instead of the real one, so the dashboard's
 per-session timeline drops the middle event in the triad.
 
-```bash
-SID="random-load-test"
-echo "{\"session_id\":\"$SID\"}" | python hooks/quality_on_session_end.py
-python -m usage_tracker --sync
-```
+Set `SID=random-load-test`, then run the Score command and the Stop
+usage-tracker command from the canonical playbook's
+[Score](playbook-live-load-unload.md#5-score-sidecar-refreshes-on-session-end)
+and [Hook registration](playbook-live-load-unload.md#1-hook-registration)
+sections.
 
 **Expected**:
 - Sidecar for $TARGET now shows `load_count >= 1`,
@@ -232,8 +215,9 @@ python -m usage_tracker --sync
 Run `usage_tracker --sync` two more times without any
 corresponding `used` signal (i.e., no recent intent-log entry for
 the tags that originally surfaced $TARGET). With
-`CTX_STALE_THRESHOLD_SESSIONS=3` and `session_count` bumped on each
-sync, $TARGET should cross the stale threshold on the 3rd sync.
+`usage_tracker.stale_threshold_sessions=3` in the config and
+`session_count` bumped on each sync, $TARGET should cross the stale threshold
+on the third sync.
 
 ```bash
 for i in 1 2 3; do python -m usage_tracker --sync; done
@@ -288,7 +272,7 @@ Screenshot this. That is the end-to-end proof.
   simulation — we simulate the load event write. The verification
   is therefore of the ctx half of the contract (suggest → observe →
   queue-for-unload), not the IDE half (inject skill into prompt).
-- `context_monitor` only suggests based on KEYWORD_SIGNALS +
+- The context monitor only suggests based on KEYWORD_SIGNALS +
   graph walks. If $TARGET has no tags that match any keyword, the
   suggestion won't surface. The candidate picker in step 1 filters
   on tag richness for that reason.

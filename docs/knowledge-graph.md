@@ -472,10 +472,10 @@ review reports and never auto-modify the inventory.
   `.dedup-allowlist.txt`. The current snapshot has 15,976 findings,
   most of which are within-MCP near-duplicates (multiple wrappers
   around the same upstream service).
-- **`ctx-tag-backfill`** — finds skills/agents with empty `tags:`
-  frontmatter and proposes a backfill drawn from slug tokens, body
-  keywords, and the existing tag vocabulary. Report-only by default;
-  pass `--apply` to write. Backfills are additive only.
+- **`ctx-tag-backfill`** — finds installed skills/agents with empty `tags:`
+  frontmatter and proposes a backfill from slug tokens and an allowlist of
+  body keywords. Existing tag frequency breaks keyword ties. Report-only by
+  default; pass `--apply` to write. Backfills are additive only.
 - **`ctx-skillspector-audit`** — runs a static `--no-llm` check over
   shipped skill bodies with
   [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector), writes

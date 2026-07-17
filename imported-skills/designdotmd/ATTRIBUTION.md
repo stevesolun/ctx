@@ -43,11 +43,13 @@ python src/import_designdotmd_skills.py --install       # deploy as designdotmd-
 
 The importer:
 - Deploys each design to `~/.claude/skills/designdotmd-<slug>/SKILL.md`.
-- Preserves the upstream YAML frontmatter (colors, typography, spacing,
-  components, rationale) verbatim.
-- **Injects** a `tags: [...]` line right after `description:` so the
-  recommender's tag signal can match design tokens to user queries
-  ("dark editorial typography" → `serif` + `dark` + `editorial` tags).
+- Preserves valid upstream YAML fields and values, while quoting the corpus's
+  YAML-invalid plain `description` scalars for compatibility.
+- **Injects** a `tags: [...]` field only when top-level tags are missing. The
+  field follows the complete `description` node, including block scalar and
+  sequence forms, so the recommender's tag signal can match design tokens to
+  user queries ("dark editorial typography" → `serif` + `dark` +
+  `editorial` tags).
 - Prepends a one-line attribution comment so the upstream URL is
   visible inline in every deployed file.
 

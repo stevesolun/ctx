@@ -10,8 +10,8 @@ implementation that all of them delegate to.
 The ``atomic_write_*`` family writes via a temp file in the same directory
 as the target, then calls ``os.replace()`` which is atomic on POSIX and
 best-effort atomic on Windows.  On Windows, ``os.replace()`` raises
-``PermissionError`` if the destination is held open; we retry 3 times with
-a 50 ms sleep between attempts before re-raising.
+``PermissionError`` if the destination is held open; a bounded retry loop
+absorbs transient contention before re-raising.
 """
 
 from __future__ import annotations

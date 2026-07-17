@@ -14,9 +14,10 @@ On every `Edit` / `Write` / `MultiEdit` tool call, the hook:
    `~/.claude` in a file/tree/memory path tracked by `BackupConfig`.
 3. If tracked, shells out to
    `python <repo>/src/backup_mirror.py snapshot-if-changed --reason <tool>:<basename>`.
-4. `snapshot-if-changed` hashes every tracked file, compares against the
-   most recent snapshot's `manifest.json`, and only creates a new folder
-   when at least one SHA differs.
+4. `snapshot-if-changed` hashes the same eligible file set that capture would
+   persist, including the size cap and tree/memory destination exclusions. It
+   compares that state against the most recent snapshot's `manifest.json` and
+   only creates a new folder when at least one SHA differs.
 
 No-op edits don't create folders. The hook always exits 0 so a bug in
 the backup layer cannot stall a Claude session.
@@ -48,8 +49,9 @@ path to this checkout — on Windows this is a path like
 
 Notes:
 
-- The `matcher` is a regex against the tool name — the three names above
-  are the only tools that touch files.
+- The `matcher` is a regex against the tool name. The three names above are the
+  supported direct file-edit events; use the watchdog below to catch changes
+  made by Bash commands, external editors, or other processes.
 - Use forward slashes in the path even on Windows.
 - If `python` on your PATH is not the interpreter you want, give the
   absolute path instead (e.g.
@@ -85,6 +87,14 @@ See `src/backup_config.py` and the `backup` section of
   UNC paths, `.` entries, or `..` traversal.
 - **trees** — `agents/`, `skills/`.
 - **memory** — `projects/*/memory/**` when `memory_glob` is true.
+- **max_file_bytes** — `5242880` (5 MiB) by default. Files exactly at the cap
+  are included. For larger top-level, tree, and memory files, capture records a
+  `too_large` manifest entry without storing the content, and change detection
+  ignores the file.
+- **excludes** — optional destination-relative patterns for tree and memory
+  files. A pattern matches either the complete destination path or every file
+  with the same basename. These custom patterns do not suppress an explicitly
+  configured `top_files` entry; use `top_files` to control that list.
 - **always excluded** — `.credentials.json`, `claude.json`, token
   caches; these are dropped even if a user config lists them.
 
@@ -120,9 +130,8 @@ Both land under `~/.claude/backups/<timestamp>__<reason>/` and write a
 ## Watchdog — snapshot on changes outside a Claude session
 
 The PostToolUse hook only fires on `Edit` / `Write` / `MultiEdit` tool
-calls *inside* a Claude session. If you edit `~/.claude/settings.json`
-in VS Code, or a `git pull` updates an agent file, the hook never
-sees it.
+calls *inside* a Claude session. If a Bash command, VS Code edit, `git pull`,
+or another process updates a tracked file, the hook never sees it.
 
 For that gap, run the polling watchdog — a simple loop that calls
 `snapshot-if-changed` every N seconds:

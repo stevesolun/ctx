@@ -55,7 +55,7 @@ def infer_tags(name: str, content: str) -> list[str]:
 
 
 def install_skill(source: Path, skills_dir: Path, name: str) -> Path:
-    """Copy SKILL.md into skills_dir/<name>/SKILL.md. Returns the installed path."""
+    """Install SKILL.md; no-op when source already resolves to the destination."""
     dest_dir = skills_dir / name
     dest = dest_dir / "SKILL.md"
     if source.is_file() and dest.is_file():

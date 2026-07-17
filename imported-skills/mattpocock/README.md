@@ -18,6 +18,7 @@ Engineering:
 - `grill-with-docs`
 - `improve-codebase-architecture`
 - `prototype`
+- `review`
 - `setup-matt-pocock-skills`
 - `tdd`
 - `to-issues`

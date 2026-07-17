@@ -260,7 +260,7 @@ per-process monitor token injected into the rendered page.
 | `GET /api/kpi.json` | `DashboardSummary` passthrough — `{total, by_subject, grade_counts, lifecycle_counts, category_breakdown, hard_floor_counts, low_quality_candidates, archived, generated_at}`. Returns `{total: 0, detail: "no sidecars yet"}` when the quality directory is empty |
 | `GET /api/runtime.json` | Runtime lifecycle summary: source path, validation count, failed/error count, open-escalation count, latest validation, recent validations, open escalations, session IDs, `tool_selection`, `token_usage`, `token_usage_history`, and `recent_tool_usage`. |
 | `GET /api/skillspector.json?q=<text>&status=<status>&severity=<severity>&tag=<tag>&family=<family>&limit=100` | SkillSpector audit payload for `/skillspector`: summary counts, available filters, filtered records, audit path, and audit availability |
-| `GET /api/config.json` | Effective/default/user config payload used by the Config tab. |
+| `GET /api/config.json` | Effective/default/user config payload used by the Config tab; secret values in all three maps are recursively redacted, and reading the payload does not mutate the stored config. |
 | `GET /api/entities/search.json?q=<text>&type=<entity>&limit=80` | Wiki entity search results for Manage, Config, and entity picker flows, with wiki-relative `path` values. |
 | `GET /api/entity/<slug>.json?type=<entity>` | Frontmatter, wiki-relative `path`, and Markdown body for one wiki entity from the same merged pack/local source as `/wiki/<slug>`. |
 | `GET /api/events.stream` | Server-sent events tail of `~/.claude/ctx-audit.jsonl` |
@@ -289,7 +289,7 @@ load/unload mutation endpoint yet.
 | `POST /api/unload` | `{"slug": "...", "entity_type": "mcp-server"}` | `mcp_install.uninstall_mcp(slug, wiki_dir=...)` |
 | `POST /api/config` | `{"updates": {...}}` | persist supported user config overrides after validation |
 | `POST /api/entity/upsert` | entity metadata/body payload | write or update a wiki entity, then attach graph/recommendation metadata |
-| `POST /api/entity/delete` | `{"slug": "...", "entity_type": "skill"}` | remove a dashboard-supported wiki entity after safe-name validation; active wiki packs receive a tombstone on worker drain |
+| `POST /api/entity/delete` | `{"slug": "...", "entity_type": "skill"}` | validate the request, unload a live entity before unlinking its wiki page, then queue graph refresh and an active-pack tombstone for worker drain |
 
 Harness load/unload POSTs are rejected with the exact
 `ctx-harness-install ... --dry-run` command to run instead. Skill rows emit

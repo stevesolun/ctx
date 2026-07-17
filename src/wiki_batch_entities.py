@@ -6,7 +6,7 @@ Usage:
     python wiki_batch_entities.py --skills       # Generate missing skill pages
     python wiki_batch_entities.py --agents       # Generate missing agent pages
     python wiki_batch_entities.py --all          # Both
-    python wiki_batch_entities.py --dry-run      # Preview without writing
+    python wiki_batch_entities.py --all --dry-run # Preview both without writing
 """
 
 from __future__ import annotations

@@ -53,6 +53,11 @@ Changes under `.github/workflows/**` set `ci_changed`, run the full
 Ubuntu/Windows/macOS pytest matrix on the PR, and make the stable required
 aggregate fail if that matrix is skipped.
 
+PRs matching `WINDOWS_PATTERNS` in `scripts/ci_classifier.py` also run the
+required `windows-high-risk` job on native Windows 3.12, focused on the
+DesignDotMD, Matt Pocock, and Strix importer suites. Local-fast and preflight
+remain the first pass, but they do not replace that native Windows evidence.
+
 ## Documentation changes
 
 Public docs surfaces are release-tracked in the canonical
@@ -93,13 +98,27 @@ ruff check --fix src hooks scripts
 
 Maintainer no-mistakes agents can use `scripts/no_mistakes_codex_env.sh` as
 the Codex wrapper for this repo. It prepends the verified project Python venv
-when present and owner-only, plus Codex-bundled resources, without installing
-or upgrading system packages. Candidate venvs are checked in this order:
+when present and owner-only, plus either the configured Codex resource directory
+or the resolved executable's directory, without installing or upgrading system
+packages. Candidate venvs are checked in this order:
 `CTX_NO_MISTAKES_PYTHON_BIN`, `$PWD/.venv/bin`, this repository's `.venv/bin`,
 then `/tmp/ctx-verify-venv/bin`; the first owner-only venv containing
 `pytest`, `ruff`, and `mypy` wins and is exposed as
-`CTX_NO_MISTAKES_PYTHON_BIN_RESOLVED`. `CTX_NO_MISTAKES_CODEX_RESOURCES` and
-`CTX_NO_MISTAKES_REAL_CODEX` override the Codex resource directory or binary.
+`CTX_NO_MISTAKES_PYTHON_BIN_RESOLVED`.
+
+Codex executable discovery first accepts a valid
+`CTX_NO_MISTAKES_REAL_CODEX`. When that variable is unset, it checks
+`CTX_NO_MISTAKES_CODEX_RESOURCES/codex`, the colon-separated candidates in
+`CTX_NO_MISTAKES_CODEX_APP_PATHS`, then `codex` on `PATH`. When the app-path
+variable is unset, its candidates default to system `Codex.app`, system
+`ChatGPT.app`, user `Codex.app`, then user `ChatGPT.app`. An explicitly empty
+app-path value disables those app candidates. An invalid explicit executable
+fails closed with exit 127. A resource override is validated as an executable
+source only when `CTX_NO_MISTAKES_REAL_CODEX` is unset; when both are set and
+the executable is valid, the resource directory is prepended to `PATH` without
+separate validation. Invalid app candidates are skipped before the `PATH`
+fallback.
+
 The repo disables review-stage no-mistakes auto-fixes (`auto_fix.review: 0`) so
 review findings stay human-approved; rebase, test, document, lint, and CI stages
 still allow three automated repair attempts.

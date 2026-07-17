@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # no-mistakes agents run in a stripped-down environment. Keep ctx validation fast
-# by exposing the verified project Python toolchain and Codex-bundled ripgrep.
+# by exposing the verified project Python toolchain and either the configured Codex
+# resource directory or the resolved executable's directory.
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd -- "${script_dir}/.." && pwd -P)"
 pwd_ctx_python_bin="${PWD}/.venv/bin"

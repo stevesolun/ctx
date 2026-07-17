@@ -652,7 +652,10 @@ def _resolve_add_source(skill_path_or_name: str) -> tuple[Path, str]:
 
 
 def run_add(wiki_dir: Path, skill_path_or_name: str) -> None:
-    """Delegate to skill_add, or fall back to wiki_sync upsert."""
+    """Delegate to skill_add, falling back only when that module is absent.
+
+    Import, API, and call failures fail closed instead of invoking wiki_sync.
+    """
     source_path, skill_name = _resolve_add_source(skill_path_or_name)
 
     r = HealthReport()

@@ -13,6 +13,10 @@ Scans ~/.claude/skill-wiki/converted/ for all converted skill directories and:
   3. Updates index.md with any new skill entries
   4. Appends a summary entry to log.md
   5. Generates converted-index.md listing all converted skills
+
+The wiki root must already be a real directory, and checked wiki paths must not
+contain symlinks. Physical page updates are atomic; installed wiki packs receive
+matching overlay writes.
 """
 
 import argparse

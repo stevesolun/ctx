@@ -3,23 +3,17 @@
 Many imported skills (especially the auto-mirrored short ones) ship
 with no ``tags:`` block. The recommender uses tag overlap as one of
 three signals; an entity with zero tags is invisible to that signal.
-This tool walks the wiki, finds entities with empty ``tags`` (or
-missing the field entirely), and proposes a backfill set drawn from:
+This tool scans installed skills and agents, finds entities with empty
+``tags`` (or missing the field entirely), and proposes a backfill set drawn from:
 
   1. **Slug tokens** — the entity's filename, hyphen-split, lowercased,
      filtered against a stopword list. ``python-fastapi-development``
      contributes ``python``, ``fastapi``, ``development``.
 
-  2. **Detected keywords** — a small allowlist of well-known
+  2. **Body keywords** — a small allowlist of well-known
      technologies / disciplines. We scan the entity body for these
      and add any that fire. ``react``, ``kubernetes``, ``security``,
      ``testing``, etc.
-
-  3. **Existing-corpus tag overlap** — any tag already used elsewhere
-     in the catalog that also appears as a slug-token of this entity
-     is added with high confidence. This keeps backfilled tags
-     consistent with the existing tag vocabulary instead of inventing
-     new ones.
 
 The tool is **propose-only** by default. It writes a report (YAML
 patches per file) and never edits frontmatter unless explicitly
@@ -180,7 +174,7 @@ class TagProposal:
     proposed_add: list[str]  # tags to add (no duplicates with current)
     sources: dict[str, list[str]] = field(
         default_factory=dict
-    )  # token | keyword | corpus → list of tags
+    )  # slug_token | body_keyword → list of tags
 
 
 @dataclass
@@ -213,7 +207,8 @@ def _split_frontmatter(text: str) -> tuple[str, str, str]:
     """Return ``(prefix, body_after, frontmatter_text)``.
 
     ``prefix`` is everything before the opening ``---`` (usually empty
-    or an HTML comment from a strix/mattpocock import header).
+    or an attribution comment from a supported DesignDotMD, Matt Pocock,
+    or Strix import).
     ``body_after`` is the markdown body after the closing ``---``.
     """
     prefix = ""
@@ -322,7 +317,7 @@ def _render_frontmatter_with_added_tags(
 
 
 def _existing_tag_vocabulary(entities: Iterable[Path]) -> Counter:
-    """Tally tag usage across the corpus so backfill prefers existing tags."""
+    """Count existing tag frequency for body-keyword candidate ordering."""
     counter: Counter = Counter()
     for p in entities:
         try:
@@ -414,9 +409,9 @@ def discover_empty_tag_entities(wiki_dir: Path) -> list[tuple[str, str, Path]]:
     """Return ``(entity_type, slug, source_path)`` for every entity whose
     canonical SKILL.md / agent file has empty or missing tags.
 
-    The "canonical" path for skills is ``~/.claude/skills/<slug>/SKILL.md``
-    when present (the deployed source), falling back to the entity card
-    in the wiki. Same shape for agents.
+    Discovery reads installed sources only: skills under
+    ``~/.claude/skills/<slug>/SKILL.md`` and agents under
+    ``~/.claude/agents/<slug>.md``.
     """
     out: list[tuple[str, str, Path]] = []
     skills_root = Path.home() / ".claude" / "skills"
@@ -463,7 +458,7 @@ def run_backfill(
     wiki_dir: Path,
     max_tags_per_entity: int = 6,
 ) -> TagReport:
-    """Walk the catalog, propose backfills for empty-tag entities."""
+    """Scan installed skills and agents and propose backfills for empty tags."""
     skills_root = Path.home() / ".claude" / "skills"
     agents_root = Path.home() / ".claude" / "agents"
     all_paths: list[Path] = []

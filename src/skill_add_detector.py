@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-skill_add_detector.py -- PostToolUse hook: detect when a new skill is written to a skill dir.
+skill_add_detector.py -- PostToolUse hook: detect writes to installed skill files.
 
 When Claude writes a SKILL.md file (via Write/Edit tools), this detects it and
-registers the new skill in the wiki catalog automatically.
+inserts or refreshes that skill's row in the wiki catalog automatically.
 
 Called by the installed PostToolUse hook:
     python -m skill_add_detector --from-stdin
@@ -75,7 +75,7 @@ def validate_user_supplied_slug(name: str) -> str:
     return name
 
 
-SKILL_TRIGGERS = {"Write", "Edit"}  # Tools that could create a skill file
+SKILL_TRIGGERS = {"Write", "Edit"}  # Tools that can write an installed skill file
 
 
 def load_registry() -> list[str]:
@@ -257,7 +257,7 @@ def main() -> None:
     if resolved_path is None:
         sys.exit(0)
 
-    # New skill detected in a skill directory.
+    # A qualifying installed skill file was written.
     raw_name = resolved_path.parent.name
     try:
         skill_name = validate_user_supplied_slug(raw_name)

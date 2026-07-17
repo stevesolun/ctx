@@ -773,11 +773,13 @@ def snapshot_if_changed(
 ) -> SnapshotIfChangedResult:
     """Take a new snapshot iff at least one tracked file has changed.
 
-    Compares current SHA-256 hashes of all files under the active
-    BackupConfig (top_files + trees + optional memory glob) against the
-    most-recent existing snapshot's manifest. Returns a
-    :class:`SnapshotIfChangedResult` whose ``snapshot_path`` is ``None``
-    when nothing has changed — making this cheap to call from a hook
+    Compares current SHA-256 hashes for the same eligible files that capture
+    can persist: configured top files plus tree and optional memory files,
+    applying ``max_file_bytes`` everywhere and destination exclusions to tree
+    and memory entries. Symlinks and unreadable files are skipped consistently.
+    The resulting state is compared against the most-recent snapshot manifest.
+    Returns a :class:`SnapshotIfChangedResult` whose ``snapshot_path`` is
+    ``None`` when nothing has changed — making this cheap to call from a hook
     that fires on every tool invocation.
     """
     from change_detector import detect_changes  # noqa: PLC0415
