@@ -36,6 +36,8 @@ def test_wiki_base_pack_manifest_round_trips(tmp_path: Path) -> None:
     assert manifest.page_count == 2
     assert manifest.tombstone_count == 0
     assert read_wiki_pack_manifest(pack_dir / "wiki-pack-manifest.json") == manifest
+    assert discover_wiki_pack_manifests(pack_dir.parent)[0].manifest == manifest
+    assert b"\r\n" not in (pack_dir / "pages.jsonl").read_bytes()
     assert (
         json.loads((pack_dir / "pages.jsonl").read_text(encoding="utf-8").splitlines()[0])["path"]
         == "entities/skills/python.md"

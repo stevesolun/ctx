@@ -351,9 +351,9 @@ def build_html_with_filters(
     {"".join(f'<label><input type="checkbox" class="type-filter" data-type="{html.escape(node_type, quote=True)}" checked onchange="applyFilters()"> {html.escape(node_type)}</label>' for node_type in TYPE_COLORS)}
   </div>
 
-  <h2>Min Connections: <span id="deg-val">1</span></h2>
+  <h2>Min Connections: <span id="deg-val">0</span></h2>
   <div class="filter-group">
-    <input type="range" id="min-degree" min="1" max="50" value="1" oninput="document.getElementById('deg-val').textContent=this.value; applyFilters()">
+    <input type="range" id="min-degree" min="0" max="50" value="0" oninput="document.getElementById('deg-val').textContent=this.value; applyFilters()">
   </div>
 
   <h2>Tags</h2>

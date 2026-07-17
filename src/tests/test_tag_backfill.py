@@ -43,21 +43,50 @@ def _write_agent(home: Path, slug: str, text: str) -> Path:
 
 
 def test_split_frontmatter_supports_import_attribution_header() -> None:
+    attribution = (
+        "<!-- strix-import: upstream=https://example.test rev=0123456789ab "
+        "license=Apache-2.0 category=coordination -->\n"
+    )
     text = _entity_text(
         "imported-skill",
-        attribution="<!-- strix-import: upstream=https://example.test -->\n",
+        attribution=attribution,
     )
 
     prefix, body, frontmatter = tag_backfill._split_frontmatter(text)
 
-    assert prefix == "<!-- strix-import: upstream=https://example.test -->\n"
+    assert prefix == attribution
     assert "name: imported-skill" in frontmatter
     assert body.startswith("# imported-skill")
 
 
 def test_split_frontmatter_leaves_malformed_sources_untouched() -> None:
-    for text in ("# No frontmatter\n", "---\nname: unclosed\n"):
+    for text in (
+        "# No frontmatter\n",
+        "---\nname: unclosed\n",
+        "# Body\n\n---\ntags: []\n---\nTrailing body\n",
+        "<!-- unknown-import: upstream=https://example.test -->\n"
+        "---\nname: helper\n---\n",
+        "<!-- strix-import: upstream=https://example.test -->\n"
+        "---\nname: helper\n---\n",
+        "----\nname: helper\n----\n",
+    ):
         assert tag_backfill._split_frontmatter(text) == (text, "", "")
+
+
+def test_apply_does_not_treat_body_thematic_breaks_as_frontmatter(tmp_path: Path) -> None:
+    source = tmp_path / "SKILL.md"
+    original = "# Helper\n\nIntro\n\n---\ntags: []\n---\nClosing text\n"
+    source.write_text(original, encoding="utf-8")
+    proposal = tag_backfill.TagProposal(
+        entity_type="skill",
+        slug="helper",
+        path=source,
+        current_tags=[],
+        proposed_add=["python"],
+    )
+
+    assert tag_backfill.apply_proposals([proposal]) == 0
+    assert source.read_text(encoding="utf-8") == original
 
 
 def test_render_frontmatter_merges_tags_without_removing_curated_values() -> None:

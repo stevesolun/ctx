@@ -208,6 +208,9 @@ def test_catalog_upsert_matches_only_name_column(
     catalog.write_text(
         catalog.read_text(encoding="utf-8")
         + "| existing | skill | 1 |  | `/tmp/existing/SKILL.md` |\n"
+        + "| skill | agent | 9 |  | `/tmp/skill-agent.md` |\n"
+        + "| skill | skill | 7 |  | `/tmp/stale-one/SKILL.md` |\n"
+        + "| skill | skill | 8 |  | `/tmp/stale-two/SKILL.md` |\n"
         + "Keep this prose | skill | mention unchanged.\n",
         encoding="utf-8",
     )
@@ -235,6 +238,7 @@ def test_catalog_upsert_matches_only_name_column(
     content = catalog.read_text(encoding="utf-8")
     assert content.count("| skill | skill |") == 1
     assert f"| skill | skill | 1 |  | `{skill_file}` |" in content
+    assert "| skill | agent | 9 |  | `/tmp/skill-agent.md` |" in content
     assert "Keep this prose | skill | mention unchanged." in content
     assert atomic_writes == [(catalog, content, "utf-8")]
 

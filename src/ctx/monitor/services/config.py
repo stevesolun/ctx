@@ -38,6 +38,14 @@ _CONFIG_SECRET_KEY_PAIRS = frozenset(
         ("private", "key"),
     }
 )
+_CONFIG_NONSECRET_TOKEN_PATH_TYPES: dict[
+    tuple[str, ...], type[Any] | tuple[type[Any], ...]
+] = {
+    ("graph", "edge_weights", "slug_tokens"): (int, float),
+    ("graph", "token_edges"): dict,
+    ("graph", "token_edges", "dense_token_threshold"): int,
+    ("graph", "token_edges", "shared_token_saturation"): int,
+}
 _CONFIG_SECRET_ASSIGNMENT_RE = re.compile(
     r"(?P<prefix>(?P<key_quote>[\"']?)(?P<key>[A-Za-z_][A-Za-z0-9_.-]*)"
     r"(?P=key_quote)\s*=\s*)"
@@ -430,7 +438,7 @@ def _config_key_is_secret(key: str) -> bool:
         return False
     if any(part in _CONFIG_SECRET_WORDS for part in parts):
         return True
-    if parts[-1] == "token":
+    if any(part in {"token", "tokens"} for part in parts):
         return True
     return any(pair in _CONFIG_SECRET_KEY_PAIRS for pair in zip(parts, parts[1:]))
 
@@ -471,7 +479,16 @@ def _config_argv_flag_is_secret(value: str) -> bool:
     return value.startswith("-") and "=" not in value and _config_key_is_secret(value.lstrip("-"))
 
 
-def _redact_config_list(value: list[Any]) -> list[Any]:
+def _config_path_is_known_nonsecret(path: tuple[str, ...], value: Any) -> bool:
+    expected_type = _CONFIG_NONSECRET_TOKEN_PATH_TYPES.get(
+        tuple(part.lower() for part in path)
+    )
+    if expected_type is None or isinstance(value, bool):
+        return False
+    return isinstance(value, expected_type)
+
+
+def _redact_config_list(value: list[Any], *, path: tuple[str, ...]) -> list[Any]:
     redacted: list[Any] = []
     redact_next = False
     for child in value:
@@ -480,22 +497,26 @@ def _redact_config_list(value: list[Any]) -> list[Any]:
             redact_next = False
             continue
         redact_next = False
-        redacted.append(_redact_config_value(child))
+        redacted.append(_redact_config_value(child, path=path))
         if isinstance(child, str) and _config_argv_flag_is_secret(child):
             redact_next = True
     return redacted
 
 
-def _redact_config_value(value: Any, *, key: str = "") -> Any:
-    if key and _config_key_is_secret(key):
+def _redact_config_value(value: Any, *, path: tuple[str, ...] = ()) -> Any:
+    if (
+        path
+        and _config_key_is_secret(path[-1])
+        and not _config_path_is_known_nonsecret(path, value)
+    ):
         return _REDACTED
     if isinstance(value, dict):
         return {
-            child_key: _redact_config_value(child, key=str(child_key))
+            child_key: _redact_config_value(child, path=(*path, str(child_key)))
             for child_key, child in value.items()
         }
     if isinstance(value, list):
-        return _redact_config_list(value)
+        return _redact_config_list(value, path=path)
     if isinstance(value, str):
         return _redact_config_text(value)
     return value

@@ -28,6 +28,8 @@ import secrets
 import stat
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -68,10 +70,18 @@ def load_manifest() -> dict:
 
 
 def render_attribution_header(entry: dict, manifest: dict) -> str:
+    upstream = _validate_attribution_value("manifest.upstream", manifest.get("upstream"))
+    revision = _validate_attribution_value(
+        "manifest.upstream_revision", manifest.get("upstream_revision")
+    )
+    license_name = _validate_attribution_value("manifest.license", manifest.get("license"))
+    category = _validate_attribution_value(
+        "category", entry.get("category"), regex=_SAFE_CATEGORY_RE
+    )
     return (
-        f"<!-- strix-import: upstream={manifest['upstream']} "
-        f"rev={manifest['upstream_revision'][:12]} "
-        f"license={manifest['license']} category={entry['category']} -->\n"
+        f"<!-- strix-import: upstream={upstream} "
+        f"rev={revision[:12]} "
+        f"license={license_name} category={category} -->\n"
     )
 
 
@@ -103,6 +113,22 @@ def _validate_manifest_field(
     return value
 
 
+def _validate_attribution_value(
+    field: str, value: object, *, regex: re.Pattern[str] | None = None
+) -> str:
+    text = _validate_manifest_field(field, value, regex=regex)
+    if "\r" in text or "\n" in text or "-->" in text:
+        raise ValueError(f"{field}: unsafe attribution value")
+    return text
+
+
+def _resolve_path(path: Path, *, field: str) -> Path:
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"{field}: {path} could not be resolved: {exc}") from None
+
+
 def _resolve_within(root: Path, candidate_rel: str, *, field: str) -> Path:
     """Join ``candidate_rel`` onto ``root`` and fail hard if the result escapes root.
 
@@ -114,8 +140,8 @@ def _resolve_within(root: Path, candidate_rel: str, *, field: str) -> Path:
     """
     if ".." in Path(candidate_rel).parts or candidate_rel.startswith(("/", "\\")):
         raise ValueError(f"{field}: path traversal denied in {candidate_rel!r}")
-    resolved = (root / candidate_rel).resolve()
-    root_resolved = root.resolve()
+    resolved = _resolve_path(root / candidate_rel, field=field)
+    root_resolved = _resolve_path(root, field=f"{field} root")
     try:
         resolved.relative_to(root_resolved)
     except ValueError as exc:
@@ -127,6 +153,127 @@ def _identity(metadata: os.stat_result) -> tuple[int, int]:
     return metadata.st_dev, metadata.st_ino
 
 
+_DIRECTORY_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(
+    os, "O_NOFOLLOW", 0
+)
+_FILE_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(
+    os, "O_NONBLOCK", 0
+)
+
+
+def _supports_directory_fds() -> bool:
+    supported = getattr(os, "supports_dir_fd", ())
+    return (
+        hasattr(os, "O_DIRECTORY")
+        and hasattr(os, "O_NOFOLLOW")
+        and os.open in supported
+        and os.mkdir in supported
+        and os.rename in supported
+        and os.stat in supported
+        and os.unlink in supported
+    )
+
+
+def _open_anchored_directory(path: Path, *, create: bool) -> int | None:
+    absolute = Path(os.path.abspath(path))
+    current_fd = os.open(absolute.anchor, _DIRECTORY_OPEN_FLAGS)
+    try:
+        for component in absolute.parts[1:]:
+            try:
+                next_fd = os.open(component, _DIRECTORY_OPEN_FLAGS, dir_fd=current_fd)
+            except FileNotFoundError:
+                if not create:
+                    os.close(current_fd)
+                    return None
+                try:
+                    os.mkdir(component, mode=0o700, dir_fd=current_fd)
+                except FileExistsError:
+                    pass
+                next_fd = os.open(component, _DIRECTORY_OPEN_FLAGS, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        return current_fd
+    except BaseException:
+        os.close(current_fd)
+        raise
+
+
+def _read_source_text(source_rel: str) -> tuple[Path, str]:
+    resolved_source = _resolve_within(IMPORT_ROOT, source_rel, field="source_path")
+    trusted_root = _resolve_path(IMPORT_ROOT, field="import root")
+    try:
+        anchored_source_rel = resolved_source.relative_to(trusted_root)
+    except ValueError as exc:
+        raise ValueError("source_path: import root changed during validation") from exc
+    source = trusted_root.joinpath(*anchored_source_rel.parts)
+
+    if _supports_directory_fds():
+        parent_fd = _open_anchored_directory(trusted_root, create=False)
+        if parent_fd is None:
+            raise FileNotFoundError(f"Source skill missing: {source}")
+        try:
+            for component in anchored_source_rel.parts[:-1]:
+                next_fd = os.open(component, _DIRECTORY_OPEN_FLAGS, dir_fd=parent_fd)
+                os.close(parent_fd)
+                parent_fd = next_fd
+            try:
+                fd = os.open(anchored_source_rel.name, _FILE_OPEN_FLAGS, dir_fd=parent_fd)
+            except FileNotFoundError:
+                raise FileNotFoundError(f"Source skill missing: {source}") from None
+            try:
+                metadata = os.fstat(fd)
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ValueError(f"{source}: source is not a regular file")
+                with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                    fd = -1
+                    return source, handle.read()
+            except UnicodeError:
+                raise ValueError(f"{source}: source is not valid UTF-8") from None
+            finally:
+                if fd != -1:
+                    os.close(fd)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Source skill missing: {source}") from None
+        except OSError as exc:
+            raise ValueError(
+                f"{source}: source path changed or is not a real file: {exc}"
+            ) from None
+        finally:
+            os.close(parent_fd)
+
+    if _supports_windows_path_guards():
+        with _guard_windows_directories(trusted_root, source.parent, create_missing=False):
+            source_metadata = _lstat_optional(source)
+            if source_metadata is None:
+                raise FileNotFoundError(f"Source skill missing: {source}")
+            if (
+                stat.S_ISLNK(source_metadata.st_mode)
+                or _is_reparse_point(source, source_metadata)
+                or not stat.S_ISREG(source_metadata.st_mode)
+            ):
+                raise ValueError(f"{source}: source is not a regular file")
+            fd = os.open(source, os.O_RDONLY)
+            try:
+                opened = os.fstat(fd)
+                if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(
+                    source_metadata, opened
+                ):
+                    raise ValueError(f"{source}: source path changed while opening")
+                with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                    fd = -1
+                    return source, handle.read()
+            except UnicodeError:
+                raise ValueError(f"{source}: source is not valid UTF-8") from None
+            finally:
+                if fd != -1:
+                    os.close(fd)
+
+    raise RuntimeError(
+        "secure source read unavailable: this platform must provide directory-relative "
+        "filesystem operations or Windows directory handles"
+    )
+
+
 def _prepare_entry(entry: dict, manifest: dict, target_dir: Path) -> PreparedEntry:
     # Manifest fields are untrusted input (the repo's imported-skills/
     # MANIFEST.json is checked-in today, but the path from parsing to
@@ -134,10 +281,7 @@ def _prepare_entry(entry: dict, manifest: dict, target_dir: Path) -> PreparedEnt
     # against a strict allowlist, contain source_path inside IMPORT_ROOT.
     category = _validate_manifest_field("category", entry.get("category"), regex=_SAFE_CATEGORY_RE)
     source_path_raw = _validate_manifest_field("source_path", entry.get("source_path"))
-    source = _resolve_within(IMPORT_ROOT, source_path_raw, field="source_path")
-
-    if not source.exists():
-        raise FileNotFoundError(f"Source skill missing: {source}")
+    _, body = _read_source_text(source_path_raw)
 
     name = _validate_manifest_field("name", entry.get("name"))
     name_parts = name.replace("\\", "/").split("/")
@@ -151,15 +295,15 @@ def _prepare_entry(entry: dict, manifest: dict, target_dir: Path) -> PreparedEnt
     skill_dir = target_dir / dir_name
     # Resolve both the directory and final file so existing symlinks cannot
     # redirect an install outside target_dir.
-    target_resolved = target_dir.resolve()
-    dest_resolved = skill_dir.resolve()
+    target_resolved = _resolve_path(target_dir, field="target directory")
+    dest_resolved = _resolve_path(skill_dir, field="skill directory")
     try:
         dest_resolved.relative_to(target_resolved)
     except ValueError as exc:
         raise ValueError(f"skill dir {skill_dir} resolves outside target_dir") from exc
     dest = skill_dir / "SKILL.md"
     try:
-        canonical_destination = dest.resolve()
+        canonical_destination = _resolve_path(dest, field="destination")
         canonical_destination.relative_to(target_resolved)
     except ValueError as exc:
         raise ValueError(f"destination {dest} resolves outside target_dir") from exc
@@ -168,7 +312,6 @@ def _prepare_entry(entry: dict, manifest: dict, target_dir: Path) -> PreparedEnt
         raise ValueError(f"destination {dest} must not be a symlink")
 
     header = render_attribution_header(entry, manifest)
-    body = source.read_text(encoding="utf-8")
     if body.startswith("<!-- strix-import:"):
         body = body.split("-->", 1)[1].lstrip("\n")
     content = header + body
@@ -213,18 +356,42 @@ def _destination_state_at(parent_fd: int, name: str) -> os.stat_result | None:
 
 
 def _validate_write_state(prepared: PreparedEntry, metadata: os.stat_result | None) -> None:
-    if metadata is not None and stat.S_ISLNK(metadata.st_mode):
-        raise ValueError(f"destination {prepared.destination} must not be a symlink")
-    if metadata is not None and metadata.st_nlink > 1:
-        raise ValueError(f"destination {prepared.destination} is hard-linked")
+    if metadata is not None:
+        if stat.S_ISLNK(metadata.st_mode) or _is_reparse_point(
+            prepared.canonical_destination, metadata
+        ):
+            raise ValueError(f"destination {prepared.destination} must not be a symlink")
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError(f"destination {prepared.destination} must be a regular file")
+        if metadata.st_nlink > 1:
+            raise ValueError(f"destination {prepared.destination} is hard-linked")
     current_identity = None if metadata is None else _identity(metadata)
     if current_identity != prepared.destination_identity:
         raise ValueError(f"destination {prepared.destination} changed after preflight")
 
 
-def _write_via_directory_fd(prepared: PreparedEntry) -> None:
-    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    target_fd = os.open(prepared.target_root, directory_flags)
+def _read_destination_at(parent_fd: int, prepared: PreparedEntry) -> str | None:
+    metadata = _destination_state_at(parent_fd, prepared.destination.name)
+    _validate_write_state(prepared, metadata)
+    if metadata is None:
+        return None
+    fd = os.open(prepared.destination.name, _FILE_OPEN_FLAGS, dir_fd=parent_fd)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(metadata, opened):
+            raise ValueError(f"destination {prepared.destination} changed while opening")
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            fd = -1
+            return handle.read()
+    finally:
+        if fd != -1:
+            os.close(fd)
+
+
+def _write_via_directory_fd(prepared: PreparedEntry) -> tuple[bool, bool]:
+    target_fd = _open_anchored_directory(prepared.target_root, create=True)
+    if target_fd is None:
+        raise RuntimeError(f"could not create target directory {prepared.target_root}")
     parent_fd: int | None = None
     temp_name: str | None = None
     try:
@@ -236,7 +403,7 @@ def _write_via_directory_fd(prepared: PreparedEntry) -> None:
         except FileExistsError:
             pass
 
-        parent_fd = os.open(parent_name, directory_flags, dir_fd=target_fd)
+        parent_fd = os.open(parent_name, _DIRECTORY_OPEN_FLAGS, dir_fd=target_fd)
         current_parent_identity = _identity(os.fstat(parent_fd))
         if created_parent:
             if prepared.parent_identity is not None:
@@ -244,10 +411,14 @@ def _write_via_directory_fd(prepared: PreparedEntry) -> None:
         elif current_parent_identity != prepared.parent_identity:
             raise ValueError(f"skill dir {prepared.destination.parent} changed after preflight")
 
-        _validate_write_state(
-            prepared,
-            _destination_state_at(parent_fd, prepared.destination.name),
-        )
+        existing = _read_destination_at(parent_fd, prepared)
+        existed = existing is not None
+        if existing == prepared.content:
+            _validate_write_state(
+                prepared,
+                _destination_state_at(parent_fd, prepared.destination.name),
+            )
+            return False, existed
 
         temp_name = f".{prepared.destination.name}.{secrets.token_hex(8)}.tmp"
         temp_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
@@ -279,6 +450,7 @@ def _write_via_directory_fd(prepared: PreparedEntry) -> None:
             os.fsync(parent_fd)
         except OSError:
             pass
+        return True, existed
     finally:
         if temp_name is not None and parent_fd is not None:
             try:
@@ -290,77 +462,194 @@ def _write_via_directory_fd(prepared: PreparedEntry) -> None:
         os.close(target_fd)
 
 
-def _write_via_checked_paths(prepared: PreparedEntry) -> None:
-    parent = prepared.destination.parent
-    if parent.is_symlink():
-        raise ValueError(f"skill dir {parent} is a symlink")
-    parent.mkdir(parents=True, exist_ok=True)
-    if parent.is_symlink():
-        raise ValueError(f"skill dir {parent} changed after preflight")
-    if _identity(parent.stat(follow_symlinks=False)) != prepared.parent_identity and (
-        prepared.parent_identity is not None
-    ):
-        raise ValueError(f"skill dir {parent} changed after preflight")
-
-    current = None
+def _lstat_optional(path: Path) -> os.stat_result | None:
     try:
-        current = prepared.destination.stat(follow_symlinks=False)
+        return path.stat(follow_symlinks=False)
     except FileNotFoundError:
-        pass
-    _validate_write_state(prepared, current)
+        return None
 
-    fd, temp_path = tempfile.mkstemp(prefix=f".{prepared.destination.name}.", dir=parent)
+
+def _is_reparse_point(path: Path, metadata: os.stat_result) -> bool:
+    is_junction = getattr(path, "is_junction", None)
+    return bool(getattr(metadata, "st_file_attributes", 0) & 0x400) or (
+        callable(is_junction) and is_junction()
+    )
+
+
+def _validate_real_directory(path: Path, *, label: str) -> bool:
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(prepared.content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if parent.is_symlink():
-            raise ValueError(f"skill dir {parent} changed after preflight")
-        current = None
-        try:
-            current = prepared.destination.stat(follow_symlinks=False)
-        except FileNotFoundError:
-            pass
-        _validate_write_state(prepared, current)
-        os.replace(temp_path, prepared.destination)
-        temp_path = ""
+        metadata = _lstat_optional(path)
+    except OSError as exc:
+        raise ValueError(f"{label} {path} must be a real directory: {exc}") from None
+    if metadata is None:
+        return False
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or _is_reparse_point(path, metadata)
+    ):
+        raise ValueError(f"{label} {path} must be a real directory")
+    return True
+
+
+def _supports_windows_path_guards() -> bool:
+    return os.name == "nt"
+
+
+def _open_windows_directory_guard(path: Path) -> int:  # pragma: no cover - Windows only
+    import ctypes
+
+    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    )
+    create_file.restype = ctypes.c_void_p
+    handle = create_file(
+        str(path),
+        0x80,
+        0x1 | 0x2,
+        None,
+        3,
+        0x02000000 | 0x00200000,
+        None,
+    )
+    if handle in (None, ctypes.c_void_p(-1).value):
+        error = getattr(ctypes, "get_last_error")()
+        message = getattr(ctypes, "FormatError")(error)
+        raise OSError(error, f"cannot guard directory {path}: {message}")
+    return int(handle)
+
+
+def _close_windows_directory_guard(handle: int) -> None:  # pragma: no cover - Windows only
+    import ctypes
+
+    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (ctypes.c_void_p,)
+    close_handle.restype = ctypes.c_int
+    close_handle(ctypes.c_void_p(handle))
+
+
+def _windows_guard_paths(target_dir: Path, skill_dir: Path) -> list[Path]:
+    absolute_target = Path(os.path.abspath(target_dir))
+    paths = [Path(absolute_target.anchor)]
+    for component in absolute_target.parts[1:]:
+        paths.append(paths[-1] / component)
+    try:
+        relative_skill = skill_dir.relative_to(absolute_target)
+    except ValueError as exc:
+        raise ValueError(f"guarded directory {skill_dir} is outside {absolute_target}") from exc
+    for component in relative_skill.parts:
+        paths.append(paths[-1] / component)
+    return paths
+
+
+@contextmanager
+def _guard_windows_directories(
+    target_dir: Path,
+    skill_dir: Path,
+    *,
+    create_missing: bool = True,
+) -> Iterator[None]:
+    handles: list[int] = []
+    try:
+        for path in _windows_guard_paths(target_dir, skill_dir):
+            if not _validate_real_directory(path, label="target directory"):
+                if not create_missing:
+                    raise ValueError(f"target directory {path} must be a real directory")
+                path.mkdir()
+                _validate_real_directory(path, label="target directory")
+            handles.append(_open_windows_directory_guard(path))
+            _validate_real_directory(path, label="target directory")
+        yield
     finally:
-        if temp_path:
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
+        for handle in reversed(handles):
+            _close_windows_directory_guard(handle)
 
 
-def _write_prepared_entry(prepared: PreparedEntry) -> None:
-    if not prepared.changed:
-        return
+def _read_destination_path(prepared: PreparedEntry) -> str | None:
+    destination = prepared.canonical_destination
+    metadata = _lstat_optional(destination)
+    _validate_write_state(prepared, metadata)
+    if metadata is None:
+        return None
+    fd = os.open(destination, os.O_RDONLY)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(metadata, opened):
+            raise ValueError(f"destination {prepared.destination} changed while opening")
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            fd = -1
+            return handle.read()
+    finally:
+        if fd != -1:
+            os.close(fd)
+
+
+def _write_via_checked_paths(prepared: PreparedEntry) -> tuple[bool, bool]:
+    destination = prepared.canonical_destination
+    parent = destination.parent
+    with _guard_windows_directories(prepared.target_root, parent):
+        current_parent_identity = _identity(parent.stat(follow_symlinks=False))
+        if (
+            prepared.parent_identity is not None
+            and current_parent_identity != prepared.parent_identity
+        ):
+            raise ValueError(f"skill dir {prepared.destination.parent} changed after preflight")
+
+        existing = _read_destination_path(prepared)
+        existed = existing is not None
+        if existing == prepared.content:
+            _validate_write_state(prepared, _lstat_optional(destination))
+            return False, existed
+
+        fd, temp_path = tempfile.mkstemp(prefix=f".{destination.name}.", dir=parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(prepared.content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            _validate_write_state(prepared, _lstat_optional(destination))
+            os.replace(temp_path, destination)
+            temp_path = ""
+            return True, existed
+        finally:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+
+
+def _write_prepared_entry(prepared: PreparedEntry) -> tuple[bool, bool]:
     if prepared.parent_is_symlink or prepared.destination.parent.is_symlink():
         raise ValueError(f"skill dir {prepared.destination.parent} is a symlink")
-    supports_directory_fds = (
-        hasattr(os, "O_DIRECTORY")
-        and hasattr(os, "O_NOFOLLOW")
-        and os.open in os.supports_dir_fd
-        and os.mkdir in os.supports_dir_fd
-        and os.rename in os.supports_dir_fd
-        and os.stat in os.supports_dir_fd
-        and os.unlink in os.supports_dir_fd
+    if _supports_directory_fds():
+        return _write_via_directory_fd(prepared)
+    if _supports_windows_path_guards():
+        return _write_via_checked_paths(prepared)
+    raise RuntimeError(
+        "secure install unavailable: this platform must provide directory-relative "
+        "filesystem operations or Windows directory handles"
     )
-    if supports_directory_fds:
-        _write_via_directory_fd(prepared)
-    else:
-        _write_via_checked_paths(prepared)
 
 
 def _deploy_entry_with_status(
     entry: dict, manifest: dict, target_dir: Path, dry_run: bool
 ) -> tuple[Path, bool, bool]:
     prepared = _prepare_entry(entry, manifest, target_dir)
-    if not dry_run:
-        prepared.target_root.mkdir(parents=True, exist_ok=True)
-        _write_prepared_entry(prepared)
-    return prepared.destination, prepared.changed, prepared.existed
+    if dry_run:
+        changed, existed = prepared.changed, prepared.existed
+    else:
+        changed, existed = _write_prepared_entry(prepared)
+    return prepared.destination, changed, existed
 
 
 def _entry_label(index: int, entry: object) -> str:
@@ -388,7 +677,7 @@ def _preflight_manifest(manifest: dict, target_dir: Path) -> list[PreparedEntry]
             raise ValueError(f"{label}: expected an object, got {type(raw_entry).__name__}")
         try:
             prepared = _prepare_entry(raw_entry, manifest, target_dir)
-        except (OSError, UnicodeError, ValueError) as exc:
+        except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
             raise ValueError(f"{label}: {exc}") from exc
 
         destination_slug = prepared.destination.parent.name
@@ -451,22 +740,20 @@ def main() -> None:
         parser.error("Pass either --install or --dry-run")
 
     manifest = load_manifest()
-    target_dir = Path(args.target).expanduser()
-
     try:
+        target_dir = Path(args.target).expanduser()
         prepared_entries = _preflight_manifest(manifest, target_dir)
 
         if args.install and not target_dir.exists():
             print(f"Creating target dir: {target_dir}")
-            target_dir.mkdir(parents=True, exist_ok=True)
 
         created = updated = unchanged = 0
         for prepared in prepared_entries:
             if args.install:
-                _write_prepared_entry(prepared)
+                changed, existed = _write_prepared_entry(prepared)
+            else:
+                changed, existed = prepared.changed, prepared.existed
             dest = prepared.destination
-            changed = prepared.changed
-            existed = prepared.existed
             if changed:
                 if existed:
                     updated += 1
@@ -478,7 +765,7 @@ def main() -> None:
                 unchanged += 1
                 marker = "   "
             print(f"  [{marker}] {dest.relative_to(target_dir.parent)}")
-    except (OSError, UnicodeError, ValueError) as exc:
+    except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(1) from None
 

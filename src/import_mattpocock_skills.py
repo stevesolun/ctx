@@ -46,6 +46,7 @@ _NAME_SURROGATE_REPARSE_BIT = 0x20000000
 class _DestinationState:
     identity: tuple[int, int]
     mode: int
+    link_count: int
     digest: bytes
     content: bytes
 
@@ -196,15 +197,18 @@ def _is_name_surrogate_reparse_point(metadata: os.stat_result) -> bool:
     )
 
 
-def _validate_parent_metadata(path: Path, metadata: os.stat_result) -> None:
+def _validate_parent_metadata(
+    path: Path,
+    metadata: os.stat_result,
+    *,
+    label: str = "destination parent",
+) -> None:
     if stat.S_ISLNK(metadata.st_mode):
-        raise ValueError(f"destination parent: {path} is a symlink")
+        raise ValueError(f"{label}: {path} is a symlink")
     if _is_name_surrogate_reparse_point(metadata):
-        raise ValueError(
-            f"destination parent: {path} is a junction or name-surrogate reparse point"
-        )
+        raise ValueError(f"{label}: {path} is a junction or name-surrogate reparse point")
     if not stat.S_ISDIR(metadata.st_mode):
-        raise ValueError(f"destination parent: {path} is not a directory")
+        raise ValueError(f"{label}: {path} is not a directory")
 
 
 def _preflight_target_root(target_dir: Path) -> tuple[_ParentState, tuple[_ParentState, ...]]:
@@ -284,6 +288,7 @@ def _read_destination(
         _DestinationState(
             _identity(opened_metadata),
             stat.S_IMODE(opened_metadata.st_mode),
+            opened_metadata.st_nlink,
             hashlib.sha256(existing).digest(),
             existing,
         ),
@@ -292,10 +297,18 @@ def _read_destination(
 
 
 def render_attribution_header(manifest: dict) -> str:
+    def value(field: str) -> str:
+        text = _validate(f"manifest.{field}", manifest.get(field))
+        if "\r" in text or "\n" in text or "-->" in text:
+            raise ValueError(f"manifest.{field}: unsafe attribution value")
+        return text
+
+    upstream = value("upstream")
+    upstream_revision = value("upstream_revision")
+    license_name = value("license")
     return (
-        f"<!-- mattpocock-import: upstream={manifest['upstream']} "
-        f"rev={manifest['upstream_revision'][:12]} "
-        f"license={manifest['license']} -->\n"
+        f"<!-- mattpocock-import: upstream={upstream} "
+        f"rev={upstream_revision[:12]} license={license_name} -->\n"
     )
 
 
@@ -308,10 +321,13 @@ def _prepare_entry(
     slug = _validate("slug", entry.get("slug"), regex=_SAFE_SLUG_RE)
     source_path_raw = _validate("source_path", entry.get("source_path"))
     source = _resolve_within(IMPORT_ROOT, source_path_raw, field="source_path")
-    if not source.exists():
-        raise FileNotFoundError(f"Source skill missing: {source}")
-    if not source.is_file():
-        raise ValueError(f"source_path: {source_path_raw!r} is not a regular file")
+    try:
+        source_content, source_mode = _read_source_payload(
+            source,
+            field=f"source_path: {source_path_raw!r}",
+        )
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Source skill missing: {source}") from None
     source_dir = source.parent
 
     skill_dir = target_dir / f"mattpocock-{slug}"
@@ -324,7 +340,7 @@ def _prepare_entry(
     dest_skill = skill_dir / "SKILL.md"
     dest_skill_resolved = _resolve_within(skill_dir, "SKILL.md", field="skill destination")
     header = render_attribution_header(manifest)
-    body = source.read_text(encoding="utf-8")
+    body = source_content.decode("utf-8")
     if body.startswith("<!-- mattpocock-import:"):
         _, separator, imported_body = body.partition("-->")
         if not separator:
@@ -340,7 +356,7 @@ def _prepare_entry(
             field="skill destination",
             destination=dest_skill,
             content=content.encode("utf-8"),
-            mode=stat.S_IMODE(source.stat().st_mode),
+            mode=source_mode,
         )
     ]
     support_files = entry.get("support_files", [])
@@ -370,16 +386,20 @@ def _prepare_entry(
         destination_owners[dest_support_resolved] = rel
         portable_destination_owners[portable_key] = rel
 
-        # The resolved source proves containment; the lexical path controls placement.
-        if not source_support.is_file():
-            raise ValueError(f"support_files: {rel!r} is not a regular file")
+        try:
+            support_content, support_mode = _read_source_payload(
+                source_support,
+                field=f"support_files: {rel!r}",
+            )
+        except FileNotFoundError:
+            raise ValueError(f"support_files: {rel!r} is not a regular file") from None
         support_paths.append(source_support)
         candidates.append(
             _CandidateWrite(
                 field="support_files destination",
                 destination=dest_support,
-                content=source_support.read_bytes(),
-                mode=stat.S_IMODE(source_support.stat().st_mode),
+                content=support_content,
+                mode=support_mode,
             )
         )
 
@@ -394,8 +414,10 @@ def _prepare_entry(
         state, existing = _read_destination(candidate.destination, field=candidate.field)
         if candidate.destination == dest_skill:
             destination_existed = state is not None
-        if existing != candidate.content or (
-            manage_modes and state is not None and state.mode != candidate.mode
+        if (
+            existing != candidate.content
+            or (state is not None and state.link_count > 1)
+            or (manage_modes and state is not None and state.mode != candidate.mode)
         ):
             writes.append(
                 _PreparedWrite(
@@ -540,6 +562,7 @@ def _write_staged_payload(fd: int, write: _PreparedWrite) -> _DestinationState:
         return _DestinationState(
             identity=_identity(metadata),
             mode=stat.S_IMODE(metadata.st_mode),
+            link_count=metadata.st_nlink,
             digest=hashlib.sha256(write.content).digest(),
             content=write.content,
         )
@@ -706,6 +729,7 @@ def _snapshot_state(staged: _StagedWrite, name: str) -> _DestinationState:
     return _DestinationState(
         identity=_identity(metadata),
         mode=stat.S_IMODE(metadata.st_mode),
+        link_count=metadata.st_nlink,
         digest=hashlib.sha256(content).digest(),
         content=content,
     )
@@ -926,6 +950,128 @@ def _close_windows_directory_guard(handle: int) -> None:  # pragma: no cover - W
     close_handle(ctypes.c_void_p(handle))
 
 
+def _read_source_fd(
+    fd: int,
+    source: Path,
+    *,
+    field: str,
+    expected_identity: tuple[int, int] | None = None,
+) -> tuple[bytes, int]:
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError(f"{field}: {source} is not a regular file")
+        if expected_identity is not None and _identity(metadata) != expected_identity:
+            raise ValueError(f"{field}: {source} changed while opening")
+    except BaseException:
+        os.close(fd)
+        raise
+    with os.fdopen(fd, "rb") as handle:
+        return handle.read(), stat.S_IMODE(metadata.st_mode)
+
+
+def _read_source_via_directory_fds(
+    root: Path,
+    relative: Path,
+    source: Path,
+    *,
+    field: str,
+) -> tuple[bytes, int]:
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    file_flags = (
+        os.O_RDONLY
+        | os.O_NOFOLLOW
+        | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
+    current_fd = os.open(root.anchor, directory_flags)
+    try:
+        for component in (*root.parts[1:], *relative.parts[:-1]):
+            next_fd = os.open(component, directory_flags, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        fd = os.open(relative.name, file_flags, dir_fd=current_fd)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise ValueError(f"{field}: {source} changed or is not a regular file: {exc}") from None
+    finally:
+        os.close(current_fd)
+    return _read_source_fd(fd, source, field=field)
+
+
+def _source_parent_paths(root: Path, source: Path) -> list[Path]:
+    try:
+        relative_parent = source.parent.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"source {source} is outside import root {root}") from exc
+    paths = [*reversed(root.parents), root]
+    current = root
+    for component in relative_parent.parts:
+        current /= component
+        paths.append(current)
+    return paths
+
+
+@contextmanager
+def _guard_source_parents(root: Path, source: Path) -> Iterator[None]:
+    handles: list[int] = []
+    try:
+        for path in _source_parent_paths(root, source):
+            metadata = _lstat_optional(path)
+            if metadata is None:
+                raise FileNotFoundError(source)
+            _validate_parent_metadata(path, metadata, label="source parent")
+            identity = _identity(metadata)
+            handles.append(_open_windows_directory_guard(path))
+            guarded_metadata = _lstat_optional(path)
+            if guarded_metadata is None or _identity(guarded_metadata) != identity:
+                raise ValueError(f"source parent: {path} changed while acquiring guard")
+        yield
+    finally:
+        for handle in reversed(handles):
+            _close_windows_directory_guard(handle)
+
+
+def _read_source_via_checked_paths(
+    root: Path,
+    source: Path,
+    *,
+    field: str,
+) -> tuple[bytes, int]:
+    with _guard_source_parents(root, source):
+        metadata = _lstat_optional(source)
+        if metadata is None:
+            raise FileNotFoundError(source)
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or _is_name_surrogate_reparse_point(metadata)
+            or not stat.S_ISREG(metadata.st_mode)
+        ):
+            raise ValueError(f"{field}: {source} is not a regular file")
+        try:
+            fd = os.open(source, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        except OSError as exc:
+            raise ValueError(f"{field}: {source} changed while opening: {exc}") from None
+        return _read_source_fd(fd, source, field=field, expected_identity=_identity(metadata))
+
+
+def _read_source_payload(source: Path, *, field: str) -> tuple[bytes, int]:
+    root = IMPORT_ROOT.resolve()
+    try:
+        relative = source.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"{field}: {source} is outside import root {root}") from exc
+    if _supports_directory_fds():
+        return _read_source_via_directory_fds(root, relative, source, field=field)
+    if _supports_windows_path_guards():
+        return _read_source_via_checked_paths(root, source, field=field)
+    raise RuntimeError(
+        "secure source read unavailable: this platform must provide directory-relative "
+        "filesystem operations or Windows directory handles"
+    )
+
+
 @contextmanager
 def _guard_checked_parents(
     prepared: _PreparedEntry,
@@ -936,15 +1082,14 @@ def _guard_checked_parents(
             "secure checked-path fallback requires Windows directory handles; "
             "this platform must provide directory-relative filesystem operations"
         )
-    if any(state.identity is None for state in prepared.parent_states):
-        raise RuntimeError(
-            "secure creation of missing destination directories requires "
-            "directory-relative filesystem operations"
-        )
 
     target_dir = prepared.parent_states[0].path
-    expected_states = {state.path: state.identity for state in prepared.parent_states}
-    guard_paths = [*reversed(target_dir.parents), *(state.path for state in prepared.parent_states)]
+    expected_states = {state.path: state.identity for state in prepared.target_chain}
+    expected_states.update({state.path: state.identity for state in prepared.parent_states})
+    guard_paths = [
+        *reversed(target_dir.parents),
+        *(state.path for state in prepared.parent_states),
+    ]
     identities: dict[Path, tuple[int, int]] = {}
     handles: list[int] = []
     seen: set[Path] = set()
@@ -954,16 +1099,23 @@ def _guard_checked_parents(
                 continue
             seen.add(path)
             metadata = _lstat_optional(path)
+            expected = expected_states.get(path)
+            if path in expected_states and expected is None:
+                if metadata is not None:
+                    raise ValueError(f"destination parent {path} changed after preflight")
+                try:
+                    path.mkdir(mode=0o755)
+                except FileExistsError:
+                    raise ValueError(
+                        f"destination parent {path} changed after preflight"
+                    ) from None
+                metadata = _lstat_optional(path)
             if metadata is None:
-                raise ValueError(f"destination parent {path} changed after preflight")
-            elif path in expected_states and expected_states[path] is None:
                 raise ValueError(f"destination parent {path} changed after preflight")
             _validate_parent_metadata(path, metadata)
             identity = _identity(metadata)
-            if path in expected_states:
-                expected = expected_states[path]
-                if expected is not None and identity != expected:
-                    raise ValueError(f"destination parent {path} changed after preflight")
+            if expected is not None and identity != expected:
+                raise ValueError(f"destination parent {path} changed after preflight")
 
             handles.append(_open_windows_directory_guard(path))
             guarded_metadata = _lstat_optional(path)
@@ -1116,7 +1268,7 @@ def _preflight_manifest(manifest: dict, target_dir: Path) -> list[tuple[dict, _D
             entry_label = _entry_label(raw_entry)
             destination_entries[destination_key] = (index, entry_label)
             results.append((raw_entry, result))
-        except (OSError, UnicodeError, ValueError) as exc:
+        except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
             raise ValueError(_format_entry_error(index, raw_entry, exc)) from exc
     return results
 
@@ -1136,10 +1288,10 @@ def main() -> None:
         parser.error("Pass either --install or --dry-run")
 
     manifest = load_manifest()
-    target_dir = Path(args.target).expanduser().resolve()
     try:
+        target_dir = Path(args.target).expanduser().resolve()
         preflight = _preflight_manifest(manifest, target_dir)
-    except (OSError, UnicodeError, ValueError) as exc:
+    except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
         print(f"Import failed: {exc}", file=sys.stderr)
         raise SystemExit(1) from None
 

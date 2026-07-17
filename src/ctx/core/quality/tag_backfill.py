@@ -195,7 +195,18 @@ class TagReport:
 # ── Frontmatter parsing + writing ──────────────────────────────────────
 
 
-_FM_OPEN = re.compile(r"^---\s*\n", re.MULTILINE)
+_FM_OPEN = re.compile(r"\A---[^\S\r\n]*\r?\n")
+_FM_CLOSE = re.compile(r"^---[^\S\r\n]*(?:\r?\n|\Z)", re.MULTILINE)
+_IMPORT_ATTRIBUTION_PREFIX = re.compile(
+    r"\A(?:"
+    r"<!-- designdotmd-import: upstream=[^<>\r\n]+ id=[^<>\r\n]+ "
+    r"fetched=[^<>\r\n]+ author=[^<>\r\n]+ -->|"
+    r"<!-- mattpocock-import: upstream=[^<>\r\n]+ rev=[^<>\r\n]+ "
+    r"license=[^<>\r\n]+ -->|"
+    r"<!-- strix-import: upstream=[^<>\r\n]+ rev=[^<>\r\n]+ "
+    r"license=[^<>\r\n]+ category=[^<>\r\n]+ -->"
+    r")\r?\n"
+)
 
 
 def _split_frontmatter(text: str) -> tuple[str, str, str]:
@@ -205,18 +216,24 @@ def _split_frontmatter(text: str) -> tuple[str, str, str]:
     or an HTML comment from a strix/mattpocock import header).
     ``body_after`` is the markdown body after the closing ``---``.
     """
-    # The opening delimiter can follow an importer attribution comment.
-    open_match = _FM_OPEN.search(text)
+    prefix = ""
+    rest = text
+    open_match = _FM_OPEN.match(rest)
+    if not open_match:
+        attribution_match = _IMPORT_ATTRIBUTION_PREFIX.match(text)
+        if not attribution_match:
+            return text, "", ""
+        prefix = attribution_match.group(0)
+        rest = text[attribution_match.end() :]
+        open_match = _FM_OPEN.match(rest)
     if not open_match:
         return text, "", ""
-    prefix = text[: open_match.start()]
-    rest = text[open_match.start() :]
-    try:
-        close = rest.index("\n---", 3)
-    except ValueError:
+    after_open = rest[open_match.end() :]
+    close_match = _FM_CLOSE.search(after_open)
+    if not close_match:
         return text, "", ""
-    fm = rest[3:close].strip("\n")
-    body_after = rest[close + 4 :].lstrip("\n")
+    fm = after_open[: close_match.start()].strip("\r\n")
+    body_after = after_open[close_match.end() :].lstrip("\r\n")
     return prefix, body_after, fm
 
 

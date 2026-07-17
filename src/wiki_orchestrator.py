@@ -385,10 +385,14 @@ def run_sync(wiki_dir: Path, verbose: bool = False) -> HealthReport:  # noqa: AR
             log("  structure OK")
         except Exception as exc:
             record_failure(f"[wiki_sync.ensure_wiki] {exc}")
-            log("  wiki_sync.ensure_wiki failed - continuing")
+            log("  wiki_sync.ensure_wiki failed - aborting")
+            acc.score = min(acc.score, 99)
+            return acc
     else:
         record_failure("[wiki_sync.ensure_wiki] unavailable; step skipped")
-        log("  wiki_sync.ensure_wiki unavailable - skipping")
+        log("  wiki_sync.ensure_wiki unavailable - aborting")
+        acc.score = min(acc.score, 99)
+        return acc
 
     # Step 2 — inventory skills
     log("\nStep 2: Scan skill directories")
@@ -581,8 +585,12 @@ def _resolve_add_name(skill_path_or_name: str) -> str:
     is_path_like = "/" in raw or "\\" in raw or raw.endswith(".md") or raw.endswith(".py")
 
     if is_path_like:
-        resolved = Path(raw).resolve()
-        skills_dir_resolved = cfg.skills_dir.resolve()
+        try:
+            resolved = Path(raw).expanduser().resolve()
+            skills_dir_resolved = Path(cfg.skills_dir).expanduser().resolve()
+        except (OSError, RuntimeError) as exc:
+            print(f"Error: could not resolve --add path '{raw}': {exc}", file=sys.stderr)
+            sys.exit(1)
         try:
             resolved.relative_to(skills_dir_resolved)
         except ValueError:
@@ -593,7 +601,7 @@ def _resolve_add_name(skill_path_or_name: str) -> str:
                 file=sys.stderr,
             )
             sys.exit(1)
-        raw_stem = resolved.stem
+        raw_stem = resolved.parent.name if resolved.name == "SKILL.md" else resolved.stem
     else:
         raw_stem = raw
 
@@ -604,9 +612,48 @@ def _resolve_add_name(skill_path_or_name: str) -> str:
         sys.exit(1)
 
 
+def _resolve_add_source(skill_path_or_name: str) -> tuple[Path, str]:
+    raw = skill_path_or_name
+    skill_name = _resolve_add_name(raw)
+    is_path_like = "/" in raw or "\\" in raw or raw.endswith(".md") or raw.endswith(".py")
+
+    if is_path_like:
+        requested = Path(raw).expanduser()
+        if requested.is_dir():
+            source_path = requested / "SKILL.md"
+        elif requested.name == "SKILL.md":
+            source_path = requested
+        else:
+            print(
+                f"Error: --add path '{raw}' must be an installed skill directory or SKILL.md.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    else:
+        source_path = Path(cfg.skills_dir).expanduser() / skill_name / "SKILL.md"
+
+    try:
+        skills_dir_resolved = Path(cfg.skills_dir).expanduser().resolve()
+        source_resolved = source_path.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        print(f"Error: installed SKILL.md not found for '{raw}': {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    expected_source = skills_dir_resolved / skill_name / "SKILL.md"
+    if source_resolved != expected_source or not source_resolved.is_file():
+        print(
+            f"Error: --add source '{raw}' must resolve to the installed file "
+            f"'{expected_source}'.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    return source_resolved, skill_name
+
+
 def run_add(wiki_dir: Path, skill_path_or_name: str) -> None:
     """Delegate to skill_add, or fall back to wiki_sync upsert."""
-    skill_name = _resolve_add_name(skill_path_or_name)
+    source_path, skill_name = _resolve_add_source(skill_path_or_name)
 
     r = HealthReport()
     skill_add_load = _load_module("skill_add", r)
@@ -621,7 +668,7 @@ def run_add(wiki_dir: Path, skill_path_or_name: str) -> None:
             sys.exit(1)
         try:
             sa.add_skill(
-                source_path=Path(skill_path_or_name),
+                source_path=source_path,
                 name=skill_name,
                 wiki_path=wiki_dir,
                 skills_dir=cfg.skills_dir,
@@ -637,10 +684,10 @@ def run_add(wiki_dir: Path, skill_path_or_name: str) -> None:
         print("Neither skill_add nor wiki_sync available — cannot add skill.", file=sys.stderr)
         sys.exit(1)
 
-    info = {"path": skill_path_or_name, "reason": "manually added via orchestrator"}
+    info = {"path": str(source_path), "reason": "manually added via orchestrator"}
     is_new = ws.upsert_skill_page(str(wiki_dir), skill_name, info)
     ws.update_index(str(wiki_dir), [skill_name] if is_new else [])
-    ws.append_log(str(wiki_dir), "add-skill", skill_name, [f"Path: {skill_path_or_name}"])
+    ws.append_log(str(wiki_dir), "add-skill", skill_name, [f"Path: {source_path}"])
     print(f"Entity page {'created' if is_new else 'updated'}: {skill_name}")
 
 

@@ -16,6 +16,7 @@ Covers:
   - main()                      (via argv)
 """
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 
 import link_conversions as _lc
 from ctx.core.wiki.wiki_packs import load_merged_wiki_pages, write_wiki_base_pack
+from ctx.utils._fs_utils import supports_secure_directory_fds
 from link_conversions import (
     ConvertedSkill,
     _build_new_entity_page,
@@ -67,6 +69,13 @@ def _make_converted_skill(wiki: Path, name: str, skill_md_content: str = "") -> 
     if skill_md_content:
         (d / "SKILL.md").write_text(skill_md_content, encoding="utf-8")
     return ConvertedSkill(name=name, pipeline_path=f"converted/{name}/", abs_dir=d)
+
+
+def _symlink_or_skip(target: Path, link: Path, *, target_is_directory: bool) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -546,6 +555,108 @@ class TestRun:
         assert "link-conversions" in merged["log.md"]
         assert "react" in merged["converted-index.md"]
 
+    @pytest.mark.skipif(
+        not supports_secure_directory_fds(), reason="requires directory-relative writes"
+    )
+    def test_pack_overlay_remains_in_open_parent_during_swap(self, tmp_path, monkeypatch):
+        wiki = tmp_path / "wiki"
+        packs_dir = wiki / "wiki-packs"
+        write_wiki_base_pack(
+            pack_dir=packs_dir / "base-export-1",
+            pack_id="base-export-1",
+            base_export_id="export-1",
+            pages={"index.md": "# Index\n"},
+        )
+        displaced_packs = wiki / "wiki-packs-original"
+        outside_packs = tmp_path / "outside-packs"
+        outside_packs.mkdir()
+        original_replace = os.replace
+        swapped = False
+
+        def swap_parent_then_replace(
+            src,
+            dst,
+            *,
+            src_dir_fd=None,
+            dst_dir_fd=None,
+        ):
+            nonlocal swapped
+            assert src_dir_fd is not None
+            assert src_dir_fd == dst_dir_fd
+            if not swapped:
+                packs_dir.rename(displaced_packs)
+                _symlink_or_skip(outside_packs, packs_dir, target_is_directory=True)
+                swapped = True
+            return original_replace(
+                src,
+                dst,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
+
+        monkeypatch.setattr(_lc.os, "replace", swap_parent_then_replace)
+
+        _lc._write_wiki_page(wiki, "entities/skills/demo.md", "# Demo\n")
+
+        assert swapped is True
+        assert list(outside_packs.iterdir()) == []
+        merged = load_merged_wiki_pages(displaced_packs)
+        assert merged["entities/skills/demo.md"] == "# Demo\n"
+        overlay_dirs = list(displaced_packs.glob("overlay-*"))
+        assert len(overlay_dirs) == 1
+        assert {path.name for path in overlay_dirs[0].iterdir()} == {
+            "pages.jsonl",
+            "tombstones.jsonl",
+            "wiki-pack-manifest.json",
+        }
+        assert not list(displaced_packs.rglob("*.tmp"))
+
+    @pytest.mark.skipif(
+        not supports_secure_directory_fds(), reason="requires directory-relative writes"
+    )
+    def test_atomic_write_remains_in_open_parent_during_swap(self, tmp_path, monkeypatch):
+        wiki = _make_wiki(tmp_path)
+        parent = wiki / "entities" / "skills"
+        destination = parent / "demo.md"
+        destination.write_text("stale\n", encoding="utf-8")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        outside_destination = outside / "demo.md"
+        outside_destination.write_text("outside\n", encoding="utf-8")
+        displaced = wiki / "entities" / "displaced-skills"
+        original_replace = os.replace
+        swapped = False
+
+        def swap_parent_then_replace(
+            src,
+            dst,
+            *,
+            src_dir_fd=None,
+            dst_dir_fd=None,
+        ):
+            nonlocal swapped
+            assert src_dir_fd is not None
+            assert src_dir_fd == dst_dir_fd
+            if not swapped:
+                parent.rename(displaced)
+                _symlink_or_skip(outside, parent, target_is_directory=True)
+                swapped = True
+            return original_replace(
+                src,
+                dst,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
+
+        monkeypatch.setattr(_lc.os, "replace", swap_parent_then_replace)
+
+        _lc._write_wiki_page(wiki, "entities/skills/demo.md", "updated\n")
+
+        assert swapped is True
+        assert outside_destination.read_text(encoding="utf-8") == "outside\n"
+        assert (displaced / "demo.md").read_text(encoding="utf-8") == "updated\n"
+        assert not list(displaced.glob(".demo.md.*.tmp"))
+
 
 # ---------------------------------------------------------------------------
 # main()
@@ -591,3 +702,27 @@ class TestMain:
         with pytest.raises(SystemExit) as exc:
             _lc.main()
         assert exc.value.code == 1
+
+    def test_rejects_symlinked_wiki_argument(self, tmp_path, monkeypatch, capsys):
+        wiki = _make_wiki(tmp_path)
+        linked_wiki = tmp_path / "linked-wiki"
+        _symlink_or_skip(wiki, linked_wiki, target_is_directory=True)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "link_conversions.py",
+                "--wiki",
+                str(linked_wiki),
+                "--skills-dir",
+                str(tmp_path / "skills"),
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            _lc.main()
+
+        captured = capsys.readouterr()
+        assert exc.value.code == 1
+        assert "symlinked path" in captured.err
+        assert not (wiki / "converted-index.md").exists()

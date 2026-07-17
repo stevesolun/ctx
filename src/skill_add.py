@@ -58,6 +58,14 @@ def install_skill(source: Path, skills_dir: Path, name: str) -> Path:
     """Copy SKILL.md into skills_dir/<name>/SKILL.md. Returns the installed path."""
     dest_dir = skills_dir / name
     dest = dest_dir / "SKILL.md"
+    if source.is_file() and dest.is_file():
+        reject_symlink_path(source)
+        reject_symlink_path(dest)
+        try:
+            if source.resolve(strict=True) == dest.resolve(strict=True):
+                return dest
+        except (OSError, RuntimeError):
+            pass
     safe_copy_file(source, dest, dest_root=skills_dir)
     return dest
 

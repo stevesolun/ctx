@@ -162,8 +162,12 @@ def register_skill_in_catalog(file_path: str, skill_name: str, lines: int) -> No
         replaced = False
         for line in content.splitlines():
             row = line.lstrip()
-            cells = row.split("|", 2) if row.startswith("|") else []
-            if len(cells) == 3 and cells[1].strip() == skill_name:
+            cells = row.split("|", 3) if row.startswith("|") else []
+            if (
+                len(cells) == 4
+                and cells[1].strip() == skill_name
+                and cells[2].strip().lower() == "skill"
+            ):
                 if not replaced:
                     updated_lines.append(entry)
                     replaced = True

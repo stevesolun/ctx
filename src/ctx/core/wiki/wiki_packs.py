@@ -18,7 +18,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from ctx.utils._fs_utils import atomic_write_text
+from ctx.utils._fs_utils import (
+    SecureDirectoryExistsError,
+    atomic_write_text,
+    secure_directory,
+)
 
 WIKI_PACK_MANIFEST = "wiki-pack-manifest.json"
 WIKI_PACK_SCHEMA_VERSION = 1
@@ -30,6 +34,10 @@ WikiPackType = Literal["base", "overlay"]
 
 class WikiPackManifestError(ValueError):
     """Raised when a wiki pack manifest or artifact is malformed."""
+
+
+class _WikiPackDirectoryCollision(Exception):
+    pass
 
 
 @dataclass(frozen=True)
@@ -194,17 +202,20 @@ def write_active_wiki_overlay_pack(
     for suffix in ["", *[f"-{index}" for index in range(1, 1000)]]:
         pack_id = f"{base_pack_id}{suffix}"
         pack_dir = packs_dir / pack_id
-        if pack_dir.exists():
+        try:
+            return _write_wiki_pack(
+                pack_dir=pack_dir,
+                pack_id=pack_id,
+                pack_type="overlay",
+                base_export_id=base.base_export_id,
+                parent_export_id=base.base_export_id,
+                pages=page_map,
+                tombstones=tombstone_paths,
+                created_at=created_at,
+                require_new=True,
+            )
+        except _WikiPackDirectoryCollision:
             continue
-        return write_wiki_overlay_pack(
-            pack_dir=pack_dir,
-            pack_id=pack_id,
-            base_export_id=base.base_export_id,
-            parent_export_id=base.base_export_id,
-            pages=page_map,
-            tombstones=tombstone_paths,
-            created_at=created_at,
-        )
     raise WikiPackManifestError("could not allocate unique wiki overlay pack id")
 
 
@@ -488,12 +499,9 @@ def _write_wiki_pack(
     pages: dict[str, str],
     tombstones: list[str],
     created_at: str | None,
+    require_new: bool = False,
 ) -> WikiPackManifest:
     _validate_relative_name(pack_id, "pack_id")
-    manifest_path = pack_dir / WIKI_PACK_MANIFEST
-    if manifest_path.exists():
-        raise WikiPackManifestError(f"wiki pack already exists: {pack_id}")
-    pack_dir.mkdir(parents=True, exist_ok=True)
     page_rows = [
         {
             "path": relpath,
@@ -505,11 +513,8 @@ def _write_wiki_pack(
         )
     ]
     tombstone_rows = [{"path": _normalise_page_path(path)} for path in sorted(tombstones)]
-    artifact_paths: list[str] = []
-    _write_jsonl(pack_dir / "pages.jsonl", page_rows)
-    artifact_paths.append("pages.jsonl")
-    _write_jsonl(pack_dir / "tombstones.jsonl", tombstone_rows)
-    artifact_paths.append("tombstones.jsonl")
+    pages_text = _serialise_jsonl(page_rows)
+    tombstones_text = _serialise_jsonl(tombstone_rows)
     manifest = WikiPackManifest(
         pack_id=pack_id,
         pack_type=pack_type,
@@ -517,15 +522,30 @@ def _write_wiki_pack(
         parent_export_id=parent_export_id,
         page_count=len(page_rows),
         tombstone_count=len(tombstone_rows),
-        checksums={name: sha256_file(pack_dir / name) for name in artifact_paths},
+        checksums={
+            "pages.jsonl": _sha256_text(pages_text),
+            "tombstones.jsonl": _sha256_text(tombstones_text),
+        },
         created_at=created_at,
     )
     manifest.validate()
-    atomic_write_text(
-        manifest_path,
-        json.dumps(manifest.to_mapping(), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    try:
+        with secure_directory(pack_dir, create=True, exclusive=require_new) as directory:
+            if directory.exists(WIKI_PACK_MANIFEST):
+                raise WikiPackManifestError(f"wiki pack already exists: {pack_id}")
+            directory.atomic_write_text("pages.jsonl", pages_text, encoding="utf-8")
+            directory.atomic_write_text(
+                "tombstones.jsonl",
+                tombstones_text,
+                encoding="utf-8",
+            )
+            directory.atomic_write_text(
+                WIKI_PACK_MANIFEST,
+                json.dumps(manifest.to_mapping(), indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+    except SecureDirectoryExistsError as exc:
+        raise _WikiPackDirectoryCollision(pack_id) from exc
     return manifest
 
 
@@ -555,11 +575,9 @@ def _validate_pack_count(
         )
 
 
-def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
-    atomic_write_text(
-        path,
-        "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in rows),
-        encoding="utf-8",
+def _serialise_jsonl(rows: list[dict[str, Any]]) -> str:
+    return "".join(
+        json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in rows
     )
 
 

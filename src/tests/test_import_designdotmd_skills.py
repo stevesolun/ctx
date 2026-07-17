@@ -868,11 +868,12 @@ def test_windows_atomic_writer_replaces_content_and_preserves_mode(tmp_path: Pat
     destination = tmp_path / "SKILL.md"
     destination.write_text("old content\n", encoding="utf-8")
     destination.chmod(0o640)
+    expected_mode = stat.S_IMODE(destination.stat().st_mode)
 
     importer._atomic_write_text_windows(destination, "new content\n")
 
     assert destination.read_text(encoding="utf-8") == "new content\n"
-    assert stat.S_IMODE(destination.stat().st_mode) == 0o640
+    assert stat.S_IMODE(destination.stat().st_mode) == expected_mode
     assert not list(tmp_path.glob(".SKILL.md.*"))
 
 
@@ -1248,7 +1249,7 @@ def test_cli_read_permission_failure_is_concise(
         monkeypatch.setattr(Path, "read_text", denied_read_text)
     else:
         original_open = os.open
-        monkeypatch.setattr(importer, "_supports_directory_fds", lambda: True)
+        supports_directory_fds = importer._supports_directory_fds()
 
         def denied_open(
             path: Any,
@@ -1257,11 +1258,17 @@ def test_cli_read_permission_failure_is_concise(
             *,
             dir_fd: int | None = None,
         ) -> int:
-            if path == design_import.source.name and dir_fd is not None:
+            if (path == design_import.source.name and dir_fd is not None) or (
+                path == design_import.source and dir_fd is None
+            ):
                 raise PermissionError("permission denied")
+            if dir_fd is None:
+                return original_open(path, flags, mode)
             return original_open(path, flags, mode, dir_fd=dir_fd)
 
         monkeypatch.setattr(importer.os, "open", denied_open)
+        if supports_directory_fds:
+            monkeypatch.setattr(importer, "_supports_directory_fds", lambda: True)
 
     with pytest.raises(SystemExit) as exc_info:
         _run_main(monkeypatch, "--dry-run", "--target", str(design_import.target))

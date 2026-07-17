@@ -271,14 +271,14 @@ def test_install_does_not_require_fchmod(
     assert changed_again is False
 
 
-def test_checked_path_fallback_fails_closed_without_native_guards(
+def test_install_fails_closed_without_safe_filesystem_primitives(
     import_tree: ImportTree,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(importer, "_supports_directory_fds", lambda: False)
     monkeypatch.setattr(importer, "_supports_windows_path_guards", lambda: False)
 
-    with pytest.raises(RuntimeError, match="secure checked-path fallback"):
+    with pytest.raises(RuntimeError, match="secure source read unavailable"):
         importer.deploy_entry(
             import_tree.entry,
             import_tree.manifest,
@@ -289,21 +289,29 @@ def test_checked_path_fallback_fails_closed_without_native_guards(
     assert not import_tree.target.exists()
 
 
-def test_checked_path_fallback_rejects_missing_destination_directories(
+def test_checked_path_fallback_creates_missing_destination_directories(
     import_tree: ImportTree,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _enable_checked_path_fallback(monkeypatch)
 
-    with pytest.raises(RuntimeError, match="secure creation of missing destination"):
-        importer.deploy_entry(
-            import_tree.entry,
-            import_tree.manifest,
-            import_tree.target,
-            dry_run=False,
-        )
+    destination, changed, support_paths = importer.deploy_entry(
+        import_tree.entry,
+        import_tree.manifest,
+        import_tree.target,
+        dry_run=False,
+    )
 
-    assert not import_tree.target.exists()
+    assert changed is True
+    assert import_tree.source_body in destination.read_text(encoding="utf-8")
+    assert (destination.parent / "NOTICE.txt").read_text(encoding="utf-8") == "support notice\n"
+    assert (destination.parent / "assets" / "helper.bin").read_bytes() == (
+        b"\x00fixture-support\xff"
+    )
+    assert support_paths == [
+        import_tree.source_skill.parent / "NOTICE.txt",
+        import_tree.source_skill.parent / "assets" / "helper.bin",
+    ]
 
 
 def test_native_path_guard_capability_tracks_windows() -> None:
@@ -487,6 +495,122 @@ def test_rejects_support_file_symlink_escape(import_tree: ImportTree, tmp_path: 
     with pytest.raises(ValueError, match="support_files: .* resolves outside"):
         importer.deploy_entry(entry, import_tree.manifest, import_tree.target, dry_run=False)
 
+    assert not import_tree.target.exists()
+
+
+@pytest.mark.skipif(
+    not importer._supports_directory_fds(), reason="requires descriptor-relative source reads"
+)
+@pytest.mark.parametrize("payload", ["skill", "support"])
+def test_source_parent_swap_after_resolution_is_rejected(
+    import_tree: ImportTree,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: str,
+) -> None:
+    source_dir = import_tree.source_skill.parent
+    moved = import_tree.import_root / "moved-fixture-skill"
+    outside = tmp_path / "outside-source-parent"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text("# Outside skill\n", encoding="utf-8")
+    (outside / "NOTICE.txt").write_text("outside notice\n", encoding="utf-8")
+    original_resolve = importer._resolve_within
+    selected_field = "source_path" if payload == "skill" else "support_files"
+    swapped = False
+
+    def resolve_then_swap(root: Path, candidate_rel: str, *, field: str) -> Path:
+        nonlocal swapped
+        resolved = original_resolve(root, candidate_rel, field=field)
+        if field == selected_field and not swapped:
+            source_dir.rename(moved)
+            _symlink_or_skip(source_dir, outside, target_is_directory=True)
+            swapped = True
+        return resolved
+
+    monkeypatch.setattr(importer, "_resolve_within", resolve_then_swap)
+
+    with pytest.raises(ValueError, match=f"{selected_field}: .*changed or is not a regular file"):
+        importer.deploy_entry(
+            import_tree.entry,
+            import_tree.manifest,
+            import_tree.target,
+            dry_run=True,
+        )
+
+    assert swapped is True
+    assert not import_tree.target.exists()
+
+
+@pytest.mark.skipif(
+    not importer._supports_directory_fds(), reason="requires descriptor-relative source reads"
+)
+@pytest.mark.parametrize("payload", ["skill", "support"])
+def test_source_file_swap_after_resolution_is_rejected(
+    import_tree: ImportTree,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: str,
+) -> None:
+    outside = tmp_path / f"outside-{payload}.txt"
+    outside.write_text("outside payload\n", encoding="utf-8")
+    original_resolve = importer._resolve_within
+    selected_field = "source_path" if payload == "skill" else "support_files"
+    swapped = False
+
+    def resolve_then_swap(root: Path, candidate_rel: str, *, field: str) -> Path:
+        nonlocal swapped
+        resolved = original_resolve(root, candidate_rel, field=field)
+        if field == selected_field and not swapped:
+            resolved.unlink()
+            _symlink_or_skip(resolved, outside)
+            swapped = True
+        return resolved
+
+    monkeypatch.setattr(importer, "_resolve_within", resolve_then_swap)
+
+    with pytest.raises(ValueError, match=f"{selected_field}: .*changed or is not a regular file"):
+        importer.deploy_entry(
+            import_tree.entry,
+            import_tree.manifest,
+            import_tree.target,
+            dry_run=True,
+        )
+
+    assert swapped is True
+    assert outside.read_text(encoding="utf-8") == "outside payload\n"
+    assert not import_tree.target.exists()
+
+
+def test_checked_path_source_parent_swap_while_acquiring_guard_is_rejected(
+    import_tree: ImportTree,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_dir = import_tree.source_skill.parent
+    moved = import_tree.import_root / "moved-fixture-skill"
+    outside = tmp_path / "outside-source-parent"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text("# Outside skill\n", encoding="utf-8")
+    swapped = False
+
+    def swap_source_parent(path: Path) -> None:
+        nonlocal swapped
+        if path == source_dir and not swapped:
+            source_dir.rename(moved)
+            _symlink_or_skip(source_dir, outside, target_is_directory=True)
+            swapped = True
+
+    _enable_checked_path_fallback(monkeypatch, on_guard=swap_source_parent)
+
+    with pytest.raises(ValueError, match="source parent: .*changed while acquiring guard"):
+        importer.deploy_entry(
+            import_tree.entry,
+            import_tree.manifest,
+            import_tree.target,
+            dry_run=True,
+        )
+
+    assert swapped is True
     assert not import_tree.target.exists()
 
 
@@ -839,6 +963,40 @@ def test_install_atomically_replaces_hard_linked_support_without_changing_outsid
     assert support_destination.read_text(encoding="utf-8") == "updated support notice\n"
 
 
+@pytest.mark.parametrize("relative_path", [Path("SKILL.md"), Path("NOTICE.txt")])
+def test_install_detaches_unchanged_hard_link(
+    import_tree: ImportTree,
+    relative_path: Path,
+) -> None:
+    destination, _, _ = importer.deploy_entry(
+        import_tree.entry,
+        import_tree.manifest,
+        import_tree.target,
+        dry_run=False,
+    )
+    selected = destination.parent / relative_path
+    expected = selected.read_bytes()
+    expected_mode = selected.stat().st_mode & 0o777
+    outside = import_tree.target.parent / f"outside-unchanged-{relative_path.name}"
+    outside.write_bytes(expected)
+    outside.chmod(expected_mode)
+    selected.unlink()
+    _hardlink_or_skip(selected, outside)
+    assert selected.samefile(outside)
+
+    _, changed, _ = importer.deploy_entry(
+        import_tree.entry,
+        import_tree.manifest,
+        import_tree.target,
+        dry_run=False,
+    )
+
+    assert changed is True
+    assert not selected.samefile(outside)
+    assert selected.read_bytes() == expected
+    assert outside.read_bytes() == expected
+
+
 def test_rejects_in_tree_symlinked_support_parent_before_any_write(
     import_tree: ImportTree,
 ) -> None:
@@ -1080,6 +1238,7 @@ def test_temp_swap_inside_replace_is_removed_or_restores_previous_destination(
     assert not _transaction_artifacts(import_tree.target)
 
 
+@pytest.mark.skipif(importer.os.name == "nt", reason="POSIX permission bits are required")
 def test_mode_tamper_inside_replace_restores_previous_destination_without_fchmod(
     import_tree: ImportTree,
     monkeypatch: pytest.MonkeyPatch,
@@ -1578,6 +1737,32 @@ def test_manifest_validation_labels_unnamed_entries_and_requires_a_list(
         importer._preflight_manifest(manifest, import_tree.target)
 
 
+@pytest.mark.parametrize(
+    ("field", "unsafe_value"),
+    [
+        ("upstream", "https://example.test/unsafe\ninjected"),
+        ("upstream_revision", "abc-->injected"),
+        ("license", "MIT\rinjected"),
+    ],
+)
+def test_unsafe_attribution_values_are_rejected(
+    import_tree: ImportTree,
+    field: str,
+    unsafe_value: str,
+) -> None:
+    manifest = {**import_tree.manifest, field: unsafe_value}
+
+    with pytest.raises(ValueError, match=f"manifest.{field}: unsafe attribution value"):
+        importer.deploy_entry(
+            import_tree.entry,
+            manifest,
+            import_tree.target,
+            dry_run=True,
+        )
+
+    assert not import_tree.target.exists()
+
+
 def test_invalid_later_entry_does_not_partially_install(
     import_tree: ImportTree,
     monkeypatch: pytest.MonkeyPatch,
@@ -1811,6 +1996,38 @@ def test_existing_file_target_is_concise_exit_one(
     assert import_tree.target.read_text(encoding="utf-8") == "sentinel\n"
 
 
+def test_target_symlink_loop_is_concise_exit_one(
+    import_tree: ImportTree,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    original_resolve = Path.resolve
+
+    def fail_target_resolve(self: Path, strict: bool = False) -> Path:
+        if self == import_tree.target:
+            raise RuntimeError("symlink loop")
+        return original_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", fail_target_resolve)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["import_mattpocock_skills.py", "--dry-run", "--target", str(import_tree.target)],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        importer.main()
+
+    error = capsys.readouterr().err
+    assert exc_info.value.code == 1
+    assert "Import failed: symlink loop" in error
+    assert "Traceback" not in error
+    assert not import_tree.target.exists()
+
+
+@pytest.mark.skipif(
+    not importer._supports_directory_fds(), reason="requires descriptor-relative creation"
+)
 def test_target_creation_uses_pinned_ancestor_when_lexical_parent_is_swapped(
     import_tree: ImportTree,
     tmp_path: Path,
@@ -1855,6 +2072,9 @@ def test_target_creation_uses_pinned_ancestor_when_lexical_parent_is_swapped(
     assert not _transaction_artifacts(moved_holder)
 
 
+@pytest.mark.skipif(
+    not importer._supports_directory_fds(), reason="requires descriptor-relative creation"
+)
 def test_target_creation_error_is_concise_exit_one(
     import_tree: ImportTree,
     monkeypatch: pytest.MonkeyPatch,
