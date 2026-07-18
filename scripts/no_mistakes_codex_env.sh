@@ -31,8 +31,6 @@ resolve_real_codex() {
       echo "Configured Codex executable is not runnable: ${CTX_NO_MISTAKES_REAL_CODEX}" >&2
       return 127
     }
-    printf '%s\n' "${CTX_NO_MISTAKES_REAL_CODEX}"
-    return 0
   fi
 
   if [[ -n "${CTX_NO_MISTAKES_CODEX_RESOURCES:-}" ]]; then
@@ -41,6 +39,14 @@ resolve_real_codex() {
       echo "Configured Codex resources do not contain a runnable codex: ${candidate}" >&2
       return 127
     }
+  fi
+
+  if [[ -n "${CTX_NO_MISTAKES_REAL_CODEX:-}" ]]; then
+    printf '%s\n' "${CTX_NO_MISTAKES_REAL_CODEX}"
+    return 0
+  fi
+
+  if [[ -n "${CTX_NO_MISTAKES_CODEX_RESOURCES:-}" ]]; then
     printf '%s\n' "${candidate}"
     return 0
   fi

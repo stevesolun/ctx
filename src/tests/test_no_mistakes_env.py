@@ -52,7 +52,7 @@ def test_no_mistakes_wrapper_prefers_valid_worktree_venv_over_broken_override(
     env = os.environ.copy()
     env.pop("VIRTUAL_ENV", None)
     env["CTX_NO_MISTAKES_PYTHON_BIN"] = str(broken_bin)
-    env["CTX_NO_MISTAKES_CODEX_RESOURCES"] = str(tmp_path / "codex-resources")
+    env["CTX_NO_MISTAKES_CODEX_RESOURCES"] = str(tmp_path)
     env["CTX_NO_MISTAKES_REAL_CODEX"] = str(fake_codex)
 
     result = subprocess.run(
@@ -189,6 +189,41 @@ def test_no_mistakes_wrapper_rejects_bad_explicit_resources(tmp_path: Path) -> N
 
     result = subprocess.run(
         ["bash", str(script_dir / "no_mistakes_codex_env.sh"), "--version"],
+        cwd=repo,
+        env=env,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    expected = missing_resources / "codex"
+    assert result.returncode == 127
+    assert f"Configured Codex resources do not contain a runnable codex: {expected}" in (
+        result.stderr
+    )
+
+
+@posix_shell_only
+def test_no_mistakes_wrapper_validates_resources_with_explicit_codex(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    script_dir = repo / "scripts"
+    script_dir.mkdir(parents=True)
+    wrapper = script_dir / "no_mistakes_codex_env.sh"
+    shutil.copy2(Path("scripts/no_mistakes_codex_env.sh"), wrapper)
+
+    fake_codex = tmp_path / "codex"
+    _write_executable(fake_codex, "#!/bin/sh\nexit 0\n")
+    missing_resources = tmp_path / "missing-resources"
+
+    env = os.environ.copy()
+    env["CTX_NO_MISTAKES_REAL_CODEX"] = str(fake_codex)
+    env["CTX_NO_MISTAKES_CODEX_RESOURCES"] = str(missing_resources)
+
+    result = subprocess.run(
+        ["bash", str(wrapper), "--version"],
         cwd=repo,
         env=env,
         check=False,
