@@ -206,6 +206,49 @@ def test_main_report_only_writes_reports_without_mutating_entities(
     assert source.read_text(encoding="utf-8") == before
 
 
+def test_main_wiki_option_uses_entity_cards_as_fallbacks(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
+    wiki = tmp_path / "custom-wiki"
+    wiki_skills = wiki / "entities" / "skills"
+    wiki_skills.mkdir(parents=True)
+    wiki_only = wiki_skills / "wiki-only.md"
+    wiki_only.write_text(_entity_text("wiki-only"), encoding="utf-8")
+    wiki_shadow = wiki_skills / "installed-skill.md"
+    wiki_shadow.write_text(
+        _entity_text("installed-skill"),
+        encoding="utf-8",
+    )
+    installed = _write_skill(
+        tmp_path,
+        "installed-skill",
+        _entity_text("installed-skill", tags="tags: [curated]"),
+    )
+    json_report = tmp_path / "tags.json"
+
+    result = tag_backfill.main(
+        [
+            "--wiki",
+            str(wiki),
+            "--report",
+            str(tmp_path / "tags.md"),
+            "--report-json",
+            str(json_report),
+            "--apply",
+        ]
+    )
+
+    assert result == 0
+    payload = json.loads(json_report.read_text(encoding="utf-8"))
+    assert payload["total_entities_scanned"] == 2
+    assert [proposal["path"] for proposal in payload["proposals"]] == [str(wiki_only)]
+    assert "  - wiki" in wiki_only.read_text(encoding="utf-8")
+    assert "tags: [curated]" in installed.read_text(encoding="utf-8")
+    assert "tags: []" in wiki_shadow.read_text(encoding="utf-8")
+
+
 def test_main_apply_updates_empty_tags(tmp_path: Path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
     source = _write_agent(tmp_path, "security-agent", _entity_text("security-agent"))

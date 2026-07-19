@@ -3,8 +3,9 @@
 Many imported skills (especially the auto-mirrored short ones) ship
 with no ``tags:`` block. The recommender uses tag overlap as one of
 three signals; an entity with zero tags is invisible to that signal.
-This tool scans installed skills and agents, finds entities with empty
-``tags`` (or missing the field entirely), and proposes a backfill set drawn from:
+This tool scans installed skills and agents, with unpacked wiki entity cards
+as fallbacks, finds entities with empty ``tags`` (or missing the field entirely),
+and proposes a backfill set drawn from:
 
   1. **Slug tokens** — the entity's filename, hyphen-split, lowercased,
      filtered against a stopword list. ``python-fastapi-development``
@@ -405,50 +406,66 @@ def _propose(
     )
 
 
-def discover_empty_tag_entities(wiki_dir: Path) -> list[tuple[str, str, Path]]:
-    """Return ``(entity_type, slug, source_path)`` for every entity whose
-    canonical SKILL.md / agent file has empty or missing tags.
-
-    Discovery reads installed sources only: skills under
-    ``~/.claude/skills/<slug>/SKILL.md`` and agents under
-    ``~/.claude/agents/<slug>.md``.
-    """
-    out: list[tuple[str, str, Path]] = []
+def _entity_sources(wiki_dir: Path) -> list[tuple[str, str, Path]]:
+    """Return installed entity sources plus wiki fallbacks by slug."""
+    sources: list[tuple[str, str, Path]] = []
+    installed: set[tuple[str, str]] = set()
     skills_root = Path.home() / ".claude" / "skills"
     agents_root = Path.home() / ".claude" / "agents"
 
-    # Skills: each <slug>/SKILL.md
     if skills_root.is_dir():
-        for skill_dir in skills_root.iterdir():
-            if not skill_dir.is_dir():
-                continue
+        for skill_dir in sorted(skills_root.iterdir()):
             skill_md = skill_dir / "SKILL.md"
             if not skill_md.is_file():
                 continue
-            try:
-                text = skill_md.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            _, _, fm = _split_frontmatter(text)
-            if not fm:
-                continue
-            tags, _ = _parse_frontmatter_tags(fm)
-            if not tags:  # absent OR present-but-empty both qualify
-                out.append(("skill", skill_dir.name, skill_md))
+            installed.add(("skill", skill_dir.name))
+            sources.append(("skill", skill_dir.name, skill_md))
 
-    # Agents: each <slug>.md
     if agents_root.is_dir():
-        for agent_md in agents_root.glob("*.md"):
-            try:
-                text = agent_md.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            _, _, fm = _split_frontmatter(text)
-            if not fm:
-                continue
-            tags, _ = _parse_frontmatter_tags(fm)
-            if not tags:
-                out.append(("agent", agent_md.stem, agent_md))
+        for agent_md in sorted(agents_root.glob("*.md")):
+            installed.add(("agent", agent_md.stem))
+            sources.append(("agent", agent_md.stem, agent_md))
+
+    wiki_roots = {
+        "skill": wiki_dir / "entities" / "skills",
+        "agent": wiki_dir / "entities" / "agents",
+    }
+    for entity_type, root in wiki_roots.items():
+        if not root.is_dir():
+            continue
+        for entity_md in sorted(root.glob("*.md")):
+            key = (entity_type, entity_md.stem)
+            if key not in installed:
+                sources.append((entity_type, entity_md.stem, entity_md))
+
+    return sources
+
+
+def discover_empty_tag_entities(wiki_dir: Path) -> list[tuple[str, str, Path]]:
+    """Return canonical entity sources whose tags are empty or missing.
+
+    Installed skills and agents take precedence. Entity cards below
+    ``<wiki>/entities`` provide the source when the entity is not installed.
+    """
+    return _empty_tag_entities(_entity_sources(wiki_dir))
+
+
+def _empty_tag_entities(
+    sources: Iterable[tuple[str, str, Path]],
+) -> list[tuple[str, str, Path]]:
+    """Filter a stable entity-source snapshot to empty-tag entries."""
+    out: list[tuple[str, str, Path]] = []
+    for entity_type, slug, path in sources:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        _, _, fm = _split_frontmatter(text)
+        if not fm:
+            continue
+        tags, _ = _parse_frontmatter_tags(fm)
+        if not tags:
+            out.append((entity_type, slug, path))
 
     return out
 
@@ -458,17 +475,12 @@ def run_backfill(
     wiki_dir: Path,
     max_tags_per_entity: int = 6,
 ) -> TagReport:
-    """Scan installed skills and agents and propose backfills for empty tags."""
-    skills_root = Path.home() / ".claude" / "skills"
-    agents_root = Path.home() / ".claude" / "agents"
-    all_paths: list[Path] = []
-    if skills_root.is_dir():
-        all_paths.extend(skills_root.glob("*/SKILL.md"))
-    if agents_root.is_dir():
-        all_paths.extend(agents_root.glob("*.md"))
+    """Scan canonical installed/wiki sources and propose empty-tag backfills."""
+    sources = _entity_sources(wiki_dir)
+    all_paths = [path for _, _, path in sources]
     vocab = _existing_tag_vocabulary(all_paths)
 
-    targets = discover_empty_tag_entities(wiki_dir)
+    targets = _empty_tag_entities(sources)
     proposals: list[TagProposal] = []
     for entity_type, slug, path in targets:
         prop = _propose(
@@ -574,7 +586,11 @@ def main(argv: Iterable[str] | None = None) -> int:
         "--wiki",
         type=Path,
         default=Path.home() / ".claude" / "skill-wiki",
-        help="Wiki directory (default: ~/.claude/skill-wiki)",
+        help=(
+            "Wiki directory containing unpacked entities/{skills,agents} cards "
+            "used when an entity is not installed "
+            "(default: ~/.claude/skill-wiki)"
+        ),
     )
     parser.add_argument(
         "--max-tags",
