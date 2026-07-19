@@ -432,7 +432,7 @@ def discover_empty_tag_entities(wiki_dir: Path) -> list[tuple[str, str, Path]]:
             _, _, fm = _split_frontmatter(text)
             if not fm:
                 continue
-            tags, present = _parse_frontmatter_tags(fm)
+            tags, _ = _parse_frontmatter_tags(fm)
             if not tags:  # absent OR present-but-empty both qualify
                 out.append(("skill", skill_dir.name, skill_md))
 
@@ -446,7 +446,7 @@ def discover_empty_tag_entities(wiki_dir: Path) -> list[tuple[str, str, Path]]:
             _, _, fm = _split_frontmatter(text)
             if not fm:
                 continue
-            tags, present = _parse_frontmatter_tags(fm)
+            tags, _ = _parse_frontmatter_tags(fm)
             if not tags:
                 out.append(("agent", agent_md.stem, agent_md))
 
