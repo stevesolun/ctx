@@ -11,9 +11,8 @@ for custom, API, and local models is a separate workflow. Recommendations do
 not install or load tools without an operator action or approval.
 
 **Release status:** [v1.0.20](https://github.com/stevesolun/ctx/releases/tag/v1.0.20)
-is the current release. PyPI currently publishes
-[v1.0.19](https://pypi.org/project/claude-ctx/); this source tree declares
-`1.0.21` for unreleased work.
+is the current GitHub and [PyPI](https://pypi.org/project/claude-ctx/) release;
+this source tree declares `1.0.21` for unreleased work.
 
 ## Install
 
@@ -39,8 +38,7 @@ wiki is optional; see the [knowledge graph guide](https://stevesolun.github.io/c
 
 ## Privacy And Telemetry
 
-These controls are available in release `1.0.20` and the current source tree;
-the PyPI `1.0.19` package does not include the telemetry CLI entry points.
+These controls are available in release `1.0.20` and the current source tree.
 Telemetry is enabled by default in `local_redacted` mode. Events are written to
 `~/.ctx/telemetry/events.jsonl`, metrics are written to
 `~/.ctx/telemetry/metrics.jsonl`, and raw prompts and queries are removed or
