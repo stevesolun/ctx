@@ -281,7 +281,7 @@ def main() -> None:
         )
         status = "converted" if converted else "conversion not completed"
         print(
-            f"\n[skill-system] New skill '{skill_name}' has {lines} lines "
+            f"\n[skill-system] Skill '{skill_name}' has {lines} lines "
             f"(>{LINE_THRESHOLD}); micro-skill gate {status}: {detail}\n"
         )
 

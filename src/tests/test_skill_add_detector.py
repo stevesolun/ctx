@@ -246,6 +246,7 @@ def test_catalog_upsert_matches_only_name_column(
 def test_edit_refreshes_existing_catalog_row(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     skills, _, catalog = _configure_installed_paths(monkeypatch, tmp_path)
     skill_file = skills / "growing-skill" / "SKILL.md"
@@ -270,6 +271,10 @@ def test_edit_refreshes_existing_catalog_row(
     content = catalog.read_text(encoding="utf-8")
     assert content.count("| growing-skill | skill |") == 1
     assert f"| growing-skill | skill | 181 | ⚠ | `{skill_file}` |" in content
+    assert capsys.readouterr().out == (
+        "\n[skill-system] Skill 'growing-skill' has 181 lines (>180); "
+        "micro-skill gate conversion not completed: test conversion disabled\n\n"
+    )
 
 
 def test_main_installed_stdin_long_skill_hands_off_to_conversion(
