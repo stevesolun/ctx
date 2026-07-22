@@ -30,6 +30,7 @@ from ctx.adapters.generic.ctx_core_tools import (
     _file_signature,
     _infer_query_language,
     _query_to_tags,
+    _recommendation_context_policy,
     make_tool_executor,
 )
 from ctx.adapters.generic.providers import ToolCall, ToolDefinition
@@ -1559,6 +1560,52 @@ class TestRecommendBundle:
         filtered_ids = {row["id"] for row in filtered["results"]}
         assert "skill:local-security" in filtered_ids
         assert "skill:remote-security" not in filtered_ids
+
+    def test_context_policy_starts_one_skill_and_defers_expensive_context(self) -> None:
+        results: list[dict[str, Any]] = [
+            {"id": "agent:reviewer", "type": "agent", "installable": True},
+            {"id": "skill:baseline", "type": "skill", "installable": True},
+            {"id": "skill:primary", "type": "skill", "installable": True},
+            {"id": "skill:secondary", "type": "skill", "installable": True},
+            {"id": "mcp-server:wiki", "type": "mcp-server", "installable": True},
+            {"id": "skill:remote", "type": "skill", "installable": False},
+            {
+                "id": "skill:external",
+                "type": "skill",
+                "installable": True,
+                "external": True,
+            },
+            {"id": "skill:malformed", "type": "skill", "installable": "false"},
+            {"id": "tool:unknown", "type": "tool", "installable": True},
+        ]
+
+        policy = _recommendation_context_policy(
+            baseline_context=["skill:baseline"],
+            active_context=[],
+            results=results,
+        )
+
+        assert policy["keep"] == ["skill:baseline"]
+        assert policy["load"] == ["skill:primary"]
+        assert policy["deferred"] == [
+            "agent:reviewer",
+            "skill:secondary",
+            "mcp-server:wiki",
+        ]
+        assert policy["manual"] == [
+            "skill:remote",
+            "skill:external",
+            "skill:malformed",
+            "tool:unknown",
+        ]
+
+        expensive_only = _recommendation_context_policy(
+            baseline_context=[],
+            active_context=[],
+            results=[results[0], results[4]],
+        )
+        assert expensive_only["load"] == []
+        assert expensive_only["deferred"] == ["agent:reviewer", "mcp-server:wiki"]
 
     def test_language_inference_resolves_common_word_aliases(self) -> None:
         assert _infer_query_language("go through python tests") == "python"

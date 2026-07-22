@@ -1776,9 +1776,15 @@ def _is_local_loadable_skill_row(row: Mapping[str, Any]) -> bool:
 
 
 def _is_loadable_recommendation_row(row: Mapping[str, Any]) -> bool:
-    if not row.get("installable"):
+    if row.get("installable") is not True or row.get("external", False) is not False:
         return False
-    if str(row.get("type") or "").strip() == "skill":
+    raw_type = row.get("type")
+    if not isinstance(raw_type, str):
+        return False
+    entity_type = raw_type.strip().lower()
+    if entity_type not in RECOMMENDABLE_ENTITY_TYPES:
+        return False
+    if entity_type == "skill":
         return _is_local_loadable_skill_row(row)
     return True
 
@@ -1915,10 +1921,23 @@ def _recommendation_context_policy(
     results: list[dict[str, Any]],
 ) -> dict[str, Any]:
     keep = _recommendation_selection_values(baseline_context + active_context)
+    keep_keys = _recommendation_selection_keys(keep)
+    loadable = [
+        row
+        for row in results
+        if _is_loadable_recommendation_row(row)
+        and not (_recommendation_selection_keys([str(row.get("id") or "")]) & keep_keys)
+    ]
+    initial = next(
+        (row for row in loadable if str(row.get("type") or "").strip().lower() == "skill"),
+        None,
+    )
+    initial_id = str(initial["id"]) if initial is not None else None
     return {
         "baseline": baseline_context,
         "keep": keep,
-        "load": [row["id"] for row in results if _is_loadable_recommendation_row(row)],
+        "load": [initial_id] if initial_id is not None else [],
+        "deferred": [row["id"] for row in loadable if row["id"] != initial_id],
         "manual": [row["id"] for row in results if not _is_loadable_recommendation_row(row)],
         "unload": [],
         "replace": [],
