@@ -407,6 +407,9 @@ class SessionStore:
     def write_session_start(self, payload: dict[str, Any]) -> None:
         self.write_event("session_start", payload)
 
+    def write_session_config(self, payload: dict[str, Any]) -> None:
+        self.write_event("session_config", payload)
+
     def write_iteration_start(self, iteration: int) -> None:
         self.write_event("iteration_start", {"iteration": iteration})
 
@@ -642,7 +645,8 @@ def load_session(
 
     The replay walks every ``message`` event in order — this is the
     single source of truth for "what did the conversation look like".
-    Metadata comes from the first ``session_start`` event (if any).
+    Metadata starts with ``session_start`` and is updated by later
+    ``session_config`` events written by explicit resume overrides.
     """
     sdir = sessions_dir if sessions_dir is not None else default_sessions_dir()
     path = sdir / f"{_safe_session_id(session_id)}.jsonl"
@@ -668,6 +672,10 @@ def load_session(
                 for k, v in event.items()
                 if k not in ("type", "ts", "session_id", "seed_messages")
             }
+        elif etype == "session_config":
+            metadata.update(
+                {k: v for k, v in event.items() if k not in ("type", "ts", "session_id")}
+            )
         elif etype == "message":
             try:
                 messages.append(_dict_to_message(event))

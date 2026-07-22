@@ -75,7 +75,10 @@ def fake_litellm(monkeypatch: pytest.MonkeyPatch):
     return fake
 
 
-def _tool_call_completion(name: str) -> dict[str, Any]:
+def _tool_call_completion(
+    name: str,
+    arguments: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "choices": [
             {
@@ -85,7 +88,10 @@ def _tool_call_completion(name: str) -> dict[str, Any]:
                         {
                             "id": "call-1",
                             "type": "function",
-                            "function": {"name": name, "arguments": "{}"},
+                            "function": {
+                                "name": name,
+                                "arguments": json.dumps(arguments or {}),
+                            },
                         }
                     ],
                 },
@@ -94,6 +100,10 @@ def _tool_call_completion(name: str) -> dict[str, Any]:
         ],
         "usage": {"prompt_tokens": 5, "completion_tokens": 1},
     }
+
+
+def _submitted_tool_names(call: dict[str, Any]) -> set[str]:
+    return {item["function"]["name"] for item in call.get("tools", [])}
 
 
 def _enable_real_telemetry(
@@ -671,6 +681,7 @@ class TestRunCommand:
         assert exit_code == 2
         assert payload["stop_reason"] == "tool_denied"
         assert "matched deny pattern" in payload["detail"]
+        assert _submitted_tool_names(fake_litellm._calls[0]) == {"ctx__recommend_bundle"}
 
     @pytest.mark.parametrize(
         "stop_reason,final_message,detail",
@@ -930,6 +941,178 @@ class TestRunCommand:
         # Check the call passed tools=None (or no tools).
         first_call = fake_litellm._calls[0]
         assert "tools" not in first_call  # loop passes None → omitted
+        assert "ctx__" not in first_call["messages"][0]["content"]
+
+    def test_non_ctx_allow_pattern_removes_ctx_prompt_and_schemas(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+    ) -> None:
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use only an attached server",
+                "--sessions-dir",
+                str(tmp_path),
+                "--allow-tool",
+                "server__*",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        first_call = fake_litellm._calls[0]
+        assert "tools" not in first_call
+        assert "ctx__" not in first_call["messages"][0]["content"]
+
+    def test_ctx_tools_default_to_minimal_surface_on_every_iteration(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+    ) -> None:
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            fake_litellm._calls.append(kwargs)
+            if len(fake_litellm._calls) == 1:
+                return _tool_call_completion("ctx__wiki_get")
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "done", "tool_calls": None},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+            }
+
+        fake_litellm.completion = completion
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use ctx only if needed",
+                "--sessions-dir",
+                str(tmp_path),
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert len(fake_litellm._calls) == 2
+        assert all(
+            _submitted_tool_names(call) == {"ctx__recommend_bundle", "ctx__wiki_get"}
+            for call in fake_litellm._calls
+        )
+        prompt = fake_litellm._calls[0]["messages"][0]["content"]
+        assert "ctx__recommend_bundle" in prompt
+        assert "ctx__wiki_get" in prompt
+        assert "ctx runtime session id:" not in prompt
+        assert "ctx__mark_entity_used" not in prompt
+
+    def test_allow_tool_submits_and_executes_only_selected_ctx_schema(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        lifecycle_dir = tmp_path / "runtime"
+        monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_dir))
+
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            fake_litellm._calls.append(kwargs)
+            if len(fake_litellm._calls) == 1:
+                return _tool_call_completion(
+                    "ctx__mark_entity_used",
+                    {
+                        "entity_type": "skill",
+                        "slug": "focused-skill",
+                        "evidence": "used in focused test",
+                    },
+                )
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "done", "tool_calls": None},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+            }
+
+        fake_litellm.completion = completion
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use the selected skill",
+                "--sessions-dir",
+                str(tmp_path / "sessions"),
+                "--session-id",
+                "selected-schema",
+                "--allow-tool",
+                "ctx__mark_entity_used",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert all(
+            _submitted_tool_names(call) == {"ctx__mark_entity_used"} for call in fake_litellm._calls
+        )
+        events = [
+            json.loads(line)
+            for line in (lifecycle_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        assert "used" in [event["action"] for event in events]
+        prompt = fake_litellm._calls[0]["messages"][0]["content"]
+        assert "ctx__mark_entity_used.token_usage" in prompt
+        assert "ctx__recommend_bundle" not in prompt
+        assert "ctx__wiki_get" not in prompt
+        assert "ctx__load_entity" not in prompt
+        assert "ctx__unload_entity" not in prompt
+
+    def test_full_ctx_tool_surface_preserves_previous_schema_inventory(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+    ) -> None:
+        main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use full ctx tooling",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "full-schema",
+                "--ctx-tool-surface",
+                "full",
+                "--quiet",
+            ]
+        )
+
+        expected = {
+            definition.name
+            for definition in run_cli.CtxCoreToolbox(
+                bound_session_id="full-schema"
+            ).tool_definitions()
+        }
+        submitted = _submitted_tool_names(fake_litellm._calls[0])
+        assert submitted == expected
+        assert len(submitted) == 13
+        metadata = json.loads(
+            (tmp_path / "full-schema.jsonl").read_text(encoding="utf-8").splitlines()[0]
+        )
+        assert metadata["ctx_tool_surface"] == "full"
+        assert set(metadata["ctx_tool_names"]) == expected
 
     def test_system_prompt_override(
         self,
@@ -1007,6 +1190,8 @@ class TestRunCommand:
                 str(tmp_path / "sessions"),
                 "--session-id",
                 "lifecycle-run",
+                "--ctx-tool-surface",
+                "full",
                 "--quiet",
             ]
         )
@@ -1425,6 +1610,163 @@ class TestResumeCommand:
         )
         assert stop_count == 2
 
+    def test_legacy_session_without_surface_resumes_full_tool_inventory(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+    ) -> None:
+        (tmp_path / "legacy-surface.jsonl").write_text(
+            json.dumps(
+                {
+                    "type": "session_start",
+                    "ts": "t",
+                    "session_id": "legacy-surface",
+                    "task": "old",
+                    "model": "ollama/x",
+                    "ctx_tools_enabled": True,
+                    "system_prompt": run_cli._LEGACY_DEFAULT_SYSTEM_PROMPT,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        exit_code = main(
+            [
+                "resume",
+                "legacy-surface",
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(tmp_path),
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert len(_submitted_tool_names(fake_litellm._calls[-1])) == 13
+
+    def test_exact_legacy_prompt_does_not_advertise_filtered_ctx_tools(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+    ) -> None:
+        legacy_prompt = (
+            run_cli._LEGACY_DEFAULT_SYSTEM_PROMPT.rstrip()
+            + "\n\nctx runtime session id: legacy-filtered\n"
+            + "Use this exact session_id when calling ctx lifecycle tools. "
+            + "Record ctx__load_entity and ctx__mark_entity_used when relevant.\n"
+        )
+        (tmp_path / "legacy-filtered.jsonl").write_text(
+            json.dumps(
+                {
+                    "type": "session_start",
+                    "ts": "t",
+                    "session_id": "legacy-filtered",
+                    "task": "old",
+                    "model": "ollama/x",
+                    "ctx_tools_enabled": True,
+                    "system_prompt": legacy_prompt,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        exit_code = main(
+            [
+                "resume",
+                "legacy-filtered",
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(tmp_path),
+                "--allow-tool",
+                "server__*",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        call = fake_litellm._calls[-1]
+        assert "tools" not in call
+        assert "ctx__" not in call["messages"][0]["content"]
+
+    def test_resume_surface_override_rewrites_prompt_and_persists(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "first",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "surface-resume",
+                "--ctx-tool-surface",
+                "full",
+                "--quiet",
+            ]
+        )
+        capsys.readouterr()
+        fake_litellm._calls.clear()
+
+        main(
+            [
+                "resume",
+                "surface-resume",
+                "--task",
+                "switch to minimal",
+                "--sessions-dir",
+                str(tmp_path),
+                "--ctx-tool-surface",
+                "minimal",
+                "--quiet",
+            ]
+        )
+        capsys.readouterr()
+        explicit_call = fake_litellm._calls[-1]
+        assert _submitted_tool_names(explicit_call) == {
+            "ctx__recommend_bundle",
+            "ctx__wiki_get",
+        }
+        prompt = explicit_call["messages"][0]["content"]
+        assert "ctx__recommend_bundle" in prompt
+        assert "ctx__wiki_get" in prompt
+        assert "ctx__load_entity" not in prompt
+        assert "ctx__mark_entity_used" not in prompt
+        assert "ctx__unload_entity" not in prompt
+
+        fake_litellm._calls.clear()
+        main(
+            [
+                "resume",
+                "surface-resume",
+                "--task",
+                "inherit minimal",
+                "--sessions-dir",
+                str(tmp_path),
+                "--quiet",
+            ]
+        )
+        capsys.readouterr()
+        assert _submitted_tool_names(fake_litellm._calls[-1]) == {
+            "ctx__recommend_bundle",
+            "ctx__wiki_get",
+        }
+        events = [
+            json.loads(line)
+            for line in (tmp_path / "surface-resume.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        config_events = [event for event in events if event["type"] == "session_config"]
+        assert [event["ctx_tool_surface"] for event in config_events] == ["minimal", "minimal"]
+
     def test_resume_records_runtime_lifecycle_events(
         self,
         fake_litellm: Any,
@@ -1452,6 +1794,8 @@ class TestResumeCommand:
                 str(sessions_dir),
                 "--session-id",
                 "lifecycle-resume",
+                "--ctx-tool-surface",
+                "full",
                 "--quiet",
             ]
         )

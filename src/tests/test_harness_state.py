@@ -292,6 +292,13 @@ class TestConvenienceWriters:
         assert event["task"] == "hello"
         assert event["model"] == "ollama/x"
 
+    def test_write_session_config(self, tmp_path: Path) -> None:
+        with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
+            store.write_session_config({"ctx_tool_surface": "minimal"})
+        event = json.loads((tmp_path / "s.jsonl").read_text(encoding="utf-8"))
+        assert event["type"] == "session_config"
+        assert event["ctx_tool_surface"] == "minimal"
+
     def test_write_message(self, tmp_path: Path) -> None:
         with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
             store.write_message(Message(role="user", content="hi"))
@@ -401,6 +408,24 @@ class TestLoadSession:
         assert state.metadata["task"] == "hello"
         assert state.stopped is True
         assert state.stop_reason == "completed"
+
+    def test_session_config_updates_replayed_metadata(self, tmp_path: Path) -> None:
+        with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
+            store.write_session_start({"task": "hello", "ctx_tool_surface": "full"})
+            store.write_session_config(
+                {
+                    "ctx_tool_surface": "minimal",
+                    "ctx_tool_names": ["ctx__recommend_bundle", "ctx__wiki_get"],
+                }
+            )
+
+        state = load_session("s", sessions_dir=tmp_path)
+        assert state.metadata["task"] == "hello"
+        assert state.metadata["ctx_tool_surface"] == "minimal"
+        assert state.metadata["ctx_tool_names"] == [
+            "ctx__recommend_bundle",
+            "ctx__wiki_get",
+        ]
 
     def test_replay_unstopped_session(self, tmp_path: Path) -> None:
         """Session that trails off mid-run (no stop event) is flagged."""

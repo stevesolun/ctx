@@ -60,6 +60,9 @@ from ctx.utils._secret_scan import find_inline_secret_arg
 
 _logger = logging.getLogger(__name__)
 _CTX_SESSION_MARKER = "ctx runtime session id:"
+_CTX_TOOL_INSTRUCTIONS_START = "ctx tool instructions:"
+_CTX_TOOL_INSTRUCTIONS_END = "end ctx tool instructions."
+_MISSING = object()
 _SESSION_USAGE_ATTRIBUTION_REASON = (
     "ctx run provider usage is aggregated across the session; exact per-tool "
     "token attribution requires host-supplied ctx__mark_entity_used.token_usage."
@@ -71,6 +74,8 @@ _GITHUB_MCP_CREDENTIAL_ENV = (
     "GH_TOKEN",
 )
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_CTX_TOOL_SURFACES = ("minimal", "full")
+_CTX_BOOTSTRAP_TOOL_NAMES = frozenset({"ctx__recommend_bundle", "ctx__wiki_get"})
 
 
 # ── Provider key-env defaults ───────────────────────────────────────────────
@@ -185,6 +190,62 @@ def _normalise_tool_patterns(patterns: list[str] | tuple[str, ...] | None) -> tu
     return tuple(p.strip() for p in (patterns or []) if p and p.strip())
 
 
+def _resolve_ctx_tool_surface(explicit: str | None, recorded: Any = _MISSING) -> str:
+    if explicit in _CTX_TOOL_SURFACES:
+        return explicit
+    if recorded in _CTX_TOOL_SURFACES:
+        return str(recorded)
+    # Sessions created before surfaces were recorded exposed all ctx tools.
+    return "full" if recorded is _MISSING else "minimal"
+
+
+def _ctx_toolbox_for_surface(
+    *,
+    lifecycle_dir: Path | None,
+    bound_session_id: str,
+    surface: str,
+    allow_patterns: list[str] | tuple[str, ...] | None,
+    deny_patterns: list[str] | tuple[str, ...] | None,
+) -> tuple[CtxCoreToolbox, list[ToolDefinition]]:
+    """Build a toolbox whose submitted and executable ctx tools agree."""
+    if surface not in _CTX_TOOL_SURFACES:
+        raise ValueError(f"unsupported ctx tool surface: {surface!r}")
+    allow = _normalise_tool_patterns(allow_patterns)
+    deny = _normalise_tool_patterns(deny_patterns)
+    inventory = CtxCoreToolbox(
+        lifecycle_dir=lifecycle_dir,
+        bound_session_id=bound_session_id,
+    )
+    definitions = inventory.tool_definitions()
+    inventory_names = frozenset(definition.name for definition in definitions)
+    if allow:
+        definitions = [
+            definition
+            for definition in definitions
+            if any(fnmatchcase(definition.name, pattern) for pattern in allow)
+        ]
+    elif surface == "minimal":
+        definitions = [
+            definition for definition in definitions if definition.name in _CTX_BOOTSTRAP_TOOL_NAMES
+        ]
+    if deny:
+        definitions = [
+            definition
+            for definition in definitions
+            if not any(fnmatchcase(definition.name, pattern) for pattern in deny)
+        ]
+
+    exposed_names = frozenset(definition.name for definition in definitions)
+    if exposed_names == inventory_names:
+        return inventory, definitions
+    toolbox = CtxCoreToolbox(
+        lifecycle_dir=lifecycle_dir,
+        bound_session_id=bound_session_id,
+        allowed_tool_names=exposed_names,
+    )
+    return toolbox, toolbox.tool_definitions()
+
+
 def _compile_tool_policy(
     allow_patterns: list[str] | tuple[str, ...] | None,
     deny_patterns: list[str] | tuple[str, ...] | None,
@@ -232,7 +293,8 @@ def _add_tool_policy_args(parser: argparse.ArgumentParser) -> None:
         metavar="PATTERN",
         help=(
             "Allow only tool names matching this glob pattern. Repeatable. "
-            "If omitted, all attached tools are allowed unless denied."
+            "Matching ctx tools are the only ctx schemas sent to the provider. "
+            "If omitted, the selected ctx tool surface is allowed unless denied."
         ),
     )
     parser.add_argument(
@@ -242,7 +304,25 @@ def _add_tool_policy_args(parser: argparse.ArgumentParser) -> None:
         metavar="PATTERN",
         help=(
             "Deny tool names matching this glob pattern before execution. "
-            "Repeatable; deny rules override allow rules."
+            "Denied ctx schemas are not sent to the provider. Repeatable; "
+            "deny rules override allow rules."
+        ),
+    )
+
+
+def _add_ctx_tool_surface_arg(
+    parser: argparse.ArgumentParser,
+    *,
+    default: str | None,
+) -> None:
+    parser.add_argument(
+        "--ctx-tool-surface",
+        choices=_CTX_TOOL_SURFACES,
+        default=default,
+        help=(
+            "Built-in ctx schemas submitted to the model: 'minimal' exposes "
+            "recommend_bundle + wiki_get; 'full' restores the complete "
+            "read/lifecycle surface. --allow-tool selects an explicit subset."
         ),
     )
 
@@ -429,7 +509,7 @@ def _mcp_configs_from_metadata(meta: dict) -> list[McpServerConfig]:
     return out
 
 
-_DEFAULT_SYSTEM_PROMPT = """\
+_LEGACY_DEFAULT_SYSTEM_PROMPT = """\
 You are a coding assistant running inside the ctx harness. You have
 access to the model's knowledge PLUS a set of tools for file system
 access, git operations, and the ctx knowledge graph (ctx__*). The
@@ -453,23 +533,95 @@ Be concise. Preserve file paths and slugs verbatim in your responses.
 """
 
 
-def _with_ctx_session_instructions(system_prompt: str, session_id: str) -> str:
-    if _CTX_SESSION_MARKER in system_prompt:
-        return system_prompt
-    return (
-        system_prompt.rstrip()
-        + "\n\n"
-        + "ctx runtime session id: "
-        + session_id
-        + "\n"
-        + "Use this exact session_id when calling ctx lifecycle tools. "
-        + "Record ctx__load_entity when the user/host chooses a recommended "
-        + "skill, agent, MCP server, or harness; record ctx__mark_entity_used "
-        + "when it materially helps; call ctx__unload_entity only after user "
-        + "confirmation or an explicit skip/unload instruction. Include "
-        + "ctx__mark_entity_used.token_usage only when exact per-entity usage "
-        + "is available; do not allocate session totals across tools.\n"
-    )
+_DEFAULT_SYSTEM_PROMPT = """\
+You are a coding assistant running inside the ctx harness. Use only the
+tools attached to the current request, and use them only when they are
+relevant to the user's task.
+
+Workflow:
+  1. Read the task carefully.
+  2. Use attached filesystem, git, knowledge, or MCP tools as needed.
+  3. Make and verify the requested changes.
+  4. When done or blocked on user input, answer in text.
+
+Be concise. Preserve file paths and slugs verbatim in your responses.
+"""
+
+
+def _without_ctx_session_instructions(system_prompt: str) -> str:
+    prompt = system_prompt
+    managed_marker = "\n\n" + _CTX_TOOL_INSTRUCTIONS_START
+    if managed_marker in prompt:
+        prompt = prompt.split(managed_marker, 1)[0]
+    legacy_marker = "\n\n" + _CTX_SESSION_MARKER
+    if legacy_marker in prompt:
+        prompt = prompt.split(legacy_marker, 1)[0]
+    legacy_default = _LEGACY_DEFAULT_SYSTEM_PROMPT.rstrip()
+    if prompt.startswith(legacy_default):
+        prompt = _DEFAULT_SYSTEM_PROMPT.rstrip() + prompt[len(legacy_default) :]
+    return prompt.rstrip()
+
+
+def _with_ctx_session_instructions(
+    system_prompt: str,
+    session_id: str,
+    definitions: list[ToolDefinition],
+) -> str:
+    base_prompt = _without_ctx_session_instructions(system_prompt)
+    if not base_prompt:
+        return ""
+    names = {definition.name for definition in definitions}
+    instructions: list[str] = []
+    if "ctx__recommend_bundle" in names:
+        instructions.append(
+            "Call ctx__recommend_bundle only when the task needs relevant skills, "
+            "agents, or MCP servers that are not already active."
+        )
+    if "ctx__wiki_get" in names:
+        instructions.append("Use ctx__wiki_get to inspect a recommended entity before choosing it.")
+    if "ctx__load_entity" in names:
+        instructions.append(
+            "Record ctx__load_entity when the user/host chooses a recommended "
+            "skill, agent, MCP server, or harness."
+        )
+    if "ctx__mark_entity_used" in names:
+        instructions.append(
+            "Record ctx__mark_entity_used when it materially helps; include "
+            "ctx__mark_entity_used.token_usage only when exact per-entity usage "
+            "is available, and do not allocate session totals across tools."
+        )
+    if "ctx__unload_entity" in names:
+        instructions.append(
+            "Call ctx__unload_entity only after user confirmation or an explicit "
+            "skip/unload instruction."
+        )
+    if not instructions:
+        return base_prompt
+    lifecycle_names = {
+        "ctx__load_entity",
+        "ctx__mark_entity_used",
+        "ctx__unload_entity",
+    }
+    lines = [_CTX_TOOL_INSTRUCTIONS_START, *instructions]
+    if names & lifecycle_names:
+        lines.extend(
+            [
+                f"{_CTX_SESSION_MARKER} {session_id}",
+                "Use this exact session_id when calling ctx lifecycle tools.",
+            ]
+        )
+    lines.append(_CTX_TOOL_INSTRUCTIONS_END)
+    return base_prompt + "\n\n" + "\n".join(lines) + "\n"
+
+
+def _resume_messages_with_system_prompt(messages: tuple[Any, ...], system_prompt: str) -> list[Any]:
+    replay = list(messages)
+    if replay and replay[0].role == "system":
+        if system_prompt:
+            replay[0] = replace(replay[0], content=system_prompt)
+        else:
+            replay.pop(0)
+    return replay
 
 
 def _record_lifecycle_safely(
@@ -790,6 +942,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not attach the built-in ctx__* tool surface.",
     )
+    _add_ctx_tool_surface_arg(r, default="minimal")
     _add_tool_policy_args(r)
     r.add_argument(
         "--api-key-env",
@@ -983,6 +1136,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "can contain executable command metadata."
         ),
     )
+    _add_ctx_tool_surface_arg(rz, default=None)
     _add_tool_policy_args(rz)
     rz.add_argument(
         "--quiet",
@@ -1103,8 +1257,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
 
     ctx_tools_enabled = not args.no_ctx_tools
-    if ctx_tools_enabled:
-        system_prompt = _with_ctx_session_instructions(system_prompt, session_id)
+    ctx_tool_surface = _resolve_ctx_tool_surface(args.ctx_tool_surface)
+    allow_tools = _normalise_tool_patterns(args.allow_tool)
+    deny_tools = _normalise_tool_patterns(args.deny_tool)
 
     try:
         mcp_configs = _apply_mcp_env_overlays(
@@ -1128,19 +1283,25 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     # ctx-core tools.
     lifecycle = RuntimeLifecycleStore()
-    extra_tools = []
+    extra_tools: list[ToolDefinition] = []
     tool_executor = None
     if ctx_tools_enabled:
-        toolbox = CtxCoreToolbox(
+        toolbox, ctx_definitions = _ctx_toolbox_for_surface(
             lifecycle_dir=lifecycle.root,
             bound_session_id=session_id,
+            surface=ctx_tool_surface,
+            allow_patterns=allow_tools,
+            deny_patterns=deny_tools,
         )
-        extra_tools.extend(toolbox.tool_definitions())
+        extra_tools.extend(ctx_definitions)
         tool_executor = make_tool_executor(toolbox, fallback=None)
+        system_prompt = _with_ctx_session_instructions(
+            system_prompt,
+            session_id,
+            ctx_definitions,
+        )
 
     compactor = None if args.no_compact else TokenBudgetCompactor()
-    allow_tools = _normalise_tool_patterns(args.allow_tool)
-    deny_tools = _normalise_tool_patterns(args.deny_tool)
     tool_policy = _compile_tool_policy(allow_tools, deny_tools)
 
     try:
@@ -1205,6 +1366,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 for c in mcp_configs
             ],
             "ctx_tools_enabled": ctx_tools_enabled,
+            "ctx_tool_surface": ctx_tool_surface,
+            "ctx_tool_names": [definition.name for definition in extra_tools],
             "tool_policy": {"allow": list(allow_tools), "deny": list(deny_tools)},
             "planner_used": plan_artifact is not None,
             "contract_used": bool(args.evaluator and args.contract),
@@ -1504,11 +1667,6 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         if isinstance(recorded_system_prompt, str)
         else _DEFAULT_SYSTEM_PROMPT
     )
-    if use_ctx_tools:
-        system_prompt = _with_ctx_session_instructions(
-            str(system_prompt),
-            args.session_id,
-        )
     provider_name = args.provider or meta.get("provider") or meta.get("provider_prefix")
     provider_key = provider_name if isinstance(provider_name, str) else None
     if args.api_key_env is not None:
@@ -1567,14 +1725,38 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     lifecycle = RuntimeLifecycleStore()
     extra_tools: list[ToolDefinition] = []
     tool_executor = None
+    allow_tools, deny_tools = _resume_tool_policy_patterns(args, meta)
+    ctx_tool_surface = _resolve_ctx_tool_surface(
+        args.ctx_tool_surface,
+        meta["ctx_tool_surface"] if "ctx_tool_surface" in meta else _MISSING,
+    )
     if use_ctx_tools:
-        ctx_toolbox = CtxCoreToolbox(
+        ctx_toolbox, ctx_definitions = _ctx_toolbox_for_surface(
             lifecycle_dir=lifecycle.root,
             bound_session_id=args.session_id,
+            surface=ctx_tool_surface,
+            allow_patterns=allow_tools,
+            deny_patterns=deny_tools,
         )
-        extra_tools.extend(ctx_toolbox.tool_definitions())
+        extra_tools.extend(ctx_definitions)
         tool_executor = make_tool_executor(ctx_toolbox)
-    allow_tools, deny_tools = _resume_tool_policy_patterns(args, meta)
+        system_prompt = _with_ctx_session_instructions(
+            str(system_prompt),
+            args.session_id,
+            ctx_definitions,
+        )
+    else:
+        system_prompt = _without_ctx_session_instructions(str(system_prompt))
+    store.write_session_config(
+        {
+            "system_prompt": system_prompt,
+            "ctx_tools_enabled": use_ctx_tools,
+            "ctx_tool_surface": ctx_tool_surface,
+            "ctx_tool_names": [definition.name for definition in extra_tools],
+            "tool_policy": {"allow": list(allow_tools), "deny": list(deny_tools)},
+        }
+    )
+    resume_messages = _resume_messages_with_system_prompt(state.messages, system_prompt)
     tool_policy = _compile_tool_policy(allow_tools, deny_tools)
 
     with telemetry_span():
@@ -1585,7 +1767,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             elif recorded_mcp_configs:
                 bits.append(f"{len(recorded_mcp_configs)} recorded MCP server(s) skipped")
             if use_ctx_tools:
-                bits.append("ctx-core tools")
+                bits.append(f"ctx-core tools ({ctx_tool_surface}, {len(extra_tools)} schemas)")
             if allow_tools or deny_tools:
                 bits.append(f"tool policy allow={len(allow_tools)} deny={len(deny_tools)}")
             suffix = f" + {', '.join(bits)}" if bits else ""
@@ -1638,7 +1820,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 provider=provider,
                 system_prompt=system_prompt,
                 task=args.task,
-                messages=list(state.messages),
+                messages=resume_messages,
                 model=model,
                 observer=observer,
                 compactor=compactor,
