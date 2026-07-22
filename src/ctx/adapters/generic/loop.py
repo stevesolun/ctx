@@ -118,8 +118,9 @@ class TurnController(Protocol):
 
     Preparation must be side-effect free and cooperatively observe its
     monotonic deadline and cancellation event. Resource activation belongs in
-    authorization or tool execution; unload belongs in ``close_turn``. Hooks
-    that perform model work must return its usage for budgets and telemetry.
+    the optional ``activate_turn`` hook, authorization, or tool execution;
+    unload belongs in ``close_turn``. Hooks that perform model work must return
+    its usage for budgets and telemetry.
     """
 
     def prepare_turn(
@@ -546,6 +547,28 @@ def _run_prepared_turn(
                     step = _TurnStep("cancelled", "cancel_event was set after preparation")
                     break
 
+                activation_usage, activation_error = _activate_turn(
+                    turn_controller,
+                    iteration=iteration,
+                    preparation=preparation,
+                )
+                if activation_usage is not None:
+                    totals.add(activation_usage)
+                if activation_error is not None:
+                    step = _TurnStep("controller_error", activation_error)
+                    break
+                budget_stop, budget_detail = _budget_stop_reason(
+                    totals,
+                    budget_usd=budget_usd,
+                    budget_tokens=budget_tokens,
+                )
+                if budget_stop is not None:
+                    step = _TurnStep(budget_stop, budget_detail)
+                    break
+                if cancel_event is not None and cancel_event.is_set():
+                    step = _TurnStep("cancelled", "cancel_event was set during activation")
+                    break
+
                 request_messages = _messages_for_turn(
                     conversation,
                     preparation.ephemeral_context,
@@ -553,6 +576,15 @@ def _run_prepared_turn(
                 )
                 advertised_tool_names = frozenset(tool.name for tool in request_tools)
                 enforce_advertised_tools = turn_controller is not None or bool(base_tools)
+
+                provider_request_error = _notify_provider_request(
+                    turn_controller,
+                    iteration=iteration,
+                    preparation=preparation,
+                )
+                if provider_request_error is not None:
+                    step = _TurnStep("controller_error", provider_request_error)
+                    break
 
                 try:
                     response = _complete_provider(
@@ -1115,6 +1147,57 @@ def _notify_turn_controller(
         except (TypeError, ValueError) as exc:
             return None, str(exc)
     return usage, None
+
+
+def _activate_turn(
+    turn_controller: TurnController | None,
+    *,
+    iteration: int,
+    preparation: TurnPreparation,
+) -> tuple[Usage | None, str | None]:
+    if turn_controller is None:
+        return None, None
+    try:
+        hook = getattr(turn_controller, "activate_turn", None)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"turn controller activation lookup raised {type(exc).__name__}: {exc}"
+    if hook is None:
+        return None, None
+    if not callable(hook):
+        return None, "turn controller activate_turn must be callable"
+    try:
+        usage = hook(iteration, preparation.capability_epoch)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"turn controller activation raised {type(exc).__name__}: {exc}"
+    if usage is not None:
+        try:
+            _validate_usage(usage, source="turn controller activation")
+        except (TypeError, ValueError) as exc:
+            return None, str(exc)
+    return usage, None
+
+
+def _notify_provider_request(
+    turn_controller: TurnController | None,
+    *,
+    iteration: int,
+    preparation: TurnPreparation,
+) -> str | None:
+    if turn_controller is None:
+        return None
+    try:
+        hook = getattr(turn_controller, "on_provider_request", None)
+    except Exception as exc:  # noqa: BLE001
+        return f"turn controller provider-request lookup raised {type(exc).__name__}: {exc}"
+    if hook is None:
+        return None
+    if not callable(hook):
+        return "turn controller on_provider_request must be callable"
+    try:
+        hook(iteration, preparation.capability_epoch)
+    except Exception as exc:  # noqa: BLE001
+        return f"turn controller provider-request hook raised {type(exc).__name__}: {exc}"
+    return None
 
 
 def _close_turn(

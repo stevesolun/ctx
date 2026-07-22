@@ -37,7 +37,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
-from ctx.adapters.generic.adaptive_runtime import AdaptiveRuntimeController
+from ctx.adapters.generic.adaptive_runtime import AdaptiveRuntimeController, SelectedSkill
 from ctx.adapters.generic.compaction import TokenBudgetCompactor
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox, make_tool_executor
 from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
@@ -687,11 +687,11 @@ def _record_lifecycle_safely(
     method_name: str,
     **kwargs: Any,
 ) -> None:
-    method = getattr(lifecycle, method_name)
     started = time.perf_counter()
     try:
+        method = getattr(lifecycle, method_name)
         method(**kwargs)
-    except (OSError, ValueError) as exc:
+    except Exception as exc:  # noqa: BLE001 - lifecycle must not break the runtime.
         _logger.warning("ctx runtime lifecycle record failed: %s", exc)
         _record_cli_telemetry(
             "ctx.runtime_lifecycle.write",
@@ -817,6 +817,81 @@ def _adaptive_runtime_payload(
         ),
         "ctx.adaptive.skill_hash": summary["skill_hash"],
     }
+
+
+def _adaptive_controller_for_task(
+    task: str,
+    *,
+    cwd: Path,
+    lifecycle: RuntimeLifecycleStore,
+    session_id: str,
+) -> AdaptiveRuntimeController:
+    def on_activate(selection: SelectedSkill) -> None:
+        _record_lifecycle_safely(
+            lifecycle,
+            "mark_entity_loaded",
+            session_id=session_id,
+            entity_type="skill",
+            slug=selection.name,
+            reason="adaptive capability lease activated",
+        )
+
+    def on_deactivate(selection: SelectedSkill, outcome: str, submitted: bool) -> None:
+        if submitted:
+            _record_lifecycle_safely(
+                lifecycle,
+                "mark_entity_used",
+                session_id=session_id,
+                entity_type="skill",
+                slug=selection.name,
+                evidence="adaptive context submitted to provider",
+                token_usage={
+                    "attribution": "estimated",
+                    "input_tokens": selection.estimated_context_tokens,
+                    "output_tokens": 0,
+                    "attribution_reason": "bounded character estimate for selected skill context",
+                },
+            )
+        _record_lifecycle_safely(
+            lifecycle,
+            "mark_entity_unloaded",
+            session_id=session_id,
+            entity_type="skill",
+            slug=selection.name,
+            reason=f"adaptive capability lease closed after {outcome}",
+        )
+
+    return AdaptiveRuntimeController.from_task(
+        task,
+        cwd=cwd,
+        on_activate=on_activate,
+        on_deactivate=on_deactivate,
+    )
+
+
+def _record_adaptive_selection_request(
+    lifecycle: RuntimeLifecycleStore,
+    controller: AdaptiveRuntimeController | None,
+    *,
+    session_id: str,
+) -> None:
+    selection = controller.selection if controller is not None else None
+    if selection is None:
+        return
+    _record_lifecycle_safely(
+        lifecycle,
+        "load_entity",
+        session_id=session_id,
+        entity_type="skill",
+        slug=selection.name,
+        reason="adaptive task match",
+        selected=True,
+        selection_source="host",
+        source_context={
+            "score": selection.score,
+            "estimated_context_tokens": selection.estimated_context_tokens,
+        },
+    )
 
 
 def _run_setup_failure_payload(args: argparse.Namespace, *, stage: str) -> dict[str, Any]:
@@ -1413,9 +1488,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 ctx_definitions,
             )
         elif ctx_tool_surface == "adaptive" and not mcp_configs:
-            turn_controller = AdaptiveRuntimeController.from_task(
+            turn_controller = _adaptive_controller_for_task(
                 args.task,
                 cwd=Path.cwd(),
+                lifecycle=lifecycle,
+                session_id=session_id,
             )
             system_prompt = _without_ctx_session_instructions(system_prompt)
         else:
@@ -1519,6 +1596,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     "model": args.model,
                     "provider": args.provider or _model_provider_prefix(args.model),
                 },
+            )
+            _record_adaptive_selection_request(
+                lifecycle,
+                turn_controller,
+                session_id=session_id,
             )
         _record_cli_telemetry(
             "ctx.cli.run",
@@ -1890,9 +1972,11 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 ctx_definitions,
             )
         elif ctx_tool_surface == "adaptive" and not mcp_configs:
-            turn_controller = AdaptiveRuntimeController.from_task(
+            turn_controller = _adaptive_controller_for_task(
                 args.task,
                 cwd=Path.cwd(),
+                lifecycle=lifecycle,
+                session_id=args.session_id,
             )
             system_prompt = _without_ctx_session_instructions(str(system_prompt))
         else:
@@ -1945,6 +2029,11 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 host="ctx-resume",
                 cwd=str(Path.cwd()),
                 payload={"task": args.task, "model": model},
+            )
+            _record_adaptive_selection_request(
+                lifecycle,
+                turn_controller,
+                session_id=args.session_id,
             )
         _record_cli_telemetry(
             "ctx.cli.resume",

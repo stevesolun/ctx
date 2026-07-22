@@ -17,7 +17,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 import yaml
 from yaml.tokens import (
@@ -76,16 +76,6 @@ _ACTION_TERMS = frozenset(
         "test",
         "trace",
         "verify",
-    }
-)
-_NO_PROVIDER_OUTCOMES = frozenset(
-    {
-        "cancelled",
-        "controller_error",
-        "cost_budget",
-        "preparation_rejected",
-        "preparation_timeout",
-        "token_budget",
     }
 )
 
@@ -260,12 +250,18 @@ class AdaptiveRuntimeController:
         selection: SelectedSkill | None,
         *,
         selection_duration_ms: float = 0.0,
+        on_activate: Callable[[SelectedSkill], None] | None = None,
+        on_deactivate: Callable[[SelectedSkill, str, bool], None] | None = None,
     ) -> None:
         self.selection = selection
         self.selection_duration_ms = max(0.0, float(selection_duration_ms))
+        self._on_activate = on_activate
+        self._on_deactivate = on_deactivate
         self._consumed = False
         self._pending_context_bytes = 0
         self._pending_epoch: int | None = None
+        self._active_epoch: int | None = None
+        self._provider_attempted_epoch: int | None = None
         self._submitted_context_bytes = 0
         self._lock = threading.Lock()
 
@@ -276,11 +272,18 @@ class AdaptiveRuntimeController:
         *,
         cwd: Path | None = None,
         skill_roots: Iterable[Path] | None = None,
+        on_activate: Callable[[SelectedSkill], None] | None = None,
+        on_deactivate: Callable[[SelectedSkill, str, bool], None] | None = None,
     ) -> "AdaptiveRuntimeController":
         started = time.perf_counter()
         selection = select_installed_skill(task, cwd=cwd, skill_roots=skill_roots)
         elapsed_ms = (time.perf_counter() - started) * 1000.0
-        return cls(selection, selection_duration_ms=elapsed_ms)
+        return cls(
+            selection,
+            selection_duration_ms=elapsed_ms,
+            on_activate=on_activate,
+            on_deactivate=on_deactivate,
+        )
 
     def summary(self) -> dict[str, Any]:
         selection = self.selection
@@ -338,8 +341,44 @@ class AdaptiveRuntimeController:
         del call
         if capability_epoch != iteration:
             return TurnAuthorization(denial="stale adaptive capability epoch")
-        self._mark_submitted(iteration)
         return None
+
+    def activate_turn(
+        self,
+        iteration: int,
+        capability_epoch: int,
+    ) -> Usage | None:
+        with self._lock:
+            if (
+                self._consumed
+                or capability_epoch != iteration
+                or self._pending_epoch != iteration
+                or self.selection is None
+            ):
+                return None
+            if self._active_epoch is not None:
+                if self._active_epoch == iteration:
+                    return None
+                raise RuntimeError("adaptive runtime already has an active capability epoch")
+            self._active_epoch = iteration
+            selection = self.selection
+        if self._on_activate is not None:
+            self._on_activate(selection)
+        return None
+
+    def on_provider_request(self, iteration: int, capability_epoch: int) -> None:
+        with self._lock:
+            if (
+                capability_epoch != iteration
+                or self._active_epoch != iteration
+                or self._pending_epoch != iteration
+            ):
+                return
+            self._provider_attempted_epoch = iteration
+            self._submitted_context_bytes = max(
+                self._submitted_context_bytes,
+                self._pending_context_bytes,
+            )
 
     def on_tool_result(
         self,
@@ -358,27 +397,24 @@ class AdaptiveRuntimeController:
         capability_epoch: int,
         outcome: str,
     ) -> Usage | None:
+        deactivated: SelectedSkill | None = None
+        submitted = False
         if capability_epoch == iteration:
             with self._lock:
+                submitted = self._provider_attempted_epoch == iteration
+                if submitted:
+                    self._provider_attempted_epoch = None
                 if self._pending_epoch == iteration:
-                    if outcome not in _NO_PROVIDER_OUTCOMES:
-                        self._submitted_context_bytes = max(
-                            self._submitted_context_bytes,
-                            self._pending_context_bytes,
-                        )
                     self._pending_epoch = None
                     self._pending_context_bytes = 0
+                if self._active_epoch == iteration:
+                    deactivated = self.selection
+                    self._active_epoch = None
                 if self.selection is not None:
                     self._consumed = True
+        if deactivated is not None and self._on_deactivate is not None:
+            self._on_deactivate(deactivated, outcome, submitted)
         return None
-
-    def _mark_submitted(self, iteration: int) -> None:
-        with self._lock:
-            if self._pending_epoch == iteration:
-                self._submitted_context_bytes = max(
-                    self._submitted_context_bytes,
-                    self._pending_context_bytes,
-                )
 
 
 def _discover_candidates(

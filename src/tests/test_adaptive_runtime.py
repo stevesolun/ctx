@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,7 @@ from ctx.adapters.generic.adaptive_runtime import (
     select_installed_skill,
 )
 from ctx.adapters.generic.loop import run_loop
+from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
 from ctx.adapters.generic.providers import (
     CompletionResponse,
     Message,
@@ -24,6 +27,7 @@ from ctx.adapters.generic.providers import (
     ToolDefinition,
     Usage,
 )
+from ctx.cli.run import _adaptive_controller_for_task, _record_adaptive_selection_request
 
 
 def _write_skill(root: Path, name: str, description: str, body: str = "Follow this skill.") -> Path:
@@ -38,7 +42,9 @@ def _write_skill(root: Path, name: str, description: str, body: str = "Follow th
 
 
 def _selection(
-    name: str = "focused-skill", content: str = "Apply focused guidance."
+    name: str = "focused-skill",
+    content: str = "Apply focused guidance.",
+    estimated_context_tokens: int = 0,
 ) -> SelectedSkill:
     data = content.encode("utf-8")
     return SelectedSkill(
@@ -48,6 +54,7 @@ def _selection(
         content_bytes=len(data),
         score=50.0,
         matched_terms=("focused",),
+        estimated_context_tokens=estimated_context_tokens,
     )
 
 
@@ -312,6 +319,8 @@ def test_controller_exposes_skill_once_and_removes_ctx_schemas() -> None:
     assert [tool.name for tool in first.tools or ()] == ["server__echo"]
     assert controller.selection is not None
     assert controller.summary()["selected_context_bytes"] > controller.selection.content_bytes
+    assert controller.activate_turn(1, first.capability_epoch) is None
+    controller.on_provider_request(1, first.capability_epoch)
     assert controller.close_turn(1, first.capability_epoch, "continue") is None
     assert (
         controller.summary()["submitted_context_bytes"]
@@ -423,3 +432,152 @@ def test_budget_stop_reports_zero_submitted_context() -> None:
     assert provider.calls == []
     assert controller.summary()["selected_context_bytes"] > 0
     assert controller.summary()["submitted_context_bytes"] == 0
+
+
+def test_cancellation_during_activation_prevents_provider_request() -> None:
+    provider = _TwoTurnProvider()
+    cancelled = threading.Event()
+    controller = AdaptiveRuntimeController(
+        _selection(),
+        on_activate=lambda _selection: cancelled.set(),
+    )
+
+    result = run_loop(
+        provider=provider,
+        system_prompt="system",
+        task="task",
+        turn_controller=controller,
+        cancel_event=cancelled,
+    )
+
+    assert result.stop_reason == "cancelled"
+    assert provider.calls == []
+    assert controller.summary()["submitted_context_bytes"] == 0
+
+
+def test_cli_adaptive_lifecycle_records_applied_use_and_unload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle = RuntimeLifecycleStore(root=tmp_path / "runtime")
+
+    def from_task(
+        cls: type[AdaptiveRuntimeController],
+        _task: str,
+        **kwargs: Any,
+    ) -> AdaptiveRuntimeController:
+        return cls(
+            _selection(estimated_context_tokens=17),
+            on_activate=kwargs["on_activate"],
+            on_deactivate=kwargs["on_deactivate"],
+        )
+
+    monkeypatch.setattr(AdaptiveRuntimeController, "from_task", classmethod(from_task))
+    controller = _adaptive_controller_for_task(
+        "private user task",
+        cwd=tmp_path,
+        lifecycle=lifecycle,
+        session_id="adaptive-lifecycle",
+    )
+    _record_adaptive_selection_request(
+        lifecycle,
+        controller,
+        session_id="adaptive-lifecycle",
+    )
+
+    provider = _TwoTurnProvider()
+    result = run_loop(
+        provider=provider,
+        system_prompt="system",
+        task="task",
+        extra_tools=[ToolDefinition(name="server__echo", description="echo", parameters={})],
+        tool_executor=lambda _call: "ok",
+        turn_controller=controller,
+        max_iterations=2,
+        budget_tokens=5,
+    )
+
+    assert result.stop_reason == "token_budget"
+    assert len(provider.calls) == 1
+    events = [
+        json.loads(line) for line in lifecycle.events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["action"] for event in events] == [
+        "load_requested",
+        "load_applied",
+        "used",
+        "unload_applied",
+    ]
+    assert events[2]["token_usage"]["attribution"] == "estimated"
+    assert events[2]["token_usage"]["total_tokens"] == 17
+    assert "private user task" not in lifecycle.events_path.read_text(encoding="utf-8")
+    state = lifecycle.session_state(session_id="adaptive-lifecycle")
+    assert state["loaded"] == []
+    assert state["unloaded"][0]["unload_status"] == "applied"
+    assert state["unloaded"][0]["was_loaded"] is True
+    assert state["unloaded"][0]["was_used"] is True
+
+
+def test_cli_adaptive_lifecycle_keeps_unapplied_request_on_budget_stop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle = RuntimeLifecycleStore(root=tmp_path / "runtime")
+
+    def from_task(
+        cls: type[AdaptiveRuntimeController],
+        _task: str,
+        **kwargs: Any,
+    ) -> AdaptiveRuntimeController:
+        return cls(
+            _selection(estimated_context_tokens=17),
+            on_activate=kwargs["on_activate"],
+            on_deactivate=kwargs["on_deactivate"],
+        )
+
+    monkeypatch.setattr(AdaptiveRuntimeController, "from_task", classmethod(from_task))
+    controller = _adaptive_controller_for_task(
+        "task",
+        cwd=tmp_path,
+        lifecycle=lifecycle,
+        session_id="adaptive-budget",
+    )
+    _record_adaptive_selection_request(lifecycle, controller, session_id="adaptive-budget")
+    provider = _TwoTurnProvider()
+
+    result = run_loop(
+        provider=provider,
+        system_prompt="system",
+        task="task",
+        turn_controller=controller,
+        initial_usage=Usage(input_tokens=2),
+        budget_tokens=1,
+    )
+
+    assert result.stop_reason == "token_budget"
+    assert provider.calls == []
+    events = [
+        json.loads(line) for line in lifecycle.events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["action"] for event in events] == ["load_requested"]
+    state = lifecycle.session_state(session_id="adaptive-budget")
+    assert state["loaded"][0]["load_status"] == "requested"
+    assert state["loaded"][0]["applied_at"] is None
+
+
+def test_lifecycle_collapses_requested_and_applied_unload(tmp_path: Path) -> None:
+    lifecycle = RuntimeLifecycleStore(root=tmp_path / "runtime")
+    lifecycle.load_entity(session_id="adaptive-unload", entity_type="skill", slug="focused-skill")
+    lifecycle.mark_entity_loaded(
+        session_id="adaptive-unload", entity_type="skill", slug="focused-skill"
+    )
+    lifecycle.unload_entity(session_id="adaptive-unload", entity_type="skill", slug="focused-skill")
+    lifecycle.mark_entity_unloaded(
+        session_id="adaptive-unload", entity_type="skill", slug="focused-skill"
+    )
+
+    state = lifecycle.session_state(session_id="adaptive-unload")
+    assert state["loaded"] == []
+    assert len(state["unloaded"]) == 1
+    assert state["unloaded"][0]["unload_status"] == "applied"
+    assert state["unloaded"][0]["was_loaded"] is True

@@ -135,6 +135,22 @@ class RuntimeLifecycleStore:
         )
         return event
 
+    def mark_entity_loaded(
+        self,
+        *,
+        session_id: str,
+        entity_type: str,
+        slug: str,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        return self._record(
+            action="load_applied",
+            session_id=session_id,
+            entity_type=entity_type,
+            slug=slug,
+            reason=reason,
+        )
+
     def unload_entity(
         self,
         *,
@@ -145,6 +161,22 @@ class RuntimeLifecycleStore:
     ) -> dict[str, Any]:
         return self._record(
             action="unload_requested",
+            session_id=session_id,
+            entity_type=entity_type,
+            slug=slug,
+            reason=reason,
+        )
+
+    def mark_entity_unloaded(
+        self,
+        *,
+        session_id: str,
+        entity_type: str,
+        slug: str,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        return self._record(
+            action="unload_applied",
             session_id=session_id,
             entity_type=entity_type,
             slug=slug,
@@ -242,24 +274,34 @@ class RuntimeLifecycleStore:
             key = (str(event.get("entity_type") or ""), str(event.get("slug") or ""))
             if not key[0] or not key[1]:
                 continue
-            if action == "load_requested":
-                loaded[key] = {
-                    "entity_type": key[0],
-                    "slug": key[1],
-                    "loaded_at": event.get("created_at"),
-                    "loaded_at_epoch": float(event.get("created_at_epoch") or 0),
-                    "reason": event.get("reason"),
-                    "security_scan": event.get("security_scan"),
-                    "selected": bool(event.get("selected", False)),
-                    "selection_source": event.get("selection_source") or "unknown",
-                    "source_context": event.get("source_context") or {},
-                    "used": False,
-                    "use_count": 0,
-                    "last_used_at": None,
-                    "evidence": [],
-                    "dev_event_epoch": latest_dev_event_epoch,
-                    "token_usage": _empty_token_usage_summary(),
-                }
+            if action in {"load_requested", "load_applied"}:
+                current = loaded.get(key)
+                if action == "load_requested" or current is None:
+                    current = {
+                        "entity_type": key[0],
+                        "slug": key[1],
+                        "loaded_at": event.get("created_at"),
+                        "loaded_at_epoch": float(event.get("created_at_epoch") or 0),
+                        "reason": event.get("reason"),
+                        "security_scan": event.get("security_scan"),
+                        "selected": bool(event.get("selected", False)),
+                        "selection_source": event.get("selection_source") or "unknown",
+                        "source_context": event.get("source_context") or {},
+                        "used": False,
+                        "use_count": 0,
+                        "last_used_at": None,
+                        "evidence": [],
+                        "dev_event_epoch": latest_dev_event_epoch,
+                        "token_usage": _empty_token_usage_summary(),
+                        "load_status": "requested",
+                        "applied_at": None,
+                        "applied_at_epoch": None,
+                    }
+                    loaded[key] = current
+                if action == "load_applied":
+                    current["load_status"] = "applied"
+                    current["applied_at"] = event.get("created_at")
+                    current["applied_at_epoch"] = float(event.get("created_at_epoch") or 0)
             elif action == "used" and key in loaded:
                 loaded[key]["used"] = True
                 loaded[key]["use_count"] = int(loaded[key]["use_count"]) + 1
@@ -279,8 +321,37 @@ class RuntimeLifecycleStore:
                         "reason": event.get("reason"),
                         "was_loaded": current is not None,
                         "was_used": bool(current and current.get("used")),
+                        "unload_status": "requested",
                     }
                 )
+            elif action == "unload_applied":
+                current = loaded.pop(key, None)
+                pending = next(
+                    (
+                        entry
+                        for entry in reversed(unloaded)
+                        if entry["entity_type"] == key[0]
+                        and entry["slug"] == key[1]
+                        and entry["unload_status"] == "requested"
+                    ),
+                    None,
+                )
+                if current is None and pending is not None:
+                    pending["unloaded_at"] = event.get("created_at")
+                    pending["reason"] = event.get("reason") or pending["reason"]
+                    pending["unload_status"] = "applied"
+                else:
+                    unloaded.append(
+                        {
+                            "entity_type": key[0],
+                            "slug": key[1],
+                            "unloaded_at": event.get("created_at"),
+                            "reason": event.get("reason"),
+                            "was_loaded": current is not None,
+                            "was_used": bool(current and current.get("used")),
+                            "unload_status": "applied",
+                        }
+                    )
 
         loaded_entries = list(loaded.values())
         unload_candidates = [
