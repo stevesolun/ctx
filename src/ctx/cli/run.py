@@ -37,14 +37,22 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
+from ctx.adapters.generic.adaptive_runtime import AdaptiveRuntimeController
 from ctx.adapters.generic.compaction import TokenBudgetCompactor
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox, make_tool_executor
 from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
-from ctx.adapters.generic.loop import ToolPolicy, run_loop
+from ctx.adapters.generic.loop import LoopObserver, LoopResult, ToolPolicy, run_loop
 from ctx.adapters.generic.contract import ContractBuilder
 from ctx.adapters.generic.evaluator import Evaluator, run_with_evaluation
 from ctx.adapters.generic.planner import Planner, augmented_system_prompt
-from ctx.adapters.generic.providers import ToolCall, ToolDefinition, get_provider
+from ctx.adapters.generic.providers import (
+    CompletionResponse,
+    Message,
+    ToolCall,
+    ToolDefinition,
+    Usage,
+    get_provider,
+)
 from ctx.adapters.generic.state import (
     JsonlObserver,
     SessionStore,
@@ -74,8 +82,53 @@ _GITHUB_MCP_CREDENTIAL_ENV = (
     "GH_TOKEN",
 )
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-_CTX_TOOL_SURFACES = ("minimal", "full")
+_CTX_TOOL_SURFACES = ("adaptive", "minimal", "full")
 _CTX_BOOTSTRAP_TOOL_NAMES = frozenset({"ctx__recommend_bundle", "ctx__wiki_get"})
+
+
+class _DeferredStopObserver:
+    """Forward evaluator events while persisting one orchestration-level stop."""
+
+    def __init__(self, delegate: LoopObserver) -> None:
+        self._delegate = delegate
+        self._round_results: list[LoopResult] = []
+
+    def on_iteration_start(self, iteration: int, messages: list[Message]) -> None:
+        self._delegate.on_iteration_start(iteration, messages)
+
+    def on_model_response(self, iteration: int, response: CompletionResponse) -> None:
+        self._delegate.on_model_response(iteration, response)
+
+    def on_tool_call(
+        self,
+        iteration: int,
+        call: ToolCall,
+        result: str,
+        error: str | None,
+    ) -> None:
+        self._delegate.on_tool_call(iteration, call, result, error)
+
+    def on_stop(self, result: LoopResult) -> None:
+        self._round_results.append(result)
+
+    def failure_result(self, exc: Exception) -> LoopResult:
+        """Collapse completed generator rounds into one failed orchestration result."""
+
+        previous = self._round_results[-1] if self._round_results else None
+        return LoopResult(
+            stop_reason="provider_error",
+            final_message=previous.final_message if previous is not None else "",
+            iterations=sum(result.iterations for result in self._round_results),
+            usage=Usage(
+                input_tokens=sum(result.usage.input_tokens for result in self._round_results),
+                output_tokens=sum(result.usage.output_tokens for result in self._round_results),
+                cost_usd=(
+                    sum(result.usage.cost_usd or 0.0 for result in self._round_results) or None
+                ),
+            ),
+            messages=previous.messages if previous is not None else (),
+            detail=f"evaluator orchestration failed: {type(exc).__name__}",
+        )
 
 
 # ── Provider key-env defaults ───────────────────────────────────────────────
@@ -228,6 +281,8 @@ def _ctx_toolbox_for_surface(
         definitions = [
             definition for definition in definitions if definition.name in _CTX_BOOTSTRAP_TOOL_NAMES
         ]
+    elif surface == "adaptive":
+        definitions = []
     if deny:
         definitions = [
             definition
@@ -320,7 +375,10 @@ def _add_ctx_tool_surface_arg(
         choices=_CTX_TOOL_SURFACES,
         default=default,
         help=(
-            "Built-in ctx schemas submitted to the model: 'minimal' exposes "
+            "CTX capability mode: 'adaptive' selects at most one installed skill "
+            "from trusted user/configured roots and submits no CTX schemas; it "
+            "defers when an explicit MCP is attached and falls back to 'minimal' "
+            "when secure local reads are unavailable. 'minimal' exposes "
             "recommend_bundle + wiki_get; 'full' restores the complete "
             "read/lifecycle surface. --allow-tool selects an explicit subset."
         ),
@@ -646,6 +704,16 @@ def _record_lifecycle_safely(
         )
 
 
+def _write_session_config_safely(
+    store: SessionStore,
+    config: dict[str, Any],
+) -> None:
+    try:
+        store.write_session_config(config)
+    except (OSError, RuntimeError, ValueError) as exc:
+        _logger.warning("ctx session metadata write failed: %s", exc)
+
+
 def _duration_ms(started: float) -> float:
     return (time.perf_counter() - started) * 1000.0
 
@@ -722,6 +790,32 @@ def _run_start_payload(
         "ctx.budget.tokens_configured": args.budget_tokens is not None,
         "ctx.tool_policy.allow_count": allow_count,
         "ctx.tool_policy.deny_count": deny_count,
+    }
+
+
+def _adaptive_runtime_payload(
+    controller: AdaptiveRuntimeController | None,
+) -> dict[str, Any]:
+    if controller is None:
+        return {
+            "ctx.adaptive.enabled": False,
+            "ctx.adaptive.skill_selected": False,
+            "ctx.adaptive.selection_duration_ms": 0.0,
+            "ctx.adaptive.selected_context_bytes": 0,
+            "ctx.adaptive.submitted_context_bytes": 0,
+            "ctx.adaptive.estimated_selected_context_tokens": 0,
+        }
+    summary = controller.summary()
+    return {
+        "ctx.adaptive.enabled": True,
+        "ctx.adaptive.skill_selected": bool(summary["skill_selected"]),
+        "ctx.adaptive.selection_duration_ms": float(summary["selection_duration_ms"]),
+        "ctx.adaptive.selected_context_bytes": int(summary["selected_context_bytes"]),
+        "ctx.adaptive.submitted_context_bytes": int(summary["submitted_context_bytes"]),
+        "ctx.adaptive.estimated_selected_context_tokens": int(
+            summary["estimated_selected_context_tokens"]
+        ),
+        "ctx.adaptive.skill_hash": summary["skill_hash"],
     }
 
 
@@ -942,7 +1036,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not attach the built-in ctx__* tool surface.",
     )
-    _add_ctx_tool_surface_arg(r, default="minimal")
+    _add_ctx_tool_surface_arg(r, default="adaptive")
     _add_tool_policy_args(r)
     r.add_argument(
         "--api-key-env",
@@ -1191,6 +1285,22 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
         return 2
 
+    if args.evaluator and args.contract and not args.planner:
+        with telemetry_span():
+            _record_cli_telemetry(
+                "ctx.cli.run",
+                session_id=args.session_id,
+                phase="failed",
+                payload=_run_setup_failure_payload(args, stage="validation"),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind="SystemExit",
+            )
+        raise SystemExit(
+            "error: --contract requires --planner (the contract refines the "
+            "planner's success_criteria into testable clauses)."
+        )
+
     sdir = Path(args.sessions_dir) if args.sessions_dir else default_sessions_dir()
 
     api_key_env = _resolve_api_key_env(args.api_key_env, args.model, args.provider)
@@ -1285,6 +1395,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     lifecycle = RuntimeLifecycleStore()
     extra_tools: list[ToolDefinition] = []
     tool_executor = None
+    turn_controller: AdaptiveRuntimeController | None = None
     if ctx_tools_enabled:
         toolbox, ctx_definitions = _ctx_toolbox_for_surface(
             lifecycle_dir=lifecycle.root,
@@ -1293,13 +1404,22 @@ def _cmd_run(args: argparse.Namespace) -> int:
             allow_patterns=allow_tools,
             deny_patterns=deny_tools,
         )
-        extra_tools.extend(ctx_definitions)
-        tool_executor = make_tool_executor(toolbox, fallback=None)
-        system_prompt = _with_ctx_session_instructions(
-            system_prompt,
-            session_id,
-            ctx_definitions,
-        )
+        if ctx_definitions:
+            extra_tools.extend(ctx_definitions)
+            tool_executor = make_tool_executor(toolbox, fallback=None)
+            system_prompt = _with_ctx_session_instructions(
+                system_prompt,
+                session_id,
+                ctx_definitions,
+            )
+        elif ctx_tool_surface == "adaptive" and not mcp_configs:
+            turn_controller = AdaptiveRuntimeController.from_task(
+                args.task,
+                cwd=Path.cwd(),
+            )
+            system_prompt = _without_ctx_session_instructions(system_prompt)
+        else:
+            system_prompt = _without_ctx_session_instructions(system_prompt)
 
     compactor = None if args.no_compact else TokenBudgetCompactor()
     tool_policy = _compile_tool_policy(allow_tools, deny_tools)
@@ -1368,6 +1488,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "ctx_tools_enabled": ctx_tools_enabled,
             "ctx_tool_surface": ctx_tool_surface,
             "ctx_tool_names": [definition.name for definition in extra_tools],
+            "ctx_adaptive": turn_controller.summary() if turn_controller else {"enabled": False},
             "tool_policy": {"allow": list(allow_tools), "deny": list(deny_tools)},
             "planner_used": plan_artifact is not None,
             "contract_used": bool(args.evaluator and args.contract),
@@ -1403,14 +1524,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "ctx.cli.run",
             session_id=session_id,
             phase="started",
-            payload=_run_start_payload(
-                args,
-                ctx_tools_enabled=ctx_tools_enabled,
-                mcp_count=len(mcp_configs),
-                allow_count=len(allow_tools),
-                deny_count=len(deny_tools),
-                plan_available=plan_artifact is not None,
-            ),
+            payload={
+                **_run_start_payload(
+                    args,
+                    ctx_tools_enabled=ctx_tools_enabled,
+                    mcp_count=len(mcp_configs),
+                    allow_count=len(allow_tools),
+                    deny_count=len(deny_tools),
+                    plan_available=plan_artifact is not None,
+                ),
+                **_adaptive_runtime_payload(turn_controller),
+            },
             outcome="ok",
             duration_ms=_duration_ms(telemetry_started),
         )
@@ -1424,6 +1548,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         evaluator_rounds: list[dict[str, Any]] | None = None
         contract_artifact = None  # populated only on P/C/G/E path
         result = None
+        deferred_stop_observer: _DeferredStopObserver | None = None
         try:
             if router is not None:
                 if not args.quiet:
@@ -1433,26 +1558,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     )
                 router.start()
             if args.evaluator:
-                if args.contract and not args.planner:
-                    # Contracts refine planner output; without a plan
-                    # they'd have no prior spec to refine.
-                    _record_cli_telemetry(
-                        "ctx.cli.run",
-                        session_id=session_id,
-                        phase="failed",
-                        payload=_run_setup_failure_payload(
-                            args,
-                            stage="validation",
-                        ),
-                        outcome="error",
-                        duration_ms=_duration_ms(telemetry_started),
-                        error_kind="SystemExit",
-                    )
-                    raise SystemExit(
-                        "error: --contract requires --planner (the contract "
-                        "refines the planner's success_criteria into "
-                        "testable clauses)."
-                    )
                 if not args.quiet:
                     pieces = ["evaluator"]
                     if args.planner:
@@ -1481,6 +1586,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     provider,
                     model=args.evaluator_model or args.model,
                 )
+                deferred_stop_observer = _DeferredStopObserver(observer)
                 eval_outcome = run_with_evaluation(
                     provider=provider,
                     system_prompt=system_prompt,
@@ -1493,6 +1599,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     extra_tools=extra_tools or None,
                     tool_executor=tool_executor,
                     tool_policy=tool_policy,
+                    turn_controller=turn_controller,
                     model=args.model,
                     temperature=args.temperature,
                     max_tokens=args.max_tokens,
@@ -1500,10 +1607,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     max_iterations=args.max_iterations,
                     budget_usd=args.budget_usd,
                     budget_tokens=args.budget_tokens,
-                    observer=observer,
+                    observer=deferred_stop_observer,
                     compactor=compactor,
                 )
-                result = eval_outcome.final
+                result = replace(eval_outcome.final, usage=eval_outcome.total_usage)
+                observer.on_stop(result)
                 plan_artifact = eval_outcome.plan
                 contract_artifact = eval_outcome.contract
                 # session_start metadata was snapshotted BEFORE the planner
@@ -1544,6 +1652,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     extra_tools=extra_tools or None,
                     tool_executor=tool_executor,
                     tool_policy=tool_policy,
+                    turn_controller=turn_controller,
                     model=args.model,
                     temperature=args.temperature,
                     max_tokens=args.max_tokens,
@@ -1555,7 +1664,28 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     compactor=compactor,
                 )
         except Exception as exc:
-            failure_payload = _loop_result_payload(result)
+            if result is None and deferred_stop_observer is not None:
+                result = deferred_stop_observer.failure_result(exc)
+                try:
+                    observer.on_stop(result)
+                except Exception:  # noqa: BLE001 - preserve the original failure.
+                    _logger.exception("failed to persist evaluator failure stop")
+                _write_session_config_safely(
+                    store,
+                    {
+                        "ctx_usage": {
+                            "complete": False,
+                            "scope": "completed_generator_rounds",
+                        }
+                    },
+                )
+            failure_payload = {
+                **_loop_result_payload(result),
+                **_adaptive_runtime_payload(turn_controller),
+            }
+            if deferred_stop_observer is not None:
+                failure_payload["ctx.usage.complete"] = False
+                failure_payload["ctx.usage.scope"] = "completed_generator_rounds"
             failure_payload["ctx.evaluator.round_count"] = (
                 len(evaluator_rounds) if evaluator_rounds is not None else 0
             )
@@ -1571,19 +1701,31 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
             raise
         finally:
-            if ctx_tools_enabled:
-                _record_lifecycle_safely(
-                    lifecycle,
-                    "end_session",
-                    session_id=session_id,
-                    status=str(getattr(result, "stop_reason", "error")),
-                )
-            store.close()
-            if router is not None:
-                router.stop()
+            try:
+                if turn_controller is not None:
+                    _write_session_config_safely(
+                        store,
+                        {"ctx_adaptive": turn_controller.summary()},
+                    )
+                if ctx_tools_enabled:
+                    _record_lifecycle_safely(
+                        lifecycle,
+                        "end_session",
+                        session_id=session_id,
+                        status=str(getattr(result, "stop_reason", "error")),
+                    )
+            finally:
+                try:
+                    store.close()
+                finally:
+                    if router is not None:
+                        router.stop()
 
         outcome, error_kind = _loop_result_outcome(result)
-        finish_payload = _loop_result_payload(result)
+        finish_payload = {
+            **_loop_result_payload(result),
+            **_adaptive_runtime_payload(turn_controller),
+        }
         finish_payload["ctx.evaluator.round_count"] = (
             len(evaluator_rounds) if evaluator_rounds is not None else 0
         )
@@ -1725,6 +1867,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     lifecycle = RuntimeLifecycleStore()
     extra_tools: list[ToolDefinition] = []
     tool_executor = None
+    turn_controller: AdaptiveRuntimeController | None = None
     allow_tools, deny_tools = _resume_tool_policy_patterns(args, meta)
     ctx_tool_surface = _resolve_ctx_tool_surface(
         args.ctx_tool_surface,
@@ -1738,13 +1881,22 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             allow_patterns=allow_tools,
             deny_patterns=deny_tools,
         )
-        extra_tools.extend(ctx_definitions)
-        tool_executor = make_tool_executor(ctx_toolbox)
-        system_prompt = _with_ctx_session_instructions(
-            str(system_prompt),
-            args.session_id,
-            ctx_definitions,
-        )
+        if ctx_definitions:
+            extra_tools.extend(ctx_definitions)
+            tool_executor = make_tool_executor(ctx_toolbox)
+            system_prompt = _with_ctx_session_instructions(
+                str(system_prompt),
+                args.session_id,
+                ctx_definitions,
+            )
+        elif ctx_tool_surface == "adaptive" and not mcp_configs:
+            turn_controller = AdaptiveRuntimeController.from_task(
+                args.task,
+                cwd=Path.cwd(),
+            )
+            system_prompt = _without_ctx_session_instructions(str(system_prompt))
+        else:
+            system_prompt = _without_ctx_session_instructions(str(system_prompt))
     else:
         system_prompt = _without_ctx_session_instructions(str(system_prompt))
     store.write_session_config(
@@ -1753,6 +1905,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             "ctx_tools_enabled": use_ctx_tools,
             "ctx_tool_surface": ctx_tool_surface,
             "ctx_tool_names": [definition.name for definition in extra_tools],
+            "ctx_adaptive": turn_controller.summary() if turn_controller else {"enabled": False},
             "tool_policy": {"allow": list(allow_tools), "deny": list(deny_tools)},
         }
     )
@@ -1797,17 +1950,20 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             "ctx.cli.resume",
             session_id=args.session_id,
             phase="started",
-            payload=_resume_start_payload(
-                args,
-                model=str(model),
-                use_ctx_tools=use_ctx_tools,
-                prior_message_count=len(state.messages),
-                recorded_mcp_count=len(recorded_mcp_configs),
-                restored_mcp_count=len(mcp_configs),
-                allow_count=len(allow_tools),
-                deny_count=len(deny_tools),
-                previous_trace_id=previous_trace_id,
-            ),
+            payload={
+                **_resume_start_payload(
+                    args,
+                    model=str(model),
+                    use_ctx_tools=use_ctx_tools,
+                    prior_message_count=len(state.messages),
+                    recorded_mcp_count=len(recorded_mcp_configs),
+                    restored_mcp_count=len(mcp_configs),
+                    allow_count=len(allow_tools),
+                    deny_count=len(deny_tools),
+                    previous_trace_id=previous_trace_id,
+                ),
+                **_adaptive_runtime_payload(turn_controller),
+            },
             outcome="ok",
             duration_ms=_duration_ms(telemetry_started),
         )
@@ -1828,6 +1984,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 extra_tools=extra_tools or None,
                 tool_executor=tool_executor,
                 tool_policy=tool_policy,
+                turn_controller=turn_controller,
                 # Resume must keep the replayed transcript first; the
                 # follow-up task is appended at the end, not shoved before
                 # the prior conversation.
@@ -1848,7 +2005,10 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 session_id=args.session_id,
                 phase="failed",
                 payload=_with_previous_trace_id(
-                    _loop_result_payload(result),
+                    {
+                        **_loop_result_payload(result),
+                        **_adaptive_runtime_payload(turn_controller),
+                    },
                     previous_trace_id,
                 ),
                 outcome="error",
@@ -1858,16 +2018,25 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             )
             raise
         finally:
-            if use_ctx_tools:
-                _record_lifecycle_safely(
-                    lifecycle,
-                    "end_session",
-                    session_id=args.session_id,
-                    status=str(getattr(result, "stop_reason", "error")),
-                )
-            store.close()
-            if router is not None:
-                router.stop()
+            try:
+                if turn_controller is not None:
+                    _write_session_config_safely(
+                        store,
+                        {"ctx_adaptive": turn_controller.summary()},
+                    )
+                if use_ctx_tools:
+                    _record_lifecycle_safely(
+                        lifecycle,
+                        "end_session",
+                        session_id=args.session_id,
+                        status=str(getattr(result, "stop_reason", "error")),
+                    )
+            finally:
+                try:
+                    store.close()
+                finally:
+                    if router is not None:
+                        router.stop()
 
         outcome, error_kind = _loop_result_outcome(result)
         _record_cli_telemetry(
@@ -1875,7 +2044,10 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             session_id=args.session_id,
             phase="finished",
             payload=_with_previous_trace_id(
-                _loop_result_payload(result),
+                {
+                    **_loop_result_payload(result),
+                    **_adaptive_runtime_payload(turn_controller),
+                },
                 previous_trace_id,
             ),
             outcome=outcome,
