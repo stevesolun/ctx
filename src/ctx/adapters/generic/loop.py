@@ -106,6 +106,14 @@ class TurnPreparation:
 
 
 @dataclass(frozen=True)
+class TurnActivation:
+    """Resources discovered after a turn passes its cheap safety gates."""
+
+    tools: tuple[ToolDefinition, ...] | None = None
+    usage: Usage = field(default_factory=Usage)
+
+
+@dataclass(frozen=True)
 class TurnAuthorization:
     """Host authorization decision plus any activation-model usage."""
 
@@ -547,16 +555,33 @@ def _run_prepared_turn(
                     step = _TurnStep("cancelled", "cancel_event was set after preparation")
                     break
 
-                activation_usage, activation_error = _activate_turn(
+                activation, activation_error = _activate_turn(
                     turn_controller,
                     iteration=iteration,
                     preparation=preparation,
                 )
-                if activation_usage is not None:
-                    totals.add(activation_usage)
+                totals.add(activation.usage)
                 if activation_error is not None:
                     step = _TurnStep("controller_error", activation_error)
                     break
+                if activation.tools is not None:
+                    try:
+                        request_tools = _validate_turn_payload(
+                            (
+                                *preparation.ephemeral_context,
+                                *preparation.ephemeral_user_context,
+                            ),
+                            activation.tools,
+                            max_context_bytes=max_context_bytes,
+                            max_tools=max_tools,
+                            max_schema_bytes=max_schema_bytes,
+                        )
+                    except (TypeError, ValueError, OverflowError) as exc:
+                        step = _TurnStep(
+                            "controller_error",
+                            f"turn activation payload rejected: {exc}",
+                        )
+                        break
                 budget_stop, budget_detail = _budget_stop_reason(
                     totals,
                     budget_usd=budget_usd,
@@ -1154,27 +1179,36 @@ def _activate_turn(
     *,
     iteration: int,
     preparation: TurnPreparation,
-) -> tuple[Usage | None, str | None]:
+) -> tuple[TurnActivation, str | None]:
     if turn_controller is None:
-        return None, None
+        return TurnActivation(), None
     try:
         hook = getattr(turn_controller, "activate_turn", None)
     except Exception as exc:  # noqa: BLE001
-        return None, f"turn controller activation lookup raised {type(exc).__name__}: {exc}"
+        return TurnActivation(), (
+            f"turn controller activation lookup raised {type(exc).__name__}: {exc}"
+        )
     if hook is None:
-        return None, None
+        return TurnActivation(), None
     if not callable(hook):
-        return None, "turn controller activate_turn must be callable"
+        return TurnActivation(), "turn controller activate_turn must be callable"
     try:
-        usage = hook(iteration, preparation.capability_epoch)
+        result = hook(iteration, preparation.capability_epoch)
     except Exception as exc:  # noqa: BLE001
-        return None, f"turn controller activation raised {type(exc).__name__}: {exc}"
-    if usage is not None:
-        try:
-            _validate_usage(usage, source="turn controller activation")
-        except (TypeError, ValueError) as exc:
-            return None, str(exc)
-    return usage, None
+        return TurnActivation(), f"turn controller activation raised {type(exc).__name__}: {exc}"
+    if result is None:
+        activation = TurnActivation()
+    elif isinstance(result, Usage):
+        activation = TurnActivation(usage=result)
+    elif isinstance(result, TurnActivation):
+        activation = result
+    else:
+        return TurnActivation(), "turn controller activate_turn returned an unsupported value"
+    try:
+        _validate_usage(activation.usage, source="turn controller activation")
+    except (TypeError, ValueError) as exc:
+        return TurnActivation(), str(exc)
+    return activation, None
 
 
 def _notify_provider_request(
@@ -1300,7 +1334,9 @@ def _collect_tools(
             for tool in caller_tools
             if TOOL_SEPARATOR in tool.name
         }
-        conflicts = sorted(reserved_prefixes & set(router.server_names))
+        configured_names = getattr(router, "configured_server_names", None)
+        router_names = router.server_names if configured_names is None else configured_names
+        conflicts = sorted(reserved_prefixes & set(router_names))
         if conflicts:
             raise ValueError(
                 "MCP server name conflicts with caller tool namespace: " + ", ".join(conflicts)

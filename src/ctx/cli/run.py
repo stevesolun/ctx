@@ -31,6 +31,7 @@ import os
 import re
 import shlex
 import sys
+import threading
 import time
 from dataclasses import replace
 from fnmatch import fnmatchcase
@@ -41,7 +42,15 @@ from ctx.adapters.generic.adaptive_runtime import AdaptiveRuntimeController, Sel
 from ctx.adapters.generic.compaction import TokenBudgetCompactor
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox, make_tool_executor
 from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
-from ctx.adapters.generic.loop import LoopObserver, LoopResult, ToolPolicy, run_loop
+from ctx.adapters.generic.loop import (
+    LoopObserver,
+    LoopResult,
+    ToolPolicy,
+    TurnActivation,
+    TurnAuthorization,
+    TurnPreparation,
+    run_loop,
+)
 from ctx.adapters.generic.contract import ContractBuilder
 from ctx.adapters.generic.evaluator import Evaluator, run_with_evaluation
 from ctx.adapters.generic.planner import Planner, augmented_system_prompt
@@ -61,7 +70,7 @@ from ctx.adapters.generic.state import (
     load_session,
     new_session_id,
 )
-from ctx.adapters.generic.tools import McpRouter, McpServerConfig
+from ctx.adapters.generic.tools import TOOL_SEPARATOR, McpRouter, McpServerConfig
 from ctx.telemetry import record_event, record_exception, telemetry_span
 from ctx.utils._secret_scan import find_inline_secret_arg
 
@@ -376,9 +385,11 @@ def _add_ctx_tool_surface_arg(
         default=default,
         help=(
             "CTX capability mode: 'adaptive' selects at most one installed skill "
-            "from trusted user/configured roots and submits no CTX schemas; it "
-            "defers when an explicit MCP is attached and abstains while remaining "
-            "zero-schema when secure local reads are unavailable. 'minimal' exposes "
+            "from trusted user/configured roots. Explicit MCP servers stay dormant "
+            "until a namespaced --allow-tool grant (or an explicit '*') selects them; "
+            "--mcp alone grants all supplied servers. Their filtered schemas are "
+            "leased for one turn. It "
+            "abstains when secure local reads are unavailable. 'minimal' exposes "
             "recommend_bundle + wiki_get; 'full' restores the complete "
             "read/lifecycle surface. --allow-tool selects an explicit subset."
         ),
@@ -794,7 +805,7 @@ def _run_start_payload(
 
 
 def _adaptive_runtime_payload(
-    controller: AdaptiveRuntimeController | None,
+    controller: AdaptiveRuntimeController | _AdaptiveMcpController | None,
 ) -> dict[str, Any]:
     if controller is None:
         return {
@@ -804,6 +815,13 @@ def _adaptive_runtime_payload(
             "ctx.adaptive.selected_context_bytes": 0,
             "ctx.adaptive.submitted_context_bytes": 0,
             "ctx.adaptive.estimated_selected_context_tokens": 0,
+            "ctx.adaptive.mcp_configured_count": 0,
+            "ctx.adaptive.mcp_activated_count": 0,
+            "ctx.adaptive.mcp_fetched_tool_count": 0,
+            "ctx.adaptive.mcp_submitted_tool_count": 0,
+            "ctx.adaptive.mcp_submitted_schema_bytes": 0,
+            "ctx.adaptive.mcp_estimated_schema_tokens": 0,
+            "ctx.adaptive.mcp_schema_submission_attempted": False,
         }
     summary = controller.summary()
     return {
@@ -816,7 +834,222 @@ def _adaptive_runtime_payload(
             summary["estimated_selected_context_tokens"]
         ),
         "ctx.adaptive.skill_hash": summary["skill_hash"],
+        "ctx.adaptive.mcp_configured_count": int(summary.get("mcp_configured_count", 0)),
+        "ctx.adaptive.mcp_activated_count": int(summary.get("mcp_activated_count", 0)),
+        "ctx.adaptive.mcp_fetched_tool_count": int(summary.get("mcp_fetched_tool_count", 0)),
+        "ctx.adaptive.mcp_submitted_tool_count": int(summary.get("mcp_submitted_tool_count", 0)),
+        "ctx.adaptive.mcp_submitted_schema_bytes": int(
+            summary.get("mcp_submitted_schema_bytes", 0)
+        ),
+        "ctx.adaptive.mcp_estimated_schema_tokens": int(
+            summary.get("mcp_estimated_schema_tokens", 0)
+        ),
+        "ctx.adaptive.mcp_schema_submission_attempted": bool(
+            summary.get("mcp_schema_submission_attempted", False)
+        ),
     }
+
+
+class _AdaptiveMcpController:
+    """Compose a one-turn skill lease with exact host-granted MCP servers."""
+
+    def __init__(
+        self,
+        skill: AdaptiveRuntimeController,
+        *,
+        router: McpRouter,
+        server_names: tuple[str, ...],
+        configured_count: int,
+        lifecycle: RuntimeLifecycleStore,
+        session_id: str,
+        allow_patterns: tuple[str, ...],
+        deny_patterns: tuple[str, ...],
+    ) -> None:
+        self._skill = skill
+        self._router = router
+        self._server_names = server_names
+        self._configured_count = configured_count
+        self._lifecycle = lifecycle
+        self._session_id = session_id
+        self._allow_patterns = allow_patterns
+        self._deny_patterns = deny_patterns
+        self._prepared_epoch: int | None = None
+        self._prepared_tools: tuple[ToolDefinition, ...] = ()
+        self._active_servers: tuple[str, ...] = ()
+        self._mcp_consumed = False
+        self._mcp_activated_count = 0
+        self._mcp_fetched_tool_count = 0
+        self._mcp_submitted_tool_count = 0
+        self._mcp_submitted_schema_bytes = 0
+        self._mcp_schema_submission_attempted = False
+
+    @property
+    def selection(self) -> SelectedSkill | None:
+        return self._skill.selection
+
+    @property
+    def mcp_server_names(self) -> tuple[str, ...]:
+        return self._server_names
+
+    def summary(self) -> dict[str, Any]:
+        summary = self._skill.summary()
+        summary["mcp_configured_count"] = self._configured_count
+        summary["mcp_activated_count"] = self._mcp_activated_count
+        summary["mcp_fetched_tool_count"] = self._mcp_fetched_tool_count
+        summary["mcp_submitted_tool_count"] = self._mcp_submitted_tool_count
+        summary["mcp_submitted_schema_bytes"] = self._mcp_submitted_schema_bytes
+        summary["mcp_estimated_schema_tokens"] = (self._mcp_submitted_schema_bytes + 3) // 4
+        summary["mcp_schema_submission_attempted"] = self._mcp_schema_submission_attempted
+        return summary
+
+    def prepare_turn(
+        self,
+        iteration: int,
+        messages: tuple[Message, ...],
+        base_tools: tuple[ToolDefinition, ...],
+        *,
+        deadline_monotonic: float | None,
+        cancel_event: threading.Event | None,
+    ) -> TurnPreparation:
+        preparation = self._skill.prepare_turn(
+            iteration,
+            messages,
+            base_tools,
+            deadline_monotonic=deadline_monotonic,
+            cancel_event=cancel_event,
+        )
+        self._prepared_epoch = iteration
+        self._prepared_tools = base_tools
+        return preparation
+
+    def activate_turn(
+        self,
+        iteration: int,
+        capability_epoch: int,
+    ) -> TurnActivation | Usage | None:
+        skill_usage = self._skill.activate_turn(iteration, capability_epoch)
+        if capability_epoch != iteration or self._prepared_epoch != iteration:
+            return skill_usage
+        if not self._server_names:
+            return TurnActivation(
+                tools=self._prepared_tools,
+                usage=skill_usage or Usage(),
+            )
+        if self._mcp_consumed:
+            return skill_usage
+        tools = self._router.activate(self._server_names)
+        self._active_servers = self._server_names
+        self._mcp_activated_count += len(self._active_servers)
+        self._mcp_fetched_tool_count = len(tools)
+        for server_name in self._active_servers:
+            _record_lifecycle_safely(
+                self._lifecycle,
+                "mark_entity_loaded",
+                session_id=self._session_id,
+                entity_type="mcp-server",
+                slug=server_name,
+                reason="adaptive MCP capability lease activated",
+            )
+        visible_tools = tuple(tool for tool in tools if self._tool_is_visible(tool.name))
+        encoded_schemas = (
+            json.dumps(
+                [
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    }
+                    for tool in visible_tools
+                ],
+                allow_nan=False,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            if visible_tools
+            else ""
+        )
+        self._mcp_submitted_tool_count = len(visible_tools)
+        self._mcp_submitted_schema_bytes = len(encoded_schemas.encode("utf-8"))
+        return TurnActivation(
+            tools=(*self._prepared_tools, *visible_tools),
+            usage=skill_usage or Usage(),
+        )
+
+    def on_provider_request(self, iteration: int, capability_epoch: int) -> None:
+        self._skill.on_provider_request(iteration, capability_epoch)
+        if self._active_servers and self._mcp_submitted_tool_count:
+            self._mcp_schema_submission_attempted = True
+
+    def authorize_tool_call(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        call: ToolCall,
+    ) -> TurnAuthorization | None:
+        return self._skill.authorize_tool_call(iteration, capability_epoch, call)
+
+    def on_tool_result(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        call: ToolCall,
+        result: str,
+        error: str | None,
+    ) -> Usage | None:
+        server_name = call.name.split(TOOL_SEPARATOR, 1)[0] if TOOL_SEPARATOR in call.name else ""
+        mcp_dispatched = error is None or error.startswith(("MCP: ", "MCP-dispatch: "))
+        if server_name in self._active_servers and mcp_dispatched:
+            _record_lifecycle_safely(
+                self._lifecycle,
+                "mark_entity_used",
+                session_id=self._session_id,
+                entity_type="mcp-server",
+                slug=server_name,
+                evidence="adaptive MCP tool call attempted",
+            )
+        return self._skill.on_tool_result(iteration, capability_epoch, call, result, error)
+
+    def close_turn(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        outcome: str,
+    ) -> Usage | None:
+        deactivation_error: Exception | None = None
+        active_servers = self._active_servers
+        self._active_servers = ()
+        if active_servers:
+            try:
+                self._router.deactivate(active_servers)
+            except Exception as exc:  # noqa: BLE001 - skill cleanup must still run.
+                deactivation_error = exc
+            else:
+                for server_name in active_servers:
+                    _record_lifecycle_safely(
+                        self._lifecycle,
+                        "mark_entity_unloaded",
+                        session_id=self._session_id,
+                        entity_type="mcp-server",
+                        slug=server_name,
+                        reason=f"adaptive MCP capability lease closed after {outcome}",
+                    )
+            self._mcp_consumed = True
+        self._prepared_epoch = None
+        self._prepared_tools = ()
+        usage = self._skill.close_turn(iteration, capability_epoch, outcome)
+        if deactivation_error is not None:
+            raise deactivation_error
+        return usage
+
+    def _tool_is_visible(self, name: str) -> bool:
+        if self._deny_patterns and any(
+            fnmatchcase(name, pattern) for pattern in self._deny_patterns
+        ):
+            return False
+        return not self._allow_patterns or any(
+            fnmatchcase(name, pattern) for pattern in self._allow_patterns
+        )
 
 
 def _adaptive_controller_for_task(
@@ -825,7 +1058,12 @@ def _adaptive_controller_for_task(
     cwd: Path,
     lifecycle: RuntimeLifecycleStore,
     session_id: str,
-) -> AdaptiveRuntimeController:
+    router: McpRouter | None = None,
+    mcp_server_names: tuple[str, ...] = (),
+    mcp_configured_count: int = 0,
+    allow_patterns: tuple[str, ...] = (),
+    deny_patterns: tuple[str, ...] = (),
+) -> AdaptiveRuntimeController | _AdaptiveMcpController:
     def on_activate(selection: SelectedSkill) -> None:
         _record_lifecycle_safely(
             lifecycle,
@@ -861,37 +1099,98 @@ def _adaptive_controller_for_task(
             reason=f"adaptive capability lease closed after {outcome}",
         )
 
-    return AdaptiveRuntimeController.from_task(
+    controller = AdaptiveRuntimeController.from_task(
         task,
         cwd=cwd,
         on_activate=on_activate,
         on_deactivate=on_deactivate,
     )
+    if router is None:
+        return controller
+    return _AdaptiveMcpController(
+        controller,
+        router=router,
+        server_names=mcp_server_names,
+        configured_count=mcp_configured_count,
+        lifecycle=lifecycle,
+        session_id=session_id,
+        allow_patterns=allow_patterns,
+        deny_patterns=deny_patterns,
+    )
+
+
+def _adaptive_mcp_server_names(
+    configs: list[McpServerConfig],
+    allow_patterns: tuple[str, ...],
+    deny_patterns: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Return only servers that can satisfy the host's allow patterns."""
+    configured = tuple(config.name for config in configs)
+    if any(pattern in {"*", "**"} for pattern in deny_patterns):
+        return ()
+    server_patterns = tuple(
+        pattern.split(TOOL_SEPARATOR, 1)[0]
+        for pattern in allow_patterns
+        if TOOL_SEPARATOR in pattern
+    )
+    allow_all = any(pattern in {"*", "**"} for pattern in allow_patterns)
+    allowed = (
+        configured
+        if not allow_patterns or allow_all
+        else tuple(
+            name
+            for name in configured
+            if any(fnmatchcase(name, pattern) for pattern in server_patterns)
+        )
+    )
+
+    def fully_denied(name: str) -> bool:
+        for pattern in deny_patterns:
+            if TOOL_SEPARATOR not in pattern:
+                continue
+            server_pattern, tool_pattern = pattern.split(TOOL_SEPARATOR, 1)
+            if tool_pattern in {"*", "**"} and fnmatchcase(name, server_pattern):
+                return True
+        return False
+
+    return tuple(name for name in allowed if not fully_denied(name))
 
 
 def _record_adaptive_selection_request(
     lifecycle: RuntimeLifecycleStore,
-    controller: AdaptiveRuntimeController | None,
+    controller: AdaptiveRuntimeController | _AdaptiveMcpController | None,
     *,
     session_id: str,
 ) -> None:
     selection = controller.selection if controller is not None else None
-    if selection is None:
-        return
-    _record_lifecycle_safely(
-        lifecycle,
-        "load_entity",
-        session_id=session_id,
-        entity_type="skill",
-        slug=selection.name,
-        reason="adaptive task match",
-        selected=True,
-        selection_source="host",
-        source_context={
-            "score": selection.score,
-            "estimated_context_tokens": selection.estimated_context_tokens,
-        },
-    )
+    if selection is not None:
+        _record_lifecycle_safely(
+            lifecycle,
+            "load_entity",
+            session_id=session_id,
+            entity_type="skill",
+            slug=selection.name,
+            reason="adaptive task match",
+            selected=True,
+            selection_source="host",
+            source_context={
+                "score": selection.score,
+                "estimated_context_tokens": selection.estimated_context_tokens,
+            },
+        )
+    server_names = getattr(controller, "mcp_server_names", ())
+    for server_name in server_names:
+        _record_lifecycle_safely(
+            lifecycle,
+            "load_entity",
+            session_id=session_id,
+            entity_type="mcp-server",
+            slug=server_name,
+            reason="explicit adaptive MCP grant",
+            selected=True,
+            selection_source="user",
+            source_context={"surface": "ctx-run"},
+        )
 
 
 def _run_setup_failure_payload(args: argparse.Namespace, *, stage: str) -> dict[str, Any]:
@@ -1464,13 +1763,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 exc=exc,
             )
         raise
-    router = McpRouter(mcp_configs, session_id=session_id) if mcp_configs else None
+    router: McpRouter | None = None
 
     # ctx-core tools.
     lifecycle = RuntimeLifecycleStore()
     extra_tools: list[ToolDefinition] = []
     tool_executor = None
-    turn_controller: AdaptiveRuntimeController | None = None
+    turn_controller: AdaptiveRuntimeController | _AdaptiveMcpController | None = None
     if ctx_tools_enabled:
         toolbox, ctx_definitions = _ctx_toolbox_for_surface(
             lifecycle_dir=lifecycle.root,
@@ -1487,16 +1786,31 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 session_id,
                 ctx_definitions,
             )
-        elif ctx_tool_surface == "adaptive" and not mcp_configs:
-            turn_controller = _adaptive_controller_for_task(
-                args.task,
-                cwd=Path.cwd(),
-                lifecycle=lifecycle,
-                session_id=session_id,
-            )
+        if ctx_tool_surface == "adaptive":
+            if mcp_configs:
+                router = McpRouter(mcp_configs, session_id=session_id, lazy=True)
+            if mcp_configs or not ctx_definitions:
+                turn_controller = _adaptive_controller_for_task(
+                    args.task,
+                    cwd=Path.cwd(),
+                    lifecycle=lifecycle,
+                    session_id=session_id,
+                    router=router,
+                    mcp_server_names=_adaptive_mcp_server_names(
+                        mcp_configs,
+                        allow_tools,
+                        deny_tools,
+                    ),
+                    mcp_configured_count=len(mcp_configs),
+                    allow_patterns=allow_tools,
+                    deny_patterns=deny_tools,
+                )
+            if not ctx_definitions:
+                system_prompt = _without_ctx_session_instructions(system_prompt)
+        elif not ctx_definitions:
             system_prompt = _without_ctx_session_instructions(system_prompt)
-        else:
-            system_prompt = _without_ctx_session_instructions(system_prompt)
+    if router is None and mcp_configs:
+        router = McpRouter(mcp_configs, session_id=session_id)
 
     compactor = None if args.no_compact else TokenBudgetCompactor()
     tool_policy = _compile_tool_policy(allow_tools, deny_tools)
@@ -1634,8 +1948,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
         try:
             if router is not None:
                 if not args.quiet:
+                    action = "registering dormant" if router.lazy else "starting"
                     print(
-                        f"[ctx] starting MCP servers: {[c.name for c in mcp_configs]}",
+                        f"[ctx] {action} MCP servers: {[c.name for c in mcp_configs]}",
                         file=sys.stderr,
                     )
                 router.start()
@@ -1944,12 +2259,12 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     # transcript unless the user explicitly opts in for this resume.
     recorded_mcp_configs = _mcp_configs_from_metadata(meta)
     mcp_configs = recorded_mcp_configs if args.restore_session_mcp else []
-    router = McpRouter(mcp_configs, session_id=args.session_id) if mcp_configs else None
+    router: McpRouter | None = None
 
     lifecycle = RuntimeLifecycleStore()
     extra_tools: list[ToolDefinition] = []
     tool_executor = None
-    turn_controller: AdaptiveRuntimeController | None = None
+    turn_controller: AdaptiveRuntimeController | _AdaptiveMcpController | None = None
     allow_tools, deny_tools = _resume_tool_policy_patterns(args, meta)
     ctx_tool_surface = _resolve_ctx_tool_surface(
         args.ctx_tool_surface,
@@ -1971,18 +2286,33 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 args.session_id,
                 ctx_definitions,
             )
-        elif ctx_tool_surface == "adaptive" and not mcp_configs:
-            turn_controller = _adaptive_controller_for_task(
-                args.task,
-                cwd=Path.cwd(),
-                lifecycle=lifecycle,
-                session_id=args.session_id,
-            )
-            system_prompt = _without_ctx_session_instructions(str(system_prompt))
-        else:
+        if ctx_tool_surface == "adaptive":
+            if mcp_configs:
+                router = McpRouter(mcp_configs, session_id=args.session_id, lazy=True)
+            if mcp_configs or not ctx_definitions:
+                turn_controller = _adaptive_controller_for_task(
+                    args.task,
+                    cwd=Path.cwd(),
+                    lifecycle=lifecycle,
+                    session_id=args.session_id,
+                    router=router,
+                    mcp_server_names=_adaptive_mcp_server_names(
+                        mcp_configs,
+                        allow_tools,
+                        deny_tools,
+                    ),
+                    mcp_configured_count=len(mcp_configs),
+                    allow_patterns=allow_tools,
+                    deny_patterns=deny_tools,
+                )
+            if not ctx_definitions:
+                system_prompt = _without_ctx_session_instructions(str(system_prompt))
+        elif not ctx_definitions:
             system_prompt = _without_ctx_session_instructions(str(system_prompt))
     else:
         system_prompt = _without_ctx_session_instructions(str(system_prompt))
+    if router is None and mcp_configs:
+        router = McpRouter(mcp_configs, session_id=args.session_id)
     store.write_session_config(
         {
             "system_prompt": system_prompt,

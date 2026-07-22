@@ -21,15 +21,17 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import subprocess
 import sys
 import time
 import types
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 import ctx.adapters.generic.runtime_lifecycle as runtime_lifecycle
+import ctx.adapters.generic.tools.mcp_router as mcp_router_module
 import ctx.cli.run as run_cli
 import ctx.telemetry as telemetry
 from ctx.adapters.generic.adaptive_runtime import SelectedSkill
@@ -46,6 +48,9 @@ from ctx.cli.run import (
 )
 from ctx.adapters.generic.providers import ToolCall, ToolDefinition, Usage
 from ctx.telemetry import read_events, record_event as real_record_event
+
+
+_MCP_FIXTURE = Path(__file__).parent / "fixtures" / "fake_mcp_server.py"
 
 
 # ── Fixture: fake litellm so --provider ollama (no key) works ───────────────
@@ -288,6 +293,28 @@ class TestToolPolicy:
     def test_empty_patterns_disable_policy(self) -> None:
         assert _compile_tool_policy([], []) is None
 
+    def test_adaptive_mcp_grants_require_namespaced_patterns(self) -> None:
+        configs = [_parse_mcp_spec("alpha:ignored"), _parse_mcp_spec("beta:ignored")]
+
+        assert run_cli._adaptive_mcp_server_names(configs, ("alpha*",)) == ()
+        assert run_cli._adaptive_mcp_server_names(configs, ("*",)) == (
+            "alpha",
+            "beta",
+        )
+        assert run_cli._adaptive_mcp_server_names(configs, (), ("*",)) == ()
+        assert run_cli._adaptive_mcp_server_names(
+            configs,
+            ("ctx__*", "alpha__read*"),
+        ) == ("alpha",)
+        assert (
+            run_cli._adaptive_mcp_server_names(
+                configs,
+                ("alpha__*",),
+                ("alpha__*",),
+            )
+            == ()
+        )
+
 
 class TestRunCommand:
     def _write_model_profile(self, root: Path, data: dict[str, Any]) -> None:
@@ -382,39 +409,89 @@ class TestRunCommand:
         assert router_session_ids == ["mcp-run"]
         assert calls == ["start", "list_tools", "stop"]
 
-    def test_adaptive_defers_to_explicit_large_mcp_catalogue(
+    def test_adaptive_mcp_is_one_turn_and_policy_bounded(
         self,
         fake_litellm: Any,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        lifecycle_dir = tmp_path / "runtime"
+        monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_dir))
+        events: list[tuple[str, Any]] = []
+        routers: list[Any] = []
+
         class FakeRouter:
-            def __init__(self, configs: list[Any], *, session_id: str | None = None) -> None:
-                assert configs and session_id == "large-mcp"
+            def __init__(
+                self,
+                configs: list[Any],
+                *,
+                session_id: str | None = None,
+                lazy: bool = False,
+            ) -> None:
+                assert len(configs) == 2 and session_id == "bounded-mcp"
+                assert lazy is True
+                self.lazy = lazy
+                self.active: tuple[str, ...] = ()
+                routers.append(self)
 
             def start(self) -> None:
-                pass
+                events.append(("start", self.active))
 
             def stop(self) -> None:
-                pass
+                assert self.active == ()
+                events.append(("stop", self.active))
+
+            @property
+            def server_names(self) -> list[str]:
+                return sorted(self.active)
 
             def list_tools(self) -> list[ToolDefinition]:
+                assert self.active == ()
+                events.append(("list_tools", self.active))
+                return []
+
+            def activate(self, server_names: tuple[str, ...]) -> list[ToolDefinition]:
+                assert self.active == ()
+                self.active = tuple(server_names)
+                events.append(("activate", self.active))
                 return [
-                    ToolDefinition(name=f"server__tool_{index}", description="tool", parameters={})
-                    for index in range(33)
+                    ToolDefinition(name="server__read", description="read", parameters={}),
+                    ToolDefinition(name="server__write", description="write", parameters={}),
                 ]
 
+            def deactivate(self, server_names: tuple[str, ...]) -> None:
+                assert tuple(server_names) == self.active
+                events.append(("deactivate", self.active))
+                self.active = ()
+
             def call(self, name: str, arguments: dict[str, Any]) -> str:
-                raise AssertionError(f"unexpected tool call: {name} {arguments}")
+                assert self.active == ("server",)
+                assert name == "server__read"
+                events.append(("call", name))
+                return "bounded result"
 
-        def unexpected_selection(*_args: Any, **_kwargs: Any) -> None:
-            raise AssertionError("adaptive skill selection must defer to explicit MCP")
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            fake_litellm._calls.append(kwargs)
+            events.append(("provider", tuple(sorted(_submitted_tool_names(kwargs)))))
+            if len(fake_litellm._calls) == 1:
+                return _tool_call_completion("server__read")
+            assert routers[0].active == ()
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "done", "tool_calls": None},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+            }
 
+        fake_litellm.completion = completion
         monkeypatch.setattr(run_cli, "McpRouter", FakeRouter)
         monkeypatch.setattr(
             run_cli.AdaptiveRuntimeController,
             "from_task",
-            classmethod(unexpected_selection),
+            classmethod(lambda cls, *_args, **_kwargs: cls(None)),
         )
 
         exit_code = main(
@@ -427,19 +504,179 @@ class TestRunCommand:
                 "--sessions-dir",
                 str(tmp_path),
                 "--session-id",
-                "large-mcp",
+                "bounded-mcp",
                 "--mcp",
-                "raw:ignored-command",
+                "server:ignored-command",
+                "--mcp",
+                "other:ignored-command",
+                "--allow-tool",
+                "server__read",
                 "--quiet",
             ]
         )
 
         assert exit_code == 0
-        assert _submitted_tool_names(fake_litellm._calls[0]) == {
-            f"server__tool_{index}" for index in range(33)
-        }
-        metadata = json.loads((tmp_path / "large-mcp.jsonl").read_text().splitlines()[0])
-        assert metadata["ctx_adaptive"] == {"enabled": False}
+        assert [_submitted_tool_names(call) for call in fake_litellm._calls] == [
+            {"server__read"},
+            set(),
+        ]
+        assert events == [
+            ("start", ()),
+            ("list_tools", ()),
+            ("activate", ("server",)),
+            ("provider", ("server__read",)),
+            ("call", "server__read"),
+            ("deactivate", ("server",)),
+            ("provider", ()),
+            ("stop", ()),
+        ]
+        metadata = run_cli.load_session("bounded-mcp", sessions_dir=tmp_path).metadata
+        assert metadata["ctx_adaptive"]["enabled"] is True
+        assert metadata["ctx_adaptive"]["mcp_configured_count"] == 2
+        assert metadata["ctx_adaptive"]["mcp_activated_count"] == 1
+        assert metadata["ctx_adaptive"]["mcp_fetched_tool_count"] == 2
+        assert metadata["ctx_adaptive"]["mcp_submitted_tool_count"] == 1
+        assert metadata["ctx_adaptive"]["mcp_submitted_schema_bytes"] > 0
+        assert metadata["ctx_adaptive"]["mcp_estimated_schema_tokens"] > 0
+        assert metadata["ctx_adaptive"]["mcp_schema_submission_attempted"] is True
+        lifecycle_events = [
+            json.loads(line)
+            for line in (lifecycle_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        mcp_events = [
+            event for event in lifecycle_events if event.get("entity_type") == "mcp-server"
+        ]
+        assert [(event["action"], event["slug"]) for event in mcp_events] == [
+            ("load_requested", "server"),
+            ("load_applied", "server"),
+            ("used", "server"),
+            ("unload_applied", "server"),
+        ]
+
+    def test_adaptive_mcp_real_process_stays_lazy_with_ctx_subgroup(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        procs: list[subprocess.Popen[bytes]] = []
+        real_popen = mcp_router_module.subprocess.Popen
+
+        def capture_popen(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+            proc = real_popen(*args, **kwargs)
+            procs.append(proc)
+            return proc
+
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            fake_litellm._calls.append(kwargs)
+            if len(fake_litellm._calls) == 1:
+                return _tool_call_completion("live__echo", {"text": "real"})
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "done", "tool_calls": None},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+            }
+
+        monkeypatch.setattr(mcp_router_module.subprocess, "Popen", capture_popen)
+        monkeypatch.setattr(
+            run_cli.AdaptiveRuntimeController,
+            "from_task",
+            classmethod(lambda cls, *_args, **_kwargs: cls(None)),
+        )
+        fake_litellm.completion = completion
+
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use one live tool",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "real-lazy-mcp",
+                "--mcp",
+                f"live:{sys.executable} {_MCP_FIXTURE}",
+                "--mcp",
+                "other:definitely-not-a-real-command",
+                "--allow-tool",
+                "ctx__recommend_bundle",
+                "--allow-tool",
+                "live__echo",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert [_submitted_tool_names(call) for call in fake_litellm._calls] == [
+            {"ctx__recommend_bundle", "live__echo"},
+            set(),
+        ]
+        assert len(procs) == 1
+        procs[0].wait(timeout=2.0)
+        assert procs[0].poll() is not None
+        metadata = run_cli.load_session("real-lazy-mcp", sessions_dir=tmp_path).metadata
+        assert metadata["ctx_adaptive"]["mcp_fetched_tool_count"] >= 2
+        assert metadata["ctx_adaptive"]["mcp_submitted_tool_count"] == 1
+        assert metadata["ctx_adaptive"]["mcp_schema_submission_attempted"] is True
+
+    def test_adaptive_mcp_policy_denial_is_not_recorded_as_use(self, tmp_path: Path) -> None:
+        class FakeRouter:
+            def activate(self, server_names: tuple[str, ...]) -> list[ToolDefinition]:
+                return []
+
+            def deactivate(self, server_names: tuple[str, ...]) -> None:
+                pass
+
+        lifecycle_dir = tmp_path / "runtime"
+        lifecycle = run_cli.RuntimeLifecycleStore(root=lifecycle_dir)
+        controller = run_cli._AdaptiveMcpController(
+            run_cli.AdaptiveRuntimeController(None),
+            router=cast(Any, FakeRouter()),
+            server_names=("server",),
+            configured_count=1,
+            lifecycle=lifecycle,
+            session_id="denied-mcp",
+            allow_patterns=("server__read",),
+            deny_patterns=(),
+        )
+        preparation = controller.prepare_turn(
+            1,
+            (),
+            (),
+            deadline_monotonic=None,
+            cancel_event=None,
+        )
+        controller.activate_turn(1, preparation.capability_epoch)
+        controller.on_tool_result(
+            1,
+            preparation.capability_epoch,
+            ToolCall(id="denied", name="server__hidden", arguments={}),
+            "",
+            "policy: capability was not advertised",
+        )
+        controller.on_tool_result(
+            1,
+            preparation.capability_epoch,
+            ToolCall(id="malformed", name="server__read", arguments={}),
+            "",
+            "invalid tool call arguments: malformed JSON",
+        )
+        controller.close_turn(1, preparation.capability_epoch, "tool_denied")
+
+        events = [
+            json.loads(line)
+            for line in (lifecycle_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        assert [event["action"] for event in events] == [
+            "load_applied",
+            "unload_applied",
+        ]
 
     def test_run_uses_ctx_init_model_profile_when_model_omitted(
         self,
@@ -2654,6 +2891,149 @@ class TestResumeCommand:
         assert router_session_ids == ["restore-mcp"]
         assert "restoring MCP server danger" in captured.err
         assert calls == ["start", "list_tools", "stop"]
+
+    def test_adaptive_resume_activates_only_selected_recorded_mcp(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls: list[str] = []
+
+        class FakeRouter:
+            def __init__(
+                self,
+                configs: list[Any],
+                *,
+                session_id: str | None = None,
+                lazy: bool = False,
+            ) -> None:
+                assert len(configs) == 2
+                assert session_id == "adaptive-resume-mcp"
+                assert lazy is True
+                self.lazy = lazy
+                self.active: tuple[str, ...] = ()
+
+            @property
+            def server_names(self) -> list[str]:
+                return sorted(self.active)
+
+            def start(self) -> None:
+                calls.append("start")
+
+            def stop(self) -> None:
+                calls.append("stop")
+
+            def list_tools(self) -> list[Any]:
+                assert self.active == ()
+                calls.append("list_tools")
+                return []
+
+            def activate(self, server_names: tuple[str, ...]) -> list[ToolDefinition]:
+                assert server_names == ("danger",)
+                self.active = server_names
+                calls.append("activate:danger")
+                return [
+                    ToolDefinition(name="danger__read", description="read", parameters={}),
+                    ToolDefinition(name="danger__write", description="write", parameters={}),
+                ]
+
+            def deactivate(self, server_names: tuple[str, ...]) -> None:
+                assert server_names == self.active
+                calls.append("deactivate:danger")
+                self.active = ()
+
+            def call(self, name: str, arguments: dict[str, Any]) -> str:
+                assert self.active == ("danger",)
+                assert name == "danger__read"
+                calls.append("call:danger__read")
+                return "restored result"
+
+        (tmp_path / "adaptive-resume-mcp.jsonl").write_text(
+            json.dumps(
+                {
+                    "type": "session_start",
+                    "ts": "t",
+                    "session_id": "adaptive-resume-mcp",
+                    "task": "old",
+                    "model": "ollama/x",
+                    "ctx_tools_enabled": True,
+                    "ctx_tool_surface": "adaptive",
+                    "mcp": [
+                        {
+                            "name": "danger",
+                            "command": "definitely-not-a-real-mcp-command",
+                            "args": [],
+                            "credential_env": [],
+                        },
+                        {
+                            "name": "other",
+                            "command": "also-not-a-real-mcp-command",
+                            "args": [],
+                            "credential_env": [],
+                        },
+                    ],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(run_cli, "McpRouter", FakeRouter)
+        monkeypatch.setattr(
+            run_cli.AdaptiveRuntimeController,
+            "from_task",
+            classmethod(lambda cls, *_args, **_kwargs: cls(None)),
+        )
+
+        def completion(**kwargs: Any) -> dict[str, Any]:
+            fake_litellm._calls.append(kwargs)
+            if len(fake_litellm._calls) == 1:
+                return _tool_call_completion("danger__read")
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "done", "tool_calls": None},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+            }
+
+        fake_litellm.completion = completion
+
+        exit_code = main(
+            [
+                "resume",
+                "adaptive-resume-mcp",
+                "--task",
+                "follow-up",
+                "--sessions-dir",
+                str(tmp_path),
+                "--restore-session-mcp",
+                "--allow-tool",
+                "ctx__recommend_bundle",
+                "--allow-tool",
+                "danger__read",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert [_submitted_tool_names(call) for call in fake_litellm._calls] == [
+            {"ctx__recommend_bundle", "danger__read"},
+            set(),
+        ]
+        assert calls == [
+            "start",
+            "list_tools",
+            "activate:danger",
+            "call:danger__read",
+            "deactivate:danger",
+            "stop",
+        ]
+        metadata = run_cli.load_session("adaptive-resume-mcp", sessions_dir=tmp_path).metadata
+        assert metadata["ctx_adaptive"]["mcp_configured_count"] == 2
+        assert metadata["ctx_adaptive"]["mcp_activated_count"] == 1
 
     def test_resume_without_model_in_session_requires_flag(
         self,

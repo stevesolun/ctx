@@ -22,6 +22,8 @@ from typing import Any
 import pytest
 
 import ctx.telemetry as telemetry
+from ctx.adapters.generic.loop import _collect_tools
+from ctx.adapters.generic.providers import ToolDefinition
 from ctx.adapters.generic.tools import (
     McpClient,
     McpRouter,
@@ -651,6 +653,126 @@ class TestRouter:
         try:
             router.start()  # must not spawn a second server
             assert router.server_names == ["fake"]
+        finally:
+            router.stop()
+
+    def test_lazy_router_activates_exact_server_and_reaps_it(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        procs = _capture_popen(monkeypatch)
+        events: list[dict[str, Any]] = []
+
+        def capture_event(event_name: str, **kwargs: Any) -> None:
+            events.append({"event_name": event_name, **kwargs})
+
+        monkeypatch.setattr(mcp_router, "record_event", capture_event)
+        router = McpRouter(
+            [_make_config("alpha"), _make_config("beta")],
+            session_id="lazy-session",
+            lazy=True,
+        )
+        router.start()
+        try:
+            assert router.lazy is True
+            assert router.configured_server_names == ["alpha", "beta"]
+            assert router.server_names == []
+            assert router.list_tools() == []
+            assert procs == []
+
+            tools = router.activate(["beta"])
+            assert len(procs) == 1
+            assert router.server_names == ["beta"]
+            assert {tool.name for tool in tools} >= {"beta__echo", "beta__add"}
+            assert all(tool.name.startswith("beta__") for tool in tools)
+            assert router.call("beta__echo", {"text": "leased"}) == "leased"
+
+            router.deactivate(["beta"])
+            assert router.server_names == []
+            _assert_exited(procs[0])
+        finally:
+            router.stop()
+
+        transitions = [
+            event
+            for event in events
+            if event["event_name"] in {"ctx.mcp.activation", "ctx.mcp.deactivation"}
+        ]
+        assert [
+            (event["event_name"], event["payload"]["ctx.mcp.phase"]) for event in transitions
+        ] == [
+            ("ctx.mcp.activation", "requested"),
+            ("ctx.mcp.activation", "applied"),
+            ("ctx.mcp.deactivation", "requested"),
+            ("ctx.mcp.deactivation", "applied"),
+        ]
+        assert transitions[1]["payload"]["ctx.mcp.tool.count"] == len(tools)
+        assert transitions[1]["payload"]["ctx.mcp.server.hashes"] == [
+            telemetry.hash_identifier("beta")
+        ]
+        assert "beta" not in json.dumps(transitions)
+
+    def test_lazy_router_rejects_unknown_grant_before_spawning(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        procs = _capture_popen(monkeypatch)
+        router = McpRouter([_make_config("known")], lazy=True)
+        router.start()
+        try:
+            with pytest.raises(ValueError, match="unknown MCP server grant"):
+                router.activate(["known", "missing"])
+            assert procs == []
+            assert router.server_names == []
+        finally:
+            router.stop()
+
+    def test_lazy_router_retains_failed_shutdown_for_final_retry(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        instances: list[Any] = []
+
+        class FlakyClient:
+            def __init__(self, config: McpServerConfig, *, session_id: str | None = None) -> None:
+                self.stop_calls = 0
+                instances.append(self)
+
+            def start(self) -> None:
+                pass
+
+            def list_tools(self) -> list[Any]:
+                return []
+
+            def stop(self) -> bool:
+                self.stop_calls += 1
+                return self.stop_calls >= 2
+
+        monkeypatch.setattr(mcp_router, "McpClient", FlakyClient)
+        router = McpRouter([_make_config("flaky")], lazy=True)
+        router.start()
+        router.activate(["flaky"])
+
+        with pytest.raises(McpServerError, match="did not fully stop"):
+            router.deactivate(["flaky"])
+        assert router.server_names == []
+        assert instances[0].stop_calls == 1
+
+        router.stop()
+        assert instances[0].stop_calls == 2
+
+    def test_lazy_router_reserves_dormant_server_namespace(self) -> None:
+        router = McpRouter([_make_config("owner")], lazy=True)
+        router.start()
+        try:
+            caller_tool = ToolDefinition(
+                name="owner__local",
+                description="caller tool",
+                parameters={},
+            )
+            with pytest.raises(ValueError, match="caller tool namespace"):
+                _collect_tools(router, [caller_tool])
+            assert router.server_names == []
         finally:
             router.stop()
 

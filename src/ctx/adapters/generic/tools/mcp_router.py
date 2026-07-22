@@ -166,6 +166,39 @@ def _record_mcp_client_tool_call(
         pass
 
 
+def _record_mcp_transition(
+    event_name: str,
+    *,
+    phase: str,
+    server_names: Iterable[str],
+    session_id: str | None,
+    duration_ms: float = 0.0,
+    tool_count: int = 0,
+    outcome: str = "ok",
+    error_kind: str | None = None,
+) -> None:
+    names = tuple(dict.fromkeys(server_names))
+    try:
+        record_event(
+            event_name,
+            source="ctx-mcp-router",
+            transport="mcp-jsonrpc",
+            session_id=session_id,
+            outcome=outcome,
+            duration_ms=duration_ms,
+            error_kind=error_kind,
+            payload={
+                "ctx.mcp.phase": phase,
+                "ctx.mcp.server.count": len(names),
+                "ctx.mcp.server.hashes": [hash_identifier(name) for name in names],
+                "ctx.mcp.tool.count": tool_count,
+                "otel.status_code": "ERROR" if outcome == "error" else "OK",
+            },
+        )
+    except Exception:  # noqa: BLE001 - telemetry must never break MCP lifecycle.
+        pass
+
+
 def _default_child_env() -> dict[str, str]:
     """Return parent env entries that are process plumbing, not credentials."""
     child_env: dict[str, str] = {}
@@ -482,13 +515,12 @@ class McpClient:
         # before accepting operational requests.
         self._notify("notifications/initialized", {})
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
         """Best-effort shutdown. Never raises."""
         proc = self._proc
-        self._proc = None
         if proc is None:
             self._stderr_redaction_values = ()
-            return
+            return True
         try:
             # Close stdin to signal the server to exit cleanly.
             if proc.stdin and not proc.stdin.closed:
@@ -515,9 +547,16 @@ class McpClient:
         for thread in (self._stdout_thread, self._stderr_thread):
             if thread and thread.is_alive():
                 thread.join(timeout=0.2)
-        self._stdout_thread = None
-        self._stderr_thread = None
-        self._stderr_redaction_values = ()
+        reaped = proc.poll() is not None and all(
+            thread is None or not thread.is_alive()
+            for thread in (self._stdout_thread, self._stderr_thread)
+        )
+        if reaped:
+            self._proc = None
+            self._stdout_thread = None
+            self._stderr_thread = None
+            self._stderr_redaction_values = ()
+        return reaped
 
     def __enter__(self) -> "McpClient":
         self.start()
@@ -782,15 +821,21 @@ class McpRouter:
         configs: list[McpServerConfig],
         *,
         session_id: str | None = None,
+        lazy: bool = False,
     ) -> None:
         self._configs = list(configs)
         self._session_id = str(session_id or "").strip() or None
         self._clients: dict[str, McpClient] = {}
+        self._retiring_clients: list[McpClient] = []
         self._started = False
+        self._lazy = bool(lazy)
 
     def start(self) -> None:
         """Spawn every configured server; roll back all on any failure."""
         if self._started:
+            return
+        if self._lazy:
+            self._started = True
             return
         spawned: list[str] = []
         try:
@@ -798,29 +843,132 @@ class McpRouter:
                 if cfg.name in self._clients:
                     raise ValueError(f"duplicate MCP server name {cfg.name!r}")
                 client = McpClient(cfg, session_id=self._session_id)
-                client.start()
+                try:
+                    client.start()
+                except Exception:
+                    self._stop_or_retain(client)
+                    raise
                 self._clients[cfg.name] = client
                 spawned.append(cfg.name)
         except Exception:
             # Atomic startup — tear down any already-started servers so
             # we don't leak child processes when a later config fails.
             for name in spawned:
-                try:
-                    self._clients[name].stop()
-                except Exception:  # noqa: BLE001
-                    pass
-            self._clients.clear()
+                client = self._clients.pop(name)
+                self._stop_or_retain(client)
             raise
         self._started = True
 
+    def activate(self, server_names: Iterable[str]) -> list[ToolDefinition]:
+        """Start only the exact granted servers and return their schemas."""
+        if not self._started:
+            raise RuntimeError("router not started; call start() first")
+        names = tuple(dict.fromkeys(server_names))
+        started = time.perf_counter()
+        _record_mcp_transition(
+            "ctx.mcp.activation",
+            phase="requested",
+            server_names=names,
+            session_id=self._session_id,
+        )
+        spawned: list[str] = []
+        try:
+            if self._lazy:
+                configs: list[McpServerConfig] = []
+                for name in names:
+                    matches = [config for config in self._configs if config.name == name]
+                    if not matches:
+                        raise ValueError(f"unknown MCP server grant {name!r}")
+                    if len(matches) > 1:
+                        raise ValueError(f"duplicate MCP server name {name!r}")
+                    configs.append(matches[0])
+                for config in configs:
+                    if config.name in self._clients:
+                        continue
+                    client = McpClient(config, session_id=self._session_id)
+                    try:
+                        client.start()
+                    except Exception:
+                        self._stop_or_retain(client)
+                        raise
+                    self._clients[config.name] = client
+                    spawned.append(config.name)
+            tools = self._qualified_tools(names)
+        except Exception as exc:
+            for name in spawned:
+                rollback_client = self._clients.pop(name) if name in self._clients else None
+                if rollback_client is not None:
+                    self._stop_or_retain(rollback_client)
+            _record_mcp_transition(
+                "ctx.mcp.activation",
+                phase="failed",
+                server_names=names,
+                session_id=self._session_id,
+                duration_ms=_duration_ms(started),
+                outcome="error",
+                error_kind=type(exc).__name__,
+            )
+            raise
+        _record_mcp_transition(
+            "ctx.mcp.activation",
+            phase="applied",
+            server_names=names,
+            session_id=self._session_id,
+            duration_ms=_duration_ms(started),
+            tool_count=len(tools),
+        )
+        return tools
+
+    def deactivate(self, server_names: Iterable[str] | None = None) -> None:
+        """Revoke exact server routes, then stop and verify their clients."""
+        names = tuple(dict.fromkeys(tuple(self._clients) if server_names is None else server_names))
+        started = time.perf_counter()
+        _record_mcp_transition(
+            "ctx.mcp.deactivation",
+            phase="requested",
+            server_names=names,
+            session_id=self._session_id,
+        )
+        reaped = True
+        for name in names:
+            client = self._clients.pop(name, None)
+            if client is not None:
+                reaped = self._stop_or_retain(client) and reaped
+        if not reaped:
+            _record_mcp_transition(
+                "ctx.mcp.deactivation",
+                phase="failed",
+                server_names=names,
+                session_id=self._session_id,
+                duration_ms=_duration_ms(started),
+                outcome="error",
+                error_kind="McpProcessNotReaped",
+            )
+            raise McpServerError("one or more MCP servers did not fully stop")
+        _record_mcp_transition(
+            "ctx.mcp.deactivation",
+            phase="applied",
+            server_names=names,
+            session_id=self._session_id,
+            duration_ms=_duration_ms(started),
+        )
+
     def stop(self) -> None:
-        for client in list(self._clients.values()):
-            try:
-                client.stop()
-            except Exception:  # noqa: BLE001
-                pass
+        clients = [*self._clients.values(), *self._retiring_clients]
         self._clients.clear()
+        self._retiring_clients = []
+        for client in clients:
+            self._stop_or_retain(client)
         self._started = False
+
+    def _stop_or_retain(self, client: McpClient) -> bool:
+        try:
+            reaped = client.stop()
+        except Exception:  # noqa: BLE001 - retain ownership for a later retry.
+            reaped = False
+        if not reaped and all(item is not client for item in self._retiring_clients):
+            self._retiring_clients.append(client)
+        return reaped
 
     def __enter__(self) -> "McpRouter":
         self.start()
@@ -840,9 +988,17 @@ class McpRouter:
         """
         if not self._started:
             raise RuntimeError("router not started; call start() first")
+        return self._qualified_tools(tuple(self._clients))
+
+    def _qualified_tools(self, server_names: Iterable[str]) -> list[ToolDefinition]:
         out: list[ToolDefinition] = []
         seen_names: set[str] = set()
-        for server_name, client in self._clients.items():
+        for server_name in server_names:
+            client = self._clients.get(server_name)
+            if client is None:
+                raise ValueError(
+                    f"unknown MCP server {server_name!r}; active: {sorted(self._clients)}"
+                )
             for tool in client.list_tools():
                 qualified_name = f"{server_name}{TOOL_SEPARATOR}{tool.name}"
                 if qualified_name in seen_names:
@@ -874,6 +1030,14 @@ class McpRouter:
     @property
     def server_names(self) -> list[str]:
         return sorted(self._clients)
+
+    @property
+    def configured_server_names(self) -> list[str]:
+        return sorted({config.name for config in self._configs})
+
+    @property
+    def lazy(self) -> bool:
+        return self._lazy
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
