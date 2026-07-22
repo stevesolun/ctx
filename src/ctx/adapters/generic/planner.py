@@ -179,7 +179,7 @@ class Planner:
         model: str | None = None,
         system_prompt: str = _DEFAULT_PLANNER_PROMPT,
         temperature: float = 0.4,
-        max_tokens: int = 1200,
+        max_tokens: int = 800,
     ) -> None:
         self._provider = provider
         self._model = model

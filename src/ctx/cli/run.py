@@ -93,6 +93,7 @@ _GITHUB_MCP_CREDENTIAL_ENV = (
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _CTX_TOOL_SURFACES = ("adaptive", "minimal", "full")
 _CTX_BOOTSTRAP_TOOL_NAMES = frozenset({"ctx__recommend_bundle", "ctx__wiki_get"})
+_MAX_AUXILIARY_AGENT_TIMEOUT = 45.0
 
 
 class _DeferredStopObserver:
@@ -128,13 +129,7 @@ class _DeferredStopObserver:
             stop_reason="provider_error",
             final_message=previous.final_message if previous is not None else "",
             iterations=sum(result.iterations for result in self._round_results),
-            usage=Usage(
-                input_tokens=sum(result.usage.input_tokens for result in self._round_results),
-                output_tokens=sum(result.usage.output_tokens for result in self._round_results),
-                cost_usd=(
-                    sum(result.usage.cost_usd or 0.0 for result in self._round_results) or None
-                ),
-            ),
+            usage=previous.usage if previous is not None else Usage(),
             messages=previous.messages if previous is not None else (),
             detail=f"evaluator orchestration failed: {type(exc).__name__}",
         )
@@ -235,6 +230,13 @@ def _positive_int(raw: str) -> int:
         raise argparse.ArgumentTypeError("must be an integer") from exc
     if value < 1:
         raise argparse.ArgumentTypeError("must be >= 1")
+    return value
+
+
+def _evaluator_rounds(raw: str) -> int:
+    value = _positive_int(raw)
+    if value > 2:
+        raise argparse.ArgumentTypeError("must be <= 2 (one initial round plus one revision)")
     return value
 
 
@@ -713,6 +715,85 @@ def _record_lifecycle_safely(
             duration_ms=_duration_ms(started),
             error_kind=type(exc).__name__,
         )
+
+
+def _agent_token_usage(usage: Usage, *, model: str | None, provider: str) -> dict[str, Any]:
+    tokens_reported = usage.input_tokens > 0 or usage.output_tokens > 0
+    return {
+        "attribution": "exact" if tokens_reported else "unavailable",
+        "input_tokens": usage.input_tokens if tokens_reported else None,
+        "output_tokens": usage.output_tokens if tokens_reported else None,
+        "total_tokens": usage.input_tokens + usage.output_tokens if tokens_reported else None,
+        "cost_usd": usage.cost_usd,
+        "attribution_reason": None if tokens_reported else "provider reported no token usage",
+        "model": model,
+        "provider": provider,
+    }
+
+
+def _load_runtime_agent(
+    lifecycle: RuntimeLifecycleStore,
+    *,
+    session_id: str,
+    role: str,
+) -> None:
+    common = {"session_id": session_id, "entity_type": "agent", "slug": role}
+    _record_lifecycle_safely(
+        lifecycle,
+        "load_entity",
+        **common,
+        reason="explicit CLI agent flag",
+        selected=True,
+        selection_source="user",
+        source_context={"surface": "ctx-run"},
+    )
+    _record_lifecycle_safely(
+        lifecycle,
+        "mark_entity_loaded",
+        **common,
+        reason="agent provider call enabled",
+    )
+
+
+def _mark_runtime_agent_used(
+    lifecycle: RuntimeLifecycleStore,
+    *,
+    session_id: str,
+    role: str,
+    usage: Usage,
+    model: str | None,
+    provider: str,
+) -> None:
+    _record_lifecycle_safely(
+        lifecycle,
+        "mark_entity_used",
+        session_id=session_id,
+        entity_type="agent",
+        slug=role,
+        evidence="explicit agent provider call completed",
+        token_usage=_agent_token_usage(usage, model=model, provider=provider),
+    )
+
+
+def _unload_runtime_agent(
+    lifecycle: RuntimeLifecycleStore,
+    *,
+    session_id: str,
+    role: str,
+) -> None:
+    common = {"session_id": session_id, "entity_type": "agent", "slug": role}
+    _record_lifecycle_safely(
+        lifecycle,
+        "unload_entity",
+        **common,
+        reason="bounded agent call complete",
+    )
+    _record_lifecycle_safely(
+        lifecycle,
+        "mark_entity_unloaded",
+        **common,
+        reason="agent provider surface released",
+    )
 
 
 def _write_session_config_safely(
@@ -1513,7 +1594,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     r.add_argument(
         "--evaluator-rounds",
-        type=_positive_int,
+        type=_evaluator_rounds,
         default=2,
         help=(
             "Max Generator->Evaluator rounds (1 = one generation "
@@ -1684,6 +1765,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
         api_key_env=api_key_env,
         timeout=args.provider_timeout,
     )
+    auxiliary_provider = (
+        get_provider(
+            default_model=args.model,
+            base_url=args.base_url,
+            api_key_env=api_key_env,
+            timeout=min(args.provider_timeout, _MAX_AUXILIARY_AGENT_TIMEOUT),
+        )
+        if args.planner or args.evaluator or args.contract
+        else provider
+    )
 
     session_id = args.session_id or new_session_id()
     try:
@@ -1702,6 +1793,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
         raise
 
+    lifecycle = RuntimeLifecycleStore()
+
     # Planner pass (opt-in, SOLO path only — when --evaluator is set,
     # run_with_evaluation owns the planner call so the P/G/E agents
     # share state coherently). In the solo path, the planner runs
@@ -1712,11 +1805,20 @@ def _cmd_run(args: argparse.Namespace) -> int:
         if not args.quiet:
             print("[ctx] planner: building spec...", file=sys.stderr)
         planner = Planner(
-            provider,
+            auxiliary_provider,
             model=args.planner_model or args.model,
         )
+        _load_runtime_agent(lifecycle, session_id=session_id, role="planner")
         try:
             plan_artifact = planner.plan(args.task)
+            _mark_runtime_agent_used(
+                lifecycle,
+                session_id=session_id,
+                role="planner",
+                usage=plan_artifact.usage,
+                model=args.planner_model or args.model,
+                provider=args.provider or _model_provider_prefix(args.planner_model or args.model),
+            )
         except Exception as exc:
             with telemetry_span():
                 _record_cli_telemetry(
@@ -1730,6 +1832,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     exc=exc,
                 )
             raise
+        finally:
+            _unload_runtime_agent(lifecycle, session_id=session_id, role="planner")
         system_prompt = augmented_system_prompt(system_prompt, plan_artifact)
         if not args.quiet:
             status = "ok" if plan_artifact.parsed_ok else "unstructured"
@@ -1741,6 +1845,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
 
     ctx_tools_enabled = not args.no_ctx_tools
+    lifecycle_active = bool(ctx_tools_enabled or args.planner or args.evaluator or args.contract)
     ctx_tool_surface = _resolve_ctx_tool_surface(args.ctx_tool_surface)
     allow_tools = _normalise_tool_patterns(args.allow_tool)
     deny_tools = _normalise_tool_patterns(args.deny_tool)
@@ -1766,7 +1871,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
     router: McpRouter | None = None
 
     # ctx-core tools.
-    lifecycle = RuntimeLifecycleStore()
     extra_tools: list[ToolDefinition] = []
     tool_executor = None
     turn_controller: AdaptiveRuntimeController | _AdaptiveMcpController | None = None
@@ -1897,7 +2001,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             ),
         }
         observer = JsonlObserver(store, session_metadata=metadata)
-        if ctx_tools_enabled:
+        if lifecycle_active:
             _record_lifecycle_safely(
                 lifecycle,
                 "record_dev_event",
@@ -1945,6 +2049,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         contract_artifact = None  # populated only on P/C/G/E path
         result = None
         deferred_stop_observer: _DeferredStopObserver | None = None
+        loaded_runtime_agents: list[str] = []
         try:
             if router is not None:
                 if not args.quiet:
@@ -1966,21 +2071,50 @@ def _cmd_run(args: argparse.Namespace) -> int:
                         f"(max_rounds={args.evaluator_rounds})",
                         file=sys.stderr,
                     )
+                agent_models = {
+                    "planner": args.planner_model or args.model,
+                    "contract": args.contract_model or args.model,
+                    "evaluator": args.evaluator_model or args.model,
+                }
+                enabled_agent_roles = [
+                    role
+                    for role, enabled in (
+                        ("planner", args.planner),
+                        ("contract", args.contract),
+                        ("evaluator", True),
+                    )
+                    if enabled
+                ]
+                for role in enabled_agent_roles:
+                    _load_runtime_agent(lifecycle, session_id=session_id, role=role)
+                    loaded_runtime_agents.append(role)
+
+                def observe_agent_usage(role: str, usage: Usage) -> None:
+                    _mark_runtime_agent_used(
+                        lifecycle,
+                        session_id=session_id,
+                        role=role,
+                        usage=usage,
+                        model=agent_models.get(role),
+                        provider=args.provider
+                        or _model_provider_prefix(agent_models.get(role) or args.model),
+                    )
+
                 planner_agent = (
-                    Planner(provider, model=args.planner_model or args.model)
+                    Planner(auxiliary_provider, model=args.planner_model or args.model)
                     if args.planner
                     else None
                 )
                 contract_builder = (
                     ContractBuilder(
-                        provider,
+                        auxiliary_provider,
                         model=args.contract_model or args.model,
                     )
                     if args.contract
                     else None
                 )
                 evaluator_agent = Evaluator(
-                    provider,
+                    auxiliary_provider,
                     model=args.evaluator_model or args.model,
                 )
                 deferred_stop_observer = _DeferredStopObserver(observer)
@@ -2004,6 +2138,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     max_iterations=args.max_iterations,
                     budget_usd=args.budget_usd,
                     budget_tokens=args.budget_tokens,
+                    agent_usage_observer=observe_agent_usage,
                     observer=deferred_stop_observer,
                     compactor=compactor,
                 )
@@ -2057,6 +2192,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     max_iterations=args.max_iterations,
                     budget_usd=args.budget_usd,
                     budget_tokens=args.budget_tokens,
+                    initial_usage=plan_artifact.usage if plan_artifact is not None else None,
                     observer=observer,
                     compactor=compactor,
                 )
@@ -2099,12 +2235,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
             raise
         finally:
             try:
+                for role in reversed(loaded_runtime_agents):
+                    _unload_runtime_agent(lifecycle, session_id=session_id, role=role)
+                loaded_runtime_agents.clear()
                 if turn_controller is not None:
                     _write_session_config_safely(
                         store,
                         {"ctx_adaptive": turn_controller.summary()},
                     )
-                if ctx_tools_enabled:
+                if lifecycle_active:
                     _record_lifecycle_safely(
                         lifecycle,
                         "end_session",

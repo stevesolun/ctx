@@ -228,7 +228,7 @@ class ContractBuilder:
         model: str | None = None,
         system_prompt: str = _DEFAULT_CONTRACT_PROMPT,
         temperature: float = 0.2,
-        max_tokens: int = 1500,
+        max_tokens: int = 1000,
     ) -> None:
         self._provider = provider
         self._model = model

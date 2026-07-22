@@ -44,7 +44,7 @@ from ctx.adapters.generic.evaluator import (
     _UsageTotals,
     run_with_evaluation,
 )
-from ctx.adapters.generic.loop import TurnPreparation
+from ctx.adapters.generic.loop import LoopResult, TurnPreparation
 from ctx.adapters.generic.planner import Planner
 from ctx.adapters.generic.providers import (
     CompletionResponse,
@@ -477,7 +477,7 @@ class TestRunWithEvaluation:
             system_prompt="sys",
             task="t",
             evaluator=Evaluator(provider),
-            max_rounds=3,
+            max_rounds=2,
             turn_controller=controller,
         )
         assert len(outcome.rounds) == 2
@@ -538,6 +538,17 @@ class TestRunWithEvaluation:
                 max_rounds=0,
             )
 
+    def test_more_than_one_revision_is_rejected(self) -> None:
+        provider = _Scripted([])
+        with pytest.raises(ValueError, match="max_rounds must be <= 2"):
+            run_with_evaluation(
+                provider=provider,
+                system_prompt="sys",
+                task="t",
+                evaluator=Evaluator(provider),
+                max_rounds=3,
+            )
+
     def test_with_planner_replaces_evaluator_criteria(self) -> None:
         # Planner call → 1, Generator → 1, Evaluator → 1
         provider = _Scripted(
@@ -587,7 +598,7 @@ class TestRunWithEvaluation:
             system_prompt="sys",
             task="t",
             evaluator=Evaluator(provider),
-            max_rounds=3,
+            max_rounds=2,
         )
         assert len(outcome.rounds) == 1
         assert outcome.rounds[0].loop_result.stop_reason == "tool_error"
@@ -611,12 +622,61 @@ class TestRunWithEvaluation:
             task="t",
             evaluator=Evaluator(provider),
             planner=Planner(provider),
-            max_rounds=3,
+            max_rounds=2,
         )
         # 5 calls, each reporting 10 input + 20 output = 50 + 100
         total = outcome.total_usage
         assert total.input_tokens == 50
         assert total.output_tokens == 100
+
+    def test_shared_budget_stops_after_planner_without_generator_call(self) -> None:
+        provider = _Scripted([_resp(_PLAN_JSON)])
+
+        outcome = run_with_evaluation(
+            provider=provider,
+            system_prompt="sys",
+            task="t",
+            evaluator=Evaluator(provider),
+            planner=Planner(provider),
+            budget_tokens=30,
+        )
+
+        assert len(provider.calls) == 1
+        assert outcome.final.stop_reason == "token_budget"
+        assert outcome.total_usage.input_tokens + outcome.total_usage.output_tokens == 30
+
+    def test_shared_budget_prevents_revision_after_evaluator(self) -> None:
+        provider = _Scripted([_resp("first"), _resp(_NEEDS_REVISION_JSON)])
+
+        outcome = run_with_evaluation(
+            provider=provider,
+            system_prompt="sys",
+            task="t",
+            evaluator=Evaluator(provider),
+            max_rounds=2,
+            budget_tokens=60,
+        )
+
+        assert len(provider.calls) == 2
+        assert len(outcome.rounds) == 1
+        assert outcome.final.stop_reason == "token_budget"
+
+    def test_agent_usage_observer_receives_each_explicit_agent_call(self) -> None:
+        provider = _Scripted([_resp(_PLAN_JSON), _resp("answer"), _resp(_PASS_JSON)])
+        observed: list[tuple[str, Usage]] = []
+
+        run_with_evaluation(
+            provider=provider,
+            system_prompt="sys",
+            task="t",
+            evaluator=Evaluator(provider),
+            planner=Planner(provider),
+            max_rounds=1,
+            agent_usage_observer=lambda role, usage: observed.append((role, usage)),
+        )
+
+        assert [role for role, _usage in observed] == ["planner", "evaluator"]
+        assert all(usage.input_tokens + usage.output_tokens == 30 for _, usage in observed)
 
     def test_revision_task_carries_conversation_forward(self) -> None:
         provider = _Scripted(
@@ -634,16 +694,68 @@ class TestRunWithEvaluation:
             evaluator=Evaluator(provider),
             max_rounds=2,
         )
-        # Round-2 generator call sees prior conversation in messages.
+        # Round 2 gets a bounded revision task, not the complete prior transcript.
         round_2_gen_call = provider.calls[2]
         messages = round_2_gen_call["messages"]
         roles = [m.role for m in messages]
-        assert roles == ["system", "user", "assistant", "user"]
-        # The revision prompt should mention the evaluator's feedback.
-        revision_user = [
-            m for m in messages if m.role == "user" and "evaluator" in m.content.lower()
-        ]
-        assert len(revision_user) >= 1
+        assert roles == ["system", "user"]
+        assert "evaluator" in messages[-1].content.lower()
+        assert "first attempt" in messages[-1].content
+
+    def test_revision_bounds_prior_answer_instead_of_replaying_transcript(self) -> None:
+        provider = _Scripted(
+            [
+                _resp("x" * 70_000),
+                _resp(_NEEDS_REVISION_JSON),
+                _resp("revised"),
+                _resp(_PASS_JSON),
+            ]
+        )
+
+        run_with_evaluation(
+            provider=provider,
+            system_prompt="sys",
+            task="original",
+            evaluator=Evaluator(provider),
+            max_rounds=2,
+        )
+
+        revision_content = provider.calls[2]["messages"][-1].content
+        assert len(revision_content.encode("utf-8")) < 20_000
+        assert "[prior answer truncated by ctx]" in revision_content
+
+    def test_generator_iteration_limit_is_shared_across_rounds(self) -> None:
+        from ctx.adapters.generic.providers import ToolCall
+
+        provider = _Scripted(
+            [
+                _resp("first"),
+                _resp(_NEEDS_REVISION_JSON),
+                CompletionResponse(
+                    content="",
+                    tool_calls=(ToolCall(id="c1", name="x", arguments={}),),
+                    finish_reason="tool_calls",
+                    usage=Usage(input_tokens=10, output_tokens=20),
+                    provider="scripted",
+                    model="x",
+                ),
+            ]
+        )
+
+        outcome = run_with_evaluation(
+            provider=provider,
+            system_prompt="sys",
+            task="t",
+            evaluator=Evaluator(provider),
+            max_rounds=2,
+            max_iterations=2,
+            extra_tools=[ToolDefinition(name="x", description="x", parameters={})],
+            tool_executor=lambda _call: "ok",
+        )
+
+        assert len(provider.calls) == 3
+        assert outcome.final.stop_reason == "max_iterations"
+        assert outcome.final.iterations == 2
 
 
 # ── _UsageTotals ──────────────────────────────────────────────────────────
@@ -663,6 +775,47 @@ class TestUsageTotals:
         assert u.input_tokens == 8
         assert u.output_tokens == 15
         assert u.cost_usd == pytest.approx(0.03)
+
+    def test_failure_observer_uses_latest_cumulative_usage(self) -> None:
+        from ctx.cli.run import _DeferredStopObserver
+
+        observer = _DeferredStopObserver(object())  # type: ignore[arg-type]
+        observer.on_stop(
+            LoopResult(
+                stop_reason="completed",
+                final_message="first",
+                iterations=1,
+                usage=Usage(input_tokens=10, output_tokens=20, cost_usd=0.1),
+                messages=(),
+            )
+        )
+        observer.on_stop(
+            LoopResult(
+                stop_reason="completed",
+                final_message="second",
+                iterations=1,
+                usage=Usage(input_tokens=30, output_tokens=60, cost_usd=0.3),
+                messages=(),
+            )
+        )
+
+        result = observer.failure_result(RuntimeError("evaluation failed"))
+
+        assert result.iterations == 2
+        assert result.usage == Usage(input_tokens=30, output_tokens=60, cost_usd=0.3)
+
+    def test_cost_only_agent_usage_does_not_invent_exact_tokens(self) -> None:
+        from ctx.cli.run import _agent_token_usage
+
+        payload = _agent_token_usage(
+            Usage(cost_usd=0.1),
+            model="openai/reviewer",
+            provider="openai",
+        )
+
+        assert payload["attribution"] == "unavailable"
+        assert payload["total_tokens"] is None
+        assert payload["cost_usd"] == 0.1
 
 
 # ── CLI integration ──────────────────────────────────────────────────────
@@ -760,6 +913,141 @@ class TestCliEvaluator:
         assert "evaluator_rounds" in payload
         assert len(payload["evaluator_rounds"]) >= 1
         assert payload["evaluator_rounds"][0]["verdict"] == "pass"
+
+    def test_evaluator_agent_lifecycle_is_exact_and_unloaded(
+        self,
+        fake_litellm_evaluator: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from ctx.cli.run import main
+
+        lifecycle_root = tmp_path / "runtime"
+        monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_root))
+
+        assert (
+            main(
+                [
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "t",
+                    "--sessions-dir",
+                    str(tmp_path / "sessions"),
+                    "--session-id",
+                    "ev-lifecycle",
+                    "--evaluator",
+                    "--evaluator-model",
+                    "openai/reviewer",
+                    "--no-ctx-tools",
+                    "--quiet",
+                ]
+            )
+            == 0
+        )
+        assert len(fake_litellm_evaluator._calls) == 2
+        assert [call["timeout"] for call in fake_litellm_evaluator._calls] == [120.0, 45.0]
+        assert [call["model"] for call in fake_litellm_evaluator._calls] == [
+            "ollama/x",
+            "openai/reviewer",
+        ]
+
+        events = [
+            json.loads(line)
+            for line in (lifecycle_root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        agent_events = [event for event in events if event.get("entity_type") == "agent"]
+        assert [event["action"] for event in agent_events] == [
+            "load_requested",
+            "load_applied",
+            "used",
+            "unload_requested",
+            "unload_applied",
+        ]
+        assert {event["slug"] for event in agent_events} == {"evaluator"}
+        used = next(event for event in agent_events if event["action"] == "used")
+        assert used["token_usage"]["attribution"] == "exact"
+        assert used["token_usage"]["total_tokens"] == 15
+        assert used["token_usage"]["provider"] == "openai"
+
+    def test_missing_agent_usage_is_not_reported_as_exact(
+        self,
+        fake_litellm_evaluator: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from ctx.cli.run import main
+
+        lifecycle_root = tmp_path / "runtime"
+        monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_root))
+        evaluator_response = fake_litellm_evaluator._mk(_PASS_JSON)
+        evaluator_response.pop("usage")
+        fake_litellm_evaluator._responses = [
+            fake_litellm_evaluator._mk("answer"),
+            evaluator_response,
+        ]
+
+        assert (
+            main(
+                [
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "t",
+                    "--sessions-dir",
+                    str(tmp_path / "sessions"),
+                    "--session-id",
+                    "ev-usage-unavailable",
+                    "--evaluator",
+                    "--no-ctx-tools",
+                    "--quiet",
+                ]
+            )
+            == 0
+        )
+
+        events = [
+            json.loads(line)
+            for line in (lifecycle_root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        used = next(event for event in events if event.get("action") == "used")
+        assert used["token_usage"]["attribution"] == "unavailable"
+        assert used["token_usage"]["total_tokens"] is None
+
+    def test_default_run_emits_no_agent_lifecycle(
+        self,
+        fake_litellm_evaluator: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from ctx.cli.run import main
+
+        lifecycle_root = tmp_path / "runtime"
+        monkeypatch.setenv("CTX_RUNTIME_LIFECYCLE_DIR", str(lifecycle_root))
+        fake_litellm_evaluator._responses = [fake_litellm_evaluator._mk("answer")]
+
+        assert (
+            main(
+                [
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "t",
+                    "--sessions-dir",
+                    str(tmp_path / "sessions"),
+                    "--session-id",
+                    "no-agent-lifecycle",
+                    "--no-ctx-tools",
+                    "--quiet",
+                ]
+            )
+            == 0
+        )
+        assert len(fake_litellm_evaluator._calls) == 1
+        assert not (lifecycle_root / "events.jsonl").exists()
 
     def test_evaluator_without_flag_omits_rounds(
         self,

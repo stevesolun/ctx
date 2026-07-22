@@ -42,7 +42,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Literal
 
 from ctx.adapters.generic.contract import (
@@ -57,6 +57,7 @@ from ctx.adapters.generic.loop import (
     DEFAULT_TURN_PREPARE_TIMEOUT,
     LoopObserver,
     LoopResult,
+    StopReason,
     ToolPolicy,
     TurnController,
     run_loop,
@@ -73,6 +74,7 @@ from ctx.adapters.generic.tools import McpRouter
 
 
 _logger = logging.getLogger(__name__)
+_MAX_REVISION_ANSWER_BYTES = 16_384
 
 
 Verdict = Literal["pass", "needs_revision", "fail"]
@@ -211,7 +213,7 @@ class Evaluator:
         model: str | None = None,
         system_prompt: str = _DEFAULT_EVALUATOR_PROMPT,
         temperature: float = 0.3,
-        max_tokens: int = 1000,
+        max_tokens: int = 600,
     ) -> None:
         self._provider = provider
         self._criteria: tuple[str, ...] = tuple(criteria) if criteria else _DEFAULT_CRITERIA
@@ -343,6 +345,7 @@ def run_with_evaluation(
     max_iterations: int = 25,
     budget_usd: float | None = None,
     budget_tokens: int | None = None,
+    agent_usage_observer: Callable[[str, Usage], None] | None = None,
     observer: LoopObserver | None = None,
     compactor: Any | None = None,
 ) -> EvaluationLoopResult:
@@ -362,28 +365,55 @@ def run_with_evaluation(
         evaluator's grading criteria AND are embedded in the
         Generator's system prompt.
 
-    Budgets (``budget_usd``, ``budget_tokens``) apply to the
-    Generator call in each round, NOT to the planner / contract /
-    evaluator calls. Their costs are tracked in ``total_usage`` so
-    the caller sees the full picture.
+    Budgets (``budget_usd``, ``budget_tokens``) apply to the complete
+    orchestration: planner, contract, every Generator round, and every
+    evaluator call.
 
     ``max_rounds`` caps the total Generator calls. 1 = solo agent
     with a grade applied at the end; 2 = one revision; etc.
     """
     if max_rounds < 1:
         raise ValueError(f"max_rounds must be >= 1 (got {max_rounds})")
+    if max_rounds > 2:
+        raise ValueError(f"max_rounds must be <= 2 (got {max_rounds})")
+    if max_iterations < 1:
+        raise ValueError(f"max_iterations must be >= 1 (got {max_iterations})")
 
     # Planner pass — if supplied, transform the system prompt + give
     # the evaluator its spec-based criteria.
+    totals = _UsageTotals()
     plan: PlanArtifact | None = None
     contract: Contract | None = None
     augmented_prompt = system_prompt
     active_evaluator = evaluator
     if planner is not None:
         plan = planner.plan(task)
+        totals.add(plan.usage)
+        if agent_usage_observer is not None:
+            agent_usage_observer("planner", plan.usage)
         augmented_prompt = augmented_system_prompt(system_prompt, plan)
         if plan.success_criteria:
             active_evaluator = evaluator.with_criteria(plan.success_criteria)
+        budget_stop = _unknown_usage_budget_stop(
+            plan.usage,
+            role="planner",
+            budget_usd=budget_usd,
+            budget_tokens=budget_tokens,
+        ) or _budget_stop(
+            totals.as_usage(),
+            budget_usd=budget_usd,
+            budget_tokens=budget_tokens,
+            before_call=True,
+        )
+        if budget_stop is not None:
+            reason, detail = budget_stop
+            return EvaluationLoopResult(
+                final=_budget_loop_result(reason, detail, totals.as_usage()),
+                rounds=(),
+                plan=plan,
+                contract=None,
+                total_usage=totals.as_usage(),
+            )
 
     # Contract pass — runs AFTER the planner, BEFORE the Generator.
     # Replaces the evaluator's criteria with the contract's testable
@@ -391,26 +421,40 @@ def run_with_evaluation(
     # contract markdown (more specific than the planner's).
     if contract_builder is not None:
         contract = contract_builder.build(task, plan=plan)
+        totals.add(contract.usage)
+        if agent_usage_observer is not None:
+            agent_usage_observer("contract", contract.usage)
         if contract.criteria:
             active_evaluator = evaluator.with_criteria(contract.as_evaluator_criteria())
             augmented_prompt = augmented_system_prompt_with_contract(
                 system_prompt,
                 contract,
             )
-
-    # Total usage starts with the planner's + contract builder's cost.
-    totals = _UsageTotals()
-    if plan is not None:
-        totals.add(plan.usage)
-    if contract is not None:
-        totals.add(contract.usage)
+        budget_stop = _unknown_usage_budget_stop(
+            contract.usage,
+            role="contract",
+            budget_usd=budget_usd,
+            budget_tokens=budget_tokens,
+        ) or _budget_stop(
+            totals.as_usage(),
+            budget_usd=budget_usd,
+            budget_tokens=budget_tokens,
+            before_call=True,
+        )
+        if budget_stop is not None:
+            reason, detail = budget_stop
+            return EvaluationLoopResult(
+                final=_budget_loop_result(reason, detail, totals.as_usage()),
+                rounds=(),
+                plan=plan,
+                contract=contract,
+                total_usage=totals.as_usage(),
+            )
 
     rounds: list[EvaluationRound] = []
     round_index = 0
     next_task = task
-    # The Generator's conversation carries over across rounds so the
-    # revision call sees the prior assistant turn + tool outputs.
-    accumulated_messages: list[Message] = []
+    remaining_iterations = max_iterations
 
     while round_index < max_rounds:
         round_index += 1
@@ -433,15 +477,24 @@ def run_with_evaluation(
             temperature=temperature,
             max_tokens=max_tokens,
             provider_timeout=provider_timeout,
-            max_iterations=max_iterations,
+            max_iterations=remaining_iterations,
             budget_usd=budget_usd,
             budget_tokens=budget_tokens,
+            initial_usage=totals.as_usage(),
             observer=observer,
             compactor=compactor,
-            messages=accumulated_messages[:] or None,
-            append_task_after_messages=bool(accumulated_messages),
         )
-        totals.add(loop_result.usage)
+        remaining_iterations -= loop_result.iterations
+        totals = _UsageTotals.from_usage(loop_result.usage)
+        budget_stop = _budget_stop(
+            totals.as_usage(),
+            budget_usd=budget_usd,
+            budget_tokens=budget_tokens,
+            before_call=True,
+        )
+        if budget_stop is not None and loop_result.stop_reason == "completed":
+            reason, detail = budget_stop
+            loop_result = replace(loop_result, stop_reason=reason, detail=detail)
 
         # If the Generator's stop reason isn't "completed", skip
         # evaluation — there's no reasonable answer to grade. Record
@@ -477,6 +530,8 @@ def run_with_evaluation(
             context=plan_context,
         )
         totals.add(evaluation.usage)
+        if agent_usage_observer is not None:
+            agent_usage_observer("evaluator", evaluation.usage)
         rounds.append(
             EvaluationRound(
                 index=round_index,
@@ -486,16 +541,72 @@ def run_with_evaluation(
             )
         )
 
+        budget_stop = _unknown_usage_budget_stop(
+            evaluation.usage,
+            role="evaluator",
+            budget_usd=budget_usd,
+            budget_tokens=budget_tokens,
+        ) or _budget_stop(
+            totals.as_usage(),
+            budget_usd=budget_usd,
+            budget_tokens=budget_tokens,
+        )
+        if budget_stop is not None:
+            reason, detail = budget_stop
+            rounds[-1] = replace(
+                rounds[-1],
+                loop_result=replace(
+                    loop_result,
+                    stop_reason=reason,
+                    detail=detail,
+                    usage=totals.as_usage(),
+                ),
+            )
+            break
+
         if evaluation.verdict == "pass":
             break
         if round_index >= max_rounds:
             break
+        budget_stop = _budget_stop(
+            totals.as_usage(),
+            budget_usd=budget_usd,
+            budget_tokens=budget_tokens,
+            before_call=True,
+        )
+        if budget_stop is not None:
+            reason, detail = budget_stop
+            rounds[-1] = replace(
+                rounds[-1],
+                loop_result=replace(
+                    loop_result,
+                    stop_reason=reason,
+                    detail=detail,
+                    usage=totals.as_usage(),
+                ),
+            )
+            break
+        if remaining_iterations < 1:
+            rounds[-1] = replace(
+                rounds[-1],
+                loop_result=replace(
+                    loop_result,
+                    stop_reason="max_iterations",
+                    detail="shared generator iteration budget exhausted before revision",
+                    usage=totals.as_usage(),
+                ),
+            )
+            break
 
-        # Prepare the next round's prompt + carry over conversation.
-        accumulated_messages = list(loop_result.messages)
-        next_task = _build_revision_task(task, evaluation)
+        next_task = _build_revision_task(
+            task,
+            evaluation,
+            prior_answer=loop_result.final_message,
+        )
 
     final = rounds[-1].loop_result if rounds else _empty_loop_result(task)
+    if rounds:
+        final = replace(final, iterations=max_iterations - remaining_iterations)
     return EvaluationLoopResult(
         final=final,
         rounds=tuple(rounds),
@@ -514,6 +625,14 @@ class _UsageTotals:
     output_tokens: int = 0
     cost_usd: float = 0.0
 
+    @classmethod
+    def from_usage(cls, usage: Usage) -> "_UsageTotals":
+        return cls(
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cost_usd=float(usage.cost_usd or 0.0),
+        )
+
     def add(self, usage: Usage) -> None:
         self.input_tokens += usage.input_tokens
         self.output_tokens += usage.output_tokens
@@ -528,7 +647,66 @@ class _UsageTotals:
         )
 
 
-def _build_revision_task(original_task: str, evaluation: EvaluationResult) -> str:
+def _budget_stop(
+    usage: Usage,
+    *,
+    budget_usd: float | None,
+    budget_tokens: int | None,
+    before_call: bool = False,
+) -> tuple[StopReason, str] | None:
+    cost_limit_hit = (
+        budget_usd is not None
+        and usage.cost_usd is not None
+        and (usage.cost_usd >= budget_usd if before_call else usage.cost_usd > budget_usd)
+    )
+    if cost_limit_hit:
+        return "cost_budget", (
+            f"cumulative cost ${usage.cost_usd:.4f} "
+            f"{'exhausted' if before_call else 'exceeded'} budget ${budget_usd:.4f}"
+        )
+    total_tokens = usage.input_tokens + usage.output_tokens
+    token_limit_hit = budget_tokens is not None and (
+        total_tokens >= budget_tokens if before_call else total_tokens > budget_tokens
+    )
+    if token_limit_hit:
+        return "token_budget", (
+            f"cumulative tokens {total_tokens} "
+            f"{'exhausted' if before_call else 'exceeded'} budget {budget_tokens}"
+        )
+    return None
+
+
+def _unknown_usage_budget_stop(
+    usage: Usage,
+    *,
+    role: str,
+    budget_usd: float | None,
+    budget_tokens: int | None,
+) -> tuple[StopReason, str] | None:
+    if budget_usd is not None and usage.cost_usd is None:
+        return "cost_budget", f"{role} cost usage unavailable; cannot enforce USD budget"
+    if budget_tokens is not None and usage.input_tokens == 0 and usage.output_tokens == 0:
+        return "token_budget", f"{role} token usage unavailable; cannot enforce token budget"
+    return None
+
+
+def _budget_loop_result(reason: StopReason, detail: str, usage: Usage) -> LoopResult:
+    return LoopResult(
+        stop_reason=reason,
+        final_message="",
+        iterations=0,
+        usage=usage,
+        messages=(),
+        detail=detail,
+    )
+
+
+def _build_revision_task(
+    original_task: str,
+    evaluation: EvaluationResult,
+    *,
+    prior_answer: str = "",
+) -> str:
     """Construct the next Generator turn when a revision is needed.
 
     Keeps the original task visible so the Generator doesn't lose
@@ -550,9 +728,19 @@ def _build_revision_task(original_task: str, evaluation: EvaluationResult) -> st
         parts.append(f"Feedback: {feedback}")
     if directive:
         parts.append(f"Directive: {directive}")
+    if prior_answer:
+        parts.append(f"Prior answer (bounded):\n{_bounded_revision_answer(prior_answer)}")
     parts.append(f"Original task: {original_task}")
     parts.append("Produce a revised answer.")
     return "\n\n".join(parts)
+
+
+def _bounded_revision_answer(answer: str) -> str:
+    raw = answer.encode("utf-8")
+    if len(raw) <= _MAX_REVISION_ANSWER_BYTES:
+        return answer
+    bounded = raw[:_MAX_REVISION_ANSWER_BYTES].decode("utf-8", errors="ignore")
+    return bounded + "\n[prior answer truncated by ctx]"
 
 
 def _empty_loop_result(task: str) -> LoopResult:
