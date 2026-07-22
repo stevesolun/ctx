@@ -16,6 +16,7 @@ overrides, resolves conflicts, and produces a load/unload manifest.
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -199,6 +200,9 @@ def resolve(
     enable_graph: bool = True,
 ) -> dict:
     """Resolve stack profile to skill manifest."""
+    if max_skills < 1:
+        raise ValueError("max_skills must be at least 1")
+
     manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "repo_path": profile["repo_path"],
@@ -247,26 +251,33 @@ def resolve(
                     "reason": f"{stack_id} detected ({', '.join(evidence[:2])})",
                     "confidence": confidence,
                     "priority": priority,
+                    "direct_relevance": True,
                 }
 
     # ── Fuzzy installed-skill match for unresolved detections ────────
     # STACK_SKILL_MAP lists skills by short canonical names (e.g. "fastapi"),
     # but marketplace skills use suffixed slugs (e.g. "fastapi-pro",
-    # "python-fastapi-development"). If a matrix hit is unresolved, pick
-    # any installed skill whose name contains the detection id — otherwise
-    # the graph walk below has zero seeds and the recommendation engine
-    # silently no-ops on a well-known stack.
-    detection_ids = {d["name"].lower() for d, _ in all_detections}
-    for det_id in list(detection_ids):
+    # "python-fastapi-development"). For unresolved detections, retain only
+    # token-boundary matches as lower-confidence candidates; single-slot
+    # resolution surfaces them as suggestions rather than loading them.
+    detection_ids = sorted({d["name"].lower() for d, _ in all_detections})
+    for det_id in detection_ids:
         if det_id in available:
             continue  # already a direct hit — nothing to do
-        fuzzy_matches = [s for s in available if det_id in s.lower()]
+        detection_tokens = set(re.findall(r"[a-z0-9+#]+", det_id))
+        fuzzy_matches = sorted(
+            skill_name
+            for skill_name in available
+            if detection_tokens
+            and detection_tokens <= set(re.findall(r"[a-z0-9+#]+", skill_name.lower()))
+        )
         for match in fuzzy_matches[:3]:  # cap to avoid flood
             if match not in needed:
                 needed[match] = {
                     "reason": f"fuzzy match for detected stack '{det_id}'",
                     "confidence": 0.5,
                     "priority": PRIORITY_BASE.get(match, 5) + 2,
+                    "direct_relevance": False,
                 }
 
     # ── Graph-walk augmentation ──────────────────────────────────────
@@ -402,8 +413,8 @@ def resolve(
     for conflict_set, conflict_type in CONFLICTS:
         in_needed = conflict_set & set(needed.keys())
         if len(in_needed) > 1:
-            # Keep highest priority
-            best = max(in_needed, key=lambda s: needed[s]["priority"])
+            # Keep highest priority, then the alphabetically first name.
+            best = min(in_needed, key=lambda s: (-needed[s]["priority"], s))
             for s in in_needed:
                 if s != best:
                     manifest["warnings"].append(
@@ -426,13 +437,56 @@ def resolve(
             manifest["warnings"].append(f"{skill_name} needed but not installed ({info['reason']})")
             del needed[skill_name]
 
-    # Cap at max_skills
-    sorted_needed = sorted(needed.items(), key=lambda x: -x[1]["priority"])
-    if len(sorted_needed) > max_skills:
+    # Limit automatic context while preserving explicit always_load overrides.
+    # Detection-derived candidates outrank graph neighbors for the default
+    # one-skill path, even when a graph score produces a higher raw priority.
+    explicit_names = {
+        skill_name
+        for skill_name, override in overrides.items()
+        if override.get("always_load") and skill_name in needed
+    }
+    explicit_needed = sorted(
+        ((name, info) for name, info in needed.items() if name in explicit_names),
+        key=lambda item: (-item[1]["priority"], item[0]),
+    )
+    automatic_pool = sorted(
+        ((name, info) for name, info in needed.items() if name not in explicit_names),
+        key=lambda item: (
+            not item[1].get("direct_relevance", False),
+            -item[1]["priority"],
+            item[0],
+        ),
+    )
+    automatic_needed = automatic_pool
+    if max_skills == 1:
+        automatic_needed = [
+            (name, info)
+            for name, info in automatic_pool
+            if info.get("direct_relevance", False) and info.get("entity_type", "skill") == "skill"
+        ]
+        automatic_names = {name for name, _info in automatic_needed}
+        for name, info in automatic_pool:
+            if name in automatic_names:
+                continue
+            if any(row.get("skill") == name for row in manifest["suggestions"]):
+                continue
+            entity_type = info.get("entity_type", "skill")
+            manifest["suggestions"].append(
+                {
+                    "skill": name,
+                    "entity_type": entity_type,
+                    "reason": info["reason"],
+                    "install_from": available.get(name, {}).get(
+                        "path", f"catalog:{entity_type}/{name}"
+                    ),
+                }
+            )
+    if len(automatic_needed) > max_skills:
         manifest["warnings"].append(
-            f"Capped at {max_skills} skills. {len(sorted_needed) - max_skills} lower-priority skills excluded."
+            f"Capped automatic selection at {max_skills} skills. "
+            f"{len(automatic_needed) - max_skills} lower-priority candidates require explicit selection."
         )
-        sorted_needed = sorted_needed[:max_skills]
+    sorted_needed = explicit_needed + automatic_needed[:max_skills]
 
     # Build load list
     loaded_names = set()
@@ -552,7 +606,13 @@ def main():
     parser.add_argument("--available-skills", default=_SKILLS_DEFAULT, help="Skills directory")
     parser.add_argument("--output", default=_MANIFEST_DEFAULT, help="Output manifest path")
     parser.add_argument(
-        "--max-skills", type=int, default=_MAX_SKILLS_DEFAULT, help="Max simultaneous skills"
+        "--max-skills",
+        type=int,
+        default=None,
+        help=(
+            "Explicit automatic skill limit; omit to select one. "
+            f"Configured maximum: {_MAX_SKILLS_DEFAULT}"
+        ),
     )
     parser.add_argument(
         "--intent-log",
@@ -565,6 +625,9 @@ def main():
         help="If set, also write to this path (for mid-session re-runs)",
     )
     args = parser.parse_args()
+    max_skills = 1 if args.max_skills is None else args.max_skills
+    if not 1 <= max_skills <= _MAX_SKILLS_DEFAULT:
+        parser.error(f"--max-skills must be between 1 and {_MAX_SKILLS_DEFAULT}")
 
     # Load profile
     with open(args.profile) as f:
@@ -595,7 +658,13 @@ def main():
         print(f"Intent signals today: {dict(list(intent_signals.items())[:5])} ...")
 
     # Resolve (intent_signals flow through resolve → apply_intent_boosts)
-    manifest = resolve(profile, available, overrides, args.max_skills, intent_signals)
+    manifest = resolve(
+        profile,
+        available,
+        overrides,
+        max_skills=max_skills,
+        intent_signals=intent_signals,
+    )
 
     # Write manifest
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
