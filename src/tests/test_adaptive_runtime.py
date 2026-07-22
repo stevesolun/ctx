@@ -307,7 +307,8 @@ def test_controller_exposes_skill_once_and_removes_ctx_schemas() -> None:
         deadline_monotonic=time.monotonic() + 1,
         cancel_event=None,
     )
-    assert "Apply focused guidance" in first.ephemeral_context[0]
+    assert first.ephemeral_context == ()
+    assert "Apply focused guidance" in first.ephemeral_user_context[0]
     assert [tool.name for tool in first.tools or ()] == ["server__echo"]
     assert controller.selection is not None
     assert controller.summary()["selected_context_bytes"] > controller.selection.content_bytes
@@ -325,6 +326,7 @@ def test_controller_exposes_skill_once_and_removes_ctx_schemas() -> None:
         cancel_event=None,
     )
     assert second.ephemeral_context == ()
+    assert second.ephemeral_user_context == ()
     stale = controller.authorize_tool_call(
         2,
         first.capability_epoch,
@@ -385,7 +387,11 @@ def test_run_loop_does_not_persist_or_replay_ephemeral_skill() -> None:
     )
 
     assert result.stop_reason == "completed"
-    assert secret_body in "\n".join(message.content for message in provider.calls[0]["messages"])
+    first_messages = provider.calls[0]["messages"]
+    skill_message = next(message for message in first_messages if secret_body in message.content)
+    assert skill_message.role == "user"
+    assert [message.role for message in first_messages] == ["system", "user"]
+    assert first_messages[-1].content.endswith("--- current user request ---\ntask")
     assert secret_body not in "\n".join(
         message.content for message in provider.calls[1]["messages"]
     )

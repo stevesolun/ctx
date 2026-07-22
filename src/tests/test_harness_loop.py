@@ -822,7 +822,7 @@ class TestTurnController:
             ):
                 if iteration == 1:
                     return TurnPreparation(
-                        ephemeral_context=("CTX SELECTED SKILL: focused-test",),
+                        ephemeral_user_context=("CTX SELECTED SKILL: focused-test",),
                         tools=(first_tool,),
                         capability_epoch=1,
                     )
@@ -840,15 +840,94 @@ class TestTurnController:
             turn_controller=controller,
         )
 
-        first_contents = [message.content for message in provider.calls[0]["messages"]]
+        first_messages = provider.calls[0]["messages"]
+        first_contents = [message.content for message in first_messages]
         second_contents = [message.content for message in provider.calls[1]["messages"]]
         persisted_contents = [message.content for message in result.messages]
-        assert "CTX SELECTED SKILL: focused-test" in first_contents
+        assert any("CTX SELECTED SKILL: focused-test" in item for item in first_contents)
         assert "CTX SELECTED SKILL: focused-test" not in second_contents
         assert "CTX SELECTED SKILL: focused-test" not in persisted_contents
+        assert [message.role for message in first_messages] == ["system", "user"]
+        assert first_messages[-1].content.endswith("--- current user request ---\ntask")
         assert [tool.name for tool in provider.calls[0]["tools"]] == [first_tool.name]
         assert provider.calls[1]["tools"] is None
         assert controller.closed == [(1, 1, "continue"), (2, 2, "completed")]
+
+    def test_system_and_user_context_keep_authority_and_share_byte_limit(self) -> None:
+        legacy = TurnPreparation(
+            ("LEGACY POSITIONAL CONTEXT",),
+            None,
+            9,
+            Usage(input_tokens=1),
+        )
+        assert legacy.ephemeral_context == ("LEGACY POSITIONAL CONTEXT",)
+        assert legacy.capability_epoch == 9
+        assert legacy.usage.input_tokens == 1
+        assert legacy.ephemeral_user_context == ()
+
+        preparation = TurnPreparation(
+            ephemeral_context=("TRUSTED HOST CONTEXT",),
+            ephemeral_user_context=("UNTRUSTED REFERENCE",),
+            capability_epoch=1,
+        )
+        provider = _Scripted([_stop_response("done")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="base prompt",
+            task="current task",
+            turn_controller=_TestTurnController(preparation),
+        )
+
+        messages = provider.calls[0]["messages"]
+        assert [message.role for message in messages] == [
+            "system",
+            "system",
+            "user",
+        ]
+        assert [message.content for message in messages] == [
+            "base prompt",
+            "TRUSTED HOST CONTEXT",
+            "UNTRUSTED REFERENCE\n\n--- current user request ---\ncurrent task",
+        ]
+        persisted = [message.content for message in result.messages]
+        assert "TRUSTED HOST CONTEXT" not in persisted
+        assert "UNTRUSTED REFERENCE" not in persisted
+
+        rejected_provider = _Scripted([_stop_response("unreached")])
+        rejected = run_loop(
+            provider=rejected_provider,
+            system_prompt="base prompt",
+            task="current task",
+            turn_controller=_TestTurnController(preparation),
+            max_ephemeral_context_bytes=20,
+        )
+        assert rejected.stop_reason == "controller_error"
+        assert rejected_provider.calls == []
+
+        resume_provider = _Scripted([_stop_response("resumed")])
+        resumed = run_loop(
+            provider=resume_provider,
+            system_prompt="base prompt",
+            task="follow-up task",
+            messages=[
+                Message(role="system", content="base prompt"),
+                Message(role="user", content="prior task"),
+                Message(role="assistant", content="prior answer"),
+            ],
+            append_task_after_messages=True,
+            turn_controller=_TestTurnController(preparation),
+        )
+        resume_messages = resume_provider.calls[0]["messages"]
+        assert [message.role for message in resume_messages] == [
+            "system",
+            "system",
+            "user",
+            "assistant",
+            "user",
+        ]
+        assert resume_messages[-1].content.endswith("--- current user request ---\nfollow-up task")
+        assert "UNTRUSTED REFERENCE" not in [message.content for message in resumed.messages]
 
     def test_unadvertised_tool_is_denied_before_dispatch(self) -> None:
         allowed = _tool_definition("custom__allowed")
@@ -1131,7 +1210,17 @@ class TestTurnController:
                 "ephemeral_context must be a tuple",
             ),
             (
-                TurnPreparation(ephemeral_context=("too large",), capability_epoch=2),
+                TurnPreparation(
+                    ephemeral_user_context=cast(Any, "bad"),
+                    capability_epoch=2,
+                ),
+                100,
+                10,
+                1_000,
+                "ephemeral_user_context must be a tuple",
+            ),
+            (
+                TurnPreparation(ephemeral_context=("too large",), capability_epoch=3),
                 4,
                 10,
                 1_000,
@@ -1140,7 +1229,7 @@ class TestTurnController:
             (
                 TurnPreparation(
                     tools=(_tool_definition("one"), _tool_definition("two")),
-                    capability_epoch=3,
+                    capability_epoch=4,
                 ),
                 100,
                 1,
@@ -1156,7 +1245,7 @@ class TestTurnController:
                             parameters={"type": "object"},
                         ),
                     ),
-                    capability_epoch=4,
+                    capability_epoch=5,
                 ),
                 100,
                 10,

@@ -1264,6 +1264,46 @@ class TestRunCommand:
         assert stop_events[0]["detail"] == ("evaluator orchestration failed: RuntimeError")
         assert "private evaluator failure" not in state.path.read_text(encoding="utf-8")
 
+    def test_cleanup_metadata_error_does_not_mask_evaluator_failure(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def fail_evaluator(**_kwargs: Any) -> None:
+            raise RuntimeError("primary evaluator failure")
+
+        def fail_session_config(
+            _store: run_cli.SessionStore,
+            _config: dict[str, Any],
+        ) -> None:
+            raise KeyError("cleanup exploded")
+
+        monkeypatch.setattr(run_cli, "run_with_evaluation", fail_evaluator)
+        monkeypatch.setattr(
+            run_cli.SessionStore,
+            "write_session_config",
+            fail_session_config,
+        )
+
+        with pytest.raises(RuntimeError, match="primary evaluator failure"):
+            main(
+                [
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "evaluate cleanup",
+                    "--sessions-dir",
+                    str(tmp_path),
+                    "--session-id",
+                    "evaluator-cleanup-failure",
+                    "--no-ctx-tools",
+                    "--evaluator",
+                    "--quiet",
+                ]
+            )
+
     def test_explicit_minimal_surface_keeps_bootstrap_tools_on_every_iteration(
         self,
         fake_litellm: Any,
