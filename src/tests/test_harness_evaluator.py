@@ -44,6 +44,7 @@ from ctx.adapters.generic.evaluator import (
     _UsageTotals,
     run_with_evaluation,
 )
+from ctx.adapters.generic.loop import TurnPreparation
 from ctx.adapters.generic.planner import Planner
 from ctx.adapters.generic.providers import (
     CompletionResponse,
@@ -413,6 +414,10 @@ class TestRunWithEvaluation:
             evaluator=evaluator,
             max_rounds=2,
             provider_timeout=3.25,
+            turn_prepare_timeout=0.25,
+            max_ephemeral_context_bytes=123,
+            max_turn_tools=4,
+            max_turn_schema_bytes=456,
         )
         assert isinstance(outcome, EvaluationLoopResult)
         assert len(outcome.rounds) == 1
@@ -420,9 +425,44 @@ class TestRunWithEvaluation:
         assert outcome.final.stop_reason == "completed"
         assert outcome.final.final_message == "final answer"
         assert captured["provider_timeout"] == 3.25
+        assert captured["turn_prepare_timeout"] == 0.25
+        assert captured["max_ephemeral_context_bytes"] == 123
+        assert captured["max_turn_tools"] == 4
+        assert captured["max_turn_schema_bytes"] == 456
 
     def test_needs_revision_triggers_second_round(self) -> None:
         # Round 1: gen -> evaluator (needs_revision). Round 2: gen -> eval (pass).
+        class _Controller:
+            prepared_turns = 0
+
+            def prepare_turn(
+                self,
+                iteration,
+                messages,
+                base_tools,
+                *,
+                deadline_monotonic,
+                cancel_event,
+            ):
+                self.prepared_turns += 1
+                return TurnPreparation(capability_epoch=self.prepared_turns)
+
+            def authorize_tool_call(self, iteration, capability_epoch, call):
+                return None
+
+            def on_tool_result(
+                self,
+                iteration,
+                capability_epoch,
+                call,
+                result,
+                error,
+            ):
+                return None
+
+            def close_turn(self, iteration, capability_epoch, outcome):
+                return None
+
         provider = _Scripted(
             [
                 _resp("first attempt"),
@@ -431,17 +471,20 @@ class TestRunWithEvaluation:
                 _resp(_PASS_JSON),
             ]
         )
+        controller = _Controller()
         outcome = run_with_evaluation(
             provider=provider,
             system_prompt="sys",
             task="t",
             evaluator=Evaluator(provider),
             max_rounds=3,
+            turn_controller=controller,
         )
         assert len(outcome.rounds) == 2
         assert outcome.rounds[0].evaluation.verdict == "needs_revision"
         assert outcome.rounds[1].evaluation.verdict == "pass"
         assert outcome.final.final_message == "revised attempt"
+        assert controller.prepared_turns == 2
 
     def test_max_rounds_cap(self) -> None:
         # Every evaluator call says needs_revision.

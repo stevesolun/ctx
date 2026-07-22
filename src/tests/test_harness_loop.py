@@ -26,6 +26,8 @@ import pytest
 from ctx.adapters.generic.loop import (
     LoopResult,
     LoopObserver,
+    TurnAuthorization,
+    TurnPreparation,
     _collect_tools,
     run_loop,
 )
@@ -173,6 +175,85 @@ def _filter_response() -> CompletionResponse:
         provider="scripted",
         model="x",
     )
+
+
+def _tool_definition(name: str) -> ToolDefinition:
+    return ToolDefinition(
+        name=name,
+        description=f"Test tool {name}.",
+        parameters={"type": "object", "properties": {}},
+    )
+
+
+class _TestTurnController:
+    def __init__(
+        self,
+        preparation: TurnPreparation | None = None,
+        *,
+        authorization_denial: str | None = None,
+        authorization_usage: Usage | None = None,
+        result_usage: Usage | None = None,
+        result_error: Exception | None = None,
+        close_usage: Usage | None = None,
+        close_error: Exception | None = None,
+    ) -> None:
+        self.preparation = preparation or TurnPreparation()
+        self.authorization_denial = authorization_denial
+        self.authorization_usage = authorization_usage
+        self.result_usage = result_usage
+        self.result_error = result_error
+        self.result_calls = 0
+        self.close_usage = close_usage
+        self.close_error = close_error
+        self.closed: list[tuple[int, int, str]] = []
+
+    def prepare_turn(
+        self,
+        iteration: int,
+        messages: tuple[Message, ...],
+        base_tools: tuple[ToolDefinition, ...],
+        *,
+        deadline_monotonic: float | None,
+        cancel_event: threading.Event | None,
+    ) -> TurnPreparation:
+        return self.preparation
+
+    def authorize_tool_call(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        call: ToolCall,
+    ) -> TurnAuthorization | None:
+        if self.authorization_denial is None and self.authorization_usage is None:
+            return None
+        return TurnAuthorization(
+            denial=self.authorization_denial,
+            usage=self.authorization_usage or Usage(),
+        )
+
+    def on_tool_result(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        call: ToolCall,
+        result: str,
+        error: str | None,
+    ) -> Usage | None:
+        self.result_calls += 1
+        if self.result_error is not None:
+            raise self.result_error
+        return self.result_usage
+
+    def close_turn(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        outcome: str,
+    ) -> Usage | None:
+        self.closed.append((iteration, capability_epoch, outcome))
+        if self.close_error is not None:
+            raise self.close_error
+        return self.close_usage
 
 
 # ── Termination: completed ──────────────────────────────────────────────────
@@ -719,6 +800,815 @@ class TestToolCatalogue:
             task="task",
         )
         assert provider.calls[0]["tools"] is None
+
+
+# ── Per-turn context + capabilities ────────────────────────────────────────
+
+
+class TestTurnController:
+    def test_context_and_tools_are_ephemeral_per_turn(self) -> None:
+        base_tools = tuple(_tool_definition(f"custom__tool_{index}") for index in range(12))
+        first_tool = base_tools[0]
+
+        class _Controller(_TestTurnController):
+            def prepare_turn(
+                self,
+                iteration,
+                messages,
+                base_tools,
+                *,
+                deadline_monotonic,
+                cancel_event,
+            ):
+                if iteration == 1:
+                    return TurnPreparation(
+                        ephemeral_context=("CTX SELECTED SKILL: focused-test",),
+                        tools=(first_tool,),
+                        capability_epoch=1,
+                    )
+                return TurnPreparation(tools=(), capability_epoch=2)
+
+        call = ToolCall(id="c1", name=first_tool.name, arguments={})
+        provider = _Scripted([_tool_response(call), _stop_response("done")])
+        controller = _Controller()
+        result = run_loop(
+            provider=provider,
+            system_prompt="base prompt",
+            task="task",
+            extra_tools=list(base_tools),
+            tool_executor=lambda _call: "ok",
+            turn_controller=controller,
+        )
+
+        first_contents = [message.content for message in provider.calls[0]["messages"]]
+        second_contents = [message.content for message in provider.calls[1]["messages"]]
+        persisted_contents = [message.content for message in result.messages]
+        assert "CTX SELECTED SKILL: focused-test" in first_contents
+        assert "CTX SELECTED SKILL: focused-test" not in second_contents
+        assert "CTX SELECTED SKILL: focused-test" not in persisted_contents
+        assert [tool.name for tool in provider.calls[0]["tools"]] == [first_tool.name]
+        assert provider.calls[1]["tools"] is None
+        assert controller.closed == [(1, 1, "continue"), (2, 2, "completed")]
+
+    def test_unadvertised_tool_is_denied_before_dispatch(self) -> None:
+        allowed = _tool_definition("custom__allowed")
+        invoked = False
+        controller = _TestTurnController(TurnPreparation(tools=(allowed,), capability_epoch=7))
+
+        def execute(_call: ToolCall) -> str:
+            nonlocal invoked
+            invoked = True
+            return "should-not-run"
+
+        hidden_call = ToolCall(id="c1", name="custom__hidden", arguments={})
+        result = run_loop(
+            provider=_Scripted([_tool_response(hidden_call)]),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=controller,
+        )
+
+        assert result.stop_reason == "tool_denied"
+        assert "capability epoch 7 did not advertise" in result.detail
+        assert not invoked
+        assert controller.closed == [(1, 7, "tool_denied")]
+
+    def test_stale_epoch_denies_later_call_from_same_response(self) -> None:
+        first_tool = _tool_definition("custom__first")
+        second_tool = _tool_definition("custom__second")
+
+        class _Controller(_TestTurnController):
+            def __init__(self) -> None:
+                super().__init__()
+                self.current_epoch = 4
+
+            def prepare_turn(
+                self,
+                iteration,
+                messages,
+                base_tools,
+                *,
+                deadline_monotonic,
+                cancel_event,
+            ):
+                return TurnPreparation(
+                    tools=(first_tool, second_tool),
+                    capability_epoch=self.current_epoch,
+                )
+
+            def authorize_tool_call(self, iteration, capability_epoch, call):
+                if capability_epoch != self.current_epoch:
+                    return TurnAuthorization(denial=f"stale capability epoch {capability_epoch}")
+                return None
+
+            def on_tool_result(
+                self,
+                iteration,
+                capability_epoch,
+                call,
+                result,
+                error,
+            ):
+                if error is None:
+                    self.current_epoch += 1
+                return None
+
+        invoked: list[str] = []
+
+        def execute(call: ToolCall) -> str:
+            invoked.append(call.name)
+            return "ok"
+
+        calls = (
+            ToolCall(id="c1", name=first_tool.name, arguments={}),
+            ToolCall(id="c2", name=second_tool.name, arguments={}),
+        )
+        result = run_loop(
+            provider=_Scripted([_tool_response(*calls)]),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=_Controller(),
+        )
+
+        assert result.stop_reason == "tool_denied"
+        assert "stale capability epoch 4" in result.detail
+        assert invoked == [first_tool.name]
+
+    def test_controller_usage_counts_toward_loop_budget(self) -> None:
+        tool = _tool_definition("custom__metered")
+        controller = _TestTurnController(
+            TurnPreparation(tools=(tool,), capability_epoch=1),
+            result_usage=Usage(input_tokens=7, output_tokens=3, cost_usd=0.02),
+        )
+
+        call = ToolCall(id="c1", name=tool.name, arguments={})
+        provider = _Scripted(
+            [
+                _tool_response(call, usage=Usage(input_tokens=10, output_tokens=5)),
+                _stop_response("done", usage=Usage(input_tokens=5, output_tokens=3)),
+            ]
+        )
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            tool_executor=lambda _call: "ok",
+            turn_controller=controller,
+        )
+
+        assert result.usage.input_tokens == 22
+        assert result.usage.output_tokens == 11
+        assert result.usage.cost_usd == pytest.approx(0.02)
+
+    def test_authorization_usage_stops_before_dispatch_and_close_usage_is_metered(
+        self,
+    ) -> None:
+        tool = _tool_definition("custom__metered-activation")
+        controller = _TestTurnController(
+            TurnPreparation(tools=(tool,), capability_epoch=21),
+            authorization_usage=Usage(input_tokens=60),
+            close_usage=Usage(input_tokens=7),
+        )
+        invoked = False
+
+        def execute(_call: ToolCall) -> str:
+            nonlocal invoked
+            invoked = True
+            return "unreached"
+
+        result = run_loop(
+            provider=_Scripted(
+                [
+                    _tool_response(
+                        ToolCall("c1", tool.name, {}),
+                        usage=Usage(),
+                    )
+                ]
+            ),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert result.usage.input_tokens == 67
+        assert not invoked
+        assert controller.closed == [(1, 21, "token_budget")]
+
+    def test_denied_authorization_usage_stops_before_result_hook(self) -> None:
+        tool = _tool_definition("custom__denied-metered-activation")
+        controller = _TestTurnController(
+            TurnPreparation(tools=(tool,), capability_epoch=27),
+            authorization_denial="host denied activation",
+            authorization_usage=Usage(input_tokens=60),
+            result_usage=Usage(input_tokens=100),
+        )
+
+        result = run_loop(
+            provider=_Scripted(
+                [
+                    _tool_response(
+                        ToolCall("c1", tool.name, {}),
+                        usage=Usage(),
+                    )
+                ]
+            ),
+            system_prompt="",
+            task="task",
+            tool_executor=lambda _call: pytest.fail("denied tool was dispatched"),
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert result.usage.input_tokens == 60
+        assert controller.result_calls == 0
+        assert controller.closed == [(1, 27, "token_budget")]
+
+    def test_close_usage_can_trip_budget_before_result_emission(self) -> None:
+        controller = _TestTurnController(
+            TurnPreparation(tools=(), capability_epoch=22),
+            close_usage=Usage(output_tokens=60),
+        )
+
+        result = run_loop(
+            provider=_Scripted([_stop_response("done", usage=Usage())]),
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert result.usage.output_tokens == 60
+        assert controller.closed == [(1, 22, "completed")]
+
+    def test_preparation_usage_stops_before_provider_and_closes(self) -> None:
+        controller = _TestTurnController(
+            TurnPreparation(
+                tools=(),
+                capability_epoch=3,
+                usage=Usage(input_tokens=60),
+            )
+        )
+        provider = _Scripted([_stop_response("unreached")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert result.usage.input_tokens == 60
+        assert provider.calls == []
+        assert controller.closed == [(1, 3, "token_budget")]
+
+    def test_controller_usage_stops_before_next_tool_call(self) -> None:
+        tools = (_tool_definition("custom__one"), _tool_definition("custom__two"))
+        controller = _TestTurnController(
+            TurnPreparation(tools=tools, capability_epoch=5),
+            result_usage=Usage(input_tokens=60),
+        )
+        invoked: list[str] = []
+
+        def execute(call: ToolCall) -> str:
+            invoked.append(call.name)
+            return "ok"
+
+        calls = tuple(
+            ToolCall(id=str(index), name=tool.name, arguments={})
+            for index, tool in enumerate(tools)
+        )
+        result = run_loop(
+            provider=_Scripted(
+                [_tool_response(*calls, usage=Usage(input_tokens=0, output_tokens=0))]
+            ),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert invoked == [tools[0].name]
+        assert controller.closed == [(1, 5, "token_budget")]
+
+    @pytest.mark.parametrize(
+        "usage",
+        [Usage(input_tokens=-1), Usage(cost_usd=float("nan"))],
+    )
+    def test_invalid_controller_usage_fails_closed(self, usage: Usage) -> None:
+        controller = _TestTurnController(TurnPreparation(capability_epoch=8, usage=usage))
+        provider = _Scripted([_stop_response("unreached")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert provider.calls == []
+        assert controller.closed == [(1, 8, "preparation_rejected")]
+
+    @pytest.mark.parametrize(
+        ("preparation", "context_limit", "tool_limit", "schema_limit", "detail"),
+        [
+            (
+                TurnPreparation(ephemeral_context=cast(Any, "bad"), capability_epoch=1),
+                100,
+                10,
+                1_000,
+                "ephemeral_context must be a tuple",
+            ),
+            (
+                TurnPreparation(ephemeral_context=("too large",), capability_epoch=2),
+                4,
+                10,
+                1_000,
+                "ephemeral context is",
+            ),
+            (
+                TurnPreparation(
+                    tools=(_tool_definition("one"), _tool_definition("two")),
+                    capability_epoch=3,
+                ),
+                100,
+                1,
+                1_000,
+                "turn exposes 2 tools",
+            ),
+            (
+                TurnPreparation(
+                    tools=(
+                        ToolDefinition(
+                            name="large",
+                            description="x" * 200,
+                            parameters={"type": "object"},
+                        ),
+                    ),
+                    capability_epoch=4,
+                ),
+                100,
+                10,
+                50,
+                "tool schemas are",
+            ),
+        ],
+    )
+    def test_turn_payload_limits_fail_closed(
+        self,
+        preparation: TurnPreparation,
+        context_limit: int,
+        tool_limit: int,
+        schema_limit: int,
+        detail: str,
+    ) -> None:
+        controller = _TestTurnController(preparation)
+        provider = _Scripted([_stop_response("unreached")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            max_ephemeral_context_bytes=context_limit,
+            max_turn_tools=tool_limit,
+            max_turn_schema_bytes=schema_limit,
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert detail in result.detail
+        assert provider.calls == []
+        assert len(controller.closed) == 1
+
+    def test_turn_tool_schema_is_isolated_before_provider_call(self) -> None:
+        parameters: dict[str, Any] = {"type": "object", "properties": {}}
+        tool = ToolDefinition("custom__stable", "stable", parameters)
+
+        class _MutatingCancellationProbe:
+            checks = 0
+
+            def is_set(self) -> bool:
+                self.checks += 1
+                if self.checks == 2:
+                    parameters["properties"]["late"] = {"description": "x" * 5_000}
+                return False
+
+        provider = _Scripted([_stop_response("done")])
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=_TestTurnController(
+                TurnPreparation(tools=(tool,), capability_epoch=23)
+            ),
+            cancel_event=cast(Any, _MutatingCancellationProbe()),
+            max_turn_schema_bytes=200,
+        )
+
+        assert result.stop_reason == "completed"
+        submitted = provider.calls[0]["tools"][0]
+        assert submitted.parameters == {"type": "object", "properties": {}}
+        assert "late" in parameters["properties"]
+
+    def test_non_finite_turn_schema_fails_closed(self) -> None:
+        tool = ToolDefinition(
+            "custom__nan",
+            "invalid schema",
+            {"type": "number", "default": float("nan")},
+        )
+        provider = _Scripted([_stop_response("unreached")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=_TestTurnController(
+                TurnPreparation(tools=(tool,), capability_epoch=24)
+            ),
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert "not JSON serializable" in result.detail
+        assert provider.calls == []
+
+    def test_rejected_payload_keeps_preparation_usage(self) -> None:
+        controller = _TestTurnController(
+            TurnPreparation(
+                ephemeral_context=("too large",),
+                capability_epoch=6,
+                usage=Usage(input_tokens=123, output_tokens=7, cost_usd=0.02),
+            )
+        )
+
+        result = run_loop(
+            provider=_Scripted([_stop_response("unreached")]),
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            max_ephemeral_context_bytes=4,
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert result.usage == Usage(input_tokens=123, output_tokens=7, cost_usd=0.02)
+        assert controller.closed == [(1, 6, "controller_error")]
+
+    def test_structurally_rejected_preparation_keeps_valid_usage(self) -> None:
+        controller = _TestTurnController(
+            TurnPreparation(
+                ephemeral_context=cast(Any, "bad"),
+                capability_epoch=25,
+                usage=Usage(input_tokens=77, output_tokens=3, cost_usd=0.01),
+            )
+        )
+
+        result = run_loop(
+            provider=_Scripted([_stop_response("unreached")]),
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert result.usage == Usage(input_tokens=77, output_tokens=3, cost_usd=0.01)
+        assert controller.closed == [(1, 25, "preparation_rejected")]
+
+    def test_result_hook_failure_preserves_successful_tool_result(self) -> None:
+        tool = _tool_definition("custom__commit")
+        controller = _TestTurnController(
+            TurnPreparation(tools=(tool,), capability_epoch=9),
+            result_error=RuntimeError("telemetry unavailable"),
+        )
+        call = ToolCall(id="c1", name=tool.name, arguments={})
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(call)]),
+            system_prompt="",
+            task="task",
+            tool_executor=lambda _call: "committed",
+            turn_controller=controller,
+        )
+
+        tool_message = next(message for message in result.messages if message.role == "tool")
+        assert result.stop_reason == "controller_error"
+        assert "executed successfully" in result.detail
+        assert tool_message.content == "committed"
+        assert controller.closed == [(1, 9, "controller_error")]
+
+    def test_close_failure_is_reported_once(self) -> None:
+        controller = _TestTurnController(
+            TurnPreparation(tools=(), capability_epoch=10),
+            close_error=RuntimeError("revoke failed"),
+        )
+
+        result = run_loop(
+            provider=_Scripted([_stop_response("done")]),
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert "revoke failed" in result.detail
+        assert controller.closed == [(1, 10, "completed")]
+
+    def test_close_failure_overrides_budget_stop_and_cli_reports_error(self) -> None:
+        from ctx.cli.run import _emit_result, _loop_result_outcome
+
+        controller = _TestTurnController(
+            TurnPreparation(
+                tools=(),
+                capability_epoch=12,
+                usage=Usage(input_tokens=60),
+            ),
+            close_error=RuntimeError("revocation failed"),
+        )
+
+        result = run_loop(
+            provider=_Scripted([_stop_response("unreached")]),
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "controller_error"
+        assert "turn ended as token_budget" in result.detail
+        assert "revocation failed" in result.detail
+        assert _loop_result_outcome(result) == ("error", "controller_error")
+        assert _emit_result(result, "test", as_json=False, quiet=True) == 2
+
+    def test_max_iteration_outcome_reaches_close_hook(self) -> None:
+        tool = _tool_definition("custom__once")
+        controller = _TestTurnController(TurnPreparation(tools=(tool,), capability_epoch=13))
+        call = ToolCall(id="c1", name=tool.name, arguments={})
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(call)]),
+            system_prompt="",
+            task="task",
+            tool_executor=lambda _call: "ok",
+            turn_controller=controller,
+            max_iterations=1,
+        )
+
+        assert result.stop_reason == "max_iterations"
+        assert controller.closed == [(1, 13, "max_iterations")]
+
+    def test_compaction_budget_outcome_reaches_close_hook(self) -> None:
+        from ctx.adapters.generic.compaction import CompactionResult
+
+        class _Compactor:
+            def should_compact(self, messages):
+                return True
+
+            def compact_with_usage(self, messages, provider):
+                return CompactionResult(
+                    new_messages=list(messages),
+                    compacted_count=0,
+                    summary="",
+                    usage=Usage(input_tokens=60),
+                )
+
+        tool = _tool_definition("custom__compact")
+        controller = _TestTurnController(TurnPreparation(tools=(tool,), capability_epoch=14))
+        call = ToolCall(id="c1", name=tool.name, arguments={})
+        result = run_loop(
+            provider=_Scripted(
+                [_tool_response(call, usage=Usage(input_tokens=0, output_tokens=0))]
+            ),
+            system_prompt="",
+            task="task",
+            tool_executor=lambda _call: "ok",
+            turn_controller=controller,
+            compactor=_Compactor(),
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert controller.closed == [(1, 14, "token_budget")]
+
+    def test_observer_failure_still_closes_turn(self) -> None:
+        class _FailingObserver:
+            def on_iteration_start(self, iteration, messages):
+                return None
+
+            def on_model_response(self, iteration, response):
+                raise RuntimeError("observer disk full")
+
+            def on_tool_call(self, iteration, call, result, error):
+                return None
+
+            def on_stop(self, result):
+                return None
+
+        controller = _TestTurnController(TurnPreparation(tools=(), capability_epoch=15))
+
+        with pytest.raises(RuntimeError, match="observer disk full"):
+            run_loop(
+                provider=_Scripted([_stop_response("done")]),
+                system_prompt="",
+                task="task",
+                turn_controller=controller,
+                observer=_FailingObserver(),
+            )
+
+        assert controller.closed == [(1, 15, "RuntimeError")]
+
+    def test_tool_observer_failure_preserves_committed_result(self) -> None:
+        from ctx.cli.run import _loop_result_outcome
+
+        class _FailingToolObserver:
+            def on_iteration_start(self, iteration, messages):
+                return None
+
+            def on_model_response(self, iteration, response):
+                return None
+
+            def on_tool_call(self, iteration, call, result, error):
+                raise RuntimeError("event sink unavailable")
+
+            def on_stop(self, result):
+                return None
+
+        tool = _tool_definition("custom__irreversible-write")
+        controller = _TestTurnController(TurnPreparation(tools=(tool,), capability_epoch=26))
+        executed: list[str] = []
+
+        def execute(call: ToolCall) -> str:
+            executed.append(call.name)
+            return "committed"
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(ToolCall("c1", tool.name, {}))]),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=controller,
+            observer=_FailingToolObserver(),
+        )
+
+        assert result.stop_reason == "observer_error"
+        assert _loop_result_outcome(result) == ("error", "observer_error")
+        assert executed == [tool.name]
+        assert any(
+            message.role == "tool" and message.content == "committed" for message in result.messages
+        )
+        assert controller.closed == [(1, 26, "observer_error")]
+
+    def test_base_exception_still_closes_turn(self) -> None:
+        class _InterruptingProvider:
+            name = "interrupting"
+
+            def complete(
+                self,
+                messages,
+                tools=None,
+                *,
+                model=None,
+                temperature=0.7,
+                max_tokens=None,
+            ):
+                raise KeyboardInterrupt
+
+        controller = _TestTurnController(TurnPreparation(tools=(), capability_epoch=16))
+
+        with pytest.raises(KeyboardInterrupt):
+            run_loop(
+                provider=_InterruptingProvider(),
+                system_prompt="",
+                task="task",
+                turn_controller=controller,
+            )
+
+        assert controller.closed == [(1, 16, "KeyboardInterrupt")]
+
+    def test_provider_and_close_failures_are_combined(self) -> None:
+        controller = _TestTurnController(
+            TurnPreparation(tools=(), capability_epoch=17),
+            close_error=RuntimeError("revoke failed"),
+        )
+
+        with pytest.raises(RuntimeError, match="provider network down.*revoke failed") as raised:
+            run_loop(
+                provider=_Exploding(),
+                system_prompt="",
+                task="task",
+                turn_controller=controller,
+            )
+
+        assert isinstance(raised.value.__cause__, RuntimeError)
+        assert controller.closed == [(1, 17, "provider_error")]
+
+    @pytest.mark.parametrize(
+        "timeout",
+        [True, 0, -1, float("nan"), float("inf"), float("-inf"), "1"],
+    )
+    def test_invalid_preparation_timeout_is_rejected(self, timeout: Any) -> None:
+        with pytest.raises(
+            ValueError,
+            match="turn_prepare_timeout must be a positive finite number or None",
+        ):
+            run_loop(
+                provider=_Scripted([_stop_response("unreached")]),
+                system_prompt="",
+                task="task",
+                turn_prepare_timeout=timeout,
+            )
+
+    def test_preparation_timeout_stops_before_provider(self) -> None:
+        class _SlowController(_TestTurnController):
+            def prepare_turn(
+                self,
+                iteration,
+                messages,
+                base_tools,
+                *,
+                deadline_monotonic,
+                cancel_event,
+            ):
+                assert deadline_monotonic is not None
+                delay = max(0.0, deadline_monotonic - time.monotonic()) + 0.005
+                time.sleep(delay)
+                return TurnPreparation(
+                    tools=(),
+                    capability_epoch=19,
+                    usage=Usage(input_tokens=321, output_tokens=4),
+                )
+
+        controller = _SlowController()
+        provider = _Scripted([_stop_response("unreached")])
+        started = time.monotonic()
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            turn_prepare_timeout=0.01,
+        )
+        elapsed = time.monotonic() - started
+        assert result.stop_reason == "controller_error"
+        assert "preparation exceeded" in result.detail
+        assert elapsed < 0.2
+        assert result.usage == Usage(input_tokens=321, output_tokens=4)
+        assert provider.calls == []
+        assert controller.closed == [(1, 19, "preparation_timeout")]
+        assert not any(
+            thread.name.startswith("ctx-turn-prepare-") for thread in threading.enumerate()
+        )
+
+    def test_cancellation_during_preparation_skips_provider(self) -> None:
+        cancel_event = threading.Event()
+
+        class _CancellingController(_TestTurnController):
+            def prepare_turn(
+                self,
+                iteration,
+                messages,
+                base_tools,
+                *,
+                deadline_monotonic,
+                cancel_event,
+            ):
+                cancel_event.set()
+                return TurnPreparation(tools=(), capability_epoch=18)
+
+        controller = _CancellingController()
+        provider = _Scripted([_stop_response("unreached")])
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+            cancel_event=cancel_event,
+        )
+
+        assert result.stop_reason == "cancelled"
+        assert provider.calls == []
+        assert controller.closed == [(1, 18, "cancelled")]
+
+    def test_provider_timeout_closes_turn(self) -> None:
+        controller = _TestTurnController(TurnPreparation(tools=(), capability_epoch=11))
+
+        result = run_loop(
+            provider=_NativeTimeout(),
+            system_prompt="",
+            task="task",
+            turn_controller=controller,
+        )
+
+        assert result.stop_reason == "provider_timeout"
+        assert controller.closed == [(1, 11, "provider_timeout")]
 
 
 # ── Usage accumulation ──────────────────────────────────────────────────────

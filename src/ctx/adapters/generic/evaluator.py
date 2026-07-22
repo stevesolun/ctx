@@ -50,7 +50,17 @@ from ctx.adapters.generic.contract import (
     ContractBuilder,
     augmented_system_prompt_with_contract,
 )
-from ctx.adapters.generic.loop import LoopObserver, LoopResult, ToolPolicy, run_loop
+from ctx.adapters.generic.loop import (
+    DEFAULT_MAX_EPHEMERAL_CONTEXT_BYTES,
+    DEFAULT_MAX_TURN_SCHEMA_BYTES,
+    DEFAULT_MAX_TURN_TOOLS,
+    DEFAULT_TURN_PREPARE_TIMEOUT,
+    LoopObserver,
+    LoopResult,
+    ToolPolicy,
+    TurnController,
+    run_loop,
+)
 from ctx.adapters.generic.planner import PlanArtifact, Planner, augmented_system_prompt
 from ctx.adapters.generic.providers import (
     CompletionResponse,
@@ -321,6 +331,11 @@ def run_with_evaluation(
     extra_tools: list[ToolDefinition] | None = None,
     tool_executor: Callable[..., str] | None = None,
     tool_policy: ToolPolicy | None = None,
+    turn_controller: TurnController | None = None,
+    turn_prepare_timeout: float | None = DEFAULT_TURN_PREPARE_TIMEOUT,
+    max_ephemeral_context_bytes: int = DEFAULT_MAX_EPHEMERAL_CONTEXT_BYTES,
+    max_turn_tools: int = DEFAULT_MAX_TURN_TOOLS,
+    max_turn_schema_bytes: int = DEFAULT_MAX_TURN_SCHEMA_BYTES,
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int | None = None,
@@ -409,6 +424,11 @@ def run_with_evaluation(
             extra_tools=extra_tools,
             tool_executor=tool_executor,
             tool_policy=tool_policy,
+            turn_controller=turn_controller,
+            turn_prepare_timeout=turn_prepare_timeout,
+            max_ephemeral_context_bytes=max_ephemeral_context_bytes,
+            max_turn_tools=max_turn_tools,
+            max_turn_schema_bytes=max_turn_schema_bytes,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,

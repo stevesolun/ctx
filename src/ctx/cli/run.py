@@ -1935,8 +1935,10 @@ def _cmd_sessions(args: argparse.Namespace) -> int:
 _ERROR_STOP_REASONS = frozenset(
     {
         "content_filter",
+        "controller_error",
         "empty_response",
         "length",
+        "observer_error",
         "provider_error",
         "provider_other",
         "provider_timeout",

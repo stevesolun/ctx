@@ -35,10 +35,13 @@ Plan 001 Phase H3.
 
 from __future__ import annotations
 
+import json
 import logging
+import math
 import queue
 import threading
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Protocol
 
 from ctx.adapters.generic.providers import (
@@ -67,11 +70,85 @@ StopReason = Literal[
     "content_filter",
     "tool_denied",
     "tool_error",
+    "controller_error",
+    "observer_error",
     "provider_error",
     "provider_timeout",
 ]
 
 ToolPolicy = Callable[[ToolCall], str | None]
+DEFAULT_MAX_EPHEMERAL_CONTEXT_BYTES = 16_384
+DEFAULT_MAX_TURN_TOOLS = 32
+DEFAULT_MAX_TURN_SCHEMA_BYTES = 65_536
+DEFAULT_TURN_PREPARE_TIMEOUT = 1.0
+
+
+@dataclass(frozen=True)
+class TurnPreparation:
+    """Request-only context and tools for one provider turn.
+
+    ``ephemeral_context`` is inserted into the provider request after the
+    canonical system message and is never appended to session history.
+    ``tools=None`` keeps the loop's base catalogue; an empty tuple exposes no
+    tools. ``capability_epoch`` identifies the immutable snapshot that
+    authorizes calls returned by that provider response.
+    """
+
+    ephemeral_context: tuple[str, ...] = ()
+    tools: tuple[ToolDefinition, ...] | None = None
+    capability_epoch: int = 0
+    usage: Usage = field(default_factory=Usage)
+
+
+@dataclass(frozen=True)
+class TurnAuthorization:
+    """Host authorization decision plus any activation-model usage."""
+
+    denial: str | None = None
+    usage: Usage = field(default_factory=Usage)
+
+
+class TurnController(Protocol):
+    """Host-owned control plane for dynamic context and capabilities.
+
+    Preparation must be side-effect free and cooperatively observe its
+    monotonic deadline and cancellation event. Resource activation belongs in
+    authorization or tool execution; unload belongs in ``close_turn``. Hooks
+    that perform model work must return its usage for budgets and telemetry.
+    """
+
+    def prepare_turn(
+        self,
+        iteration: int,
+        messages: tuple[Message, ...],
+        base_tools: tuple[ToolDefinition, ...],
+        *,
+        deadline_monotonic: float | None,
+        cancel_event: threading.Event | None,
+    ) -> TurnPreparation: ...
+
+    def authorize_tool_call(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        call: ToolCall,
+    ) -> TurnAuthorization | None: ...
+
+    def on_tool_result(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        call: ToolCall,
+        result: str,
+        error: str | None,
+    ) -> Usage | None: ...
+
+    def close_turn(
+        self,
+        iteration: int,
+        capability_epoch: int,
+        outcome: str,
+    ) -> Usage | None: ...
 
 
 # ── Event hooks (for H4 session state + H5 context compaction) ───────────
@@ -133,8 +210,8 @@ class LoopResult:
     ``stop_reason`` is the canonical tag the caller inspects to tell
     whether this was a normal completion or a guard-rail trip.
     ``final_message`` is the last model-produced message (empty string
-    when termination was external). ``usage`` is the sum across every
-    provider call.
+    when termination was external). ``usage`` is the sum across all
+    provider, preparation, controller-hook, and compaction calls.
     """
 
     stop_reason: StopReason
@@ -143,6 +220,13 @@ class LoopResult:
     usage: Usage
     messages: tuple[Message, ...]
     detail: str = ""
+
+
+@dataclass(frozen=True)
+class _TurnStep:
+    stop_reason: StopReason | None = None
+    detail: str = ""
+    final_message: str = ""
 
 
 @dataclass
@@ -202,6 +286,11 @@ def run_loop(
     extra_tools: list[ToolDefinition] | None = None,
     tool_executor: Callable[[ToolCall], str] | None = None,
     tool_policy: ToolPolicy | None = None,
+    turn_controller: TurnController | None = None,
+    turn_prepare_timeout: float | None = DEFAULT_TURN_PREPARE_TIMEOUT,
+    max_ephemeral_context_bytes: int = DEFAULT_MAX_EPHEMERAL_CONTEXT_BYTES,
+    max_turn_tools: int = DEFAULT_MAX_TURN_TOOLS,
+    max_turn_schema_bytes: int = DEFAULT_MAX_TURN_SCHEMA_BYTES,
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int | None = None,
@@ -232,12 +321,19 @@ def run_loop(
                            non-recoverable failures.
         tool_policy      - optional pre-dispatch policy. Return ``None`` to
                            allow a call, or a denial reason string to block it.
+        turn_controller  - optional host control plane that supplies bounded
+                           request-only context and a per-turn capability
+                           snapshot. Its context is never persisted.
+        turn_prepare_timeout - cooperative deadline for side-effect-free preparation
 
     Safety limits:
         max_iterations   - hard cap on model calls (default 25)
         budget_usd       - stop when cumulative reported cost exceeds (optional)
         budget_tokens    - stop when input+output tokens exceed (optional)
         cancel_event     - caller sets to stop between iterations
+        max_ephemeral_context_bytes - request-only context byte ceiling
+        max_turn_tools   - dynamic capability count ceiling
+        max_turn_schema_bytes - serialized dynamic schema byte ceiling
 
     State seeding:
         messages         - if provided, appended to AFTER the synthesized
@@ -250,6 +346,21 @@ def run_loop(
         raise ValueError(f"max_iterations must be >= 1 (got {max_iterations})")
     if provider_timeout is not None and provider_timeout <= 0:
         raise ValueError("provider_timeout must be > 0 when set")
+    if turn_prepare_timeout is not None:
+        if (
+            isinstance(turn_prepare_timeout, bool)
+            or not isinstance(turn_prepare_timeout, (int, float))
+            or not math.isfinite(turn_prepare_timeout)
+            or turn_prepare_timeout <= 0
+        ):
+            raise ValueError("turn_prepare_timeout must be a positive finite number or None")
+    for name, value in (
+        ("max_ephemeral_context_bytes", max_ephemeral_context_bytes),
+        ("max_turn_tools", max_turn_tools),
+        ("max_turn_schema_bytes", max_turn_schema_bytes),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
 
     obs = observer or _NullObserver()
     totals = _RunningTotals()
@@ -279,11 +390,10 @@ def run_loop(
         if messages:
             conversation.extend(messages)
 
-    # Build the tool-catalogue once. Router tools use "__" namespacing;
-    # extra_tools are passed through verbatim. A caller-supplied extra
-    # tool with a "__" in its name is allowed but risks colliding with
-    # the router's namespace convention — log a warning.
-    tools = list(_collect_tools(router, extra_tools))
+    # Build the base catalogue once. A host turn controller may publish a
+    # smaller or larger immutable snapshot immediately before each provider
+    # call without mutating the canonical conversation.
+    base_tools = tuple(_collect_tools(router, extra_tools))
 
     iteration = 0
     final_message = ""
@@ -299,198 +409,56 @@ def run_loop(
             break
 
         obs.on_iteration_start(iteration, list(conversation))
-
         try:
-            response = _complete_provider(
-                provider,
-                messages=list(conversation),
-                tools=tools or None,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                provider_timeout=provider_timeout,
+            preparation = _prepare_turn(
+                turn_controller,
+                iteration=iteration,
+                conversation=conversation,
+                base_tools=base_tools,
+                timeout=turn_prepare_timeout,
+                cancel_event=cancel_event,
+                totals=totals,
             )
-        except TimeoutError as exc:
-            stop_reason = "provider_timeout"
+        except InterruptedError as exc:
+            stop_reason = "cancelled"
             stop_detail = str(exc)
             break
-        except Exception as exc:
-            if _is_provider_timeout_exception(exc):
-                stop_reason = "provider_timeout"
-                stop_detail = f"provider timed out: {exc}"
-                break
-            stop_reason = "provider_error"
-            stop_detail = f"provider raised {type(exc).__name__}: {exc}"
-            result = LoopResult(
-                stop_reason=stop_reason,
-                final_message=final_message,
-                iterations=iteration,
-                usage=totals.as_usage(),
-                messages=tuple(conversation),
-                detail=stop_detail,
-            )
-            obs.on_stop(result)
-            raise
-        totals.add(response.usage)
-        obs.on_model_response(iteration, response)
-
-        # Append the model's turn to the conversation BEFORE we act on
-        # any tool calls — so if a tool call raises, the assistant
-        # message is already in the log.
-        conversation.append(
-            Message(
-                role="assistant",
-                content=response.content,
-                tool_calls=response.tool_calls,
-            )
-        )
-
-        # Terminal content-filter trip takes priority over tool calls.
-        if response.finish_reason == "content_filter":
-            final_message = response.content
-            stop_reason = "content_filter"
-            stop_detail = "provider reported content_filter finish"
+        except (TypeError, ValueError, RuntimeError) as exc:
+            stop_reason = "controller_error"
+            stop_detail = str(exc)
             break
-
-        # Never execute tool calls from a truncated provider response.
-        # Tool-call arguments may be partial even when the provider
-        # surfaced a tool call object.
-        if response.finish_reason == "length":
-            final_message = response.content or ""
-            stop_reason = "length"
-            stop_detail = "provider truncated response (finish_reason=length)"
-            break
-
-        if response.tool_calls:
-            budget_stop, budget_detail = _budget_stop_reason(
-                totals,
-                budget_usd=budget_usd,
-                budget_tokens=budget_tokens,
-            )
-            if budget_stop is not None:
-                stop_reason = budget_stop
-                stop_detail = budget_detail
-                break
-
-        # No tool calls → the model answered in-line. Codex review fix #5:
-        # only call it ``completed`` when the answer is non-empty AND the
-        # provider ended on a normal finish. Truncated, empty, or oddly-
-        # finished responses get distinct stop reasons so a budget-hit
-        # truncation doesn't masquerade as success.
-        if not response.tool_calls:
-            final_message = response.content or ""
-            budget_stop, budget_detail = _budget_stop_reason(
-                totals,
-                budget_usd=budget_usd,
-                budget_tokens=budget_tokens,
-            )
-            if budget_stop is not None:
-                stop_reason = budget_stop
-                stop_detail = budget_detail
-                break
-            finish = (response.finish_reason or "").lower()
-            if finish == "length":
-                stop_reason = "length"
-                stop_detail = "provider truncated response (finish_reason=length)"
-            elif not final_message.strip():
-                stop_reason = "empty_response"
-                stop_detail = (
-                    f"empty content with no tool calls (finish_reason={finish or 'unset'!r})"
-                )
-            elif finish in ("stop", "end_turn", ""):
-                stop_reason = "completed"
-            else:
-                stop_reason = "provider_other"
-                stop_detail = f"unexpected finish_reason={finish!r} with no tool calls"
-            break
-
-        # Execute every tool call. Policy denials and execution errors
-        # end the loop rather than loop forever trying to recover; an
-        # Evaluator agent (H11) is where retry strategy will live.
-        tool_error_occurred = False
-        for call in response.tool_calls:
-            denial: str | None
-            error: str | None
-            parse_error = getattr(call, "parse_error", "")
-            if parse_error:
-                denial = None
-                tool_result, error = "", f"invalid tool call arguments: {parse_error}"
-            else:
-                denial = _check_tool_policy(call, tool_policy)
-                if denial is None:
-                    tool_result, error = _execute_tool(
-                        call,
-                        router=router,
-                        tool_executor=tool_executor,
-                    )
-                else:
-                    tool_result, error = "", f"policy: {denial}"
-            obs.on_tool_call(iteration, call, tool_result, error)
-            conversation.append(
-                Message(
-                    role="tool",
-                    content=tool_result if error is None else f"ERROR: {error}",
-                    tool_call_id=call.id,
-                    name=call.name,
-                )
-            )
-            if error is not None:
-                if denial is None:
-                    stop_reason = "tool_error"
-                    stop_detail = f"tool {call.name!r} failed: {error}"
-                else:
-                    stop_reason = "tool_denied"
-                    stop_detail = f"tool {call.name!r} denied: {denial}"
-                tool_error_occurred = True
-                break
-        if tool_error_occurred:
-            break
-
-        # Context compaction runs BEFORE budget checks so the summary
-        # call's cost lands inside this iteration's budget window.
-        # The compactor owns the should-compact decision + the
-        # summary call + the in-place message-list swap. Codex review
-        # fix #6: when the compactor exposes ``compact_with_usage``,
-        # fold the summary call's tokens + cost into the running
-        # totals so the budget enforcement and audit trail include
-        # what the summarisation actually cost.
-        if compactor is not None and compactor.should_compact(conversation):
-            try:
-                if hasattr(compactor, "compact_with_usage"):
-                    cresult = compactor.compact_with_usage(conversation, provider)
-                    new_conversation = cresult.new_messages
-                    totals.add(cresult.usage)  # _RunningTotals handles None costs
-                else:
-                    new_conversation = compactor.compact(conversation, provider)
-            except Exception as exc:  # noqa: BLE001
-                _logger.warning(
-                    "compactor raised (%s); continuing with uncompacted "
-                    "conversation — next provider call may hit context limit",
-                    exc,
-                )
-            else:
-                if new_conversation is not conversation:
-                    # Accept whatever the compactor returned (list or
-                    # any sequence). Replace in place.
-                    conversation[:] = list(new_conversation)
-
-        # Budget checks run AFTER the tool responses land in the
-        # conversation — the caller sees the model's last pre-budget
-        # action in the session log.
-        budget_stop, budget_detail = _budget_stop_reason(
-            totals,
+        step = _run_prepared_turn(
+            iteration=iteration,
+            max_iterations=max_iterations,
+            preparation=preparation,
+            turn_controller=turn_controller,
+            provider=provider,
+            conversation=conversation,
+            base_tools=base_tools,
+            totals=totals,
+            router=router,
+            tool_executor=tool_executor,
+            tool_policy=tool_policy,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            provider_timeout=provider_timeout,
             budget_usd=budget_usd,
             budget_tokens=budget_tokens,
+            cancel_event=cancel_event,
+            observer=obs,
+            compactor=compactor,
+            max_context_bytes=max_ephemeral_context_bytes,
+            max_tools=max_turn_tools,
+            max_schema_bytes=max_turn_schema_bytes,
+            prior_final_message=final_message,
         )
-        if budget_stop is not None:
-            stop_reason = budget_stop
-            stop_detail = budget_detail
-            break
-
-    else:
-        # Fell out of while via hitting max_iterations without break.
-        stop_reason = "max_iterations"
-        stop_detail = f"hit iteration cap {max_iterations}"
+        if step.stop_reason is None:
+            continue
+        stop_reason = step.stop_reason
+        stop_detail = step.detail
+        final_message = step.final_message
+        break
 
     result = LoopResult(
         stop_reason=stop_reason,
@@ -504,7 +472,648 @@ def run_loop(
     return result
 
 
+def _run_prepared_turn(
+    *,
+    iteration: int,
+    max_iterations: int,
+    preparation: TurnPreparation,
+    turn_controller: TurnController | None,
+    provider: ModelProvider,
+    conversation: list[Message],
+    base_tools: tuple[ToolDefinition, ...],
+    totals: _RunningTotals,
+    router: McpRouter | None,
+    tool_executor: Callable[[ToolCall], str] | None,
+    tool_policy: ToolPolicy | None,
+    model: str | None,
+    temperature: float,
+    max_tokens: int | None,
+    provider_timeout: float | None,
+    budget_usd: float | None,
+    budget_tokens: int | None,
+    cancel_event: threading.Event | None,
+    observer: LoopObserver,
+    compactor: Any | None,
+    max_context_bytes: int,
+    max_tools: int,
+    max_schema_bytes: int,
+    prior_final_message: str,
+) -> _TurnStep:
+    """Execute one prepared turn and close its capability lease exactly once."""
+    step: _TurnStep | None = None
+    failure: BaseException | None = None
+    provider_failure: Exception | None = None
+    close_error: str | None = None
+
+    try:
+        try:
+            while True:
+                budget_stop, budget_detail = _budget_stop_reason(
+                    totals,
+                    budget_usd=budget_usd,
+                    budget_tokens=budget_tokens,
+                )
+                if budget_stop is not None:
+                    step = _TurnStep(budget_stop, budget_detail)
+                    break
+
+                request_tools = base_tools if preparation.tools is None else preparation.tools
+                if turn_controller is not None:
+                    try:
+                        request_tools = _validate_turn_payload(
+                            preparation.ephemeral_context,
+                            request_tools,
+                            max_context_bytes=max_context_bytes,
+                            max_tools=max_tools,
+                            max_schema_bytes=max_schema_bytes,
+                        )
+                    except (TypeError, ValueError, OverflowError) as exc:
+                        step = _TurnStep(
+                            "controller_error",
+                            f"turn controller payload rejected: {exc}",
+                        )
+                        break
+
+                if cancel_event is not None and cancel_event.is_set():
+                    step = _TurnStep("cancelled", "cancel_event was set after preparation")
+                    break
+
+                request_messages = _messages_for_turn(
+                    conversation,
+                    preparation.ephemeral_context,
+                )
+                advertised_tool_names = frozenset(tool.name for tool in request_tools)
+                enforce_advertised_tools = turn_controller is not None or bool(base_tools)
+
+                try:
+                    response = _complete_provider(
+                        provider,
+                        messages=request_messages,
+                        tools=list(request_tools) or None,
+                        model=model,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        provider_timeout=provider_timeout,
+                    )
+                except TimeoutError as exc:
+                    step = _TurnStep("provider_timeout", str(exc))
+                    break
+                except Exception as exc:
+                    if _is_provider_timeout_exception(exc):
+                        step = _TurnStep("provider_timeout", f"provider timed out: {exc}")
+                        break
+                    provider_failure = exc
+                    raise
+
+                totals.add(response.usage)
+                observer.on_model_response(iteration, response)
+                conversation.append(
+                    Message(
+                        role="assistant",
+                        content=response.content,
+                        tool_calls=response.tool_calls,
+                    )
+                )
+
+                if response.finish_reason == "content_filter":
+                    step = _TurnStep(
+                        "content_filter",
+                        "provider reported content_filter finish",
+                        response.content,
+                    )
+                    break
+                if response.finish_reason == "length":
+                    step = _TurnStep(
+                        "length",
+                        "provider truncated response (finish_reason=length)",
+                        response.content or "",
+                    )
+                    break
+
+                if response.tool_calls:
+                    budget_stop, budget_detail = _budget_stop_reason(
+                        totals,
+                        budget_usd=budget_usd,
+                        budget_tokens=budget_tokens,
+                    )
+                    if budget_stop is not None:
+                        step = _TurnStep(budget_stop, budget_detail)
+                        break
+                else:
+                    final_message = response.content or ""
+                    budget_stop, budget_detail = _budget_stop_reason(
+                        totals,
+                        budget_usd=budget_usd,
+                        budget_tokens=budget_tokens,
+                    )
+                    if budget_stop is not None:
+                        step = _TurnStep(budget_stop, budget_detail, final_message)
+                        break
+                    finish = (response.finish_reason or "").lower()
+                    if not final_message.strip():
+                        step = _TurnStep(
+                            "empty_response",
+                            "empty content with no tool calls "
+                            f"(finish_reason={finish or 'unset'!r})",
+                        )
+                    elif finish in ("stop", "end_turn", ""):
+                        step = _TurnStep("completed", final_message=final_message)
+                    else:
+                        step = _TurnStep(
+                            "provider_other",
+                            f"unexpected finish_reason={finish!r} with no tool calls",
+                            final_message,
+                        )
+                    break
+
+                for call in response.tool_calls:
+                    denial: str | None
+                    error: str | None
+                    parse_error = getattr(call, "parse_error", "")
+                    if parse_error:
+                        denial = None
+                        tool_result, error = "", f"invalid tool call arguments: {parse_error}"
+                    else:
+                        denial = _check_tool_policy(call, tool_policy)
+                        if denial is None:
+                            denial, authorization_usage = _check_turn_authorization(
+                                call,
+                                preparation=preparation,
+                                advertised_tool_names=advertised_tool_names,
+                                enforce_advertised_tools=enforce_advertised_tools,
+                                turn_controller=turn_controller,
+                                iteration=iteration,
+                            )
+                            if authorization_usage is not None:
+                                totals.add(authorization_usage)
+                            budget_stop, budget_detail = _budget_stop_reason(
+                                totals,
+                                budget_usd=budget_usd,
+                                budget_tokens=budget_tokens,
+                            )
+                            if budget_stop is not None:
+                                step = _TurnStep(budget_stop, budget_detail)
+                                break
+                        if denial is None:
+                            tool_result, error = _execute_tool(
+                                call,
+                                router=router,
+                                tool_executor=tool_executor,
+                            )
+                        else:
+                            tool_result, error = "", f"policy: {denial}"
+
+                    controller_usage, controller_error = _notify_turn_controller(
+                        turn_controller,
+                        iteration=iteration,
+                        preparation=preparation,
+                        call=call,
+                        result=tool_result,
+                        error=error,
+                    )
+                    if controller_usage is not None:
+                        totals.add(controller_usage)
+                    conversation.append(
+                        Message(
+                            role="tool",
+                            content=tool_result if error is None else f"ERROR: {error}",
+                            tool_call_id=call.id,
+                            name=call.name,
+                        )
+                    )
+                    observer_error: str | None = None
+                    try:
+                        observer.on_tool_call(iteration, call, tool_result, error)
+                    except Exception as exc:  # noqa: BLE001
+                        observer_error = f"observer raised {type(exc).__name__}: {exc}"
+
+                    if error is not None:
+                        reason: StopReason = "tool_error" if denial is None else "tool_denied"
+                        action = "failed" if denial is None else "denied"
+                        detail = (
+                            f"tool {call.name!r} {action}: {error if denial is None else denial}"
+                        )
+                        if controller_error is not None:
+                            detail += f"; additionally {controller_error}"
+                        if observer_error is not None:
+                            detail += f"; additionally {observer_error}"
+                        step = _TurnStep(reason, detail)
+                        break
+                    if controller_error is not None:
+                        detail = f"tool {call.name!r} executed successfully; {controller_error}"
+                        if observer_error is not None:
+                            detail += f"; additionally {observer_error}"
+                        step = _TurnStep(
+                            "controller_error",
+                            detail,
+                        )
+                        break
+                    if observer_error is not None:
+                        step = _TurnStep(
+                            "observer_error",
+                            f"tool {call.name!r} executed successfully; {observer_error}",
+                        )
+                        break
+                    budget_stop, budget_detail = _budget_stop_reason(
+                        totals,
+                        budget_usd=budget_usd,
+                        budget_tokens=budget_tokens,
+                    )
+                    if budget_stop is not None:
+                        step = _TurnStep(budget_stop, budget_detail)
+                        break
+                if step is not None:
+                    break
+
+                if compactor is not None and compactor.should_compact(conversation):
+                    try:
+                        if hasattr(compactor, "compact_with_usage"):
+                            cresult = compactor.compact_with_usage(conversation, provider)
+                            new_conversation = cresult.new_messages
+                            totals.add(cresult.usage)
+                        else:
+                            new_conversation = compactor.compact(conversation, provider)
+                    except Exception as exc:  # noqa: BLE001
+                        _logger.warning(
+                            "compactor raised (%s); continuing with uncompacted "
+                            "conversation — next provider call may hit context limit",
+                            exc,
+                        )
+                    else:
+                        if new_conversation is not conversation:
+                            conversation[:] = list(new_conversation)
+
+                budget_stop, budget_detail = _budget_stop_reason(
+                    totals,
+                    budget_usd=budget_usd,
+                    budget_tokens=budget_tokens,
+                )
+                if budget_stop is not None:
+                    step = _TurnStep(budget_stop, budget_detail)
+                elif iteration >= max_iterations:
+                    step = _TurnStep(
+                        "max_iterations",
+                        f"hit iteration cap {max_iterations}",
+                    )
+                else:
+                    step = _TurnStep()
+                break
+        except BaseException as exc:  # cleanup must also run for cancellation signals
+            failure = exc
+    finally:
+        if failure is not None:
+            outcome = "provider_error" if provider_failure is not None else type(failure).__name__
+        else:
+            outcome = step.stop_reason if step and step.stop_reason is not None else "continue"
+        close_usage, close_error = _close_turn(
+            turn_controller,
+            iteration=iteration,
+            preparation=preparation,
+            outcome=outcome,
+        )
+        if close_usage is not None:
+            totals.add(close_usage)
+
+    if failure is not None:
+        if provider_failure is not None:
+            detail = f"provider raised {type(provider_failure).__name__}: {provider_failure}"
+            if close_error is not None:
+                detail += f"; {close_error}"
+            observer.on_stop(
+                LoopResult(
+                    stop_reason="provider_error",
+                    final_message=prior_final_message,
+                    iterations=iteration,
+                    usage=totals.as_usage(),
+                    messages=tuple(conversation),
+                    detail=detail,
+                )
+            )
+        if close_error is not None:
+            raise RuntimeError(f"{failure}; {close_error}") from failure
+        raise failure
+
+    if step is None:
+        raise RuntimeError("prepared turn ended without a result")
+    if close_error is not None:
+        original_outcome = step.stop_reason or "continue"
+        return _TurnStep(
+            "controller_error",
+            f"turn ended as {original_outcome}; {close_error}",
+            step.final_message,
+        )
+    close_budget_stop, close_budget_detail = _budget_stop_reason(
+        totals,
+        budget_usd=budget_usd,
+        budget_tokens=budget_tokens,
+    )
+    if close_budget_stop is not None and step.stop_reason in (
+        None,
+        "completed",
+        "max_iterations",
+        "cost_budget",
+        "token_budget",
+    ):
+        return _TurnStep(close_budget_stop, close_budget_detail, step.final_message)
+    return step
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────
+
+
+def _prepare_turn(
+    turn_controller: TurnController | None,
+    *,
+    iteration: int,
+    conversation: list[Message],
+    base_tools: tuple[ToolDefinition, ...],
+    timeout: float | None,
+    cancel_event: threading.Event | None,
+    totals: _RunningTotals,
+) -> TurnPreparation:
+    if turn_controller is None:
+        return TurnPreparation()
+    try:
+        preparation, deadline = _call_turn_preparer(
+            turn_controller,
+            iteration=iteration,
+            conversation=conversation,
+            base_tools=base_tools,
+            timeout=timeout,
+            cancel_event=cancel_event,
+        )
+    except InterruptedError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            f"turn controller preparation failed: {type(exc).__name__}: {exc}"
+        ) from exc
+    try:
+        if not isinstance(preparation, TurnPreparation):
+            raise TypeError("turn controller must return TurnPreparation")
+        _validate_usage(preparation.usage, source="turn preparation")
+        totals.add(preparation.usage)
+        if isinstance(preparation.capability_epoch, bool) or not isinstance(
+            preparation.capability_epoch, int
+        ):
+            raise TypeError("capability_epoch must be an integer")
+        if preparation.capability_epoch < 0:
+            raise ValueError("capability_epoch must be >= 0")
+        if not isinstance(preparation.ephemeral_context, tuple):
+            raise TypeError("ephemeral_context must be a tuple of strings")
+        if preparation.tools is not None and not isinstance(preparation.tools, tuple):
+            raise TypeError("turn tools must be a tuple or None")
+    except (TypeError, ValueError) as exc:
+        epoch = getattr(preparation, "capability_epoch", 0)
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 0:
+            epoch = 0
+        close_usage, close_error = _close_turn(
+            turn_controller,
+            iteration=iteration,
+            preparation=TurnPreparation(capability_epoch=epoch),
+            outcome="preparation_rejected",
+        )
+        if close_usage is not None:
+            totals.add(close_usage)
+        if close_error is not None:
+            raise RuntimeError(f"{exc}; {close_error}") from exc
+        raise
+    if deadline is not None and time.monotonic() > deadline:
+        close_usage, close_error = _close_turn(
+            turn_controller,
+            iteration=iteration,
+            preparation=preparation,
+            outcome="preparation_timeout",
+        )
+        if close_usage is not None:
+            totals.add(close_usage)
+        error = RuntimeError(f"turn controller preparation exceeded {timeout:.3f}s deadline")
+        if close_error is not None:
+            raise RuntimeError(f"{error}; {close_error}") from error
+        raise error
+    return TurnPreparation(
+        ephemeral_context=preparation.ephemeral_context,
+        tools=preparation.tools,
+        capability_epoch=preparation.capability_epoch,
+        usage=preparation.usage,
+    )
+
+
+def _call_turn_preparer(
+    turn_controller: TurnController,
+    *,
+    iteration: int,
+    conversation: list[Message],
+    base_tools: tuple[ToolDefinition, ...],
+    timeout: float | None,
+    cancel_event: threading.Event | None,
+) -> tuple[TurnPreparation, float | None]:
+    deadline = None if timeout is None else time.monotonic() + timeout
+    preparation = turn_controller.prepare_turn(
+        iteration,
+        tuple(conversation),
+        base_tools,
+        deadline_monotonic=deadline,
+        cancel_event=cancel_event,
+    )
+    return preparation, deadline
+
+
+def _messages_for_turn(
+    conversation: list[Message],
+    ephemeral_context: tuple[str, ...],
+) -> list[Message]:
+    messages = list(conversation)
+    if not ephemeral_context:
+        return messages
+    insert_at = 1 if messages and messages[0].role == "system" else 0
+    messages.insert(
+        insert_at,
+        Message(role="system", content="\n\n".join(ephemeral_context)),
+    )
+    return messages
+
+
+def _validate_tool_catalogue(
+    tools: list[ToolDefinition] | tuple[ToolDefinition, ...],
+) -> None:
+    seen: set[str] = set()
+    for tool in tools:
+        if not isinstance(tool, ToolDefinition):
+            raise TypeError("tool catalogue entries must be ToolDefinition instances")
+        if not isinstance(tool.name, str) or not tool.name.strip():
+            raise ValueError("tool names must be non-empty strings")
+        if not isinstance(tool.description, str):
+            raise TypeError("tool descriptions must be strings")
+        if not isinstance(tool.parameters, dict):
+            raise TypeError("tool parameters must be JSON-schema objects")
+        if tool.name in seen:
+            raise ValueError(f"duplicate tool name exposed to provider: {tool.name}")
+        seen.add(tool.name)
+
+
+def _validate_turn_payload(
+    context: tuple[str, ...],
+    tools: tuple[ToolDefinition, ...],
+    *,
+    max_context_bytes: int,
+    max_tools: int,
+    max_schema_bytes: int,
+) -> tuple[ToolDefinition, ...]:
+    for item in context:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("ephemeral context entries must be non-empty strings")
+    context_bytes = len("\n\n".join(context).encode("utf-8"))
+    if context_bytes > max_context_bytes:
+        raise ValueError(
+            f"ephemeral context is {context_bytes} bytes; limit is {max_context_bytes}"
+        )
+    if len(tools) > max_tools:
+        raise ValueError(f"turn exposes {len(tools)} tools; limit is {max_tools}")
+    _validate_tool_catalogue(tools)
+    try:
+        encoded = json.dumps(
+            [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                }
+                for tool in tools
+            ],
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        payload = json.loads(encoded)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"turn tool schemas are not JSON serializable: {exc}") from exc
+    schema_bytes = len(encoded.encode("utf-8"))
+    if schema_bytes > max_schema_bytes:
+        raise ValueError(f"turn tool schemas are {schema_bytes} bytes; limit is {max_schema_bytes}")
+    return tuple(
+        ToolDefinition(
+            name=item["name"],
+            description=item["description"],
+            parameters=item["parameters"],
+        )
+        for item in payload
+    )
+
+
+def _validate_usage(usage: Usage, *, source: str) -> None:
+    if not isinstance(usage, Usage):
+        raise TypeError(f"{source} usage must be Usage")
+    for name, value in (
+        ("input_tokens", usage.input_tokens),
+        ("output_tokens", usage.output_tokens),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{source} {name} must be a non-negative integer")
+    if usage.cost_usd is not None:
+        cost = usage.cost_usd
+        if isinstance(cost, bool) or not isinstance(cost, (int, float)):
+            raise ValueError(f"{source} cost_usd must be a non-negative finite number")
+        try:
+            finite = math.isfinite(cost)
+        except (TypeError, OverflowError) as exc:
+            raise ValueError(f"{source} cost_usd must be a non-negative finite number") from exc
+        if not finite or cost < 0:
+            raise ValueError(f"{source} cost_usd must be a non-negative finite number")
+
+
+def _check_turn_authorization(
+    call: ToolCall,
+    *,
+    preparation: TurnPreparation,
+    advertised_tool_names: frozenset[str],
+    enforce_advertised_tools: bool,
+    turn_controller: TurnController | None,
+    iteration: int,
+) -> tuple[str | None, Usage | None]:
+    if enforce_advertised_tools and call.name not in advertised_tool_names:
+        return (
+            f"capability epoch {preparation.capability_epoch} did not advertise tool {call.name!r}",
+            None,
+        )
+    if turn_controller is None:
+        return None, None
+    try:
+        authorization = turn_controller.authorize_tool_call(
+            iteration,
+            preparation.capability_epoch,
+            call,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"turn controller raised {type(exc).__name__}: {exc}", None
+    if authorization is None:
+        return None, None
+    if not isinstance(authorization, TurnAuthorization):
+        return "turn controller authorization must return TurnAuthorization or None", None
+    try:
+        _validate_usage(authorization.usage, source="turn controller authorization")
+    except (TypeError, ValueError) as exc:
+        return str(exc), None
+    if authorization.denial is None:
+        return None, authorization.usage
+    if not isinstance(authorization.denial, str):
+        return "turn controller authorization denial must be a string or None", authorization.usage
+    return authorization.denial or "denied by turn controller", authorization.usage
+
+
+def _notify_turn_controller(
+    turn_controller: TurnController | None,
+    *,
+    iteration: int,
+    preparation: TurnPreparation,
+    call: ToolCall,
+    result: str,
+    error: str | None,
+) -> tuple[Usage | None, str | None]:
+    if turn_controller is None:
+        return None, None
+    try:
+        usage = turn_controller.on_tool_result(
+            iteration,
+            preparation.capability_epoch,
+            call,
+            result,
+            error,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return None, f"turn controller result hook raised {type(exc).__name__}: {exc}"
+    if usage is not None:
+        try:
+            _validate_usage(usage, source="turn controller result hook")
+        except (TypeError, ValueError) as exc:
+            return None, str(exc)
+    return usage, None
+
+
+def _close_turn(
+    turn_controller: TurnController | None,
+    *,
+    iteration: int,
+    preparation: TurnPreparation,
+    outcome: str,
+) -> tuple[Usage | None, str | None]:
+    if turn_controller is None:
+        return None, None
+    try:
+        usage = turn_controller.close_turn(
+            iteration,
+            preparation.capability_epoch,
+            outcome,
+        )
+    except BaseException as exc:  # cleanup failures must not replace the original exit
+        return None, f"turn controller close hook raised {type(exc).__name__}: {exc}"
+    if usage is not None:
+        try:
+            _validate_usage(usage, source="turn controller close hook")
+        except (TypeError, ValueError) as exc:
+            return None, str(exc)
+    return usage, None
 
 
 def _complete_provider(
@@ -588,13 +1197,8 @@ def _collect_tools(
                 "MCP server name conflicts with caller tool namespace: " + ", ".join(conflicts)
             )
 
-    merged: list[ToolDefinition] = []
-    seen: set[str] = set()
-    for tool in [*router_tools, *caller_tools]:
-        if tool.name in seen:
-            raise ValueError(f"duplicate tool name exposed to provider: {tool.name}")
-        seen.add(tool.name)
-        merged.append(tool)
+    merged = [*router_tools, *caller_tools]
+    _validate_tool_catalogue(merged)
     return merged
 
 
