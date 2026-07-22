@@ -18,6 +18,7 @@ once the full H1-H7 stack is proven on a live model.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import sys
@@ -31,6 +32,9 @@ import pytest
 import ctx.adapters.generic.runtime_lifecycle as runtime_lifecycle
 import ctx.cli.run as run_cli
 import ctx.telemetry as telemetry
+from ctx.adapters.generic.adaptive_runtime import SelectedSkill
+from ctx.adapters.generic.evaluator import EvaluationLoopResult
+from ctx.adapters.generic.loop import LoopResult
 from ctx.cli.run import (
     _apply_mcp_env_overlays,
     _compile_tool_policy,
@@ -40,7 +44,7 @@ from ctx.cli.run import (
     _split_mcp_invocation,
     main,
 )
-from ctx.adapters.generic.providers import ToolCall, Usage
+from ctx.adapters.generic.providers import ToolCall, ToolDefinition, Usage
 from ctx.telemetry import read_events, record_event as real_record_event
 
 
@@ -378,6 +382,65 @@ class TestRunCommand:
         assert router_session_ids == ["mcp-run"]
         assert calls == ["start", "list_tools", "stop"]
 
+    def test_adaptive_defers_to_explicit_large_mcp_catalogue(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        class FakeRouter:
+            def __init__(self, configs: list[Any], *, session_id: str | None = None) -> None:
+                assert configs and session_id == "large-mcp"
+
+            def start(self) -> None:
+                pass
+
+            def stop(self) -> None:
+                pass
+
+            def list_tools(self) -> list[ToolDefinition]:
+                return [
+                    ToolDefinition(name=f"server__tool_{index}", description="tool", parameters={})
+                    for index in range(33)
+                ]
+
+            def call(self, name: str, arguments: dict[str, Any]) -> str:
+                raise AssertionError(f"unexpected tool call: {name} {arguments}")
+
+        def unexpected_selection(*_args: Any, **_kwargs: Any) -> None:
+            raise AssertionError("adaptive skill selection must defer to explicit MCP")
+
+        monkeypatch.setattr(run_cli, "McpRouter", FakeRouter)
+        monkeypatch.setattr(
+            run_cli.AdaptiveRuntimeController,
+            "from_task",
+            classmethod(unexpected_selection),
+        )
+
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/llama3",
+                "--task",
+                "say hi",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "large-mcp",
+                "--mcp",
+                "raw:ignored-command",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert _submitted_tool_names(fake_litellm._calls[0]) == {
+            f"server__tool_{index}" for index in range(33)
+        }
+        metadata = json.loads((tmp_path / "large-mcp.jsonl").read_text().splitlines()[0])
+        assert metadata["ctx_adaptive"] == {"enabled": False}
+
     def test_run_uses_ctx_init_model_profile_when_model_omitted(
         self,
         fake_litellm: Any,
@@ -671,6 +734,8 @@ class TestRunCommand:
                 "call denied tool",
                 "--sessions-dir",
                 str(tmp_path),
+                "--ctx-tool-surface",
+                "minimal",
                 "--deny-tool",
                 "ctx__wiki_get",
                 "--json",
@@ -968,7 +1033,238 @@ class TestRunCommand:
         assert "tools" not in first_call
         assert "ctx__" not in first_call["messages"][0]["content"]
 
-    def test_ctx_tools_default_to_minimal_surface_on_every_iteration(
+    def test_ctx_tools_default_to_adaptive_host_surface(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            run_cli.AdaptiveRuntimeController,
+            "from_task",
+            classmethod(lambda cls, *_args, **_kwargs: cls(None)),
+        )
+
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use ctx only if needed",
+                "--sessions-dir",
+                str(tmp_path),
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert len(fake_litellm._calls) == 1
+        call = fake_litellm._calls[0]
+        assert _submitted_tool_names(call) == set()
+        assert "ctx__" not in call["messages"][0]["content"]
+        metadata = json.loads(next((tmp_path.glob("*.jsonl"))).read_text().splitlines()[0])
+        assert metadata["ctx_tool_surface"] == "adaptive"
+        assert metadata["ctx_tool_names"] == []
+        assert metadata["ctx_adaptive"]["enabled"] is True
+
+    def test_adaptive_stays_zero_schema_when_secure_reads_unavailable(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "ctx.adapters.generic.adaptive_runtime.secure_skill_reads_available",
+            lambda: False,
+        )
+
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use ctx",
+                "--sessions-dir",
+                str(tmp_path),
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        assert _submitted_tool_names(fake_litellm._calls[0]) == set()
+        metadata = json.loads(next(tmp_path.glob("*.jsonl")).read_text().splitlines()[0])
+        assert metadata["ctx_tool_surface"] == "adaptive"
+        assert metadata["ctx_adaptive"]["enabled"] is True
+        assert metadata["ctx_adaptive"]["skill_selected"] is False
+
+    def test_adaptive_skill_is_request_only_and_not_persisted(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        body = "EPHEMERAL-CLI-SKILL-BODY"
+        selected = SelectedSkill(
+            name="focused-skill",
+            content=body,
+            content_sha256=hashlib.sha256(body.encode()).hexdigest(),
+            content_bytes=len(body.encode()),
+            score=42.0,
+            matched_terms=("focused",),
+        )
+        monkeypatch.setattr(
+            run_cli.AdaptiveRuntimeController,
+            "from_task",
+            classmethod(lambda cls, *_args, **_kwargs: cls(selected, selection_duration_ms=1.5)),
+        )
+
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "use focused guidance",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "adaptive-ephemeral",
+                "--quiet",
+            ]
+        )
+
+        assert exit_code == 0
+        call = fake_litellm._calls[0]
+        assert _submitted_tool_names(call) == set()
+        assert body in "\n".join(message["content"] for message in call["messages"])
+        session_text = (tmp_path / "adaptive-ephemeral.jsonl").read_text(encoding="utf-8")
+        assert body not in session_text
+        metadata = run_cli.load_session(
+            "adaptive-ephemeral",
+            sessions_dir=tmp_path,
+        ).metadata
+        assert metadata["ctx_adaptive"]["selected_context_bytes"] > len(body.encode())
+        assert (
+            metadata["ctx_adaptive"]["submitted_context_bytes"]
+            == metadata["ctx_adaptive"]["selected_context_bytes"]
+        )
+        assert metadata["ctx_adaptive"]["estimated_selected_context_tokens"] > 0
+        assert metadata["ctx_adaptive"]["skill_hash"]
+
+    def test_evaluator_reports_complete_usage(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        final = LoopResult(
+            stop_reason="completed",
+            final_message="done",
+            iterations=1,
+            usage=Usage(input_tokens=5, output_tokens=10),
+            messages=(),
+        )
+        monkeypatch.setattr(
+            run_cli,
+            "run_with_evaluation",
+            lambda **_kwargs: EvaluationLoopResult(
+                final=final,
+                rounds=(),
+                plan=None,
+                contract=None,
+                total_usage=Usage(input_tokens=12, output_tokens=21),
+            ),
+        )
+
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "evaluate usage",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "evaluator-usage",
+                "--no-ctx-tools",
+                "--evaluator",
+                "--json",
+                "--quiet",
+            ]
+        )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert exit_code == 0
+        assert payload["usage"] == {
+            "input_tokens": 12,
+            "output_tokens": 21,
+            "cost_usd": None,
+        }
+        state = run_cli.load_session("evaluator-usage", sessions_dir=tmp_path)
+        assert state.usage == Usage(input_tokens=12, output_tokens=21)
+        events = [json.loads(line) for line in state.path.read_text().splitlines()]
+        stop_events = [event for event in events if event["type"] == "stop"]
+        assert len(stop_events) == 1
+        assert stop_events[0]["usage"]["input_tokens"] == 12
+        assert stop_events[0]["usage"]["output_tokens"] == 21
+
+    def test_evaluator_failure_persists_one_stop_with_completed_round_usage(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        partial = LoopResult(
+            stop_reason="completed",
+            final_message="partial answer",
+            iterations=2,
+            usage=Usage(input_tokens=5, output_tokens=10),
+            messages=(),
+        )
+
+        def fail_after_generator(**kwargs: Any) -> None:
+            kwargs["observer"].on_stop(partial)
+            raise RuntimeError("private evaluator failure")
+
+        monkeypatch.setattr(run_cli, "run_with_evaluation", fail_after_generator)
+
+        with pytest.raises(RuntimeError, match="private evaluator failure"):
+            main(
+                [
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "evaluate failure",
+                    "--sessions-dir",
+                    str(tmp_path),
+                    "--session-id",
+                    "evaluator-failure",
+                    "--no-ctx-tools",
+                    "--evaluator",
+                    "--quiet",
+                ]
+            )
+
+        state = run_cli.load_session("evaluator-failure", sessions_dir=tmp_path)
+        assert state.stopped is True
+        assert state.stop_reason == "provider_error"
+        assert state.usage == Usage(input_tokens=5, output_tokens=10)
+        assert state.metadata["ctx_usage"] == {
+            "complete": False,
+            "scope": "completed_generator_rounds",
+        }
+        events = [json.loads(line) for line in state.path.read_text().splitlines()]
+        stop_events = [event for event in events if event["type"] == "stop"]
+        assert len(stop_events) == 1
+        assert stop_events[0]["detail"] == ("evaluator orchestration failed: RuntimeError")
+        assert "private evaluator failure" not in state.path.read_text(encoding="utf-8")
+
+    def test_explicit_minimal_surface_keeps_bootstrap_tools_on_every_iteration(
         self,
         fake_litellm: Any,
         tmp_path: Path,
@@ -997,6 +1293,8 @@ class TestRunCommand:
                 "use ctx only if needed",
                 "--sessions-dir",
                 str(tmp_path),
+                "--ctx-tool-surface",
+                "minimal",
                 "--quiet",
             ]
         )
