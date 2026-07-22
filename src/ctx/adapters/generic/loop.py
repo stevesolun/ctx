@@ -41,7 +41,7 @@ import math
 import queue
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Literal, Protocol
 
 from ctx.adapters.generic.providers import (
@@ -81,14 +81,18 @@ DEFAULT_MAX_EPHEMERAL_CONTEXT_BYTES = 16_384
 DEFAULT_MAX_TURN_TOOLS = 32
 DEFAULT_MAX_TURN_SCHEMA_BYTES = 65_536
 DEFAULT_TURN_PREPARE_TIMEOUT = 1.0
+_EPHEMERAL_USER_CONTEXT_BOUNDARY = "\n\n--- current user request ---\n"
 
 
 @dataclass(frozen=True)
 class TurnPreparation:
     """Request-only context and tools for one provider turn.
 
-    ``ephemeral_context`` is inserted into the provider request after the
-    canonical system message and is never appended to session history.
+    ``ephemeral_context`` is trusted system-level context inserted after the
+    canonical system message. ``ephemeral_user_context`` is lower-authority
+    reference material inserted immediately before the current user request.
+    Neither input is appended directly to session history; provider responses
+    are persisted normally and may independently repeat reference text.
     ``tools=None`` keeps the loop's base catalogue; an empty tuple exposes no
     tools. ``capability_epoch`` identifies the immutable snapshot that
     authorizes calls returned by that provider response.
@@ -98,6 +102,7 @@ class TurnPreparation:
     tools: tuple[ToolDefinition, ...] | None = None
     capability_epoch: int = 0
     usage: Usage = field(default_factory=Usage)
+    ephemeral_user_context: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -323,7 +328,7 @@ def run_loop(
                            allow a call, or a denial reason string to block it.
         turn_controller  - optional host control plane that supplies bounded
                            request-only context and a per-turn capability
-                           snapshot. Its context is never persisted.
+                           snapshot. Its input is not directly persisted.
         turn_prepare_timeout - cooperative deadline for side-effect-free preparation
 
     Safety limits:
@@ -521,7 +526,10 @@ def _run_prepared_turn(
                 if turn_controller is not None:
                     try:
                         request_tools = _validate_turn_payload(
-                            preparation.ephemeral_context,
+                            (
+                                *preparation.ephemeral_context,
+                                *preparation.ephemeral_user_context,
+                            ),
                             request_tools,
                             max_context_bytes=max_context_bytes,
                             max_tools=max_tools,
@@ -541,6 +549,7 @@ def _run_prepared_turn(
                 request_messages = _messages_for_turn(
                     conversation,
                     preparation.ephemeral_context,
+                    preparation.ephemeral_user_context,
                 )
                 advertised_tool_names = frozenset(tool.name for tool in request_tools)
                 enforce_advertised_tools = turn_controller is not None or bool(base_tools)
@@ -861,6 +870,8 @@ def _prepare_turn(
             raise ValueError("capability_epoch must be >= 0")
         if not isinstance(preparation.ephemeral_context, tuple):
             raise TypeError("ephemeral_context must be a tuple of strings")
+        if not isinstance(preparation.ephemeral_user_context, tuple):
+            raise TypeError("ephemeral_user_context must be a tuple of strings")
         if preparation.tools is not None and not isinstance(preparation.tools, tuple):
             raise TypeError("turn tools must be a tuple or None")
     except (TypeError, ValueError) as exc:
@@ -893,6 +904,7 @@ def _prepare_turn(
         raise error
     return TurnPreparation(
         ephemeral_context=preparation.ephemeral_context,
+        ephemeral_user_context=preparation.ephemeral_user_context,
         tools=preparation.tools,
         capability_epoch=preparation.capability_epoch,
         usage=preparation.usage,
@@ -922,15 +934,29 @@ def _call_turn_preparer(
 def _messages_for_turn(
     conversation: list[Message],
     ephemeral_context: tuple[str, ...],
+    ephemeral_user_context: tuple[str, ...],
 ) -> list[Message]:
     messages = list(conversation)
-    if not ephemeral_context:
-        return messages
-    insert_at = 1 if messages and messages[0].role == "system" else 0
-    messages.insert(
-        insert_at,
-        Message(role="system", content="\n\n".join(ephemeral_context)),
-    )
+    if ephemeral_context:
+        insert_at = 1 if messages and messages[0].role == "system" else 0
+        messages.insert(
+            insert_at,
+            Message(role="system", content="\n\n".join(ephemeral_context)),
+        )
+    if ephemeral_user_context:
+        user_index = next(
+            (index for index in range(len(messages) - 1, -1, -1) if messages[index].role == "user"),
+            len(messages),
+        )
+        reference = "\n\n".join(ephemeral_user_context)
+        if user_index == len(messages):
+            messages.append(Message(role="user", content=reference))
+        else:
+            current = messages[user_index]
+            messages[user_index] = replace(
+                current,
+                content=(reference + _EPHEMERAL_USER_CONTEXT_BOUNDARY + current.content),
+            )
     return messages
 
 

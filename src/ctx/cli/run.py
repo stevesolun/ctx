@@ -377,8 +377,8 @@ def _add_ctx_tool_surface_arg(
         help=(
             "CTX capability mode: 'adaptive' selects at most one installed skill "
             "from trusted user/configured roots and submits no CTX schemas; it "
-            "defers when an explicit MCP is attached and falls back to 'minimal' "
-            "when secure local reads are unavailable. 'minimal' exposes "
+            "defers when an explicit MCP is attached and abstains while remaining "
+            "zero-schema when secure local reads are unavailable. 'minimal' exposes "
             "recommend_bundle + wiki_get; 'full' restores the complete "
             "read/lifecycle surface. --allow-tool selects an explicit subset."
         ),
@@ -710,7 +710,7 @@ def _write_session_config_safely(
 ) -> None:
     try:
         store.write_session_config(config)
-    except (OSError, RuntimeError, ValueError) as exc:
+    except Exception as exc:  # noqa: BLE001 - cleanup must preserve the primary failure.
         _logger.warning("ctx session metadata write failed: %s", exc)
 
 
