@@ -12,7 +12,7 @@ Pins:
   * run_with_evaluation with contract_builder: evaluator gets
     refined criteria, system prompt uses contract markdown,
     total_usage sums all four agents
-  * CLI: --contract requires --planner; --contract persists contract
+  * CLI: --contract requires --planner + --evaluator; --contract persists contract
     event into JSONL; JSON output does NOT re-duplicate contract
     (it's in the session file)
   * augmented_system_prompt_with_contract formatting
@@ -701,7 +701,10 @@ class TestCliContract:
     def test_contract_without_planner_rejected(self, tmp_path: Path) -> None:
         from ctx.cli.run import main
 
-        with pytest.raises(SystemExit, match="--contract requires --planner"):
+        with pytest.raises(
+            SystemExit,
+            match="--contract requires --planner and --evaluator",
+        ):
             main(
                 [
                     "run",
@@ -718,58 +721,27 @@ class TestCliContract:
                 ]
             )
 
-    def test_contract_without_evaluator_rejected(
-        self,
-        tmp_path: Path,
-    ) -> None:
+    def test_contract_without_evaluator_rejected(self) -> None:
         """--contract is only meaningful with --evaluator + --planner."""
-        # Without --evaluator the contract flag is silently ignored
-        # (the solo path ignores it since run_with_evaluation isn't
-        # entered); that's acceptable behaviour — document but don't
-        # error. This test pins the current behaviour so a future
-        # change is explicit.
         from ctx.cli.run import main
 
-        # Should not raise — --contract is silently ignored in the
-        # solo path (run_with_evaluation isn't entered). The solo
-        # path with --planner makes TWO provider calls: the planner
-        # call and the Generator's single iteration.
-        fake = types.ModuleType("litellm")
-
-        def _mk(content: str) -> dict[str, Any]:
-            return {
-                "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
-            }
-
-        fake._responses = [  # type: ignore[attr-defined]
-            _mk(_VALID_PLAN_JSON),  # planner call
-            _mk("generator answer"),  # generator
-        ]
-
-        def completion(**kwargs):
-            return fake._responses.pop(0)  # type: ignore[attr-defined]
-
-        fake.completion = completion  # type: ignore[attr-defined]
-        import sys as _sys
-
-        _sys.modules["litellm"] = fake
-        exit_code = main(
-            [
-                "run",
-                "--model",
-                "ollama/x",
-                "--task",
-                "t",
-                "--sessions-dir",
-                str(tmp_path),
-                "--planner",  # planner enabled but evaluator isn't
-                "--contract",  # contract solo path doesn't reach run_with_eval
-                "--no-ctx-tools",
-                "--quiet",
-            ]
-        )
-        assert exit_code == 0
+        with pytest.raises(
+            SystemExit,
+            match="--contract requires --planner and --evaluator",
+        ):
+            main(
+                [
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "t",
+                    "--planner",
+                    "--contract",
+                    "--no-ctx-tools",
+                    "--quiet",
+                ]
+            )
 
     def test_contract_persisted_in_jsonl(
         self,

@@ -420,6 +420,27 @@ class TestBudgets:
         assert result.usage.cost_usd == pytest.approx(0.30)
         assert len([m for m in result.messages if m.role == "tool"]) == 2
 
+    def test_exact_cost_budget_stops_before_second_provider_call(self) -> None:
+        tc = ToolCall(id="c1", name="srv__noop", arguments={})
+        provider = _Scripted(
+            [
+                _tool_response(tc, usage=Usage(cost_usd=0.10)),
+                _stop_response("unreached", usage=Usage(cost_usd=0.10)),
+            ]
+        )
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="spend exactly",
+            tool_executor=lambda _call: "ok",
+            budget_usd=0.10,
+        )
+
+        assert result.stop_reason == "cost_budget"
+        assert len(provider.calls) == 1
+        assert result.usage.cost_usd == pytest.approx(0.10)
+
     def test_token_budget_trips(self) -> None:
         tc = ToolCall(id="c1", name="srv__noop", arguments={})
         heavy = _tool_response(tc, usage=Usage(input_tokens=100, output_tokens=50))
@@ -436,6 +457,97 @@ class TestBudgets:
         assert result.iterations == 2
         assert result.usage.input_tokens + result.usage.output_tokens == 300
         assert len([m for m in result.messages if m.role == "tool"]) == 1
+
+    def test_exact_token_budget_stops_before_second_provider_call(self) -> None:
+        tc = ToolCall(id="c1", name="srv__noop", arguments={})
+        provider = _Scripted(
+            [
+                _tool_response(tc, usage=Usage(input_tokens=6, output_tokens=4)),
+                _stop_response("unreached"),
+            ]
+        )
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="spend exactly",
+            tool_executor=lambda _call: "ok",
+            budget_tokens=10,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert len(provider.calls) == 1
+        assert result.usage.input_tokens + result.usage.output_tokens == 10
+
+    @pytest.mark.parametrize(
+        ("budget_tokens", "budget_usd", "expected_reason"),
+        [
+            (10, None, "token_budget"),
+            (None, 0.10, "cost_budget"),
+        ],
+    )
+    def test_exact_budget_stops_before_compactor_provider_call(
+        self,
+        budget_tokens: int | None,
+        budget_usd: float | None,
+        expected_reason: str,
+    ) -> None:
+        from ctx.adapters.generic.compaction import CompactionResult
+
+        class _CountingCompactor:
+            calls = 0
+
+            def should_compact(self, messages):
+                return True
+
+            def compact_with_usage(self, messages, provider):
+                self.calls += 1
+                return CompactionResult(
+                    new_messages=list(messages),
+                    compacted_count=0,
+                    summary="unreached",
+                    usage=Usage(input_tokens=1, output_tokens=1, cost_usd=0.01),
+                )
+
+        tc = ToolCall(id="c1", name="srv__noop", arguments={})
+        provider = _Scripted(
+            [
+                _tool_response(
+                    tc,
+                    usage=Usage(input_tokens=6, output_tokens=4, cost_usd=0.10),
+                )
+            ]
+        )
+        compactor = _CountingCompactor()
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="spend exactly",
+            tool_executor=lambda _call: "ok",
+            compactor=compactor,
+            budget_tokens=budget_tokens,
+            budget_usd=budget_usd,
+        )
+
+        assert result.stop_reason == expected_reason
+        assert compactor.calls == 0
+        assert len(provider.calls) == 1
+
+    def test_exact_initial_usage_stops_before_first_provider_call(self) -> None:
+        provider = _Scripted([_stop_response("unreached")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="already exhausted",
+            budget_tokens=10,
+            initial_usage=Usage(input_tokens=6, output_tokens=4),
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert result.iterations == 0
+        assert provider.calls == []
 
     def test_cost_budget_trips_on_terminal_response(self) -> None:
         provider = _Scripted([_stop_response("done", usage=Usage(cost_usd=0.50))])

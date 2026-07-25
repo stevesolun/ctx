@@ -18,8 +18,8 @@ hooks and mutation hooks respectively.
 Stop conditions (deterministic, in priority order):
   1. Model returned no tool_calls and content != ''     → ``"completed"``
   2. Max iterations reached                              → ``"max_iterations"``
-  3. Cumulative cost exceeded ``budget_usd``              → ``"cost_budget"``
-  4. Total tokens exceeded ``budget_tokens``              → ``"token_budget"``
+  3. Cumulative cost exhausted ``budget_usd``              → ``"cost_budget"``
+  4. Total tokens exhausted ``budget_tokens``              → ``"token_budget"``
   5. Caller cancellation (``cancel_event`` set)           → ``"cancelled"``
   6. Provider returned finish_reason == 'content_filter' → ``"content_filter"``
   7. Tool policy denied a model-requested call           -> ``"tool_denied"``
@@ -272,18 +272,27 @@ def _budget_stop_reason(
     *,
     budget_usd: float | None,
     budget_tokens: int | None,
+    before_call: bool = False,
 ) -> tuple[StopReason | None, str]:
-    if budget_usd is not None and totals.cost_usd > budget_usd:
+    cost_limit_hit = budget_usd is not None and (
+        totals.cost_usd >= budget_usd if before_call else totals.cost_usd > budget_usd
+    )
+    if cost_limit_hit:
         return (
             "cost_budget",
-            f"cumulative cost ${totals.cost_usd:.4f} exceeded budget ${budget_usd:.4f}",
+            f"cumulative cost ${totals.cost_usd:.4f} "
+            f"{'exhausted' if before_call else 'exceeded'} budget ${budget_usd:.4f}",
         )
     if budget_tokens is not None:
         total_tokens = totals.input_tokens + totals.output_tokens
-        if total_tokens > budget_tokens:
+        token_limit_hit = (
+            total_tokens >= budget_tokens if before_call else total_tokens > budget_tokens
+        )
+        if token_limit_hit:
             return (
                 "token_budget",
-                f"cumulative tokens {total_tokens} exceeded budget {budget_tokens}",
+                f"cumulative tokens {total_tokens} "
+                f"{'exhausted' if before_call else 'exceeded'} budget {budget_tokens}",
             )
     return None, ""
 
@@ -342,8 +351,8 @@ def run_loop(
 
     Safety limits:
         max_iterations   - hard cap on model calls (default 25)
-        budget_usd       - stop when cumulative reported cost exceeds (optional)
-        budget_tokens    - stop when input+output tokens exceed (optional)
+        budget_usd       - stop before another call would exceed reported cost (optional)
+        budget_tokens    - stop before another call would exceed reported tokens (optional)
         cancel_event     - caller sets to stop between iterations
         max_ephemeral_context_bytes - request-only context byte ceiling
         max_turn_tools   - dynamic capability count ceiling
@@ -415,6 +424,16 @@ def run_loop(
     stop_detail = ""
 
     while iteration < max_iterations:
+        budget_stop, budget_detail = _budget_stop_reason(
+            totals,
+            budget_usd=budget_usd,
+            budget_tokens=budget_tokens,
+            before_call=True,
+        )
+        if budget_stop is not None:
+            stop_reason = budget_stop
+            stop_detail = budget_detail
+            break
         iteration += 1
 
         if cancel_event is not None and cancel_event.is_set():
@@ -526,6 +545,7 @@ def _run_prepared_turn(
                     totals,
                     budget_usd=budget_usd,
                     budget_tokens=budget_tokens,
+                    before_call=True,
                 )
                 if budget_stop is not None:
                     step = _TurnStep(budget_stop, budget_detail)
@@ -586,6 +606,7 @@ def _run_prepared_turn(
                     totals,
                     budget_usd=budget_usd,
                     budget_tokens=budget_tokens,
+                    before_call=True,
                 )
                 if budget_stop is not None:
                     step = _TurnStep(budget_stop, budget_detail)
@@ -792,6 +813,15 @@ def _run_prepared_turn(
                     break
 
                 if compactor is not None and compactor.should_compact(conversation):
+                    budget_stop, budget_detail = _budget_stop_reason(
+                        totals,
+                        budget_usd=budget_usd,
+                        budget_tokens=budget_tokens,
+                        before_call=True,
+                    )
+                    if budget_stop is not None:
+                        step = _TurnStep(budget_stop, budget_detail)
+                        break
                     try:
                         if hasattr(compactor, "compact_with_usage"):
                             cresult = compactor.compact_with_usage(conversation, provider)

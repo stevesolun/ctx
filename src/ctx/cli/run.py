@@ -1740,7 +1740,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
         return 2
 
-    if args.evaluator and args.contract and not args.planner:
+    if args.contract and not (args.planner and args.evaluator):
         with telemetry_span():
             _record_cli_telemetry(
                 "ctx.cli.run",
@@ -1752,8 +1752,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 error_kind="SystemExit",
             )
         raise SystemExit(
-            "error: --contract requires --planner (the contract refines the "
-            "planner's success_criteria into testable clauses)."
+            "error: --contract requires --planner and --evaluator "
+            "(all three agents share the same testable success criteria)."
         )
 
     sdir = Path(args.sessions_dir) if args.sessions_dir else default_sessions_dir()
