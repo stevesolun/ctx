@@ -639,6 +639,7 @@ class TestRuntimeLifecycle:
                             "attribution": "exact",
                             "input_tokens": 12,
                             "cached_input_tokens": 7,
+                            "cache_write_input_tokens": 3,
                             "uncached_input_tokens": 5,
                             "output_tokens": 8,
                             "tokens_reported": True,
@@ -657,6 +658,7 @@ class TestRuntimeLifecycle:
             "ctx.tool_usage.records",
             "ctx.tool_usage.input_tokens",
             "ctx.tool_usage.cached_input_tokens",
+            "ctx.tool_usage.cache_write_input_tokens",
             "ctx.tool_usage.uncached_input_tokens",
             "ctx.tool_usage.output_tokens",
             "ctx.tool_usage.tokens",
@@ -671,6 +673,7 @@ class TestRuntimeLifecycle:
         ]
         assert usage_payloads[0]["ctx.usage.total_tokens"] == 20
         assert usage_payloads[0]["ctx.usage.cached_input_tokens"] == 7
+        assert usage_payloads[0]["ctx.usage.cache_write_input_tokens"] == 3
         assert usage_payloads[0]["ctx.usage.uncached_input_tokens"] == 5
         for event in events:
             payload = event["payload"]
@@ -726,6 +729,17 @@ class TestRuntimeLifecycle:
                     "entity_type": "mcp-server",
                     "slug": "filesystem",
                     "evidence": "read workspace tree",
+                    "token_usage": {
+                        "attribution": "unavailable",
+                        "input_tokens": 0,
+                        "cached_input_tokens": 0,
+                        "cache_write_input_tokens": 0,
+                        "uncached_input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                        "tokens_reported": False,
+                        "cost_usd": 0.0,
+                    },
                 },
             ),
         ]
@@ -751,6 +765,7 @@ class TestRuntimeLifecycle:
             "records": 1,
             "input_tokens": None,
             "cached_input_tokens": None,
+            "cache_write_input_tokens": None,
             "uncached_input_tokens": None,
             "output_tokens": None,
             "total_tokens": None,
@@ -790,6 +805,14 @@ class TestRuntimeLifecycle:
             entity_type="skill",
             slug="fastapi-pro",
             evidence=f"opened {secret} from /Users/steves/private/app.py",
+            token_usage={
+                "attribution": "exact",
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "attribution_reason": f"reported with {secret}",
+                "model": "/Users/steves/private/model",
+                "provider": f"provider-{secret}",
+            },
         )
         validation = store.record_validation(
             session_id="s-private",
@@ -822,6 +845,224 @@ class TestRuntimeLifecycle:
         assert "/Users/steves" not in payload
         assert "[redacted]" in payload
         assert "[redacted-path]" in payload
+        token_usage = used["event"]["token_usage"]
+        assert token_usage["attribution_reason"] == "reported with [redacted]"
+        assert token_usage["model"].startswith("[path_hash:sha256:")
+        assert token_usage["provider"] == "provider-[redacted]"
+
+    def test_runtime_lifecycle_rejects_impossible_cache_write_usage(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+
+        with pytest.raises(
+            ValueError,
+            match="cache_write_input_tokens cannot exceed input_tokens",
+        ):
+            store.mark_entity_used(
+                session_id="s-invalid-cache",
+                entity_type="skill",
+                slug="fastapi-pro",
+                token_usage={
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "cache_write_input_tokens": 6,
+                    "output_tokens": 1,
+                },
+            )
+
+    def test_runtime_lifecycle_rejects_reported_usage_without_output(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+
+        with pytest.raises(
+            ValueError,
+            match="tokens_reported=true requires input_tokens and output_tokens",
+        ):
+            store.mark_entity_used(
+                session_id="s-incomplete-usage",
+                entity_type="skill",
+                slug="fastapi-pro",
+                token_usage={
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "tokens_reported": True,
+                },
+            )
+
+    def test_runtime_lifecycle_rejects_contradictory_total_usage(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+
+        with pytest.raises(
+            ValueError,
+            match=r"total_tokens must equal input_tokens \+ output_tokens",
+        ):
+            store.mark_entity_used(
+                session_id="s-contradictory-usage",
+                entity_type="skill",
+                slug="fastapi-pro",
+                token_usage={
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 999,
+                    "tokens_reported": True,
+                },
+            )
+
+    @pytest.mark.parametrize(
+        "token_usage",
+        [
+            {
+                "attribution": "exact",
+                "input_tokens": 5,
+                "output_tokens": 1,
+                "tokens_reported": False,
+            },
+            {
+                "attribution": "exact",
+                "input_tokens": 5,
+            },
+        ],
+    )
+    def test_runtime_lifecycle_rejects_untruthful_exact_usage(
+        self,
+        tmp_path: Path,
+        token_usage: dict[str, Any],
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+
+        with pytest.raises(
+            ValueError,
+            match="attribution=exact requires input_tokens, output_tokens, and tokens_reported=true",
+        ):
+            store.mark_entity_used(
+                session_id="s-untruthful-exact",
+                entity_type="skill",
+                slug="fastapi-pro",
+                token_usage=token_usage,
+            )
+
+    def test_runtime_lifecycle_preserves_exact_zero_usage(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+
+        used = store.mark_entity_used(
+            session_id="s-zero-usage",
+            entity_type="skill",
+            slug="fastapi-pro",
+            token_usage={
+                "attribution": "exact",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "tokens_reported": True,
+                "cost_usd": 0.0,
+            },
+        )
+
+        token_usage = used["event"]["token_usage"]
+        assert token_usage["input_tokens"] == 0
+        assert token_usage["output_tokens"] == 0
+        assert token_usage["total_tokens"] == 0
+        assert token_usage["tokens_reported"] is True
+
+    def test_session_state_normalizes_all_historical_usage_records(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+        entities = [
+            ("skill", "missing-usage"),
+            ("agent", "malformed-reported"),
+            ("mcp-server", "contradictory-total"),
+        ]
+        for entity_type, slug in entities:
+            store.load_entity(
+                session_id="s-historical-usage",
+                entity_type=entity_type,
+                slug=slug,
+            )
+        historical_events = [
+            {
+                "action": "used",
+                "session_id": "s-historical-usage",
+                "entity_type": "skill",
+                "slug": "missing-usage",
+            },
+            {
+                "action": "used",
+                "session_id": "s-historical-usage",
+                "entity_type": "agent",
+                "slug": "malformed-reported",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 2,
+                    "output_tokens": 1,
+                    "total_tokens": 3,
+                    "tokens_reported": "true",
+                },
+            },
+            {
+                "action": "used",
+                "session_id": "s-historical-usage",
+                "entity_type": "mcp-server",
+                "slug": "contradictory-total",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 999,
+                    "tokens_reported": True,
+                },
+            },
+        ]
+        with store.events_path.open("a", encoding="utf-8") as event_file:
+            for event in historical_events:
+                event_file.write(json.dumps(event) + "\n")
+
+        state = store.session_state(session_id="s-historical-usage")
+        by_slug = {entry["slug"]: entry["token_usage"] for entry in state["used"]}
+
+        missing = by_slug["missing-usage"]
+        assert missing["records"] == 1
+        assert missing["total_tokens"] is None
+        assert missing["tokens_reported"] is False
+        assert missing["by_attribution"]["unavailable"] == 1
+
+        malformed = by_slug["malformed-reported"]
+        assert malformed["records"] == 1
+        assert malformed["input_tokens"] == 2
+        assert malformed["output_tokens"] == 1
+        assert malformed["total_tokens"] == 3
+        assert malformed["tokens_reported"] is False
+        assert malformed["by_attribution"]["estimated"] == 1
+
+        contradictory = by_slug["contradictory-total"]
+        assert contradictory["records"] == 1
+        assert contradictory["total_tokens"] == 6
+        assert contradictory["tokens_reported"] is False
+        assert contradictory["by_attribution"]["estimated"] == 1
 
     def test_runtime_lifecycle_usage_metrics_share_lifecycle_span(
         self,
@@ -1293,6 +1534,7 @@ class TestRuntimeLifecycle:
             "records": 1,
             "input_tokens": 10,
             "cached_input_tokens": None,
+            "cache_write_input_tokens": None,
             "uncached_input_tokens": None,
             "output_tokens": 5,
             "total_tokens": 15,

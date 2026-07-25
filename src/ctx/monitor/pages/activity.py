@@ -174,11 +174,28 @@ def render_runtime_lifecycle(
         for attribution, count in sorted(by_attribution.items())
     )
 
+    def usage_value(value: Any) -> str:
+        return "unavailable" if value is None else html.escape(str(value))
+
     def usage_cell(row: dict[str, Any], key: str) -> str:
         usage = row.get("token_usage")
         if not isinstance(usage, dict):
-            return ""
-        return html.escape(str(usage.get(key) or ""))
+            return "unavailable"
+        return usage_value(usage.get(key))
+
+    token_total_rows = "".join(
+        f"<tr><td>{label}</td><td>{usage_value(token_usage.get(key))}</td></tr>"
+        for label, key in (
+            ("Input", "input_tokens"),
+            ("Cache read", "cached_input_tokens"),
+            ("Cache write", "cache_write_input_tokens"),
+            ("Uncached input", "uncached_input_tokens"),
+            ("Output", "output_tokens"),
+        )
+    )
+    total_tokens = usage_value(token_usage.get("total_tokens"))
+    cost_value = token_usage.get("cost_usd")
+    cost = "unavailable" if cost_value is None else f"${float(cost_value):.4f}"
 
     recent_usage_rows = "".join(
         "<tr>"
@@ -214,8 +231,11 @@ def render_runtime_lifecycle(
         + "</div>"
         "<div class='card'><strong>Token usage</strong>"
         f"<p><strong>{token_usage.get('records', 0)}</strong> records / "
-        f"<strong>{token_usage.get('total_tokens', 0)}</strong> tokens / "
-        f"<strong>${float(token_usage.get('cost_usd') or 0.0):.4f}</strong> cost</p>"
+        f"<strong>{total_tokens}</strong> tokens / "
+        f"<strong>{cost}</strong> cost</p>"
+        "<table><tr><th>Token class</th><th>Total</th></tr>"
+        + token_total_rows
+        + "</table>"
         + (
             "<table><tr><th>Attribution</th><th>Records</th></tr>" + attribution_rows + "</table>"
             if attribution_rows

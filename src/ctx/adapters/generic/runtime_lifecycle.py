@@ -39,6 +39,20 @@ _VALIDATION_STATUSES = {"passed", "failed", "skipped", "error"}
 _ESCALATION_STATUSES = {"open", "resolved", "ignored"}
 _SELECTION_SOURCES = {"user", "system", "host", "unknown"}
 _TOKEN_ATTRIBUTIONS = {"exact", "estimated", "unavailable"}
+_TOKEN_USAGE_FIELDS = (
+    "input_tokens",
+    "cached_input_tokens",
+    "cache_write_input_tokens",
+    "uncached_input_tokens",
+    "output_tokens",
+    "total_tokens",
+)
+_TOKEN_USAGE_METADATA_FIELDS = ("attribution_reason", "model", "provider")
+_LEGACY_ATTRIBUTION_REASON = "legacy token usage without attribution; treated as estimated"
+_INCONSISTENT_TOTAL_REASON = "inconsistent total token usage; treated as estimated"
+_MALFORMED_REPORTED_REASON = "invalid tokens_reported value; treated as estimated"
+_UNREPORTED_EXACT_REASON = "exact token usage was not fully reported; treated as estimated"
+_INCOMPLETE_EXACT_REASON = "incomplete exact token usage; treated as unavailable"
 _LIFECYCLE_SANITIZER_CONFIG = {"enabled": True, "mode": "local_redacted"}
 _LIFECYCLE_FREE_TEXT_FIELDS = ("reason", "evidence", "command", "summary", "trigger", "status")
 _PATH_SEGMENT_RE = r"[^/\s'\"`<>|:;,\)\]]+"
@@ -321,9 +335,8 @@ class RuntimeLifecycleStore:
                 loaded[key]["last_used_at"] = event.get("created_at")
                 if event.get("evidence"):
                     loaded[key]["evidence"].append(event["evidence"])
-                token_usage = event.get("token_usage")
-                if isinstance(token_usage, dict):
-                    _merge_token_usage(loaded[key]["token_usage"], token_usage)
+                token_usage = normalize_historical_token_usage(event.get("token_usage"))
+                _merge_token_usage(loaded[key]["token_usage"], token_usage)
             elif action == "unload_requested":
                 current = loaded.get(key)
                 pending = next(
@@ -463,6 +476,21 @@ def _sanitize_lifecycle_event(event: dict[str, Any]) -> dict[str, Any]:
     payload = redacted.get("payload")
     if isinstance(payload, dict):
         redacted["payload"] = sanitize_payload(payload, config=_LIFECYCLE_SANITIZER_CONFIG)
+    token_usage = redacted.get("token_usage")
+    if isinstance(token_usage, dict):
+        metadata = {
+            field: token_usage[field]
+            for field in ("attribution_reason", "model", "provider")
+            if field in token_usage
+        }
+        redacted_usage = dict(token_usage)
+        redacted_usage.update(
+            sanitize_payload(
+                metadata,
+                config=_LIFECYCLE_SANITIZER_CONFIG,
+            )
+        )
+        redacted["token_usage"] = redacted_usage
     source_context = redacted.get("source_context")
     if isinstance(source_context, dict):
         redacted["source_context"] = sanitize_payload(
@@ -545,6 +573,7 @@ def _record_runtime_lifecycle_telemetry(event: dict[str, Any]) -> None:
         for usage_key in (
             "input_tokens",
             "cached_input_tokens",
+            "cache_write_input_tokens",
             "uncached_input_tokens",
             "output_tokens",
             "total_tokens",
@@ -609,6 +638,7 @@ def _record_token_usage_metrics(
         metric_names = {
             "input_tokens": "ctx.tool_usage.input_tokens",
             "cached_input_tokens": "ctx.tool_usage.cached_input_tokens",
+            "cache_write_input_tokens": "ctx.tool_usage.cache_write_input_tokens",
             "uncached_input_tokens": "ctx.tool_usage.uncached_input_tokens",
             "output_tokens": "ctx.tool_usage.output_tokens",
             "total_tokens": "ctx.tool_usage.tokens",
@@ -695,18 +725,28 @@ def _token_usage_state(raw: dict[str, Any] | None) -> dict[str, Any]:
         raw.get("cached_input_tokens"),
         "token_usage.cached_input_tokens",
     )
+    cache_write_input_tokens = _nonnegative_int(
+        raw.get("cache_write_input_tokens"),
+        "token_usage.cache_write_input_tokens",
+    )
     uncached_input_tokens = _nonnegative_int(
         raw.get("uncached_input_tokens"),
         "token_usage.uncached_input_tokens",
     )
     output_tokens = _nonnegative_int(raw.get("output_tokens"), "token_usage.output_tokens")
     total_tokens = _nonnegative_int(raw.get("total_tokens"), "token_usage.total_tokens")
-    if total_tokens is None and input_tokens is not None and output_tokens is not None:
-        total_tokens = input_tokens + output_tokens
+    if input_tokens is not None and output_tokens is not None:
+        expected_total_tokens = input_tokens + output_tokens
+        if total_tokens is not None and total_tokens != expected_total_tokens:
+            raise ValueError("token_usage.total_tokens must equal input_tokens + output_tokens")
+        if total_tokens is None:
+            total_tokens = expected_total_tokens
     cost_usd = _nonnegative_float(raw.get("cost_usd"), "token_usage.cost_usd")
     if input_tokens is not None:
         if cached_input_tokens is not None and cached_input_tokens > input_tokens:
             raise ValueError("token_usage.cached_input_tokens cannot exceed input_tokens")
+        if cache_write_input_tokens is not None and cache_write_input_tokens > input_tokens:
+            raise ValueError("token_usage.cache_write_input_tokens cannot exceed input_tokens")
         if uncached_input_tokens is not None and uncached_input_tokens > input_tokens:
             raise ValueError("token_usage.uncached_input_tokens cannot exceed input_tokens")
         if (
@@ -724,10 +764,29 @@ def _token_usage_state(raw: dict[str, Any] | None) -> dict[str, Any]:
         tokens_reported = tokens_reported_raw
     else:
         tokens_reported = input_tokens is not None and output_tokens is not None
+    if tokens_reported and (input_tokens is None or output_tokens is None):
+        raise ValueError("token_usage.tokens_reported=true requires input_tokens and output_tokens")
+    if attribution == "exact" and (
+        input_tokens is None or output_tokens is None or tokens_reported is not True
+    ):
+        raise ValueError(
+            "token_usage.attribution=exact requires input_tokens, output_tokens, "
+            "and tokens_reported=true"
+        )
+    if attribution == "unavailable":
+        input_tokens = None
+        cached_input_tokens = None
+        cache_write_input_tokens = None
+        uncached_input_tokens = None
+        output_tokens = None
+        total_tokens = None
+        tokens_reported = False
+        cost_usd = None
     state = {
         "attribution": attribution,
         "input_tokens": input_tokens,
         "cached_input_tokens": cached_input_tokens,
+        "cache_write_input_tokens": cache_write_input_tokens,
         "uncached_input_tokens": uncached_input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
@@ -740,11 +799,177 @@ def _token_usage_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     return state
 
 
+def normalize_historical_token_usage(raw: Any) -> dict[str, Any]:
+    """Tolerantly normalize persisted usage for lifecycle and monitor readers."""
+
+    usage = raw if isinstance(raw, dict) else {}
+    metadata = _historical_token_usage_metadata(usage)
+    input_tokens = _historical_int_value(usage.get("input_tokens"))
+    cached_raw = (
+        usage.get("cached_input_tokens")
+        if "cached_input_tokens" in usage
+        else usage.get("cache_read_input_tokens")
+    )
+    cached_input_tokens = _historical_int_value(cached_raw)
+    cache_write_input_tokens = _historical_int_value(usage.get("cache_write_input_tokens"))
+    uncached_input_tokens = _historical_int_value(usage.get("uncached_input_tokens"))
+    cache_fields_valid = True
+    if cached_raw is not None and cached_input_tokens is None:
+        cache_fields_valid = False
+    if usage.get("cache_write_input_tokens") is not None and cache_write_input_tokens is None:
+        cache_fields_valid = False
+    if usage.get("uncached_input_tokens") is not None and uncached_input_tokens is None:
+        cache_fields_valid = False
+    if input_tokens is None and any(
+        value is not None
+        for value in (cached_input_tokens, cache_write_input_tokens, uncached_input_tokens)
+    ):
+        cached_input_tokens = None
+        cache_write_input_tokens = None
+        uncached_input_tokens = None
+        cache_fields_valid = False
+    elif input_tokens is not None:
+        if cached_input_tokens is not None and cached_input_tokens > input_tokens:
+            cached_input_tokens = None
+            uncached_input_tokens = None
+            cache_fields_valid = False
+        if cache_write_input_tokens is not None and cache_write_input_tokens > input_tokens:
+            cache_write_input_tokens = None
+            cache_fields_valid = False
+        if uncached_input_tokens is not None and uncached_input_tokens > input_tokens:
+            cached_input_tokens = None
+            uncached_input_tokens = None
+            cache_fields_valid = False
+        if (
+            cached_input_tokens is not None
+            and uncached_input_tokens is not None
+            and cached_input_tokens + uncached_input_tokens != input_tokens
+        ):
+            cached_input_tokens = None
+            uncached_input_tokens = None
+            cache_fields_valid = False
+    if (
+        "uncached_input_tokens" not in usage
+        and input_tokens is not None
+        and cached_input_tokens is not None
+    ):
+        uncached_input_tokens = input_tokens - cached_input_tokens
+
+    output_tokens = _historical_int_value(usage.get("output_tokens"))
+    total_tokens_raw = usage.get("total_tokens")
+    total_tokens = _historical_int_value(total_tokens_raw)
+    total_tokens_supplied = total_tokens_raw is not None and total_tokens_raw != ""
+    expected_total_tokens: int | None = None
+    if input_tokens is not None and output_tokens is not None:
+        expected_total_tokens = input_tokens + output_tokens
+    complete_token_counts = expected_total_tokens is not None
+    total_tokens_contradictory = bool(
+        complete_token_counts and total_tokens_supplied and total_tokens != expected_total_tokens
+    )
+    if complete_token_counts and not total_tokens_supplied:
+        total_tokens = expected_total_tokens
+
+    raw_attribution = usage.get("attribution")
+    attribution_missing = raw_attribution is None or (
+        isinstance(raw_attribution, str) and not raw_attribution.strip()
+    )
+    if attribution_missing and complete_token_counts and cache_fields_valid:
+        attribution = "estimated"
+        metadata["attribution_reason"] = _LEGACY_ATTRIBUTION_REASON
+    else:
+        attribution = (
+            raw_attribution.strip().lower() if isinstance(raw_attribution, str) else "unavailable"
+        )
+        if attribution not in _TOKEN_ATTRIBUTIONS:
+            attribution = "unavailable"
+    if total_tokens_contradictory and attribution != "unavailable":
+        total_tokens = expected_total_tokens
+        if attribution == "exact":
+            attribution = "estimated"
+            metadata["attribution_reason"] = _INCONSISTENT_TOTAL_REASON
+
+    reported_present = "tokens_reported" in usage
+    reported_raw = usage.get("tokens_reported")
+    reported_malformed = reported_present and not isinstance(reported_raw, bool)
+    if not reported_present:
+        tokens_reported = complete_token_counts
+    elif isinstance(reported_raw, bool):
+        tokens_reported = reported_raw
+    else:
+        tokens_reported = False
+    if not complete_token_counts or not cache_fields_valid or total_tokens_contradictory:
+        tokens_reported = False
+
+    if attribution == "exact" and not tokens_reported:
+        if complete_token_counts:
+            attribution = "estimated"
+            metadata["attribution_reason"] = (
+                _MALFORMED_REPORTED_REASON if reported_malformed else _UNREPORTED_EXACT_REASON
+            )
+        else:
+            attribution = "unavailable"
+            metadata["attribution_reason"] = _INCOMPLETE_EXACT_REASON
+    if attribution == "unavailable":
+        return {
+            "attribution": attribution,
+            **{key: None for key in _TOKEN_USAGE_FIELDS},
+            "tokens_reported": False,
+            "cost_usd": None,
+            **metadata,
+        }
+    return {
+        "attribution": attribution,
+        "input_tokens": input_tokens,
+        "cached_input_tokens": cached_input_tokens,
+        "cache_write_input_tokens": cache_write_input_tokens,
+        "uncached_input_tokens": uncached_input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "tokens_reported": tokens_reported,
+        "cost_usd": _historical_float_value(usage.get("cost_usd")),
+        **metadata,
+    }
+
+
+def _historical_int_value(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return None
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        return None
+    return result if result >= 0 else None
+
+
+def _historical_float_value(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) and result >= 0 else None
+
+
+def _historical_token_usage_metadata(usage: dict[str, Any]) -> dict[str, str | None]:
+    metadata = {
+        key: value.strip() if isinstance(value, str) and value.strip() else None
+        for key in _TOKEN_USAGE_METADATA_FIELDS
+        if (value := usage.get(key)) is not None
+    }
+    sanitized = sanitize_payload(metadata, config=_LIFECYCLE_SANITIZER_CONFIG)
+    return {
+        key: value if isinstance((value := sanitized.get(key)), str) else None
+        for key in _TOKEN_USAGE_METADATA_FIELDS
+    }
+
+
 def _empty_token_usage_summary() -> dict[str, Any]:
     return {
         "records": 0,
         "input_tokens": 0,
         "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
         "uncached_input_tokens": 0,
         "output_tokens": 0,
         "total_tokens": 0,
@@ -762,13 +987,7 @@ def _merge_token_usage(summary: dict[str, Any], usage: dict[str, Any]) -> None:
         {key: 0 for key in sorted(_TOKEN_ATTRIBUTIONS)},
     )
     by_attribution[attribution] = int(by_attribution.get(attribution) or 0) + 1
-    for key in (
-        "input_tokens",
-        "cached_input_tokens",
-        "uncached_input_tokens",
-        "output_tokens",
-        "total_tokens",
-    ):
+    for key in _TOKEN_USAGE_FIELDS:
         value = usage.get(key)
         current = summary.get(key)
         if current is None or isinstance(value, bool) or not isinstance(value, int):

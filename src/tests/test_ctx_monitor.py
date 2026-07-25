@@ -1000,8 +1000,12 @@ def test_runtime_lifecycle_summary_reads_validation_and_escalation_events(
                 "token_usage": {
                     "attribution": "exact",
                     "input_tokens": 10,
+                    "cached_input_tokens": 6,
+                    "cache_write_input_tokens": 2,
+                    "uncached_input_tokens": 4,
                     "output_tokens": 5,
                     "total_tokens": 15,
+                    "tokens_reported": True,
                     "cost_usd": 0.02,
                 },
                 "created_at": "2026-05-08T01:10:00Z",
@@ -1035,8 +1039,12 @@ def test_runtime_lifecycle_summary_reads_validation_and_escalation_events(
     assert summary["token_usage"] == {
         "records": 1,
         "input_tokens": 10,
+        "cached_input_tokens": 6,
+        "cache_write_input_tokens": 2,
+        "uncached_input_tokens": 4,
         "output_tokens": 5,
         "total_tokens": 15,
+        "tokens_reported": True,
         "cost_usd": 0.02,
         "by_attribution": {"exact": 1, "estimated": 0, "unavailable": 0},
     }
@@ -1075,6 +1083,14 @@ def test_runtime_lifecycle_summary_counts_mcp_token_usage_history(
                 "token_usage": {
                     "attribution": "unavailable",
                     "attribution_reason": "host did not provide per-tool token usage",
+                    "input_tokens": 0,
+                    "cached_input_tokens": 0,
+                    "cache_write_input_tokens": 0,
+                    "uncached_input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                    "tokens_reported": False,
+                    "cost_usd": 0.0,
                 },
                 "created_at": "2026-05-08T01:09:00Z",
             },
@@ -1086,10 +1102,14 @@ def test_runtime_lifecycle_summary_counts_mcp_token_usage_history(
     assert summary["tool_selection"]["used_total"] == 1
     assert summary["token_usage"] == {
         "records": 1,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "total_tokens": 0,
-        "cost_usd": 0.0,
+        "input_tokens": None,
+        "cached_input_tokens": None,
+        "cache_write_input_tokens": None,
+        "uncached_input_tokens": None,
+        "output_tokens": None,
+        "total_tokens": None,
+        "tokens_reported": False,
+        "cost_usd": None,
         "by_attribution": {"exact": 0, "estimated": 0, "unavailable": 1},
     }
     history = summary["token_usage_history"]
@@ -1100,6 +1120,476 @@ def test_runtime_lifecycle_summary_counts_mcp_token_usage_history(
     assert history["by_session"][0]["session_id"] == "s-mcp"
     assert history["by_source"][0]["selection_source"] == "host"
     assert summary["recent_tool_usage"][0]["token_usage"]["attribution"] == "unavailable"
+
+
+def test_runtime_lifecycle_summary_aggregates_complete_cache_usage_by_dimension(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    complete_load = {
+        "action": "load_requested",
+        "session_id": "s-complete",
+        "entity_type": "skill",
+        "slug": "cache-aware",
+        "selected": True,
+        "selection_source": "host",
+    }
+    complete_usage = [
+        {
+            "action": "used",
+            "session_id": "s-complete",
+            "entity_type": "skill",
+            "slug": "cache-aware",
+            "token_usage": {
+                "attribution": "exact",
+                "input_tokens": 10,
+                "cached_input_tokens": 4,
+                "cache_write_input_tokens": 2,
+                "uncached_input_tokens": 6,
+                "output_tokens": 2,
+                "total_tokens": 12,
+                "tokens_reported": True,
+                "cost_usd": 0.01,
+            },
+        },
+        {
+            "action": "used",
+            "session_id": "s-complete",
+            "entity_type": "skill",
+            "slug": "cache-aware",
+            "token_usage": {
+                "attribution": "exact",
+                "input_tokens": 5,
+                "cached_input_tokens": 2,
+                "cache_write_input_tokens": 1,
+                "uncached_input_tokens": 3,
+                "output_tokens": 1,
+                "total_tokens": 6,
+                "tokens_reported": True,
+                "cost_usd": 0.02,
+            },
+        },
+    ]
+    missing_load = {
+        "action": "load_requested",
+        "session_id": "s-missing",
+        "entity_type": "agent",
+        "slug": "usage-missing",
+        "selected": False,
+        "selection_source": "system",
+    }
+    missing_usage = {
+        "action": "used",
+        "session_id": "s-missing",
+        "entity_type": "agent",
+        "slug": "usage-missing",
+    }
+    _write_runtime_events(
+        events,
+        [complete_load, *complete_usage, missing_load, missing_usage],
+    )
+
+    summary = runtime_service.lifecycle_summary(events)
+
+    assert summary["token_usage"] == {
+        "records": 3,
+        "input_tokens": None,
+        "cached_input_tokens": None,
+        "cache_write_input_tokens": None,
+        "uncached_input_tokens": None,
+        "output_tokens": None,
+        "total_tokens": None,
+        "tokens_reported": False,
+        "cost_usd": None,
+        "by_attribution": {"exact": 2, "estimated": 0, "unavailable": 1},
+    }
+    history = summary["token_usage_history"]
+    by_tool = {(row["entity_type"], row["slug"]): row for row in history["by_tool"]}
+    assert by_tool[("skill", "cache-aware")] == {
+        "entity_type": "skill",
+        "slug": "cache-aware",
+        "records": 2,
+        "input_tokens": 15,
+        "cached_input_tokens": 6,
+        "cache_write_input_tokens": 3,
+        "uncached_input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 18,
+        "tokens_reported": True,
+        "cost_usd": 0.03,
+        "by_attribution": {"exact": 2, "estimated": 0, "unavailable": 0},
+    }
+    assert by_tool[("agent", "usage-missing")]["total_tokens"] is None
+    assert by_tool[("agent", "usage-missing")]["tokens_reported"] is False
+    by_type = {row["entity_type"]: row for row in history["by_type"]}
+    assert by_type["skill"]["cache_write_input_tokens"] == 3
+    assert by_type["agent"]["cache_write_input_tokens"] is None
+    by_session = {row["session_id"]: row for row in history["by_session"]}
+    assert by_session["s-complete"]["uncached_input_tokens"] == 9
+    assert by_session["s-missing"]["uncached_input_tokens"] is None
+    by_source = {row["selection_source"]: row for row in history["by_source"]}
+    assert by_source["host"]["cached_input_tokens"] == 6
+    assert by_source["system"]["cached_input_tokens"] is None
+    assert summary["recent_tool_usage"][-1]["token_usage"]["attribution"] == "unavailable"
+
+
+def test_runtime_lifecycle_summary_preserves_consistent_legacy_usage(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-legacy",
+                "entity_type": "skill",
+                "slug": "legacy-usage",
+                "token_usage": {
+                    "input_tokens": 10,
+                    "cached_input_tokens": 4,
+                    "cache_write_input_tokens": 2,
+                    "uncached_input_tokens": 6,
+                    "output_tokens": 5,
+                    "total_tokens": 15,
+                    "cost_usd": 0.03,
+                },
+            }
+        ],
+    )
+
+    summary = runtime_service.lifecycle_summary(events)
+
+    assert summary["token_usage"] == {
+        "records": 1,
+        "input_tokens": 10,
+        "cached_input_tokens": 4,
+        "cache_write_input_tokens": 2,
+        "uncached_input_tokens": 6,
+        "output_tokens": 5,
+        "total_tokens": 15,
+        "tokens_reported": True,
+        "cost_usd": 0.03,
+        "by_attribution": {"exact": 0, "estimated": 1, "unavailable": 0},
+    }
+    recent = summary["recent_tool_usage"][0]["token_usage"]
+    assert recent["attribution"] == "estimated"
+    assert (
+        recent["attribution_reason"]
+        == "legacy token usage without attribution; treated as estimated"
+    )
+
+
+def test_runtime_lifecycle_summary_downgrades_incomplete_reported_usage(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-incomplete",
+                "entity_type": "skill",
+                "slug": "incomplete-usage",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "total_tokens": 5,
+                    "tokens_reported": True,
+                },
+            }
+        ],
+    )
+
+    summary = runtime_service.lifecycle_summary(events)
+    recent = summary["recent_tool_usage"][0]["token_usage"]
+
+    assert recent["attribution"] == "unavailable"
+    assert recent["attribution_reason"] == "incomplete exact token usage; treated as unavailable"
+    assert recent["input_tokens"] is None
+    assert recent["output_tokens"] is None
+    assert recent["total_tokens"] is None
+    assert recent["tokens_reported"] is False
+    assert summary["token_usage"]["tokens_reported"] is False
+
+
+def test_runtime_lifecycle_summary_infers_reported_only_when_absent(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-reported-flags",
+                "entity_type": "skill",
+                "slug": "reported-absent",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 6,
+                },
+            },
+            {
+                "action": "used",
+                "session_id": "s-reported-flags",
+                "entity_type": "agent",
+                "slug": "reported-malformed",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 6,
+                    "tokens_reported": "true",
+                },
+            },
+            {
+                "action": "used",
+                "session_id": "s-reported-flags",
+                "entity_type": "mcp-server",
+                "slug": "reported-false",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 6,
+                    "tokens_reported": False,
+                },
+            },
+        ],
+    )
+
+    recent = runtime_service.lifecycle_summary(events)["recent_tool_usage"]
+    by_slug = {row["slug"]: row["token_usage"] for row in recent}
+
+    absent = by_slug["reported-absent"]
+    assert absent["attribution"] == "exact"
+    assert absent["tokens_reported"] is True
+
+    malformed = by_slug["reported-malformed"]
+    assert malformed["attribution"] == "estimated"
+    assert malformed["tokens_reported"] is False
+    assert malformed["attribution_reason"] == (
+        "invalid tokens_reported value; treated as estimated"
+    )
+
+    explicit_false = by_slug["reported-false"]
+    assert explicit_false["attribution"] == "estimated"
+    assert explicit_false["tokens_reported"] is False
+    assert explicit_false["attribution_reason"] == (
+        "exact token usage was not fully reported; treated as estimated"
+    )
+
+
+def test_runtime_lifecycle_summary_repairs_contradictory_exact_total(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-contradictory",
+                "entity_type": "agent",
+                "slug": "contradictory-usage",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 999,
+                    "tokens_reported": True,
+                },
+            }
+        ],
+    )
+
+    summary = runtime_service.lifecycle_summary(events)
+    recent = summary["recent_tool_usage"][0]["token_usage"]
+
+    assert recent["attribution"] == "estimated"
+    assert recent["attribution_reason"] == "inconsistent total token usage; treated as estimated"
+    assert recent["total_tokens"] == 6
+    assert recent["tokens_reported"] is False
+    assert summary["token_usage"]["total_tokens"] == 6
+    assert summary["token_usage"]["tokens_reported"] is False
+    assert summary["token_usage"]["by_attribution"]["estimated"] == 1
+
+
+def test_runtime_lifecycle_summary_repairs_contradictory_legacy_total(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-legacy-contradictory",
+                "entity_type": "skill",
+                "slug": "legacy-contradictory-usage",
+                "token_usage": {
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 999,
+                },
+            }
+        ],
+    )
+
+    recent = runtime_service.lifecycle_summary(events)["recent_tool_usage"][0]["token_usage"]
+
+    assert recent["attribution"] == "estimated"
+    assert (
+        recent["attribution_reason"]
+        == "legacy token usage without attribution; treated as estimated"
+    )
+    assert recent["total_tokens"] == 6
+    assert recent["tokens_reported"] is False
+
+
+def test_runtime_lifecycle_summary_preserves_exact_zero_usage(tmp_path: Path) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-zero",
+                "entity_type": "mcp-server",
+                "slug": "zero-usage",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                    "tokens_reported": True,
+                    "cost_usd": 0.0,
+                },
+            }
+        ],
+    )
+
+    summary = runtime_service.lifecycle_summary(events)
+    recent = summary["recent_tool_usage"][0]["token_usage"]
+
+    assert recent["input_tokens"] == 0
+    assert recent["output_tokens"] == 0
+    assert recent["total_tokens"] == 0
+    assert recent["tokens_reported"] is True
+    assert summary["token_usage"]["input_tokens"] == 0
+    assert summary["token_usage"]["output_tokens"] == 0
+    assert summary["token_usage"]["total_tokens"] == 0
+    assert summary["token_usage"]["tokens_reported"] is True
+
+
+@pytest.mark.parametrize(
+    ("cache_fields", "invalid_fields"),
+    [
+        ({"cached_input_tokens": 6}, {"cached_input_tokens", "uncached_input_tokens"}),
+        ({"cache_write_input_tokens": 6}, {"cache_write_input_tokens"}),
+        (
+            {"cached_input_tokens": 2, "uncached_input_tokens": 2},
+            {"cached_input_tokens", "uncached_input_tokens"},
+        ),
+    ],
+)
+def test_runtime_lifecycle_summary_nulls_malformed_cache_usage(
+    tmp_path: Path,
+    cache_fields: dict[str, int],
+    invalid_fields: set[str],
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-malformed",
+                "entity_type": "agent",
+                "slug": "cache-reader",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 5,
+                    "output_tokens": 1,
+                    "total_tokens": 6,
+                    "tokens_reported": True,
+                    "cost_usd": 0.01,
+                    **cache_fields,
+                },
+            }
+        ],
+    )
+
+    summary = runtime_service.lifecycle_summary(events)
+    recent = summary["recent_tool_usage"][0]["token_usage"]
+
+    assert summary["token_usage"]["records"] == 1
+    assert summary["token_usage"]["tokens_reported"] is False
+    assert summary["token_usage"]["input_tokens"] == 5
+    assert summary["token_usage"]["output_tokens"] == 1
+    assert summary["token_usage"]["total_tokens"] == 6
+    for field in invalid_fields:
+        assert summary["token_usage"][field] is None
+        assert recent[field] is None
+
+
+def test_runtime_lifecycle_summary_whitelists_and_sanitizes_token_metadata(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "runtime" / "events.jsonl"
+    secret = "sk-" + ("a" * 32)
+    _write_runtime_events(
+        events,
+        [
+            {
+                "action": "used",
+                "session_id": "s-private",
+                "entity_type": "mcp-server",
+                "slug": "filesystem",
+                "token_usage": {
+                    "attribution": "exact",
+                    "input_tokens": 1,
+                    "output_tokens": 0,
+                    "total_tokens": 1,
+                    "tokens_reported": True,
+                    "cost_usd": 0.0,
+                    "attribution_reason": f"read /Users/alice/private with {secret}",
+                    "model": "/Users/alice/private/model",
+                    "provider": f"provider-{secret}",
+                    "api_key": secret,
+                    "arbitrary": {"path": "/Users/alice/private/raw"},
+                },
+            }
+        ],
+    )
+
+    recent = runtime_service.lifecycle_summary(events)["recent_tool_usage"][0]["token_usage"]
+    serialized = json.dumps(recent)
+
+    assert set(recent) == {
+        "attribution",
+        "attribution_reason",
+        "cache_write_input_tokens",
+        "cached_input_tokens",
+        "cost_usd",
+        "input_tokens",
+        "model",
+        "output_tokens",
+        "provider",
+        "tokens_reported",
+        "total_tokens",
+        "uncached_input_tokens",
+    }
+    assert "api_key" not in recent
+    assert "arbitrary" not in recent
+    assert secret not in serialized
+    assert "/Users/alice" not in serialized
+    assert recent["provider"] == "provider-[redacted]"
+    assert recent["model"].startswith("[path_hash:sha256:")
 
 
 def test_runtime_lifecycle_summary_uses_full_history_for_open_state(
@@ -1198,8 +1688,12 @@ def test_render_runtime_lifecycle_surfaces_checks_and_open_escalations(
                 "token_usage": {
                     "attribution": "exact",
                     "input_tokens": 20,
+                    "cached_input_tokens": 12,
+                    "cache_write_input_tokens": 4,
+                    "uncached_input_tokens": 8,
                     "output_tokens": 7,
                     "total_tokens": 27,
+                    "tokens_reported": True,
                     "cost_usd": 0.03,
                 },
                 "created_at": "2026-05-08T01:08:00Z",
@@ -1219,6 +1713,9 @@ def test_render_runtime_lifecycle_surfaces_checks_and_open_escalations(
     assert "Recent tool usage" in html
     assert "&lt;fastapi-pro&gt;" in html
     assert "<strong>27</strong> tokens" in html
+    assert "<td>Cache read</td><td>12</td>" in html
+    assert "<td>Cache write</td><td>4</td>" in html
+    assert "<td>Uncached input</td><td>8</td>" in html
     assert "<span class='pill'>exact</span>" in html
 
 
