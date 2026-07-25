@@ -447,6 +447,33 @@ class TestToolDefinitions:
         td = next(d for d in toolbox.tool_definitions() if d.name == "ctx__graph_query")
         assert td.parameters["required"] == ["seeds"]
 
+    def test_mark_entity_used_exposes_complete_token_usage_schema(
+        self,
+        toolbox: CtxCoreToolbox,
+    ) -> None:
+        definition = next(
+            item for item in toolbox.tool_definitions() if item.name == "ctx__mark_entity_used"
+        )
+        token_usage = definition.parameters["properties"]["token_usage"]
+
+        assert token_usage["properties"] == {
+            "attribution": {
+                "type": "string",
+                "enum": ["exact", "estimated", "unavailable"],
+            },
+            "input_tokens": {"type": "integer", "minimum": 0},
+            "cached_input_tokens": {"type": "integer", "minimum": 0},
+            "cache_write_input_tokens": {"type": "integer", "minimum": 0},
+            "uncached_input_tokens": {"type": "integer", "minimum": 0},
+            "output_tokens": {"type": "integer", "minimum": 0},
+            "total_tokens": {"type": "integer", "minimum": 0},
+            "tokens_reported": {"type": "boolean"},
+            "cost_usd": {"type": "number", "minimum": 0},
+            "attribution_reason": {"type": "string"},
+            "provider": {"type": "string"},
+            "model": {"type": "string"},
+        }
+
     def test_read_tools_expose_optional_response_format(
         self,
         toolbox: CtxCoreToolbox,
