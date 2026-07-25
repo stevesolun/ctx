@@ -65,13 +65,20 @@ Runtime lifecycle token usage emits OTel-style metric names when a host records
 `ctx__mark_entity_used.token_usage`:
 
 - `ctx.tool_usage.records` counts usage records by entity type and attribution.
+- `ctx.tool_usage.input_tokens` and `ctx.tool_usage.output_tokens` count reported
+  provider input and output tokens.
+- `ctx.tool_usage.cached_input_tokens` and
+  `ctx.tool_usage.uncached_input_tokens` split reported input usage when the
+  provider exposes cache-read counts.
 - `ctx.tool_usage.tokens` counts total tokens when the record has a
   non-negative `total_tokens` value.
 - `ctx.tool_usage.tokens_per_record` observes the same total as a histogram.
 
 Those metric points are recorded inside the same telemetry span as the
 `ctx.runtime_lifecycle.record` event that describes the usage, so trace/span
-correlation stays aligned across event and metric signals.
+correlation stays aligned across event and metric signals. The low-cardinality
+`ctx.usage.tokens_reported` attribute distinguishes explicit zero usage from an
+unavailable provider report.
 
 Attribution is always explicit through `ctx.usage.attribution`:
 `exact`, `estimated`, or `unavailable`. The built-in `ctx run` provider totals

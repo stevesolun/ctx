@@ -638,7 +638,10 @@ class TestRuntimeLifecycle:
                         "token_usage": {
                             "attribution": "exact",
                             "input_tokens": 12,
+                            "cached_input_tokens": 7,
+                            "uncached_input_tokens": 5,
                             "output_tokens": 8,
+                            "tokens_reported": True,
                             "provider": "test",
                             "model": "local-test",
                         },
@@ -652,16 +655,23 @@ class TestRuntimeLifecycle:
         assert "ctx.core.lifecycle" in event_names
         assert [metric[1] for metric in metrics] == [
             "ctx.tool_usage.records",
+            "ctx.tool_usage.input_tokens",
+            "ctx.tool_usage.cached_input_tokens",
+            "ctx.tool_usage.uncached_input_tokens",
+            "ctx.tool_usage.output_tokens",
             "ctx.tool_usage.tokens",
             "ctx.tool_usage.tokens_per_record",
         ]
         assert {metric[4]["ctx.usage.attribution"] for metric in metrics} == {"exact"}
+        assert {metric[4]["ctx.usage.tokens_reported"] for metric in metrics} == {True}
         usage_payloads = [
             event["payload"]
             for event in events
             if event["payload"].get("ctx.usage.attribution") == "exact"
         ]
         assert usage_payloads[0]["ctx.usage.total_tokens"] == 20
+        assert usage_payloads[0]["ctx.usage.cached_input_tokens"] == 7
+        assert usage_payloads[0]["ctx.usage.uncached_input_tokens"] == 5
         for event in events:
             payload = event["payload"]
             assert payload["otel.status_code"] == "OK"
@@ -739,10 +749,13 @@ class TestRuntimeLifecycle:
         assert state["used"][0]["entity_type"] == "mcp-server"
         assert usage == {
             "records": 1,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-            "cost_usd": 0.0,
+            "input_tokens": None,
+            "cached_input_tokens": None,
+            "uncached_input_tokens": None,
+            "output_tokens": None,
+            "total_tokens": None,
+            "tokens_reported": False,
+            "cost_usd": None,
             "by_attribution": {
                 "estimated": 0,
                 "exact": 0,
@@ -858,6 +871,8 @@ class TestRuntimeLifecycle:
         metric_spans = [item for item in spans if item[0] == "metric"]
         assert [item[1] for item in metric_spans] == [
             "ctx.tool_usage.records",
+            "ctx.tool_usage.input_tokens",
+            "ctx.tool_usage.output_tokens",
             "ctx.tool_usage.tokens",
             "ctx.tool_usage.tokens_per_record",
         ]
@@ -1076,8 +1091,8 @@ class TestRuntimeLifecycle:
             )
         )
         assert state["loaded"][0]["security_scan"]["status"] == "not_provided"
-        assert state["loaded"][0]["selected"] is True
-        assert state["loaded"][0]["selection_source"] == "user"
+        assert state["loaded"][0]["selected"] is False
+        assert state["loaded"][0]["selection_source"] == "unknown"
         assert state["loaded"][0]["source_context"] == {}
 
     def test_skill_load_accepts_security_scan_proof(
@@ -1277,8 +1292,11 @@ class TestRuntimeLifecycle:
         assert result["used"][0]["token_usage"] == {
             "records": 1,
             "input_tokens": 10,
+            "cached_input_tokens": None,
+            "uncached_input_tokens": None,
             "output_tokens": 5,
             "total_tokens": 15,
+            "tokens_reported": True,
             "cost_usd": 0.01,
             "by_attribution": {
                 "estimated": 0,

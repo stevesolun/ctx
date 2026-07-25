@@ -518,6 +518,209 @@ def test_cli_adaptive_lifecycle_records_applied_use_and_unload(
     assert state["unloaded"][0]["was_used"] is True
 
 
+@pytest.mark.parametrize("entity_type", ["agent", "mcp-server"])
+def test_lifecycle_preserves_and_aggregates_cache_token_usage(
+    tmp_path: Path,
+    entity_type: str,
+) -> None:
+    lifecycle = RuntimeLifecycleStore(root=tmp_path / entity_type)
+    session_id = f"adaptive-usage-{entity_type}"
+    lifecycle.load_entity(
+        session_id=session_id,
+        entity_type=entity_type,
+        slug="focused-runtime",
+        selected=True,
+        selection_source="host",
+    )
+    lifecycle.mark_entity_loaded(
+        session_id=session_id,
+        entity_type=entity_type,
+        slug="focused-runtime",
+    )
+
+    lifecycle.mark_entity_used(
+        session_id=session_id,
+        entity_type=entity_type,
+        slug="focused-runtime",
+        token_usage={
+            "attribution": "exact",
+            "input_tokens": 100,
+            "cached_input_tokens": 60,
+            "uncached_input_tokens": 40,
+            "output_tokens": 10,
+            "total_tokens": 110,
+            "tokens_reported": True,
+            "cost_usd": 0.01,
+        },
+    )
+    lifecycle.mark_entity_used(
+        session_id=session_id,
+        entity_type=entity_type,
+        slug="focused-runtime",
+        token_usage={
+            "attribution": "estimated",
+            "input_tokens": 50,
+            "cached_input_tokens": 20,
+            "uncached_input_tokens": 30,
+            "output_tokens": 5,
+            "total_tokens": 55,
+            "tokens_reported": False,
+            "cost_usd": 0.02,
+        },
+    )
+    lifecycle.mark_entity_used(
+        session_id=session_id,
+        entity_type=entity_type,
+        slug="focused-runtime",
+        token_usage={
+            "attribution": "exact",
+            "input_tokens": 0,
+            "cached_input_tokens": 0,
+            "uncached_input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "tokens_reported": True,
+            "cost_usd": 0.0,
+        },
+    )
+
+    events = [
+        json.loads(line) for line in lifecycle.events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    usage_events = [event["token_usage"] for event in events if event["action"] == "used"]
+    assert usage_events[0]["cached_input_tokens"] == 60
+    assert usage_events[0]["uncached_input_tokens"] == 40
+    assert usage_events[0]["tokens_reported"] is True
+    assert usage_events[1]["cached_input_tokens"] == 20
+    assert usage_events[1]["uncached_input_tokens"] == 30
+    assert usage_events[1]["tokens_reported"] is False
+    assert usage_events[2]["cached_input_tokens"] == 0
+    assert usage_events[2]["uncached_input_tokens"] == 0
+    assert usage_events[2]["tokens_reported"] is True
+
+    usage = lifecycle.session_state(session_id=session_id)["used"][0]["token_usage"]
+    assert usage["records"] == 3
+    assert usage["input_tokens"] == 150
+    assert usage["cached_input_tokens"] == 80
+    assert usage["uncached_input_tokens"] == 70
+    assert usage["output_tokens"] == 15
+    assert usage["total_tokens"] == 165
+    assert usage["tokens_reported"] is False
+    assert usage["cost_usd"] == pytest.approx(0.03)
+    assert usage["by_attribution"] == {
+        "estimated": 1,
+        "exact": 2,
+        "unavailable": 0,
+    }
+
+
+@pytest.mark.parametrize("unavailable_first", [True, False])
+def test_lifecycle_mixed_usage_keeps_incomplete_totals_unavailable(
+    tmp_path: Path,
+    unavailable_first: bool,
+) -> None:
+    lifecycle = RuntimeLifecycleStore(root=tmp_path / "runtime")
+    session_id = "adaptive-mixed-usage"
+    lifecycle.load_entity(
+        session_id=session_id,
+        entity_type="skill",
+        slug="focused-skill",
+        selected=True,
+        selection_source="host",
+    )
+    lifecycle.mark_entity_loaded(
+        session_id=session_id,
+        entity_type="skill",
+        slug="focused-skill",
+    )
+    unavailable = {"attribution": "unavailable"}
+    exact = {
+        "attribution": "exact",
+        "input_tokens": 5,
+        "cached_input_tokens": 2,
+        "uncached_input_tokens": 3,
+        "output_tokens": 1,
+        "total_tokens": 6,
+        "tokens_reported": True,
+        "cost_usd": 0.01,
+    }
+    for token_usage in (unavailable, exact) if unavailable_first else (exact, unavailable):
+        lifecycle.mark_entity_used(
+            session_id=session_id,
+            entity_type="skill",
+            slug="focused-skill",
+            token_usage=token_usage,
+        )
+
+    usage = lifecycle.session_state(session_id=session_id)["used"][0]["token_usage"]
+
+    assert usage["records"] == 2
+    assert usage["input_tokens"] is None
+    assert usage["cached_input_tokens"] is None
+    assert usage["uncached_input_tokens"] is None
+    assert usage["output_tokens"] is None
+    assert usage["total_tokens"] is None
+    assert usage["tokens_reported"] is False
+    assert usage["cost_usd"] is None
+
+
+@pytest.mark.parametrize(
+    ("token_usage", "message"),
+    [
+        (
+            {"cached_input_tokens": -1},
+            "token_usage.cached_input_tokens must be a non-negative integer",
+        ),
+        (
+            {"uncached_input_tokens": -1},
+            "token_usage.uncached_input_tokens must be a non-negative integer",
+        ),
+        (
+            {"tokens_reported": "true"},
+            "token_usage.tokens_reported must be a boolean",
+        ),
+        (
+            {"cached_input_tokens": True},
+            "token_usage.cached_input_tokens must be a non-negative integer",
+        ),
+        (
+            {"cost_usd": float("nan")},
+            "token_usage.cost_usd must be a non-negative number",
+        ),
+        (
+            {"cost_usd": float("inf")},
+            "token_usage.cost_usd must be a non-negative number",
+        ),
+        (
+            {"input_tokens": 5, "cached_input_tokens": 8},
+            "token_usage.cached_input_tokens cannot exceed input_tokens",
+        ),
+        (
+            {
+                "input_tokens": 5,
+                "cached_input_tokens": 2,
+                "uncached_input_tokens": 2,
+            },
+            "must equal input_tokens",
+        ),
+    ],
+)
+def test_lifecycle_rejects_invalid_extended_token_usage(
+    tmp_path: Path,
+    token_usage: dict[str, Any],
+    message: str,
+) -> None:
+    lifecycle = RuntimeLifecycleStore(root=tmp_path / "runtime")
+
+    with pytest.raises(ValueError, match=message):
+        lifecycle.mark_entity_used(
+            session_id="adaptive-invalid-usage",
+            entity_type="agent",
+            slug="focused-agent",
+            token_usage=token_usage,
+        )
+
+
 def test_cli_adaptive_lifecycle_keeps_unapplied_request_on_budget_stop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -565,13 +768,114 @@ def test_cli_adaptive_lifecycle_keeps_unapplied_request_on_budget_stop(
     assert state["loaded"][0]["applied_at"] is None
 
 
+def test_lifecycle_missing_selection_authority_fails_closed(tmp_path: Path) -> None:
+    lifecycle = RuntimeLifecycleStore(root=tmp_path / "runtime")
+
+    request = lifecycle.load_entity(
+        session_id="adaptive-authority",
+        entity_type="skill",
+        slug="focused-skill",
+    )
+
+    assert request["event"]["selected"] is False
+    assert request["event"]["selection_source"] == "unknown"
+    state = lifecycle.session_state(session_id="adaptive-authority")
+    assert state["loaded"][0]["selected"] is False
+    assert state["loaded"][0]["selection_source"] == "unknown"
+    lifecycle.unload_entity(
+        session_id="adaptive-authority",
+        entity_type="skill",
+        slug="focused-skill",
+    )
+    pending = lifecycle.session_state(session_id="adaptive-authority")
+    assert pending["unloaded"][0]["was_loaded"] is False
+
+    explicit = lifecycle.load_entity(
+        session_id="adaptive-authority",
+        entity_type="agent",
+        slug="focused-agent",
+        selected=True,
+        selection_source="user",
+    )
+
+    assert explicit["event"]["selected"] is True
+    assert explicit["event"]["selection_source"] == "user"
+
+
+def test_lifecycle_repeated_load_preserves_applied_usage_state(tmp_path: Path) -> None:
+    lifecycle = RuntimeLifecycleStore(root=tmp_path / "runtime")
+    common: dict[str, Any] = {
+        "session_id": "adaptive-repeat-load",
+        "entity_type": "skill",
+        "slug": "focused-skill",
+    }
+    lifecycle.load_entity(
+        **common,
+        selected=True,
+        selection_source="host",
+    )
+    lifecycle.mark_entity_loaded(**common)
+    lifecycle.mark_entity_used(
+        **common,
+        evidence="first use",
+        token_usage={
+            "attribution": "exact",
+            "input_tokens": 3,
+            "output_tokens": 2,
+            "total_tokens": 5,
+        },
+    )
+
+    lifecycle.load_entity(
+        **common,
+        reason="idempotent retry",
+        selected=True,
+        selection_source="host",
+    )
+
+    state = lifecycle.session_state(session_id=common["session_id"])
+    assert len(state["loaded"]) == 1
+    loaded = state["loaded"][0]
+    assert loaded["load_status"] == "applied"
+    assert loaded["used"] is True
+    assert loaded["use_count"] == 1
+    assert loaded["token_usage"]["total_tokens"] == 5
+
+
 def test_lifecycle_collapses_requested_and_applied_unload(tmp_path: Path) -> None:
     lifecycle = RuntimeLifecycleStore(root=tmp_path / "runtime")
-    lifecycle.load_entity(session_id="adaptive-unload", entity_type="skill", slug="focused-skill")
+    lifecycle.load_entity(
+        session_id="adaptive-unload",
+        entity_type="skill",
+        slug="focused-skill",
+        selected=True,
+        selection_source="host",
+    )
     lifecycle.mark_entity_loaded(
         session_id="adaptive-unload", entity_type="skill", slug="focused-skill"
     )
     lifecycle.unload_entity(session_id="adaptive-unload", entity_type="skill", slug="focused-skill")
+    lifecycle.unload_entity(
+        session_id="adaptive-unload",
+        entity_type="skill",
+        slug="focused-skill",
+        reason="idempotent retry",
+    )
+
+    pending = lifecycle.session_state(session_id="adaptive-unload")
+    assert len(pending["loaded"]) == 1
+    assert pending["loaded"][0]["load_status"] == "applied"
+    assert len(pending["unloaded"]) == 1
+    assert pending["unloaded"][0]["unload_status"] == "requested"
+    assert pending["unloaded"][0]["was_loaded"] is True
+    assert pending["unloaded"][0]["reason"] == "idempotent retry"
+
+    lifecycle.mark_entity_used(
+        session_id="adaptive-unload",
+        entity_type="skill",
+        slug="focused-skill",
+        evidence="used while deactivation was pending",
+    )
     lifecycle.mark_entity_unloaded(
         session_id="adaptive-unload", entity_type="skill", slug="focused-skill"
     )
@@ -581,3 +885,4 @@ def test_lifecycle_collapses_requested_and_applied_unload(tmp_path: Path) -> Non
     assert len(state["unloaded"]) == 1
     assert state["unloaded"][0]["unload_status"] == "applied"
     assert state["unloaded"][0]["was_loaded"] is True
+    assert state["unloaded"][0]["was_used"] is True

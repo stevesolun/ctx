@@ -9,6 +9,7 @@ and security-scan details before appending events.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import time
@@ -96,7 +97,7 @@ class RuntimeLifecycleStore:
         entity_type = _validate_entity_type(entity_type)
         slug = _validate_slug(slug)
         source = _validate_choice(
-            selection_source or "user",
+            selection_source or "unknown",
             _SELECTION_SOURCES,
             "selection_source",
         )
@@ -111,7 +112,7 @@ class RuntimeLifecycleStore:
                 entity_type=entity_type,
                 slug=slug,
             ),
-            selected=(source == "user" if selected is None else bool(selected)),
+            selected=False if selected is None else bool(selected),
             selection_source=source,
             source_context=source_context or {},
         )
@@ -276,7 +277,7 @@ class RuntimeLifecycleStore:
                 continue
             if action in {"load_requested", "load_applied"}:
                 current = loaded.get(key)
-                if action == "load_requested" or current is None:
+                if current is None:
                     current = {
                         "entity_type": key[0],
                         "slug": key[1],
@@ -298,6 +299,18 @@ class RuntimeLifecycleStore:
                         "applied_at_epoch": None,
                     }
                     loaded[key] = current
+                elif action == "load_requested":
+                    current["reason"] = event.get("reason") or current["reason"]
+                    current["security_scan"] = (
+                        event.get("security_scan") or current["security_scan"]
+                    )
+                    current["selected"] = bool(event.get("selected", current["selected"]))
+                    current["selection_source"] = (
+                        event.get("selection_source") or current["selection_source"]
+                    )
+                    current["source_context"] = (
+                        event.get("source_context") or current["source_context"]
+                    )
                 if action == "load_applied":
                     current["load_status"] = "applied"
                     current["applied_at"] = event.get("created_at")
@@ -312,18 +325,39 @@ class RuntimeLifecycleStore:
                 if isinstance(token_usage, dict):
                     _merge_token_usage(loaded[key]["token_usage"], token_usage)
             elif action == "unload_requested":
-                current = loaded.pop(key, None)
-                unloaded.append(
-                    {
-                        "entity_type": key[0],
-                        "slug": key[1],
-                        "unloaded_at": event.get("created_at"),
-                        "reason": event.get("reason"),
-                        "was_loaded": current is not None,
-                        "was_used": bool(current and current.get("used")),
-                        "unload_status": "requested",
-                    }
+                current = loaded.get(key)
+                pending = next(
+                    (
+                        entry
+                        for entry in reversed(unloaded)
+                        if entry["entity_type"] == key[0]
+                        and entry["slug"] == key[1]
+                        and entry["unload_status"] == "requested"
+                    ),
+                    None,
                 )
+                if pending is None:
+                    unloaded.append(
+                        {
+                            "entity_type": key[0],
+                            "slug": key[1],
+                            "unloaded_at": event.get("created_at"),
+                            "reason": event.get("reason"),
+                            "was_loaded": bool(current and current.get("load_status") == "applied"),
+                            "was_used": bool(current and current.get("used")),
+                            "unload_status": "requested",
+                        }
+                    )
+                else:
+                    pending["unloaded_at"] = event.get("created_at")
+                    pending["reason"] = event.get("reason") or pending["reason"]
+                    pending["was_loaded"] = bool(
+                        pending["was_loaded"]
+                        or (current and current.get("load_status") == "applied")
+                    )
+                    pending["was_used"] = bool(
+                        pending["was_used"] or (current and current.get("used"))
+                    )
             elif action == "unload_applied":
                 current = loaded.pop(key, None)
                 pending = next(
@@ -336,9 +370,16 @@ class RuntimeLifecycleStore:
                     ),
                     None,
                 )
-                if current is None and pending is not None:
+                if pending is not None:
                     pending["unloaded_at"] = event.get("created_at")
                     pending["reason"] = event.get("reason") or pending["reason"]
+                    pending["was_loaded"] = bool(
+                        pending["was_loaded"]
+                        or (current and current.get("load_status") == "applied")
+                    )
+                    pending["was_used"] = bool(
+                        pending["was_used"] or (current and current.get("used"))
+                    )
                     pending["unload_status"] = "applied"
                 else:
                     unloaded.append(
@@ -347,7 +388,7 @@ class RuntimeLifecycleStore:
                             "slug": key[1],
                             "unloaded_at": event.get("created_at"),
                             "reason": event.get("reason"),
-                            "was_loaded": current is not None,
+                            "was_loaded": bool(current and current.get("load_status") == "applied"),
                             "was_used": bool(current and current.get("used")),
                             "unload_status": "applied",
                         }
@@ -474,10 +515,8 @@ def _validate_session_id(raw: str) -> str:
 def _record_runtime_lifecycle_telemetry(event: dict[str, Any]) -> None:
     token_usage = event.get("token_usage")
     usage_attribution: str | None = None
-    total_tokens: Any = None
     if isinstance(token_usage, dict):
         usage_attribution = str(token_usage.get("attribution") or "unavailable")
-        total_tokens = token_usage.get("total_tokens")
     payload: dict[str, Any] = {
         "ctx.lifecycle.action": str(event.get("action") or ""),
         "ctx.payload.present": bool(event.get("payload")),
@@ -503,11 +542,22 @@ def _record_runtime_lifecycle_telemetry(event: dict[str, Any]) -> None:
         payload["ctx.security_scan.status"] = str(security_scan.get("status") or "")
     if usage_attribution is not None:
         payload["ctx.usage.attribution"] = usage_attribution
-        for usage_key in ("input_tokens", "output_tokens", "total_tokens"):
+        for usage_key in (
+            "input_tokens",
+            "cached_input_tokens",
+            "uncached_input_tokens",
+            "output_tokens",
+            "total_tokens",
+        ):
             usage_value = token_usage.get(usage_key) if isinstance(token_usage, dict) else None
             payload[f"ctx.usage.{usage_key}"] = (
                 usage_value if isinstance(usage_value, int) else None
             )
+        tokens_reported = (
+            token_usage.get("tokens_reported") if isinstance(token_usage, dict) else None
+        )
+        if isinstance(tokens_reported, bool):
+            payload["ctx.usage.tokens_reported"] = tokens_reported
         cost_value = token_usage.get("cost_usd") if isinstance(token_usage, dict) else None
         payload["ctx.usage.cost_usd"] = (
             float(cost_value) if isinstance(cost_value, (int, float)) else None
@@ -515,11 +565,7 @@ def _record_runtime_lifecycle_telemetry(event: dict[str, Any]) -> None:
     try:
         with telemetry_span():
             if isinstance(token_usage, dict) and usage_attribution is not None:
-                _record_token_usage_metrics(
-                    event,
-                    attribution=usage_attribution,
-                    total_tokens=total_tokens if isinstance(total_tokens, int) else None,
-                )
+                _record_token_usage_metrics(event, token_usage=token_usage)
             if not telemetry_enabled():
                 return
             record_event(
@@ -537,9 +583,9 @@ def _record_runtime_lifecycle_telemetry(event: dict[str, Any]) -> None:
 def _record_token_usage_metrics(
     event: dict[str, Any],
     *,
-    attribution: str,
-    total_tokens: int | None,
+    token_usage: dict[str, Any],
 ) -> None:
+    attribution = str(token_usage.get("attribution") or "unavailable")
     attrs: dict[str, Any] = {
         "ctx.lifecycle.action": str(event.get("action") or ""),
         "ctx.usage.attribution": attribution,
@@ -547,6 +593,9 @@ def _record_token_usage_metrics(
     entity_type = event.get("entity_type")
     if isinstance(entity_type, str) and entity_type:
         attrs["ctx.entity.type"] = entity_type
+    tokens_reported = token_usage.get("tokens_reported")
+    if isinstance(tokens_reported, bool):
+        attrs["ctx.usage.tokens_reported"] = tokens_reported
     session_id = str(event.get("session_id") or "") or None
     try:
         record_counter(
@@ -557,23 +606,36 @@ def _record_token_usage_metrics(
             source="ctx-runtime-lifecycle",
             session_id=session_id,
         )
-        if total_tokens is not None:
+        metric_names = {
+            "input_tokens": "ctx.tool_usage.input_tokens",
+            "cached_input_tokens": "ctx.tool_usage.cached_input_tokens",
+            "uncached_input_tokens": "ctx.tool_usage.uncached_input_tokens",
+            "output_tokens": "ctx.tool_usage.output_tokens",
+            "total_tokens": "ctx.tool_usage.tokens",
+        }
+        for usage_key, metric_name in metric_names.items():
+            value = token_usage.get(usage_key)
+            if isinstance(value, bool) or not isinstance(value, int):
+                continue
             record_counter(
-                "ctx.tool_usage.tokens",
-                value=total_tokens,
+                metric_name,
+                value=value,
                 unit="tokens",
                 attributes=attrs,
                 source="ctx-runtime-lifecycle",
                 session_id=session_id,
             )
-            record_histogram(
-                "ctx.tool_usage.tokens_per_record",
-                value=total_tokens,
-                unit="tokens",
-                attributes=attrs,
-                source="ctx-runtime-lifecycle",
-                session_id=session_id,
-            )
+        total_tokens = token_usage.get("total_tokens")
+        if isinstance(total_tokens, bool) or not isinstance(total_tokens, int):
+            return
+        record_histogram(
+            "ctx.tool_usage.tokens_per_record",
+            value=total_tokens,
+            unit="tokens",
+            attributes=attrs,
+            source="ctx-runtime-lifecycle",
+            session_id=session_id,
+        )
     except Exception:  # noqa: BLE001 - metrics must not break lifecycle writes.
         pass
 
@@ -629,29 +691,64 @@ def _token_usage_state(raw: dict[str, Any] | None) -> dict[str, Any]:
         "token_usage.attribution",
     )
     input_tokens = _nonnegative_int(raw.get("input_tokens"), "token_usage.input_tokens")
+    cached_input_tokens = _nonnegative_int(
+        raw.get("cached_input_tokens"),
+        "token_usage.cached_input_tokens",
+    )
+    uncached_input_tokens = _nonnegative_int(
+        raw.get("uncached_input_tokens"),
+        "token_usage.uncached_input_tokens",
+    )
     output_tokens = _nonnegative_int(raw.get("output_tokens"), "token_usage.output_tokens")
     total_tokens = _nonnegative_int(raw.get("total_tokens"), "token_usage.total_tokens")
-    if total_tokens is None and (input_tokens is not None or output_tokens is not None):
-        total_tokens = int(input_tokens or 0) + int(output_tokens or 0)
+    if total_tokens is None and input_tokens is not None and output_tokens is not None:
+        total_tokens = input_tokens + output_tokens
     cost_usd = _nonnegative_float(raw.get("cost_usd"), "token_usage.cost_usd")
-    return {
+    if input_tokens is not None:
+        if cached_input_tokens is not None and cached_input_tokens > input_tokens:
+            raise ValueError("token_usage.cached_input_tokens cannot exceed input_tokens")
+        if uncached_input_tokens is not None and uncached_input_tokens > input_tokens:
+            raise ValueError("token_usage.uncached_input_tokens cannot exceed input_tokens")
+        if (
+            cached_input_tokens is not None
+            and uncached_input_tokens is not None
+            and cached_input_tokens + uncached_input_tokens != input_tokens
+        ):
+            raise ValueError(
+                "token_usage.cached_input_tokens + uncached_input_tokens must equal input_tokens"
+            )
+    tokens_reported_raw = raw.get("tokens_reported")
+    if "tokens_reported" in raw:
+        if not isinstance(tokens_reported_raw, bool):
+            raise ValueError("token_usage.tokens_reported must be a boolean")
+        tokens_reported = tokens_reported_raw
+    else:
+        tokens_reported = input_tokens is not None and output_tokens is not None
+    state = {
         "attribution": attribution,
         "input_tokens": input_tokens,
+        "cached_input_tokens": cached_input_tokens,
+        "uncached_input_tokens": uncached_input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
+        "tokens_reported": tokens_reported,
         "cost_usd": cost_usd,
         "attribution_reason": str(raw.get("attribution_reason") or "").strip() or None,
         "model": str(raw.get("model") or "").strip() or None,
         "provider": str(raw.get("provider") or "").strip() or None,
     }
+    return state
 
 
 def _empty_token_usage_summary() -> dict[str, Any]:
     return {
         "records": 0,
         "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "uncached_input_tokens": 0,
         "output_tokens": 0,
         "total_tokens": 0,
+        "tokens_reported": True,
         "cost_usd": 0.0,
         "by_attribution": {key: 0 for key in sorted(_TOKEN_ATTRIBUTIONS)},
     }
@@ -665,18 +762,35 @@ def _merge_token_usage(summary: dict[str, Any], usage: dict[str, Any]) -> None:
         {key: 0 for key in sorted(_TOKEN_ATTRIBUTIONS)},
     )
     by_attribution[attribution] = int(by_attribution.get(attribution) or 0) + 1
-    for key in ("input_tokens", "output_tokens", "total_tokens"):
+    for key in (
+        "input_tokens",
+        "cached_input_tokens",
+        "uncached_input_tokens",
+        "output_tokens",
+        "total_tokens",
+    ):
         value = usage.get(key)
-        if isinstance(value, int):
-            summary[key] = int(summary.get(key) or 0) + value
+        current = summary.get(key)
+        if current is None or isinstance(value, bool) or not isinstance(value, int):
+            summary[key] = None
+        else:
+            summary[key] = int(current) + value
+    summary["tokens_reported"] = bool(
+        summary.get("tokens_reported") and usage.get("tokens_reported") is True
+    )
     cost = usage.get("cost_usd")
-    if isinstance(cost, (int, float)):
-        summary["cost_usd"] = round(float(summary.get("cost_usd") or 0.0) + float(cost), 8)
+    current_cost = summary.get("cost_usd")
+    if current_cost is None or isinstance(cost, bool) or not isinstance(cost, (int, float)):
+        summary["cost_usd"] = None
+    else:
+        summary["cost_usd"] = round(float(current_cost) + float(cost), 8)
 
 
 def _nonnegative_int(raw: Any, field: str) -> int | None:
     if raw is None or raw == "":
         return None
+    if isinstance(raw, bool) or not isinstance(raw, (int, str)):
+        raise ValueError(f"{field} must be a non-negative integer")
     try:
         value = int(raw)
     except (TypeError, ValueError) as exc:
@@ -689,11 +803,13 @@ def _nonnegative_int(raw: Any, field: str) -> int | None:
 def _nonnegative_float(raw: Any, field: str) -> float | None:
     if raw is None or raw == "":
         return None
+    if isinstance(raw, bool):
+        raise ValueError(f"{field} must be a non-negative number")
     try:
         value = float(raw)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{field} must be a non-negative number") from exc
-    if value < 0:
+    if not math.isfinite(value) or value < 0:
         raise ValueError(f"{field} must be a non-negative number")
     return value
 
