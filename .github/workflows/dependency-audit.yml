@@ -1,0 +1,67 @@
+name: Dependency audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - ".github/pip-audit-ignore.txt"
+      - ".github/workflows/dependency-audit.yml"
+      - "scripts/ci_dependency_audit.py"
+  pull_request:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - ".github/pip-audit-ignore.txt"
+      - ".github/workflows/dependency-audit.yml"
+      - "scripts/ci_dependency_audit.py"
+  schedule:
+    - cron: "41 4 * * 2"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-audit-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pip-audit:
+    name: pip-audit (${{ matrix.os }} / py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11", "3.12"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install pip-audit
+        run: python -m pip install "pip-audit==2.10.1"
+
+      - name: Audit installable runtime dependencies
+        shell: bash
+        # Optional ignore file format: one CVE-, GHSA-, or PYSEC- ID per line.
+        # Blank lines, CRLF, and # comments are accepted; malformed IDs fail closed.
+        run: |
+          python scripts/ci_dependency_audit.py \
+            --manifest pyproject.toml \
+            --requirements-output "$RUNNER_TEMP/ctx-runtime-requirements.txt" \
+            --ignore-file .github/pip-audit-ignore.txt

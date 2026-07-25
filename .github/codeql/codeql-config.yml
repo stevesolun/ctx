@@ -1,0 +1,15 @@
+name: ctx-python-security
+
+queries:
+  - uses: security-extended
+
+paths:
+  - src
+  - scripts
+  - hooks
+
+paths-ignore:
+  - imported-skills/**
+  - graph/**
+  - docs/**
+  - "**/fixtures/**"
