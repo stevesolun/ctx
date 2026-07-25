@@ -1,0 +1,21 @@
+# ctx code ownership
+#
+# @stevesolun is the only verified repository owner at present.
+# HUMAN GOVERNANCE BLOCKER: Add a second real human CODEOWNER before claiming
+# dual control or independent security/release approval.
+# Sequence: grant that reviewer repository access, add their real handle here,
+# then enable branch protection with required CODEOWNER approval. Enabling that
+# rule with only the author-owner could deadlock merges. This file records
+# ownership but cannot enforce review by itself.
+
+# Default owner for every tracked path.
+* @stevesolun
+
+# Security, repository governance, and automation surfaces.
+/SECURITY.md @stevesolun
+/.github/ @stevesolun
+
+# Product, release, and maintenance surfaces.
+/src/ @stevesolun
+/scripts/ @stevesolun
+/pyproject.toml @stevesolun
