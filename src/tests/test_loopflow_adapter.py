@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import shlex
 from pathlib import Path
+import threading
 from typing import Any
 
 import networkx as nx
@@ -1466,3 +1468,338 @@ def test_main_empty_permissions_fail_closed(monkeypatch, capsys) -> None:
         }
         assert payload["loopflow"]["use_tools"] is None
         assert payload["loopflow"]["use_skills"] is None
+
+
+def test_activation_leases_share_context_until_last_loop_releases() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    applied: list[loopflow.ActivationLeaseActions] = []
+
+    outer = leases.sync(
+        "session.outer",
+        desired=["skill:security-review", "mcp:filesystem"],
+        permissions={"skills", "mcps"},
+        apply=applied.append,
+        used=["mcp-server:filesystem"],
+    )
+    nested = leases.sync(
+        "session.inner",
+        desired=["skill:security-review"],
+        permissions={"skills"},
+        apply=applied.append,
+        used=["skill:security-review"],
+    )
+
+    assert outer.as_dict() == {
+        "keep": [],
+        "load": ["mcp-server:filesystem", "skill:security-review"],
+        "use": ["mcp-server:filesystem"],
+        "unload": [],
+    }
+    assert nested.as_dict() == {
+        "keep": ["skill:security-review"],
+        "load": [],
+        "use": ["skill:security-review"],
+        "unload": [],
+    }
+    assert leases.active_context() == (
+        "mcp-server:filesystem",
+        "skill:security-review",
+    )
+
+    outer_release = leases.release("session.outer", apply=applied.append)
+
+    assert outer_release.as_dict() == {
+        "keep": ["skill:security-review"],
+        "load": [],
+        "use": [],
+        "unload": ["mcp-server:filesystem"],
+    }
+    assert leases.active_context() == ("skill:security-review",)
+
+    nested_release = leases.release("session.inner", apply=applied.append)
+
+    assert nested_release.as_dict() == {
+        "keep": [],
+        "load": [],
+        "use": [],
+        "unload": ["skill:security-review"],
+    }
+    assert leases.active_context() == ()
+    assert (
+        leases.release("session.inner", apply=applied.append) == loopflow.ActivationLeaseActions()
+    )
+    assert applied == [
+        outer,
+        nested,
+        outer_release,
+        nested_release,
+        loopflow.ActivationLeaseActions(),
+    ]
+
+
+def test_activation_lease_permissions_fail_closed_without_changing_ownership() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    initial = leases.sync(
+        "session.owner",
+        desired=["skill:security-review"],
+        permissions={"skills"},
+        apply=lambda _actions: None,
+    )
+    assert initial.load == ("skill:security-review",)
+
+    with pytest.raises(ValueError, match="not granted by permissions"):
+        leases.sync(
+            "session.blocked",
+            desired=["skill:security-review"],
+            permissions={"mcps"},
+            apply=lambda _actions: None,
+        )
+    with pytest.raises(ValueError, match="used entities must also be desired"):
+        leases.sync(
+            "session.owner",
+            desired=["skill:security-review"],
+            permissions={"skills", "agents"},
+            apply=lambda _actions: None,
+            used=["agent:reviewer"],
+        )
+
+    assert leases.active_context() == ("skill:security-review",)
+    assert leases.release("session.owner", apply=lambda _actions: None).unload == (
+        "skill:security-review",
+    )
+
+
+def test_activation_lease_failed_actions_leave_truthful_retryable_state() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+
+    def fail(_actions: loopflow.ActivationLeaseActions) -> None:
+        raise RuntimeError("host action failed")
+
+    with pytest.raises(RuntimeError, match="host action failed"):
+        leases.sync(
+            "session.owner",
+            desired=["skill:security-review"],
+            permissions={"skills"},
+            apply=fail,
+        )
+    assert leases.active_context() == ()
+    retry = leases.sync(
+        "session.owner",
+        desired=["skill:security-review"],
+        permissions={"skills"},
+        apply=lambda _actions: None,
+    )
+    assert retry.load == ("skill:security-review",)
+
+    with pytest.raises(RuntimeError, match="host action failed"):
+        leases.release("session.owner", apply=fail)
+    assert leases.active_context() == ("skill:security-review",)
+    assert leases.release("session.owner", apply=lambda _actions: None).unload == (
+        "skill:security-review",
+    )
+
+
+def test_activation_lease_context_releases_after_loop_failure() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    applied: list[loopflow.ActivationLeaseActions] = []
+    used = ["agent:reviewer"]
+
+    with pytest.raises(RuntimeError, match="loop failed"):
+        with leases.lease(
+            "session.owner",
+            desired=["agent:reviewer"],
+            permissions={"agents"},
+            apply=applied.append,
+            used=lambda: used,
+        ):
+            raise RuntimeError("loop failed")
+
+    assert applied[0].load == ("agent:reviewer",)
+    assert applied[1].use == ("agent:reviewer",)
+    assert applied[2].unload == ("agent:reviewer",)
+    assert leases.active_context() == ()
+
+
+def test_activation_lease_context_rejects_duplicate_live_id() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    applied: list[loopflow.ActivationLeaseActions] = []
+
+    with leases.lease(
+        "session.same",
+        desired=["skill:reviewer"],
+        permissions={"skills"},
+        apply=applied.append,
+    ):
+        with pytest.raises(ValueError, match="already active"):
+            with leases.lease(
+                "session.same",
+                desired=["skill:reviewer"],
+                permissions={"skills"},
+                apply=applied.append,
+            ):
+                pytest.fail("duplicate lease context entered")
+        with pytest.raises(RuntimeError, match="active context manager"):
+            leases.release("session.same", apply=applied.append)
+        assert leases.active_context() == ("skill:reviewer",)
+
+    assert [actions.load for actions in applied] == [("skill:reviewer",), ()]
+    assert [actions.unload for actions in applied] == [(), ("skill:reviewer",)]
+    assert leases.active_context() == ()
+
+
+@pytest.mark.parametrize(
+    ("lease_id", "entity_id", "error"),
+    [
+        (None, "skill:security-review", TypeError),
+        ("session.owner", None, TypeError),
+        ("session.owner", "skill:../escape", ValueError),
+        ("session.owner", "skill:CON", ValueError),
+    ],
+)
+def test_activation_lease_rejects_unsafe_boundary_ids(
+    lease_id: object,
+    entity_id: object,
+    error: type[Exception],
+) -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+
+    with pytest.raises(error):
+        leases.sync(
+            lease_id,  # type: ignore[arg-type]
+            desired=[entity_id],  # type: ignore[list-item]
+            permissions={"skills"},
+            apply=lambda _actions: None,
+        )
+
+    assert leases.active_context() == ()
+
+
+def test_activation_leases_serialize_parallel_shared_context() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    owners = 16
+    entered = threading.Barrier(owners)
+    applied: list[loopflow.ActivationLeaseActions] = []
+
+    def run(index: int) -> None:
+        with leases.lease(
+            f"session.{index}",
+            desired=["mcp-server:filesystem"],
+            permissions={"mcps"},
+            apply=applied.append,
+        ):
+            entered.wait(timeout=5)
+
+    with ThreadPoolExecutor(max_workers=owners) as pool:
+        list(pool.map(run, range(owners)))
+
+    assert sum(bool(actions.load) for actions in applied) == 1
+    assert sum(bool(actions.unload) for actions in applied) == 1
+    assert leases.active_context() == ()
+
+
+def test_activation_lease_callback_cannot_reenter_registry() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+
+    def reenter(_actions: loopflow.ActivationLeaseActions) -> None:
+        leases.sync(
+            "session.inner",
+            desired=["skill:reviewer"],
+            permissions={"skills"},
+            apply=lambda _nested: None,
+        )
+
+    with pytest.raises(RuntimeError, match="must not invoke or wait"):
+        leases.sync(
+            "session.outer",
+            desired=["skill:reviewer"],
+            permissions={"skills"},
+            apply=reenter,
+        )
+
+    assert leases.active_context() == ()
+
+
+def test_activation_lease_callback_worker_reentry_fails_without_deadlock() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    nested_errors: list[Exception] = []
+
+    def reenter_from_worker(_actions: loopflow.ActivationLeaseActions) -> None:
+        def nested() -> None:
+            try:
+                leases.sync(
+                    "session.inner",
+                    desired=["skill:reviewer"],
+                    permissions={"skills"},
+                    apply=lambda _nested: None,
+                )
+            except Exception as exc:  # noqa: BLE001 - asserted below.
+                nested_errors.append(exc)
+
+        worker = threading.Thread(target=nested)
+        worker.start()
+        worker.join(timeout=1)
+        assert not worker.is_alive()
+
+    leases.sync(
+        "session.outer",
+        desired=["skill:reviewer"],
+        permissions={"skills"},
+        apply=reenter_from_worker,
+    )
+
+    assert len(nested_errors) == 1
+    assert isinstance(nested_errors[0], loopflow.ActivationLeaseBusyError)
+    assert "busy" in str(nested_errors[0])
+    assert leases.active_context() == ("skill:reviewer",)
+
+
+def test_activation_lease_independent_waiter_serializes_after_slow_callback() -> None:
+    leases = loopflow.ActivationLeaseRegistry()
+    callback_started = threading.Event()
+    callback_continue = threading.Event()
+    waiter_done = threading.Event()
+    errors: list[Exception] = []
+
+    def slow_apply(_actions: loopflow.ActivationLeaseActions) -> None:
+        callback_started.set()
+        assert callback_continue.wait(timeout=2)
+
+    def first() -> None:
+        try:
+            leases.sync(
+                "session.first",
+                desired=["skill:first"],
+                permissions={"skills"},
+                apply=slow_apply,
+            )
+        except Exception as exc:  # noqa: BLE001 - asserted below.
+            errors.append(exc)
+
+    def independent() -> None:
+        try:
+            assert callback_started.wait(timeout=2)
+            leases.sync(
+                "session.parallel",
+                desired=["skill:parallel"],
+                permissions={"skills"},
+                apply=lambda _actions: None,
+                wait_for_transition=True,
+            )
+            waiter_done.set()
+        except Exception as exc:  # noqa: BLE001 - asserted below.
+            errors.append(exc)
+
+    first_thread = threading.Thread(target=first)
+    waiter_thread = threading.Thread(target=independent)
+    first_thread.start()
+    waiter_thread.start()
+    assert callback_started.wait(timeout=2)
+    assert not waiter_done.wait(timeout=0.05)
+    callback_continue.set()
+    first_thread.join(timeout=2)
+    waiter_thread.join(timeout=2)
+
+    assert not first_thread.is_alive()
+    assert not waiter_thread.is_alive()
+    assert errors == []
+    assert leases.active_context() == ("skill:first", "skill:parallel")

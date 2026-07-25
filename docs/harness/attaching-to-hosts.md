@@ -396,6 +396,16 @@ plan_context = recommend_for_loop(
 )
 ```
 
+When the host executes accepted recommendations, keep one
+`ActivationLeaseRegistry` in the long-lived runner and use its `lease(...)`
+context manager around each loop. The registry serializes acknowledged
+load/use/unload transitions, keeps failed host actions retryable, and unloads
+shared context only after its final owner exits. The module CLI remains a
+stateless recommendation path; it does not coordinate leases between separate
+processes. Give every live loop invocation a unique lease ID and pass a
+deferred `used` supplier so observed usage is recorded on every exit path. See
+the presenter demo for the complete host-applier example.
+
 Load only the groups that are explicitly granted in `permissions`.
 `--model-provider` and `--model` are ranking metadata, not ownership consent:
 if `harnesses` is granted without `--own-llm`, the adapter returns a warning

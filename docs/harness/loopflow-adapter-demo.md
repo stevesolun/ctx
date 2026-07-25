@@ -204,6 +204,54 @@ After a failed observe step, LoopFlow passes the new failure text back into the
 next adapter call. That is the agent-loop back edge: LoopFlow keeps the retry
 logic, and ctx refreshes recommendations based on what just failed.
 
+For a long-lived runner that executes accepted recommendations, share one
+`ActivationLeaseRegistry` across all nested or parallel loops:
+
+```python
+from ctx.adapters.loopflow import ActivationLeaseRegistry
+
+leases = ActivationLeaseRegistry()
+
+def apply_ctx_actions(actions):
+    runner.load_all(actions.load)
+    runner.mark_used(actions.use)
+    runner.unload_all(actions.unload)
+
+lease_id = f"{run.id}.{loop.id}.{loop.invocation_id}"
+desired = loop.accepted_ctx_ids
+with leases.lease(
+    lease_id,
+    desired=desired,
+    used=lambda: loop.used_ctx_ids,
+    permissions=loop.ctx_permissions,
+    apply=apply_ctx_actions,
+):
+    loop.run()
+```
+
+The registry serializes transitions inside one host process. It commits
+ownership only after `apply_ctx_actions` returns, so failed loads and unloads
+remain retryable, and it unloads shared context only after the final owning
+loop exits. Host load/unload operations must be idempotent because a host may
+partially apply an action set before raising.
+
+Each live context-manager lease ID must be unique; include the loop invocation
+or attempt ID, not only the static loop name. Pass a `used` supplier so the
+registry reads observed use after execution, including failure and cancellation
+paths, rather than recording planned use before the loop starts.
+The applier must be synchronous and must not call the registry or wait for a
+worker that calls it. Such callback re-entry fails fast with
+`ActivationLeaseBusyError` so it cannot deadlock all loop transitions. The
+context manager waits for unrelated transitions automatically; direct
+`sync(...)` or `release(...)` calls may either retry that error or explicitly
+pass `wait_for_transition=True` when they are outside an applier.
+
+The subprocess CLI is recommendation-only: each
+`python -m ctx.adapters.loopflow` invocation is stateless and does not
+coordinate activation leases across processes. A runner that needs live
+load/use/unload behavior must use the direct Python integration above (or own a
+persistent coordinator) and keep LoopFlow in control of physical tool changes.
+
 ## Permission model
 
 The adapter fails closed:

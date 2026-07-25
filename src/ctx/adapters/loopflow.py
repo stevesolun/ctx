@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
 import re
 import shlex
 import sys
+import threading
 from typing import Any
 
 import ctx.api as ctx_api
@@ -19,6 +23,7 @@ from ctx.adapters.generic.ctx_core_tools import (
     _recommendation_context_skip_reason,
 )
 from ctx.core.resolve.recommendations import query_to_tags, recommend_by_tags
+from ctx.core.wiki.wiki_utils import validate_skill_name
 from ctx_init import _harness_requirements_text, recommend_harnesses
 
 
@@ -57,6 +62,329 @@ _HARNESS_REQUIREMENT_FLAGS = {
     "attach_mode": "--harness-attach-mode",
     "api_key_env": "--api-key-env",
 }
+_LEASE_ENTITY_TO_GROUP = {
+    "agent": "agents",
+    "harness": "harnesses",
+    "mcp-server": "mcps",
+    "skill": "skills",
+}
+_LEASE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+
+
+@dataclass(frozen=True)
+class ActivationLeaseActions:
+    """Physical context changes required after one lease synchronization."""
+
+    keep: tuple[str, ...] = ()
+    load: tuple[str, ...] = ()
+    use: tuple[str, ...] = ()
+    unload: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, list[str]]:
+        return {
+            "keep": list(self.keep),
+            "load": list(self.load),
+            "use": list(self.use),
+            "unload": list(self.unload),
+        }
+
+
+class ActivationLeaseBusyError(RuntimeError):
+    """A host transition is active and this operation must be retried."""
+
+
+class ActivationLeaseRegistry:
+    """Share host-owned context safely across LoopFlow and agent-loop leases."""
+
+    def __init__(self) -> None:
+        self._entities_by_lease: dict[str, set[str]] = {}
+        self._leases_by_entity: dict[str, set[str]] = {}
+        self._context_leases: set[str] = set()
+        self._lock = threading.RLock()
+        self._transition_lock = threading.Lock()
+        self._callback_active = threading.Event()
+        self._callback_local = threading.local()
+
+    def sync(
+        self,
+        lease_id: str,
+        *,
+        desired: Iterable[str],
+        permissions: set[str],
+        apply: Callable[[ActivationLeaseActions], None],
+        used: Iterable[str] = (),
+        wait_for_transition: bool = False,
+    ) -> ActivationLeaseActions:
+        """Apply and commit one lease transition in deterministic order.
+
+        ``desired`` is the complete context this loop intends to retain.
+        ``used`` is the subset actually used during this synchronization.
+        Entity IDs must be typed (for example ``skill:pytest``) so permission
+        grants remain authoritative. ``apply`` must perform the returned host
+        actions or raise; ownership changes commit only after it returns.
+        Direct calls fail with ``ActivationLeaseBusyError`` during another host
+        transition unless ``wait_for_transition`` is explicitly enabled.
+        """
+
+        owner = _validate_lease_id(lease_id)
+        granted = _parse_permissions(list(permissions))
+        desired_entities = _normalize_lease_entities(
+            desired,
+            permissions=granted,
+            field="desired",
+        )
+        used_entities = _normalize_lease_entities(
+            used,
+            permissions=granted,
+            field="used",
+        )
+        if not used_entities <= desired_entities:
+            missing = ", ".join(sorted(used_entities - desired_entities))
+            raise ValueError(f"used entities must also be desired: {missing}")
+
+        self._acquire_transition(wait=wait_for_transition)
+        try:
+            with self._lock:
+                entities_by_lease = {
+                    lease: set(entities) for lease, entities in self._entities_by_lease.items()
+                }
+                leases_by_entity = {
+                    entity: set(leases) for entity, leases in self._leases_by_entity.items()
+                }
+                previous = entities_by_lease.get(owner, set())
+                acquired = desired_entities - previous
+                released = previous - desired_entities
+                load: set[str] = set()
+                keep = set(desired_entities & previous)
+
+                for entity_id in acquired:
+                    owners = leases_by_entity.setdefault(entity_id, set())
+                    if owners:
+                        keep.add(entity_id)
+                    else:
+                        load.add(entity_id)
+                    owners.add(owner)
+
+                unload: set[str] = set()
+                for entity_id in released:
+                    owners = leases_by_entity[entity_id]
+                    owners.discard(owner)
+                    if owners:
+                        keep.add(entity_id)
+                    else:
+                        unload.add(entity_id)
+                        del leases_by_entity[entity_id]
+
+                if desired_entities:
+                    entities_by_lease[owner] = set(desired_entities)
+                else:
+                    entities_by_lease.pop(owner, None)
+
+                actions = ActivationLeaseActions(
+                    keep=tuple(sorted(keep)),
+                    load=tuple(sorted(load)),
+                    use=tuple(sorted(used_entities)),
+                    unload=tuple(sorted(unload)),
+                )
+            self._apply_actions(actions, apply)
+            with self._lock:
+                self._entities_by_lease = entities_by_lease
+                self._leases_by_entity = leases_by_entity
+            return actions
+        finally:
+            self._transition_lock.release()
+
+    def release(
+        self,
+        lease_id: str,
+        *,
+        apply: Callable[[ActivationLeaseActions], None],
+        wait_for_transition: bool = False,
+    ) -> ActivationLeaseActions:
+        """Apply and commit a release; failed unloads remain retryable."""
+
+        return self._release(
+            lease_id,
+            apply=apply,
+            from_context=False,
+            wait_for_transition=wait_for_transition,
+        )
+
+    def _release(
+        self,
+        lease_id: str,
+        *,
+        apply: Callable[[ActivationLeaseActions], None],
+        from_context: bool,
+        wait_for_transition: bool,
+    ) -> ActivationLeaseActions:
+        owner = _validate_lease_id(lease_id)
+        self._acquire_transition(wait=wait_for_transition)
+        try:
+            with self._lock:
+                if owner in self._context_leases and not from_context:
+                    raise RuntimeError(f"lease {owner!r} is owned by an active context manager")
+                entities_by_lease = {
+                    lease: set(entities) for lease, entities in self._entities_by_lease.items()
+                }
+                leases_by_entity = {
+                    entity: set(leases) for entity, leases in self._leases_by_entity.items()
+                }
+                released = entities_by_lease.pop(owner, set())
+                keep: set[str] = set()
+                unload: set[str] = set()
+                for entity_id in released:
+                    owners = leases_by_entity[entity_id]
+                    owners.discard(owner)
+                    if owners:
+                        keep.add(entity_id)
+                    else:
+                        unload.add(entity_id)
+                        del leases_by_entity[entity_id]
+                actions = ActivationLeaseActions(
+                    keep=tuple(sorted(keep)),
+                    unload=tuple(sorted(unload)),
+                )
+            self._apply_actions(actions, apply)
+            with self._lock:
+                self._entities_by_lease = entities_by_lease
+                self._leases_by_entity = leases_by_entity
+            return actions
+        finally:
+            self._transition_lock.release()
+
+    @contextmanager
+    def lease(
+        self,
+        lease_id: str,
+        *,
+        desired: Iterable[str],
+        permissions: set[str],
+        apply: Callable[[ActivationLeaseActions], None],
+        used: Iterable[str] | Callable[[], Iterable[str]] = (),
+    ) -> Iterator[ActivationLeaseActions]:
+        """Hold one lease, report observed use, and release on every exit path."""
+
+        owner = _validate_lease_id(lease_id)
+        desired_values = tuple(desired)
+        permission_values = set(permissions)
+        with self._lock:
+            if owner in self._context_leases:
+                raise ValueError(f"lease_id {owner!r} is already active")
+            self._context_leases.add(owner)
+        try:
+            actions = self.sync(
+                owner,
+                desired=desired_values,
+                permissions=permission_values,
+                apply=apply,
+                wait_for_transition=True,
+            )
+            failure: BaseException | None = None
+            try:
+                yield actions
+            except BaseException as exc:
+                failure = exc
+                raise
+            finally:
+                cleanup_errors: list[BaseException] = []
+                try:
+                    used_values = tuple(used() if callable(used) else used)
+                    if used_values:
+                        self.sync(
+                            owner,
+                            desired=desired_values,
+                            permissions=permission_values,
+                            apply=apply,
+                            used=used_values,
+                            wait_for_transition=True,
+                        )
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+                try:
+                    self._release(
+                        owner,
+                        apply=apply,
+                        from_context=True,
+                        wait_for_transition=True,
+                    )
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+                if cleanup_errors:
+                    for error in cleanup_errors:
+                        detail = f"activation lease cleanup failed: {type(error).__name__}: {error}"
+                        if failure is not None:
+                            failure.add_note(detail)
+                        else:
+                            cleanup_errors[0].add_note(detail)
+                    if failure is None:
+                        raise cleanup_errors[0]
+        finally:
+            with self._lock:
+                self._context_leases.discard(owner)
+
+    def active_context(self) -> tuple[str, ...]:
+        """Return the context currently owned by at least one live lease."""
+
+        with self._lock:
+            return tuple(sorted(self._leases_by_entity))
+
+    def _apply_actions(
+        self,
+        actions: ActivationLeaseActions,
+        apply: Callable[[ActivationLeaseActions], None],
+    ) -> None:
+        self._callback_active.set()
+        self._callback_local.active = True
+        try:
+            apply(actions)
+        finally:
+            self._callback_local.active = False
+            self._callback_active.clear()
+
+    def _acquire_transition(self, *, wait: bool) -> None:
+        if bool(getattr(self._callback_local, "active", False)):
+            raise ActivationLeaseBusyError(
+                "activation lease callbacks must not invoke or wait on registry operations"
+            )
+        if wait:
+            self._transition_lock.acquire()
+            return
+        if self._callback_active.is_set() or not self._transition_lock.acquire(blocking=False):
+            raise ActivationLeaseBusyError("activation lease transition busy; retry the operation")
+
+
+def _validate_lease_id(value: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError("lease_id must be a string")
+    lease_id = value.strip()
+    if not _LEASE_ID_RE.fullmatch(lease_id):
+        raise ValueError("lease_id must be 1-128 safe characters")
+    return lease_id
+
+
+def _normalize_lease_entities(
+    values: Iterable[str],
+    *,
+    permissions: set[str],
+    field: str,
+) -> set[str]:
+    entities: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            raise TypeError(f"{field} entities must be strings")
+        entity_id = _selection_key(value)
+        entity_type, separator, slug = entity_id.partition(":")
+        group = _LEASE_ENTITY_TO_GROUP.get(entity_type)
+        if not separator or not slug or group is None:
+            raise ValueError(
+                f"{field} entity {value!r} must be a typed skill, agent, mcp-server, or harness ID"
+            )
+        validate_skill_name(slug)
+        if group not in permissions:
+            raise ValueError(f"{field} entity {entity_id!r} is not granted by permissions")
+        entities.add(entity_id)
+    return entities
 
 
 def _split_csv(values: list[str] | None) -> list[str]:
