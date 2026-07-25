@@ -89,11 +89,19 @@ class ToolDefinition:
 
 @dataclass(frozen=True)
 class Usage:
-    """Token counts + optional cost for a single provider call."""
+    """Normalized usage for one provider call.
+
+    ``tokens_reported`` is true only when both input and output counts were
+    present, distinguishing an explicit zero pair from missing or partial
+    usage. ``cached_input_tokens`` is ``None`` when the provider did not
+    expose a cache-read count.
+    """
 
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float | None = None
+    cached_input_tokens: int | None = None
+    tokens_reported: bool = True
 
 
 @dataclass(frozen=True)

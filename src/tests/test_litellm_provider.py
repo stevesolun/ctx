@@ -31,6 +31,7 @@ from ctx.adapters.generic.providers import (
     Message,
     ToolCall,
     ToolDefinition,
+    Usage,
     get_provider,
 )
 from ctx.adapters.generic.providers.litellm_provider import (
@@ -241,6 +242,15 @@ class TestParseToolCall:
 
 
 class TestNormaliseResponse:
+    def test_usage_defaults_preserve_legacy_construction(self) -> None:
+        assert Usage(1, 2, 0.3) == Usage(
+            input_tokens=1,
+            output_tokens=2,
+            cost_usd=0.3,
+            cached_input_tokens=None,
+            tokens_reported=True,
+        )
+
     def test_plain_content_response(self) -> None:
         raw = {
             "choices": [
@@ -257,6 +267,8 @@ class TestNormaliseResponse:
         assert resp.finish_reason == "stop"
         assert resp.usage.input_tokens == 5
         assert resp.usage.output_tokens == 3
+        assert resp.usage.tokens_reported
+        assert resp.usage.cached_input_tokens is None
         assert resp.provider == "litellm"
         assert resp.model == "test"
 
@@ -308,6 +320,103 @@ class TestNormaliseResponse:
         }
         resp = _normalise_response(raw, provider="litellm", model="test")
         assert resp.usage.cost_usd == 0.0002
+
+    def test_cost_without_token_fields_marks_tokens_unreported(self) -> None:
+        raw = {
+            "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+            "usage": {},
+            "response_cost": 0.0002,
+        }
+
+        resp = _normalise_response(raw, provider="litellm", model="test")
+
+        assert resp.usage.cost_usd == 0.0002
+        assert not resp.usage.tokens_reported
+
+    def test_missing_usage_is_distinct_from_explicit_zero(self) -> None:
+        missing = {
+            "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+        }
+        explicit_zero = {
+            "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+        }
+
+        missing_resp = _normalise_response(missing, provider="litellm", model="test")
+        zero_resp = _normalise_response(explicit_zero, provider="litellm", model="test")
+
+        assert not missing_resp.usage.tokens_reported
+        assert zero_resp.usage.tokens_reported
+
+    def test_partial_usage_is_not_reported_as_complete(self) -> None:
+        raw = {
+            "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 4},
+        }
+
+        resp = _normalise_response(raw, provider="litellm", model="test")
+
+        assert not resp.usage.tokens_reported
+        assert resp.usage.input_tokens == 4
+        assert resp.usage.output_tokens == 0
+
+    def test_openai_cached_tokens_are_already_in_prompt_total(self) -> None:
+        raw = {
+            "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 2,
+                "prompt_tokens_details": {"cached_tokens": 7},
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+
+        resp = _normalise_response(raw, provider="litellm", model="test")
+
+        assert resp.usage.input_tokens == 10
+        assert resp.usage.cached_input_tokens == 7
+
+    def test_anthropic_cached_tokens_do_not_double_count_prompt_total(self) -> None:
+        raw = {
+            "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": 20,
+                "completion_tokens": 2,
+                "cache_read_input_tokens": 7,
+                "cache_creation_input_tokens": 3,
+            },
+        }
+
+        resp = _normalise_response(raw, provider="litellm", model="test")
+
+        assert resp.usage.input_tokens == 20
+        assert resp.usage.cached_input_tokens == 7
+
+    @pytest.mark.parametrize(
+        ("cache_read", "expected"),
+        [
+            (None, None),
+            (0, 0),
+        ],
+    )
+    def test_cache_read_null_is_distinct_from_explicit_zero(
+        self,
+        cache_read: int | None,
+        expected: int | None,
+    ) -> None:
+        raw = {
+            "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": 2,
+                "completion_tokens": 1,
+                "cache_read_input_tokens": cache_read,
+            },
+        }
+
+        resp = _normalise_response(raw, provider="litellm", model="test")
+
+        assert resp.usage.cached_input_tokens == expected
 
     def test_empty_choices_degrades_cleanly(self) -> None:
         raw: dict[str, Any] = {"choices": [], "usage": {}}

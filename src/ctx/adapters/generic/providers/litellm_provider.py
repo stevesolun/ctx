@@ -266,8 +266,23 @@ def _extract_usage(raw_dict: dict[str, Any]) -> Usage:
     budget tracker can decide how to handle unknown cost.
     """
     usage = raw_dict.get("usage") or {}
+    tokens_reported = all(
+        key in usage and usage.get(key) is not None
+        for key in ("prompt_tokens", "completion_tokens")
+    )
     input_tokens = int(usage.get("prompt_tokens") or 0)
     output_tokens = int(usage.get("completion_tokens") or 0)
+    prompt_details = usage.get("prompt_tokens_details")
+    cached_input_tokens: int | None = None
+    if isinstance(prompt_details, dict) and prompt_details.get("cached_tokens") is not None:
+        cached_input_tokens = int(prompt_details["cached_tokens"])
+
+    # LiteLLM normalizes prompt_tokens to include cache tokens. Providers
+    # expose cache-read detail in either OpenAI's nested field or Anthropic's
+    # top-level field, so capture it without changing the normalized total.
+    cache_read = usage.get("cache_read_input_tokens")
+    if cached_input_tokens is None and cache_read is not None:
+        cached_input_tokens = int(cache_read)
     # LiteLLM sometimes attaches ``response_cost`` at top level, not
     # under usage. Check both without requiring it.
     cost = raw_dict.get("response_cost")
@@ -277,6 +292,8 @@ def _extract_usage(raw_dict: dict[str, Any]) -> Usage:
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cost_usd=float(cost) if cost is not None else None,
+        cached_input_tokens=cached_input_tokens,
+        tokens_reported=tokens_reported,
     )
 
 
