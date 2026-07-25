@@ -250,20 +250,47 @@ class _RunningTotals:
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    cached_input_tokens: int = 0
+    usage_sources: int = 0
+    tokens_reported: bool = True
+    cost_reported: bool = True
+    cached_input_reported: bool = True
 
-    def add(self, usage: Usage) -> None:
+    def add(self, usage: Usage, *, provider_call: bool = False) -> None:
         self.input_tokens += usage.input_tokens
         self.output_tokens += usage.output_tokens
         if usage.cost_usd is not None:
             self.cost_usd += usage.cost_usd
+        if usage.cached_input_tokens is not None:
+            self.cached_input_tokens += usage.cached_input_tokens
+        observed_usage = provider_call or any(
+            (
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cost_usd is not None,
+                usage.cached_input_tokens is not None,
+                not usage.tokens_reported,
+            )
+        )
+        if observed_usage:
+            self.usage_sources += 1
+            self.tokens_reported = self.tokens_reported and usage.tokens_reported
+            self.cost_reported = self.cost_reported and usage.cost_usd is not None
+            self.cached_input_reported = (
+                self.cached_input_reported and usage.cached_input_tokens is not None
+            )
 
     def as_usage(self) -> Usage:
-        # cost_usd=None when the provider never reported cost (ollama)
-        # → caller can tell accumulated cost is unknown, not "0".
         return Usage(
             input_tokens=self.input_tokens,
             output_tokens=self.output_tokens,
-            cost_usd=self.cost_usd if self.cost_usd > 0 else None,
+            cost_usd=(self.cost_usd if self.usage_sources > 0 and self.cost_reported else None),
+            cached_input_tokens=(
+                self.cached_input_tokens
+                if self.usage_sources > 0 and self.cached_input_reported
+                else None
+            ),
+            tokens_reported=self.tokens_reported,
         )
 
 
@@ -274,6 +301,11 @@ def _budget_stop_reason(
     budget_tokens: int | None,
     before_call: bool = False,
 ) -> tuple[StopReason | None, str]:
+    if budget_usd is not None and totals.usage_sources > 0 and not totals.cost_reported:
+        return (
+            "cost_budget",
+            "provider cost usage unavailable; cannot enforce USD budget",
+        )
     cost_limit_hit = budget_usd is not None and (
         totals.cost_usd >= budget_usd if before_call else totals.cost_usd > budget_usd
     )
@@ -284,6 +316,11 @@ def _budget_stop_reason(
             f"{'exhausted' if before_call else 'exceeded'} budget ${budget_usd:.4f}",
         )
     if budget_tokens is not None:
+        if totals.usage_sources > 0 and not totals.tokens_reported:
+            return (
+                "token_budget",
+                "provider token usage unavailable; cannot enforce token budget",
+            )
         total_tokens = totals.input_tokens + totals.output_tokens
         token_limit_hit = (
             total_tokens >= budget_tokens if before_call else total_tokens > budget_tokens
@@ -388,7 +425,7 @@ def run_loop(
     obs = observer or _NullObserver()
     totals = _RunningTotals()
     if initial_usage is not None:
-        totals.add(initial_usage)
+        totals.add(initial_usage, provider_call=True)
 
     # Seed the conversation.
     # Two ordering modes:
@@ -652,7 +689,7 @@ def _run_prepared_turn(
                     provider_failure = exc
                     raise
 
-                totals.add(response.usage)
+                totals.add(response.usage, provider_call=True)
                 observer.on_model_response(iteration, response)
                 conversation.append(
                     Message(
@@ -682,6 +719,7 @@ def _run_prepared_turn(
                         totals,
                         budget_usd=budget_usd,
                         budget_tokens=budget_tokens,
+                        before_call=True,
                     )
                     if budget_stop is not None:
                         step = _TurnStep(budget_stop, budget_detail)
@@ -737,6 +775,7 @@ def _run_prepared_turn(
                                 totals,
                                 budget_usd=budget_usd,
                                 budget_tokens=budget_tokens,
+                                before_call=True,
                             )
                             if budget_stop is not None:
                                 step = _TurnStep(budget_stop, budget_detail)
@@ -805,6 +844,7 @@ def _run_prepared_turn(
                         totals,
                         budget_usd=budget_usd,
                         budget_tokens=budget_tokens,
+                        before_call=True,
                     )
                     if budget_stop is not None:
                         step = _TurnStep(budget_stop, budget_detail)
@@ -826,10 +866,12 @@ def _run_prepared_turn(
                         if hasattr(compactor, "compact_with_usage"):
                             cresult = compactor.compact_with_usage(conversation, provider)
                             new_conversation = cresult.new_messages
-                            totals.add(cresult.usage)
+                            totals.add(cresult.usage, provider_call=True)
                         else:
                             new_conversation = compactor.compact(conversation, provider)
+                            totals.add(Usage(tokens_reported=False), provider_call=True)
                     except Exception as exc:  # noqa: BLE001
+                        totals.add(Usage(tokens_reported=False), provider_call=True)
                         _logger.warning(
                             "compactor raised (%s); continuing with uncompacted "
                             "conversation — next provider call may hit context limit",
@@ -843,6 +885,7 @@ def _run_prepared_turn(
                     totals,
                     budget_usd=budget_usd,
                     budget_tokens=budget_tokens,
+                    before_call=True,
                 )
                 if budget_stop is not None:
                     step = _TurnStep(budget_stop, budget_detail)
@@ -1124,6 +1167,12 @@ def _validate_usage(usage: Usage, *, source: str) -> None:
     ):
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError(f"{source} {name} must be a non-negative integer")
+    if usage.cached_input_tokens is not None:
+        cached = usage.cached_input_tokens
+        if isinstance(cached, bool) or not isinstance(cached, int) or cached < 0:
+            raise ValueError(f"{source} cached_input_tokens must be a non-negative integer")
+    if not isinstance(usage.tokens_reported, bool):
+        raise ValueError(f"{source} tokens_reported must be a boolean")
     if usage.cost_usd is not None:
         cost = usage.cost_usd
         if isinstance(cost, bool) or not isinstance(cost, (int, float)):

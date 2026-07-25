@@ -480,7 +480,7 @@ def run_with_evaluation(
             max_iterations=remaining_iterations,
             budget_usd=budget_usd,
             budget_tokens=budget_tokens,
-            initial_usage=totals.as_usage(),
+            initial_usage=totals.as_usage() if totals.has_usage else None,
             observer=observer,
             compactor=compactor,
         )
@@ -624,6 +624,11 @@ class _UsageTotals:
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    cached_input_tokens: int = 0
+    has_usage: bool = False
+    tokens_reported: bool = True
+    cost_reported: bool = True
+    cached_input_reported: bool = True
 
     @classmethod
     def from_usage(cls, usage: Usage) -> "_UsageTotals":
@@ -631,19 +636,36 @@ class _UsageTotals:
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
             cost_usd=float(usage.cost_usd or 0.0),
+            cached_input_tokens=int(usage.cached_input_tokens or 0),
+            has_usage=True,
+            tokens_reported=usage.tokens_reported,
+            cost_reported=usage.cost_usd is not None,
+            cached_input_reported=usage.cached_input_tokens is not None,
         )
 
     def add(self, usage: Usage) -> None:
+        self.has_usage = True
         self.input_tokens += usage.input_tokens
         self.output_tokens += usage.output_tokens
         if usage.cost_usd is not None:
             self.cost_usd += usage.cost_usd
+        if usage.cached_input_tokens is not None:
+            self.cached_input_tokens += usage.cached_input_tokens
+        self.tokens_reported = self.tokens_reported and usage.tokens_reported
+        self.cost_reported = self.cost_reported and usage.cost_usd is not None
+        self.cached_input_reported = (
+            self.cached_input_reported and usage.cached_input_tokens is not None
+        )
 
     def as_usage(self) -> Usage:
         return Usage(
             input_tokens=self.input_tokens,
             output_tokens=self.output_tokens,
-            cost_usd=self.cost_usd if self.cost_usd > 0 else None,
+            cost_usd=self.cost_usd if self.has_usage and self.cost_reported else None,
+            cached_input_tokens=(
+                self.cached_input_tokens if self.has_usage and self.cached_input_reported else None
+            ),
+            tokens_reported=self.tokens_reported,
         )
 
 
@@ -685,7 +707,7 @@ def _unknown_usage_budget_stop(
 ) -> tuple[StopReason, str] | None:
     if budget_usd is not None and usage.cost_usd is None:
         return "cost_budget", f"{role} cost usage unavailable; cannot enforce USD budget"
-    if budget_tokens is not None and usage.input_tokens == 0 and usage.output_tokens == 0:
+    if budget_tokens is not None and not usage.tokens_reported:
         return "token_budget", f"{role} token usage unavailable; cannot enforce token budget"
     return None
 

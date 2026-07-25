@@ -767,6 +767,41 @@ class TestUsageTotals:
         t.add(Usage(input_tokens=10, output_tokens=20))
         assert t.as_usage().cost_usd is None
 
+    def test_explicit_zero_cost_and_cache_stay_reported(self) -> None:
+        t = _UsageTotals()
+        t.add(Usage(cost_usd=0.0, cached_input_tokens=0))
+
+        usage = t.as_usage()
+
+        assert usage.cost_usd == 0.0
+        assert usage.cached_input_tokens == 0
+        assert usage.tokens_reported
+
+    def test_partial_usage_preserves_unavailable_fields(self) -> None:
+        t = _UsageTotals.from_usage(
+            Usage(
+                input_tokens=4,
+                output_tokens=2,
+                cost_usd=0.01,
+                cached_input_tokens=3,
+            )
+        )
+        t.add(
+            Usage(
+                input_tokens=5,
+                output_tokens=1,
+                tokens_reported=False,
+            )
+        )
+
+        usage = t.as_usage()
+
+        assert usage.input_tokens == 9
+        assert usage.output_tokens == 3
+        assert usage.cost_usd is None
+        assert usage.cached_input_tokens is None
+        assert not usage.tokens_reported
+
     def test_cost_sums(self) -> None:
         t = _UsageTotals()
         t.add(Usage(input_tokens=5, output_tokens=10, cost_usd=0.01))

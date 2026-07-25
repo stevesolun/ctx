@@ -200,6 +200,7 @@ class _TestTurnController:
         self.preparation = preparation or TurnPreparation()
         self.authorization_denial = authorization_denial
         self.authorization_usage = authorization_usage
+        self.authorization_calls = 0
         self.result_usage = result_usage
         self.result_error = result_error
         self.result_calls = 0
@@ -224,6 +225,7 @@ class _TestTurnController:
         capability_epoch: int,
         call: ToolCall,
     ) -> TurnAuthorization | None:
+        self.authorization_calls += 1
         if self.authorization_denial is None and self.authorization_usage is None:
             return None
         return TurnAuthorization(
@@ -534,6 +536,55 @@ class TestBudgets:
         assert compactor.calls == 0
         assert len(provider.calls) == 1
 
+    @pytest.mark.parametrize(
+        ("budget_tokens", "budget_usd", "expected_reason"),
+        [
+            (100, None, "token_budget"),
+            (None, 1.0, "cost_budget"),
+        ],
+    )
+    def test_compactor_failure_with_active_budget_fails_closed(
+        self,
+        budget_tokens: int | None,
+        budget_usd: float | None,
+        expected_reason: str,
+    ) -> None:
+        class _FailingCompactor:
+            def should_compact(self, messages):
+                return True
+
+            def compact_with_usage(self, messages, provider):
+                raise RuntimeError("summary provider failed after dispatch")
+
+        tc = ToolCall(id="c1", name="srv__noop", arguments={})
+        provider = _Scripted(
+            [
+                _tool_response(
+                    tc,
+                    usage=Usage(
+                        input_tokens=1,
+                        output_tokens=1,
+                        cost_usd=0.01,
+                    ),
+                ),
+                _stop_response("unreached"),
+            ]
+        )
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="meter uncertain compaction",
+            tool_executor=lambda _call: "ok",
+            compactor=_FailingCompactor(),
+            budget_tokens=budget_tokens,
+            budget_usd=budget_usd,
+        )
+
+        assert result.stop_reason == expected_reason
+        assert "usage unavailable" in result.detail
+        assert len(provider.calls) == 1
+
     def test_exact_initial_usage_stops_before_first_provider_call(self) -> None:
         provider = _Scripted([_stop_response("unreached")])
 
@@ -548,6 +599,147 @@ class TestBudgets:
         assert result.stop_reason == "token_budget"
         assert result.iterations == 0
         assert provider.calls == []
+
+    def test_missing_initial_token_usage_fails_closed_before_provider_call(self) -> None:
+        provider = _Scripted([_stop_response("unreached")])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="unknown prior spend",
+            budget_tokens=10,
+            initial_usage=Usage(tokens_reported=False),
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert "usage unavailable" in result.detail
+        assert provider.calls == []
+
+    def test_missing_provider_token_usage_fails_closed_after_one_call(self) -> None:
+        provider = _Scripted([_stop_response("answer", usage=Usage(tokens_reported=False))])
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="meter me",
+            budget_tokens=100,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert result.final_message == "answer"
+        assert "usage unavailable" in result.detail
+        assert len(provider.calls) == 1
+
+    def test_explicit_zero_usage_remains_valid_under_budget(self) -> None:
+        provider = _Scripted(
+            [
+                _stop_response(
+                    "answer",
+                    usage=Usage(
+                        cost_usd=0.0,
+                        cached_input_tokens=0,
+                        tokens_reported=True,
+                    ),
+                )
+            ]
+        )
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="meter me",
+            budget_tokens=100,
+            budget_usd=1.0,
+        )
+
+        assert result.stop_reason == "completed"
+        assert result.usage.tokens_reported
+        assert result.usage.cost_usd == 0.0
+        assert result.usage.cached_input_tokens == 0
+
+    def test_missing_provider_cost_fails_closed_under_usd_budget(self) -> None:
+        provider = _Scripted(
+            [
+                _stop_response(
+                    "answer",
+                    usage=Usage(
+                        input_tokens=1,
+                        output_tokens=1,
+                        cached_input_tokens=0,
+                    ),
+                )
+            ]
+        )
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="meter me",
+            budget_usd=1.0,
+        )
+
+        assert result.stop_reason == "cost_budget"
+        assert "usage unavailable" in result.detail
+        assert len(provider.calls) == 1
+
+    def test_cache_usage_aggregates_only_when_every_call_reports_it(self) -> None:
+        tc = ToolCall(id="c1", name="srv__noop", arguments={})
+        complete = run_loop(
+            provider=_Scripted(
+                [
+                    _tool_response(
+                        tc,
+                        usage=Usage(
+                            input_tokens=1,
+                            output_tokens=1,
+                            cost_usd=0.0,
+                            cached_input_tokens=3,
+                        ),
+                    ),
+                    _stop_response(
+                        "done",
+                        usage=Usage(
+                            input_tokens=2,
+                            output_tokens=2,
+                            cost_usd=0.0,
+                            cached_input_tokens=2,
+                        ),
+                    ),
+                ]
+            ),
+            system_prompt="",
+            task="aggregate",
+            tool_executor=lambda _call: "ok",
+        )
+        incomplete = run_loop(
+            provider=_Scripted(
+                [
+                    _tool_response(
+                        tc,
+                        usage=Usage(
+                            input_tokens=1,
+                            output_tokens=1,
+                            cost_usd=0.0,
+                            cached_input_tokens=3,
+                        ),
+                    ),
+                    _stop_response(
+                        "done",
+                        usage=Usage(
+                            input_tokens=2,
+                            output_tokens=2,
+                            cost_usd=0.0,
+                        ),
+                    ),
+                ]
+            ),
+            system_prompt="",
+            task="aggregate",
+            tool_executor=lambda _call: "ok",
+        )
+
+        assert complete.usage.cached_input_tokens == 5
+        assert incomplete.usage.cached_input_tokens is None
 
     def test_cost_budget_trips_on_terminal_response(self) -> None:
         provider = _Scripted([_stop_response("done", usage=Usage(cost_usd=0.50))])
@@ -1137,8 +1329,14 @@ class TestTurnController:
         call = ToolCall(id="c1", name=tool.name, arguments={})
         provider = _Scripted(
             [
-                _tool_response(call, usage=Usage(input_tokens=10, output_tokens=5)),
-                _stop_response("done", usage=Usage(input_tokens=5, output_tokens=3)),
+                _tool_response(
+                    call,
+                    usage=Usage(input_tokens=10, output_tokens=5, cost_usd=0.0),
+                ),
+                _stop_response(
+                    "done",
+                    usage=Usage(input_tokens=5, output_tokens=3, cost_usd=0.0),
+                ),
             ]
         )
         result = run_loop(
@@ -1152,6 +1350,72 @@ class TestTurnController:
         assert result.usage.input_tokens == 22
         assert result.usage.output_tokens == 11
         assert result.usage.cost_usd == pytest.approx(0.02)
+
+    def test_exact_provider_budget_closes_turn_with_budget_outcome(self) -> None:
+        tool = _tool_definition("custom__exact-provider-budget")
+        controller = _TestTurnController(TurnPreparation(tools=(tool,), capability_epoch=99))
+        invoked = False
+
+        def execute(_call: ToolCall) -> str:
+            nonlocal invoked
+            invoked = True
+            return "unreached"
+
+        result = run_loop(
+            provider=_Scripted(
+                [
+                    _tool_response(
+                        ToolCall("c1", tool.name, {}),
+                        usage=Usage(input_tokens=6, output_tokens=4),
+                    )
+                ]
+            ),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=controller,
+            budget_tokens=10,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert not invoked
+        assert controller.authorization_calls == 0
+        assert controller.closed == [(1, 99, "token_budget")]
+
+    def test_exact_result_hook_budget_stops_before_next_authorization(self) -> None:
+        tools = (
+            _tool_definition("custom__first"),
+            _tool_definition("custom__second"),
+        )
+        controller = _TestTurnController(
+            TurnPreparation(tools=tools, capability_epoch=100),
+            authorization_usage=Usage(input_tokens=1),
+            result_usage=Usage(input_tokens=10),
+        )
+        invoked: list[str] = []
+        calls = tuple(
+            ToolCall(id=str(index), name=tool.name, arguments={})
+            for index, tool in enumerate(tools)
+        )
+
+        def execute(call: ToolCall) -> str:
+            invoked.append(call.name)
+            return "ok"
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(*calls, usage=Usage(input_tokens=39))]),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            turn_controller=controller,
+            budget_tokens=50,
+        )
+
+        assert result.stop_reason == "token_budget"
+        assert invoked == [tools[0].name]
+        assert controller.authorization_calls == 1
+        assert controller.result_calls == 1
+        assert controller.closed == [(1, 100, "token_budget")]
 
     def test_authorization_usage_stops_before_dispatch_and_close_usage_is_metered(
         self,
@@ -1880,8 +2144,14 @@ class TestUsage:
                 )
 
         tc = ToolCall(id="c1", name="x__a", arguments={})
-        a = _tool_response(tc, usage=Usage(input_tokens=1, output_tokens=1))
-        b = _stop_response("done", usage=Usage(input_tokens=2, output_tokens=2))
+        a = _tool_response(
+            tc,
+            usage=Usage(input_tokens=1, output_tokens=1, cost_usd=0.0),
+        )
+        b = _stop_response(
+            "done",
+            usage=Usage(input_tokens=2, output_tokens=2, cost_usd=0.0),
+        )
         provider = _Scripted([a, b])
         result = run_loop(
             provider=provider,
