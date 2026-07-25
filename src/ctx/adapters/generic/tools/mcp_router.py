@@ -1025,6 +1025,11 @@ class McpRouter:
         client = self._clients.get(server)
         if client is None:
             raise ValueError(f"unknown MCP server {server!r}; known: {sorted(self._clients)}")
+        published_tools = {definition.name for definition in client.list_tools()}
+        if tool not in published_tools:
+            raise ValueError(
+                f"unknown MCP tool {qualified_name!r}; published: {sorted(published_tools)}"
+            )
         return client.call_tool(tool, arguments)
 
     @property

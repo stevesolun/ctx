@@ -583,6 +583,56 @@ class TestRouter:
             result = router.call("fake__echo", {"text": "round-trip"})
             assert result == "round-trip"
 
+    def test_call_rejects_unpublished_tool_before_dispatch(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        dispatched: list[str] = []
+
+        class BoundaryClient:
+            def __init__(
+                self,
+                config: McpServerConfig,
+                *,
+                session_id: str | None = None,
+            ) -> None:
+                pass
+
+            def start(self) -> None:
+                pass
+
+            def list_tools(self) -> list[ToolDefinition]:
+                return [
+                    ToolDefinition(
+                        name="public",
+                        description="Published tool",
+                        parameters={},
+                    )
+                ]
+
+            def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+                dispatched.append(name)
+                return "dispatched"
+
+            def stop(self) -> bool:
+                return True
+
+        monkeypatch.setattr(mcp_router, "McpClient", BoundaryClient)
+        router = McpRouter([_make_config("fake")], lazy=True)
+        router.start()
+        try:
+            assert router.server_names == []
+            assert [tool.name for tool in router.activate(["fake"])] == ["fake__public"]
+
+            with pytest.raises(ValueError, match=r"unknown MCP tool 'fake__hidden'"):
+                router.call("fake__hidden", {})
+            assert dispatched == []
+
+            assert router.call("fake__public", {}) == "dispatched"
+            assert dispatched == ["public"]
+        finally:
+            router.stop()
+
     def test_multi_server_union(self) -> None:
         cfgs = [
             _make_config("a"),
