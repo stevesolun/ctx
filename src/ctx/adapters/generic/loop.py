@@ -680,9 +680,11 @@ def _run_prepared_turn(
                         provider_timeout=provider_timeout,
                     )
                 except TimeoutError as exc:
+                    totals.add(Usage(tokens_reported=False), provider_call=True)
                     step = _TurnStep("provider_timeout", str(exc))
                     break
                 except Exception as exc:
+                    totals.add(Usage(tokens_reported=False), provider_call=True)
                     if _is_provider_timeout_exception(exc):
                         step = _TurnStep("provider_timeout", f"provider timed out: {exc}")
                         break

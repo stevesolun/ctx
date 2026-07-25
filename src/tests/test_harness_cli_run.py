@@ -1091,10 +1091,10 @@ class TestRunCommand:
         assert payload["stop_reason"] == "provider_timeout"
         assert payload["detail"] == "provider call timed out after 0.010s"
         assert payload["usage"] == {
-            "tokens_reported": True,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
+            "tokens_reported": False,
+            "input_tokens": None,
+            "output_tokens": None,
+            "total_tokens": None,
             "cached_input_tokens": None,
             "uncached_input_tokens": None,
             "cost_usd": None,

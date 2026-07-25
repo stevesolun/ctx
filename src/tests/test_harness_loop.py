@@ -2073,6 +2073,7 @@ class TestTurnController:
         )
 
         assert result.stop_reason == "provider_timeout"
+        assert not result.usage.tokens_reported
         assert controller.closed == [(1, 11, "provider_timeout")]
 
 
@@ -2254,6 +2255,7 @@ class TestObserver:
 
         assert len(obs.stops) == 1
         assert obs.stops[0].stop_reason == "provider_error"
+        assert not obs.stops[0].usage.tokens_reported
         assert "provider network down" in obs.stops[0].detail
 
     def test_provider_timeout_returns_terminal_observation(self) -> None:
@@ -2270,6 +2272,7 @@ class TestObserver:
 
         assert time.monotonic() - started < 1.0
         assert result.stop_reason == "provider_timeout"
+        assert not result.usage.tokens_reported
         assert len(obs.stops) == 1
         assert obs.stops[0].stop_reason == "provider_timeout"
 
@@ -2286,6 +2289,7 @@ class TestObserver:
 
         assert result.stop_reason == "provider_timeout"
         assert "socket timed out" in result.detail
+        assert not result.usage.tokens_reported
         assert len(obs.stops) == 1
         assert obs.stops[0].stop_reason == "provider_timeout"
 
@@ -2297,6 +2301,7 @@ class TestObserver:
         )
 
         assert result.stop_reason == "provider_timeout"
+        assert not result.usage.tokens_reported
 
 
 # ── State seeding (resume path) ─────────────────────────────────────────────
