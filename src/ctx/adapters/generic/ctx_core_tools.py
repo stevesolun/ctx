@@ -47,7 +47,7 @@ MCP servers):
 
     ctx__wiki_get(slug)
         Fetch a single entity page by slug — returns its full
-        frontmatter + body for the model to reason about.
+        frontmatter plus at most 8,000 UTF-8 bytes of body text.
 
 Load/unload/use tools are explicit lifecycle records, not filesystem
 auto-installs. The host remains responsible for asking the user and
@@ -95,6 +95,7 @@ _logger = logging.getLogger(__name__)
 # anything else falls back to its normal tool_executor.
 _NAMESPACE = f"ctx{TOOL_SEPARATOR}"
 _FILE_SIGNATURE_SAMPLE_BYTES = 64 * 1024
+_WIKI_GET_BODY_MAX_BYTES = 8_000
 _RECOMMENDATION_ENTITY_TYPE_ALIASES = {
     "agent": "agent",
     "harness": "harness",
@@ -613,8 +614,9 @@ class CtxCoreToolbox:
                 name=f"{_NAMESPACE}wiki_get",
                 description=(
                     "Fetch a single wiki entity page by slug. Returns "
-                    "the full frontmatter (as a dict), body text, and "
-                    "wiki-relative path. "
+                    "the full frontmatter (as a dict), wiki-relative path, "
+                    "and up to 8,000 UTF-8 bytes of body text. Body byte "
+                    "counts and truncation status are included in the response. "
                     "Use after recommend_bundle / wiki_search to read "
                     "the detail of a specific candidate."
                 ),
@@ -1357,6 +1359,15 @@ class CtxCoreToolbox:
         from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body  # noqa: PLC0415
 
         fm, body = parse_frontmatter_and_body(text)
+        encoded_body = body.encode("utf-8")
+        body_bytes = len(encoded_body)
+        body_truncated = body_bytes > _WIKI_GET_BODY_MAX_BYTES
+        if body_truncated:
+            body = encoded_body[:_WIKI_GET_BODY_MAX_BYTES].decode(
+                "utf-8",
+                errors="ignore",
+            )
+        body_returned_bytes = len(body.encode("utf-8"))
         return _encode_response(
             {
                 "slug": path.stem,
@@ -1365,6 +1376,10 @@ class CtxCoreToolbox:
                 "path": _wiki_entity_relpath(entity_type, path.stem),
                 "frontmatter": fm,
                 "body": body,
+                "body_truncated": body_truncated,
+                "body_bytes": body_bytes,
+                "body_returned_bytes": body_returned_bytes,
+                "body_limit_bytes": _WIKI_GET_BODY_MAX_BYTES,
             },
             response_format,
         )

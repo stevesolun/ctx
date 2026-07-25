@@ -25,6 +25,7 @@ import pytest
 
 from ctx.adapters.generic.ctx_core_tools import (
     CtxCoreToolbox,
+    _WIKI_GET_BODY_MAX_BYTES,
     _clamp_int,
     _excerpt,
     _file_signature,
@@ -2056,6 +2057,55 @@ class TestWikiGet:
         assert "frontmatter" in result
         assert "body" in result
         assert "Python Patterns" in result["body"]
+        assert result["body_truncated"] is False
+        assert result["body_bytes"] == len(result["body"].encode("utf-8"))
+        assert result["body_returned_bytes"] == result["body_bytes"]
+        assert result["body_limit_bytes"] == _WIKI_GET_BODY_MAX_BYTES
+
+    def test_body_at_byte_limit_is_not_truncated(self, tmp_path: Path) -> None:
+        wiki = _build_synthetic_wiki(tmp_path)
+        body = "x" * _WIKI_GET_BODY_MAX_BYTES
+        (wiki / "entities" / "skills" / "limit.md").write_text(
+            "---\nname: limit\ntitle: Limit\n---\n" + body,
+            encoding="utf-8",
+        )
+        toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=tmp_path / "missing.json")
+
+        result = json.loads(
+            toolbox.dispatch(ToolCall(id="c1", name="ctx__wiki_get", arguments={"slug": "limit"}))
+        )
+
+        assert result["body"] == body
+        assert result["body_truncated"] is False
+        assert result["body_bytes"] == _WIKI_GET_BODY_MAX_BYTES
+        assert result["body_returned_bytes"] == _WIKI_GET_BODY_MAX_BYTES
+
+    def test_long_body_is_bounded_at_utf8_boundary(self, tmp_path: Path) -> None:
+        wiki = _build_synthetic_wiki(tmp_path)
+        body = ("x" * (_WIKI_GET_BODY_MAX_BYTES - 1)) + "🙂tail"
+        (wiki / "entities" / "skills" / "unicode-boundary.md").write_text(
+            "---\nname: unicode-boundary\ntitle: Unicode Boundary\ntags: [unicode]\n---\n" + body,
+            encoding="utf-8",
+        )
+        toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=tmp_path / "missing.json")
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="c1",
+                    name="ctx__wiki_get",
+                    arguments={"slug": "unicode-boundary"},
+                )
+            )
+        )
+
+        assert result["slug"] == "unicode-boundary"
+        assert result["frontmatter"]["title"] == "Unicode Boundary"
+        assert result["body_truncated"] is True
+        assert result["body_bytes"] == len(body.encode("utf-8"))
+        assert result["body"] == "x" * (_WIKI_GET_BODY_MAX_BYTES - 1)
+        assert result["body_returned_bytes"] == _WIKI_GET_BODY_MAX_BYTES - 1
+        assert result["body_returned_bytes"] <= result["body_limit_bytes"]
 
     def test_missing_slug(self, toolbox: CtxCoreToolbox) -> None:
         result = json.loads(toolbox.dispatch(ToolCall(id="c1", name="ctx__wiki_get", arguments={})))
