@@ -775,6 +775,12 @@ class TestRuntimeLifecycle:
                 toolbox.dispatch(ToolCall(id="c1", name=tool_name, arguments=arguments))
             )
             assert result["ok"] is True
+            if tool_name == "ctx__load_entity":
+                toolbox._lifecycle.mark_entity_loaded(
+                    session_id="s-mcp",
+                    entity_type="mcp-server",
+                    slug="filesystem",
+                )
 
         state = json.loads(
             toolbox.dispatch(
@@ -1030,6 +1036,11 @@ class TestRuntimeLifecycle:
                 entity_type=entity_type,
                 slug=slug,
             )
+            store.mark_entity_loaded(
+                session_id="s-historical-usage",
+                entity_type=entity_type,
+                slug=slug,
+            )
         historical_events = [
             {
                 "action": "used",
@@ -1090,6 +1101,43 @@ class TestRuntimeLifecycle:
         assert contradictory["total_tokens"] == 6
         assert contradictory["tokens_reported"] is False
         assert contradictory["by_attribution"]["estimated"] == 1
+
+    def test_session_state_only_reports_applied_entities_as_loaded(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path)
+        common = {
+            "session_id": "s-applied-state",
+            "entity_type": "skill",
+            "slug": "fastapi-pro",
+        }
+        store.load_entity(**common, selected=True, selection_source="host")
+        store.mark_entity_used(**common, evidence="advisory event cannot prove activation")
+
+        requested = store.session_state(session_id="s-applied-state")
+        assert requested["loaded"] == []
+        assert requested["used"] == []
+        assert requested["unload_candidates"] == []
+        assert [entry["slug"] for entry in requested["requested"]] == ["fastapi-pro"]
+
+        store.mark_entity_loaded(**common)
+        applied = store.session_state(session_id="s-applied-state")
+        assert applied["requested"] == []
+        assert [entry["slug"] for entry in applied["loaded"]] == ["fastapi-pro"]
+        assert [entry["slug"] for entry in applied["used"]] == ["fastapi-pro"]
+
+        store.unload_entity(**common)
+        pending_unload = store.session_state(session_id="s-applied-state")
+        assert [entry["slug"] for entry in pending_unload["loaded"]] == ["fastapi-pro"]
+
+        store.mark_entity_unloaded(**common)
+        unloaded = store.session_state(session_id="s-applied-state")
+        assert unloaded["loaded"] == []
+        assert unloaded["requested"] == []
+        assert unloaded["unloaded"][-1]["unload_status"] == "applied"
 
     def test_runtime_lifecycle_usage_metrics_share_lifecycle_span(
         self,
@@ -1358,10 +1406,11 @@ class TestRuntimeLifecycle:
                 )
             )
         )
-        assert state["loaded"][0]["security_scan"]["status"] == "not_provided"
-        assert state["loaded"][0]["selected"] is False
-        assert state["loaded"][0]["selection_source"] == "unknown"
-        assert state["loaded"][0]["source_context"] == {}
+        assert state["loaded"] == []
+        assert state["requested"][0]["security_scan"]["status"] == "not_provided"
+        assert state["requested"][0]["selected"] is False
+        assert state["requested"][0]["selection_source"] == "unknown"
+        assert state["requested"][0]["source_context"] == {}
 
     def test_skill_load_accepts_security_scan_proof(
         self,
@@ -1410,7 +1459,8 @@ class TestRuntimeLifecycle:
                 )
             )
         )
-        assert state["loaded"][0]["security_scan"]["status"] == "passed"
+        assert state["loaded"] == []
+        assert state["requested"][0]["security_scan"]["status"] == "passed"
 
     def test_skill_load_redacts_security_scan_tokens_and_paths(
         self,
@@ -1476,7 +1526,8 @@ class TestRuntimeLifecycle:
                 )
             )
         )
-        assert state["loaded"][0]["security_scan"] == scan
+        assert state["loaded"] == []
+        assert state["requested"][0]["security_scan"] == scan
 
         serialized_scan = json.dumps(scan)
         assert github_token not in serialized_scan
@@ -1544,6 +1595,12 @@ class TestRuntimeLifecycle:
         ]
         for name, arguments in calls:
             toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments))
+            if name == "ctx__load_entity":
+                toolbox._lifecycle.mark_entity_loaded(
+                    session_id="s-2",
+                    entity_type=str(arguments["entity_type"]),
+                    slug=str(arguments["slug"]),
+                )
 
         result = json.loads(
             toolbox.dispatch(
@@ -1678,7 +1735,7 @@ def test_session_state_suppresses_current_dev_window_unloads(
 ) -> None:
     from ctx.adapters.generic import runtime_lifecycle
 
-    timestamps = iter([100.0, 101.0, 102.0, 103.0, 104.0, 105.0])
+    timestamps = iter([100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0])
     monkeypatch.setattr(runtime_lifecycle.time, "time", lambda: next(timestamps))
 
     for name, arguments in [
@@ -1699,6 +1756,11 @@ def test_session_state_suppresses_current_dev_window_unloads(
         ),
     ]:
         toolbox.dispatch(ToolCall(id="c1", name=name, arguments=arguments))
+    toolbox._lifecycle.mark_entity_loaded(
+        session_id="s-window",
+        entity_type="skill",
+        slug="fastapi-pro",
+    )
 
     current_window = json.loads(
         toolbox.dispatch(

@@ -764,8 +764,9 @@ def test_cli_adaptive_lifecycle_keeps_unapplied_request_on_budget_stop(
     ]
     assert [event["action"] for event in events] == ["load_requested"]
     state = lifecycle.session_state(session_id="adaptive-budget")
-    assert state["loaded"][0]["load_status"] == "requested"
-    assert state["loaded"][0]["applied_at"] is None
+    assert state["loaded"] == []
+    assert state["requested"][0]["load_status"] == "requested"
+    assert state["requested"][0]["applied_at"] is None
 
 
 def test_lifecycle_missing_selection_authority_fails_closed(tmp_path: Path) -> None:
@@ -780,8 +781,9 @@ def test_lifecycle_missing_selection_authority_fails_closed(tmp_path: Path) -> N
     assert request["event"]["selected"] is False
     assert request["event"]["selection_source"] == "unknown"
     state = lifecycle.session_state(session_id="adaptive-authority")
-    assert state["loaded"][0]["selected"] is False
-    assert state["loaded"][0]["selection_source"] == "unknown"
+    assert state["loaded"] == []
+    assert state["requested"][0]["selected"] is False
+    assert state["requested"][0]["selection_source"] == "unknown"
     lifecycle.unload_entity(
         session_id="adaptive-authority",
         entity_type="skill",

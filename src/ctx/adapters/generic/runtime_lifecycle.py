@@ -407,7 +407,12 @@ class RuntimeLifecycleStore:
                         }
                     )
 
-        loaded_entries = list(loaded.values())
+        loaded_entries = [
+            entry for entry in loaded.values() if entry.get("load_status") == "applied"
+        ]
+        requested_entries = [
+            entry for entry in loaded.values() if entry.get("load_status") == "requested"
+        ]
         unload_candidates = [
             entry
             for entry in loaded_entries
@@ -419,6 +424,7 @@ class RuntimeLifecycleStore:
             "ok": True,
             "session_id": session_id,
             "loaded": loaded_entries,
+            "requested": requested_entries,
             "used": [entry for entry in loaded_entries if entry["used"]],
             "unload_candidates": unload_candidates,
             "unloaded": unloaded,
