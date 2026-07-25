@@ -717,15 +717,47 @@ def _record_lifecycle_safely(
         )
 
 
+def _usage_token_fields(usage: Any) -> dict[str, Any]:
+    input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+    output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+    reported_raw = getattr(usage, "tokens_reported", _MISSING)
+    if reported_raw is _MISSING:
+        tokens_reported = input_tokens > 0 or output_tokens > 0
+    elif isinstance(reported_raw, bool):
+        tokens_reported = reported_raw
+    else:
+        tokens_reported = False
+    cached_raw = getattr(usage, "cached_input_tokens", None)
+    cached_input_tokens = (
+        int(cached_raw)
+        if not isinstance(cached_raw, bool) and isinstance(cached_raw, int) and cached_raw >= 0
+        else None
+    )
+    reported_input = input_tokens if tokens_reported else None
+    return {
+        "tokens_reported": tokens_reported,
+        "input_tokens": reported_input,
+        "output_tokens": output_tokens if tokens_reported else None,
+        "total_tokens": input_tokens + output_tokens if tokens_reported else None,
+        "cached_input_tokens": cached_input_tokens,
+        "uncached_input_tokens": (
+            reported_input - cached_input_tokens
+            if reported_input is not None
+            and cached_input_tokens is not None
+            and cached_input_tokens <= reported_input
+            else None
+        ),
+    }
+
+
 def _agent_token_usage(usage: Usage, *, model: str | None, provider: str) -> dict[str, Any]:
-    tokens_reported = usage.input_tokens > 0 or usage.output_tokens > 0
+    token_fields = _usage_token_fields(usage)
+    tokens_reported = bool(token_fields["tokens_reported"])
     return {
         "attribution": "exact" if tokens_reported else "unavailable",
-        "input_tokens": usage.input_tokens if tokens_reported else None,
-        "output_tokens": usage.output_tokens if tokens_reported else None,
-        "total_tokens": usage.input_tokens + usage.output_tokens if tokens_reported else None,
+        **token_fields,
         "cost_usd": usage.cost_usd,
-        "attribution_reason": None if tokens_reported else "provider reported no token usage",
+        "attribution_reason": None if tokens_reported else "provider did not report token usage",
         "model": model,
         "provider": provider,
     }
@@ -1361,11 +1393,18 @@ def _loop_result_payload(result: Any) -> dict[str, Any]:
     payload["ctx.iterations"] = int(getattr(result, "iterations", 0) or 0)
     usage = getattr(result, "usage", None)
     if usage is not None:
-        input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
-        output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
-        payload["ctx.usage.input_tokens"] = input_tokens
-        payload["ctx.usage.output_tokens"] = output_tokens
-        payload["ctx.usage.total_tokens"] = input_tokens + output_tokens
+        token_fields = _usage_token_fields(usage)
+        payload["ctx.usage.tokens_reported"] = token_fields["tokens_reported"]
+        for name in (
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "cached_input_tokens",
+            "uncached_input_tokens",
+        ):
+            value = token_fields[name]
+            if value is not None:
+                payload[f"ctx.usage.{name}"] = value
         payload["ctx.usage.scope"] = "session"
         payload["ctx.usage.attribution"] = "unavailable"
         payload["ctx.usage.attribution_reason"] = _SESSION_USAGE_ATTRIBUTION_REASON
@@ -1374,15 +1413,11 @@ def _loop_result_payload(result: Any) -> dict[str, Any]:
 
 
 def _usage_attribution_summary(usage: Any) -> dict[str, Any]:
-    input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
-    output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
     return {
         "scope": "session",
         "attribution": "unavailable",
         "attribution_reason": _SESSION_USAGE_ATTRIBUTION_REASON,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": input_tokens + output_tokens,
+        **_usage_token_fields(usage),
         "cost_usd": getattr(usage, "cost_usd", None),
     }
 
@@ -1992,8 +2027,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "plan": plan_artifact.to_dict() if plan_artifact else None,
             "plan_usage": (
                 {
-                    "input_tokens": plan_artifact.usage.input_tokens,
-                    "output_tokens": plan_artifact.usage.output_tokens,
+                    **_usage_token_fields(plan_artifact.usage),
                     "cost_usd": plan_artifact.usage.cost_usd,
                 }
                 if plan_artifact
@@ -2686,6 +2720,7 @@ def _emit_result(
     quiet: bool,
     evaluator_rounds: list[dict[str, Any]] | None = None,
 ) -> int:
+    token_fields = _usage_token_fields(result.usage)
     if as_json:
         payload = {
             "session_id": session_id,
@@ -2693,8 +2728,7 @@ def _emit_result(
             "final_message": result.final_message,
             "iterations": result.iterations,
             "usage": {
-                "input_tokens": result.usage.input_tokens,
-                "output_tokens": result.usage.output_tokens,
+                **token_fields,
                 "cost_usd": result.usage.cost_usd,
             },
             "usage_attribution": _usage_attribution_summary(result.usage),
@@ -2705,9 +2739,10 @@ def _emit_result(
         print(json.dumps(payload, indent=2))
     else:
         if not quiet:
+            token_count = token_fields["total_tokens"]
             print(
                 f"\n[ctx] stop={result.stop_reason}  iterations={result.iterations}  "
-                f"tokens={result.usage.input_tokens + result.usage.output_tokens}  "
+                f"tokens={token_count if token_count is not None else 'unavailable'}  "
                 "usage_scope=session  per_tool_usage=unavailable",
                 file=sys.stderr,
             )

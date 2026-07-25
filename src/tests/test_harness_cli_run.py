@@ -1037,8 +1037,12 @@ class TestRunCommand:
         assert payload["final_message"] == final_message
         assert payload["detail"] == detail
         assert payload["usage"] == {
+            "tokens_reported": True,
             "input_tokens": 5,
             "output_tokens": 1,
+            "total_tokens": 6,
+            "cached_input_tokens": None,
+            "uncached_input_tokens": None,
             "cost_usd": None,
         }
 
@@ -1087,8 +1091,12 @@ class TestRunCommand:
         assert payload["stop_reason"] == "provider_timeout"
         assert payload["detail"] == "provider call timed out after 0.010s"
         assert payload["usage"] == {
+            "tokens_reported": True,
             "input_tokens": 0,
             "output_tokens": 0,
+            "total_tokens": 0,
+            "cached_input_tokens": None,
+            "uncached_input_tokens": None,
             "cost_usd": None,
         }
 
@@ -1122,11 +1130,40 @@ class TestRunCommand:
             "scope": "session",
             "attribution": "unavailable",
             "attribution_reason": run_cli._SESSION_USAGE_ATTRIBUTION_REASON,
+            "tokens_reported": True,
             "input_tokens": 5,
             "output_tokens": 3,
             "total_tokens": 8,
+            "cached_input_tokens": None,
+            "uncached_input_tokens": None,
             "cost_usd": None,
         }
+
+    def test_usage_telemetry_exposes_cached_and_uncached_tokens(self) -> None:
+        result = types.SimpleNamespace(
+            stop_reason="completed",
+            iterations=1,
+            usage=Usage(
+                input_tokens=10,
+                output_tokens=3,
+                cost_usd=0.01,
+                cached_input_tokens=6,
+            ),
+        )
+
+        payload = run_cli._loop_result_payload(result)
+
+        assert payload["ctx.usage.tokens_reported"] is True
+        assert payload["ctx.usage.total_tokens"] == 13
+        assert payload["ctx.usage.cached_input_tokens"] == 6
+        assert payload["ctx.usage.uncached_input_tokens"] == 4
+        assert payload["ctx.usage.cost_present"] is True
+
+        invalid_cache = run_cli._usage_token_fields(
+            Usage(input_tokens=5, output_tokens=1, cached_input_tokens=8)
+        )
+        assert invalid_cache["cached_input_tokens"] == 8
+        assert invalid_cache["uncached_input_tokens"] is None
 
     def test_model_required(
         self,
@@ -1437,8 +1474,12 @@ class TestRunCommand:
         payload = json.loads(capsys.readouterr().out)
         assert exit_code == 0
         assert payload["usage"] == {
+            "tokens_reported": True,
             "input_tokens": 12,
             "output_tokens": 21,
+            "total_tokens": 33,
+            "cached_input_tokens": None,
+            "uncached_input_tokens": None,
             "cost_usd": None,
         }
         state = run_cli.load_session("evaluator-usage", sessions_dir=tmp_path)

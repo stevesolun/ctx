@@ -843,14 +843,31 @@ class TestUsageTotals:
         from ctx.cli.run import _agent_token_usage
 
         payload = _agent_token_usage(
-            Usage(cost_usd=0.1),
+            Usage(cost_usd=0.1, tokens_reported=False),
             model="openai/reviewer",
             provider="openai",
         )
 
         assert payload["attribution"] == "unavailable"
         assert payload["total_tokens"] is None
+        assert payload["cached_input_tokens"] is None
+        assert payload["uncached_input_tokens"] is None
         assert payload["cost_usd"] == 0.1
+
+    def test_explicit_zero_agent_usage_remains_exact(self) -> None:
+        from ctx.cli.run import _agent_token_usage
+
+        payload = _agent_token_usage(
+            Usage(cost_usd=0.0, cached_input_tokens=0),
+            model="local/free",
+            provider="local",
+        )
+
+        assert payload["attribution"] == "exact"
+        assert payload["total_tokens"] == 0
+        assert payload["cached_input_tokens"] == 0
+        assert payload["uncached_input_tokens"] == 0
+        assert payload["cost_usd"] == 0.0
 
 
 # ── CLI integration ──────────────────────────────────────────────────────

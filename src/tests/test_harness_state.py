@@ -325,14 +325,25 @@ class TestConvenienceWriters:
                     content="ok",
                     tool_calls=(),
                     finish_reason="stop",
-                    usage=Usage(input_tokens=10, output_tokens=5, cost_usd=0.002),
+                    usage=Usage(
+                        input_tokens=10,
+                        output_tokens=5,
+                        cost_usd=0.002,
+                        cached_input_tokens=6,
+                    ),
                     provider="litellm",
                     model="openrouter/x",
                 ),
             )
         event = json.loads((tmp_path / "s.jsonl").read_text(encoding="utf-8"))
         assert event["iteration"] == 3
-        assert event["usage"]["cost_usd"] == 0.002
+        assert event["usage"] == {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_usd": 0.002,
+            "cached_input_tokens": 6,
+            "tokens_reported": True,
+        }
         assert event["provider"] == "litellm"
         assert event["model"] == "openrouter/x"
 
@@ -435,6 +446,93 @@ class TestLoadSession:
         state = load_session("s", sessions_dir=tmp_path)
         assert state.stopped is False
         assert state.stop_reason is None
+        assert not state.usage.tokens_reported
+
+    def test_replay_usage_preserves_cache_and_incomplete_attribution(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:
+            store.write_stop(
+                LoopResult(
+                    stop_reason="completed",
+                    final_message="first",
+                    iterations=1,
+                    usage=Usage(
+                        input_tokens=10,
+                        output_tokens=2,
+                        cost_usd=0.1,
+                        cached_input_tokens=4,
+                    ),
+                    messages=(),
+                )
+            )
+            store.write_stop(
+                LoopResult(
+                    stop_reason="completed",
+                    final_message="second",
+                    iterations=1,
+                    usage=Usage(
+                        input_tokens=15,
+                        output_tokens=3,
+                        cached_input_tokens=6,
+                        tokens_reported=False,
+                    ),
+                    messages=(),
+                )
+            )
+
+        usage = load_session("s", sessions_dir=tmp_path).usage
+
+        assert usage.input_tokens == 15
+        assert usage.output_tokens == 3
+        assert usage.cost_usd is None
+        assert usage.cached_input_tokens == 6
+        assert not usage.tokens_reported
+
+    def test_replay_legacy_usage_defaults_to_reported_tokens(self, tmp_path: Path) -> None:
+        path = tmp_path / "s.jsonl"
+        path.write_text(
+            json.dumps(
+                {
+                    "type": "stop",
+                    "stop_reason": "completed",
+                    "usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "cost_usd": 0.0,
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        usage = load_session("s", sessions_dir=tmp_path).usage
+
+        assert usage.tokens_reported
+        assert usage.cached_input_tokens is None
+        assert usage.cost_usd == 0.0
+
+    def test_replay_malformed_usage_does_not_claim_exact_tokens(self, tmp_path: Path) -> None:
+        path = tmp_path / "s.jsonl"
+        path.write_text(
+            json.dumps(
+                {
+                    "type": "stop",
+                    "stop_reason": "completed",
+                    "usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "tokens_reported": "false",
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        assert not load_session("s", sessions_dir=tmp_path).usage.tokens_reported
 
     def test_replay_tool_call_messages(self, tmp_path: Path) -> None:
         """Assistant-with-tool_calls + tool-result must round-trip faithfully."""

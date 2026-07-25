@@ -244,6 +244,8 @@ def _usage_to_dict(usage: Usage) -> dict[str, Any]:
         "input_tokens": usage.input_tokens,
         "output_tokens": usage.output_tokens,
         "cost_usd": usage.cost_usd,
+        "cached_input_tokens": usage.cached_input_tokens,
+        "tokens_reported": usage.tokens_reported,
     }
 
 
@@ -251,11 +253,30 @@ def _usage_from_dict(raw: Any) -> Usage | None:
     if not isinstance(raw, dict):
         return None
     cost_raw = raw.get("cost_usd")
-    cost = float(cost_raw) if isinstance(cost_raw, int | float) else None
+    cost = (
+        float(cost_raw)
+        if not isinstance(cost_raw, bool) and isinstance(cost_raw, int | float)
+        else None
+    )
+    cached_raw = raw.get("cached_input_tokens")
+    cached = (
+        _usage_int(cached_raw)
+        if not isinstance(cached_raw, bool) and isinstance(cached_raw, int)
+        else None
+    )
+    tokens_reported_raw = raw.get("tokens_reported")
+    if "tokens_reported" not in raw:
+        tokens_reported = True
+    elif isinstance(tokens_reported_raw, bool):
+        tokens_reported = tokens_reported_raw
+    else:
+        tokens_reported = False
     return Usage(
         input_tokens=_usage_int(raw.get("input_tokens")),
         output_tokens=_usage_int(raw.get("output_tokens")),
         cost_usd=cost,
+        cached_input_tokens=cached,
+        tokens_reported=tokens_reported,
     )
 
 
@@ -267,16 +288,25 @@ def _usage_int(raw: Any) -> int:
     return 0
 
 
-def _combine_usage(left: Usage, right: Usage) -> Usage:
-    cost: float | None
-    if left.cost_usd is None and right.cost_usd is None:
-        cost = None
-    else:
-        cost = (left.cost_usd or 0.0) + (right.cost_usd or 0.0)
+def _combine_usage(left: Usage | None, right: Usage | None) -> Usage | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
     return Usage(
         input_tokens=left.input_tokens + right.input_tokens,
         output_tokens=left.output_tokens + right.output_tokens,
-        cost_usd=cost,
+        cost_usd=(
+            left.cost_usd + right.cost_usd
+            if left.cost_usd is not None and right.cost_usd is not None
+            else None
+        ),
+        cached_input_tokens=(
+            left.cached_input_tokens + right.cached_input_tokens
+            if left.cached_input_tokens is not None and right.cached_input_tokens is not None
+            else None
+        ),
+        tokens_reported=left.tokens_reported and right.tokens_reported,
     )
 
 
@@ -660,8 +690,8 @@ def load_session(
     stopped = False
     stop_reason: str | None = None
     event_count = 0
-    usage_total = Usage()
-    current_run_usage = Usage()
+    usage_total: Usage | None = None
+    current_run_usage: Usage | None = None
 
     for event in _iter_events(path):
         event_count += 1
@@ -693,11 +723,11 @@ def load_session(
             stopped = True
             stop_reason = event.get("stop_reason")
             usage = _usage_from_dict(event.get("usage"))
-            usage_total = _combine_usage(
-                usage_total,
-                usage if usage is not None else current_run_usage,
-            )
-            current_run_usage = Usage()
+            if usage is not None:
+                usage_total = usage
+            else:
+                usage_total = _combine_usage(usage_total, current_run_usage)
+            current_run_usage = None
 
     usage_total = _combine_usage(usage_total, current_run_usage)
 
@@ -714,7 +744,7 @@ def load_session(
         stopped=stopped,
         stop_reason=stop_reason,
         event_count=event_count,
-        usage=usage_total,
+        usage=usage_total or Usage(tokens_reported=False),
     )
 
 
