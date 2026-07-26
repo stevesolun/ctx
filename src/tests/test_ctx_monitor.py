@@ -1721,6 +1721,7 @@ def test_render_runtime_lifecycle_surfaces_checks_and_open_escalations(
     assert "<td>Cache write</td><td>4</td>" in html
     assert "<td>Uncached input</td><td>8</td>" in html
     assert "<span class='pill'>exact</span>" in html
+    assert html.count("class='card table-scroll'") == 5
 
 
 def test_render_logs_filters_and_renders(fake_claude: Path) -> None:
@@ -5151,6 +5152,8 @@ def test_render_home_shows_stat_grid_even_with_no_sessions(fake_claude: Path) ->
         assert f"grade-{grade}" in html_out
     # Empty-state copy kicks in when there are no sessions / audit entries.
     assert "No sessions recorded" in html_out or "Recent sessions" in html_out
+    assert "class='responsive-split-grid'" in html_out
+    assert html_out.count("class='card table-scroll'") == 2
 
 
 def test_render_home_formats_large_counts_with_commas(
@@ -5198,6 +5201,8 @@ def test_render_home_formats_large_counts_with_commas(
     assert "1,778,069 edges" in html_out
     assert "68,494 skills" in html_out
     assert "10,790 MCPs" in html_out
+    assert "&middot;" in html_out
+    assert "&amp;middot;" not in html_out
     assert "10000</div>" not in html_out
     assert "100000</div>" not in html_out
 
@@ -5605,6 +5610,8 @@ def test_render_wiki_index_lists_entities(fake_claude: Path) -> None:
     # Search + type filter must be present.
     assert "id='wiki-search'" in html_out
     assert "class='wiki-type-filter'" in html_out
+    assert "class='responsive-sidebar-grid'" in html_out
+    assert "class='responsive-sidebar'" in html_out
     # Cards link to the typed per-entity wiki page so duplicate slugs can
     # disambiguate skill/agent/MCP/harness pages.
     assert "href='/wiki/python-patterns?type=skill'" in html_out
@@ -6800,6 +6807,10 @@ def test_layout_nav_tabs_are_draggable_and_persist_order() -> None:
     assert "id='dashboard-nav'" in out
     assert "app-shell" in out
     assert ".app-shell" in css
+    assert ".responsive-split-grid" in css
+    assert ".responsive-sidebar-grid" in css
+    assert ".table-scroll { overflow-x: auto; }" in css
+    assert ".responsive-sidebar { position: static !important; }" in css
     assert ".graph-canvas-wrap [data-3d-node-id]:focus" in css
     assert (
         ".graph-stage { width: 100%; height: calc(100vh - 2rem); height: calc(100dvh - 2rem);"

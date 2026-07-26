@@ -218,7 +218,7 @@ def render_runtime_lifecycle(
         f"<br><span class='muted'>source: <code>{html.escape(summary['path'])}</code></span>"
         " / <a href='/api/runtime.json'>JSON</a>"
         "</div>"
-        "<div class='card'><strong>Tool selection</strong>"
+        "<div class='card table-scroll'><strong>Tool selection</strong>"
         f"<p><strong>{selection.get('loaded_total', 0)}</strong> loaded / "
         f"<strong>{selection.get('active_loaded_total', 0)}</strong> active / "
         f"<strong>{selection.get('selected_total', 0)}</strong> selected / "
@@ -229,7 +229,7 @@ def render_runtime_lifecycle(
             else "<p class='muted'>No tool selections recorded yet.</p>"
         )
         + "</div>"
-        "<div class='card'><strong>Token usage</strong>"
+        "<div class='card table-scroll'><strong>Token usage</strong>"
         f"<p><strong>{token_usage.get('records', 0)}</strong> records / "
         f"<strong>{total_tokens}</strong> tokens / "
         f"<strong>{cost}</strong> cost</p>"
@@ -242,7 +242,7 @@ def render_runtime_lifecycle(
             else "<p class='muted'>No token usage records yet.</p>"
         )
         + "</div>"
-        "<div class='card'><strong>Recent tool usage</strong>"
+        "<div class='card table-scroll'><strong>Recent tool usage</strong>"
         + (
             "<table><tr><th>Created</th><th>Session</th><th>Type</th><th>Slug</th>"
             "<th>Tokens</th><th>Attribution</th></tr>" + recent_usage_rows + "</table>"
@@ -250,7 +250,7 @@ def render_runtime_lifecycle(
             else "<p class='muted'>No tool usage recorded yet.</p>"
         )
         + "</div>"
-        "<div class='card'><strong>Recent validations</strong>"
+        "<div class='card table-scroll'><strong>Recent validations</strong>"
         + (
             "<table><tr><th>Created</th><th>Check</th><th>Status</th>"
             "<th>Session</th><th>Summary</th></tr>" + validation_rows + "</table>"
@@ -258,7 +258,7 @@ def render_runtime_lifecycle(
             else "<p class='muted'>No validation checks recorded yet.</p>"
         )
         + "</div>"
-        "<div class='card'><strong>Open escalations</strong>"
+        "<div class='card table-scroll'><strong>Open escalations</strong>"
         + (
             "<table><tr><th>Created</th><th>Trigger</th><th>Severity</th>"
             "<th>Session</th><th>Reason</th></tr>" + escalation_rows + "</table>"
