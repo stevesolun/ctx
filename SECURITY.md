@@ -65,6 +65,12 @@ implemented controls, and residual risks.
 
 ## Governance Status
 
-This policy does not claim that Dependabot, CodeQL, branch protection, or
-mandatory multi-person approval is currently enabled. Those controls are
-managed separately and do not replace private vulnerability reporting.
+Private vulnerability reporting is enabled. The active GitHub
+[ruleset 15907020](https://github.com/stevesolun/ctx/rules/15907020)
+CI-protects `main`: it strictly requires the `CI required` status and has no
+bypass actors. The ruleset does not require pull-request review or CODEOWNER
+approval, and `.github/CODEOWNERS` currently names only one human. Mandatory
+independent review therefore remains a human/operator blocker.
+
+Dependabot, CodeQL, and other GitHub-hosted controls are managed separately.
+They do not replace private vulnerability reporting or independent review.

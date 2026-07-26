@@ -40,6 +40,22 @@ def test_threat_model_is_public_and_links_security_policy() -> None:
     assert "[threat model](docs/threat-model.md)" in security
 
 
+def test_governance_docs_distinguish_ci_protection_from_independent_review() -> None:
+    enterprise = " ".join(_read("docs/enterprise-readiness-review.md").split())
+    security = " ".join(_read("SECURITY.md").split())
+    codeowners = " ".join(_read(".github/CODEOWNERS").split())
+
+    assert "GitHub `main` was unprotected" not in enterprise
+    assert "ruleset 15907020" in enterprise
+    assert "strictly requires the `CI required` status" in enterprise
+    assert "ruleset 15907020" in security
+    assert "does not require pull-request review or CODEOWNER approval" in security
+    assert "only one human" in security
+    assert "ruleset 15907020" in codeowners
+    assert "already protects main with strict required CI" in codeowners
+    assert "could deadlock merges" in codeowners
+
+
 def test_monitor_docs_match_runtime_exposure_contract() -> None:
     security = _read("SECURITY.md")
     dashboard = _read("docs/dashboard.md")

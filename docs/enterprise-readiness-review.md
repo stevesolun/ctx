@@ -33,7 +33,7 @@ Enterprise work for the current model prioritizes:
 |---|---|---|---|
 | P0-1 Security disclosure | Partial | `SECURITY.md`; GitHub private vulnerability reporting enabled | Decide and document response targets, or formally amend that packet criterion; revalidate the repository setting during the release audit |
 | P0-2 Independent ownership | External/human blocker | `.github/CODEOWNERS` exists but names only one human owner | Add a second human owner |
-| P0-2 Required review controls | Pending operator action | GitHub `main` was unprotected at review time | Enable branch protection, code-owner approval, required checks, and admin enforcement, then validate them with a test PR |
+| P0-2 Required review controls | Partial; external/human blocker | Active GitHub [ruleset 15907020](https://github.com/stevesolun/ctx/rules/15907020) targets `main`, strictly requires the `CI required` status, and has no bypass actors | Add a second human CODEOWNER, then require pull-request review and CODEOWNER approval and validate those controls with a test PR |
 | P0-3 Dependabot, CodeQL, dependency audit | Implemented locally | `.github/dependabot.yml`, CodeQL and dependency-audit workflows, hash-locked policy dependencies, fail-closed Dependabot parser, and security-config classifiers | Pass the final remote workflow matrix and observe the first scheduled Dependabot/audit runs |
 | P0-4 License provenance | Critical partial | `src/ctx/core/source_registry.py`, `src/import_designdotmd_skills.py`, generated `NOTICE`, and paired adversarial tests | Extend the enforced registry boundary to every ingestion/recommend/install/publication path; keep unresolved full bodies blocked |
 | P1-1 Local monitor trust model | Implemented with accepted substitution | Exact HTTP Origin/Host authority, explicit `--allow-non-loopback`, token-protected reads, disabled remote mutations, tests, and security docs | The packet's separate environment acknowledgement is not implemented; preserve the deliberate flag-plus-read-only-token design or revisit that decision |
@@ -68,8 +68,9 @@ operability. The implementation must make these corrections:
 - The local monitor deliberately substitutes one explicit non-loopback flag,
   token-protected reads, and disabled remote mutations for the packet's
   flag-plus-environment-acknowledgement proposal.
-- CODEOWNERS without a second human and branch protection does not create
-  independent review.
+- The active GitHub ruleset CI-protects `main`, but it does not require
+  pull-request review or CODEOWNER approval. CODEOWNERS names only one human,
+  so independent review remains a human/operator blocker.
 - Functional loopback benchmark evidence must not be labeled as live-provider
   or production-efficiency evidence.
 - Dependency automation now uses a fail-closed structural exemption in the
@@ -123,7 +124,7 @@ An enterprise-ready claim additionally requires:
 
 1. every in-scope P0 and P1 criterion above to be implemented rather than
    partial, pending, or blocked;
-2. independent ownership and tested branch-protection controls;
+2. independent ownership and tested pull-request and CODEOWNER review controls;
 3. universal provenance enforcement across ingestion, recommendation,
    installation, and publication;
 4. observed scheduled security-scanner runs and verification against a real
