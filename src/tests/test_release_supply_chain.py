@@ -316,7 +316,7 @@ def test_publish_workflow_resolves_all_extras_before_validated_sbom() -> None:
     assert names.index("Generate and validate CycloneDX runtime SBOM") < names.index(
         "Upload dist artifact"
     )
-    assert "${wheel}[ann,browser,embeddings,gcf,harness,viz]" in install
+    assert "${CTX_WHEEL}[ann,browser,embeddings,gcf,harness,viz]" in install
     assert "python -m pip check" in install
     for distribution in (
         "gcf-python",
@@ -360,7 +360,11 @@ def test_attestation_covers_every_published_artifact_and_blocks_publish() -> Non
 
     provenance = attest_steps["Attest release provenance"]
     assert provenance["uses"] == ("actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6")
-    for path in ("dist/*.whl", "dist/*.tar.gz", "release-sbom/*.json"):
+    for path in (
+        "dist/packages/*.whl",
+        "dist/packages/*.tar.gz",
+        "release-sbom/*.json",
+    ):
         assert path in provenance["with"]["subject-path"]
 
     graph_download = attest_steps["Download graph artifact bundle"]
