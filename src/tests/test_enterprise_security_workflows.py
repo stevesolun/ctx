@@ -74,9 +74,9 @@ def test_codeql_uses_current_actions_and_external_config() -> None:
     steps = workflow["jobs"]["analyze"]["steps"]
 
     assert [step["uses"] for step in steps] == [
-        "actions/checkout@v7",
-        "github/codeql-action/init@v4",
-        "github/codeql-action/analyze@v4",
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81",
+        "github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81",
     ]
     checkout = _step(workflow, "analyze", "Checkout")
     initialize = _step(workflow, "analyze", "Initialize CodeQL")
@@ -166,8 +166,8 @@ def test_dependency_workflow_uses_current_actions_and_helper() -> None:
     command = audit["run"]
 
     assert [step["uses"] for step in steps if "uses" in step] == [
-        "actions/checkout@v7",
-        "actions/setup-python@v7",
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
     ]
     setup = _step(
         workflow,

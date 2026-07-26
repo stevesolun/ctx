@@ -359,7 +359,7 @@ def test_attestation_covers_every_published_artifact_and_blocks_publish() -> Non
     assert publish["permissions"] == {"contents": "read", "id-token": "write"}
 
     provenance = attest_steps["Attest release provenance"]
-    assert provenance["uses"] == "actions/attest@v4"
+    assert provenance["uses"] == ("actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6")
     for path in ("dist/*.whl", "dist/*.tar.gz", "release-sbom/*.json"):
         assert path in provenance["with"]["subject-path"]
 
@@ -382,7 +382,7 @@ def test_attestation_covers_every_published_artifact_and_blocks_publish() -> Non
         )
 
     sbom = attest_steps["Attest release SBOM"]
-    assert sbom["uses"] == "actions/attest@v4"
+    assert sbom["uses"] == "actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6"
     assert sbom["with"]["sbom-path"] == "release-sbom/claude-ctx.cdx.json"
     assert "attest" in publish["needs"]
     assert "needs.attest.result == 'success'" in publish["if"]
@@ -413,8 +413,9 @@ def test_release_keeps_existing_publish_gates_and_exposes_sbom() -> None:
         "release-sbom/claude-ctx.cdx.json"
         in release_steps["Upload graph assets and SBOM to GitHub release"]["run"]
     )
-    assert publish_steps["Publish to PyPI"]["uses"] == ("pypa/gh-action-pypi-publish@release/v1")
-    assert publish_steps["Publish to TestPyPI"]["uses"] == (
-        "pypa/gh-action-pypi-publish@release/v1"
+    immutable_publish_action = (
+        "pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247"
     )
+    assert publish_steps["Publish to PyPI"]["uses"] == immutable_publish_action
+    assert publish_steps["Publish to TestPyPI"]["uses"] == (immutable_publish_action)
     assert "password" not in json.dumps(publish_steps).lower()
