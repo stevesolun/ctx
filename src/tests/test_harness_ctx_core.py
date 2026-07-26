@@ -1109,7 +1109,7 @@ class TestRuntimeLifecycle:
         from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
 
         store = RuntimeLifecycleStore(root=tmp_path)
-        common = {
+        common: dict[str, Any] = {
             "session_id": "s-applied-state",
             "entity_type": "skill",
             "slug": "fastapi-pro",
