@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "provenance": {
+    "owner": "ctx project",
+    "source": "https://github.com/stevesolun/ctx",
+    "license": "MIT"
+  },
+  "overlay": {
+    "overlay_id": "ctx-runtime-availability-v1",
+    "replace_scope": "ctx:runtime-availability",
+    "source": "ctx-runtime-availability",
+    "provenance": "ctx-project-authored",
+    "nodes": [
+      {
+        "id": "skill:ctx-python-testing",
+        "label": "ctx-python-testing",
+        "title": "ctx Python Testing",
+        "type": "skill",
+        "description": "Project-owned local Python testing workflow for focused regressions and configured quality gates.",
+        "tags": ["ctx", "python", "testing", "pytest", "local", "no-api-key"],
+        "source": "ctx-runtime-availability",
+        "source_keys": ["https://github.com/stevesolun/ctx"],
+        "license": "MIT",
+        "status": "local-wiki",
+        "project_owned": true,
+        "requires_api_keys": false
+      },
+      {
+        "id": "skill:ctx-javascript-testing",
+        "label": "ctx-javascript-testing",
+        "title": "ctx JavaScript Testing",
+        "type": "skill",
+        "description": "Project-owned local JavaScript testing workflow for unit, integration, and browser-facing behavior.",
+        "tags": ["ctx", "javascript", "testing", "local", "no-api-key"],
+        "source": "ctx-runtime-availability",
+        "source_keys": ["https://github.com/stevesolun/ctx"],
+        "license": "MIT",
+        "status": "local-wiki",
+        "project_owned": true,
+        "requires_api_keys": false
+      },
+      {
+        "id": "skill:ctx-rust-patterns",
+        "label": "ctx-rust-patterns",
+        "title": "ctx Rust Patterns",
+        "type": "skill",
+        "description": "Project-owned local Rust implementation workflow for ownership, errors, tests, and performance checks.",
+        "tags": ["ctx", "rust", "patterns", "testing", "local", "no-api-key"],
+        "source": "ctx-runtime-availability",
+        "source_keys": ["https://github.com/stevesolun/ctx"],
+        "license": "MIT",
+        "status": "local-wiki",
+        "project_owned": true,
+        "requires_api_keys": false
+      },
+      {
+        "id": "skill:ctx-typescript",
+        "label": "ctx-typescript",
+        "title": "ctx TypeScript",
+        "type": "skill",
+        "description": "Project-owned local TypeScript workflow for strict types, runtime validation, and focused tests.",
+        "tags": ["ctx", "typescript", "typing", "testing", "local", "no-api-key"],
+        "source": "ctx-runtime-availability",
+        "source_keys": ["https://github.com/stevesolun/ctx"],
+        "license": "MIT",
+        "status": "local-wiki",
+        "project_owned": true,
+        "requires_api_keys": false
+      },
+      {
+        "id": "agent:ctx-python-reviewer",
+        "label": "ctx-python-reviewer",
+        "title": "ctx Python Reviewer",
+        "type": "agent",
+        "description": "Project-owned local Python review agent for correctness, regressions, security, typing, and tests.",
+        "tags": ["ctx", "python", "reviewer", "testing", "security", "local", "no-api-key"],
+        "source": "ctx-runtime-availability",
+        "source_keys": ["https://github.com/stevesolun/ctx"],
+        "license": "MIT",
+        "status": "available",
+        "project_owned": true,
+        "requires_api_keys": false
+      },
+      {
+        "id": "mcp-server:ctx-core",
+        "label": "ctx-core",
+        "title": "ctx Core MCP Server",
+        "type": "mcp-server",
+        "description": "Project-owned built-in stdio MCP server for ctx recommendations, lifecycle state, telemetry, and graph tools.",
+        "tags": ["ctx", "mcp-server", "recommendations", "lifecycle", "telemetry", "graph", "local", "no-api-key"],
+        "source": "ctx-runtime-availability",
+        "source_keys": ["https://github.com/stevesolun/ctx"],
+        "license": "MIT",
+        "status": "available",
+        "project_owned": true,
+        "requires_api_keys": false
+      }
+    ],
+    "edges": []
+  },
+  "entries": [
+    {
+      "id": "skill:ctx-python-testing",
+      "type": "skill",
+      "no_api_keys": true,
+      "files": [
+        {
+          "path": "converted/ctx-python-testing/SKILL.md",
+          "content": "---\nname: ctx-python-testing\ndescription: Project-owned local Python testing with pytest, focused regressions, and configured quality gates.\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx Python Testing\n\nUse this skill for local Python test design and failure diagnosis.\n\n1. Read the behavior and nearby tests before changing code.\n2. Reproduce the failure with the narrowest deterministic pytest case.\n3. Implement the smallest behavior-preserving fix.\n4. Run the focused test, affected subsystem, and configured quality gates.\n5. Keep fixtures isolated from network and wall-clock dependencies.\n"
+        }
+      ]
+    },
+    {
+      "id": "skill:ctx-javascript-testing",
+      "type": "skill",
+      "no_api_keys": true,
+      "files": [
+        {
+          "path": "converted/ctx-javascript-testing/SKILL.md",
+          "content": "---\nname: ctx-javascript-testing\ndescription: Project-owned local JavaScript testing for unit, integration, and browser-facing behavior.\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx JavaScript Testing\n\nUse the repository's configured runner and assertion style.\n\n1. Reproduce the user-visible failure with a focused test.\n2. Keep mocks at external boundaries and assert observable behavior.\n3. Cover success, invalid input, and async rejection paths.\n4. Run the focused test, JavaScript lint/type checks, and the affected suite.\n"
+        }
+      ]
+    },
+    {
+      "id": "skill:ctx-rust-patterns",
+      "type": "skill",
+      "no_api_keys": true,
+      "files": [
+        {
+          "path": "converted/ctx-rust-patterns/SKILL.md",
+          "content": "---\nname: ctx-rust-patterns\ndescription: Project-owned local Rust implementation, ownership, errors, tests, and performance checks.\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx Rust Patterns\n\nUse this skill for local Rust feature work and review.\n\n1. Preserve ownership and borrowing clarity before adding clones.\n2. Model recoverable failures with typed errors.\n3. Add focused unit or integration tests for the changed contract.\n4. Run cargo fmt, cargo clippy, and the affected cargo test targets.\n"
+        }
+      ]
+    },
+    {
+      "id": "skill:ctx-typescript",
+      "type": "skill",
+      "no_api_keys": true,
+      "files": [
+        {
+          "path": "converted/ctx-typescript/SKILL.md",
+          "content": "---\nname: ctx-typescript\ndescription: Project-owned local TypeScript implementation with strict types, runtime validation, and focused tests.\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx TypeScript\n\nUse this skill for local TypeScript feature work.\n\n1. Follow the repository's existing compiler and module settings.\n2. Keep boundary data unknown until it is validated.\n3. Avoid assertions that hide nullable or variant states.\n4. Run the configured type checker, lint, and affected tests.\n"
+        }
+      ]
+    },
+    {
+      "id": "agent:ctx-python-reviewer",
+      "type": "agent",
+      "no_api_keys": true,
+      "files": [
+        {
+          "path": "entities/agents/ctx-python-reviewer.md",
+          "content": "---\ntitle: ctx-python-reviewer\ntype: agent\nstatus: available\ntags: [ctx, python, reviewer, testing, security]\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx Python Reviewer\n\nProject-owned review agent for local Python changes. It reports findings with evidence, reproduction, risk, a minimal fix recommendation, and a verdict.\n"
+        },
+        {
+          "path": "converted-agents/ctx-python-reviewer.md",
+          "content": "---\nname: ctx-python-reviewer\ndescription: Project-owned review of local Python changes for correctness, regressions, security, typing, and missing tests.\nmodel: inherit\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\nReview the requested Python change and its tests. Lead with concrete findings ordered by severity. Check public behavior, exception boundaries, typing, resource cleanup, and deterministic pytest coverage. For every finding provide the file and line, evidence, a reproduction, risk, and the smallest correct fix. Distinguish observed results from inference. End with PASS only when focused verification covers the changed behavior; otherwise return REQUEST CHANGES.\n"
+        }
+      ]
+    },
+    {
+      "id": "mcp-server:ctx-core",
+      "type": "mcp-server",
+      "no_api_keys": true,
+      "files": [
+        {
+          "path": "entities/mcp-servers/c/ctx-core.md",
+          "content": "---\ntype: mcp-server\nslug: ctx-core\nname: ctx Core MCP Server\ndescription: Project-owned built-in stdio access to ctx recommendations, lifecycle state, telemetry, and graph tools.\nstatus: available\ntags: [ctx, local, recommendations, lifecycle, telemetry, graph]\ntransport: stdio\ninstall_cmd: ctx-mcp-server\ngithub_url: https://github.com/stevesolun/ctx\nsource: ctx-runtime-availability\nlicense: MIT\nrequires_api_keys: false\n---\n\n# ctx Core MCP Server\n\nThis project-owned MCP server is installed with ctx, runs locally over stdio, and requires no API key. It exposes the permission-aware recommendation and lifecycle tools shipped by this package. The host keeps control of model selection and tool approval.\n"
+        }
+      ]
+    }
+  ]
+}

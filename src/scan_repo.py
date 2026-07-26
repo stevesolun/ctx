@@ -690,25 +690,50 @@ def _shared_recommendations(profile: dict) -> list[dict[str, Any]] | None:
     query = _profile_recommendation_query(profile)
     if not query:
         return []
-    language = next(
-        (
-            str(item["name"])
-            for item in profile.get("languages", [])
-            if isinstance(item, dict) and item.get("name")
-        ),
-        None,
-    )
-    rows = recommend_bundle(
-        query,
-        top_k=max(1, min(int(cfg.recommendation_top_k), 5)),
-        local_code_task=True,
-        language=language,
-    )
-    return [
-        row
-        for row in rows
-        if row.get("installable") is True and row.get("load_status") == "local-wiki"
+    languages = [
+        str(item["name"])
+        for item in profile.get("languages", [])
+        if isinstance(item, dict) and item.get("name")
     ]
+    testing = [
+        str(item["name"])
+        for item in profile.get("testing", [])
+        if isinstance(item, dict) and item.get("name")
+    ]
+    query_specs: list[tuple[str, str | None]] = [(query, languages[0] if languages else None)]
+    for detected_language in languages:
+        testing_query = " ".join((detected_language, *(testing or ["testing"])))
+        query_specs.extend(
+            [
+                (testing_query, detected_language),
+                (f"ctx {testing_query}", detected_language),
+            ]
+        )
+    if languages:
+        query_specs.append((f"{languages[0]} reviewer", languages[0]))
+
+    top_k = max(1, min(int(cfg.recommendation_top_k), 5))
+    results: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for focused_query, language_hint in dict.fromkeys(query_specs):
+        rows = recommend_bundle(
+            focused_query,
+            top_k=top_k,
+            local_code_task=True,
+            no_api_keys=True,
+            language=language_hint,
+        )
+        for row in rows:
+            if row.get("installable") is not True or row.get("load_status") != "local-wiki":
+                continue
+            key = (str(row.get("type") or ""), str(row.get("name") or ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(row)
+            if len(results) >= top_k:
+                return results
+    return results
 
 
 def _row_reason(row: dict[str, Any]) -> str:

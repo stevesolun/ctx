@@ -16,6 +16,8 @@ from types import SimpleNamespace
 import networkx as nx
 import pytest
 import ctx_init as ci
+import scan_repo
+from ctx.adapters.claude_code.install.agent_install import install_agent
 from ctx.adapters.claude_code.install.skill_install import install_skill
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.providers import ToolCall
@@ -630,9 +632,18 @@ def test_graph_install_copies_local_entity_overlay(
     assert ci.build_graph(claude) == 0
 
     installed = claude / "skill-wiki" / "graphify-out" / "entity-overlays.jsonl"
-    payload = json.loads(installed.read_text(encoding="utf-8"))
-    assert payload["overlay_id"] == "test-overlay"
-    assert payload["edges"][0]["method"] == "manual_direct_overlay_v1"
+    records = [
+        json.loads(line)
+        for line in installed.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    by_overlay_id = {record["overlay_id"]: record for record in records}
+    assert set(by_overlay_id) == {"test-overlay", "ctx-runtime-availability-v1"}
+    assert by_overlay_id["test-overlay"]["edges"][0]["method"] == "manual_direct_overlay_v1"
+    assert (
+        by_overlay_id["ctx-runtime-availability-v1"]
+        == ci._load_runtime_availability_pack()["overlay"]
+    )
 
 
 @pytest.mark.parametrize("field", ["semantic_sim", "tag_sim", "token_sim"])
@@ -759,21 +770,11 @@ def test_runtime_graph_install_extracts_harness_pages_after_required_files(
     assert not (claude / "skill-wiki" / "entities" / "skills" / "not-runtime.md").exists()
 
 
-def test_runtime_graph_install_seeds_actionable_local_recommendation(
+def test_runtime_graph_install_seeds_actionable_local_availability_pack(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    archive = _write_graph_archive(
-        tmp_path,
-        graph_nodes=[
-            {
-                "id": "skill:python-testing",
-                "label": "python-testing",
-                "type": "skill",
-                "tags": ["python", "testing", "pytest"],
-            }
-        ],
-    )
+    archive = _write_graph_archive(tmp_path)
     claude = tmp_path / "home"
     wiki = claude / "skill-wiki"
     monkeypatch.setattr(ci, "_find_local_graph_archive", lambda _mode="runtime": archive)
@@ -782,43 +783,220 @@ def test_runtime_graph_install_seeds_actionable_local_recommendation(
 
     assert ci.build_graph(claude, install_mode="runtime") == 0
 
-    source = wiki / "converted" / "python-testing" / "SKILL.md"
-    assert source.is_file()
-    assert not source.is_symlink()
+    expected_paths = {
+        "converted/ctx-python-testing/SKILL.md",
+        "converted/ctx-javascript-testing/SKILL.md",
+        "converted/ctx-rust-patterns/SKILL.md",
+        "converted/ctx-typescript/SKILL.md",
+        "entities/agents/ctx-python-reviewer.md",
+        "converted-agents/ctx-python-reviewer.md",
+        "entities/mcp-servers/c/ctx-core.md",
+    }
+    for relpath in expected_paths:
+        source = wiki / relpath
+        assert source.is_file()
+        assert not source.is_symlink()
+
+    pack = ci._load_runtime_availability_pack()
+    expected_ids = {entry["id"] for entry in pack["entries"]}
+    assert expected_ids == {
+        "skill:ctx-python-testing",
+        "skill:ctx-javascript-testing",
+        "skill:ctx-rust-patterns",
+        "skill:ctx-typescript",
+        "agent:ctx-python-reviewer",
+        "mcp-server:ctx-core",
+    }
+    with sqlite3.connect(wiki / "graphify-out" / "graph-store.sqlite3") as conn:
+        stored = {
+            entity_id: json.loads(attrs_json)
+            for entity_id, attrs_json in conn.execute("SELECT id, attrs_json FROM nodes")
+            if entity_id in expected_ids
+        }
+    assert set(stored) == expected_ids
+    assert all(attrs["project_owned"] is True for attrs in stored.values())
+    assert all(attrs["license"] == "MIT" for attrs in stored.values())
+
     toolbox = CtxCoreToolbox(
         wiki_dir=wiki,
         graph_path=wiki / "graphify-out" / "graph.json",
     )
-    payload = json.loads(
-        toolbox.dispatch(
-            ToolCall(
-                id="clean-home",
-                name="ctx__recommend_bundle",
-                arguments={
-                    "query": "python testing",
-                    "top_k": 5,
-                    "local_code_task": True,
-                    "no_api_keys": True,
-                    "language": "python",
-                },
+    recommendation_cases = (
+        ("python testing", "python", "skill:ctx-python-testing"),
+        ("javascript testing", "javascript", "skill:ctx-javascript-testing"),
+        ("rust implementation patterns", "rust", "skill:ctx-rust-patterns"),
+        ("typescript strict typing", "typescript", "skill:ctx-typescript"),
+        ("python reviewer security", "python", "agent:ctx-python-reviewer"),
+        ("ctx core mcp recommendations", None, "mcp-server:ctx-core"),
+    )
+    for query, language, expected_id in recommendation_cases:
+        payload = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id=f"clean-home-{expected_id}",
+                    name="ctx__recommend_bundle",
+                    arguments={
+                        "query": query,
+                        "top_k": 5,
+                        "local_code_task": True,
+                        "no_api_keys": True,
+                        "language": language,
+                    },
+                )
             )
         )
-    )
-    assert [(row["id"], row["installable"], row["load_status"]) for row in payload["results"]] == [
-        ("skill:python-testing", True, "local-wiki")
-    ]
-    install = install_skill(
-        "python-testing",
+        by_id = {row["id"]: row for row in payload["results"]}
+        assert by_id[expected_id]["installable"] is True
+        assert by_id[expected_id]["load_status"] == "local-wiki"
+
+    for slug in (
+        "ctx-python-testing",
+        "ctx-javascript-testing",
+        "ctx-rust-patterns",
+        "ctx-typescript",
+    ):
+        install = install_skill(
+            slug,
+            wiki_dir=wiki,
+            skills_dir=claude / "skills",
+            dry_run=True,
+        )
+        assert install.status == "would-install"
+        assert install.source_variant == "transformed"
+    agent_install = install_agent(
+        "ctx-python-reviewer",
         wiki_dir=wiki,
-        skills_dir=claude / "skills",
+        agents_dir=claude / "agents",
         dry_run=True,
     )
-    assert install.status == "would-install"
-    assert install.source_variant == "transformed"
+    assert agent_install.status == "would-install"
 
-    source.write_text("user-owned body\n", encoding="utf-8")
+    overlay_path = wiki / "graphify-out" / ci._GRAPH_ENTITY_OVERLAY_NAME
+    overlay_before = overlay_path.read_bytes()
     assert ci.build_graph(claude, install_mode="runtime") == 0
-    assert source.read_text(encoding="utf-8") == "user-owned body\n"
+    assert overlay_path.read_bytes() == overlay_before
+    assert len(overlay_before.splitlines()) == 1
+
+    project = tmp_path / "sample-python-project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "sample"\nversion = "0.1.0"\n',
+        encoding="utf-8",
+    )
+    (project / "test_sample.py").write_text(
+        "def test_sample():\n    assert True\n",
+        encoding="utf-8",
+    )
+    signals = scan_repo.scan_directory(str(project))
+    profile = scan_repo.detect_stack(str(project), signals)
+    import ctx.api as ctx_api
+    import ctx_config
+
+    monkeypatch.setattr(
+        ctx_config,
+        "cfg",
+        SimpleNamespace(
+            wiki_dir=wiki,
+            recommendation_top_k=5,
+            recommendation_min_normalized_score=0.30,
+        ),
+    )
+    monkeypatch.setattr(ctx_api, "_default_toolbox", toolbox)
+    scanner_rows = scan_repo._shared_recommendations(profile)
+    assert scanner_rows
+    assert all(row["installable"] is True for row in scanner_rows)
+    assert all(row["load_status"] == "local-wiki" for row in scanner_rows)
+
+
+def test_runtime_availability_overlay_rejects_reserved_identity_changes(
+    tmp_path: Path,
+) -> None:
+    wiki = tmp_path / "skill-wiki"
+    graph_dir = wiki / "graphify-out"
+    graph_dir.mkdir(parents=True)
+    _write_dashboard_index(graph_dir / "dashboard-neighborhoods.sqlite3")
+    pack = ci._load_runtime_availability_pack()
+    altered = dict(pack["overlay"])
+    altered["source"] = "untrusted-source"
+    overlay_path = graph_dir / ci._GRAPH_ENTITY_OVERLAY_NAME
+    overlay_path.write_text(json.dumps(altered) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="identity contains unexpected content"):
+        ci._install_runtime_availability_overlay(wiki)
+    assert json.loads(overlay_path.read_text(encoding="utf-8")) == altered
+
+
+def test_runtime_availability_overlay_rejects_shipped_graph_id_collision(
+    tmp_path: Path,
+) -> None:
+    wiki = tmp_path / "skill-wiki"
+    graph_dir = wiki / "graphify-out"
+    graph_dir.mkdir(parents=True)
+    index = graph_dir / "dashboard-neighborhoods.sqlite3"
+    _write_dashboard_index(index)
+    with sqlite3.connect(index) as conn:
+        conn.execute(
+            "INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?)",
+            (
+                "skill:ctx-python-testing",
+                "ctx-python-testing",
+                "skill",
+                "[]",
+                "",
+                None,
+                None,
+                0,
+            ),
+        )
+        conn.commit()
+
+    with pytest.raises(ValueError, match="collide with shipped graph nodes"):
+        ci._install_runtime_availability_overlay(wiki)
+
+
+def test_runtime_graph_install_rejects_tampered_reserved_body(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    archive = _write_graph_archive(tmp_path)
+    claude = tmp_path / "home"
+    reserved = claude / "skill-wiki" / "converted" / "ctx-python-testing" / "SKILL.md"
+    reserved.parent.mkdir(parents=True)
+    reserved.write_text("attacker-controlled body\n", encoding="utf-8")
+    monkeypatch.setattr(ci, "_find_local_graph_archive", lambda _mode="runtime": archive)
+    monkeypatch.setattr(ci, "_verify_local_graph_archive", lambda *_a, **_k: None)
+    monkeypatch.setattr(ci, "_install_graph_entity_overlay", lambda *_a, **_k: None)
+
+    assert ci.build_graph(claude, install_mode="runtime") == 1
+    assert "reserved runtime availability body does not match" in capsys.readouterr().err
+    assert reserved.read_text(encoding="utf-8") == "attacker-controlled body\n"
+
+
+def test_runtime_graph_install_rejects_symlinked_availability_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    archive = _write_graph_archive(tmp_path)
+    claude = tmp_path / "home"
+    wiki = claude / "skill-wiki"
+    converted = wiki / "converted"
+    converted.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    symlink = converted / "ctx-python-testing"
+    try:
+        symlink.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks unavailable: {exc}")
+    monkeypatch.setattr(ci, "_find_local_graph_archive", lambda _mode="runtime": archive)
+    monkeypatch.setattr(ci, "_verify_local_graph_archive", lambda *_a, **_k: None)
+    monkeypatch.setattr(ci, "_install_graph_entity_overlay", lambda *_a, **_k: None)
+
+    assert ci.build_graph(claude, install_mode="runtime") == 1
+    assert "unsafe symlinked runtime availability path" in capsys.readouterr().err
+    assert not (outside / "SKILL.md").exists()
 
 
 def test_runtime_graph_install_preserves_existing_non_harness_entities(
@@ -831,7 +1009,8 @@ def test_runtime_graph_install_preserves_existing_non_harness_entities(
     local_agent = claude / "skill-wiki" / "entities" / "agents" / "private.md"
     local_mcp = claude / "skill-wiki" / "entities" / "mcp-servers" / "p" / "private.md"
     local_harness = claude / "skill-wiki" / "entities" / "harnesses" / "old.md"
-    for path in (local_skill, local_agent, local_mcp, local_harness):
+    local_converted = claude / "skill-wiki" / "converted" / "private-skill" / "SKILL.md"
+    for path in (local_skill, local_agent, local_mcp, local_harness, local_converted):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"# {path.stem}\n", encoding="utf-8")
 
@@ -848,6 +1027,7 @@ def test_runtime_graph_install_preserves_existing_non_harness_entities(
     assert local_skill.is_file()
     assert local_agent.is_file()
     assert local_mcp.is_file()
+    assert local_converted.read_text(encoding="utf-8") == "# SKILL\n"
     assert not local_harness.exists()
 
 

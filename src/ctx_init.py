@@ -286,28 +286,8 @@ _GRAPH_RUNTIME_ROOT_FILES = frozenset(
         "versions-catalog.md",
     }
 )
-_RUNTIME_RECOMMENDATION_SEED_ID = "skill:python-testing"
-_RUNTIME_RECOMMENDATION_SEED_PATH = Path("converted/python-testing/SKILL.md")
-_RUNTIME_RECOMMENDATION_SEED = """\
----
-name: python-testing
-description: Local Python testing workflow using pytest, focused regression tests, and coverage.
----
-
-# Python Testing
-
-Use this skill for local Python test design, regression coverage, and failure diagnosis.
-
-1. Read the target behavior and nearby tests before changing code.
-2. Reproduce the failure with the narrowest deterministic pytest case.
-3. Implement the smallest behavior-preserving fix.
-4. Run the focused test first, then the affected test module or subsystem.
-5. Run configured lint, type, and broader test gates before delivery.
-
-Prefer behavior assertions over implementation details. Keep fixtures isolated,
-avoid network and wall-clock dependencies, and include the original regression
-case whenever a bug is fixed.
-"""
+_RUNTIME_AVAILABILITY_RESOURCE = "runtime-availability.json"
+_RUNTIME_AVAILABILITY_TYPES = frozenset({"skill", "agent", "mcp-server"})
 
 
 def build_graph(
@@ -336,9 +316,9 @@ def build_graph(
                 wiki_dir,
                 allow_release_download=graph_url is None,
             )
+            _install_runtime_availability_overlay(wiki_dir)
             _refresh_graph_store(wiki_dir)
-            if install_mode == "runtime":
-                _ensure_runtime_recommendation_seed(wiki_dir)
+            _ensure_runtime_availability_pack(wiki_dir)
         except Exception as exc:
             print(
                 f"  [error] graph overlay/store refresh failed: {type(exc).__name__}: {exc}",
@@ -372,6 +352,7 @@ def build_graph(
             wiki_dir,
             allow_release_download=graph_url is None,
         )
+        _install_runtime_availability_overlay(wiki_dir)
     except Exception as exc:
         print(
             f"  [error] graph install failed: {type(exc).__name__}: {exc}",
@@ -385,8 +366,7 @@ def build_graph(
     try:
         _validate_graph_install_tree(wiki_dir)
         _refresh_graph_store(wiki_dir)
-        if install_mode == "runtime":
-            _ensure_runtime_recommendation_seed(wiki_dir)
+        _ensure_runtime_availability_pack(wiki_dir)
     except (OSError, ValueError) as exc:
         print(f"  [error] graph install validation failed: {exc}", file=sys.stderr)
         return 1
@@ -808,30 +788,276 @@ def _refresh_graph_store(wiki_dir: Path) -> None:
         )
 
 
-def _ensure_runtime_recommendation_seed(wiki_dir: Path) -> None:
-    """Install one trusted local skill when the runtime graph contains it."""
+def _load_runtime_availability_pack() -> dict[str, Any]:
+    """Load and validate the project-authored runtime availability resource."""
+    from importlib.resources import files  # noqa: PLC0415
+
+    try:
+        raw = (
+            files("ctx.assets").joinpath(_RUNTIME_AVAILABILITY_RESOURCE).read_text(encoding="utf-8")
+        )
+        payload = json.loads(raw)
+    except (OSError, json.JSONDecodeError, ModuleNotFoundError) as exc:
+        raise ValueError(f"could not load runtime availability pack: {exc}") from exc
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        raise ValueError("runtime availability pack version must be 1")
+    provenance = payload.get("provenance")
+    if not isinstance(provenance, dict) or any(
+        not isinstance(provenance.get(field), str) or not provenance[field].strip()
+        for field in ("owner", "source", "license")
+    ):
+        raise ValueError("runtime availability pack provenance is incomplete")
+    if provenance != {
+        "owner": "ctx project",
+        "source": "https://github.com/stevesolun/ctx",
+        "license": "MIT",
+    }:
+        raise ValueError("runtime availability pack provenance is not ctx-owned")
+    overlay = payload.get("overlay")
+    if (
+        not isinstance(overlay, dict)
+        or overlay.get("replace_scope") != "ctx:runtime-availability"
+        or overlay.get("source") != "ctx-runtime-availability"
+        or overlay.get("provenance") != "ctx-project-authored"
+        or not isinstance(overlay.get("overlay_id"), str)
+        or not overlay["overlay_id"].strip()
+    ):
+        raise ValueError("runtime availability pack overlay identity is invalid")
+    overlay_nodes = overlay.get("nodes")
+    if not isinstance(overlay_nodes, list) or not overlay_nodes:
+        raise ValueError("runtime availability pack overlay nodes must be non-empty")
+    if not isinstance(overlay.get("edges"), list):
+        raise ValueError("runtime availability pack overlay edges must be a list")
+    entries = payload.get("entries")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("runtime availability pack entries must be a non-empty list")
+
+    validated: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_paths: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("runtime availability pack entry must be an object")
+        entity_id = entry.get("id")
+        entity_type = entry.get("type")
+        if not isinstance(entity_id, str) or ":" not in entity_id:
+            raise ValueError("runtime availability pack entry has an invalid id")
+        prefix, slug = entity_id.split(":", 1)
+        if entity_type != prefix or entity_type not in _RUNTIME_AVAILABILITY_TYPES:
+            raise ValueError(f"runtime availability pack type mismatch: {entity_id}")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", slug):
+            raise ValueError(f"runtime availability pack has unsafe slug: {entity_id}")
+        if not slug.startswith("ctx-"):
+            raise ValueError(f"runtime availability id is not ctx-owned: {entity_id}")
+        if entity_id in seen_ids:
+            raise ValueError(f"runtime availability pack repeats id: {entity_id}")
+        if entry.get("no_api_keys") is not True:
+            raise ValueError(f"runtime availability entry is not no-key: {entity_id}")
+
+        if entity_type == "skill":
+            expected_paths = {f"converted/{slug}/SKILL.md"}
+        elif entity_type == "agent":
+            expected_paths = {
+                f"entities/agents/{slug}.md",
+                f"converted-agents/{slug}.md",
+            }
+        else:
+            shard = slug[0].lower() if slug[0].isalpha() else "0-9"
+            expected_paths = {f"entities/mcp-servers/{shard}/{slug}.md"}
+
+        file_rows = entry.get("files")
+        if not isinstance(file_rows, list) or not file_rows:
+            raise ValueError(f"runtime availability entry has no files: {entity_id}")
+        actual_paths: set[str] = set()
+        for file_row in file_rows:
+            if not isinstance(file_row, dict):
+                raise ValueError(f"runtime availability file must be an object: {entity_id}")
+            relpath = file_row.get("path")
+            content = file_row.get("content")
+            if not isinstance(relpath, str) or not isinstance(content, str) or not content.strip():
+                raise ValueError(f"runtime availability file is incomplete: {entity_id}")
+            if PurePosixPath(relpath).as_posix() != relpath:
+                raise ValueError(f"runtime availability file path is unsafe: {relpath}")
+            if (
+                "source: ctx-runtime-availability" not in content
+                or "license: MIT" not in content
+                or "requires_api_keys: false" not in content
+            ):
+                raise ValueError(f"runtime availability body provenance is incomplete: {entity_id}")
+            if relpath in seen_paths:
+                raise ValueError(f"runtime availability pack repeats path: {relpath}")
+            actual_paths.add(relpath)
+            seen_paths.add(relpath)
+        if actual_paths != expected_paths:
+            raise ValueError(
+                f"runtime availability paths do not match {entity_id}: "
+                f"expected {sorted(expected_paths)}, got {sorted(actual_paths)}"
+            )
+        seen_ids.add(entity_id)
+        validated.append(entry)
+
+    node_by_id: dict[str, dict[str, Any]] = {}
+    for node in overlay_nodes:
+        if not isinstance(node, dict) or not isinstance(node.get("id"), str):
+            raise ValueError("runtime availability overlay node must contain an id")
+        node_id = str(node["id"])
+        if node_id in node_by_id:
+            raise ValueError(f"runtime availability overlay repeats id: {node_id}")
+        node_by_id[node_id] = node
+    if set(node_by_id) != seen_ids:
+        raise ValueError("runtime availability overlay IDs do not match body entries")
+    for entry in validated:
+        entity_id = str(entry["id"])
+        node = node_by_id[entity_id]
+        if (
+            node.get("type") != entry["type"]
+            or node.get("source") != "ctx-runtime-availability"
+            or node.get("license") != "MIT"
+            or node.get("project_owned") is not True
+            or node.get("requires_api_keys") is not False
+        ):
+            raise ValueError(f"runtime availability overlay provenance is invalid: {entity_id}")
+    payload["entries"] = validated
+    return payload
+
+
+def _install_runtime_availability_overlay(wiki_dir: Path) -> None:
+    """Upsert ctx-owned runtime nodes through the graph's overlay mechanism."""
+    from ctx.core.graph.entity_overlays import (  # noqa: PLC0415
+        active_overlay_records,
+        load_overlay_records,
+        upsert_overlay_record,
+    )
+
+    pack = _load_runtime_availability_pack()
+    overlay = pack["overlay"]
+    entries = pack["entries"]
+    intended_ids = {str(entry["id"]) for entry in entries}
+    graph_dir = wiki_dir / "graphify-out"
+    dashboard_index = graph_dir / "dashboard-neighborhoods.sqlite3"
+    placeholders = ",".join("?" for _ in intended_ids)
+    try:
+        with sqlite3.connect(
+            f"{dashboard_index.resolve().as_uri()}?mode=ro",
+            uri=True,
+        ) as conn:
+            collisions = {
+                str(row[0])
+                for row in conn.execute(
+                    f"SELECT id FROM nodes WHERE id IN ({placeholders})",  # noqa: S608
+                    tuple(sorted(intended_ids)),
+                )
+            }
+    except sqlite3.Error as exc:
+        raise ValueError(f"could not verify runtime availability graph IDs: {exc}") from exc
+    if collisions:
+        raise ValueError(
+            f"runtime availability IDs collide with shipped graph nodes: {sorted(collisions)}"
+        )
+
+    overlay_path = graph_dir / _GRAPH_ENTITY_OVERLAY_NAME
+    if overlay_path.is_symlink():
+        raise ValueError(f"unsafe runtime availability overlay path: {overlay_path}")
+    _ensure_path_under_root(overlay_path.parent, wiki_dir.resolve())
+    for existing in active_overlay_records(load_overlay_records(overlay_path)):
+        owns_reserved_identity = (
+            existing.get("overlay_id") == overlay["overlay_id"]
+            or existing.get("replace_scope") == overlay["replace_scope"]
+        )
+        if owns_reserved_identity:
+            if existing != overlay:
+                raise ValueError(
+                    "runtime availability overlay identity contains unexpected content"
+                )
+            continue
+        nodes = existing.get("nodes")
+        if not isinstance(nodes, list):
+            continue
+        colliding_nodes = {
+            str(node.get("id"))
+            for node in nodes
+            if isinstance(node, dict) and node.get("id") in intended_ids
+        }
+        if not colliding_nodes:
+            continue
+        if existing != overlay:
+            raise ValueError(
+                "runtime availability IDs collide with another graph overlay: "
+                f"{sorted(colliding_nodes)}"
+            )
+    upsert_overlay_record(overlay_path, overlay)
+
+
+def _reject_symlinked_runtime_path(wiki_dir: Path, destination: Path) -> None:
+    """Reject symlinks and non-directory ancestors without following them."""
+    try:
+        relative = destination.relative_to(wiki_dir)
+    except ValueError as exc:
+        raise ValueError(f"runtime availability path escapes wiki: {destination}") from exc
+    current = wiki_dir
+    for part in relative.parts:
+        if current.is_symlink():
+            raise ValueError(f"unsafe symlinked runtime availability path: {current}")
+        if current.exists() and not current.is_dir():
+            raise ValueError(f"runtime availability ancestor is not a directory: {current}")
+        current /= part
+    if current.is_symlink():
+        raise ValueError(f"unsafe symlinked runtime availability path: {current}")
+
+
+def _ensure_runtime_availability_pack(wiki_dir: Path) -> None:
+    """Materialize project-owned, graph-backed local recommendation bodies."""
+    entries = _load_runtime_availability_pack()["entries"]
     store = wiki_dir / "graphify-out" / "graph-store.sqlite3"
     try:
         with sqlite3.connect(f"{store.resolve().as_uri()}?mode=ro", uri=True) as conn:
-            present = (
-                conn.execute(
-                    "SELECT 1 FROM nodes WHERE id = ? LIMIT 1",
-                    (_RUNTIME_RECOMMENDATION_SEED_ID,),
-                ).fetchone()
-                is not None
-            )
-    except sqlite3.Error as exc:
-        raise ValueError(f"could not inspect runtime recommendation seed: {exc}") from exc
-    if not present:
-        return
+            placeholders = ",".join("?" for _ in entries)
+            graph_rows = {
+                str(entity_id): (str(entity_type), json.loads(str(attrs_json)))
+                for entity_id, entity_type, attrs_json in conn.execute(
+                    f"SELECT id, type, attrs_json FROM nodes "  # noqa: S608
+                    f"WHERE id IN ({placeholders})",
+                    tuple(str(entry["id"]) for entry in entries),
+                )
+            }
+    except (json.JSONDecodeError, sqlite3.Error) as exc:
+        raise ValueError(f"could not inspect runtime availability graph IDs: {exc}") from exc
 
-    destination = wiki_dir / _RUNTIME_RECOMMENDATION_SEED_PATH
-    if destination.is_file() and not destination.is_symlink():
-        return
-    if destination.exists() or destination.is_symlink():
-        raise ValueError(f"unsafe runtime recommendation seed path: {destination}")
-    _ensure_path_under_root(destination.parent, wiki_dir.resolve())
-    safe_atomic_write_text(destination, _RUNTIME_RECOMMENDATION_SEED, encoding="utf-8")
+    expected_ids = {str(entry["id"]) for entry in entries}
+    if set(graph_rows) != expected_ids:
+        raise ValueError(
+            "runtime availability graph nodes are missing: "
+            f"{sorted(expected_ids - set(graph_rows))}"
+        )
+    for entry in entries:
+        entity_id = str(entry["id"])
+        graph_type, attrs = graph_rows[entity_id]
+        if graph_type != entry["type"]:
+            raise ValueError(
+                f"runtime availability graph type mismatch for {entity_id}: {graph_type}"
+            )
+        if (
+            not isinstance(attrs, dict)
+            or attrs.get("source") != "ctx-runtime-availability"
+            or attrs.get("license") != "MIT"
+            or attrs.get("project_owned") is not True
+        ):
+            raise ValueError(f"runtime availability graph provenance mismatch: {entity_id}")
+        for file_row in entry["files"]:
+            destination = wiki_dir.joinpath(*PurePosixPath(file_row["path"]).parts)
+            _reject_symlinked_runtime_path(wiki_dir, destination)
+            if destination.is_file():
+                if destination.read_text(encoding="utf-8") != file_row["content"]:
+                    raise ValueError(
+                        "reserved runtime availability body does not match "
+                        f"packaged content: {destination}"
+                    )
+                continue
+            if destination.exists():
+                raise ValueError(f"unsafe runtime availability destination: {destination}")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            _reject_symlinked_runtime_path(wiki_dir, destination)
+            safe_atomic_write_text(destination, file_row["content"], encoding="utf-8")
 
 
 def _validate_graph_install_tree(wiki_dir: Path) -> None:
@@ -1050,11 +1276,31 @@ def _promote_graph_tree(
         source = staging_dir / name
         destination = target_dir / name
         _ensure_path_under_root(destination.parent, target_root)
+        if install_mode == "runtime" and name == "converted":
+            if source.exists():
+                _merge_runtime_converted_tree(source, destination, target_root)
+            continue
         _remove_existing_graph_path(destination)
         if source.exists():
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(source), str(destination))
     _validate_graph_install_tree(target_dir)
+
+
+def _merge_runtime_converted_tree(source: Path, destination: Path, target_root: Path) -> None:
+    """Add missing runtime conversions without replacing user-owned skill bodies."""
+    _ensure_path_under_root(destination, target_root)
+    if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
+        raise ValueError(f"unsafe runtime converted destination: {destination}")
+    destination.mkdir(parents=True, exist_ok=True)
+    for child in source.iterdir():
+        target = destination / child.name
+        _ensure_path_under_root(target, target_root)
+        if target.is_symlink():
+            raise ValueError(f"unsafe runtime converted destination: {target}")
+        if target.exists():
+            continue
+        shutil.move(str(child), str(target))
 
 
 def _remove_existing_graph_path(path: Path) -> None:

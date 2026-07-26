@@ -531,12 +531,22 @@ def test_scan_repo_recommendations_enforce_enriched_availability_contract(
 
     assert rows is not None
     assert [row["name"] for row in rows] == ["local"]
-    assert calls == [
-        (
-            "api-service python fastapi",
-            {"top_k": 5, "local_code_task": True, "language": "python"},
-        )
+    assert [query for query, _kwargs in calls] == [
+        "api-service python fastapi",
+        "python testing",
+        "ctx python testing",
+        "python reviewer",
     ]
+    assert all(
+        kwargs
+        == {
+            "top_k": 5,
+            "local_code_task": True,
+            "no_api_keys": True,
+            "language": "python",
+        }
+        for _query, kwargs in calls
+    )
 
 
 def test_resolver_preserves_graph_entity_type_and_normalized_priority(
