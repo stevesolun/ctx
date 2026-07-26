@@ -18,7 +18,13 @@ _EPOCH = 1_700_000_000
 _ROOT = Path(__file__).resolve().parents[2]
 
 
-def _add_members(tf: tarfile.TarFile, *, mtime: int, reverse: bool = False) -> None:
+def _add_members(
+    tf: tarfile.TarFile,
+    *,
+    mtime: int,
+    reverse: bool = False,
+    reverse_pax: bool = False,
+) -> None:
     root = tarfile.TarInfo("example-1.0")
     root.type = tarfile.DIRTYPE
     root.mode = 0o755
@@ -37,10 +43,12 @@ def _add_members(tf: tarfile.TarFile, *, mtime: int, reverse: bool = False) -> N
     regular.uname = "builder"
     regular.gname = "staff"
     regular.mtime = mtime
-    regular.pax_headers = {
-        "mtime": f"{mtime}.5",
-        "SCHILY.xattr.user.test": "preserved",
-    }
+    pax_headers = [
+        ("mtime", f"{mtime}.5"),
+        ("SCHILY.xattr.user.mtime", "semantic-mtime"),
+        ("SCHILY.xattr.user.test", "preserved"),
+    ]
+    regular.pax_headers = dict(reversed(pax_headers) if reverse_pax else pax_headers)
 
     symlink = tarfile.TarInfo("example-1.0/data-link")
     symlink.type = tarfile.SYMTYPE
@@ -54,19 +62,11 @@ def _add_members(tf: tarfile.TarFile, *, mtime: int, reverse: bool = False) -> N
     hardlink.mode = 0o640
     hardlink.mtime = mtime
 
-    device = tarfile.TarInfo("example-1.0/null-device")
-    device.type = tarfile.CHRTYPE
-    device.mode = 0o600
-    device.devmajor = 1
-    device.devminor = 3
-    device.mtime = mtime
-
     members: list[tuple[tarfile.TarInfo, bytes | None]] = [
         (root, None),
         (regular, payload),
         (symlink, None),
         (hardlink, None),
-        (device, None),
     ]
     if reverse:
         members.reverse()
@@ -74,7 +74,13 @@ def _add_members(tf: tarfile.TarFile, *, mtime: int, reverse: bool = False) -> N
         tf.addfile(info, None if body is None else io.BytesIO(body))
 
 
-def _write_fixture(path: Path, *, mtime: int, reverse: bool = False) -> None:
+def _write_fixture(
+    path: Path,
+    *,
+    mtime: int,
+    reverse: bool = False,
+    reverse_pax: bool = False,
+) -> None:
     with (
         path.open("wb") as raw,
         gzip.GzipFile(
@@ -85,7 +91,7 @@ def _write_fixture(path: Path, *, mtime: int, reverse: bool = False) -> None:
         ) as compressed,
         tarfile.open(fileobj=compressed, mode="w|", format=tarfile.PAX_FORMAT) as tf,
     ):
-        _add_members(tf, mtime=mtime, reverse=reverse)
+        _add_members(tf, mtime=mtime, reverse=reverse, reverse_pax=reverse_pax)
 
 
 def _digest(path: Path) -> str:
@@ -96,7 +102,7 @@ def test_normalize_sdist_removes_timestamp_and_order_drift(tmp_path: Path) -> No
     first = tmp_path / "example-1.0-a.tar.gz"
     second = tmp_path / "example-1.0-b.tar.gz"
     _write_fixture(first, mtime=1_600_000_000)
-    _write_fixture(second, mtime=1_650_000_000, reverse=True)
+    _write_fixture(second, mtime=1_650_000_000, reverse=True, reverse_pax=True)
 
     reproducible.normalize_sdist(first, _EPOCH)
     reproducible.normalize_sdist(second, _EPOCH)
@@ -125,10 +131,11 @@ def test_normalize_sdist_removes_timestamp_and_order_drift(tmp_path: Path) -> No
     assert by_name["example-1.0/data-link"].linkname == "data.txt"
     assert by_name["example-1.0/data-hardlink"].islnk()
     assert by_name["example-1.0/data-hardlink"].linkname == "example-1.0/data.txt"
-    assert by_name["example-1.0/null-device"].ischr()
-    assert by_name["example-1.0/null-device"].devmajor == 1
-    assert by_name["example-1.0/null-device"].devminor == 3
     assert by_name["example-1.0/data.txt"].pax_headers["SCHILY.xattr.user.test"] == "preserved"
+    assert (
+        by_name["example-1.0/data.txt"].pax_headers["SCHILY.xattr.user.mtime"] == "semantic-mtime"
+    )
+    assert not reproducible._is_normalized_pax_field("SCHILY.xattr.user.mtime")
     assert all(
         not reproducible._is_normalized_pax_field(key)
         for member in members
@@ -161,13 +168,6 @@ def test_equivalence_check_detects_payload_tampering(tmp_path: Path) -> None:
         hardlink.linkname = "example-1.0/data.txt"
         hardlink.mode = 0o640
         tf.addfile(hardlink)
-        device = tarfile.TarInfo("example-1.0/null-device")
-        device.type = tarfile.CHRTYPE
-        device.mode = 0o600
-        device.devmajor = 1
-        device.devminor = 3
-        tf.addfile(device)
-
     with pytest.raises(
         reproducible.ReproducibleBuildError,
         match="payloads or structural metadata",
@@ -197,6 +197,40 @@ def test_normalize_sdist_rejects_unsafe_or_ambiguous_members(
     before = _digest(source)
 
     with pytest.raises(reproducible.ReproducibleBuildError):
+        reproducible.normalize_sdist(source, _EPOCH)
+
+    assert _digest(source) == before
+
+
+@pytest.mark.parametrize(
+    "member_type",
+    [
+        tarfile.CHRTYPE,
+        tarfile.BLKTYPE,
+        tarfile.FIFOTYPE,
+        tarfile.CONTTYPE,
+        b"Z",
+    ],
+    ids=["character-device", "block-device", "fifo", "contiguous", "unknown"],
+)
+def test_normalize_sdist_rejects_special_members(
+    tmp_path: Path,
+    member_type: bytes,
+) -> None:
+    source = tmp_path / "special.tar.gz"
+    with tarfile.open(source, "w:gz", format=tarfile.PAX_FORMAT) as tf:
+        root = tarfile.TarInfo("example-1.0")
+        root.type = tarfile.DIRTYPE
+        tf.addfile(root)
+        special = tarfile.TarInfo("example-1.0/special")
+        special.type = member_type
+        tf.addfile(special)
+    before = _digest(source)
+
+    with pytest.raises(
+        reproducible.ReproducibleBuildError,
+        match="unsupported member type",
+    ):
         reproducible.normalize_sdist(source, _EPOCH)
 
     assert _digest(source) == before
@@ -260,8 +294,20 @@ def test_source_date_epoch_prefers_valid_environment() -> None:
         reproducible.source_date_epoch(_ROOT, {"SOURCE_DATE_EPOCH": "-1"})
 
 
+def test_verified_output_directory_must_be_empty(tmp_path: Path) -> None:
+    output = tmp_path / "dist"
+    output.mkdir()
+    (output / "stale.whl").write_bytes(b"stale")
+
+    with pytest.raises(
+        reproducible.ReproducibleBuildError,
+        match="must be empty",
+    ):
+        reproducible._prepare_verified_output(output)
+
+
 @pytest.mark.integration
-def test_two_clean_git_archive_builds_are_byte_identical() -> None:
+def test_two_current_worktree_builds_are_byte_identical(tmp_path: Path) -> None:
     if importlib.util.find_spec("build") is None:
         pytest.skip("python-build is not installed")
     if shutil.which("git") is None or not (_ROOT / ".git").exists():
@@ -276,8 +322,11 @@ def test_two_clean_git_archive_builds_are_byte_identical() -> None:
     if probe.returncode != 0:
         pytest.skip("HEAD is not available")
 
-    hashes = reproducible.verify_reproducible_builds(_ROOT)
+    output = tmp_path / "verified-dist"
+    hashes = reproducible.verify_reproducible_builds(_ROOT, output_dir=output)
+    installed = {path.name: _digest(path) for path in output.iterdir()}
 
     assert len(hashes) == 2
     assert sum(name.endswith(".whl") for name in hashes) == 1
     assert sum(name.endswith(".tar.gz") for name in hashes) == 1
+    assert installed == hashes

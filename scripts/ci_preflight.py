@@ -470,10 +470,15 @@ def select_checks(
                     ),
                 ),
                 Check(
-                    "verify reproducible distributions",
-                    (python, "scripts/build_reproducible_dist.py", "--verify"),
+                    "build wheel",
+                    (
+                        python,
+                        "scripts/build_reproducible_dist.py",
+                        "--verify",
+                        "--output-dir",
+                        out_dir,
+                    ),
                 ),
-                Check("build wheel", (python, "-m", "build", "--outdir", out_dir)),
                 Check("twine check", (python, "-c", twine_script)),
             ]
         )

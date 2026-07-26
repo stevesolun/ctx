@@ -156,26 +156,74 @@ def normalize_sdist(path: Path, epoch: int) -> None:
         tmp_path.unlink(missing_ok=True)
 
 
-def verify_reproducible_builds(repo_root: Path, *, git_ref: str = "HEAD") -> dict[str, str]:
-    """Build two clean Git archives and require identical artifact hashes."""
+def verify_reproducible_builds(
+    repo_root: Path,
+    *,
+    output_dir: Path | None = None,
+    git_ref: str | None = None,
+) -> dict[str, str]:
+    """Build the same source twice and optionally publish the verified artifacts.
+
+    The default source is the current working tree so local preflight covers
+    uncommitted changes. ``git_ref`` is available for callers that explicitly
+    require a clean Git archive.
+    """
     repo_root = repo_root.resolve()
     epoch = source_date_epoch(repo_root)
+    target_dir = _prepare_verified_output(output_dir) if output_dir is not None else None
     results: list[dict[str, str]] = []
-    with tempfile.TemporaryDirectory(prefix="ctx-reproducible-build-") as tmp:
+    first_artifacts: BuildArtifacts | None = None
+    temp_parent = target_dir.parent if target_dir is not None else None
+    with tempfile.TemporaryDirectory(
+        prefix=".ctx-reproducible-build-",
+        dir=temp_parent,
+    ) as tmp:
         temp_root = Path(tmp)
+        snapshot_root = _export_git_tree(
+            repo_root,
+            "HEAD" if git_ref is None else git_ref,
+            temp_root / "snapshot",
+        )
+        if git_ref is None:
+            _overlay_worktree(repo_root, snapshot_root)
         for index in range(2):
-            source_root = _export_git_tree(repo_root, git_ref, temp_root / f"root-{index}")
-            artifacts = build_distributions(source_root, epoch=epoch)
+            source_root = Path(
+                shutil.copytree(
+                    snapshot_root,
+                    temp_root / f"root-{index}",
+                    symlinks=True,
+                )
+            )
+            artifacts = build_distributions(
+                source_root,
+                output_dir=temp_root / f"dist-{index}",
+                epoch=epoch,
+            )
+            if first_artifacts is None:
+                first_artifacts = artifacts
             results.append(
                 {
                     artifacts.wheel.name: _sha256_path(artifacts.wheel),
                     artifacts.sdist.name: _sha256_path(artifacts.sdist),
                 }
             )
-    if results[0] != results[1]:
-        raise ReproducibleBuildError(
-            f"two clean builds were not byte-identical: {results[0]} != {results[1]}"
-        )
+        if results[0] != results[1]:
+            raise ReproducibleBuildError(
+                f"two builds were not byte-identical: {results[0]} != {results[1]}"
+            )
+        if target_dir is not None:
+            if first_artifacts is None:
+                raise ReproducibleBuildError("reproducibility verification produced no artifacts")
+            installed = BuildArtifacts(
+                wheel=_install_artifact(first_artifacts.wheel, target_dir),
+                sdist=_install_artifact(first_artifacts.sdist, target_dir),
+            )
+            installed_hashes = {
+                installed.wheel.name: _sha256_path(installed.wheel),
+                installed.sdist.name: _sha256_path(installed.sdist),
+            }
+            if installed_hashes != results[0]:
+                raise ReproducibleBuildError("installed artifacts differ from the verified build")
     return results[0]
 
 
@@ -216,6 +264,16 @@ def _install_artifact(source: Path, target_dir: Path) -> Path:
         raise ReproducibleBuildError(f"refusing to replace non-file artifact: {target}")
     os.replace(source, target)
     return target
+
+
+def _prepare_verified_output(output_dir: Path) -> Path:
+    target_dir = Path(os.path.abspath(output_dir))
+    if target_dir.is_symlink() or (target_dir.exists() and not target_dir.is_dir()):
+        raise ReproducibleBuildError(f"output path is not a real directory: {target_dir}")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if any(target_dir.iterdir()):
+        raise ReproducibleBuildError(f"verified output directory must be empty: {target_dir}")
+    return target_dir
 
 
 def _write_normalized_archive(source: Path, target: Path, epoch: int) -> None:
@@ -333,10 +391,6 @@ def _validate_members(
         tarfile.DIRTYPE,
         tarfile.SYMTYPE,
         tarfile.LNKTYPE,
-        tarfile.CHRTYPE,
-        tarfile.BLKTYPE,
-        tarfile.FIFOTYPE,
-        tarfile.CONTTYPE,
     )
     for member in members:
         _validate_member_name(member.name)
@@ -406,7 +460,9 @@ def _safe_link_target(member: tarfile.TarInfo) -> PurePosixPath:
 
 
 def _normalized_pax_headers(headers: Mapping[str, str]) -> dict[str, str]:
-    return {key: value for key, value in headers.items() if not _is_normalized_pax_field(key)}
+    return dict(
+        sorted((key, value) for key, value in headers.items() if not _is_normalized_pax_field(key))
+    )
 
 
 def _semantic_pax_headers(headers: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
@@ -414,15 +470,14 @@ def _semantic_pax_headers(headers: Mapping[str, str]) -> tuple[tuple[str, str], 
         sorted(
             (key, value)
             for key, value in headers.items()
-            if not _is_normalized_pax_field(key)
-            and key.lower().rsplit(".", 1)[-1] not in _TRANSPORT_PAX_FIELDS
+            if not _is_normalized_pax_field(key) and key.lower() not in _TRANSPORT_PAX_FIELDS
         )
     )
 
 
 def _is_normalized_pax_field(key: str) -> bool:
-    leaf = re.split(r"[._-]", key.lower())[-1]
-    return leaf in _TIME_PAX_FIELDS or leaf in _OWNER_PAX_FIELDS
+    normalized = key.lower()
+    return normalized in _TIME_PAX_FIELDS or normalized in _OWNER_PAX_FIELDS
 
 
 def _assert_normalized_archive(path: Path, epoch: int) -> None:
@@ -482,6 +537,62 @@ def _export_git_tree(repo_root: Path, git_ref: str, target: Path) -> Path:
     if not source_root.is_dir():
         raise ReproducibleBuildError("git archive did not contain the expected source root")
     return source_root
+
+
+def _overlay_worktree(repo_root: Path, snapshot_root: Path) -> None:
+    changed = _git_paths(
+        repo_root,
+        ["diff", "--name-only", "--no-renames", "-z", "HEAD", "--"],
+    )
+    untracked = _git_paths(
+        repo_root,
+        ["ls-files", "--others", "--exclude-standard", "-z"],
+    )
+    for name in sorted(set(changed + untracked)):
+        _sync_snapshot_path(repo_root, snapshot_root, name)
+
+
+def _git_paths(repo_root: Path, args: Sequence[str]) -> list[str]:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ReproducibleBuildError(f"could not inspect the current worktree: {exc}") from exc
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise ReproducibleBuildError(f"could not inspect the current worktree: {detail}")
+    return [os.fsdecode(raw) for raw in result.stdout.split(b"\0") if raw]
+
+
+def _sync_snapshot_path(repo_root: Path, snapshot_root: Path, name: str) -> None:
+    _validate_member_name(name)
+    source = _archive_target(repo_root, name)
+    target = _archive_target(snapshot_root, name)
+    if target.is_symlink() or target.is_file():
+        target.unlink()
+    elif target.is_dir():
+        shutil.rmtree(target)
+    if not source.exists() and not source.is_symlink():
+        return
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_symlink():
+        linkname = os.readlink(source)
+        member = tarfile.TarInfo(f"source/{name}")
+        member.type = tarfile.SYMTYPE
+        member.linkname = linkname
+        _safe_link_target(member)
+        os.symlink(linkname, target)
+    elif source.is_file():
+        shutil.copy2(source, target)
+    else:
+        raise ReproducibleBuildError(f"unsupported worktree entry: {name}")
 
 
 def _extract_git_archive(archive_path: Path, target: Path) -> None:
@@ -558,16 +669,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--verify",
         action="store_true",
-        help="build two clean Git archives and compare artifact hashes",
+        help="build the current worktree twice and compare artifact hashes",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="write built artifacts here; with --verify, only verified bytes are written",
     )
     args = parser.parse_args(argv)
     try:
         if args.verify:
-            hashes = verify_reproducible_builds(args.repo)
+            hashes = verify_reproducible_builds(args.repo, output_dir=args.output_dir)
             for name, digest in sorted(hashes.items()):
                 print(f"{digest}  {name}")
         else:
-            artifacts = build_distributions(args.repo)
+            artifacts = build_distributions(args.repo, output_dir=args.output_dir)
             print(artifacts.wheel)
             print(artifacts.sdist)
     except ReproducibleBuildError as exc:

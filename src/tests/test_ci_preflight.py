@@ -392,8 +392,15 @@ def test_preflight_pr_profile_runs_package_build_for_source_prs() -> None:
         profile="pr",
         python="python",
     )
+    build = next(check for check in checks if check.name == "build wheel")
 
-    assert "build wheel" in [check.name for check in checks]
+    assert build.argv == (
+        "python",
+        "scripts/build_reproducible_dist.py",
+        "--verify",
+        "--output-dir",
+        ".ci-preflight-dist",
+    )
     assert "twine check" in [check.name for check in checks]
 
 
