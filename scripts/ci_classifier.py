@@ -66,6 +66,7 @@ BROWSER_PATTERNS = (
 PACKAGE_PATTERNS = (
     "MANIFEST.in",
     "pyproject.toml",
+    "scripts/build_reproducible_dist.py",
     "src/*.py",
     "src/ctx/**",
 )

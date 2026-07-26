@@ -11,12 +11,11 @@ CHEAP_PR_SKIPPABLE_JOBS = {
     "contract-compat",
     "e2e-canary",
     "no-test-no-merge",
-    "package-build",
-    "package-smoke",
     "similarity-integration",
     "static",
     "unit-linux",
 }
+PACKAGE_JOBS = {"package-build", "package-smoke"}
 REQUIRED_JOBS = {
     "browser-security",
     "classify",
@@ -81,6 +80,7 @@ def failed_required_jobs(
     ci_changed_pr = (
         event_name == "pull_request" and _job_output(needs, "classify", "ci_changed") == "true"
     )
+    package_changed_output = _job_output(needs, "classify", "package_changed")
     windows_changed_output = _job_output(needs, "classify", "windows_changed")
     cheap_pr = docs_only_pr or graph_only_pr
     for name, details in sorted(needs.items()):
@@ -98,6 +98,13 @@ def failed_required_jobs(
             and name in CHEAP_PR_SKIPPABLE_JOBS
             and not (name == "similarity-integration" and similarity_changed_pr)
             and result == "skipped"
+        ):
+            continue
+        if (
+            event_name == "pull_request"
+            and name in PACKAGE_JOBS
+            and result == "skipped"
+            and package_changed_output == "false"
         ):
             continue
         if (

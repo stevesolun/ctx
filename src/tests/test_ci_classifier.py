@@ -265,6 +265,13 @@ def test_source_change_marks_source_and_package() -> None:
     assert flags["docs_only"] is False
 
 
+def test_reproducible_build_script_marks_package_changed() -> None:
+    flags = classify_paths(["scripts/build_reproducible_dist.py"])
+
+    assert flags["package_changed"] is True
+    assert flags["source_changed"] is True
+
+
 def test_workflow_change_fails_open_for_future_gates() -> None:
     flags = classify_paths([".github/workflows/test.yml"])
 
@@ -465,7 +472,7 @@ def test_similarity_gate_caches_and_predownloads_real_model() -> None:
     workflow = Path(".github/workflows/test.yml").read_text(encoding="utf-8")
 
     assert "actions/cache@v4" not in workflow
-    assert "actions/cache@v5" in workflow
+    assert "actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0" in workflow
     assert "Cache MiniLM model" in workflow
     assert "hf-sentence-transformers-all-MiniLM-L6-v2-v1" in workflow
     assert "Pre-download MiniLM model" in workflow
@@ -495,7 +502,8 @@ def test_publish_static_gate_uses_canonical_python_target() -> None:
     workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
     setup_match = re.search(
         r"- name: Set up Python\n"
-        r"\s+uses: actions/setup-python@v6\n"
+        r"\s+uses: actions/setup-python@"
+        r"ece7cb06caefa5fff74198d8649806c4678c61a1 # v6\.3\.0\n"
         r"\s+with:\n"
         r'\s+python-version: "([^"]+)"',
         workflow,
@@ -1489,6 +1497,77 @@ def test_ci_required_rejects_windows_skip_for_missing_or_malformed_output() -> N
         }
 
 
+def test_ci_required_allows_package_skips_when_classifier_says_unchanged() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {"package_changed": "false"},
+        },
+        **{
+            "package-build": {"result": "skipped"},
+            "package-smoke": {"result": "skipped"},
+        },
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {}
+
+
+def test_ci_required_rejects_package_skips_when_classifier_says_changed() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {"package_changed": "true"},
+        },
+        **{
+            "package-build": {"result": "skipped"},
+            "package-smoke": {"result": "skipped"},
+        },
+    )
+
+    assert failed_required_jobs(needs, event_name="pull_request") == {
+        "package-build": "skipped",
+        "package-smoke": "skipped",
+    }
+
+
+def test_ci_required_rejects_package_skips_for_missing_or_malformed_output() -> None:
+    for outputs in (
+        {},
+        {"package_changed": "unknown"},
+        {"package_changed": False},
+    ):
+        needs = _required_needs(
+            classify={"result": "success", "outputs": outputs},
+            **{
+                "package-build": {"result": "skipped"},
+                "package-smoke": {"result": "skipped"},
+            },
+        )
+
+        assert failed_required_jobs(needs, event_name="pull_request") == {
+            "package-build": "skipped",
+            "package-smoke": "skipped",
+        }
+
+
+def test_ci_required_rejects_package_skips_on_push() -> None:
+    needs = _required_needs(
+        classify={
+            "result": "success",
+            "outputs": {"package_changed": "false"},
+        },
+        **{
+            "package-build": {"result": "skipped"},
+            "package-smoke": {"result": "skipped"},
+        },
+    )
+
+    assert failed_required_jobs(needs, event_name="push") == {
+        "package-build": "skipped",
+        "package-smoke": "skipped",
+    }
+
+
 def test_ci_required_allows_heavy_jobs_to_skip_on_docs_only_pr() -> None:
     needs = _required_needs(
         classify={
@@ -1498,6 +1577,7 @@ def test_ci_required_allows_heavy_jobs_to_skip_on_docs_only_pr() -> None:
                 "docs_changed": "true",
                 "docs_only": "true",
                 "graph_artifact_changed": "false",
+                "package_changed": "false",
             },
         },
         **{
@@ -1543,6 +1623,7 @@ def test_ci_required_allows_heavy_jobs_to_skip_on_graph_only_pr() -> None:
                 "docs_only": "false",
                 "graph_artifact_changed": "true",
                 "graph_only": "true",
+                "package_changed": "false",
             },
         },
         **{
