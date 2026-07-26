@@ -110,7 +110,7 @@ def render_config(
         f"<p class='muted'>User config: <code>{html.escape(payload['path'])}</code></p>"
         "<form id='config-form'>"
         + group_html
-        + "<div class='card' style='position:sticky; bottom:0; background:rgba(255,255,255,0.96);'>"
+        + "<div class='card' style='position:sticky; bottom:0;'>"
         "<button type='submit'>save config</button> "
         "<button type='button' id='config-reset'>reset form to effective values</button> "
         "<span id='config-msg' class='muted'></span>"

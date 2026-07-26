@@ -6861,6 +6861,18 @@ def test_layout_nav_tabs_are_draggable_and_persist_order() -> None:
     assert "id='nav-reset'" in out
 
 
+def test_dashboard_text_cards_use_color_scheme_surfaces() -> None:
+    css = mt.monitor_asset_text("monitor.css")
+
+    for selector, expected_background in (
+        (".card {", "background: var(--surface)"),
+        (".graph-edge-detail-inline {", "background: var(--surface-2)"),
+    ):
+        rule = css.split(selector, maxsplit=1)[1].split("}", maxsplit=1)[0]
+        assert expected_background in rule
+        assert "rgba(255,255,255" not in rule.replace(" ", "")
+
+
 def test_render_config_page_shows_required_defaults_and_examples(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6929,6 +6941,8 @@ def test_config_page_module_renders_controls_and_overrides() -> None:
     assert "data-config-clear='resolver.recommendation_top_k'" in html_out
     assert "intake.enabled" in html_out
     assert "X-CTX-Monitor-Token" in html_out
+    assert "<div class='card' style='position:sticky; bottom:0;'>" in html_out
+    assert "bottom:0; background:rgba(255,255,255" not in html_out
 
 
 def test_render_harness_wizard_guides_model_choice_and_real_commands(
