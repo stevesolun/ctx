@@ -148,6 +148,61 @@ def test_write_json_none_indent(tmp_path: Path) -> None:
     assert raw == '{"a": 1}'
 
 
+# ── secure_directory reads ───────────────────────────────────────────────────
+
+
+def test_secure_directory_read_text_happy_path(tmp_path: Path) -> None:
+    target = tmp_path / "body.md"
+    target.write_text("trusted", encoding="utf-8")
+
+    with fs_utils.secure_directory(tmp_path) as directory:
+        assert directory.read_text("body.md") == "trusted"
+
+
+def test_secure_directory_read_text_rejects_symlink(tmp_path: Path) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.md"
+    outside.write_text("secret", encoding="utf-8")
+    target = tmp_path / "body.md"
+    try:
+        target.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"file symlinks unavailable: {exc}")
+
+    with fs_utils.secure_directory(tmp_path) as directory:
+        with pytest.raises((OSError, ValueError)):
+            directory.read_text("body.md")
+
+
+def test_secure_directory_read_text_rejects_swap_before_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if not fs_utils.supports_secure_directory_fds():
+        pytest.skip("directory-relative no-follow opens unavailable")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.md"
+    outside.write_text("secret", encoding="utf-8")
+    target = tmp_path / "body.md"
+    target.write_text("trusted", encoding="utf-8")
+    real_open = fs_utils.os.open
+    swapped = False
+
+    with fs_utils.secure_directory(tmp_path) as directory:
+
+        def swapping_open(path, flags, *args, **kwargs):
+            nonlocal swapped
+            if path == "body.md" and kwargs.get("dir_fd") is not None and not swapped:
+                swapped = True
+                target.unlink()
+                target.symlink_to(outside)
+            return real_open(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(fs_utils.os, "open", swapping_open)
+        with pytest.raises((OSError, ValueError)):
+            directory.read_text("body.md")
+
+    assert swapped is True
+
+
 # ── Windows retry ─────────────────────────────────────────────────────────────
 
 

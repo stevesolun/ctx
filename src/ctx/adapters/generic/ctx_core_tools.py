@@ -95,6 +95,7 @@ from ctx.core.entity_types import (
     normalize_entity_type,
 )
 from ctx.telemetry import hash_identifier, record_event, record_exception, telemetry_span
+from ctx.utils._fs_utils import reject_symlink_path, secure_directory
 
 
 _logger = logging.getLogger(__name__)
@@ -1338,6 +1339,17 @@ class CtxCoreToolbox:
                     _response_format_from_args(args),
                 )
 
+        if "skill" in candidate_entity_types:
+            converted_path = _safe_converted_skill_path(wiki, slug)
+            if converted_path is not None:
+                return self._serialise_page(
+                    converted_path,
+                    "skill",
+                    _wiki_entity_link(slug, "skill"),
+                    _response_format_from_args(args),
+                    slug=slug,
+                )
+
         return json.dumps(
             {
                 "error": f"no entity page found for slug {slug!r}",
@@ -1578,12 +1590,22 @@ class CtxCoreToolbox:
         entity_type: str,
         wikilink: str,
         response_format: str,
+        *,
+        slug: str | None = None,
     ) -> str:
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
+            with secure_directory(path.parent) as directory:
+                text = directory.read_text(path.name, encoding="utf-8", errors="replace")
+        except (OSError, ValueError) as exc:
             return json.dumps({"error": f"could not read {path}: {exc}"})
-        return self._serialise_page_text(path, text, entity_type, wikilink, response_format)
+        return self._serialise_page_text(
+            path,
+            text,
+            entity_type,
+            wikilink,
+            response_format,
+            slug=slug,
+        )
 
     def _serialise_page_text(
         self,
@@ -1592,9 +1614,12 @@ class CtxCoreToolbox:
         entity_type: str,
         wikilink: str,
         response_format: str,
+        *,
+        slug: str | None = None,
     ) -> str:
         from ctx.core.wiki.wiki_utils import parse_frontmatter_and_body  # noqa: PLC0415
 
+        page_slug = slug or path.stem
         fm, body = parse_frontmatter_and_body(text)
         encoded_body = body.encode("utf-8")
         body_bytes = len(encoded_body)
@@ -1607,10 +1632,10 @@ class CtxCoreToolbox:
         body_returned_bytes = len(body.encode("utf-8"))
         return _encode_response(
             {
-                "slug": path.stem,
+                "slug": page_slug,
                 "entity_type": entity_type,
                 "wikilink": wikilink,
-                "path": _wiki_entity_relpath(entity_type, path.stem),
+                "path": _wiki_entity_relpath(entity_type, page_slug),
                 "frontmatter": fm,
                 "body": body,
                 "body_truncated": body_truncated,
@@ -1735,6 +1760,21 @@ def _wiki_get_candidates(
         (typ, _wiki_entity_path(wiki, slug, typ), _wiki_entity_link(slug, typ))
         for typ in entity_types
     ]
+
+
+def _safe_converted_skill_path(wiki: Path, slug: str) -> Path | None:
+    converted_root = wiki / "converted"
+    candidate = converted_root / slug / "SKILL.md"
+    try:
+        reject_symlink_path(candidate)
+        wiki_root = wiki.resolve(strict=True)
+        resolved_root = converted_root.resolve(strict=True)
+        resolved_root.relative_to(wiki_root)
+        resolved_candidate = candidate.resolve(strict=True)
+        resolved_candidate.relative_to(resolved_root)
+    except (OSError, ValueError):
+        return None
+    return resolved_candidate if resolved_candidate.is_file() else None
 
 
 def _normalise_allowed_tool_names(

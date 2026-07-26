@@ -57,6 +57,7 @@ _DARWIN_SYSTEM_SYMLINKS: dict[Path, Path] = {
     Path("/var"): Path("/private/var"),
 }
 _DIRECTORY_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+_READ_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
 _TEMP_OPEN_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
 _WINDOWS_FILE_READ_ATTRIBUTES = 0x80
 _WINDOWS_FILE_SHARE_READ = 0x1
@@ -183,6 +184,19 @@ class _SecureDirectory:
                 return False
             return True
         return _lstat_optional(self.path / name) is not None
+
+    def read_text(
+        self,
+        name: str,
+        *,
+        encoding: str = "utf-8",
+        errors: str = "strict",
+    ) -> str:
+        """Read one pinned regular child without following replacement links."""
+        _validate_child_name(name)
+        if self._directory_fd is not None:
+            return _read_text_at(self, name, encoding=encoding, errors=errors)
+        return _read_text_guarded_path(self, name, encoding=encoding, errors=errors)
 
     def atomic_write_text(self, name: str, text: str, encoding: str = "utf-8") -> None:
         _validate_child_name(name)
@@ -342,6 +356,59 @@ def _validate_destination(path: Path, metadata: os.stat_result | None) -> None:
 def _validate_child_name(name: str) -> None:
     if not name or name in {".", ".."} or "/" in name or "\\" in name:
         raise ValueError(f"unsafe child name: {name!r}")
+
+
+def _read_text_at(
+    directory: _SecureDirectory,
+    name: str,
+    *,
+    encoding: str,
+    errors: str,
+) -> str:
+    directory_fd = directory._directory_fd
+    if directory_fd is None:
+        raise RuntimeError("directory descriptor unavailable")
+    destination = directory.path / name
+    before = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    _validate_destination(destination, before)
+    file_fd = os.open(name, _READ_OPEN_FLAGS, dir_fd=directory_fd)
+    try:
+        opened = os.fstat(file_fd)
+        after = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        _validate_destination(destination, after)
+        if not os.path.samestat(before, opened) or not os.path.samestat(opened, after):
+            raise ValueError(f"file {destination} changed while opening")
+        with os.fdopen(file_fd, "r", encoding=encoding, errors=errors) as handle:
+            file_fd = -1
+            return handle.read()
+    finally:
+        if file_fd != -1:
+            os.close(file_fd)
+
+
+def _read_text_guarded_path(
+    directory: _SecureDirectory,
+    name: str,
+    *,
+    encoding: str,
+    errors: str,
+) -> str:
+    destination = directory.path / name
+    before = os.stat(destination, follow_symlinks=False)
+    _validate_destination(destination, before)
+    file_fd = os.open(destination, _READ_OPEN_FLAGS)
+    try:
+        opened = os.fstat(file_fd)
+        after = os.stat(destination, follow_symlinks=False)
+        _validate_destination(destination, after)
+        if not os.path.samestat(before, opened) or not os.path.samestat(opened, after):
+            raise ValueError(f"file {destination} changed while opening")
+        with os.fdopen(file_fd, "r", encoding=encoding, errors=errors) as handle:
+            file_fd = -1
+            return handle.read()
+    finally:
+        if file_fd != -1:
+            os.close(file_fd)
 
 
 def _atomic_write_text_at(

@@ -855,6 +855,27 @@ def test_runtime_graph_install_seeds_actionable_local_availability_pack(
         "ctx-rust-patterns",
         "ctx-typescript",
     ):
+        page = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id=f"inspect-{slug}",
+                    name="ctx__wiki_get",
+                    arguments={"slug": slug, "entity_type": "skill"},
+                )
+            )
+        )
+        assert page["slug"] == slug
+        assert page["entity_type"] == "skill"
+        assert page["path"] == f"entities/skills/{slug}.md"
+        assert page["frontmatter"]["source"] == "ctx-runtime-availability"
+        assert page["body"]
+
+    for slug in (
+        "ctx-python-testing",
+        "ctx-javascript-testing",
+        "ctx-rust-patterns",
+        "ctx-typescript",
+    ):
         install = install_skill(
             slug,
             wiki_dir=wiki,
@@ -924,6 +945,33 @@ def test_runtime_availability_overlay_rejects_reserved_identity_changes(
     with pytest.raises(ValueError, match="identity contains unexpected content"):
         ci._install_runtime_availability_overlay(wiki)
     assert json.loads(overlay_path.read_text(encoding="utf-8")) == altered
+
+
+def test_runtime_wiki_get_rejects_symlinked_converted_body(tmp_path: Path) -> None:
+    wiki = tmp_path / "skill-wiki"
+    converted = wiki / "converted" / "ctx-python-testing"
+    converted.mkdir(parents=True)
+    secret = tmp_path / "outside-secret.md"
+    secret.write_text("outside-secret-value\n", encoding="utf-8")
+    candidate = converted / "SKILL.md"
+    try:
+        candidate.symlink_to(secret)
+    except OSError as exc:
+        pytest.skip(f"file symlinks unavailable: {exc}")
+
+    toolbox = CtxCoreToolbox(wiki_dir=wiki)
+    payload = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="inspect-symlink",
+                name="ctx__wiki_get",
+                arguments={"slug": "ctx-python-testing", "entity_type": "skill"},
+            )
+        )
+    )
+
+    assert "error" in payload
+    assert "outside-secret-value" not in json.dumps(payload)
 
 
 def test_runtime_availability_overlay_rejects_shipped_graph_id_collision(
