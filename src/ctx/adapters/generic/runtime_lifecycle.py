@@ -260,6 +260,38 @@ class RuntimeLifecycleStore:
             summary=summary,
         )
 
+    def recommendation_rejections(self, *, session_id: str) -> list[str]:
+        """Return the latest canonical recommendation rejection set."""
+        session_id = _validate_session_id(session_id)
+        rejected: list[str] = []
+        for event in self._events_for_session(session_id):
+            if event.get("action") != "recommendation_rejections":
+                continue
+            values = event.get("rejected")
+            if not isinstance(values, list):
+                continue
+            rejected = [
+                _validate_recommendation_id(value) for value in values if isinstance(value, str)
+            ]
+        return rejected
+
+    def remember_recommendation_rejections(
+        self,
+        *,
+        session_id: str,
+        rejected: list[str],
+    ) -> list[str]:
+        """Persist a complete, canonical rejection snapshot when it changes."""
+        session_id = _validate_session_id(session_id)
+        normalised = _deduplicate_recommendation_ids(rejected)
+        if self.recommendation_rejections(session_id=session_id) != normalised:
+            self._record(
+                action="recommendation_rejections",
+                session_id=session_id,
+                rejected=normalised,
+            )
+        return normalised
+
     def session_state(
         self,
         *,
@@ -271,12 +303,22 @@ class RuntimeLifecycleStore:
         unloaded: list[dict[str, Any]] = []
         validations: list[dict[str, Any]] = []
         escalations: list[dict[str, Any]] = []
+        rejected_recommendations: list[str] = []
         min_age = max(0.0, float(min_unused_seconds))
         now = time.time()
         latest_dev_event_epoch: float | None = None
 
         for event in self._events_for_session(session_id):
             action = event.get("action")
+            if action == "recommendation_rejections":
+                values = event.get("rejected")
+                if isinstance(values, list):
+                    rejected_recommendations = [
+                        _validate_recommendation_id(value)
+                        for value in values
+                        if isinstance(value, str)
+                    ]
+                continue
             if action == "dev_event":
                 latest_dev_event_epoch = float(event.get("created_at_epoch") or 0)
                 continue
@@ -428,6 +470,7 @@ class RuntimeLifecycleStore:
             "used": [entry for entry in loaded_entries if entry["used"]],
             "unload_candidates": unload_candidates,
             "unloaded": unloaded,
+            "rejected_recommendations": rejected_recommendations,
             "validations": validations,
             "escalations": escalations,
             "latest_validation_status": (str(validations[-1]["status"]) if validations else None),
@@ -687,6 +730,27 @@ def _validate_slug(raw: str) -> str:
     value = raw.strip()
     validate_skill_name(value)
     return value
+
+
+def _validate_recommendation_id(raw: str) -> str:
+    value = raw.strip()
+    if ":" not in value:
+        raise ValueError("recommendation rejection must use a canonical type:slug id")
+    raw_type, raw_slug = value.split(":", 1)
+    return f"{_validate_entity_type(raw_type)}:{_validate_slug(raw_slug)}"
+
+
+def _deduplicate_recommendation_ids(values: list[str]) -> list[str]:
+    normalised: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        value = _validate_recommendation_id(raw)
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalised.append(value)
+    return normalised
 
 
 def _validate_nonempty(raw: str, field: str) -> str:

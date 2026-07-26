@@ -117,6 +117,7 @@ _RELATED_BLOCKED_STATUSES = {
 }
 _REMOTE_SKILL_LOAD_STATUSES = {"available", "remote-cataloged"}
 _DEFAULT_BASELINE_CONTEXT = ("mcp-server:codex-cli",)
+_REJECTION_MODES = frozenset({"use", "replace", "ignore"})
 _LOCAL_CODE_QUERY_MARKERS = (
     "local files",
     "local repo",
@@ -372,9 +373,9 @@ class CtxCoreToolbox:
     pay the cost. First call to ``dispatch`` or ``tool_definitions``
     warms the relevant cache.
 
-    The toolbox is stateless after initialisation — calls are
-    independent and safe to parallelise (the MCP router already
-    serialises per-server anyway).
+    Recommendation calls are independent unless a host binds or supplies
+    a session id. Session-bound calls persist canonical rejection feedback
+    in the lifecycle store so later recommendations do not repeat it.
     """
 
     def __init__(
@@ -460,8 +461,25 @@ class CtxCoreToolbox:
                         },
                         "active_context": {
                             "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Already active ctx entity IDs or names to keep out of load suggestions.",
+                            "items": {
+                                "anyOf": [
+                                    {"type": "string"},
+                                    {
+                                        "type": "object",
+                                        "properties": {
+                                            "id": {"type": "string"},
+                                            "load_status": {"type": "string"},
+                                            "stale": {"type": "boolean"},
+                                            "unload_candidate": {"type": "boolean"},
+                                        },
+                                        "required": ["id"],
+                                    },
+                                ]
+                            },
+                            "description": (
+                                "Active ctx IDs, optionally with explicit applied/stale "
+                                "state used for keep, unload, and replace guidance."
+                            ),
                         },
                         "baseline_context": {
                             "type": "array",
@@ -724,6 +742,28 @@ class CtxCoreToolbox:
                 },
             ),
         ]
+        for definition in definitions:
+            if definition.name not in {
+                f"{_NAMESPACE}recommend_bundle",
+                f"{_NAMESPACE}recommend_related",
+            }:
+                continue
+            properties = definition.parameters["properties"]
+            properties["rejection_mode"] = {
+                "type": "string",
+                "enum": sorted(_REJECTION_MODES),
+                "description": (
+                    "use merges session memory (default); replace overwrites it, "
+                    "including clearing with an empty rejected list; ignore is call-local."
+                ),
+            }
+            if self._bound_session_id is None:
+                properties["session_id"] = {
+                    "type": "string",
+                    "description": (
+                        "Optional host session id used only for rejection memory correlation."
+                    ),
+                }
         definitions.extend(_lifecycle_tool_definitions(self._bound_session_id))
         definitions = [td for td in definitions if self.allows(td.name)]
         return definitions
@@ -869,8 +909,13 @@ class CtxCoreToolbox:
                 _response_format_from_args(args),
             )
         selected = _selection_values_from_args(args, "selected")
-        rejected = _selection_values_from_args(args, "rejected")
-        active_context = _selection_values_from_args(args, "active_context")
+        rejected = self._recommendation_rejections(graph, args)
+        active_context_raw = args.get("active_context") or []
+        active_context = (
+            _recommendation_selection_values(active_context_raw)
+            if isinstance(active_context_raw, list)
+            else []
+        )
         include_baseline = bool(_optional_bool(args.get("include_baseline_context")) or False)
         baseline_context = _selection_values_from_args(args, "baseline_context")
         if not baseline_context and not include_baseline:
@@ -931,7 +976,12 @@ class CtxCoreToolbox:
                 },
                 "context_policy": _recommendation_context_policy(
                     baseline_context=baseline_context,
-                    active_context=active_context,
+                    active_context=(
+                        active_context_raw
+                        if isinstance(active_context_raw, list)
+                        else active_context
+                    ),
+                    rejected_context=rejected,
                     results=results,
                 ),
                 "results": results,
@@ -953,11 +1003,6 @@ class CtxCoreToolbox:
                 }
             )
 
-        rejected_raw = args.get("rejected") or []
-        rejected = (
-            _recommendation_selection_values(rejected_raw) if isinstance(rejected_raw, list) else []
-        )
-        excluded = _recommendation_selection_keys(selected + rejected)
         max_hops = _clamp_int(args.get("max_hops"), default=2, lo=1, hi=4)
         top_n = _clamp_int(args.get("top_n"), default=5, lo=1, hi=50)
 
@@ -970,6 +1015,8 @@ class CtxCoreToolbox:
                 }
             )
 
+        rejected = self._recommendation_rejections(graph, args)
+        excluded = _recommendation_selection_keys(selected + rejected)
         seed_ids = _recommendation_selection_node_ids(graph, selected)
         raw = _resolve_related_recommendation_rows(
             graph,
@@ -1336,6 +1383,39 @@ class CtxCoreToolbox:
         if not supplied:
             raise ValueError("session_id is required")
         return supplied
+
+    def _recommendation_session_id(self, args: Mapping[str, Any]) -> str | None:
+        supplied = str(args.get("session_id") or "").strip()
+        if self._bound_session_id is not None:
+            if supplied and supplied != self._bound_session_id:
+                raise ValueError("session_id is host-bound and cannot be overridden")
+            return self._bound_session_id
+        return supplied or None
+
+    def _recommendation_rejections(
+        self,
+        graph: Any,
+        args: Mapping[str, Any],
+    ) -> list[str]:
+        mode = str(args.get("rejection_mode") or "use").strip().lower()
+        if mode not in _REJECTION_MODES:
+            raise ValueError("rejection_mode must be one of " + ", ".join(sorted(_REJECTION_MODES)))
+        raw = args.get("rejected") or []
+        explicit = _recommendation_selection_values(raw) if isinstance(raw, list) else []
+        session_id = self._recommendation_session_id(args)
+        if session_id is None or mode == "ignore":
+            return explicit
+
+        stored = self._lifecycle.recommendation_rejections(session_id=session_id)
+        canonical = _canonical_graph_recommendation_ids(graph, explicit)
+        next_stored = (
+            canonical if mode == "replace" else _recommendation_selection_values(stored + canonical)
+        )
+        self._lifecycle.remember_recommendation_rejections(
+            session_id=session_id,
+            rejected=next_stored,
+        )
+        return _recommendation_selection_values(next_stored + explicit)
 
     def _serialise_page(
         self,
@@ -1934,10 +2014,22 @@ def _recommendation_text_tokens(value: str) -> list[str]:
 def _recommendation_context_policy(
     *,
     baseline_context: list[str],
-    active_context: list[str],
+    active_context: list[Any],
     results: list[dict[str, Any]],
+    rejected_context: list[str] | None = None,
 ) -> dict[str, Any]:
-    keep = _recommendation_selection_values(baseline_context + active_context)
+    active = _recommendation_selection_values(active_context)
+    action_reasons = _active_context_action_reasons(
+        baseline_context=baseline_context,
+        active_context=active_context,
+        rejected_context=rejected_context or [],
+    )
+    action_keys = _recommendation_selection_keys(list(action_reasons))
+    keep = [
+        value
+        for value in _recommendation_selection_values(baseline_context + active)
+        if _recommendation_selection_key(value) not in action_keys
+    ]
     keep_keys = _recommendation_selection_keys(keep)
     loadable = [
         row
@@ -1950,15 +2042,61 @@ def _recommendation_context_policy(
         None,
     )
     initial_id = str(initial["id"]) if initial is not None else None
+    unload_candidates = [
+        value for value in active if _recommendation_selection_key(value) in action_keys
+    ]
+    replacements: list[dict[str, str]] = []
+    if initial_id is not None and unload_candidates:
+        replaced = unload_candidates.pop(0)
+        replacements.append(
+            {
+                "unload": replaced,
+                "load": initial_id,
+                "reason": action_reasons[_recommendation_selection_key(replaced)],
+            }
+        )
     return {
         "baseline": baseline_context,
         "keep": keep,
-        "load": [initial_id] if initial_id is not None else [],
+        "load": [initial_id] if initial_id is not None and not replacements else [],
         "deferred": [row["id"] for row in loadable if row["id"] != initial_id],
         "manual": [row["id"] for row in results if not _is_loadable_recommendation_row(row)],
-        "unload": [],
-        "replace": [],
+        "unload": unload_candidates,
+        "replace": replacements,
     }
+
+
+def _active_context_action_reasons(
+    *,
+    baseline_context: list[str],
+    active_context: list[Any],
+    rejected_context: list[str],
+) -> dict[str, str]:
+    baseline_keys = _recommendation_selection_keys(baseline_context)
+    rejected_keys = _recommendation_selection_keys(rejected_context)
+    reasons: dict[str, str] = {}
+    for raw in active_context:
+        values = _recommendation_selection_values([raw])
+        if not values:
+            continue
+        value = values[0]
+        key = _recommendation_selection_key(value)
+        if key in baseline_keys:
+            continue
+        if key in rejected_keys:
+            reasons[key] = "active context was explicitly rejected in this session"
+            continue
+        if isinstance(raw, Mapping) and _is_stale_applied_context(raw):
+            reasons[key] = "host marked applied context as stale"
+    return reasons
+
+
+def _is_stale_applied_context(raw: Mapping[str, Any]) -> bool:
+    load_status = str(raw.get("load_status") or "").strip().lower()
+    applied = raw.get("applied") is True or load_status in {"active", "applied", "loaded"}
+    state = str(raw.get("status") or "").strip().lower()
+    stale = raw.get("stale") is True or raw.get("unload_candidate") is True or state == "stale"
+    return applied and stale
 
 
 def _recommendation_tags(row: Mapping[str, Any]) -> list[str]:
@@ -2071,6 +2209,34 @@ def _recommendation_selection_parts(value: str) -> tuple[str | None, str]:
     if entity_type is None or not name:
         return None, item
     return entity_type, name
+
+
+def _canonical_graph_recommendation_ids(graph: Any, values: list[str]) -> list[str]:
+    canonical_nodes = {
+        str(node_id).lower(): str(node_id)
+        for node_id in graph.nodes
+        if _recommendation_selection_parts(str(node_id))[0] is not None
+    }
+    labels: dict[str, list[str]] = {}
+    for node_id, data in graph.nodes(data=True):
+        canonical = canonical_nodes.get(str(node_id).lower())
+        if canonical is None:
+            continue
+        label = str(data.get("label") or data.get("name") or "").strip().lower()
+        if label:
+            labels.setdefault(label, []).append(canonical)
+
+    resolved: list[str] = []
+    for value in _recommendation_selection_values(values):
+        entity_type, name = _recommendation_selection_parts(value)
+        if entity_type is not None:
+            candidate = canonical_nodes.get(f"{entity_type}:{name}".lower())
+        else:
+            matches = labels.get(name.lower(), [])
+            candidate = matches[0] if len(matches) == 1 else None
+        if candidate is not None:
+            resolved.append(candidate)
+    return _recommendation_selection_values(resolved)
 
 
 def _recommendation_selection_node_ids(graph: Any, values: list[str]) -> set[str]:

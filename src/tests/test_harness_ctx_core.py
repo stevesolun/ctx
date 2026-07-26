@@ -1970,6 +1970,124 @@ class TestRecommendBundle:
         assert expensive_only["load"] == []
         assert expensive_only["deferred"] == ["agent:reviewer", "mcp-server:wiki"]
 
+    def test_session_rejections_persist_isolate_clear_and_ignore(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        graph_path = _build_synthetic_graph(tmp_path)
+        wiki_dir = _build_synthetic_wiki(tmp_path)
+        runtime_dir = tmp_path / "runtime"
+        first_session = CtxCoreToolbox(
+            wiki_dir=wiki_dir,
+            graph_path=graph_path,
+            lifecycle_dir=runtime_dir,
+            bound_session_id="first-session",
+        )
+        second_session = CtxCoreToolbox(
+            wiki_dir=wiki_dir,
+            graph_path=graph_path,
+            lifecycle_dir=runtime_dir,
+            bound_session_id="second-session",
+        )
+
+        def recommend(box: CtxCoreToolbox, **arguments: Any) -> dict[str, Any]:
+            return json.loads(
+                box.dispatch(
+                    ToolCall(
+                        id="rejection-memory",
+                        name="ctx__recommend_bundle",
+                        arguments={"query": "python web api", "top_k": 5, **arguments},
+                    )
+                )
+            )
+
+        recommend(first_session, rejected=["skill:fastapi-pro"])
+        remembered = recommend(first_session)
+        isolated = recommend(second_session)
+        ignored = recommend(first_session, rejection_mode="ignore")
+
+        assert "skill:fastapi-pro" not in {row["id"] for row in remembered["results"]}
+        assert "skill:fastapi-pro" in {row["id"] for row in isolated["results"]}
+        assert "skill:fastapi-pro" in {row["id"] for row in ignored["results"]}
+
+        cleared = recommend(first_session, rejection_mode="replace", rejected=[])
+        assert "skill:fastapi-pro" in {row["id"] for row in cleared["results"]}
+        state = json.loads(
+            first_session.dispatch(ToolCall(id="state", name="ctx__session_state", arguments={}))
+        )
+        assert state["rejected_recommendations"] == []
+
+    def test_session_rejections_persist_only_known_canonical_graph_ids(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        toolbox = CtxCoreToolbox(
+            wiki_dir=_build_synthetic_wiki(tmp_path),
+            graph_path=_build_synthetic_graph(tmp_path),
+            lifecycle_dir=tmp_path / "runtime",
+            bound_session_id="canonical-session",
+        )
+
+        json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="remember",
+                    name="ctx__recommend_bundle",
+                    arguments={
+                        "query": "python web api",
+                        "rejected": ["fastapi-pro", "skill:not-in-graph"],
+                    },
+                )
+            )
+        )
+        state = json.loads(
+            toolbox.dispatch(ToolCall(id="state", name="ctx__session_state", arguments={}))
+        )
+
+        assert state["rejected_recommendations"] == ["skill:fastapi-pro"]
+
+    def test_context_policy_replaces_rejected_or_stale_applied_context(self) -> None:
+        policy = _recommendation_context_policy(
+            baseline_context=["mcp-server:codex-cli"],
+            active_context=[
+                {
+                    "id": "skill:stale-helper",
+                    "load_status": "applied",
+                    "stale": True,
+                },
+                "agent:rejected-reviewer",
+                "mcp-server:codex-cli",
+            ],
+            rejected_context=[
+                "agent:rejected-reviewer",
+                "mcp-server:codex-cli",
+            ],
+            results=[
+                {
+                    "id": "skill:replacement",
+                    "type": "skill",
+                    "installable": True,
+                },
+                {
+                    "id": "agent:secondary",
+                    "type": "agent",
+                    "installable": True,
+                },
+            ],
+        )
+
+        assert policy["keep"] == ["mcp-server:codex-cli"]
+        assert policy["load"] == []
+        assert policy["replace"] == [
+            {
+                "unload": "skill:stale-helper",
+                "load": "skill:replacement",
+                "reason": "host marked applied context as stale",
+            }
+        ]
+        assert policy["unload"] == ["agent:rejected-reviewer"]
+        assert policy["deferred"] == ["agent:secondary"]
+
     def test_language_inference_resolves_common_word_aliases(self) -> None:
         assert _infer_query_language("go through python tests") == "python"
         assert _infer_query_language("python tree node bug") == "python"
