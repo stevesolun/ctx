@@ -175,6 +175,7 @@ class TestPublicApiShape:
         {
             "ctx_core_tool_names",
             "recommendation_graph",
+            "recommendation_rejections",
         }
     )
 
@@ -256,6 +257,10 @@ class TestSignatures:
     def test_adapter_helper_signatures(self) -> None:
         assert list(inspect.signature(ctx.api.ctx_core_tool_names).parameters) == []
         assert list(inspect.signature(ctx.api.recommendation_graph).parameters) == []
+        rejection_sig = inspect.signature(ctx.api.recommendation_rejections)
+        assert rejection_sig.parameters["rejected"].default is None
+        assert rejection_sig.parameters["session_id"].default is None
+        assert rejection_sig.parameters["rejection_mode"].default == "use"
 
 
 # ── End-to-end function behaviour ─────────────────────────────────────────

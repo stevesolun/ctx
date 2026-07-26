@@ -195,6 +195,86 @@ def test_loopflow_excludes_bare_selection_names_and_backfills(monkeypatch) -> No
     ]
 
 
+def test_loopflow_session_rejections_filter_primary_capabilities(monkeypatch) -> None:
+    memory: dict[str, list[str]] = {}
+
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        del query, permissions, top_k
+        return [
+            {
+                "id": "skill:rejected-helper",
+                "name": "rejected-helper",
+                "type": "skill",
+                "score": 99,
+                "installable": True,
+                "load_status": "local-wiki",
+            },
+            {
+                "id": "skill:accepted-helper",
+                "name": "accepted-helper",
+                "type": "skill",
+                "score": 90,
+                "installable": True,
+                "load_status": "local-wiki",
+            },
+        ]
+
+    def fake_rejections(
+        rejected: list[str] | None = None,
+        *,
+        session_id: str | None = None,
+        rejection_mode: str = "use",
+    ) -> list[str]:
+        assert session_id is not None
+        explicit = list(rejected or [])
+        if rejection_mode == "ignore":
+            return explicit
+        if rejection_mode == "replace":
+            memory[session_id] = explicit
+        else:
+            memory[session_id] = list(dict.fromkeys(memory.get(session_id, []) + explicit))
+        return memory[session_id]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+    monkeypatch.setattr(loopflow.ctx_api, "recommendation_rejections", fake_rejections)
+
+    first = loopflow.recommend_for_loop(
+        goal="python api",
+        permissions={"skills"},
+        rejected=["skill:rejected-helper"],
+        session_id="loop-session",
+        top_k=2,
+    )
+    remembered = loopflow.recommend_for_loop(
+        goal="python api",
+        permissions={"skills"},
+        session_id="loop-session",
+        top_k=2,
+    )
+    stateless = loopflow.recommend_for_loop(
+        goal="python api",
+        permissions={"skills"},
+        top_k=2,
+    )
+
+    assert first["selection"] == {
+        "selected": [],
+        "rejected": ["skill:rejected-helper"],
+        "session_bound": True,
+        "rejection_mode": "use",
+    }
+    assert [row["id"] for row in remembered["capabilities"]["skills"]] == ["skill:accepted-helper"]
+    assert [row["id"] for row in stateless["capabilities"]["skills"]] == [
+        "skill:rejected-helper",
+        "skill:accepted-helper",
+    ]
+
+
 def test_mcp_server_tools_are_filtered_by_permission_groups(monkeypatch) -> None:
     monkeypatch.setattr(loopflow, "_recommend_capability_rows", lambda *args, **kwargs: [])
     monkeypatch.setattr(loopflow, "recommend_harnesses", lambda *args, **kwargs: [])
@@ -1183,6 +1263,40 @@ def test_main_emits_json_from_loop_file(tmp_path: Path, monkeypatch, capsys) -> 
     assert "python -m ctx.adapters.loopflow" in payload["loopflow"]["before_plan"]
     assert payload["loopflow"]["use_tools"] == 'use tools from the "ctx" server'
     assert payload["loopflow"]["use_skills"] == "use skills: security-review"
+
+
+def test_main_forwards_rejection_session_flags(monkeypatch, capsys) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_recommend_for_loop(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(loopflow, "recommend_for_loop", fake_recommend_for_loop)
+
+    assert (
+        loopflow.main(
+            [
+                "--goal",
+                "review api",
+                "--permissions",
+                "skills",
+                "--rejected",
+                "skill:legacy-helper",
+                "--session-id",
+                "loop-cli-session",
+                "--rejection-mode",
+                "replace",
+                "--compact",
+            ]
+        )
+        == 0
+    )
+
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
+    assert captured["rejected"] == ["skill:legacy-helper"]
+    assert captured["session_id"] == "loop-cli-session"
+    assert captured["rejection_mode"] == "replace"
 
 
 def test_main_uses_loop_file_ctx_grants_when_cli_permissions_absent(

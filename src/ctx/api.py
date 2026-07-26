@@ -77,6 +77,9 @@ Adapter support helpers, not part of the stable public import contract:
     recommendation_graph()
         Return the shared recommendation graph for adapter-side ranking.
 
+    recommendation_rejections(...)
+        Resolve session rejection memory for first-party adapters.
+
 These remain module-level support for first-party adapters. They are
 intentionally omitted from ``__all__`` and from top-level ``ctx``
 re-exports; third-party callers that need adapter plumbing should use
@@ -493,6 +496,20 @@ def ctx_core_tool_names() -> list[str]:
 def recommendation_graph() -> Any:
     """Return the shared recommendation graph for adapter-side ranking."""
     return _get_toolbox()._ensure_graph()
+
+
+def recommendation_rejections(
+    rejected: list[str] | None = None,
+    *,
+    session_id: str | None = None,
+    rejection_mode: str = "use",
+) -> list[str]:
+    """Resolve call-local and session rejection feedback for adapters."""
+    return _get_toolbox().recommendation_rejections(
+        rejected,
+        session_id=session_id,
+        rejection_mode=rejection_mode,
+    )
 
 
 def default_wiki_dir() -> Path | None:

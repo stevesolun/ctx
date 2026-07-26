@@ -862,6 +862,27 @@ class CtxCoreToolbox:
             return tool_name in self._allowed_tool_names
         return tool_name not in _LOOP_PROVISION_TOOL_NAMES
 
+    def recommendation_rejections(
+        self,
+        rejected: list[str] | None = None,
+        *,
+        session_id: str | None = None,
+        rejection_mode: str = "use",
+    ) -> list[str]:
+        """Resolve explicit and remembered rejections for first-party adapters."""
+        graph = self._ensure_graph()
+        explicit = _recommendation_selection_values(rejected or [])
+        if graph.number_of_nodes() == 0:
+            return explicit
+        return self._recommendation_rejections(
+            graph,
+            {
+                "rejected": explicit,
+                "session_id": session_id,
+                "rejection_mode": rejection_mode,
+            },
+        )
+
     # ── Individual dispatchers ──────────────────────────────────────────
 
     def _dispatch_recommend(self, args: dict[str, Any]) -> str:

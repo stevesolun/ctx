@@ -763,6 +763,8 @@ def recommend_for_loop(
     harness_requirements: dict[str, str] | None = None,
     selected: list[str] | None = None,
     rejected: list[str] | None = None,
+    session_id: str | None = None,
+    rejection_mode: str = "use",
     top_k: int = 5,
 ) -> dict[str, Any]:
     """Return a permissioned ctx adapter payload for a DSL or agent loop.
@@ -772,6 +774,8 @@ def recommend_for_loop(
     rows.
     """
     safe_top_k = max(1, min(int(top_k), 20))
+    if rejection_mode not in {"use", "replace", "ignore"}:
+        raise ValueError("rejection_mode must be one of ignore, replace, use")
     granted = permissions or set()
     context_paths = look_at or []
     safe_context = _safe_context_refs(context_paths)
@@ -808,6 +812,12 @@ def recommend_for_loop(
     }
     selected_ids = [value.strip() for value in (selected or []) if value.strip()]
     rejected_ids = [value.strip() for value in (rejected or []) if value.strip()]
+    if session_id is not None:
+        rejected_ids = ctx_api.recommendation_rejections(
+            rejected_ids,
+            session_id=session_id,
+            rejection_mode=rejection_mode,
+        )
     excluded_ids = _selection_keys(selected_ids + rejected_ids)
     local_loadable_skills_only = _is_local_no_key_query(ranking_query)
     recommendation_context = _recommendation_context_from_args(ranking_query, {})
@@ -838,11 +848,18 @@ def recommend_for_loop(
         )
     related_recommendations: list[dict[str, Any]] = []
     if selected_ids and granted.intersection({"skills", "agents", "mcps"}):
+        related_kwargs: dict[str, Any] = {}
+        if session_id is not None:
+            related_kwargs = {
+                "session_id": session_id,
+                "rejection_mode": "ignore",
+            }
         related_recommendations = _filter_related_rows(
             ctx_api.recommend_related(
                 selected_ids,
                 rejected=rejected_ids,
                 top_n=50,
+                **related_kwargs,
             ),
             permissions=granted,
             excluded=excluded_ids,
@@ -918,6 +935,12 @@ def recommend_for_loop(
         },
         "capabilities": capability_bundle,
         "related_recommendations": related_recommendations,
+        "selection": {
+            "selected": selected_ids,
+            "rejected": rejected_ids,
+            "session_bound": session_id is not None,
+            "rejection_mode": rejection_mode,
+        },
         "loopflow": {
             "use_tools": use_tools,
             "use_skills": use_skills,
@@ -961,6 +984,16 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="Comma-separated rejected ctx recommendation IDs or names.",
+    )
+    parser.add_argument(
+        "--session-id",
+        help="Optional host session id for recommendation rejection memory.",
+    )
+    parser.add_argument(
+        "--rejection-mode",
+        choices=("use", "replace", "ignore"),
+        default="use",
+        help="Use, replace, or ignore remembered rejections for this session.",
     )
     parser.add_argument(
         "--permissions",
@@ -1046,6 +1079,8 @@ def main(argv: list[str] | None = None) -> int:
         harness_requirements={key: value for key, value in requirements.items() if value},
         selected=_split_csv(args.selected),
         rejected=_split_csv(args.rejected),
+        session_id=args.session_id,
+        rejection_mode=args.rejection_mode,
         top_k=args.top_k,
     )
     json.dump(payload, sys.stdout, indent=None if args.compact else 2, sort_keys=True)
