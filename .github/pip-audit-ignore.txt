@@ -1,0 +1,2 @@
+# No active vulnerability exemptions.
+# Add one advisory ID per line with a justification and review date.

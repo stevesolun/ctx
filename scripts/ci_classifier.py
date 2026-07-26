@@ -35,6 +35,10 @@ DOCS_PATTERNS = (
 )
 CI_PATTERNS = (
     ".github/actions/**",
+    ".github/codeql/**",
+    ".github/dependabot.yml",
+    ".github/pip-audit-ignore.txt",
+    ".github/requirements-no-test-policy.txt",
     ".github/workflows/**",
     ".no-mistakes.yaml",
     "scripts/ci_*.py",

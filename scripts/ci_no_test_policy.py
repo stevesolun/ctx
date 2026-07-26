@@ -35,7 +35,9 @@ MAINTAINER_SCRIPT_CONTRACT_FILES = {
     "scripts/sync_huggingface.py",
 }
 GATE_CONFIG_CONTRACT_FILES = {
+    ".github/codeql/codeql-config.yml",
     ".github/dependabot.yml",
+    ".github/pip-audit-ignore.txt",
     ".github/requirements-no-test-policy.txt",
     ".no-mistakes.yaml",
     "scripts/local_fast_gate.py",
@@ -132,6 +134,7 @@ def is_contract_file(path: str) -> bool:
         or path.startswith("scripts/ci_")
         or path in MAINTAINER_SCRIPT_CONTRACT_FILES
         or path in GATE_CONFIG_CONTRACT_FILES
+        or path.startswith(".github/codeql/")
         or path == "pyproject.toml"
         or is_python_dependency_file(path)
         or path.startswith(".github/actions/")

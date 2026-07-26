@@ -118,6 +118,33 @@ def test_docs_tooling_changes_are_docs_only() -> None:
     assert flags["source_changed"] is False
 
 
+def test_security_gate_configs_trigger_ci_lanes() -> None:
+    for path in (
+        ".github/codeql/codeql-config.yml",
+        ".github/dependabot.yml",
+        ".github/pip-audit-ignore.txt",
+        ".github/requirements-no-test-policy.txt",
+    ):
+        flags = classify_paths([path])
+
+        assert flags["ci_changed"] is True
+        assert flags["docs_only"] is False
+        assert flags["package_changed"] is True
+        assert flags["source_changed"] is True
+
+
+def test_pip_audit_policy_has_no_active_blanket_exemptions() -> None:
+    policy_path = Path(".github/pip-audit-ignore.txt")
+
+    assert policy_path.is_file()
+    active_entries = [
+        line.split("#", maxsplit=1)[0].strip()
+        for line in policy_path.read_text(encoding="utf-8").splitlines()
+        if line.split("#", maxsplit=1)[0].strip()
+    ]
+    assert active_entries == []
+
+
 def test_qa_feature_status_tracker_is_docs_only() -> None:
     flags = classify_paths(["qa/feature_status.csv"])
 
@@ -1254,7 +1281,10 @@ def test_no_test_policy_does_not_allow_dependabot_logic_changes_via_other_exempt
 
 def test_no_test_policy_treats_dependency_policy_as_contract() -> None:
     for path in (
+        ".github/codeql/codeql-config.yml",
+        ".github/codeql/custom-queries/example.ql",
         ".github/dependabot.yml",
+        ".github/pip-audit-ignore.txt",
         ".github/requirements-no-test-policy.txt",
     ):
         result = evaluate_policy([path], (), {path: "+policy change\n"})
