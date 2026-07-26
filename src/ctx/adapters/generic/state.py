@@ -545,6 +545,9 @@ class SessionStore:
                 "usage": _usage_to_dict(response.usage),
                 "provider": response.provider,
                 "model": response.model,
+                "response_model": response.response_model,
+                "authentication_submitted": response.authentication_submitted,
+                "request_endpoint_hash": response.request_endpoint_hash,
             },
         )
 

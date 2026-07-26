@@ -116,6 +116,10 @@ class CompletionResponse:
     model: str
     # Opaque underlying SDK response — debugging aid, not stable API.
     raw: dict[str, Any] = field(default_factory=dict)
+    # Non-secret request/response evidence for provenance-sensitive callers.
+    response_model: str | None = None
+    authentication_submitted: bool = False
+    request_endpoint_hash: str | None = None
 
 
 class ModelProvider(Protocol):

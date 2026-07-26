@@ -482,6 +482,9 @@ class TestConvenienceWriters:
                     ),
                     provider="litellm",
                     model="openrouter/x",
+                    response_model="openrouter/x",
+                    authentication_submitted=True,
+                    request_endpoint_hash="sha256:endpoint",
                 ),
             )
         event = json.loads((tmp_path / "s.jsonl").read_text(encoding="utf-8"))
@@ -495,6 +498,9 @@ class TestConvenienceWriters:
         }
         assert event["provider"] == "litellm"
         assert event["model"] == "openrouter/x"
+        assert event["response_model"] == "openrouter/x"
+        assert event["authentication_submitted"] is True
+        assert event["request_endpoint_hash"] == "sha256:endpoint"
 
     def test_write_tool_call(self, tmp_path: Path) -> None:
         with SessionStore.create(session_id="s", sessions_dir=tmp_path) as store:

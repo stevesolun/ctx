@@ -253,6 +253,7 @@ class TestNormaliseResponse:
 
     def test_plain_content_response(self) -> None:
         raw = {
+            "model": "provider-returned-model",
             "choices": [
                 {
                     "message": {"content": "hello", "tool_calls": None},
@@ -271,6 +272,9 @@ class TestNormaliseResponse:
         assert resp.usage.cached_input_tokens is None
         assert resp.provider == "litellm"
         assert resp.model == "test"
+        assert resp.response_model == "provider-returned-model"
+        assert resp.authentication_submitted is False
+        assert resp.request_endpoint_hash is None
 
     def test_tool_calls_in_response(self) -> None:
         raw = {
@@ -516,6 +520,32 @@ class TestCompleteWiring:
         )
         prov.complete([Message(role="user", content="hi")])
         assert fake_litellm._calls[0]["api_key"] == "sk-test-123"
+
+    def test_response_records_non_secret_request_provenance(
+        self,
+        fake_litellm: types.ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("MODEL_API_KEY", "private-key-value")
+        fake_litellm._response = {  # type: ignore[attr-defined]
+            "model": "openai/gpt-test",
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }
+        provider = LiteLLMProvider(
+            default_model="openai/gpt-test",
+            base_url="https://provider.example/v1",
+            api_key_env="MODEL_API_KEY",
+        )
+
+        response = provider.complete([Message(role="user", content="hi")])
+
+        assert response.response_model == "openai/gpt-test"
+        assert response.authentication_submitted is True
+        assert response.request_endpoint_hash == (
+            "sha256:ebcd93ca6f177cf940def36d04b24abddd12d02500b1240228f7ea94e6223dd7"
+        )
+        assert "private-key-value" not in repr(response)
 
     def test_missing_api_key_env_silent(
         self,

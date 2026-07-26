@@ -31,6 +31,7 @@ the full LiteLLM dependency tree (litellm brings in a lot).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Any
@@ -124,6 +125,12 @@ class LiteLLMProvider:
             raw,
             provider=self.name,
             model=effective_model,
+            authentication_submitted="api_key" in params,
+            request_endpoint_hash=(
+                "sha256:" + hashlib.sha256(self._base_url.encode("utf-8")).hexdigest()
+                if self._base_url is not None
+                else None
+            ),
         )
 
 
@@ -179,6 +186,8 @@ def _normalise_response(
     *,
     provider: str,
     model: str,
+    authentication_submitted: bool = False,
+    request_endpoint_hash: str | None = None,
 ) -> CompletionResponse:
     """Convert a LiteLLM response object into ``CompletionResponse``.
 
@@ -197,6 +206,10 @@ def _normalise_response(
         raw_dict = raw
     else:
         raw_dict = {"_repr": repr(raw)}
+    raw_response_model = raw_dict.get("model")
+    response_model = (
+        str(raw_response_model).strip() if raw_response_model not in (None, "") else None
+    )
 
     choices = raw_dict.get("choices") or []
     if not choices:
@@ -208,6 +221,9 @@ def _normalise_response(
             provider=provider,
             model=model,
             raw=raw_dict,
+            response_model=response_model,
+            authentication_submitted=authentication_submitted,
+            request_endpoint_hash=request_endpoint_hash,
         )
     first = choices[0]
     message = first.get("message") or {}
@@ -223,6 +239,9 @@ def _normalise_response(
         provider=provider,
         model=model,
         raw=raw_dict,
+        response_model=response_model,
+        authentication_submitted=authentication_submitted,
+        request_endpoint_hash=request_endpoint_hash,
     )
 
 
