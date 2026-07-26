@@ -834,7 +834,7 @@ jobs:
     name: "Contract changes must touch tests"
     needs: classify
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.graph_only != 'true' }}
+    if: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Checkout with full history
         uses: actions/checkout@v5
@@ -842,21 +842,40 @@ jobs:
           fetch-depth: 0
           lfs: false
 
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/requirements-no-test-policy.txt
+
+      - name: Install policy parser dependencies
+        run: >-
+          python -m pip install
+          --disable-pip-version-check
+          --require-hashes
+          --only-binary=:all:
+          -r .github/requirements-no-test-policy.txt
+
       - name: Enforce test-coverage-per-PR policy
         # Policy: product or CI/package contract changes must include
         # at least one src/tests/ change in the same PR. Exemptions are
         # intentionally narrow and implemented in scripts/ci_no_test_policy.py:
         # release metadata-only changes, or a maintainer-applied
-        # no-tests-needed label for changes where tests are genuinely not useful.
+        # no-tests-needed label for changes where tests are genuinely not useful,
+        # plus version-only dependency updates authored by Dependabot itself.
+        env:
+          PR_ACTOR: ${{ github.actor }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
         run: |
           set -euo pipefail
-          BASE="${{ github.event.pull_request.base.sha }}"
-          HEAD="${{ github.event.pull_request.head.sha }}"
-          LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
           python scripts/ci_no_test_policy.py \
-            --base "$BASE" \
-            --head "$HEAD" \
-            --labels-json "$LABELS"
+            --base "$PR_BASE_SHA" \
+            --head "$PR_HEAD_SHA" \
+            --labels-json "$PR_LABELS_JSON" \
+            --actor "$PR_ACTOR"
 
   ci-required:
     name: "CI required"
@@ -889,4 +908,11 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           NEEDS_JSON: ${{ toJson(needs) }}
-        run: python scripts/ci_required.py
+          NO_TEST_NO_MERGE_RESULT: ${{ needs.no-test-no-merge.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "pull_request" && "$NO_TEST_NO_MERGE_RESULT" != "success" ]]; then
+            echo "::error::no-test-no-merge must pass on every pull request"
+            exit 1
+          fi
+          python scripts/ci_required.py
