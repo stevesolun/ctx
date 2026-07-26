@@ -40,12 +40,12 @@ jobs:
       graph_assets_available: ${{ steps.resolve_graph_assets.outcome == 'success' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           lfs: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.11"
 
@@ -574,13 +574,13 @@ jobs:
           rm release-sbom/resolved-environment.json
 
       - name: Upload dist artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
           path: dist/
 
       - name: Upload release SBOM
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-sbom
           path: release-sbom/claude-ctx.cdx.json
@@ -588,7 +588,7 @@ jobs:
 
       - name: Upload graph artifact bundle
         if: steps.resolve_graph_assets.outcome == 'success'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: graph-release-assets
           path: |
@@ -608,26 +608,26 @@ jobs:
       attestations: write
     steps:
       - name: Download dist artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: dist
           path: dist
 
       - name: Download release SBOM
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-sbom
           path: release-sbom
 
       - name: Download graph artifact bundle
         if: needs.build.outputs.graph_assets_available == 'true'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: graph-release-assets
           path: graph-release-assets
 
       - name: Attest release provenance
-        uses: actions/attest@v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-path: |
             dist/*.whl
@@ -636,7 +636,7 @@ jobs:
 
       - name: Attest graph release provenance
         if: needs.build.outputs.graph_assets_available == 'true'
-        uses: actions/attest@v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-path: |
             graph-release-assets/wiki-graph.tar.gz
@@ -646,7 +646,7 @@ jobs:
             graph-release-assets/entity-overlays.jsonl
 
       - name: Attest release SBOM
-        uses: actions/attest@v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-path: |
             dist/*.whl
@@ -664,13 +664,13 @@ jobs:
       contents: write
     steps:
       - name: Download graph artifact bundle
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: graph-release-assets
           path: graph-release-assets
 
       - name: Download release SBOM
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-sbom
           path: release-sbom
@@ -711,17 +711,17 @@ jobs:
       url: https://pypi.org/project/claude-ctx/
     steps:
       - name: Download dist artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: dist
           path: dist/
 
       - name: Publish to PyPI
         if: github.event_name == 'push'
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
 
       - name: Publish to TestPyPI
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.repository == 'testpypi'
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
         with:
           repository-url: https://test.pypi.org/legacy/
