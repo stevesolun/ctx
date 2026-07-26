@@ -301,6 +301,7 @@ def select_checks(
 
     smoke_profile = profile == "smoke"
     source_required = profile == "full" or (not flags["docs_only"] and not flags["graph_only"])
+    package_required = profile == "full" or flags["package_changed"]
     policy_required = not flags["docs_only"] and not flags["graph_only"]
     if policy_required:
         checks.append(
@@ -450,7 +451,7 @@ def select_checks(
             )
         )
 
-    if not smoke_profile and source_required:
+    if not smoke_profile and package_required:
         out_dir = ".ci-preflight-dist"
         twine_script = (
             "import glob, subprocess, sys; "
@@ -467,6 +468,10 @@ def select_checks(
                         "-c",
                         f"import shutil; shutil.rmtree({out_dir!r}, ignore_errors=True)",
                     ),
+                ),
+                Check(
+                    "verify reproducible distributions",
+                    (python, "scripts/build_reproducible_dist.py", "--verify"),
                 ),
                 Check("build wheel", (python, "-m", "build", "--outdir", out_dir)),
                 Check("twine check", (python, "-c", twine_script)),
