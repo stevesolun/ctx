@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -16,7 +17,10 @@ from ctx.adapters.generic.ctx_core_tools import (
 )
 from ctx.adapters.generic.providers import ToolCall
 from ctx.core.entity_types import entity_page_path
-from ctx.core.graph.graph_store import build_graph_store
+from ctx.core.graph.graph_packs import write_base_pack
+from ctx.core.graph.graph_store import (
+    build_graph_store_from_graph_dir,
+)
 from ctx.core.resolve.recommendations import (
     query_to_tags,
     recommend_by_tags,
@@ -139,7 +143,7 @@ def _build_world(tmp_path: Path) -> tuple[Path, Path, Path, nx.Graph]:
         json.dumps(nx.node_link_data(graph, edges="edges")),
         encoding="utf-8",
     )
-    build_graph_store(index_path, graph)
+    build_graph_store_from_graph_dir(graph_dir, index_path)
 
     for slug in (
         "python-testing",
@@ -230,6 +234,61 @@ def test_indexed_ranker_matches_short_direct_signals(tmp_path: Path) -> None:
 
     assert indexed is not None
     assert indexed[0] == expected
+
+
+def test_indexed_ranker_matches_external_only_token_score(tmp_path: Path) -> None:
+    _, _, index_path, graph = _build_world(tmp_path)
+    tags = query_to_tags("market")
+
+    expected = recommend_by_tags(
+        graph,
+        tags,
+        top_n=10,
+        query="market",
+        entity_types=("external-skill",),
+    )
+    indexed = recommend_by_tags_indexed(
+        index_path,
+        tags,
+        top_n=10,
+        query="market",
+        entity_types=("external-skill",),
+    )
+
+    assert indexed is not None
+    assert indexed[0] == expected
+
+
+def test_signal_limit_keeps_large_direct_queries_indexed(tmp_path: Path) -> None:
+    _, _, index_path, graph = _build_world(tmp_path)
+    tags = ["python", *(f"signal-{index}" for index in range(1_100))]
+
+    expected = recommend_by_tags(graph, tags, top_n=10, query="python")
+    indexed = recommend_by_tags_indexed(index_path, tags, top_n=10, query="python")
+
+    assert len(query_to_tags(" ".join(tags))) == 64
+    assert indexed is not None
+    assert indexed[0] == expected
+
+
+def test_toolbox_rejects_oversized_query_without_loading_graph(tmp_path: Path) -> None:
+    wiki, graph_path, _, _ = _build_world(tmp_path)
+    toolbox = CtxCoreToolbox(wiki_dir=wiki, graph_path=graph_path)
+    query = " ".join(f"signal-{index}" for index in range(1_100))
+
+    payload = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="oversized",
+                name="ctx__recommend_bundle",
+                arguments={"query": query},
+            )
+        )
+    )
+
+    assert payload["error"] == "query is too long; maximum length is 4096 characters"
+    assert payload["results"] == []
+    assert toolbox._graph is None
 
 
 def test_indexed_policy_does_not_guess_ambiguous_bare_active_context(
@@ -343,8 +402,10 @@ def test_semantic_and_stale_index_requests_fall_back_to_networkx(
     assert semantic["results"]
     assert calls == 1
 
-    newer = index_path.stat().st_mtime_ns + 1_000_000
-    os.utime(graph_path, ns=(newer, newer))
+    graph_path.write_text(
+        graph_path.read_text(encoding="utf-8") + " ",
+        encoding="utf-8",
+    )
     regular = json.loads(
         toolbox.dispatch(
             ToolCall(
@@ -358,7 +419,7 @@ def test_semantic_and_stale_index_requests_fall_back_to_networkx(
     assert calls == 2
 
 
-def test_index_freshness_checks_only_bounded_pack_artifacts(
+def test_index_freshness_uses_pack_manifest_fingerprint_without_recursive_scan(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -367,13 +428,19 @@ def test_index_freshness_checks_only_bounded_pack_artifacts(
     nested = pack / "unrelated" / "deep"
     nested.mkdir(parents=True)
     graph_path = graph_dir / "graph.json"
-    manifest = pack / "graph-pack-manifest.json"
-    payload = pack / "graph.json"
     index_path = graph_dir / "graph-store.sqlite3"
-    manifest.write_text("{}\n", encoding="utf-8")
-    payload.write_text("{}\n", encoding="utf-8")
+    graph = nx.Graph()
+    graph.add_node("skill:base", label="base", type="skill", tags=["base"])
+    write_base_pack(
+        pack_dir=pack,
+        pack_id="base",
+        base_export_id="export-1",
+        config_hash="config-sha",
+        model_id="bge-small-en-v1.5",
+        graph=graph,
+    )
+    build_graph_store_from_graph_dir(graph_dir, index_path)
     (nested / "large-unrelated.bin").write_bytes(b"x")
-    index_path.write_bytes(b"sqlite")
 
     def fail_recursive_scan(self: Path, pattern: str) -> Any:
         raise AssertionError(f"unexpected recursive scan of {self} with {pattern}")
@@ -381,15 +448,110 @@ def test_index_freshness_checks_only_bounded_pack_artifacts(
     monkeypatch.setattr(Path, "rglob", fail_recursive_scan)
 
     assert _recommendation_index_is_fresh(index_path, graph_path) is True
-    newer = index_path.stat().st_mtime_ns + 1_000_000
-    os.utime(payload, ns=(newer, newer))
+    manifest = pack / "graph-pack-manifest.json"
+    original_stat = manifest.stat()
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["config_hash"] = "changed-sha"
+    manifest.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+    os.utime(
+        manifest,
+        ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+    )
     assert _recommendation_index_is_fresh(index_path, graph_path) is False
 
 
+def test_index_freshness_rejects_graph_tamper_with_preserved_mtime(
+    tmp_path: Path,
+) -> None:
+    _, graph_path, index_path, _ = _build_world(tmp_path)
+    original_stat = graph_path.stat()
+    payload = json.loads(graph_path.read_text(encoding="utf-8"))
+    payload["tampered"] = True
+    graph_path.write_text(json.dumps(payload), encoding="utf-8")
+    os.utime(
+        graph_path,
+        ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+    )
+
+    assert _recommendation_index_is_fresh(index_path, graph_path) is False
+
+
+def test_index_freshness_rejects_overlay_tamper_with_preserved_mtime(
+    tmp_path: Path,
+) -> None:
+    _, graph_path, index_path, _ = _build_world(tmp_path)
+    overlay_path = graph_path.with_name("entity-overlays.jsonl")
+    overlay_path.write_text(
+        json.dumps({"overlay_id": "overlay-aa", "nodes": [], "edges": []}) + "\n",
+        encoding="utf-8",
+    )
+    build_graph_store_from_graph_dir(graph_path.parent, index_path)
+    original_stat = overlay_path.stat()
+    overlay_path.write_text(
+        json.dumps({"overlay_id": "overlay-bb", "nodes": [], "edges": []}) + "\n",
+        encoding="utf-8",
+    )
+    os.utime(
+        overlay_path,
+        ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+    )
+
+    assert _recommendation_index_is_fresh(index_path, graph_path) is False
+
+
+def test_indexed_reader_observes_committed_wal_changes(tmp_path: Path) -> None:
+    _, _, index_path, _ = _build_world(tmp_path)
+    writer = sqlite3.connect(index_path)
+    try:
+        writer.execute("PRAGMA journal_mode=WAL")
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute(
+            """
+            UPDATE nodes
+            SET label = ?,
+                tags_json = ?,
+                attrs_json = ?,
+                search_text = ?
+            WHERE id = ?
+            """,
+            (
+                "wal-visible",
+                json.dumps(["wal-visible"]),
+                json.dumps(
+                    {
+                        "label": "wal-visible",
+                        "type": "skill",
+                        "tags": ["wal-visible"],
+                    }
+                ),
+                "wal-visible skill",
+                "skill:go-helper",
+            ),
+        )
+        writer.commit()
+        assert Path(f"{index_path}-wal").is_file()
+
+        indexed = recommend_by_tags_indexed(
+            index_path,
+            ["wal-visible"],
+            top_n=5,
+            query="wal-visible",
+            entity_types=("skill",),
+        )
+    finally:
+        writer.close()
+
+    assert indexed is not None
+    assert [row["name"] for row in indexed[0]] == ["wal-visible"]
+
+
 def test_clean_subprocess_uses_index_without_reading_large_graph(tmp_path: Path) -> None:
-    wiki, graph_path, index_path, graph = _build_world(tmp_path)
-    graph_path.write_text("not-json\n" + ("x" * 4_000_000), encoding="utf-8")
-    build_graph_store(index_path, graph)
+    wiki, graph_path, index_path, _ = _build_world(tmp_path)
+    graph_path.write_text(
+        graph_path.read_text(encoding="utf-8") + (" " * 4_000_000),
+        encoding="utf-8",
+    )
+    build_graph_store_from_graph_dir(graph_path.parent, index_path)
     home = tmp_path / "home"
     home.mkdir()
     code = f"""

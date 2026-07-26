@@ -15,6 +15,7 @@ from typing import Any
 
 
 _INDEXED_RECOMMENDATION_GRAPH_MARKER = object()
+_MAX_RECOMMENDATION_SIGNALS = 64
 _TAG_STOPWORDS: frozenset[str] = frozenset(
     {
         # Tiny stoplist for query-to-tags tokenisation. This is intentionally
@@ -296,7 +297,7 @@ def query_to_tags(query: str) -> list[str]:
             if len(token) < 3 or token in _TAG_STOPWORDS:
                 continue
             seen.setdefault(token, None)
-    return list(seen.keys())
+    return _normalise_signals(list(seen.keys()))
 
 
 def _slug_token_parts(label: str) -> list[str]:
@@ -479,10 +480,9 @@ def resolve_recommendation_aliases_indexed(
 
 
 def _open_recommendation_index(db_path: Path) -> sqlite3.Connection:
-    uri = f"{db_path.resolve().as_uri()}?mode=ro&immutable=1"
-    conn = sqlite3.connect(uri, uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
+    from ctx.core.graph.graph_store import open_graph_store_readonly  # noqa: PLC0415
+
+    return open_graph_store_readonly(db_path)
 
 
 def _recommendation_index_metadata(conn: sqlite3.Connection) -> dict[str, str] | None:
@@ -568,9 +568,9 @@ def _indexed_signal_idf(
             if len(token) >= 3:
                 document_frequency[token] += 1
     return {
-        token: math.log(total_nodes / max(frequency, 1))
+        token: math.log(total_nodes / frequency)
         for token, frequency in document_frequency.items()
-        if len(token) >= 3
+        if len(token) >= 3 and frequency > 0
     }
 
 
@@ -949,6 +949,8 @@ def _normalise_signals(tags: list[str]) -> list[str]:
         signal = str(tag).strip().lower()
         if signal:
             seen.setdefault(signal, None)
+            if len(seen) >= _MAX_RECOMMENDATION_SIGNALS:
+                break
     return list(seen.keys())
 
 

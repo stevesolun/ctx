@@ -11,7 +11,7 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -138,9 +138,35 @@ def graph_store_stats(db_path: Path) -> dict[str, int]:
 
 def graph_store_metadata(db_path: Path) -> dict[str, str]:
     """Return metadata recorded when the graph store was materialized."""
-    with _connect(db_path) as conn:
+    with closing(open_graph_store_readonly(db_path)) as conn:
         rows = conn.execute("SELECT key, value FROM metadata ORDER BY key").fetchall()
     return {row["key"]: row["value"] for row in rows}
+
+
+def open_graph_store_readonly(db_path: Path) -> sqlite3.Connection:
+    """Open a graph-store snapshot without ignoring committed WAL changes."""
+    uri = f"{db_path.resolve().as_uri()}?mode=ro"
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(uri, uri=True)
+        conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
+    except sqlite3.OperationalError:
+        if conn is not None:
+            conn.close()
+        sidecars = (Path(f"{db_path}-wal"), Path(f"{db_path}-shm"))
+        before = db_path.stat()
+        if any(path.exists() for path in sidecars):
+            raise
+        conn = sqlite3.connect(f"{uri}&immutable=1", uri=True)
+        after = db_path.stat()
+        before_signature = (before.st_ino, before.st_size, before.st_mtime_ns)
+        after_signature = (after.st_ino, after.st_size, after.st_mtime_ns)
+        if before_signature != after_signature or any(path.exists() for path in sidecars):
+            conn.close()
+            raise sqlite3.OperationalError("graph store changed while opening snapshot")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA query_only=ON")
+    return conn
 
 
 def graph_store_is_fresh(db_path: Path, graph_dir: Path) -> bool:

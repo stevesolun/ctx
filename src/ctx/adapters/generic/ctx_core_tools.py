@@ -107,6 +107,7 @@ _logger = logging.getLogger(__name__)
 _NAMESPACE = f"ctx{TOOL_SEPARATOR}"
 _FILE_SIGNATURE_SAMPLE_BYTES = 64 * 1024
 _WIKI_GET_BODY_MAX_BYTES = 8_000
+_RECOMMENDATION_QUERY_MAX_CHARS = 4_096
 _RECOMMENDATION_ENTITY_TYPE_ALIASES = {
     "agent": "agent",
     "harness": "harness",
@@ -432,6 +433,7 @@ class CtxCoreToolbox:
                         "query": {
                             "type": "string",
                             "description": "Free-text description of the task or stack.",
+                            "maxLength": _RECOMMENDATION_QUERY_MAX_CHARS,
                         },
                         "top_k": {
                             "type": "integer",
@@ -915,6 +917,16 @@ class CtxCoreToolbox:
         query = str(args.get("query", "")).strip()
         if not query:
             return json.dumps({"error": "query must be non-empty", "results": []})
+        if len(query) > _RECOMMENDATION_QUERY_MAX_CHARS:
+            return json.dumps(
+                {
+                    "error": (
+                        "query is too long; maximum length is "
+                        f"{_RECOMMENDATION_QUERY_MAX_CHARS} characters"
+                    ),
+                    "results": [],
+                }
+            )
         from ctx_config import cfg  # noqa: PLC0415
 
         top_k = _clamp_int(
@@ -1781,42 +1793,9 @@ def _graph_source_available(path: Path) -> bool:
 
 
 def _recommendation_index_is_fresh(index_path: Path, graph_path: Path) -> bool:
-    try:
-        index_mtime = index_path.stat().st_mtime_ns
-    except OSError:
-        return False
+    from ctx.core.graph.graph_store import graph_store_is_fresh  # noqa: PLC0415
 
-    packs_dir = graph_path.parent / "packs"
-    source_paths: list[Path] = []
-    if packs_dir.is_dir():
-        try:
-            for pack_dir in packs_dir.iterdir():
-                if not pack_dir.is_dir():
-                    continue
-                source_paths.extend(
-                    path
-                    for name in (
-                        "graph-pack-manifest.json",
-                        "graph.json",
-                        "nodes.jsonl",
-                        "edges.jsonl",
-                        "tombstones.jsonl",
-                    )
-                    if (path := pack_dir / name).is_file()
-                )
-        except OSError:
-            return False
-    if not source_paths and graph_path.is_file():
-        source_paths.append(graph_path)
-    overlay_path = graph_path.with_name("entity-overlays.jsonl")
-    if overlay_path.is_file():
-        source_paths.append(overlay_path)
-    if not source_paths:
-        return False
-    try:
-        return all(path.stat().st_mtime_ns <= index_mtime for path in source_paths)
-    except OSError:
-        return False
+    return graph_store_is_fresh(index_path, graph_path.parent)
 
 
 def _graph_pack_signature(graph_path: Path) -> PackSignature:
