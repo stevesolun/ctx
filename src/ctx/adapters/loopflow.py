@@ -44,6 +44,7 @@ _GROUP_TO_ENTITY = {"skills": "skill", "agents": "agent", "mcps": "mcp-server"}
 _MCP_SCOPE_ENTITY_BY_GROUP = {"skills": "skill", "agents": "agent", "mcps": "mcp-server"}
 _CAPABILITY_KEYS = ("skills", "agents", "mcps", "harnesses")
 _ALL_CAPABILITY_GRANTS = frozenset(_CAPABILITY_KEYS)
+_PROJECT_OWNED_RECOMMENDATION_SOURCE = "ctx-runtime-availability"
 _READ_ONLY_MCP_TOOL_NAMES = frozenset(
     {
         "ctx__recommend_bundle",
@@ -717,6 +718,66 @@ def _recommendation_graph() -> Any:
     return ctx_api.recommendation_graph()
 
 
+def _capability_row(row: dict[str, Any], *, wiki_dir: Path | None) -> dict[str, Any]:
+    enriched = _base_recommendation_row(row, wiki_dir=wiki_dir)
+    row_id = str(row.get("id") or "").strip()
+    if not row_id:
+        entity_type = str(enriched.get("type") or "").strip()
+        name = str(enriched.get("name") or "").strip()
+        if entity_type and name:
+            row_id = f"{entity_type}:{name}"
+    if row_id:
+        enriched["id"] = _selection_key(row_id)
+    return enriched
+
+
+def _project_owned_fallback_rows(
+    graph: Any,
+    *,
+    query: str,
+    entity_types: tuple[str, ...],
+    wiki_dir: Path | None,
+) -> list[dict[str, Any]]:
+    try:
+        node_ids = [
+            node_id
+            for node_id, data in graph.nodes(data=True)
+            if str(data.get("source") or "").strip() == _PROJECT_OWNED_RECOMMENDATION_SOURCE
+            and str(data.get("type") or "") in entity_types
+        ]
+        if not node_ids:
+            return []
+        fallback_graph = graph.subgraph(node_ids).copy()
+    except (AttributeError, TypeError):
+        return []
+
+    source_counts = dict(fallback_graph.graph.get("source_catalog_nodes") or {})
+    source_counts["skills.sh"] = 1
+    fallback_graph.graph["source_catalog_nodes"] = source_counts
+    context = _recommendation_context_from_args(query, {})
+    local_loadable_skills_only = _is_local_no_key_query(query)
+    rows: list[dict[str, Any]] = []
+    for raw in recommend_by_tags(
+        fallback_graph,
+        query_to_tags(query),
+        top_n=len(node_ids),
+        query=query,
+        entity_types=entity_types,
+        min_normalized_score=0.0,
+    ):
+        row = _capability_row(raw, wiki_dir=wiki_dir)
+        if (
+            row.get("type") == "skill"
+            and local_loadable_skills_only
+            and not _is_loadable_skill_row(row)
+        ):
+            continue
+        if _recommendation_context_skip_reason(row, context) is not None:
+            continue
+        rows.append(row)
+    return rows
+
+
 def _recommend_capability_rows(
     query: str,
     *,
@@ -745,7 +806,21 @@ def _recommend_capability_rows(
         min_normalized_score=cfg.recommendation_min_normalized_score,
     )
     wiki_dir = ctx_api.default_wiki_dir()
-    return [_base_recommendation_row(row, wiki_dir=wiki_dir) for row in raw_rows]
+    rows = [_capability_row(row, wiki_dir=wiki_dir) for row in raw_rows]
+    recommendation_context = _recommendation_context_from_args(query, {})
+    if _is_local_no_key_query(query) or any(
+        bool(recommendation_context.get(key))
+        for key in ("local_code_task", "no_api_keys", "language")
+    ):
+        rows.extend(
+            _project_owned_fallback_rows(
+                graph,
+                query=query,
+                entity_types=tuple(entity_types),
+                wiki_dir=wiki_dir,
+            )
+        )
+    return rows
 
 
 def recommend_for_loop(
@@ -800,8 +875,8 @@ def recommend_for_loop(
         done_when=done_when_checks,
         last_failure=last_failure,
         loop_kind=loop_kind,
-        model=model,
-        model_provider=model_provider,
+        model=None,
+        model_provider=None,
     )
 
     capability_bundle: dict[str, list[dict[str, Any]]] = {

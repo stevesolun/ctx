@@ -656,6 +656,140 @@ def test_loopflow_language_context_overfetches_primary_candidates(monkeypatch) -
     ]
 
 
+def test_project_owned_fallback_survives_context_filtering_and_owned_llm(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    wiki = tmp_path / "wiki"
+    converted = wiki / "converted" / "ctx-python-testing"
+    converted.mkdir(parents=True)
+    (converted / "SKILL.md").write_text("# Python testing\n", encoding="utf-8")
+
+    graph = nx.Graph()
+    for index in range(60):
+        graph.add_node(
+            f"skill:remote-{index}",
+            label=f"remote-{index}",
+            type="skill",
+            tags=["python", "api"],
+            source_catalog="skills.sh",
+            status="remote-cataloged",
+        )
+    graph.add_node(
+        "skill:ctx-python-testing",
+        label="ctx-python-testing",
+        type="skill",
+        tags=["python", "testing"],
+        source="ctx-runtime-availability",
+        status="local-wiki",
+    )
+
+    ranked_queries: list[str] = []
+
+    def fake_recommend_by_tags(
+        candidate_graph: Any,
+        tags: list[str],
+        *,
+        top_n: int,
+        query: str | None,
+        entity_types: tuple[str, ...] | set[str] | None,
+        min_normalized_score: float,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        del tags, entity_types, min_normalized_score, kwargs
+        assert query is not None
+        ranked_queries.append(query)
+        if candidate_graph.number_of_nodes() == 1:
+            return [
+                {
+                    "name": "ctx-python-testing",
+                    "type": "skill",
+                    "score": 80,
+                    "source": "ctx-runtime-availability",
+                    "status": "local-wiki",
+                }
+            ]
+        return [
+            {
+                "name": f"remote-{index}",
+                "type": "skill",
+                "score": 100 - index,
+                "source_catalog": "skill-index",
+                "status": "available",
+                "install_command": f"ctx-skill-install remote-{index}",
+            }
+            for index in range(min(top_n, 50))
+        ]
+
+    monkeypatch.setattr(loopflow, "_recommendation_graph", lambda: graph)
+    monkeypatch.setattr(loopflow.ctx_api, "default_wiki_dir", lambda: wiki)
+    monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
+
+    plain = loopflow.recommend_for_loop(
+        goal="Implement and test a local Python API feature with no API keys",
+        permissions={"skills"},
+        top_k=1,
+    )
+    owned = loopflow.recommend_for_loop(
+        goal="Implement and test a local Python API feature with no API keys",
+        permissions={"skills"},
+        own_llm=True,
+        model_provider="openai",
+        model="gpt-5.5",
+        top_k=1,
+    )
+
+    expected = [
+        {
+            "id": "skill:ctx-python-testing",
+            "name": "ctx-python-testing",
+            "type": "skill",
+            "score": 80,
+            "source": "ctx-runtime-availability",
+            "status": "local-wiki",
+            "installable": True,
+            "load_status": "local-wiki",
+            "source_path": "converted/ctx-python-testing/SKILL.md",
+        }
+    ]
+    assert plain["capabilities"]["skills"] == expected
+    assert owned["capabilities"]["skills"] == expected
+    assert all("openai" not in query and "gpt-5.5" not in query for query in ranked_queries)
+    assert "model: openai gpt-5.5" in owned["context"]["query"]
+
+
+def test_real_capability_rows_receive_stable_ids(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    graph = nx.Graph()
+    graph.add_node("skill:one", label="one", type="skill", tags=["local"])
+    monkeypatch.setattr(loopflow, "_recommendation_graph", lambda: graph)
+    monkeypatch.setattr(loopflow.ctx_api, "default_wiki_dir", lambda: tmp_path)
+    monkeypatch.setattr(loopflow, "query_to_tags", lambda query: ["local"])
+    monkeypatch.setattr(
+        loopflow,
+        "recommend_by_tags",
+        lambda *args, **kwargs: [
+            {"name": "testing", "type": "skill", "score": 3},
+            {"name": "reviewer", "type": "agent", "score": 2},
+            {"name": "filesystem", "type": "mcp-server", "score": 1},
+        ],
+    )
+
+    rows = loopflow._recommend_capability_rows(
+        "local recommendations",
+        permissions={"skills", "agents", "mcps"},
+        top_k=1,
+    )
+
+    assert [row["id"] for row in rows] == [
+        "skill:testing",
+        "agent:reviewer",
+        "mcp-server:filesystem",
+    ]
+
+
 def test_loopflow_local_no_key_loop_filters_related_recommendations(monkeypatch) -> None:
     monkeypatch.setattr(loopflow, "_recommend_capability_rows", lambda *args, **kwargs: [])
 
@@ -809,6 +943,7 @@ def test_loopflow_local_filter_uses_enriched_wiki_availability(
 
     assert payload["capabilities"]["skills"] == [
         {
+            "id": "skill:local-helper",
             "name": "local-helper",
             "type": "skill",
             "score": 80,
@@ -999,7 +1134,10 @@ def test_done_when_signals_feed_recommendation_queries(monkeypatch) -> None:
         'done when: "pytest src/tests/test_loopflow_adapter.py -q" passes, pnpm lint passes'
         in payload["context"]["query"]
     )
-    assert capability_queries == [payload["context"]["query"]]
+    assert capability_queries == [
+        "fix checkout e2e loopflow done when: "
+        '"pytest src/tests/test_loopflow_adapter.py -q" passes, pnpm lint passes'
+    ]
     assert (
         'done when: "pytest src/tests/test_loopflow_adapter.py -q" passes, pnpm lint passes'
         in harness_queries[0]
