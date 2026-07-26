@@ -4,6 +4,7 @@ import ast
 import csv
 import re
 import shlex
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -24,6 +25,8 @@ TRACKER = repo_root / "docs" / "qa" / "feature-user-story-status.csv"
 DASHBOARD_TRACKER = repo_root / "docs" / "qa" / "dashboard-user-story-status.csv"
 TOOL_SELECTION_TRACKER = repo_root / "qa" / "tool-selection-token-history" / "tracker.csv"
 CANONICAL_TRACKER = repo_root / "qa" / "feature_status.csv"
+BUG_SMOKE_TRACKER = repo_root / "qa" / "bug_smoke_status.csv"
+BENCHMARK_TRACKER = repo_root / "qa" / "ctx_benchmark_status.csv"
 SOURCE_ROOT = repo_root / "src"
 MKDOCS = repo_root / "mkdocs.yml"
 README = repo_root / "README.md"
@@ -44,8 +47,52 @@ CANONICAL_STATUSES = ACTIONABLE_STATUSES | {
     "Blocked/Human Decision",
     "Deprecated",
 }
-CANONICAL_STATUS_OVERRIDES: dict[str, dict[str, str]] = {}
+CANONICAL_STATUS_OVERRIDES: dict[str, dict[str, str]] = {
+    "CLI-032": {
+        "source_status": "Tested Pass",
+        "canonical_status": "Retested Pass",
+        "owner_lane": "Security/Supply Chain Lane",
+        "review_note": "bounded registry contract",
+        "validation_status": "commit 137135f7",
+    },
+}
 ALLOWED_UNPARENTED_DASHBOARD_API_DUPLICATE_ROUTES: frozenset[str] = frozenset()
+RETIRED_STALE_TRACKER_PHRASES = (
+    "pending no-mistakes",
+    "uncommitted in-memory lease patch",
+    "lacks a production-ctx-run engine",
+    "production engine is not implemented",
+    "needs implementation commit",
+    "requires a real ctx-run engine",
+)
+PROJECTION_PARENTS = {
+    "DASH-PAGE-001": "DASH-001",
+    "DASH-PAGE-002": "DASH-002",
+    "DASH-PAGE-003": "DASH-003",
+    "DASH-PAGE-004": "DASH-004",
+    "DASH-PAGE-005": "DASH-005",
+    "DASH-PAGE-006": "DASH-007",
+    "DASH-PAGE-007": "DASH-008",
+    "DASH-PAGE-008": "DASH-009",
+    "DASH-PAGE-009": "DASH-010",
+    "DASH-PAGE-010": "DASH-011",
+    "DASH-PAGE-011": "DASH-012",
+    "DASH-PAGE-012": "DASH-013",
+    "DASH-PAGE-013": "DASH-014",
+    "DASH-PAGE-014": "DASH-015",
+    "DASH-PAGE-015": "DASH-016",
+    "DASH-PAGE-016": "DASH-017",
+    "DASH-PAGE-017": "DASH-017",
+    "DASH-PAGE-018": "DASH-005",
+    "DASH-PAGE-019": "DASH-005",
+    "DASH-PAGE-020": "DASH-018",
+    "DASH-PAGE-021": "DASH-019",
+    "DASH-PAGE-022": "DASH-006",
+    "GRAPH-004": "CLI-036",
+    "GRAPH-005": "CLI-034",
+    "HARNESS-002": "CLI-026",
+    "SEC-001": "DIST-004",
+}
 
 
 def _tracker_rows() -> list[dict[str, str]]:
@@ -66,6 +113,28 @@ def _tool_selection_tracker_rows() -> list[dict[str, str]]:
 def _canonical_tracker_rows() -> list[dict[str, str]]:
     with CANONICAL_TRACKER.open(newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
+
+
+def _supporting_tracker_rows(path: Path) -> list[dict[str, str]]:
+    with path.open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def _canonical_root(feature_id: str, rows_by_id: dict[str, dict[str, str]]) -> str:
+    seen: set[str] = set()
+    current = feature_id
+    while True:
+        assert current not in seen, f"canonical parent cycle includes {current}"
+        seen.add(current)
+        parent = rows_by_id[current]["parent_feature_id"]
+        if not parent:
+            return current
+        assert parent in rows_by_id, f"{current} references missing parent {parent}"
+        current = parent
+
+
+def _supporting_ids(value: str) -> set[str]:
+    return set(re.findall(r"\b(?:AUDIT|BENCH)-\d{3}\b", value))
 
 
 def _is_substantive_python_module(path: Path) -> bool:
@@ -207,6 +276,15 @@ def test_canonical_feature_status_tracker_merges_supporting_ledgers() -> None:
 
     assert rows
     canonical_ids = {row["feature_id"] for row in rows}
+    tracked_paths = set(
+        subprocess.run(
+            ["git", "ls-files"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+    )
     assert expected_ids <= canonical_ids
     assert len(rows) == len(canonical_ids)
     for row in rows:
@@ -221,9 +299,19 @@ def test_canonical_feature_status_tracker_merges_supporting_ledgers() -> None:
         for evidence_path in evidence_paths:
             if any(marker in evidence_path for marker in "*?{}"):
                 continue
-            assert (repo_root / evidence_path).exists(), (
+            path = repo_root / evidence_path
+            assert path.exists(), (
                 f"{row['feature_id']} references missing evidence path {evidence_path}"
             )
+            if row["status"] in PASS_STATUSES:
+                tracked = evidence_path in tracked_paths
+                if path.is_dir():
+                    prefix = evidence_path.rstrip("/") + "/"
+                    tracked = any(candidate.startswith(prefix) for candidate in tracked_paths)
+                assert tracked, (
+                    f"{row['feature_id']} completed row references untracked evidence "
+                    f"{evidence_path}"
+                )
         assert row["source_tracker"] in {
             "docs/qa/feature-user-story-status.csv",
             "docs/qa/dashboard-user-story-status.csv",
@@ -259,6 +347,84 @@ def test_canonical_feature_status_tracker_merges_supporting_ledgers() -> None:
             assert "out of scope" in row["validation_status"].lower()
 
     assert set(CANONICAL_STATUS_OVERRIDES) <= canonical_ids
+
+
+def test_canonical_tracker_has_valid_parent_graph() -> None:
+    rows = _canonical_tracker_rows()
+    rows_by_id = {row["feature_id"]: row for row in rows}
+
+    assert rows_by_id["LANE-D-039"]["parent_feature_id"] == ""
+    for feature_id in rows_by_id:
+        _canonical_root(feature_id, rows_by_id)
+
+
+def test_canonical_tracker_resolves_projection_collisions() -> None:
+    rows = _canonical_tracker_rows()
+    rows_by_id = {row["feature_id"]: row for row in rows}
+    rows_by_entrypoint: dict[str, list[str]] = {}
+    for row in rows:
+        rows_by_entrypoint.setdefault(row["entrypoint_or_route"], []).append(row["feature_id"])
+
+    for feature_id, parent_id in PROJECTION_PARENTS.items():
+        assert rows_by_id[feature_id]["parent_feature_id"] == parent_id
+
+    for entrypoint, feature_ids in rows_by_entrypoint.items():
+        if len(feature_ids) < 2:
+            continue
+        roots = {_canonical_root(feature_id, rows_by_id) for feature_id in feature_ids}
+        assert len(roots) == 1, (
+            f"{entrypoint} duplicate tracker rows resolve to multiple canonical roots: "
+            f"{sorted(roots)}"
+        )
+
+
+def test_canonical_tracker_links_nonterminal_supporting_ledgers() -> None:
+    canonical_rows = _canonical_tracker_rows()
+    bug_rows = _supporting_tracker_rows(BUG_SMOKE_TRACKER)
+    benchmark_rows = _supporting_tracker_rows(BENCHMARK_TRACKER)
+    references = {
+        reference for row in canonical_rows for reference in _supporting_ids(row["bug_id"])
+    }
+    known_bug_ids = {row["finding_id"] for row in bug_rows}
+    known_benchmark_ids = {row["id"] for row in benchmark_rows}
+    nonterminal_bug_ids = {
+        row["finding_id"]
+        for row in bug_rows
+        if row["status"] not in {"Retested Pass", "False Positive"}
+    }
+    nonterminal_benchmark_ids = {row["id"] for row in benchmark_rows if row["status"] != "Resolved"}
+    canonical_by_reference: dict[str, list[dict[str, str]]] = {}
+    for row in canonical_rows:
+        for reference in _supporting_ids(row["bug_id"]):
+            canonical_by_reference.setdefault(reference, []).append(row)
+
+    assert references <= known_bug_ids | known_benchmark_ids
+    assert nonterminal_bug_ids <= references
+    assert nonterminal_benchmark_ids <= references
+    for reference in nonterminal_bug_ids | nonterminal_benchmark_ids:
+        linked_rows = canonical_by_reference[reference]
+        assert any(row["status"] not in PASS_STATUSES | {"Deprecated"} for row in linked_rows), (
+            f"{reference} remains nonterminal but all linked canonical features are closed"
+        )
+
+
+def test_canonical_retested_pass_rows_have_retest_evidence() -> None:
+    for row in _canonical_tracker_rows():
+        if row["status"] == "Retested Pass":
+            assert row["retest_evidence"].startswith("PASS:"), (
+                f"{row['feature_id']} Retested Pass lacks PASS: retest evidence"
+            )
+
+
+def test_canonical_trackers_have_no_retired_stale_completion_prose() -> None:
+    for path in (CANONICAL_TRACKER, BUG_SMOKE_TRACKER, BENCHMARK_TRACKER):
+        tracker = path.read_text(encoding="utf-8").lower()
+        stale = [
+            phrase
+            for phrase in RETIRED_STALE_TRACKER_PHRASES
+            if re.search(rf"\b{re.escape(phrase)}\b", tracker)
+        ]
+        assert stale == []
 
 
 def test_canonical_tracker_attributes_every_substantive_python_module() -> None:
@@ -395,11 +561,12 @@ def test_feature_user_story_tracker_covers_distribution_workflows() -> None:
         for path in workflow_dir.iterdir()
         if path.is_file() and path.suffix in {".yml", ".yaml"}
     )
-    tracker = _tracker_text()
+    tracker = "\n".join(_row_text(row) for row in _canonical_tracker_rows())
     hf_workflow = (workflow_dir / "huggingface-sync.yml").read_text(encoding="utf-8")
 
     assert workflows
     assert [workflow for workflow in workflows if workflow not in tracker] == []
+    assert ".github/dependabot.yml" in tracker
     docs_tracker_tests = _workflow_pytest_paths(
         workflow_dir / "docs.yml",
         "Validate public docs tracker",
@@ -417,7 +584,7 @@ def test_feature_user_story_tracker_covers_distribution_workflows() -> None:
 
 def test_feature_user_story_tracker_covers_maintainer_scripts() -> None:
     scripts = sorted((repo_root / "scripts").glob("*.py"))
-    tracker = _tracker_text()
+    tracker = "\n".join(_row_text(row) for row in _canonical_tracker_rows())
     script_paths = [script.relative_to(repo_root).as_posix() for script in scripts]
     hook_paths = _relative_file_paths(repo_root / "hooks", "*.py")
 
@@ -434,7 +601,7 @@ def test_feature_user_story_tracker_covers_public_docs_assets() -> None:
         repo_root / "docs" / "toolbox" / "templates",
         "*.json",
     )
-    tracker_rows = _tracker_rows()
+    tracker_rows = _canonical_tracker_rows()
     tracker = "\n".join(_row_text(row) for row in tracker_rows)
     public_asset_paths = asset_paths + service_paths + toolbox_template_paths
     nav_doc_paths = _mkdocs_nav_markdown_paths()
