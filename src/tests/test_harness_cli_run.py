@@ -450,8 +450,14 @@ class TestRunCommand:
                 events.append(("list_tools", self.active))
                 return []
 
-            def activate(self, server_names: tuple[str, ...]) -> list[ToolDefinition]:
+            def activate(
+                self,
+                server_names: tuple[str, ...],
+                *,
+                capability_epoch: int | None = None,
+            ) -> list[ToolDefinition]:
                 assert self.active == ()
+                assert capability_epoch == 1
                 self.active = tuple(server_names)
                 events.append(("activate", self.active))
                 return [
@@ -627,7 +633,13 @@ class TestRunCommand:
 
     def test_adaptive_mcp_policy_denial_is_not_recorded_as_use(self, tmp_path: Path) -> None:
         class FakeRouter:
-            def activate(self, server_names: tuple[str, ...]) -> list[ToolDefinition]:
+            def activate(
+                self,
+                server_names: tuple[str, ...],
+                *,
+                capability_epoch: int | None = None,
+            ) -> list[ToolDefinition]:
+                assert capability_epoch == 1
                 return []
 
             def deactivate(self, server_names: tuple[str, ...]) -> None:
@@ -2970,8 +2982,14 @@ class TestResumeCommand:
                 calls.append("list_tools")
                 return []
 
-            def activate(self, server_names: tuple[str, ...]) -> list[ToolDefinition]:
+            def activate(
+                self,
+                server_names: tuple[str, ...],
+                *,
+                capability_epoch: int | None = None,
+            ) -> list[ToolDefinition]:
                 assert server_names == ("danger",)
+                assert capability_epoch == 1
                 self.active = server_names
                 calls.append("activate:danger")
                 return [

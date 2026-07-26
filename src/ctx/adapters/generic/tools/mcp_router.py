@@ -140,18 +140,21 @@ def _record_mcp_client_tool_call(
     server: str,
     tool: str,
     session_id: str | None,
+    capability_epoch: int | None,
     outcome: str,
     duration_ms: float,
     error_kind: str | None = None,
 ) -> None:
-    payload: dict[str, Any] = {
-        "rpc.system": "jsonrpc",
-        "rpc.method": "tools/call",
-        "mcp.server.name": server,
-        "mcp.tool.name": tool,
-        "otel.status_code": "ERROR" if outcome == "error" else "OK",
-    }
     try:
+        payload: dict[str, Any] = {
+            "rpc.system": "jsonrpc",
+            "rpc.method": "tools/call",
+            "ctx.mcp.server.hash": hash_identifier(server),
+            "ctx.mcp.tool.hash": hash_identifier(f"{server}{TOOL_SEPARATOR}{tool}"),
+            "otel.status_code": "ERROR" if outcome == "error" else "OK",
+        }
+        if capability_epoch is not None:
+            payload["ctx.mcp.capability.epoch"] = capability_epoch
         record_event(
             "ctx.mcp.external_tool_call",
             source="ctx-mcp-router",
@@ -176,9 +179,75 @@ def _record_mcp_transition(
     tool_count: int = 0,
     outcome: str = "ok",
     error_kind: str | None = None,
+    capability_epoch: int | None = None,
+    process_started_count: int | None = None,
+    process_stop_observations: Iterable[tuple[bool, bool | None, float | None]] | None = None,
 ) -> None:
     names = tuple(dict.fromkeys(server_names))
+    stop_observations = (
+        None if process_stop_observations is None else tuple(process_stop_observations)
+    )
     try:
+        payload: dict[str, Any] = {
+            "ctx.mcp.phase": phase,
+            "ctx.mcp.server.count": len(names),
+            "ctx.mcp.server.hashes": [hash_identifier(name) for name in names],
+            "ctx.mcp.tool.count": tool_count,
+            "otel.status_code": "ERROR" if outcome == "error" else "OK",
+        }
+        if capability_epoch is not None:
+            payload["ctx.mcp.capability.epoch"] = capability_epoch
+        if process_started_count is not None:
+            payload["ctx.mcp.process.started.count"] = process_started_count
+        if stop_observations is not None:
+            process_observations = [
+                observation for observation in stop_observations if observation[1] is not None
+            ]
+            reaped_count = sum(
+                1
+                for _cleanup_complete, process_exited, _observed_age in process_observations
+                if process_exited
+            )
+            cleanup_complete_count = sum(
+                1
+                for cleanup_complete, _process_exited, _observed_age in process_observations
+                if cleanup_complete
+            )
+            completed_lifetimes = [
+                max(0.0, observed_age)
+                for _cleanup_complete, process_exited, observed_age in process_observations
+                if process_exited and observed_age is not None
+            ]
+            unreaped_ages = [
+                max(0.0, observed_age)
+                for _cleanup_complete, process_exited, observed_age in process_observations
+                if not process_exited and observed_age is not None
+            ]
+            payload.update(
+                {
+                    "ctx.mcp.process.reap.attempted.count": len(process_observations),
+                    "ctx.mcp.process.reap.succeeded.count": reaped_count,
+                    "ctx.mcp.process.reap.failed.count": (len(process_observations) - reaped_count),
+                    "ctx.mcp.process.reap.outcome": (
+                        "not_applicable"
+                        if not process_observations
+                        else "complete"
+                        if reaped_count == len(process_observations)
+                        else "incomplete"
+                    ),
+                    "ctx.mcp.cleanup.complete.count": cleanup_complete_count,
+                    "ctx.mcp.cleanup.incomplete.count": (
+                        len(process_observations) - cleanup_complete_count
+                    ),
+                    "ctx.mcp.process.lifetime.observed.count": len(completed_lifetimes),
+                    "ctx.mcp.process.unreaped_age.observed.count": len(unreaped_ages),
+                }
+            )
+            if completed_lifetimes:
+                payload["ctx.mcp.process.lifetime_ms.max"] = max(completed_lifetimes)
+                payload["ctx.mcp.process.lifetime_ms.total"] = sum(completed_lifetimes)
+            if unreaped_ages:
+                payload["ctx.mcp.process.unreaped_age_ms.max"] = max(unreaped_ages)
         record_event(
             event_name,
             source="ctx-mcp-router",
@@ -187,13 +256,7 @@ def _record_mcp_transition(
             outcome=outcome,
             duration_ms=duration_ms,
             error_kind=error_kind,
-            payload={
-                "ctx.mcp.phase": phase,
-                "ctx.mcp.server.count": len(names),
-                "ctx.mcp.server.hashes": [hash_identifier(name) for name in names],
-                "ctx.mcp.tool.count": tool_count,
-                "otel.status_code": "ERROR" if outcome == "error" else "OK",
-            },
+            payload=payload,
         )
     except Exception:  # noqa: BLE001 - telemetry must never break MCP lifecycle.
         pass
@@ -455,6 +518,9 @@ class McpClient:
         self._stderr_lines: list[str] = []
         self._stderr_thread: threading.Thread | None = None
         self._stderr_redaction_values: tuple[str, ...] = ()
+        self._process_started_at: float | None = None
+        self._last_process_lifetime_ms: float | None = None
+        self._last_process_exited: bool | None = None
 
     # ── lifecycle ──────────────────────────────────────────────────────────
 
@@ -469,6 +535,9 @@ class McpClient:
 
         command = _resolve_executable(self._config.command, env)
         args = _expand_config_args(self._config, env)
+        self._process_started_at = None
+        self._last_process_lifetime_ms = None
+        self._last_process_exited = None
         try:
             self._proc = subprocess.Popen(
                 [command, *args],
@@ -479,6 +548,8 @@ class McpClient:
                 bufsize=0,  # unbuffered; we flush each write ourselves
                 **_popen_process_group_kwargs(),
             )
+            self._process_started_at = time.perf_counter()
+            self._last_process_exited = False
         except OSError as exc:
             self._stderr_redaction_values = ()
             raise McpServerError(
@@ -547,7 +618,12 @@ class McpClient:
         for thread in (self._stdout_thread, self._stderr_thread):
             if thread and thread.is_alive():
                 thread.join(timeout=0.2)
-        reaped = proc.poll() is not None and all(
+        process_exited = proc.poll() is not None
+        self._last_process_exited = process_exited
+        if process_exited and self._process_started_at is not None:
+            self._last_process_lifetime_ms = _duration_ms(self._process_started_at)
+            self._process_started_at = None
+        reaped = process_exited and all(
             thread is None or not thread.is_alive()
             for thread in (self._stdout_thread, self._stderr_thread)
         )
@@ -557,6 +633,18 @@ class McpClient:
             self._stderr_thread = None
             self._stderr_redaction_values = ()
         return reaped
+
+    @property
+    def process_observed_age_ms(self) -> float | None:
+        """Return the final lifetime if reaped, otherwise the current process age."""
+        if self._process_started_at is not None:
+            return max(0.0, _duration_ms(self._process_started_at))
+        return self._last_process_lifetime_ms
+
+    @property
+    def process_exited(self) -> bool | None:
+        """Return observed process exit state, or ``None`` if no process started."""
+        return self._last_process_exited
 
     def __enter__(self) -> "McpClient":
         self.start()
@@ -597,7 +685,13 @@ class McpClient:
         self._tools_cache = tools
         return list(tools)
 
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+    def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        capability_epoch: int | None = None,
+    ) -> str:
         """Invoke a tool on this server. Returns the concatenated text output.
 
         MCP tool responses return a content array (text + image + resource
@@ -622,6 +716,7 @@ class McpClient:
                         server=self._config.name,
                         tool=name,
                         session_id=self._session_id,
+                        capability_epoch=capability_epoch,
                         outcome="error",
                         duration_ms=_duration_ms(started),
                         error_kind="tool_error",
@@ -637,6 +732,7 @@ class McpClient:
                         server=self._config.name,
                         tool=name,
                         session_id=self._session_id,
+                        capability_epoch=capability_epoch,
                         outcome="error",
                         duration_ms=_duration_ms(started),
                         error_kind=type(exc).__name__,
@@ -646,6 +742,7 @@ class McpClient:
                 server=self._config.name,
                 tool=name,
                 session_id=self._session_id,
+                capability_epoch=capability_epoch,
                 outcome="ok",
                 duration_ms=_duration_ms(started),
             )
@@ -827,6 +924,8 @@ class McpRouter:
         self._session_id = str(session_id or "").strip() or None
         self._clients: dict[str, McpClient] = {}
         self._retiring_clients: list[McpClient] = []
+        self._retiring_context: dict[McpClient, tuple[str, int | None, bool]] = {}
+        self._capability_epochs: dict[str, int | None] = {}
         self._started = False
         self._lazy = bool(lazy)
 
@@ -859,10 +958,21 @@ class McpRouter:
             raise
         self._started = True
 
-    def activate(self, server_names: Iterable[str]) -> list[ToolDefinition]:
+    def activate(
+        self,
+        server_names: Iterable[str],
+        *,
+        capability_epoch: int | None = None,
+    ) -> list[ToolDefinition]:
         """Start only the exact granted servers and return their schemas."""
         if not self._started:
             raise RuntimeError("router not started; call start() first")
+        if capability_epoch is not None and (
+            isinstance(capability_epoch, bool)
+            or not isinstance(capability_epoch, int)
+            or capability_epoch < 0
+        ):
+            raise ValueError("capability_epoch must be a non-negative integer or None")
         names = tuple(dict.fromkeys(server_names))
         started = time.perf_counter()
         _record_mcp_transition(
@@ -870,8 +980,10 @@ class McpRouter:
             phase="requested",
             server_names=names,
             session_id=self._session_id,
+            capability_epoch=capability_epoch,
         )
         spawned: list[str] = []
+        cleanup_observations: list[tuple[bool, bool | None, float | None]] = []
         try:
             if self._lazy:
                 configs: list[McpServerConfig] = []
@@ -889,7 +1001,7 @@ class McpRouter:
                     try:
                         client.start()
                     except Exception:
-                        self._stop_or_retain(client)
+                        cleanup_observations.append(self._stop_or_retain(client))
                         raise
                     self._clients[config.name] = client
                     spawned.append(config.name)
@@ -898,7 +1010,7 @@ class McpRouter:
             for name in spawned:
                 rollback_client = self._clients.pop(name) if name in self._clients else None
                 if rollback_client is not None:
-                    self._stop_or_retain(rollback_client)
+                    cleanup_observations.append(self._stop_or_retain(rollback_client))
             _record_mcp_transition(
                 "ctx.mcp.activation",
                 phase="failed",
@@ -907,8 +1019,17 @@ class McpRouter:
                 duration_ms=_duration_ms(started),
                 outcome="error",
                 error_kind=type(exc).__name__,
+                capability_epoch=capability_epoch,
+                process_started_count=sum(
+                    1
+                    for _cleanup_complete, process_exited, _observed_age in cleanup_observations
+                    if process_exited is not None
+                ),
+                process_stop_observations=cleanup_observations,
             )
             raise
+        for name in names:
+            self._capability_epochs[name] = capability_epoch
         _record_mcp_transition(
             "ctx.mcp.activation",
             phase="applied",
@@ -916,24 +1037,43 @@ class McpRouter:
             session_id=self._session_id,
             duration_ms=_duration_ms(started),
             tool_count=len(tools),
+            capability_epoch=capability_epoch,
+            process_started_count=len(spawned),
         )
         return tools
 
     def deactivate(self, server_names: Iterable[str] | None = None) -> None:
         """Revoke exact server routes, then stop and verify their clients."""
         names = tuple(dict.fromkeys(tuple(self._clients) if server_names is None else server_names))
+        server_epochs = {
+            name: self._capability_epochs[name] for name in names if name in self._capability_epochs
+        }
+        epochs = set(server_epochs.values())
+        capability_epoch = next(iter(epochs)) if len(epochs) == 1 else None
         started = time.perf_counter()
         _record_mcp_transition(
             "ctx.mcp.deactivation",
             phase="requested",
             server_names=names,
             session_id=self._session_id,
+            capability_epoch=capability_epoch,
         )
         reaped = True
+        stop_observations: list[tuple[bool, bool | None, float | None]] = []
         for name in names:
+            self._capability_epochs.pop(name, None)
             client = self._clients.pop(name, None)
             if client is not None:
-                reaped = self._stop_or_retain(client) and reaped
+                observation = self._stop_or_retain(client)
+                stop_observations.append(observation)
+                if not observation[0]:
+                    lifetime_emitted = observation[1] is True and observation[2] is not None
+                    self._retiring_context[client] = (
+                        name,
+                        server_epochs.get(name),
+                        lifetime_emitted,
+                    )
+                reaped = observation[0] and reaped
         if not reaped:
             _record_mcp_transition(
                 "ctx.mcp.deactivation",
@@ -943,6 +1083,8 @@ class McpRouter:
                 duration_ms=_duration_ms(started),
                 outcome="error",
                 error_kind="McpProcessNotReaped",
+                capability_epoch=capability_epoch,
+                process_stop_observations=stop_observations,
             )
             raise McpServerError("one or more MCP servers did not fully stop")
         _record_mcp_transition(
@@ -951,24 +1093,68 @@ class McpRouter:
             server_names=names,
             session_id=self._session_id,
             duration_ms=_duration_ms(started),
+            capability_epoch=capability_epoch,
+            process_stop_observations=stop_observations,
         )
 
     def stop(self) -> None:
         clients = [*self._clients.values(), *self._retiring_clients]
         self._clients.clear()
         self._retiring_clients = []
+        self._capability_epochs.clear()
         for client in clients:
-            self._stop_or_retain(client)
+            recovery_context = self._retiring_context.get(client)
+            retry_started = time.perf_counter()
+            observation = self._stop_or_retain(client)
+            if recovery_context is None:
+                continue
+            server_name, capability_epoch, lifetime_emitted = recovery_context
+            recovered = observation[0]
+            telemetry_observation = (
+                observation[0],
+                observation[1],
+                None if lifetime_emitted else observation[2],
+            )
+            _record_mcp_transition(
+                "ctx.mcp.deactivation",
+                phase="recovered" if recovered else "recovery_failed",
+                server_names=(server_name,),
+                session_id=self._session_id,
+                duration_ms=_duration_ms(retry_started),
+                outcome="ok" if recovered else "error",
+                error_kind=None if recovered else "McpProcessNotReaped",
+                capability_epoch=capability_epoch,
+                process_stop_observations=(telemetry_observation,),
+            )
+            if recovered:
+                self._retiring_context.pop(client, None)
+            elif observation[1] is True and observation[2] is not None:
+                self._retiring_context[client] = (
+                    server_name,
+                    capability_epoch,
+                    True,
+                )
         self._started = False
 
-    def _stop_or_retain(self, client: McpClient) -> bool:
+    def _stop_or_retain(
+        self,
+        client: McpClient,
+    ) -> tuple[bool, bool | None, float | None]:
         try:
             reaped = client.stop()
         except Exception:  # noqa: BLE001 - retain ownership for a later retry.
             reaped = False
         if not reaped and all(item is not client for item in self._retiring_clients):
             self._retiring_clients.append(client)
-        return reaped
+        process_exited_value = getattr(client, "process_exited", None)
+        process_exited = process_exited_value if isinstance(process_exited_value, bool) else None
+        observed_age = getattr(client, "process_observed_age_ms", None)
+        observed_age_ms = (
+            float(observed_age)
+            if isinstance(observed_age, (int, float)) and not isinstance(observed_age, bool)
+            else None
+        )
+        return reaped, process_exited, observed_age_ms
 
     def __enter__(self) -> "McpRouter":
         self.start()
@@ -1030,7 +1216,11 @@ class McpRouter:
             raise ValueError(
                 f"unknown MCP tool {qualified_name!r}; published: {sorted(published_tools)}"
             )
-        return client.call_tool(tool, arguments)
+        return client.call_tool(
+            tool,
+            arguments,
+            capability_epoch=self._capability_epochs.get(server),
+        )
 
     @property
     def server_names(self) -> list[str]:

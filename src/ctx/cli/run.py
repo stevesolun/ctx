@@ -1050,7 +1050,10 @@ class _AdaptiveMcpController:
             )
         if self._mcp_consumed:
             return skill_usage
-        tools = self._router.activate(self._server_names)
+        tools = self._router.activate(
+            self._server_names,
+            capability_epoch=capability_epoch,
+        )
         self._active_servers = self._server_names
         self._mcp_activated_count += len(self._active_servers)
         self._mcp_fetched_tool_count = len(tools)

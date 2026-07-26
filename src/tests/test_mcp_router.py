@@ -196,16 +196,26 @@ class TestClientToolOperations:
             timeout: float | None = None,
         ) -> dict[str, Any]:
             assert method == "tools/call"
-            assert params == {"name": "echo", "arguments": {"text": "private acme query"}}
+            assert params == {
+                "name": "private-tool",
+                "arguments": {"text": "private acme query"},
+            }
             assert timeout is None
             return {"content": [{"type": "text", "text": "ok"}]}
 
         monkeypatch.setattr(mcp_router, "record_event", fake_record_event)
-        client = McpClient(_make_config(), session_id="sess-mcp")
+        client = McpClient(_make_config("private-server"), session_id="sess-mcp")
         monkeypatch.setattr(client, "_request", fake_request)
 
         with telemetry.telemetry_span(trace_id="1" * 32, span_id="2" * 16):
-            assert client.call_tool("echo", {"text": "private acme query"}) == "ok"
+            assert (
+                client.call_tool(
+                    "private-tool",
+                    {"text": "private acme query"},
+                    capability_epoch=23,
+                )
+                == "ok"
+            )
 
         assert len(events) == 1
         event_name, kwargs, span = events[0]
@@ -218,11 +228,15 @@ class TestClientToolOperations:
         assert kwargs["payload"] == {
             "rpc.system": "jsonrpc",
             "rpc.method": "tools/call",
-            "mcp.server.name": "fake",
-            "mcp.tool.name": "echo",
+            "ctx.mcp.server.hash": telemetry.hash_identifier("private-server"),
+            "ctx.mcp.tool.hash": telemetry.hash_identifier("private-server__private-tool"),
+            "ctx.mcp.capability.epoch": 23,
             "otel.status_code": "OK",
         }
-        assert "private acme query" not in json.dumps(kwargs, sort_keys=True)
+        serialized = json.dumps(kwargs, sort_keys=True)
+        assert "private acme query" not in serialized
+        assert "private-server" not in serialized
+        assert "private-tool" not in serialized
         assert span is not None
         assert span.trace_id == "1" * 32
         assert span.parent_span_id == "2" * 16
@@ -610,7 +624,14 @@ class TestRouter:
                     )
                 ]
 
-            def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+            def call_tool(
+                self,
+                name: str,
+                arguments: dict[str, Any],
+                *,
+                capability_epoch: int | None = None,
+            ) -> str:
+                assert capability_epoch is None
                 dispatched.append(name)
                 return "dispatched"
 
@@ -730,7 +751,7 @@ class TestRouter:
             assert router.list_tools() == []
             assert procs == []
 
-            tools = router.activate(["beta"])
+            tools = router.activate(["beta"], capability_epoch=17)
             assert len(procs) == 1
             assert router.server_names == ["beta"]
             assert {tool.name for tool in tools} >= {"beta__echo", "beta__add"}
@@ -760,6 +781,26 @@ class TestRouter:
         assert transitions[1]["payload"]["ctx.mcp.server.hashes"] == [
             telemetry.hash_identifier("beta")
         ]
+        assert all(
+            transition["payload"]["ctx.mcp.capability.epoch"] == 17 for transition in transitions
+        )
+        assert transitions[1]["payload"]["ctx.mcp.process.started.count"] == 1
+        deactivation = transitions[-1]["payload"]
+        assert deactivation["ctx.mcp.process.reap.attempted.count"] == 1
+        assert deactivation["ctx.mcp.process.reap.succeeded.count"] == 1
+        assert deactivation["ctx.mcp.process.reap.failed.count"] == 0
+        assert deactivation["ctx.mcp.process.reap.outcome"] == "complete"
+        assert deactivation["ctx.mcp.process.lifetime.observed.count"] == 1
+        assert deactivation["ctx.mcp.process.lifetime_ms.max"] >= 0
+        assert deactivation["ctx.mcp.process.lifetime_ms.total"] >= 0
+        external_call = next(
+            event for event in events if event["event_name"] == "ctx.mcp.external_tool_call"
+        )
+        assert external_call["payload"]["ctx.mcp.server.hash"] == telemetry.hash_identifier("beta")
+        assert external_call["payload"]["ctx.mcp.tool.hash"] == telemetry.hash_identifier(
+            "beta__echo"
+        )
+        assert external_call["payload"]["ctx.mcp.capability.epoch"] == 17
         assert "beta" not in json.dumps(transitions)
 
     def test_lazy_router_rejects_unknown_grant_before_spawning(
@@ -777,11 +818,63 @@ class TestRouter:
         finally:
             router.stop()
 
+    def test_lazy_router_reaps_failed_activation_with_epoch_telemetry(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        procs = _capture_popen(monkeypatch)
+        events: list[dict[str, Any]] = []
+
+        def capture_event(event_name: str, **kwargs: Any) -> None:
+            events.append({"event_name": event_name, **kwargs})
+
+        monkeypatch.setattr(mcp_router, "record_event", capture_event)
+        router = McpRouter(
+            [
+                _make_config(
+                    "private-failing",
+                    extra_env={"FAKE_MCP_FAIL_INIT": "1"},
+                )
+            ],
+            lazy=True,
+        )
+        router.start()
+        try:
+            with pytest.raises(McpServerError):
+                router.activate(["private-failing"], capability_epoch=29)
+            assert router.server_names == []
+            assert len(procs) == 1
+            _assert_exited(procs[0])
+        finally:
+            router.stop()
+
+        failed = next(
+            event
+            for event in events
+            if event["event_name"] == "ctx.mcp.activation"
+            and event["payload"]["ctx.mcp.phase"] == "failed"
+        )
+        payload = failed["payload"]
+        assert payload["ctx.mcp.capability.epoch"] == 29
+        assert payload["ctx.mcp.process.started.count"] == 1
+        assert payload["ctx.mcp.process.reap.attempted.count"] == 1
+        assert payload["ctx.mcp.process.reap.succeeded.count"] == 1
+        assert payload["ctx.mcp.process.reap.failed.count"] == 0
+        assert payload["ctx.mcp.process.reap.outcome"] == "complete"
+        assert payload["ctx.mcp.cleanup.complete.count"] == 1
+        assert payload["ctx.mcp.cleanup.incomplete.count"] == 0
+        assert payload["ctx.mcp.process.lifetime.observed.count"] == 1
+        assert "private-failing" not in json.dumps(failed)
+
     def test_lazy_router_retains_failed_shutdown_for_final_retry(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         instances: list[Any] = []
+        events: list[dict[str, Any]] = []
+
+        def capture_event(event_name: str, **kwargs: Any) -> None:
+            events.append({"event_name": event_name, **kwargs})
 
         class FlakyClient:
             def __init__(self, config: McpServerConfig, *, session_id: str | None = None) -> None:
@@ -798,18 +891,161 @@ class TestRouter:
                 self.stop_calls += 1
                 return self.stop_calls >= 2
 
+            @property
+            def process_observed_age_ms(self) -> float:
+                return 12.5
+
+            @property
+            def process_exited(self) -> bool:
+                return self.stop_calls >= 2
+
+        monkeypatch.setattr(mcp_router, "record_event", capture_event)
         monkeypatch.setattr(mcp_router, "McpClient", FlakyClient)
         router = McpRouter([_make_config("flaky")], lazy=True)
         router.start()
-        router.activate(["flaky"])
+        router.activate(["flaky"], capability_epoch=31)
 
         with pytest.raises(McpServerError, match="did not fully stop"):
             router.deactivate(["flaky"])
         assert router.server_names == []
         assert instances[0].stop_calls == 1
+        failed = next(
+            event
+            for event in events
+            if event["event_name"] == "ctx.mcp.deactivation"
+            and event["payload"]["ctx.mcp.phase"] == "failed"
+        )
+        assert failed["payload"]["ctx.mcp.capability.epoch"] == 31
+        assert failed["payload"]["ctx.mcp.process.reap.attempted.count"] == 1
+        assert failed["payload"]["ctx.mcp.process.reap.succeeded.count"] == 0
+        assert failed["payload"]["ctx.mcp.process.reap.failed.count"] == 1
+        assert failed["payload"]["ctx.mcp.process.reap.outcome"] == "incomplete"
+        assert failed["payload"]["ctx.mcp.cleanup.complete.count"] == 0
+        assert failed["payload"]["ctx.mcp.cleanup.incomplete.count"] == 1
+        assert failed["payload"]["ctx.mcp.process.lifetime.observed.count"] == 0
+        assert failed["payload"]["ctx.mcp.process.unreaped_age.observed.count"] == 1
+        assert failed["payload"]["ctx.mcp.process.unreaped_age_ms.max"] == 12.5
+        assert "ctx.mcp.process.lifetime_ms.max" not in failed["payload"]
+        assert "ctx.mcp.process.lifetime_ms.total" not in failed["payload"]
+        assert "flaky" not in json.dumps(failed)
 
         router.stop()
         assert instances[0].stop_calls == 2
+        recovered = next(
+            event
+            for event in events
+            if event["event_name"] == "ctx.mcp.deactivation"
+            and event["payload"]["ctx.mcp.phase"] == "recovered"
+        )
+        recovered_payload = recovered["payload"]
+        assert recovered["outcome"] == "ok"
+        assert recovered["error_kind"] is None
+        assert recovered_payload["ctx.mcp.capability.epoch"] == 31
+        assert recovered_payload["ctx.mcp.server.hashes"] == [telemetry.hash_identifier("flaky")]
+        assert recovered_payload["ctx.mcp.process.reap.attempted.count"] == 1
+        assert recovered_payload["ctx.mcp.process.reap.succeeded.count"] == 1
+        assert recovered_payload["ctx.mcp.process.reap.failed.count"] == 0
+        assert recovered_payload["ctx.mcp.process.reap.outcome"] == "complete"
+        assert recovered_payload["ctx.mcp.cleanup.complete.count"] == 1
+        assert recovered_payload["ctx.mcp.cleanup.incomplete.count"] == 0
+        assert recovered_payload["ctx.mcp.process.lifetime.observed.count"] == 1
+        assert recovered_payload["ctx.mcp.process.unreaped_age.observed.count"] == 0
+        assert recovered_payload["ctx.mcp.process.lifetime_ms.max"] == 12.5
+        assert recovered_payload["ctx.mcp.process.lifetime_ms.total"] == 12.5
+        assert "ctx.mcp.process.unreaped_age_ms.max" not in recovered_payload
+        assert "flaky" not in json.dumps(recovered)
+
+    def test_recovery_does_not_double_count_lifetime_after_reader_cleanup(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        instances: list[Any] = []
+        events: list[dict[str, Any]] = []
+
+        def capture_event(event_name: str, **kwargs: Any) -> None:
+            events.append({"event_name": event_name, **kwargs})
+
+        class ReaderCleanupClient:
+            def __init__(self, config: McpServerConfig, *, session_id: str | None = None) -> None:
+                self.stop_calls = 0
+                instances.append(self)
+
+            def start(self) -> None:
+                pass
+
+            def list_tools(self) -> list[Any]:
+                return []
+
+            def stop(self) -> bool:
+                self.stop_calls += 1
+                return self.stop_calls >= 3
+
+            @property
+            def process_observed_age_ms(self) -> float:
+                return 12.5
+
+            @property
+            def process_exited(self) -> bool:
+                return True
+
+        monkeypatch.setattr(mcp_router, "record_event", capture_event)
+        monkeypatch.setattr(mcp_router, "McpClient", ReaderCleanupClient)
+        router = McpRouter([_make_config("private-reader")], lazy=True)
+        router.start()
+        router.activate(["private-reader"], capability_epoch=41)
+
+        with pytest.raises(McpServerError, match="did not fully stop"):
+            router.deactivate(["private-reader"])
+        router.stop()
+        router.stop()
+
+        assert instances[0].stop_calls == 3
+        transitions = [
+            event
+            for event in events
+            if event["event_name"] == "ctx.mcp.deactivation"
+            and event["payload"]["ctx.mcp.phase"] in {"failed", "recovery_failed", "recovered"}
+        ]
+        assert [event["payload"]["ctx.mcp.phase"] for event in transitions] == [
+            "failed",
+            "recovery_failed",
+            "recovered",
+        ]
+        failed_payload, retry_failed_payload, recovered_payload = [
+            event["payload"] for event in transitions
+        ]
+        assert failed_payload["ctx.mcp.process.reap.outcome"] == "complete"
+        assert failed_payload["ctx.mcp.cleanup.incomplete.count"] == 1
+        assert failed_payload["ctx.mcp.process.lifetime.observed.count"] == 1
+        assert failed_payload["ctx.mcp.process.lifetime_ms.total"] == 12.5
+        assert retry_failed_payload["ctx.mcp.process.reap.succeeded.count"] == 1
+        assert retry_failed_payload["ctx.mcp.cleanup.incomplete.count"] == 1
+        assert retry_failed_payload["ctx.mcp.process.lifetime.observed.count"] == 0
+        assert "ctx.mcp.process.lifetime_ms.max" not in retry_failed_payload
+        assert "ctx.mcp.process.lifetime_ms.total" not in retry_failed_payload
+        assert recovered_payload["ctx.mcp.capability.epoch"] == 41
+        assert recovered_payload["ctx.mcp.server.hashes"] == [
+            telemetry.hash_identifier("private-reader")
+        ]
+        assert recovered_payload["ctx.mcp.process.reap.succeeded.count"] == 1
+        assert recovered_payload["ctx.mcp.cleanup.complete.count"] == 1
+        assert recovered_payload["ctx.mcp.process.lifetime.observed.count"] == 0
+        assert "ctx.mcp.process.lifetime_ms.max" not in recovered_payload
+        assert "ctx.mcp.process.lifetime_ms.total" not in recovered_payload
+        assert (
+            sum(
+                event["payload"]["ctx.mcp.process.lifetime.observed.count"] for event in transitions
+            )
+            == 1
+        )
+        assert (
+            sum(
+                event["payload"].get("ctx.mcp.process.lifetime_ms.total", 0.0)
+                for event in transitions
+            )
+            == 12.5
+        )
+        assert "private-reader" not in json.dumps(transitions)
 
     def test_lazy_router_reserves_dormant_server_namespace(self) -> None:
         router = McpRouter([_make_config("owner")], lazy=True)
