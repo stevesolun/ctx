@@ -975,6 +975,7 @@ class CtxCoreToolbox:
         if not baseline_context and not include_baseline:
             baseline_context = list(_DEFAULT_BASELINE_CONTEXT)
         recommendation_context = _recommendation_context_from_args(query, args)
+        external_catalog_path = self._external_catalog_path()
 
         graph: Any | None = None
         indexed_aliases: dict[str, str] | None = None
@@ -1006,15 +1007,6 @@ class CtxCoreToolbox:
                             + ([] if include_baseline else baseline_context)
                         )
                         raw_top_n = min(50, top_k + len(excluded) + 25)
-                        graph_path = self._graph_file_path()
-                        external_catalog_path = (
-                            graph_path.parent.parent
-                            / "external-catalogs"
-                            / "skills-sh"
-                            / "catalog.json"
-                            if graph_path is not None
-                            else None
-                        )
                         from ctx.core.resolve.recommendations import (  # noqa: PLC0415
                             recommend_by_tags_indexed,
                         )
@@ -1552,14 +1544,19 @@ class CtxCoreToolbox:
         if session_id is None or mode == "ignore":
             return explicit
 
-        if not explicit:
-            canonical = []
-        elif graph is not None:
-            canonical = _canonical_graph_recommendation_ids(graph, explicit)
-        elif canonical_map is not None:
-            canonical = _canonical_recommendation_ids(explicit, canonical_map)
-        else:
-            canonical = []
+        canonical: list[str] = []
+        if explicit:
+            if graph is not None:
+                canonical.extend(_canonical_graph_recommendation_ids(graph, explicit))
+            elif canonical_map is not None:
+                canonical.extend(_canonical_recommendation_ids(explicit, canonical_map))
+            canonical.extend(
+                _canonical_external_catalog_recommendation_ids(
+                    self._external_catalog_path(),
+                    explicit,
+                )
+            )
+            canonical = _recommendation_selection_values(canonical)
         if mode == "replace":
             stored = self._lifecycle.remember_recommendation_rejections(
                 session_id=session_id,
@@ -1634,6 +1631,12 @@ class CtxCoreToolbox:
         if _recommendation_index_is_fresh(index_path, graph_path):
             return index_path
         return None
+
+    def _external_catalog_path(self) -> Path | None:
+        graph_path = self._graph_file_path()
+        if graph_path is None:
+            return None
+        return graph_path.parent.parent / "external-catalogs" / "skills-sh" / "catalog.json"
 
     def _ensure_graph(self) -> Any:
         graph_path = self._graph_file_path()
@@ -2408,6 +2411,28 @@ def _canonical_graph_recommendation_ids(graph: Any, values: list[str]) -> list[s
         values,
         _canonical_graph_recommendation_map(graph, values),
     )
+
+
+def _canonical_external_catalog_recommendation_ids(
+    catalog_path: Path | None,
+    values: list[str],
+) -> list[str]:
+    from ctx.core.resolve.recommendations import (  # noqa: PLC0415
+        resolve_external_catalog_ids,
+    )
+
+    typed_ids = [
+        f"{entity_type}:{name}"
+        for value in _recommendation_selection_values(values)
+        for entity_type, name in [_recommendation_selection_parts(value)]
+        if entity_type is not None
+    ]
+    resolved = resolve_external_catalog_ids(
+        catalog_path,
+        typed_ids=typed_ids,
+        allowed_entity_types=tuple(dict.fromkeys(_RECOMMENDATION_ENTITY_TYPE_ALIASES.values())),
+    )
+    return _canonical_recommendation_ids(typed_ids, resolved)
 
 
 def _canonical_recommendation_ids(

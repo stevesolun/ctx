@@ -479,6 +479,36 @@ def resolve_recommendation_aliases_indexed(
     return resolved, total_nodes
 
 
+def resolve_external_catalog_ids(
+    catalog_path: Path | None,
+    *,
+    typed_ids: list[str],
+    allowed_entity_types: tuple[str, ...],
+) -> dict[str, str]:
+    """Resolve only valid canonical skill IDs present in the external catalog."""
+    if "skill" not in {value.strip().lower() for value in allowed_entity_types}:
+        return {}
+    typed = {value.strip().lower() for value in typed_ids if value.strip()}
+    if not typed:
+        return {}
+
+    from ctx.core.wiki.wiki_utils import validate_skill_name  # noqa: PLC0415
+
+    typed_matches: dict[str, set[str]] = defaultdict(set)
+    for skill in _load_external_catalog(catalog_path):
+        public_id = str(skill.get("id") or skill.get("name") or "").strip()
+        try:
+            validate_skill_name(public_id)
+        except ValueError:
+            continue
+        canonical = f"skill:{public_id}"
+        typed_key = canonical.lower()
+        if typed_key in typed:
+            typed_matches[typed_key].add(canonical)
+
+    return {key: next(iter(matches)) for key, matches in typed_matches.items() if len(matches) == 1}
+
+
 def _open_recommendation_index(db_path: Path) -> sqlite3.Connection:
     from ctx.core.graph.graph_store import open_graph_store_readonly  # noqa: PLC0415
 

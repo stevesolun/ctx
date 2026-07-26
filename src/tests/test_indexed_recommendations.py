@@ -29,7 +29,11 @@ from ctx.core.resolve.recommendations import (
 )
 
 
-def _build_world(tmp_path: Path) -> tuple[Path, Path, Path, nx.Graph]:
+def _build_world(
+    tmp_path: Path,
+    *,
+    include_external_catalog_nodes: bool = True,
+) -> tuple[Path, Path, Path, nx.Graph]:
     wiki = tmp_path / "wiki"
     graph_dir = wiki / "graphify-out"
     graph_dir.mkdir(parents=True)
@@ -38,7 +42,8 @@ def _build_world(tmp_path: Path) -> tuple[Path, Path, Path, nx.Graph]:
 
     graph = nx.Graph()
     graph.graph["ctx_graph_path"] = str(graph_path)
-    graph.graph["source_catalog_nodes"] = {"skills.sh": 1}
+    if include_external_catalog_nodes:
+        graph.graph["source_catalog_nodes"] = {"skills.sh": 1}
     graph.add_node(
         "skill:python-testing",
         label="python-testing",
@@ -374,6 +379,104 @@ def test_toolbox_indexed_path_preserves_filters_and_rejection_memory(
     assert first["context_policy"]["baseline"] == ["mcp-server:codex-cli"]
     assert first["context_policy"]["load"] == ["skill:python-testing"]
     assert toolbox._graph is None
+
+
+def test_external_catalog_rejection_persists_and_suppresses_next_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wiki, graph_path, index_path, _ = _build_world(
+        tmp_path,
+        include_external_catalog_nodes=False,
+    )
+    catalog_path = wiki / "external-catalogs" / "skills-sh" / "catalog.json"
+    catalog_path.parent.mkdir(parents=True)
+    catalog_path.write_text(
+        json.dumps(
+            {
+                "skills": [
+                    {
+                        "id": "code-with-beto-skills-local-build",
+                        "name": "local-build",
+                        "skill_id": "local-build",
+                        "source": "code-with-beto/skills",
+                        "tags": ["local", "build"],
+                        "installs": 100,
+                    },
+                    {
+                        "id": "../unsafe",
+                        "name": "unsafe",
+                        "tags": ["local", "build"],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    ranked = recommend_by_tags_indexed(
+        index_path,
+        query_to_tags("local build"),
+        top_n=5,
+        query="local build",
+        entity_types=("skill",),
+        external_catalog_path=catalog_path,
+    )
+    assert ranked is not None
+    assert ranked[0][0]["name"] == "code-with-beto-skills-local-build"
+
+    def fail_graph_load() -> Any:
+        raise AssertionError("indexed recommendation unexpectedly loaded graph.json")
+
+    def toolbox() -> CtxCoreToolbox:
+        instance = CtxCoreToolbox(
+            wiki_dir=wiki,
+            graph_path=graph_path,
+            lifecycle_dir=tmp_path / "runtime",
+            recommendation_session_id="external-catalog-session",
+            allowed_entity_types=["skill"],
+        )
+        monkeypatch.setattr(instance, "_ensure_graph", fail_graph_load)
+        return instance
+
+    external_id = "skill:code-with-beto-skills-local-build"
+    first_toolbox = toolbox()
+    first = json.loads(
+        first_toolbox.dispatch(
+            ToolCall(
+                id="catalog-reject",
+                name="ctx__recommend_bundle",
+                arguments={
+                    "query": "local build",
+                    "include_unavailable": True,
+                    "rejected": [
+                        external_id,
+                        "skill:not-in-catalog",
+                        "skill:../unsafe",
+                    ],
+                    "rejection_mode": "replace",
+                },
+            )
+        )
+    )
+    second_toolbox = toolbox()
+    second = json.loads(
+        second_toolbox.dispatch(
+            ToolCall(
+                id="catalog-next",
+                name="ctx__recommend_bundle",
+                arguments={
+                    "query": "local build",
+                    "include_unavailable": True,
+                },
+            )
+        )
+    )
+
+    assert external_id not in {row["id"] for row in first["results"]}
+    assert second["selection"]["rejected"] == [external_id]
+    assert external_id not in {row["id"] for row in second["results"]}
+    assert first_toolbox._graph is None
+    assert second_toolbox._graph is None
 
 
 def test_semantic_and_stale_index_requests_fall_back_to_networkx(
