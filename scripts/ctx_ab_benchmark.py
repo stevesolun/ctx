@@ -42,6 +42,31 @@ INCIDENT_FIELDS = (
 )
 PROCESS_MARKER = "CTX_BENCHMARK_PROCESS_TOKEN"
 TREATMENT_ARMS = ("baseline", "ctx-light", "ctx-full")
+BENCHMARK_ENGINES = ("codex-controlled", "production-ctx-run")
+SUCCESSFUL_CTX_RUN_STOP_REASONS = frozenset({"completed"})
+SUCCESSFUL_LIFECYCLE_STATUSES = frozenset({"completed", "successful"})
+ENTITY_TRANSITION_ACTIONS = frozenset(
+    {
+        "load_requested",
+        "load_applied",
+        "used",
+        "unload_requested",
+        "unload_applied",
+    }
+)
+EVIDENCE_TRUST_BOUNDARY = (
+    "The ctx run payload and lifecycle ledger are same-process artifacts. "
+    "Their SHA-256 digests identify the exact recorded bytes but do not provide "
+    "cryptographically independent attestation."
+)
+PRODUCTION_CTX_TOOL_NAMES = (
+    "ctx__recommend_bundle",
+    "ctx__wiki_get",
+    "ctx__load_entity",
+    "ctx__mark_entity_used",
+    "ctx__unload_entity",
+)
+_PRODUCTION_CTX_MCP_ANCHOR = "ctx-benchmark-control"
 ARM_PERMUTATIONS = (
     ("baseline", "ctx-light", "ctx-full"),
     ("baseline", "ctx-full", "ctx-light"),
@@ -520,6 +545,17 @@ def write_ctx_fixture(scenario: Scenario, home: Path) -> Path:
             body_path = wiki / "converted" / slug / "SKILL.md"
             body_path.parent.mkdir(parents=True, exist_ok=True)
             body_path.write_text(str(item["body"]).strip() + "\n", encoding="utf-8")
+            installed_path = home / ".codex" / "skills" / slug / "SKILL.md"
+            installed_path.parent.mkdir(parents=True, exist_ok=True)
+            description = json.dumps(f"Use when {scenario.query.rstrip('.')}.")
+            installed_path.write_text(
+                "---\n"
+                f"name: {slug}\n"
+                f"description: {description}\n"
+                "---\n\n"
+                f"{str(item['body']).strip()}\n",
+                encoding="utf-8",
+            )
         elif entity_type == "agent":
             body_path = wiki / "converted-agents" / f"{slug}.md"
             body_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1094,6 +1130,573 @@ def codex_command(
     return command
 
 
+def production_task_prompt(scenario: Scenario, workspace: Path) -> str:
+    sources: list[str] = []
+    total_bytes = 0
+    for relative in scenario.allowed_changes:
+        path = workspace / relative
+        if not path.is_file():
+            raise RuntimeError(f"production source is missing: {relative}")
+        body = path.read_text(encoding="utf-8")
+        total_bytes += len(body.encode("utf-8"))
+        sources.append(f"--- BEGIN {relative} ---\n{body}\n--- END {relative} ---")
+    if total_bytes > 256_000:
+        raise RuntimeError("production source context exceeds 256000 bytes")
+    allowed = ", ".join(scenario.allowed_changes)
+    return (
+        "Implement the requested feature using only the supplied source files. "
+        "You cannot inspect or modify the filesystem directly in this benchmark.\n\n"
+        f"TASK\n{scenario.task}\n\n"
+        f"ALLOWED CHANGED PATHS\n{allowed}\n\n"
+        'Return exactly one JSON object with one string field named "patch". '
+        "The patch must be a valid unified Git patch rooted at the repository, "
+        "must change at least one allowed path, and must not change any other path. "
+        "Do not wrap the JSON in Markdown and do not include commentary.\n\n"
+        "CURRENT SOURCES\n" + "\n\n".join(sources)
+    )
+
+
+def production_ctx_command(
+    *,
+    model: str,
+    prompt: str,
+    session_id: str,
+    sessions_dir: Path,
+    with_ctx: bool,
+    api_key_env: str | None,
+    base_url: str | None,
+    max_iterations: int,
+    max_tokens: int | None,
+    provider_timeout: float,
+) -> list[str]:
+    command = [
+        sys.executable,
+        "-m",
+        "ctx.cli.run",
+        "run",
+        "--model",
+        model,
+        "--task",
+        prompt,
+        "--session-id",
+        session_id,
+        "--sessions-dir",
+        str(sessions_dir),
+        "--overwrite-session",
+        "--json",
+        "--quiet",
+        "--max-iterations",
+        str(max_iterations),
+        "--provider-timeout",
+        str(provider_timeout),
+    ]
+    if api_key_env:
+        command.extend(["--api-key-env", api_key_env])
+    if base_url:
+        command.extend(["--base-url", base_url])
+    if max_tokens is not None:
+        command.extend(["--max-tokens", str(max_tokens)])
+    if with_ctx:
+        command.extend(["--ctx-tool-surface", "adaptive"])
+        for tool_name in PRODUCTION_CTX_TOOL_NAMES:
+            command.extend(["--allow-tool", tool_name])
+        # The allow-list excludes namespaced MCP tools, so this anchor stays
+        # dormant while ctx run composes adaptive skill leasing with core schemas.
+        command.extend(
+            [
+                "--mcp",
+                f"{_PRODUCTION_CTX_MCP_ANCHOR}:"
+                + shlex.join([sys.executable, "-m", "ctx.mcp_server.server"]),
+            ]
+        )
+    else:
+        command.append("--no-ctx-tools")
+    return command
+
+
+def production_ctx_tool_schemas() -> list[dict[str, Any]]:
+    """Return the exact bounded ctx-core schemas submitted by the treatment."""
+    from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox  # noqa: PLC0415
+
+    definitions = CtxCoreToolbox(
+        bound_session_id="ctx-ab-schema",
+        allowed_tool_names=PRODUCTION_CTX_TOOL_NAMES,
+    ).tool_definitions()
+    names = tuple(definition.name for definition in definitions)
+    if set(names) != set(PRODUCTION_CTX_TOOL_NAMES) or len(names) != len(PRODUCTION_CTX_TOOL_NAMES):
+        raise RuntimeError(
+            "production ctx tool inventory does not match the benchmark allow-list: "
+            f"expected={list(PRODUCTION_CTX_TOOL_NAMES)!r}, actual={list(names)!r}"
+        )
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": definition.name,
+                "description": definition.description,
+                "parameters": definition.parameters,
+            },
+        }
+        for definition in definitions
+    ]
+
+
+def validate_provider_request_tool_surface(
+    payload: object,
+    *,
+    expected_tools: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Fail closed unless an actual provider request carries the exact schemas."""
+    if not isinstance(payload, dict):
+        raise ValueError("provider request payload is not an object")
+    raw_tools = payload.get("tools")
+    actual_tools = [] if raw_tools is None else raw_tools
+    if not isinstance(actual_tools, list):
+        raise ValueError("provider request tools must be a list when present")
+    if not isinstance(expected_tools, list):
+        raise ValueError("expected provider tools must be a list")
+
+    def indexed(tools: list[Any], *, label: str) -> dict[str, dict[str, Any]]:
+        by_name: dict[str, dict[str, Any]] = {}
+        for item in tools:
+            if not isinstance(item, dict) or item.get("type") != "function":
+                raise ValueError(f"{label} contains a malformed function tool")
+            function = item.get("function")
+            if not isinstance(function, dict):
+                raise ValueError(f"{label} contains a malformed function schema")
+            name = function.get("name")
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"{label} contains a tool without a name")
+            if name in by_name:
+                raise ValueError(f"{label} contains duplicate tool name: {name!r}")
+            by_name[name] = item
+        return by_name
+
+    actual_by_name = indexed(actual_tools, label="provider request")
+    expected_by_name = indexed(expected_tools, label="expected tool surface")
+    missing = sorted(set(expected_by_name) - set(actual_by_name))
+    extra = sorted(set(actual_by_name) - set(expected_by_name))
+    if missing or extra:
+        raise ValueError(
+            f"provider request tool surface mismatch: missing={missing!r}, extra={extra!r}"
+        )
+    for name, expected in expected_by_name.items():
+        if actual_by_name[name] != expected:
+            raise ValueError(f"provider request schema mismatch for tool: {name!r}")
+
+    canonical = json.dumps(
+        [actual_by_name[name] for name in sorted(actual_by_name)],
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return {
+        "provider_request_tool_names": sorted(actual_by_name),
+        "provider_request_tool_schema_sha256": hashlib.sha256(canonical).hexdigest(),
+        "provider_request_tool_surface_observed": True,
+    }
+
+
+def classify_production_evidence(
+    *,
+    base_url: str | None,
+    dry_run: bool,
+    provider_provenance: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if dry_run:
+        return {
+            "endpoint_class": "custom_endpoint" if base_url else "provider_default",
+            "evidence_level": "wiring_only",
+            "production_efficiency_eligible": False,
+        }
+    if base_url:
+        return {
+            "endpoint_class": "custom_endpoint",
+            "evidence_level": "functional_only",
+            "production_efficiency_eligible": False,
+        }
+    provenance = provider_provenance or {}
+    independently_verified = all(
+        provenance.get(field) is True
+        for field in (
+            "provider_identity_verified",
+            "provider_endpoint_verified",
+            "provider_authentication_verified",
+            "provider_response_success",
+        )
+    )
+    if not independently_verified:
+        return {
+            "endpoint_class": "provider_default_unverified",
+            "evidence_level": "functional_unverified",
+            "production_efficiency_eligible": False,
+        }
+    return {
+        "endpoint_class": "live_provider",
+        "evidence_level": "live_provider",
+        "production_efficiency_eligible": True,
+    }
+
+
+def extract_provider_response_provenance(
+    *,
+    sessions_dir: Path,
+    session_id: str,
+    model: str,
+    base_url: str | None,
+    api_key_env: str | None,
+    env: dict[str, str],
+    expected_ctx_tool_names: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    session_path = sessions_dir / f"{session_id}.jsonl"
+    if not session_path.is_file():
+        raise ValueError("ctx run produced no provider session ledger")
+    session_bytes = session_path.read_bytes()
+    events: list[dict[str, Any]] = []
+    for line_number, line in enumerate(session_bytes.decode("utf-8").splitlines(), start=1):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"ctx run provider session ledger contains invalid JSON at line {line_number}"
+            ) from exc
+        if not isinstance(event, dict):
+            raise ValueError(f"ctx run provider session ledger line {line_number} is not an object")
+        if event.get("session_id") != session_id:
+            raise ValueError(
+                "ctx run provider session ledger contains a foreign session: "
+                f"expected={session_id!r}, actual={event.get('session_id')!r}"
+            )
+        events.append(event)
+
+    starts = [event for event in events if event.get("type") == "session_start"]
+    responses = [event for event in events if event.get("type") == "model_response"]
+    if len(starts) != 1:
+        raise ValueError("ctx run provider session ledger must contain one session_start")
+    if not responses:
+        raise ValueError("ctx run provider session ledger contains no model_response")
+
+    start = starts[0]
+    configured_provider = str(start.get("provider") or "").strip()
+    configured_model = str(start.get("model") or "").strip()
+    configured_base_url = str(start.get("base_url") or "").strip()
+    configured_api_key_env = str(start.get("api_key_env") or "").strip()
+    configured_ctx_tool_names_raw = start.get("ctx_tool_names")
+    if configured_ctx_tool_names_raw is None:
+        configured_ctx_tool_names: list[str] = []
+    elif (
+        not isinstance(configured_ctx_tool_names_raw, list)
+        or not all(isinstance(name, str) and name for name in configured_ctx_tool_names_raw)
+        or len(set(configured_ctx_tool_names_raw)) != len(configured_ctx_tool_names_raw)
+    ):
+        raise ValueError("ctx run session has malformed configured ctx tool names")
+    else:
+        configured_ctx_tool_names = list(configured_ctx_tool_names_raw)
+    expected_base_url = base_url or ""
+    if not configured_provider:
+        raise ValueError("ctx run provider identity is missing from session_start")
+    if configured_model != model:
+        raise ValueError(
+            "ctx run provider session model does not match the requested model: "
+            f"expected={model!r}, actual={configured_model!r}"
+        )
+    if configured_base_url != expected_base_url:
+        raise ValueError("ctx run provider session base_url does not match the command")
+    if api_key_env and configured_api_key_env != api_key_env:
+        raise ValueError("ctx run provider session api_key_env does not match the command")
+    if expected_ctx_tool_names is not None and set(configured_ctx_tool_names) != set(
+        expected_ctx_tool_names
+    ):
+        raise ValueError(
+            "ctx run configured tool surface mismatch: "
+            f"expected={sorted(expected_ctx_tool_names)!r}, "
+            f"actual={sorted(configured_ctx_tool_names)!r}"
+        )
+
+    response_adapters = {str(event.get("provider") or "").strip() for event in responses}
+    response_models = {str(event.get("model") or "").strip() for event in responses}
+    finish_reasons = [str(event.get("finish_reason") or "").strip() for event in responses]
+    if "" in response_adapters or len(response_adapters) != 1:
+        raise ValueError("ctx run provider responses have missing or inconsistent adapters")
+    if response_models != {model}:
+        raise ValueError("ctx run provider responses do not match the requested model")
+    response_success = all(reason in {"stop", "tool_calls"} for reason in finish_reasons)
+    auth_mode = "api_key_env" if configured_api_key_env else "none_or_implicit"
+    auth_present = bool(configured_api_key_env and env.get(configured_api_key_env))
+    return {
+        "provider_identity": configured_provider,
+        "provider_identity_source": "session_start_config",
+        "provider_identity_verified": False,
+        "provider_adapter": next(iter(response_adapters)),
+        "provider_response_models": sorted(response_models),
+        "provider_response_finish_reasons": finish_reasons,
+        "provider_response_count": len(responses),
+        "provider_response_success": response_success,
+        "provider_endpoint_evidence": (
+            "custom_endpoint_from_session_config"
+            if configured_base_url
+            else "provider_default_from_session_config"
+        ),
+        "provider_endpoint_verified": False,
+        "provider_auth_mode": auth_mode,
+        "provider_authentication_evidence": (
+            "configured_api_key_env_present"
+            if auth_present
+            else "configured_api_key_env_missing"
+            if configured_api_key_env
+            else "not_established"
+        ),
+        "provider_authentication_verified": False,
+        "provider_session_sha256": hashlib.sha256(session_bytes).hexdigest(),
+        "provider_session_digest_scope": "exact_ctx_run_session_jsonl_bytes",
+        "provider_session_path": str(session_path),
+        "configured_ctx_tool_names": sorted(configured_ctx_tool_names),
+        "configured_ctx_tool_surface_verified": expected_ctx_tool_names is not None,
+        "provider_tool_surface_evidence": "ctx_run_session_start_pre_request_config",
+    }
+
+
+def validate_production_payload(
+    payload: object,
+    *,
+    session_id: str,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("ctx run JSON output is not an object")
+    if payload.get("session_id") != session_id:
+        raise ValueError(
+            "ctx run JSON session_id does not match the requested session: "
+            f"expected={session_id!r}, actual={payload.get('session_id')!r}"
+        )
+    stop_reason = payload.get("stop_reason")
+    if stop_reason not in SUCCESSFUL_CTX_RUN_STOP_REASONS:
+        raise ValueError(f"ctx run stop_reason is not successful: {stop_reason!r}")
+    return payload
+
+
+def extract_production_usage(payload: object) -> dict[str, Any]:
+    if not isinstance(payload, dict) or not isinstance(payload.get("usage"), dict):
+        raise ValueError("ctx run returned no usage object")
+    usage = payload["usage"]
+    if usage.get("tokens_reported") is not True:
+        raise ValueError("ctx run provider did not report exact token usage")
+    required = ("input_tokens", "output_tokens", "total_tokens")
+    if not all(
+        isinstance(usage.get(key), int) and not isinstance(usage.get(key), bool) and usage[key] >= 0
+        for key in required
+    ):
+        raise ValueError("ctx run token usage is incomplete")
+    input_tokens = int(usage["input_tokens"])
+    output_tokens = int(usage["output_tokens"])
+    total_tokens = int(usage["total_tokens"])
+    if total_tokens != input_tokens + output_tokens:
+        raise ValueError("ctx run total token usage is inconsistent")
+    cached = usage.get("cached_input_tokens")
+    if cached is not None and (
+        not isinstance(cached, int)
+        or isinstance(cached, bool)
+        or cached < 0
+        or cached > input_tokens
+    ):
+        raise ValueError("ctx run cached input token usage is invalid")
+    return {
+        "attribution": "exact",
+        "attribution_source": "ctx run JSON provider usage",
+        "input_tokens": input_tokens,
+        "cached_input_tokens": cached,
+        "uncached_input_tokens": input_tokens - cached if isinstance(cached, int) else None,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def extract_production_patch(payload: object) -> str:
+    if not isinstance(payload, dict) or not isinstance(payload.get("final_message"), str):
+        raise ValueError("ctx run returned no final_message")
+    try:
+        message = json.loads(payload["final_message"])
+    except json.JSONDecodeError as exc:
+        raise ValueError("ctx run final_message is not JSON") from exc
+    patch = message.get("patch") if isinstance(message, dict) else None
+    if not isinstance(patch, str) or not patch.strip():
+        raise ValueError("ctx run final_message contains no patch")
+    if len(patch.encode("utf-8")) > 1_000_000:
+        raise ValueError("ctx run patch exceeds 1000000 bytes")
+    return patch
+
+
+def apply_production_patch(scenario: Scenario, workspace: Path, patch: str) -> list[str]:
+    numstat = run_process(
+        ["git", "apply", "--numstat", "-z", "--no-unsafe-paths", "-"],
+        cwd=workspace,
+        input_text=patch,
+        timeout=30,
+    )
+    if numstat.returncode:
+        raise ValueError(f"ctx run patch is invalid: {numstat.stderr.strip()}")
+    paths: list[str] = []
+    for row in numstat.stdout.split("\0"):
+        if not row:
+            continue
+        fields = row.split("\t", 2)
+        if len(fields) != 3 or not fields[2]:
+            raise ValueError("ctx run patch has malformed path metadata")
+        paths.append(fields[2])
+    if not paths:
+        raise ValueError("ctx run patch changes no files")
+    disallowed = set(paths) - set(scenario.allowed_changes)
+    if disallowed:
+        raise ValueError(f"ctx run patch changes disallowed paths: {sorted(disallowed)}")
+    checked = run_process(
+        ["git", "apply", "--check", "--no-unsafe-paths", "-"],
+        cwd=workspace,
+        input_text=patch,
+        timeout=30,
+    )
+    if checked.returncode:
+        raise ValueError(f"ctx run patch does not apply: {checked.stderr.strip()}")
+    applied = run_process(
+        ["git", "apply", "--no-unsafe-paths", "-"],
+        cwd=workspace,
+        input_text=patch,
+        timeout=30,
+    )
+    if applied.returncode:
+        raise ValueError(f"ctx run patch application failed: {applied.stderr.strip()}")
+    return paths
+
+
+def validate_production_lifecycle(
+    scenario: Scenario,
+    *,
+    lifecycle_root: Path,
+    session_id: str,
+    expect_selected_cycle: bool = True,
+) -> dict[str, Any]:
+    path = lifecycle_root / "events.jsonl"
+    if not path.is_file():
+        if expect_selected_cycle:
+            raise ValueError("ctx run produced no lifecycle ledger")
+        return {
+            "selected_id": None,
+            "actions": [],
+            "session_actions": [],
+            "session_status": None,
+            "session_event_count": 0,
+            "lifecycle_emitted": False,
+            "lifecycle_sha256": None,
+            "final_loaded": [],
+        }
+    events: list[dict[str, Any]] = []
+    lifecycle_bytes = path.read_bytes()
+    for line_number, line in enumerate(lifecycle_bytes.decode("utf-8").splitlines(), start=1):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError("ctx run lifecycle ledger contains invalid JSON") from exc
+        if not isinstance(event, dict):
+            raise ValueError(f"ctx run lifecycle ledger line {line_number} is not an object")
+        if event.get("session_id") != session_id:
+            raise ValueError(
+                "ctx run lifecycle ledger contains a foreign session: "
+                f"expected={session_id!r}, actual={event.get('session_id')!r}"
+            )
+        events.append(event)
+    if not events:
+        if expect_selected_cycle:
+            raise ValueError("ctx run produced no lifecycle events for the requested session")
+        return {
+            "selected_id": None,
+            "actions": [],
+            "session_actions": [],
+            "session_status": None,
+            "session_event_count": 0,
+            "lifecycle_emitted": False,
+            "lifecycle_sha256": hashlib.sha256(lifecycle_bytes).hexdigest(),
+            "final_loaded": [],
+        }
+
+    session_actions = [str(event.get("action") or "") for event in events]
+    session_start_indices = [
+        index for index, action in enumerate(session_actions) if action == "session_start"
+    ]
+    if session_start_indices and session_start_indices != [0]:
+        raise ValueError("ctx run lifecycle session_start must be unique and first when emitted")
+    session_end_indices = [
+        index for index, action in enumerate(session_actions) if action == "session_end"
+    ]
+    if len(session_end_indices) != 1:
+        raise ValueError("ctx run lifecycle must contain exactly one session_end")
+    session_end_index = session_end_indices[0]
+    if session_end_index != len(events) - 1:
+        raise ValueError("ctx run lifecycle contains events after session_end")
+    session_status = str(events[session_end_index].get("status") or "").lower()
+    if session_status not in SUCCESSFUL_LIFECYCLE_STATUSES:
+        raise ValueError(
+            f"ctx run lifecycle session_end status is not successful: {session_status!r}"
+        )
+
+    skill = next(item for item in scenario.context if item["type"] == "skill")
+    slug = str(skill["slug"])
+    unexpected_transitions = [
+        event
+        for event in events
+        if event.get("action") in ENTITY_TRANSITION_ACTIONS
+        and (event.get("entity_type"), event.get("slug")) != ("skill", slug)
+    ]
+    if unexpected_transitions:
+        unexpected = unexpected_transitions[0]
+        raise ValueError(
+            "ctx run lifecycle contains an unexpected entity transition: "
+            f"action={unexpected.get('action')!r}, "
+            f"entity_type={unexpected.get('entity_type')!r}, "
+            f"slug={unexpected.get('slug')!r}"
+        )
+    actions = [
+        str(event.get("action"))
+        for event in events
+        if event.get("entity_type") == "skill" and event.get("slug") == slug
+    ]
+
+    if expect_selected_cycle:
+        state = "await_load_request"
+        for index, action in enumerate(actions):
+            if state == "await_load_request" and action == "load_requested":
+                state = "await_load_apply"
+            elif state == "await_load_apply" and action == "load_applied":
+                state = "await_use"
+            elif state == "await_use" and action == "used":
+                state = "await_unload"
+            elif state == "await_unload" and action == "unload_requested":
+                state = "await_unload_apply"
+            elif state in {"await_unload", "await_unload_apply"} and action == "unload_applied":
+                state = "complete"
+            else:
+                raise ValueError(
+                    f"ctx run lifecycle has invalid transition for skill:{slug}: "
+                    f"state={state}, action={action}, index={index}, actions={actions}"
+                )
+        if state != "complete":
+            raise ValueError(f"ctx run lifecycle is incomplete for skill:{slug}: actions={actions}")
+    elif actions:
+        raise ValueError("baseline ctx run emitted a selected skill lifecycle cycle")
+
+    state = make_lifecycle_store(lifecycle_root).session_state(session_id=session_id)
+    if state.get("loaded") != []:
+        raise ValueError("ctx run lifecycle ended with loaded context")
+    return {
+        "selected_id": f"skill:{slug}" if expect_selected_cycle else None,
+        "actions": actions,
+        "session_actions": session_actions,
+        "session_status": session_status,
+        "session_event_count": len(events),
+        "lifecycle_emitted": True,
+        "lifecycle_sha256": hashlib.sha256(lifecycle_bytes).hexdigest(),
+        "final_loaded": state["loaded"],
+    }
+
+
 def _verification_env(workspace: Path, temp: Path) -> dict[str, str]:
     return {
         "CODEX_HOME": ORIGINAL_CODEX_HOME,
@@ -1320,11 +1923,13 @@ def write_environment_manifest(
         [sys.executable, "-m", "pip", "freeze", "--all"], cwd=ROOT, timeout=60
     )
     scenario_bytes = scenarios_path.read_bytes()
+    engine = str(run_config.get("engine") or "codex-controlled")
     manifest = {
         "generated_at": datetime.now(UTC).isoformat(),
         "platform": platform.platform(),
         "python": sys.version,
         "python_executable": sys.executable,
+        "execution_engine": engine,
         "codex_binary": codex,
         "codex_version": _command_version([codex, "--version"]),
         "model": model,
@@ -1356,11 +1961,293 @@ def write_environment_manifest(
         "codex_environment_keys": sorted(
             _ctx_env(output / "manifest-home", output / "manifest-lifecycle")
         ),
-        "token_scope": "terminal Codex turn; per-subagent and per-context attribution unavailable",
+        "token_scope": (
+            "ctx run session provider usage; per-context attribution unavailable"
+            if engine == "production-ctx-run"
+            else "terminal Codex turn; per-subagent and per-context attribution unavailable"
+        ),
+        "evidence_trust_boundary": (
+            EVIDENCE_TRUST_BOUNDARY if engine == "production-ctx-run" else None
+        ),
+        "cryptographic_independence": False if engine == "production-ctx-run" else None,
     }
     (output / "environment.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
+
+
+def run_production_trial(
+    scenario: Scenario,
+    *,
+    arm: str,
+    attempt: int,
+    trial: int,
+    retry: int,
+    cache: Path,
+    output: Path,
+    model: str,
+    timeout: float,
+    dry_run: bool,
+    incidents: IncidentLog,
+    api_key_env: str | None,
+    base_url: str | None,
+    max_iterations: int,
+    max_tokens: int | None,
+    provider_timeout: float,
+) -> dict[str, Any]:
+    if arm not in {"baseline", "ctx-light"}:
+        raise ValueError(f"production ctx run does not support arm: {arm}")
+    trial_started = time.perf_counter()
+    evidence_classification = classify_production_evidence(
+        base_url=base_url,
+        dry_run=dry_run,
+    )
+    run_dir = output / scenario.id / arm / f"attempt-{attempt}"
+    workspace = run_dir / "repo"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    test_hash = prepare_workspace(scenario, cache, workspace)
+    home = run_dir / "home"
+    lifecycle_root = run_dir / "lifecycle"
+    write_ctx_fixture(scenario, home)
+    env = _ctx_env(home, lifecycle_root)
+    if api_key_env and api_key_env in os.environ:
+        env[api_key_env] = os.environ[api_key_env]
+    prompt = production_task_prompt(scenario, workspace)
+    prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()
+    session_id = f"ctx-ab-{scenario.id}-{arm}-{attempt}"
+    sessions_dir = run_dir / "sessions"
+    with_ctx = arm == "ctx-light"
+    expected_ctx_tool_names = PRODUCTION_CTX_TOOL_NAMES if with_ctx else ()
+    command = production_ctx_command(
+        model=model,
+        prompt=prompt,
+        session_id=session_id,
+        sessions_dir=sessions_dir,
+        with_ctx=with_ctx,
+        api_key_env=api_key_env,
+        base_url=base_url,
+        max_iterations=max_iterations,
+        max_tokens=max_tokens,
+        provider_timeout=provider_timeout,
+    )
+    recorded_command = list(command)
+    recorded_command[recorded_command.index("--task") + 1] = f"<sha256:{prompt_hash}>"
+    (run_dir / "prompt.sha256").write_text(prompt_hash + "\n", encoding="utf-8")
+    (run_dir / "command.json").write_text(
+        json.dumps({"argv": recorded_command}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    if dry_run:
+        return {
+            "scenario": scenario.id,
+            "arm": arm,
+            "trial": trial,
+            "retry": retry,
+            "attempt": attempt,
+            "engine": "production-ctx-run",
+            "treatment_level": arm,
+            "status": "wiring_only",
+            **evidence_classification,
+            "verification_passed": None,
+            "task_prompt_sha256": prompt_hash,
+            "delivered_prompt_sha256": prompt_hash,
+            "recommended_ids": [],
+            "selected_ids": [],
+            "used_ids": [],
+            "ctx_setup_seconds": 0.0,
+            "teardown_seconds": 0.0,
+            "total_seconds": round(time.perf_counter() - trial_started, 6),
+            "token_attribution": "unavailable",
+            "ctx_run_payload_sha256": None,
+            "lifecycle_sha256": None,
+            "expected_ctx_tool_names": list(expected_ctx_tool_names),
+            "configured_ctx_tool_names": None,
+            "provider_tool_surface_evidence": "wiring_only",
+            "evidence_trust_boundary": EVIDENCE_TRUST_BOUNDARY,
+            "cryptographic_independence": False,
+            "artifact_dir": str(run_dir),
+        }
+
+    measured_started = time.perf_counter()
+    agent = run_process(
+        command,
+        cwd=workspace,
+        env=env,
+        timeout=timeout,
+        contain_descendants=True,
+    )
+    (run_dir / "ctx-run.json").write_text(agent.stdout, encoding="utf-8")
+    (run_dir / "ctx-run.stderr.log").write_text(agent.stderr, encoding="utf-8")
+    payload_sha256 = hashlib.sha256(agent.stdout.encode("utf-8")).hexdigest()
+    payload: dict[str, Any] | None = None
+    provider_provenance: dict[str, Any] = {
+        "provider_identity": None,
+        "provider_identity_source": None,
+        "provider_identity_verified": False,
+        "provider_adapter": None,
+        "provider_response_models": [],
+        "provider_response_finish_reasons": [],
+        "provider_response_count": 0,
+        "provider_response_success": False,
+        "provider_endpoint_evidence": "not_established",
+        "provider_endpoint_verified": False,
+        "provider_auth_mode": "not_established",
+        "provider_authentication_evidence": "not_established",
+        "provider_authentication_verified": False,
+        "provider_session_sha256": None,
+        "provider_session_digest_scope": None,
+        "provider_session_path": None,
+        "configured_ctx_tool_names": None,
+        "configured_ctx_tool_surface_verified": False,
+        "provider_tool_surface_evidence": "not_established",
+    }
+    usage: dict[str, Any] = {
+        "attribution": "unavailable",
+        "reason": "ctx run provider usage was not validated",
+    }
+    patch_paths: list[str] = []
+    production_errors: list[str] = []
+    try:
+        decoded = json.loads(agent.stdout)
+        payload = validate_production_payload(decoded, session_id=session_id)
+        usage = extract_production_usage(payload)
+        patch = extract_production_patch(payload)
+        (run_dir / "model.patch").write_text(patch, encoding="utf-8")
+        if agent.returncode:
+            raise ValueError(f"ctx run exited with status {agent.returncode}")
+        patch_paths = apply_production_patch(scenario, workspace, patch)
+    except (json.JSONDecodeError, ValueError) as exc:
+        production_errors.append(str(exc))
+    try:
+        provider_provenance = extract_provider_response_provenance(
+            sessions_dir=sessions_dir,
+            session_id=session_id,
+            model=model,
+            base_url=base_url,
+            api_key_env=api_key_env,
+            env=env,
+            expected_ctx_tool_names=expected_ctx_tool_names,
+        )
+    except ValueError as exc:
+        production_errors.append(str(exc))
+
+    verification = verify_workspace(scenario, workspace, test_hash)
+    (run_dir / "verification.log").write_text(
+        verification.stdout + verification.stderr,
+        encoding="utf-8",
+    )
+    lifecycle_evidence: dict[str, Any] | None = None
+    lifecycle_path = lifecycle_root / "events.jsonl"
+    lifecycle_sha256 = (
+        hashlib.sha256(lifecycle_path.read_bytes()).hexdigest()
+        if lifecycle_path.is_file()
+        else None
+    )
+    try:
+        lifecycle_evidence = validate_production_lifecycle(
+            scenario,
+            lifecycle_root=lifecycle_root,
+            session_id=session_id,
+            expect_selected_cycle=with_ctx,
+        )
+    except ValueError as exc:
+        production_errors.append(str(exc))
+    lifecycle_valid = lifecycle_evidence is not None
+    usage_valid = usage.get("attribution") == "exact"
+    passed = bool(
+        not agent.returncode
+        and patch_paths
+        and not verification.returncode
+        and usage_valid
+        and lifecycle_valid
+        and provider_provenance["provider_response_success"] is True
+        and not production_errors
+    )
+    evidence_classification = classify_production_evidence(
+        base_url=base_url,
+        dry_run=False,
+        provider_provenance=provider_provenance,
+    )
+    if not passed:
+        if agent.timed_out:
+            production_errors.append("ctx run timed out")
+        elif agent.returncode and not any("exited with status" in row for row in production_errors):
+            production_errors.append(f"ctx run exited with status {agent.returncode}")
+        if verification.returncode:
+            production_errors.append(f"verification exited with status {verification.returncode}")
+        incidents.add(
+            scenario=scenario.id,
+            arm=arm,
+            attempt=attempt,
+            stage="production-ctx-run",
+            message="production benchmark arm failed",
+            evidence="; ".join(dict.fromkeys(production_errors)),
+        )
+    selected_id = lifecycle_evidence.get("selected_id") if lifecycle_evidence else None
+    selected_ids = [selected_id] if isinstance(selected_id, str) else []
+    measured_seconds = time.perf_counter() - measured_started
+    return {
+        "scenario": scenario.id,
+        "arm": arm,
+        "trial": trial,
+        "retry": retry,
+        "attempt": attempt,
+        "engine": "production-ctx-run",
+        **evidence_classification,
+        "benchmark_class": scenario.benchmark_class,
+        "treatment_level": arm,
+        "escalated": False,
+        "first_attempt": retry == 0,
+        "status": "passed" if passed else "failed",
+        "verification_passed": not verification.returncode,
+        "verification_returncode": verification.returncode,
+        "agent_returncode": agent.returncode,
+        "agent_timed_out": agent.timed_out,
+        "task_prompt_sha256": prompt_hash,
+        "delivered_prompt_sha256": prompt_hash,
+        "recommended_ids": selected_ids,
+        "selected_ids": selected_ids,
+        "used_ids": selected_ids,
+        "policy_valid": lifecycle_valid,
+        "production_errors": production_errors,
+        "patch_paths": patch_paths,
+        "ctx_setup_seconds": 0.0,
+        "agent_seconds": round(agent.elapsed, 6),
+        "verification_seconds": round(verification.elapsed, 6),
+        "teardown_seconds": 0.0,
+        "measured_phase_seconds": round(measured_seconds, 6),
+        "total_seconds": round(measured_seconds, 6),
+        "harness_total_seconds": round(time.perf_counter() - trial_started, 6),
+        "token_attribution": usage.pop("attribution"),
+        "token_scope": "ctx_run_session",
+        "team_token_completeness": "not_applicable",
+        "lifecycle_valid": lifecycle_valid,
+        "lifecycle_actions": lifecycle_evidence["actions"] if lifecycle_evidence else [],
+        "lifecycle_session_actions": (
+            lifecycle_evidence["session_actions"] if lifecycle_evidence else []
+        ),
+        "lifecycle_session_status": (
+            lifecycle_evidence["session_status"] if lifecycle_evidence else None
+        ),
+        "final_loaded": lifecycle_evidence["final_loaded"] if lifecycle_evidence else [],
+        "ctx_run_payload_sha256": payload_sha256,
+        "ctx_run_payload_digest_scope": "exact_ctx_run_stdout_bytes",
+        "lifecycle_sha256": lifecycle_sha256,
+        "lifecycle_digest_scope": (
+            "entire_isolated_events_jsonl_bytes" if lifecycle_sha256 else None
+        ),
+        "evidence_trust_boundary": EVIDENCE_TRUST_BOUNDARY,
+        "cryptographic_independence": False,
+        "expected_ctx_tool_names": list(expected_ctx_tool_names),
+        "reaped_descendants": agent.reaped_descendants,
+        "residual_descendants": list(agent.residual_descendants),
+        **usage,
+        "artifact_dir": str(run_dir),
+        "lifecycle_events": str(lifecycle_path) if lifecycle_path.is_file() else None,
+        "ctx_run_session_id": payload.get("session_id") if payload else None,
+        "ctx_run_stop_reason": payload.get("stop_reason") if payload else None,
+        **provider_provenance,
+    }
 
 
 def run_trial(
@@ -1493,7 +2380,8 @@ def run_trial(
                 "retry": retry,
                 "attempt": attempt,
                 "treatment_level": treatment_level,
-                "status": "dry_run",
+                "status": "wiring_only",
+                "evidence_level": "wiring_only",
                 "verification_passed": None,
                 "task_prompt_sha256": prompt_hash,
                 "delivered_prompt_sha256": treatment_hash,
@@ -1696,6 +2584,8 @@ def write_summary(output: Path, results: list[dict[str, Any]]) -> None:
             writer.writerow(row)
     grouped: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
     for row in results:
+        if row.get("production_efficiency_eligible") is not True:
+            continue
         key = (str(row.get("scenario")), str(row.get("arm")), int(row.get("trial", 0)))
         grouped.setdefault(key, []).append(row)
     aggregate: list[dict[str, Any]] = []
@@ -1737,8 +2627,13 @@ def build_performance_report(
     trials: int,
     arms: tuple[str, ...],
 ) -> dict[str, Any]:
+    eligible_results = [row for row in results if row.get("production_efficiency_eligible") is True]
+    excluded_results = [
+        row for row in results if row.get("production_efficiency_eligible") is not True
+    ]
+    efficiency_claim_allowed = bool(results) and len(eligible_results) == len(results)
     attempts: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
-    for row in results:
+    for row in eligible_results:
         key = (str(row.get("scenario")), str(row.get("arm")), int(row.get("trial", 0)))
         attempts.setdefault(key, []).append(row)
     pairs: list[dict[str, Any]] = []
@@ -1799,8 +2694,10 @@ def build_performance_report(
             pairs.append(pair)
     complete_pairs = [pair for pair in pairs if pair.get("complete")]
     expected_pairs = len(scenario_ids) * trials
-    evidence_required = trials >= 6 and {"baseline", "ctx-light"}.issubset(set(arms))
-    evidence_complete = len(complete_pairs) == expected_pairs
+    evidence_required = (
+        trials >= 6 and {"baseline", "ctx-light"}.issubset(set(arms)) and efficiency_claim_allowed
+    )
+    evidence_complete = efficiency_claim_allowed and len(complete_pairs) == expected_pairs
     quality_preserved = evidence_complete and all(
         not pair["baseline_first_attempt_passed"] or pair["ctx_light_first_attempt_passed"]
         for pair in complete_pairs
@@ -1830,7 +2727,18 @@ def build_performance_report(
         )
     return {
         "status": (
-            "passed" if gate_passed is True else "failed" if gate_passed is False else "diagnostic"
+            "functional_only"
+            if not efficiency_claim_allowed
+            else "passed"
+            if gate_passed is True
+            else "failed"
+            if gate_passed is False
+            else "diagnostic"
+        ),
+        "production_efficiency_claim_allowed": efficiency_claim_allowed,
+        "excluded_result_count": len(excluded_results),
+        "excluded_evidence_levels": sorted(
+            {str(row.get("evidence_level") or "unspecified") for row in excluded_results}
         ),
         "evidence_required": evidence_required,
         "evidence_complete": evidence_complete,
@@ -1842,6 +2750,8 @@ def build_performance_report(
         "median_time_ratio": median_time_ratio,
         "median_reported_token_ratio": median_token_ratio,
         "gate_passed": gate_passed,
+        "evidence_trust_boundary": EVIDENCE_TRUST_BOUNDARY,
+        "cryptographic_independence": False,
         "pairs": pairs,
     }
 
@@ -1869,12 +2779,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scenarios", type=Path, default=DEFAULT_SCENARIOS)
     parser.add_argument("--scenario", action="append", default=[])
     parser.add_argument(
+        "--engine",
+        choices=BENCHMARK_ENGINES,
+        default="codex-controlled",
+    )
+    parser.add_argument(
         "--arm",
         choices=("baseline", "ctx-light", "ctx-full", "both", "all"),
         default="both",
     )
     parser.add_argument("--model", default=os.environ.get("CTX_BENCHMARK_MODEL", "gpt-5.5"))
     parser.add_argument("--codex", default=shutil.which("codex") or "codex")
+    parser.add_argument("--api-key-env")
+    parser.add_argument("--base-url")
+    parser.add_argument("--max-iterations", type=int, default=25)
+    parser.add_argument("--max-tokens", type=int)
+    parser.add_argument("--provider-timeout", type=float, default=120.0)
     parser.add_argument("--cache-root", type=Path, default=Path.home() / ".cache/ctx-ab")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--trials", type=int, default=1)
@@ -1900,6 +2820,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.trials < 1 or args.retries < 0:
         raise SystemExit("--trials must be >= 1 and --retries must be >= 0")
+    if (
+        args.max_iterations < 1
+        or (args.max_tokens is not None and args.max_tokens < 1)
+        or args.provider_timeout <= 0
+    ):
+        raise SystemExit("production ctx limits must be positive")
     if sys.platform != "darwin":
         raise SystemExit("benchmark execution currently requires macOS sandbox-exec")
     output = args.output or Path("/tmp") / f"ctx-ab-{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
@@ -1908,6 +2834,15 @@ def main(argv: list[str] | None = None) -> int:
     output.mkdir(parents=True, exist_ok=True)
     incidents = IncidentLog(output / "incidents.csv")
     arms = arms_for_mode(args.arm)
+    if args.engine == "production-ctx-run" and "ctx-full" in arms:
+        raise SystemExit("production-ctx-run supports only baseline, ctx-light, or both")
+    if (
+        args.engine == "production-ctx-run"
+        and args.api_key_env
+        and not os.environ.get(args.api_key_env)
+        and not args.dry_run
+    ):
+        raise SystemExit(f"provider key environment variable is not set: {args.api_key_env}")
     schedule = trial_schedule(scenarios, arms, args.trials)
     write_environment_manifest(
         output=output,
@@ -1916,11 +2851,17 @@ def main(argv: list[str] | None = None) -> int:
         codex=args.codex,
         model=args.model,
         run_config={
+            "engine": args.engine,
             "arm_mode": args.arm,
             "arms": list(arms),
             "trials": args.trials,
             "retries": args.retries,
             "timeout_seconds": args.timeout,
+            "max_iterations": args.max_iterations,
+            "max_tokens": args.max_tokens,
+            "provider_timeout_seconds": args.provider_timeout,
+            "api_key_env": args.api_key_env,
+            "base_url": args.base_url,
             "dry_run": args.dry_run,
             "cache_root": str(args.cache_root),
             "scenario_filters": list(args.scenario),
@@ -1976,21 +2917,41 @@ def main(argv: list[str] | None = None) -> int:
                 for retry in range(args.retries + 1):
                     attempt = (trial - 1) * (args.retries + 1) + retry + 1
                     try:
-                        result = run_trial(
-                            scenario,
-                            arm=arm,
-                            treatment_level=treatment_level,
-                            attempt=attempt,
-                            trial=trial,
-                            retry=retry,
-                            cache=cache,
-                            output=output,
-                            codex=args.codex,
-                            model=args.model,
-                            timeout=args.timeout,
-                            dry_run=args.dry_run,
-                            incidents=incidents,
-                        )
+                        if args.engine == "production-ctx-run":
+                            result = run_production_trial(
+                                scenario,
+                                arm=arm,
+                                attempt=attempt,
+                                trial=trial,
+                                retry=retry,
+                                cache=cache,
+                                output=output,
+                                model=args.model,
+                                timeout=args.timeout,
+                                dry_run=args.dry_run,
+                                incidents=incidents,
+                                api_key_env=args.api_key_env,
+                                base_url=args.base_url,
+                                max_iterations=args.max_iterations,
+                                max_tokens=args.max_tokens,
+                                provider_timeout=args.provider_timeout,
+                            )
+                        else:
+                            result = run_trial(
+                                scenario,
+                                arm=arm,
+                                treatment_level=treatment_level,
+                                attempt=attempt,
+                                trial=trial,
+                                retry=retry,
+                                cache=cache,
+                                output=output,
+                                codex=args.codex,
+                                model=args.model,
+                                timeout=args.timeout,
+                                dry_run=args.dry_run,
+                                incidents=incidents,
+                            )
                     except Exception as exc:  # noqa: BLE001 - persist harness failures.
                         incidents.add(
                             scenario=scenario.id,
@@ -2008,6 +2969,16 @@ def main(argv: list[str] | None = None) -> int:
                             "attempt": attempt,
                             "status": "harness_error",
                             "error": f"{type(exc).__name__}: {exc}",
+                            "endpoint_class": "not_evaluated",
+                            "evidence_level": "harness_error",
+                            "production_efficiency_eligible": False,
+                            "provider_identity": None,
+                            "provider_identity_verified": False,
+                            "provider_endpoint_verified": False,
+                            "provider_auth_mode": "not_evaluated",
+                            "provider_authentication_evidence": "not_established",
+                            "provider_authentication_verified": False,
+                            "provider_response_success": False,
                         }
                     results.append(result)
                     write_summary(output, results)
@@ -2021,14 +2992,15 @@ def main(argv: list[str] | None = None) -> int:
                             )
                         break
                     failed_attempts.add(attempt)
-                    treatment_level = next_treatment_level(
-                        arm,
-                        treatment_level,
-                        agent_returncode=result.get("agent_returncode"),
-                        agent_timed_out=result.get("agent_timed_out"),
-                        policy_valid=result.get("policy_valid"),
-                        verification_returncode=result.get("verification_returncode"),
-                    )
+                    if args.engine == "codex-controlled":
+                        treatment_level = next_treatment_level(
+                            arm,
+                            treatment_level,
+                            agent_returncode=result.get("agent_returncode"),
+                            agent_timed_out=result.get("agent_timed_out"),
+                            policy_valid=result.get("policy_valid"),
+                            verification_returncode=result.get("verification_returncode"),
+                        )
     expected_keys = {
         (scenario.id, arm, trial)
         for scenario in scenarios
@@ -2048,7 +3020,10 @@ def main(argv: list[str] | None = None) -> int:
         return (
             0
             if observed_keys == expected_keys
-            and all(row.get("status") == "dry_run" for row in results)
+            and all(
+                row.get("status") == "wiring_only" and row.get("evidence_level") == "wiring_only"
+                for row in results
+            )
             else 1
         )
     performance = write_performance_report(
