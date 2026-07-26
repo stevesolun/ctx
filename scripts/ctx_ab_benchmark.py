@@ -1304,20 +1304,15 @@ def classify_production_evidence(
     dry_run: bool,
     provider_provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    endpoint_class = "custom_endpoint" if base_url else "provider_default"
     if dry_run:
         return {
-            "endpoint_class": "custom_endpoint" if base_url else "provider_default",
+            "endpoint_class": endpoint_class,
             "evidence_level": "wiring_only",
             "production_efficiency_eligible": False,
         }
-    if base_url:
-        return {
-            "endpoint_class": "custom_endpoint",
-            "evidence_level": "functional_only",
-            "production_efficiency_eligible": False,
-        }
     provenance = provider_provenance or {}
-    independently_verified = all(
+    positively_evidenced = all(
         provenance.get(field) is True
         for field in (
             "provider_identity_verified",
@@ -1326,16 +1321,24 @@ def classify_production_evidence(
             "provider_response_success",
         )
     )
-    if not independently_verified:
+    if not positively_evidenced:
         return {
-            "endpoint_class": "provider_default_unverified",
-            "evidence_level": "functional_unverified",
+            "endpoint_class": ("custom_endpoint" if base_url else "provider_default_unverified"),
+            "evidence_level": "functional_only" if base_url else "functional_unverified",
             "production_efficiency_eligible": False,
         }
     return {
-        "endpoint_class": "live_provider",
+        "endpoint_class": "custom_endpoint" if base_url else "live_provider",
         "evidence_level": "live_provider",
         "production_efficiency_eligible": True,
+    }
+
+
+def classify_codex_controlled_evidence(*, dry_run: bool) -> dict[str, Any]:
+    return {
+        "endpoint_class": "codex_controlled",
+        "evidence_level": ("controlled_wiring_only" if dry_run else "controlled_context_delivery"),
+        "production_efficiency_eligible": False,
     }
 
 
@@ -1416,38 +1419,80 @@ def extract_provider_response_provenance(
 
     response_adapters = {str(event.get("provider") or "").strip() for event in responses}
     response_models = {str(event.get("model") or "").strip() for event in responses}
+    reported_response_models = {
+        str(event.get("response_model") or "").strip() for event in responses
+    }
     finish_reasons = [str(event.get("finish_reason") or "").strip() for event in responses]
     if "" in response_adapters or len(response_adapters) != 1:
         raise ValueError("ctx run provider responses have missing or inconsistent adapters")
     if response_models != {model}:
         raise ValueError("ctx run provider responses do not match the requested model")
     response_success = all(reason in {"stop", "tool_calls"} for reason in finish_reasons)
+    response_model_verified = reported_response_models == {model}
     auth_mode = "api_key_env" if configured_api_key_env else "none_or_implicit"
     auth_present = bool(configured_api_key_env and env.get(configured_api_key_env))
+    authentication_submitted = all(
+        event.get("authentication_submitted") is True for event in responses
+    )
+    authentication_verified = bool(response_success and auth_present and authentication_submitted)
+    expected_endpoint_hash = (
+        "sha256:" + hashlib.sha256(configured_base_url.encode("utf-8")).hexdigest()
+        if configured_base_url
+        else None
+    )
+    response_endpoint_hashes = {
+        str(event.get("request_endpoint_hash") or "").strip() for event in responses
+    }
+    endpoint_request_verified = (
+        response_endpoint_hashes == {expected_endpoint_hash}
+        if expected_endpoint_hash is not None
+        else response_endpoint_hashes == {""}
+    )
+    identity_verified = bool(response_success and response_model_verified)
+    endpoint_verified = bool(response_success and endpoint_request_verified)
+    endpoint_source = (
+        "custom_endpoint_from_session_config"
+        if configured_base_url
+        else "provider_default_from_session_config"
+    )
     return {
         "provider_identity": configured_provider,
-        "provider_identity_source": "session_start_config",
-        "provider_identity_verified": False,
+        "provider_identity_source": (
+            "session_start_and_provider_reported_model"
+            if identity_verified
+            else "session_start_config"
+        ),
+        "provider_identity_verified": identity_verified,
         "provider_adapter": next(iter(response_adapters)),
         "provider_response_models": sorted(response_models),
+        "provider_reported_response_models": sorted(
+            model for model in reported_response_models if model
+        ),
+        "provider_response_model_verified": response_model_verified,
         "provider_response_finish_reasons": finish_reasons,
         "provider_response_count": len(responses),
         "provider_response_success": response_success,
+        "provider_request_endpoint_hash_verified": endpoint_request_verified,
         "provider_endpoint_evidence": (
-            "custom_endpoint_from_session_config"
-            if configured_base_url
-            else "provider_default_from_session_config"
+            f"{endpoint_source}_with_matching_request_and_successful_response"
+            if endpoint_verified
+            else endpoint_source
         ),
-        "provider_endpoint_verified": False,
+        "provider_endpoint_verified": endpoint_verified,
         "provider_auth_mode": auth_mode,
+        "provider_request_authentication_submitted": authentication_submitted,
         "provider_authentication_evidence": (
-            "configured_api_key_env_present"
+            "credential_submitted_with_successful_response"
+            if authentication_verified
+            else "credential_submitted_without_successful_response"
+            if authentication_submitted
+            else "configured_api_key_env_present_but_not_submitted"
             if auth_present
             else "configured_api_key_env_missing"
             if configured_api_key_env
             else "not_established"
         ),
-        "provider_authentication_verified": False,
+        "provider_authentication_verified": authentication_verified,
         "provider_session_sha256": hashlib.sha256(session_bytes).hexdigest(),
         "provider_session_digest_scope": "exact_ctx_run_session_jsonl_bytes",
         "provider_session_path": str(session_path),
@@ -2267,6 +2312,7 @@ def run_trial(
     incidents: IncidentLog,
 ) -> dict[str, Any]:
     trial_started = time.perf_counter()
+    evidence_classification = classify_codex_controlled_evidence(dry_run=dry_run)
     run_dir = output / scenario.id / arm / f"attempt-{attempt}"
     workspace = run_dir / "repo"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -2379,9 +2425,10 @@ def run_trial(
                 "trial": trial,
                 "retry": retry,
                 "attempt": attempt,
+                "engine": "codex-controlled",
                 "treatment_level": treatment_level,
                 "status": "wiring_only",
-                "evidence_level": "wiring_only",
+                **evidence_classification,
                 "verification_passed": None,
                 "task_prompt_sha256": prompt_hash,
                 "delivered_prompt_sha256": treatment_hash,
@@ -2532,6 +2579,8 @@ def run_trial(
             "trial": trial,
             "retry": retry,
             "attempt": attempt,
+            "engine": "codex-controlled",
+            **evidence_classification,
             "benchmark_class": scenario.benchmark_class,
             "treatment_level": treatment_level,
             "escalated": treatment_level != arm,
@@ -2805,6 +2854,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def dry_run_results_complete(
+    results: list[dict[str, Any]],
+    *,
+    expected_keys: set[tuple[str, str, int]],
+    engine: str,
+) -> bool:
+    expected_evidence_level = (
+        "controlled_wiring_only" if engine == "codex-controlled" else "wiring_only"
+    )
+    observed_keys = {
+        (
+            str(row.get("scenario")),
+            str(row.get("arm")),
+            int(row.get("trial", 0)),
+        )
+        for row in results
+    }
+    return observed_keys == expected_keys and all(
+        row.get("status") == "wiring_only" and row.get("evidence_level") == expected_evidence_level
+        for row in results
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     scenarios = load_scenarios(args.scenarios)
@@ -3009,20 +3081,12 @@ def main(argv: list[str] | None = None) -> int:
     }
     if args.dry_run:
         print(output)
-        observed_keys = {
-            (
-                str(row.get("scenario")),
-                str(row.get("arm")),
-                int(row.get("trial", 0)),
-            )
-            for row in results
-        }
         return (
             0
-            if observed_keys == expected_keys
-            and all(
-                row.get("status") == "wiring_only" and row.get("evidence_level") == "wiring_only"
-                for row in results
+            if dry_run_results_complete(
+                results,
+                expected_keys=expected_keys,
+                engine=args.engine,
             )
             else 1
         )

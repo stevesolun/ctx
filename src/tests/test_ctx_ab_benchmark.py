@@ -475,7 +475,7 @@ def test_performance_gate_rejects_slow_evidence_run() -> None:
     assert incomplete["evidence_complete"] is False
 
 
-def test_custom_endpoint_evidence_is_excluded_from_efficiency_aggregates(
+def test_unverified_custom_endpoint_evidence_is_excluded_from_efficiency_aggregates(
     tmp_path: Path,
 ) -> None:
     classification = benchmark.classify_production_evidence(
@@ -516,6 +516,89 @@ def test_custom_endpoint_evidence_is_excluded_from_efficiency_aggregates(
     assert report["median_time_ratio"] is None
     assert json.loads((tmp_path / "aggregate.json").read_text(encoding="utf-8")) == []
     assert len(json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))) == 2
+
+
+def test_verified_custom_endpoint_evidence_is_efficiency_eligible() -> None:
+    assert benchmark.classify_production_evidence(
+        base_url="https://provider.example/v1",
+        dry_run=False,
+        provider_provenance={
+            "provider_identity_verified": True,
+            "provider_endpoint_verified": True,
+            "provider_authentication_verified": True,
+            "provider_response_success": True,
+        },
+    ) == {
+        "endpoint_class": "custom_endpoint",
+        "evidence_level": "live_provider",
+        "production_efficiency_eligible": True,
+    }
+
+
+def test_codex_controlled_evidence_never_claims_shipped_provider_proof() -> None:
+    assert benchmark.classify_codex_controlled_evidence(dry_run=False) == {
+        "endpoint_class": "codex_controlled",
+        "evidence_level": "controlled_context_delivery",
+        "production_efficiency_eligible": False,
+    }
+    assert benchmark.classify_codex_controlled_evidence(dry_run=True) == {
+        "endpoint_class": "codex_controlled",
+        "evidence_level": "controlled_wiring_only",
+        "production_efficiency_eligible": False,
+    }
+
+
+def test_codex_controlled_dry_run_result_is_explicitly_non_production(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scenario = benchmark.load_scenarios(ROOT / "benchmarks/ctx_ab/scenarios.yaml")[0]
+
+    def fake_prepare(_scenario: object, _cache: Path, destination: Path) -> str:
+        destination.mkdir(parents=True)
+        return "test-hash"
+
+    monkeypatch.setattr(benchmark, "prepare_workspace", fake_prepare)
+    result = benchmark.run_trial(
+        scenario,
+        arm="baseline",
+        treatment_level="baseline",
+        attempt=1,
+        trial=1,
+        retry=0,
+        cache=tmp_path / "cache",
+        output=tmp_path / "output",
+        codex="codex",
+        model="gpt-test",
+        timeout=10,
+        dry_run=True,
+        incidents=benchmark.IncidentLog(tmp_path / "incidents.csv"),
+    )
+
+    assert result["engine"] == "codex-controlled"
+    assert result["endpoint_class"] == "codex_controlled"
+    assert result["evidence_level"] == "controlled_wiring_only"
+    assert result["production_efficiency_eligible"] is False
+
+
+def test_codex_controlled_dry_run_is_accepted_as_complete() -> None:
+    result = {
+        "scenario": "scenario-a",
+        "arm": "baseline",
+        "trial": 1,
+        "status": "wiring_only",
+        "evidence_level": "controlled_wiring_only",
+    }
+
+    assert benchmark.dry_run_results_complete(
+        [result],
+        expected_keys={("scenario-a", "baseline", 1)},
+        engine="codex-controlled",
+    )
+    assert not benchmark.dry_run_results_complete(
+        [{**result, "evidence_level": "wiring_only"}],
+        expected_keys={("scenario-a", "baseline", 1)},
+        engine="codex-controlled",
+    )
 
 
 def test_no_base_url_and_success_do_not_infer_live_provider() -> None:
@@ -754,7 +837,7 @@ def test_production_payload_requires_requested_successful_session() -> None:
             )
 
 
-def test_provider_response_provenance_is_recorded_but_not_attested(
+def test_provider_response_provenance_requires_a_successful_authenticated_response(
     tmp_path: Path,
 ) -> None:
     session_id = "provider-evidence"
@@ -773,6 +856,9 @@ def test_provider_response_provenance_is_recorded_but_not_attested(
             "session_id": session_id,
             "provider": "litellm",
             "model": "openai/gpt-test",
+            "response_model": "openai/gpt-test",
+            "authentication_submitted": True,
+            "request_endpoint_hash": None,
             "finish_reason": "stop",
         },
     ]
@@ -794,12 +880,218 @@ def test_provider_response_provenance_is_recorded_but_not_attested(
     assert evidence["provider_adapter"] == "litellm"
     assert evidence["provider_response_success"] is True
     assert evidence["provider_auth_mode"] == "api_key_env"
-    assert evidence["provider_authentication_evidence"] == "configured_api_key_env_present"
+    assert (
+        evidence["provider_authentication_evidence"]
+        == "credential_submitted_with_successful_response"
+    )
+    assert evidence["provider_identity_verified"] is True
+    assert evidence["provider_endpoint_verified"] is True
+    assert evidence["provider_authentication_verified"] is True
+    assert evidence["provider_request_authentication_submitted"] is True
+    assert "secret-value" not in json.dumps(evidence)
+    assert len(evidence["provider_session_sha256"]) == 64
+
+
+def test_provider_key_presence_without_success_is_not_authentication_evidence(
+    tmp_path: Path,
+) -> None:
+    session_id = "provider-failure"
+    events = [
+        {
+            "type": "session_start",
+            "session_id": session_id,
+            "provider": "openai",
+            "model": "openai/gpt-test",
+            "api_key_env": "MODEL_API_KEY",
+            "base_url": "",
+        },
+        {
+            "type": "model_response",
+            "session_id": session_id,
+            "provider": "litellm",
+            "model": "openai/gpt-test",
+            "response_model": "openai/gpt-test",
+            "authentication_submitted": True,
+            "request_endpoint_hash": None,
+            "finish_reason": "error",
+        },
+    ]
+    (tmp_path / f"{session_id}.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in events),
+        encoding="utf-8",
+    )
+
+    evidence = benchmark.extract_provider_response_provenance(
+        sessions_dir=tmp_path,
+        session_id=session_id,
+        model="openai/gpt-test",
+        base_url=None,
+        api_key_env="MODEL_API_KEY",
+        env={"MODEL_API_KEY": "secret-value"},
+    )
+
+    assert evidence["provider_response_success"] is False
     assert evidence["provider_identity_verified"] is False
     assert evidence["provider_endpoint_verified"] is False
     assert evidence["provider_authentication_verified"] is False
+    assert (
+        evidence["provider_authentication_evidence"]
+        == "credential_submitted_without_successful_response"
+    )
     assert "secret-value" not in json.dumps(evidence)
-    assert len(evidence["provider_session_sha256"]) == 64
+
+
+def test_successful_local_no_key_provider_remains_functional_only(tmp_path: Path) -> None:
+    session_id = "local-no-key"
+    model = "openai/local-test"
+    base_url = "http://127.0.0.1:11434/v1"
+    events = [
+        {
+            "type": "session_start",
+            "session_id": session_id,
+            "provider": "openai",
+            "model": model,
+            "api_key_env": "",
+            "base_url": base_url,
+        },
+        {
+            "type": "model_response",
+            "session_id": session_id,
+            "provider": "litellm",
+            "model": model,
+            "response_model": model,
+            "authentication_submitted": False,
+            "request_endpoint_hash": (
+                "sha256:" + hashlib.sha256(base_url.encode("utf-8")).hexdigest()
+            ),
+            "finish_reason": "stop",
+        },
+    ]
+    (tmp_path / f"{session_id}.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in events),
+        encoding="utf-8",
+    )
+
+    evidence = benchmark.extract_provider_response_provenance(
+        sessions_dir=tmp_path,
+        session_id=session_id,
+        model=model,
+        base_url=base_url,
+        api_key_env=None,
+        env={},
+    )
+
+    assert evidence["provider_identity_verified"] is True
+    assert evidence["provider_endpoint_verified"] is True
+    assert evidence["provider_authentication_verified"] is False
+    assert benchmark.classify_production_evidence(
+        base_url=base_url,
+        dry_run=False,
+        provider_provenance=evidence,
+    ) == {
+        "endpoint_class": "custom_endpoint",
+        "evidence_level": "functional_only",
+        "production_efficiency_eligible": False,
+    }
+
+
+def test_provider_reported_model_mismatch_does_not_verify_provider(
+    tmp_path: Path,
+) -> None:
+    session_id = "unattested-provider"
+    events = [
+        {
+            "type": "session_start",
+            "session_id": session_id,
+            "provider": "openai",
+            "model": "openai/gpt-test",
+            "api_key_env": "MODEL_API_KEY",
+            "base_url": "",
+        },
+        {
+            "type": "model_response",
+            "session_id": session_id,
+            "provider": "litellm",
+            "model": "openai/gpt-test",
+            "response_model": "provider-returned-different",
+            "authentication_submitted": True,
+            "request_endpoint_hash": None,
+            "finish_reason": "stop",
+        },
+    ]
+    (tmp_path / f"{session_id}.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in events),
+        encoding="utf-8",
+    )
+
+    evidence = benchmark.extract_provider_response_provenance(
+        sessions_dir=tmp_path,
+        session_id=session_id,
+        model="openai/gpt-test",
+        base_url=None,
+        api_key_env="MODEL_API_KEY",
+        env={"MODEL_API_KEY": "secret-value"},
+    )
+
+    assert evidence["provider_response_success"] is True
+    assert evidence["provider_identity_verified"] is False
+    assert evidence["provider_authentication_verified"] is True
+    assert evidence["provider_request_authentication_submitted"] is True
+    assert (
+        benchmark.classify_production_evidence(
+            base_url=None,
+            dry_run=False,
+            provider_provenance=evidence,
+        )["production_efficiency_eligible"]
+        is False
+    )
+
+
+def test_environment_key_without_submitted_credential_does_not_verify_authentication(
+    tmp_path: Path,
+) -> None:
+    session_id = "credential-not-submitted"
+    events = [
+        {
+            "type": "session_start",
+            "session_id": session_id,
+            "provider": "openai",
+            "model": "openai/gpt-test",
+            "api_key_env": "MODEL_API_KEY",
+            "base_url": "",
+        },
+        {
+            "type": "model_response",
+            "session_id": session_id,
+            "provider": "litellm",
+            "model": "openai/gpt-test",
+            "response_model": "openai/gpt-test",
+            "authentication_submitted": False,
+            "request_endpoint_hash": None,
+            "finish_reason": "stop",
+        },
+    ]
+    (tmp_path / f"{session_id}.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in events),
+        encoding="utf-8",
+    )
+
+    evidence = benchmark.extract_provider_response_provenance(
+        sessions_dir=tmp_path,
+        session_id=session_id,
+        model="openai/gpt-test",
+        base_url=None,
+        api_key_env="MODEL_API_KEY",
+        env={"MODEL_API_KEY": "secret-value"},
+    )
+
+    assert evidence["provider_identity_verified"] is True
+    assert evidence["provider_authentication_verified"] is False
+    assert evidence["provider_request_authentication_submitted"] is False
+    assert (
+        evidence["provider_authentication_evidence"]
+        == "configured_api_key_env_present_but_not_submitted"
+    )
 
 
 def test_provider_response_provenance_rejects_foreign_session(tmp_path: Path) -> None:
@@ -1427,6 +1719,10 @@ def completion(**params):
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API.
+            if self.headers.get("Authorization") != "Bearer local-test-key":
+                self.send_response(401)
+                self.end_headers()
+                return
             length = int(self.headers.get("Content-Length", "0"))
             request_payload = json.loads(self.rfile.read(length))
             expected_tools = [] if not observed_requests else expected_treatment_tools
@@ -1616,13 +1912,19 @@ def completion(**params):
         assert provider_provenance["provider_identity"] == "openai"
         assert provider_provenance["provider_adapter"] == "litellm"
         assert provider_provenance["provider_response_success"] is True
-        assert provider_provenance["provider_authentication_verified"] is False
+        assert provider_provenance["provider_identity_verified"] is True
+        assert provider_provenance["provider_endpoint_verified"] is True
+        assert provider_provenance["provider_authentication_verified"] is True
         assert provider_provenance["configured_ctx_tool_surface_verified"] is True
-    assert benchmark.classify_production_evidence(base_url=base_url, dry_run=False) == {
-        "endpoint_class": "custom_endpoint",
-        "evidence_level": "functional_only",
-        "production_efficiency_eligible": False,
-    }
+        assert benchmark.classify_production_evidence(
+            base_url=base_url,
+            dry_run=False,
+            provider_provenance=provider_provenance,
+        ) == {
+            "endpoint_class": "custom_endpoint",
+            "evidence_level": "live_provider",
+            "production_efficiency_eligible": True,
+        }
 
 
 def test_environment_manifest_records_schedule_and_dirty_state(
