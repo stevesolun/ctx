@@ -128,6 +128,7 @@ def synthetic_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         CtxCoreToolbox(
             wiki_dir=wiki,
             graph_path=wiki / "graphify-out" / "graph.json",
+            lifecycle_dir=tmp_path / "runtime",
         ),
     )
     # ``default_wiki_dir`` reads from ``ctx_config.cfg`` which is a
@@ -220,6 +221,8 @@ class TestSignatures:
         top_k = sig.parameters["top_k"]
         assert top_k.kind == inspect.Parameter.KEYWORD_ONLY
         assert top_k.default == 5
+        assert sig.parameters["session_id"].default is None
+        assert sig.parameters["rejection_mode"].default == "use"
 
     def test_graph_query_signature(self) -> None:
         sig = inspect.signature(ctx.graph_query)
@@ -232,6 +235,8 @@ class TestSignatures:
         assert related_sig.parameters["rejected"].default is None
         assert related_sig.parameters["max_hops"].default == 2
         assert related_sig.parameters["top_n"].default == 5
+        assert related_sig.parameters["session_id"].default is None
+        assert related_sig.parameters["rejection_mode"].default == "use"
 
     def test_wiki_search_signature(self) -> None:
         sig = inspect.signature(ctx.wiki_search)
@@ -309,6 +314,29 @@ class TestRecommendBundle:
         assert len(bundle) <= 5
         assert {row["type"] for row in bundle} <= {"skill", "agent", "mcp-server"}
 
+    def test_session_rejections_are_opt_in_and_stateless_calls_stay_independent(
+        self,
+        synthetic_home: Path,
+    ) -> None:
+        ctx.recommend_bundle(
+            "fastapi web api",
+            rejected=["skill:fastapi-pro"],
+            session_id="api-session",
+        )
+
+        remembered = ctx.recommend_bundle("fastapi web api", session_id="api-session")
+        stateless = ctx.recommend_bundle("fastapi web api")
+        cleared = ctx.recommend_bundle(
+            "fastapi web api",
+            rejected=[],
+            session_id="api-session",
+            rejection_mode="replace",
+        )
+
+        assert "skill:fastapi-pro" not in {row["id"] for row in remembered}
+        assert "skill:fastapi-pro" in {row["id"] for row in stateless}
+        assert "skill:fastapi-pro" in {row["id"] for row in cleared}
+
 
 class TestApiTelemetry:
     def test_recommend_bundle_emits_otel_style_telemetry_without_raw_query(
@@ -354,6 +382,17 @@ class TestApiTelemetry:
         assert payload["ctx.result.count"] == len(related)
         assert selected_id not in json.dumps(payload)
         assert rejected_id not in json.dumps(payload)
+
+    def test_session_correlation_is_forwarded_without_raw_payload(
+        self,
+        synthetic_home: Path,
+        captured_api_events: list[dict[str, Any]],
+    ) -> None:
+        ctx.recommend_bundle("python", session_id="private-api-session")
+
+        event = captured_api_events[-1]
+        assert event["session_id"] == "private-api-session"
+        assert "private-api-session" not in json.dumps(event["payload"])
 
     def test_recommend_bundle_error_telemetry_keeps_error_structured(
         self,

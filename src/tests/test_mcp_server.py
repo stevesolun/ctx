@@ -587,6 +587,75 @@ class TestHandlersDirect:
             _handle_tools_call(state, {})
         assert ei.value.code == _ErrorCode.INVALID_PARAMS
 
+    def test_mcp_process_keeps_isolated_rejection_memory(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        created: list[dict[str, Any]] = []
+
+        def build_toolbox(**kwargs: Any) -> CtxCoreToolbox:
+            created.append(kwargs)
+            return CtxCoreToolbox(
+                wiki_dir=_build_overlapping_scope_wiki(tmp_path),
+                graph_path=_build_overlapping_scope_graph(tmp_path),
+                lifecycle_dir=tmp_path / "runtime",
+                **kwargs,
+            )
+
+        monkeypatch.setattr(mcp_server, "CtxCoreToolbox", build_toolbox)
+        state = _ServerState(recommendation_session_id="mcp-process-session")
+
+        first = _handle_tools_call(
+            state,
+            {
+                "name": "ctx__recommend_bundle",
+                "arguments": {
+                    "query": "python patterns",
+                    "rejected": ["skill:python-patterns"],
+                },
+            },
+        )
+        second = _handle_tools_call(
+            state,
+            {
+                "name": "ctx__recommend_bundle",
+                "arguments": {"query": "python patterns"},
+            },
+        )
+
+        first_payload = json.loads(first["content"][0]["text"])
+        second_payload = json.loads(second["content"][0]["text"])
+        assert created[0]["recommendation_session_id"] == "mcp-process-session"
+        listed_tools = _handle_tools_list(state, {})["tools"]
+        assert (
+            "session_id"
+            not in next(tool for tool in listed_tools if tool["name"] == "ctx__recommend_bundle")[
+                "inputSchema"
+            ]["properties"]
+        )
+        assert (
+            "session_id"
+            in next(tool for tool in listed_tools if tool["name"] == "ctx__load_entity")[
+                "inputSchema"
+            ]["properties"]
+        )
+        assert "skill:python-patterns" not in {row["id"] for row in first_payload["results"]}
+        assert "skill:python-patterns" not in {row["id"] for row in second_payload["results"]}
+
+        override = _handle_tools_call(
+            state,
+            {
+                "name": "ctx__recommend_bundle",
+                "arguments": {
+                    "query": "python patterns",
+                    "session_id": "another-session",
+                },
+            },
+        )
+        assert override["isError"] is True
+        assert "host-bound" in override["content"][0]["text"]
+
 
 # ── Frame writers ───────────────────────────────────────────────────────────
 

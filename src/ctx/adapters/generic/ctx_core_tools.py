@@ -385,6 +385,7 @@ class CtxCoreToolbox:
         graph_path: Path | None = None,
         lifecycle_dir: Path | None = None,
         bound_session_id: str | None = None,
+        recommendation_session_id: str | None = None,
         allowed_tool_names: Iterable[str] | None = None,
         allowed_entity_types: Iterable[str] | None = None,
     ) -> None:
@@ -392,6 +393,7 @@ class CtxCoreToolbox:
         self._graph_path = graph_path
         self._lifecycle = RuntimeLifecycleStore(lifecycle_dir)
         self._bound_session_id = str(bound_session_id or "").strip() or None
+        self._recommendation_bound_session_id = str(recommendation_session_id or "").strip() or None
         self._allowed_tool_names = _normalise_allowed_tool_names(allowed_tool_names)
         self._allowed_entity_types = _normalise_allowed_entity_types(allowed_entity_types)
         self._graph: Any | None = None  # networkx.Graph
@@ -757,7 +759,7 @@ class CtxCoreToolbox:
                     "including clearing with an empty rejected list; ignore is call-local."
                 ),
             }
-            if self._bound_session_id is None:
+            if self._bound_session_id is None and self._recommendation_bound_session_id is None:
                 properties["session_id"] = {
                     "type": "string",
                     "description": (
@@ -789,6 +791,8 @@ class CtxCoreToolbox:
         )
         event_payload = _safe_tool_payload(local_name, args)
         session_id = str(args.get("session_id") or "").strip() or self._bound_session_id
+        if session_id is None and local_name in {"recommend_bundle", "recommend_related"}:
+            session_id = self._recommendation_bound_session_id
 
         with telemetry_span():
             try:
@@ -1386,10 +1390,11 @@ class CtxCoreToolbox:
 
     def _recommendation_session_id(self, args: Mapping[str, Any]) -> str | None:
         supplied = str(args.get("session_id") or "").strip()
-        if self._bound_session_id is not None:
-            if supplied and supplied != self._bound_session_id:
+        bound = self._bound_session_id or self._recommendation_bound_session_id
+        if bound is not None:
+            if supplied and supplied != bound:
                 raise ValueError("session_id is host-bound and cannot be overridden")
-            return self._bound_session_id
+            return bound
         return supplied or None
 
     def _recommendation_rejections(

@@ -43,6 +43,8 @@ Public functions:
         local_code_task=None,
         no_api_keys=None,
         language=None,
+        session_id=None,
+        rejection_mode="use",
     )
         Free-text → ranked skill/agent/MCP execution bundle with selection,
         availability, baseline-context, and local/no-key/language filters.
@@ -184,6 +186,7 @@ def _record_api_event(
     payload: dict[str, Any],
     outcome: str,
     duration_ms: float,
+    session_id: str | None = None,
     error_kind: str | None = None,
     exc: BaseException | None = None,
 ) -> None:
@@ -197,6 +200,7 @@ def _record_api_event(
                 source="ctx-api",
                 exc=exc,
                 transport="python-api",
+                session_id=session_id,
                 outcome=outcome,
                 duration_ms=duration_ms,
                 error_kind=error_kind,
@@ -207,6 +211,7 @@ def _record_api_event(
                 event_name,
                 source="ctx-api",
                 transport="python-api",
+                session_id=session_id,
                 outcome=outcome,
                 duration_ms=duration_ms,
                 error_kind=error_kind,
@@ -221,6 +226,7 @@ def _call(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     started = time.perf_counter()
     event_name = _TOOL_EVENT_NAMES.get(tool_name, "ctx.api.tool_call")
     event_payload = _safe_argument_payload(tool_name, arguments)
+    session_id = str(arguments.get("session_id") or "").strip() or None
     toolbox = _get_toolbox()
     with telemetry_span():
         try:
@@ -232,6 +238,7 @@ def _call(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
                 payload=event_payload,
                 outcome="error",
                 duration_ms=_duration_ms(started),
+                session_id=session_id,
                 error_kind=type(exc).__name__,
                 exc=exc,
             )
@@ -245,6 +252,7 @@ def _call(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             payload=event_payload,
             outcome=outcome,
             duration_ms=_duration_ms(started),
+            session_id=session_id,
             error_kind="structured_error" if outcome == "error" else None,
         )
         return payload
@@ -259,20 +267,24 @@ def recommend_bundle(
     top_k: int = 5,
     selected: list[str] | None = None,
     rejected: list[str] | None = None,
-    active_context: list[str] | None = None,
+    active_context: list[str | dict[str, Any]] | None = None,
     baseline_context: list[str] | None = None,
     include_baseline_context: bool = False,
     include_unavailable: bool = False,
     local_code_task: bool | None = None,
     no_api_keys: bool | None = None,
     language: str | None = None,
+    session_id: str | None = None,
+    rejection_mode: str = "use",
 ) -> list[dict[str, Any]]:
     """Return a top-K ranked recommendation bundle for a free-text query.
 
     ``selected``/``rejected`` suppress prior decisions, ``active_context`` and
     ``baseline_context`` suppress already-present host context, and
     ``local_code_task``/``no_api_keys``/``language`` narrow results for local
-    coding loops. Set ``include_baseline_context`` or ``include_unavailable``
+    coding loops. Calls stay stateless unless ``session_id`` is supplied;
+    ``rejection_mode`` controls whether session rejection memory is used,
+    replaced, or ignored. Set ``include_baseline_context`` or ``include_unavailable``
     to opt back into those rows. Each entry uses the enriched recommendation
     contract: ``id``, ``name``, ``type``, ``score``, ``matching_tags``,
     ``tags``, ``installable``, ``load_status``, ``source_path``, selection
@@ -294,7 +306,7 @@ def recommend_bundle(
     }
     if selected:
         args["selected"] = selected
-    if rejected:
+    if rejected is not None:
         args["rejected"] = rejected
     if active_context:
         args["active_context"] = active_context
@@ -310,6 +322,10 @@ def recommend_bundle(
         args["no_api_keys"] = no_api_keys
     if language is not None:
         args["language"] = language
+    if session_id is not None:
+        args["session_id"] = session_id
+    if rejection_mode != "use":
+        args["rejection_mode"] = rejection_mode
     payload = _call("ctx__recommend_bundle", args)
     return payload.get("results", []) if "error" not in payload else []
 
@@ -320,6 +336,8 @@ def recommend_related(
     rejected: list[str] | None = None,
     max_hops: int = 2,
     top_n: int = 5,
+    session_id: str | None = None,
+    rejection_mode: str = "use",
 ) -> list[dict[str, Any]]:
     """Return graph-related recommendations after a partial selection.
 
@@ -327,16 +345,22 @@ def recommend_related(
     ``skill:fastapi-pro`` or bare entity names such as ``fastapi-pro``.
     Returned rows use the same enriched recommendation contract as
     ``recommend_bundle`` and are marked ``selection_state='suggested_related'``.
+    ``session_id`` and ``rejection_mode`` use the same opt-in memory semantics.
     Empty list on missing graph or invalid inputs.
     """
+    arguments: dict[str, Any] = {
+        "selected": selected,
+        "rejected": rejected or [],
+        "max_hops": max_hops,
+        "top_n": top_n,
+    }
+    if session_id is not None:
+        arguments["session_id"] = session_id
+    if rejection_mode != "use":
+        arguments["rejection_mode"] = rejection_mode
     payload = _call(
         "ctx__recommend_related",
-        {
-            "selected": selected,
-            "rejected": rejected or [],
-            "max_hops": max_hops,
-            "top_n": top_n,
-        },
+        arguments,
     )
     return payload.get("results", []) if "error" not in payload else []
 

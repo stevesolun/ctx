@@ -68,8 +68,9 @@ import json
 import logging
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, BinaryIO, Iterable
+from uuid import uuid4
 
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
 from ctx.adapters.generic.providers import ToolCall
@@ -107,10 +108,12 @@ class _ServerState:
     toolbox: CtxCoreToolbox | None = None
     allowed_tool_names: frozenset[str] | None = None
     allowed_entity_types: frozenset[str] | None = None
+    recommendation_session_id: str = field(default_factory=lambda: f"mcp-{uuid4().hex}")
 
     def ensure_toolbox(self) -> CtxCoreToolbox:
         if self.toolbox is None:
             self.toolbox = CtxCoreToolbox(
+                recommendation_session_id=self.recommendation_session_id,
                 allowed_tool_names=self.allowed_tool_names,
                 allowed_entity_types=self.allowed_entity_types,
             )
