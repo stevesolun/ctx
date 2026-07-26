@@ -2300,10 +2300,15 @@ class TestRecommendBundle:
                 "SELECT event_size FROM metadata WHERE singleton = 1"
             ).fetchone()[0]
 
-        store.record_dev_event(
-            session_id="checkpoint-session",
-            event_type="test",
-        )
+        def unexpected_content_verification(*_args: Any, **_kwargs: Any) -> None:
+            raise AssertionError("ordinary append scanned the complete event stream")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(lifecycle, "_event_stream_head", unexpected_content_verification)
+            store.record_dev_event(
+                session_id="checkpoint-session",
+                event_type="test",
+            )
         with sqlite3.connect(store.recommendation_checkpoint_path) as connection:
             updated_size = connection.execute(
                 "SELECT event_size FROM metadata WHERE singleton = 1"
@@ -2345,6 +2350,37 @@ class TestRecommendBundle:
         assert row is not None
         assert json.loads(row[0]) == ["agent:reviewer"]
 
+    def test_v2_sampled_anchor_index_migrates_to_complete_stream_schema(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="v2-migration",
+            rejected=["skill:canonical"],
+        )
+        with sqlite3.connect(store.recommendation_index_path) as connection:
+            connection.execute(
+                "ALTER TABLE metadata ADD COLUMN prefix_anchor TEXT NOT NULL DEFAULT ''"
+            )
+            connection.execute(
+                "ALTER TABLE metadata ADD COLUMN tail_anchor TEXT NOT NULL DEFAULT ''"
+            )
+            connection.execute("UPDATE metadata SET version = 2")
+            connection.execute("PRAGMA user_version=2")
+            connection.commit()
+
+        assert store.recommendation_rejections(session_id="v2-migration") == ["skill:canonical"]
+        with sqlite3.connect(store.recommendation_index_path) as connection:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(metadata)").fetchall()
+            }
+        assert version == 3
+        assert {"prefix_anchor", "tail_anchor"}.isdisjoint(columns)
+
     def test_rejection_index_row_tampering_rebuilds_from_events(
         self,
         tmp_path: Path,
@@ -2370,7 +2406,7 @@ class TestRecommendBundle:
         assert rejected == ["skill:valid"]
         assert "rebuilding malformed rejection index" in caplog.text
 
-    def test_early_same_length_event_edit_is_rebuilt_before_ordinary_append(
+    def test_middle_same_length_event_edit_rebuilds_with_frozen_metadata(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -2378,17 +2414,38 @@ class TestRecommendBundle:
         import ctx.adapters.generic.runtime_lifecycle as lifecycle
 
         store = lifecycle.RuntimeLifecycleStore(root=tmp_path / "runtime")
-        store.remember_recommendation_rejections(
-            session_id="prefix-integrity",
-            rejected=["skill:valid"],
-        )
-        for index in range(80):
-            store.record_dev_event(
-                session_id="prefix-integrity",
-                event_type="padding",
-                payload={"index": index, "padding": "x" * 96},
+        padding = [
+            (
+                json.dumps(
+                    {
+                        "action": "dev_event",
+                        "session_id": "middle-integrity",
+                        "event_type": "padding",
+                        "payload": {"index": index, "padding": "x" * 128},
+                    },
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode()
+            for index in range(220)
+        ]
+        rejection = (
+            json.dumps(
+                {
+                    "action": "recommendation_rejections",
+                    "session_id": "middle-integrity",
+                    "rejected": ["skill:valid"],
+                },
+                separators=(",", ":"),
             )
-        assert store.events_path.stat().st_size > 8192
+            + "\n"
+        ).encode()
+        payload = b"".join([*padding, rejection, *padding])
+        store.events_path.parent.mkdir(parents=True)
+        store.events_path.write_bytes(payload)
+        os.chmod(store.events_path, 0o600)
+        assert len(payload) > 55_000
+        assert store.recommendation_rejections(session_id="middle-integrity") == ["skill:valid"]
 
         with sqlite3.connect(store.recommendation_index_path) as connection:
             frozen_stat = connection.execute(
@@ -2416,21 +2473,17 @@ class TestRecommendBundle:
         original = b"skill:valid"
         replacement = b"agent:evilx"
         assert len(original) == len(replacement)
+        offset = payload.index(original)
+        assert 4096 < offset < len(payload) - 4096 - len(original)
         with store.events_path.open("r+b") as handle:
-            payload = handle.read()
-            offset = payload.index(original)
             handle.seek(offset)
             handle.write(replacement)
             handle.flush()
             os.fsync(handle.fileno())
 
-        store.record_dev_event(
-            session_id="prefix-integrity",
-            event_type="after-prefix-edit",
-        )
-        indexed = store.recommendation_rejections(session_id="prefix-integrity")
+        indexed = store.recommendation_rejections(session_id="middle-integrity")
         store.recommendation_checkpoint_path.unlink()
-        rebuilt = store.recommendation_rejections(session_id="prefix-integrity")
+        rebuilt = store.recommendation_rejections(session_id="middle-integrity")
 
         assert indexed == ["agent:evilx"]
         assert rebuilt == indexed

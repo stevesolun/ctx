@@ -38,8 +38,7 @@ from ctx.utils._secret_scan import redact_secret_text
 
 
 _logger = logging.getLogger(__name__)
-_REJECTION_INDEX_VERSION = 2
-_REJECTION_CHECKPOINT_ANCHOR_BYTES = 4096
+_REJECTION_INDEX_VERSION = 3
 _REJECTION_HEAD_SEED = hashlib.sha256(b"").hexdigest()
 _SESSION_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _ENTITY_TYPES = set(RECOMMENDABLE_ENTITY_TYPES)
@@ -566,7 +565,7 @@ class RuntimeLifecycleStore:
         owns_connection = connection is None
         if owns_connection:
             _repair_jsonl_tail(path)
-            connection = self._open_rejection_index_unlocked()
+            connection = self._open_rejection_index_unlocked(verify_content=False)
         assert connection is not None
         try:
             payload = _append_jsonl_event(path, event)
@@ -620,12 +619,17 @@ class RuntimeLifecycleStore:
                 events.append(event)
         return events
 
-    def _open_rejection_index_unlocked(self) -> sqlite3.Connection:
+    def _open_rejection_index_unlocked(
+        self,
+        *,
+        verify_content: bool = True,
+    ) -> sqlite3.Connection:
         events_path = self.events_path
         return _open_rejection_index(
             events_path=events_path,
             index_path=self.recommendation_index_path,
             legacy_checkpoint_path=self._legacy_recommendation_checkpoint_path,
+            verify_content=verify_content,
         )
 
     @property
@@ -952,6 +956,7 @@ def _open_rejection_index(
     events_path: Path,
     index_path: Path,
     legacy_checkpoint_path: Path,
+    verify_content: bool,
 ) -> sqlite3.Connection:
     reject_symlink_path(events_path)
     _reject_rejection_index_symlinks(index_path)
@@ -977,6 +982,7 @@ def _open_rejection_index(
             if metadata is None or not _rejection_index_matches_events(
                 metadata,
                 events_path,
+                verify_content=verify_content,
             ):
                 _rebuild_rejection_index(connection, events_path=events_path)
             _remove_legacy_rejection_checkpoint(legacy_checkpoint_path)
@@ -1063,8 +1069,6 @@ def _create_rejection_index_schema(connection: sqlite3.Connection) -> None:
             event_mtime_ns INTEGER NOT NULL,
             event_ctime_ns INTEGER NOT NULL,
             event_head TEXT NOT NULL,
-            prefix_anchor TEXT NOT NULL,
-            tail_anchor TEXT NOT NULL,
             checksum TEXT NOT NULL
         )
         """
@@ -1100,8 +1104,6 @@ def _rejection_index_schema_current(connection: sqlite3.Connection) -> bool:
         "event_mtime_ns",
         "event_ctime_ns",
         "event_head",
-        "prefix_anchor",
-        "tail_anchor",
         "checksum",
     } and session_columns == {"session_id", "rejected_json", "checksum"}
 
@@ -1110,7 +1112,7 @@ def _read_rejection_index_metadata(connection: sqlite3.Connection) -> dict[str, 
     row = connection.execute(
         """
         SELECT version, event_dev, event_ino, event_size, event_mtime_ns,
-               event_ctime_ns, event_head, prefix_anchor, tail_anchor, checksum
+               event_ctime_ns, event_head, checksum
         FROM metadata
         WHERE singleton = 1
         """
@@ -1125,9 +1127,7 @@ def _read_rejection_index_metadata(connection: sqlite3.Connection) -> dict[str, 
         "event_mtime_ns": row[4],
         "event_ctime_ns": row[5],
         "event_head": row[6],
-        "prefix_anchor": row[7],
-        "tail_anchor": row[8],
-        "checksum": row[9],
+        "checksum": row[7],
     }
     if (
         metadata["version"] != _REJECTION_INDEX_VERSION
@@ -1142,18 +1142,21 @@ def _read_rejection_index_metadata(connection: sqlite3.Connection) -> dict[str, 
             )
         )
         or not _valid_sha256(metadata["event_head"])
-        or not _valid_sha256(metadata["prefix_anchor"])
-        or not _valid_sha256(metadata["tail_anchor"])
         or metadata["checksum"] != _rejection_metadata_checksum(metadata)
     ):
         raise _InvalidRejectionIndex("invalid rejection index metadata")
     return metadata
 
 
-def _rejection_index_matches_events(metadata: dict[str, Any], path: Path) -> bool:
+def _rejection_index_matches_events(
+    metadata: dict[str, Any],
+    path: Path,
+    *,
+    verify_content: bool,
+) -> bool:
     event_stat = path.stat() if path.is_file() else None
     expected = _event_stat_metadata(path, event_stat=event_stat)
-    return all(
+    stat_matches = all(
         metadata[field] == expected[field]
         for field in (
             "event_dev",
@@ -1161,9 +1164,10 @@ def _rejection_index_matches_events(metadata: dict[str, Any], path: Path) -> boo
             "event_size",
             "event_mtime_ns",
             "event_ctime_ns",
-            "prefix_anchor",
-            "tail_anchor",
         )
+    )
+    return stat_matches and (
+        not verify_content or metadata["event_head"] == _event_stream_head(path)
     )
 
 
@@ -1288,9 +1292,8 @@ def _write_rejection_index_metadata(
         """
         INSERT INTO metadata(
             singleton, version, event_dev, event_ino, event_size,
-            event_mtime_ns, event_ctime_ns, event_head, prefix_anchor,
-            tail_anchor, checksum
-        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            event_mtime_ns, event_ctime_ns, event_head, checksum
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             metadata["version"],
@@ -1300,8 +1303,6 @@ def _write_rejection_index_metadata(
             metadata["event_mtime_ns"],
             metadata["event_ctime_ns"],
             metadata["event_head"],
-            metadata["prefix_anchor"],
-            metadata["tail_anchor"],
             metadata["checksum"],
         ),
     )
@@ -1384,8 +1385,6 @@ def _event_stat_metadata(
         "event_mtime_ns": _stat_time_ns(event_stat, "st_mtime_ns"),
         "event_ctime_ns": _stat_time_ns(event_stat, "st_ctime_ns"),
         "event_head": event_head,
-        "prefix_anchor": _event_log_prefix_anchor(path, event_size),
-        "tail_anchor": _event_log_anchor(path, event_size),
     }
     metadata["checksum"] = _rejection_metadata_checksum(metadata)
     return metadata
@@ -1425,22 +1424,16 @@ def _valid_sha256(raw: Any) -> bool:
     )
 
 
-def _event_log_anchor(path: Path, offset: int) -> str:
-    if offset <= 0 or not path.is_file():
-        return hashlib.sha256(b"").hexdigest()
-    start = max(0, offset - _REJECTION_CHECKPOINT_ANCHOR_BYTES)
+def _event_stream_head(path: Path) -> str:
+    event_head = _REJECTION_HEAD_SEED
+    if not path.is_file():
+        return event_head
     with path.open("rb") as handle:
-        handle.seek(start)
-        payload = handle.read(offset - start)
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _event_log_prefix_anchor(path: Path, size: int) -> str:
-    if size <= 0 or not path.is_file():
-        return hashlib.sha256(b"").hexdigest()
-    with path.open("rb") as handle:
-        payload = handle.read(min(size, _REJECTION_CHECKPOINT_ANCHOR_BYTES))
-    return hashlib.sha256(payload).hexdigest()
+        for line in handle:
+            if not line.endswith(b"\n"):
+                break
+            event_head = _advance_event_head(event_head, line)
+    return event_head
 
 
 def _validate_nonempty(raw: str, field: str) -> str:
