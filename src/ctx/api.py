@@ -49,7 +49,15 @@ Public functions:
         Free-text → ranked skill/agent/MCP execution bundle with selection,
         availability, baseline-context, and local/no-key/language filters.
 
-    recommend_related(selected, *, rejected=None, max_hops=2, top_n=5)
+    recommend_related(
+        selected,
+        *,
+        rejected=None,
+        max_hops=2,
+        top_n=5,
+        session_id=None,
+        rejection_mode="use",
+    )
         Selected recommendation IDs → related filtered recommendations.
 
     graph_query(seeds, *, max_hops=2, top_n=10)

@@ -246,11 +246,14 @@ context manager waits for unrelated transitions automatically; direct
 `sync(...)` or `release(...)` calls may either retry that error or explicitly
 pass `wait_for_transition=True` when they are outside an applier.
 
-The subprocess CLI is recommendation-only: each
-`python -m ctx.adapters.loopflow` invocation is stateless and does not
-coordinate activation leases across processes. A runner that needs live
-load/use/unload behavior must use the direct Python integration above (or own a
-persistent coordinator) and keep LoopFlow in control of physical tool changes.
+The subprocess CLI is recommendation-only and does not coordinate activation
+leases across processes. Recommendation feedback is stateless unless the runner
+supplies `--session-id`; with that opt-in, canonical rejected IDs persist in the
+local lifecycle store according to `--rejection-mode` (`use`, `replace`, or
+`ignore`). This memory suppresses repeated recommendations only. It does not
+create or share activation leases. A runner that needs live load/use/unload
+behavior must use the direct Python integration above (or own a persistent
+coordinator) and keep LoopFlow in control of physical tool changes.
 
 ## Permission model
 

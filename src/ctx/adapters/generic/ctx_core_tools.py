@@ -23,6 +23,8 @@ MCP servers):
         local_code_task=None,
         no_api_keys=None,
         language=None,
+        session_id=None,
+        rejection_mode="use",
     )
         Free-text → top-K cross-type bundle (skill + agent + MCP).
         Tokenizes the query into tags, walks the graph, suppresses
@@ -32,7 +34,14 @@ MCP servers):
         hints can hide unavailable, external-service, generic-planning, or
         wrong-language rows unless include_unavailable opts them back in.
 
-    ctx__recommend_related(selected, rejected=None, max_hops=2, top_n=5)
+    ctx__recommend_related(
+        selected,
+        rejected=None,
+        max_hops=2,
+        top_n=5,
+        session_id=None,
+        rejection_mode="use",
+    )
         Selected/rejected recommendation IDs → graph-related rows.
         Excludes selected, rejected, unavailable, and deprecated nodes.
 
