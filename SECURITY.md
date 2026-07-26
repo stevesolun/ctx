@@ -49,15 +49,19 @@ dependency issue is reachable through ctx.
 - The default `127.0.0.1` bind is full local mode. Dashboard reads are
   available to loopback clients. Mutation endpoints are enabled only in this
   mode and require the generated per-process monitor token. Browser requests
-  that supply an `Origin` header must be same-origin; originless clients are
-  accepted only when they provide the valid token.
-- A non-loopback bind is read-only. HTML, JSON API, and server-sent event
-  routes require the generated per-process read token (or the HttpOnly,
-  same-site cookie established from the token URL). Load, unload, and other
-  POST mutations are disabled.
+  that supply an `Origin` header must match the exact normalized HTTP
+  authority, including the effective port; originless clients are accepted
+  only when they provide the valid token.
+- A non-loopback bind requires the explicit `--allow-non-loopback` flag and is
+  read-only. HTML, JSON API, and server-sent event routes require the generated
+  per-process read token (or the HttpOnly, same-site cookie established from
+  the token URL). Load, unload, and other POST mutations are disabled.
 - Treat the printed token URL as a secret. The built-in server does not turn a
   non-loopback bind into an enterprise authentication or authorization
   service, and it should not be exposed directly to the public internet.
+
+See the [threat model](docs/threat-model.md) for the complete boundary,
+implemented controls, and residual risks.
 
 ## Governance Status
 
