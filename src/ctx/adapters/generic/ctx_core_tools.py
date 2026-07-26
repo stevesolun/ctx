@@ -50,10 +50,12 @@ MCP servers):
         frontmatter plus at most 8,000 UTF-8 bytes of body text.
 
 Load/unload/use tools are explicit lifecycle records, not filesystem
-auto-installs. The host remains responsible for asking the user and
-deciding how to place selected entities into context. Per-entity
-token usage is recorded only when the host supplies explicit
-``ctx__mark_entity_used.token_usage`` attribution.
+auto-installs. Model-visible load/unload tools record advisory requests
+only. The host remains responsible for asking the user, applying verified
+activation grants through ``RuntimeLifecycleStore``, and deciding how to
+place selected entities into context. Per-entity token usage is recorded
+only when the host supplies explicit ``ctx__mark_entity_used.token_usage``
+attribution.
 
 Hosts that need a narrower permission surface can construct
 ``CtxCoreToolbox`` with ``allowed_tool_names`` and ``allowed_entity_types``.
@@ -1263,8 +1265,8 @@ class CtxCoreToolbox:
                     security_scan=(
                         _dict_arg(args.get("security_scan")) if "security_scan" in args else None
                     ),
-                    selected=_optional_bool(args.get("selected")),
-                    selection_source=str(args.get("selection_source") or "") or None,
+                    selected=False,
+                    selection_source="unknown",
                     source_context=_dict_arg(args.get("source_context")),
                 )
             elif name == "mark_entity_used":
@@ -2274,8 +2276,9 @@ def _lifecycle_tool_definitions(
         ToolDefinition(
             name=f"{_NAMESPACE}load_entity",
             description=(
-                "Record that the host/user chose to load a recommended skill, "
-                "agent, MCP server, or harness into the current session."
+                "Request that the host consider loading a recommended skill, "
+                "agent, MCP server, or harness. This is advisory and does not "
+                "prove selection or apply activation."
             ),
             parameters={
                 "type": "object",
@@ -2284,21 +2287,6 @@ def _lifecycle_tool_definitions(
                     "entity_type": entity_type,
                     "slug": slug,
                     "reason": {"type": "string"},
-                    "selected": {
-                        "type": "boolean",
-                        "description": (
-                            "True when the entity was explicitly selected from "
-                            "ctx recommendations. Defaults to true for user loads."
-                        ),
-                    },
-                    "selection_source": {
-                        "type": "string",
-                        "enum": ["user", "system", "host", "unknown"],
-                        "description": (
-                            "Who selected or activated the entity: user, system, "
-                            "host, or unknown. Default user."
-                        ),
-                    },
                     "source_context": {
                         "type": "object",
                         "description": (

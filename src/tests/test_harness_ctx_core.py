@@ -447,6 +447,15 @@ class TestToolDefinitions:
         td = next(d for d in toolbox.tool_definitions() if d.name == "ctx__graph_query")
         assert td.parameters["required"] == ["seeds"]
 
+    def test_load_entity_schema_is_advisory(self, toolbox: CtxCoreToolbox) -> None:
+        definition = next(
+            item for item in toolbox.tool_definitions() if item.name == "ctx__load_entity"
+        )
+
+        assert "advisory" in definition.description
+        assert "selected" not in definition.parameters["properties"]
+        assert "selection_source" not in definition.parameters["properties"]
+
     def test_mark_entity_used_exposes_complete_token_usage_schema(
         self,
         toolbox: CtxCoreToolbox,
@@ -1122,11 +1131,15 @@ class TestRuntimeLifecycle:
         assert requested["used"] == []
         assert requested["unload_candidates"] == []
         assert [entry["slug"] for entry in requested["requested"]] == ["fastapi-pro"]
+        assert requested["requested"][0]["selected"] is True
+        assert requested["requested"][0]["selection_source"] == "host"
 
         store.mark_entity_loaded(**common)
         applied = store.session_state(session_id="s-applied-state")
         assert applied["requested"] == []
         assert [entry["slug"] for entry in applied["loaded"]] == ["fastapi-pro"]
+        assert applied["loaded"][0]["selected"] is True
+        assert applied["loaded"][0]["selection_source"] == "host"
         assert [entry["slug"] for entry in applied["used"]] == ["fastapi-pro"]
 
         store.unload_entity(**common)
@@ -1282,8 +1295,8 @@ class TestRuntimeLifecycle:
             "unload_requested",
             "session_end",
         ]
-        assert events[1]["selected"] is True
-        assert events[1]["selection_source"] == "user"
+        assert events[1]["selected"] is False
+        assert events[1]["selection_source"] == "unknown"
         assert events[1]["source_context"] == {"surface": "ctx-recommend"}
         assert events[2]["token_usage"]["attribution"] == "unavailable"
         assert events[2]["token_usage"]["total_tokens"] is None

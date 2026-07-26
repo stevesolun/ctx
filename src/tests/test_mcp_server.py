@@ -565,7 +565,9 @@ class TestToolsCall:
             )
         )
         state_payload = json.loads(frames[0]["result"]["content"][0]["text"])
-        assert state_payload["unload_candidates"][0]["slug"] == "python-patterns"
+        assert state_payload["loaded"] == []
+        assert state_payload["unload_candidates"] == []
+        assert state_payload["requested"][0]["slug"] == "python-patterns"
 
 
 # ── Handler unit tests (direct, no I/O loop) ────────────────────────────────
