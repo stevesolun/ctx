@@ -109,6 +109,19 @@ def test_preflight_runs_source_gates_for_source_changes() -> None:
     assert workflow_unit_command[-4:] == list(unit_check.argv[-4:])
 
 
+def test_xdist_auto_worker_count_is_resource_capped(monkeypatch) -> None:
+    from tests import conftest
+
+    monkeypatch.setattr(conftest.os, "cpu_count", lambda: 64)
+    assert conftest._xdist_auto_worker_count() == 8
+
+    monkeypatch.setattr(conftest.os, "cpu_count", lambda: 4)
+    assert conftest._xdist_auto_worker_count() == 4
+
+    monkeypatch.setattr(conftest.os, "cpu_count", lambda: None)
+    assert conftest._xdist_auto_worker_count() == 1
+
+
 def test_preflight_smoke_profile_runs_only_fast_source_gates() -> None:
     names = _names_for(["src/ctx/adapters/generic/loop.py"], profile="smoke")
 
