@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import hashlib
 import json
 import os
 import re
@@ -35,13 +36,21 @@ from typing import Iterator, NoReturn
 
 import yaml  # type: ignore[import-untyped]
 
+from ctx.core.source_registry import (
+    ExternalSourceRecord,
+    entity_provenance,
+    get_external_source,
+    validate_ingestion_manifest,
+)
 from ctx_config import cfg
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 IMPORT_ROOT = REPO_ROOT / "imported-skills" / "designdotmd"
 MANIFEST_PATH = IMPORT_ROOT / "MANIFEST.json"
+DESIGNDOTMD_SOURCE = get_external_source("designdotmd")
 
 _SAFE_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 
 
 def load_manifest() -> dict:
@@ -60,6 +69,10 @@ def _validate(field: str, value: object, *, regex: re.Pattern[str] | None = None
     if regex is not None and not regex.fullmatch(value):
         raise ValueError(f"{field}: {value!r} failed strict format check")
     return value
+
+
+def _validate_sha256(value: object) -> str:
+    return _validate("sha256", value, regex=_SHA256_RE).lower()
 
 
 def _resolve_within(root: Path, candidate_rel: str, *, field: str) -> Path:
@@ -158,6 +171,52 @@ def _inject_tags(text: str, tags: list[str]) -> str:
     suffix = "" if insert_at == len(fm) or fm[insert_at] in "\r\n" else newline
     new_fm = fm[:insert_at] + prefix + tags_line + suffix + fm[insert_at:]
     return text[: m.start(1)] + new_fm + text[m.end(1) :]
+
+
+def _inject_provenance(
+    text: str,
+    provenance: dict[str, object],
+) -> str:
+    """Add validated provenance fields without accepting upstream overrides."""
+
+    match = _FM_OPEN_RE.match(text)
+    if not match:
+        return text
+    try:
+        frontmatter_node = yaml.compose(match.group(1))
+        frontmatter = yaml.safe_load(match.group(1))
+    except yaml.YAMLError:
+        return text
+    if not isinstance(frontmatter_node, yaml.MappingNode) or not isinstance(frontmatter, dict):
+        return text
+
+    provenance_keys: set[str] = set()
+    for key_node, _value_node in frontmatter_node.value:
+        if not isinstance(key_node, yaml.ScalarNode) or key_node.value not in provenance:
+            continue
+        if key_node.value in provenance_keys:
+            raise ValueError(f"upstream frontmatter duplicates {key_node.value!r} provenance")
+        provenance_keys.add(key_node.value)
+
+    additions: dict[str, object] = {}
+    for field, expected in provenance.items():
+        if field in frontmatter:
+            if frontmatter[field] != expected:
+                raise ValueError(f"upstream frontmatter conflicts with {field!r} provenance")
+            continue
+        additions[field] = expected
+    if not additions:
+        return text
+
+    rendered = yaml.safe_dump(
+        additions,
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False,
+    ).rstrip("\n")
+    newline = "\r\n" if "\r\n" in match.group(0) else "\n"
+    new_frontmatter = rendered + newline + match.group(1)
+    return text[: match.start(1)] + new_frontmatter + text[match.end(1) :]
 
 
 def _strip_prior_attribution(body: str, *, source: Path) -> str:
@@ -307,7 +366,19 @@ def _open_anchored_directory(path: Path, *, create: bool) -> int | None:
         raise
 
 
-def _read_source_text(source_rel: str) -> tuple[Path, str]:
+def _verified_source_text(source: Path, raw: bytes, expected_sha256: str) -> str:
+    actual_sha256 = hashlib.sha256(raw).hexdigest()
+    if not secrets.compare_digest(actual_sha256, expected_sha256):
+        raise ValueError(
+            f"{source}: sha256 mismatch; manifest={expected_sha256}, actual={actual_sha256}",
+        )
+    try:
+        return raw.decode("utf-8")
+    except UnicodeError:
+        raise ValueError(f"{source}: source is not valid UTF-8") from None
+
+
+def _read_source_text(source_rel: str, *, expected_sha256: str) -> tuple[Path, str]:
     _resolve_within(IMPORT_ROOT, source_rel, field="source_path")
     trusted_root = IMPORT_ROOT.resolve()
     source = trusted_root.joinpath(*Path(source_rel).parts)
@@ -329,11 +400,13 @@ def _read_source_text(source_rel: str) -> tuple[Path, str]:
                 metadata = os.fstat(fd)
                 if not stat.S_ISREG(metadata.st_mode):
                     raise ValueError(f"{source}: source is not a regular file")
-                with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                with os.fdopen(fd, "rb") as handle:
                     fd = -1
-                    return source, handle.read()
-            except UnicodeError:
-                raise ValueError(f"{source}: source is not valid UTF-8") from None
+                    return source, _verified_source_text(
+                        source,
+                        handle.read(),
+                        expected_sha256,
+                    )
             finally:
                 if fd != -1:
                     os.close(fd)
@@ -364,11 +437,13 @@ def _read_source_text(source_rel: str) -> tuple[Path, str]:
                     source_metadata, opened
                 ):
                     raise ValueError(f"{source}: source path changed while opening")
-                with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                with os.fdopen(fd, "rb") as handle:
                     fd = -1
-                    return source, handle.read()
-            except UnicodeError:
-                raise ValueError(f"{source}: source is not valid UTF-8") from None
+                    return source, _verified_source_text(
+                        source,
+                        handle.read(),
+                        expected_sha256,
+                    )
             finally:
                 if fd != -1:
                     os.close(fd)
@@ -696,9 +771,21 @@ def _install_if_changed(
 
 
 def _prepare_entry(entry: dict, manifest: dict, target_dir: Path) -> tuple[Path, Path, str]:
+    source_record: ExternalSourceRecord = validate_ingestion_manifest(
+        DESIGNDOTMD_SOURCE,
+        manifest,
+        import_mode="full-body",
+    )
     slug = _validate("slug", entry.get("slug"), regex=_SAFE_SLUG_RE)
+    attribution = _render_attribution(manifest, entry)
+    manifest_entries = manifest.get("entries")
+    if not isinstance(manifest_entries, list) or not any(
+        candidate is entry or candidate == entry for candidate in manifest_entries
+    ):
+        raise ValueError(f"{slug}: entry is not part of the registered full manifest")
     source_rel = _validate("source_path", entry.get("source_path"))
-    source, body = _read_source_text(source_rel)
+    source_sha256 = _validate_sha256(entry.get("sha256"))
+    source, body = _read_source_text(source_rel, expected_sha256=source_sha256)
 
     tags = entry.get("tags", []) or []
     if not isinstance(tags, list):
@@ -712,8 +799,11 @@ def _prepare_entry(entry: dict, manifest: dict, target_dir: Path) -> tuple[Path,
     body = _inject_tags(
         _quote_invalid_description_scalar(_strip_prior_attribution(body, source=source)), tags
     )
+    provenance = entity_provenance(source_record)
+    provenance["source_sha256"] = source_sha256
+    body = _inject_provenance(body, provenance)
     _validate_frontmatter(body, source=source)
-    return skill_dir, destination, _render_attribution(manifest, entry) + body
+    return skill_dir, destination, attribution + body
 
 
 def _deploy_prepared(

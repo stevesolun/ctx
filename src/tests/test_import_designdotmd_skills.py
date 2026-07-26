@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
 import subprocess
 import sys
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,11 @@ import pytest
 import yaml  # type: ignore[import-untyped]
 
 import import_designdotmd_skills as importer
+import ctx.core.source_registry as source_registry
+from ctx.core.source_registry import (
+    ExternalSourceRecord,
+    canonical_ingestion_manifest_sha256,
+)
 
 
 SOURCE_TEXT = """---
@@ -26,6 +32,10 @@ typography:
 
 Keep this body unchanged.
 """
+
+
+def _sha256(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
 
 
 @dataclass
@@ -47,7 +57,15 @@ def design_import(
     import_root = tmp_path / "imported-skills" / "designdotmd"
     source = import_root / "designs" / "fixture-design.md"
     source.parent.mkdir(parents=True)
-    source.write_text(SOURCE_TEXT, encoding="utf-8")
+    source_payload = SOURCE_TEXT.encode("utf-8")
+    source.write_bytes(source_payload)
+    revision = "b" * 40
+    license_payload = (
+        b"MIT License\n\nCopyright fixture\n\n"
+        b"Permission is hereby granted, free of charge, to any person obtaining a copy.\n"
+    )
+    license_path = import_root / "LICENSE"
+    license_path.write_bytes(license_payload)
 
     entry: dict[str, Any] = {
         "name": "Fixture Design",
@@ -55,10 +73,15 @@ def design_import(
         "tags": ["Technical", " Dark ", ""],
         "slug": "fixture-design",
         "source_path": "designs/fixture-design.md",
+        "sha256": _sha256(source_payload),
     }
     manifest: dict[str, Any] = {
         "upstream": "https://designdotmd.example",
+        "upstream_revision": revision,
         "fetched_on": "2026-07-11",
+        "license": "MIT",
+        "license_url": f"https://designdotmd.example/{revision}/LICENSE",
+        "license_evidence_sha256": _sha256(license_payload),
         "entries": [entry],
     }
     manifest_path = import_root / "MANIFEST.json"
@@ -66,6 +89,29 @@ def design_import(
 
     monkeypatch.setattr(importer, "IMPORT_ROOT", import_root)
     monkeypatch.setattr(importer, "MANIFEST_PATH", manifest_path)
+    monkeypatch.setattr(source_registry, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        importer,
+        "DESIGNDOTMD_SOURCE",
+        ExternalSourceRecord(
+            name="designdotmd",
+            url="https://designdotmd.example",
+            revision=revision,
+            license="MIT",
+            license_url=f"https://designdotmd.example/{revision}/LICENSE",
+            license_evidence_sha256=_sha256(license_payload),
+            license_evidence_path="imported-skills/designdotmd/LICENSE",
+            manifest_sha256=canonical_ingestion_manifest_sha256(manifest),
+            redistribution_obligations=(
+                "retain-copyright-notice",
+                "retain-license-notice",
+            ),
+            notice_reference=f"https://designdotmd.example/{revision}/LICENSE",
+            source_kind="design-catalog",
+            import_mode="metadata-only",
+            permission_status="license",
+        ),
+    )
     return DesignImportFixture(
         root=tmp_path,
         import_root=import_root,
@@ -75,6 +121,27 @@ def design_import(
         manifest=manifest,
         entry=entry,
     )
+
+
+def _write_source_bytes(design_import: DesignImportFixture, payload: bytes) -> None:
+    design_import.source.write_bytes(payload)
+    design_import.entry["sha256"] = _sha256(payload)
+    _write_bound_manifest(design_import)
+
+
+def _write_bound_manifest(design_import: DesignImportFixture) -> None:
+    design_import.manifest_path.write_text(
+        json.dumps(design_import.manifest),
+        encoding="utf-8",
+    )
+    importer.DESIGNDOTMD_SOURCE = replace(
+        importer.DESIGNDOTMD_SOURCE,
+        manifest_sha256=canonical_ingestion_manifest_sha256(design_import.manifest),
+    )
+
+
+def _write_source(design_import: DesignImportFixture, text: str) -> None:
+    _write_source_bytes(design_import, text.encode("utf-8"))
 
 
 def _run_main(monkeypatch: pytest.MonkeyPatch, *args: str) -> None:
@@ -148,6 +215,29 @@ def test_install_writes_attribution_and_normalized_tags(
         "id=fixture-design fetched=2026-07-11 author=Fixture Author -->\n"
     )
     assert 'description: A fixture design system\ntags: ["technical", "dark"]\n' in content
+    assert "source: designdotmd\n" in content
+    assert "source_url: https://designdotmd.example\n" in content
+    assert f"source_revision: {'b' * 40}\n" in content
+    assert "license: MIT\n" in content
+    assert f"license_url: https://designdotmd.example/{'b' * 40}/LICENSE\n" in content
+    assert "import_mode: full-body\n" in content
+    frontmatter = yaml.safe_load(content.split("---", 2)[1])
+    assert frontmatter["permission_status"] == "license"
+    assert frontmatter["permission_reference"] is None
+    assert frontmatter["permission_evidence_sha256"] is None
+    assert (
+        frontmatter["license_evidence_sha256"] == design_import.manifest["license_evidence_sha256"]
+    )
+    assert frontmatter["license_evidence_path"] == "imported-skills/designdotmd/LICENSE"
+    assert frontmatter["manifest_sha256"] == canonical_ingestion_manifest_sha256(
+        design_import.manifest
+    )
+    assert frontmatter["redistribution_obligations"] == [
+        "retain-copyright-notice",
+        "retain-license-notice",
+    ]
+    assert frontmatter["notice_reference"] == f"https://designdotmd.example/{'b' * 40}/LICENSE"
+    assert frontmatter["source_sha256"] == design_import.entry["sha256"]
     assert "  tags: nested-metadata" in content
     assert content.endswith("# Fixture Design\n\nKeep this body unchanged.\n")
     output = capsys.readouterr().out
@@ -157,10 +247,218 @@ def test_install_writes_attribution_and_normalized_tags(
     assert "Next steps:" in output
 
 
+def test_unknown_license_blocks_full_body_before_writes(
+    design_import: DesignImportFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    design_import.manifest["license"] = "unknown"
+    design_import.manifest["license_url"] = None
+    design_import.manifest["license_evidence_sha256"] = None
+    design_import.manifest_path.write_text(
+        json.dumps(design_import.manifest),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        importer,
+        "DESIGNDOTMD_SOURCE",
+        ExternalSourceRecord(
+            name="designdotmd",
+            url="https://designdotmd.example",
+            revision="b" * 40,
+            license="unknown",
+            source_kind="design-catalog",
+            import_mode="metadata-only",
+            permission_status="unknown",
+            manifest_sha256=canonical_ingestion_manifest_sha256(design_import.manifest),
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, "--install", "--target", str(design_import.target))
+
+    assert exc_info.value.code == 1
+    assert "full-body import blocked by unknown license" in capsys.readouterr().err
+    assert not design_import.target.exists()
+
+
+@pytest.mark.parametrize("digest", [None, "", "a" * 63, "g" * 64])
+def test_full_body_entry_requires_a_valid_sha256(
+    design_import: DesignImportFixture,
+    digest: str | None,
+) -> None:
+    if digest is None:
+        design_import.entry.pop("sha256")
+    else:
+        design_import.entry["sha256"] = digest
+
+    with pytest.raises(ValueError, match="sha256"):
+        importer.deploy_entry(
+            design_import.entry,
+            design_import.manifest,
+            design_import.target,
+            dry_run=False,
+        )
+
+    assert not design_import.target.exists()
+
+
+def test_full_body_source_bytes_must_match_manifest_sha256(
+    design_import: DesignImportFixture,
+) -> None:
+    design_import.source.write_bytes(b"tampered before transformation\n")
+
+    with pytest.raises(ValueError, match="sha256 mismatch") as exc_info:
+        importer.deploy_entry(
+            design_import.entry,
+            design_import.manifest,
+            design_import.target,
+            dry_run=False,
+        )
+
+    assert f"manifest={design_import.entry['sha256']}" in str(exc_info.value)
+    assert not design_import.target.exists()
+
+
+def test_manifest_body_and_entry_digest_rewrite_cannot_self_authorize(
+    design_import: DesignImportFixture,
+) -> None:
+    payload = SOURCE_TEXT.replace(
+        "Keep this body unchanged.",
+        "Unregistered replacement body.",
+    ).encode("utf-8")
+    design_import.source.write_bytes(payload)
+    design_import.entry["sha256"] = _sha256(payload)
+
+    with pytest.raises(ValueError, match="full-manifest binding mismatch"):
+        importer.deploy_entry(
+            design_import.entry,
+            design_import.manifest,
+            design_import.target,
+            dry_run=False,
+        )
+
+    assert not design_import.target.exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("upstream", "manifest upstream does not match"),
+        ("upstream_revision", "manifest revision does not match"),
+        ("fetched_on", "full-manifest binding mismatch"),
+        ("name", "full-manifest binding mismatch"),
+        ("author", "full-manifest binding mismatch"),
+        ("tags", "full-manifest binding mismatch"),
+        ("slug", "full-manifest binding mismatch"),
+        ("source_path", "full-manifest binding mismatch"),
+        ("sha256", "full-manifest binding mismatch"),
+        ("extension", "full-manifest binding mismatch"),
+    ],
+)
+def test_registered_full_manifest_rejects_any_trusted_field_mutation(
+    design_import: DesignImportFixture,
+    field: str,
+    message: str,
+) -> None:
+    mutations: dict[str, object] = {
+        "upstream": "https://changed.example/source",
+        "upstream_revision": "c" * 40,
+        "name": "Changed Name",
+        "author": "Changed Author",
+        "tags": ["changed"],
+        "slug": "changed-slug",
+        "source_path": "designs/changed-source.md",
+        "sha256": "e" * 64,
+    }
+    if field in {"upstream", "upstream_revision"}:
+        design_import.manifest[field] = mutations[field]
+    elif field == "fetched_on":
+        design_import.manifest["fetched_on"] = "2026-07-12"
+    elif field == "extension":
+        design_import.manifest["namespace"] = "changed-extension"
+    else:
+        design_import.entry[field] = mutations[field]
+
+    with pytest.raises(ValueError, match=message):
+        importer.deploy_entry(
+            design_import.entry,
+            design_import.manifest,
+            design_import.target,
+            dry_run=False,
+        )
+
+    assert not design_import.target.exists()
+
+
+def test_future_permitted_manifest_binds_raw_bytes_into_entity_provenance(
+    design_import: DesignImportFixture,
+) -> None:
+    payload = SOURCE_TEXT.replace(
+        "Keep this body unchanged.",
+        "Digest-bound body.",
+    ).encode("utf-8")
+    _write_source_bytes(design_import, payload)
+
+    skill, _ = importer.deploy_entry(
+        design_import.entry,
+        design_import.manifest,
+        design_import.target,
+        dry_run=False,
+    )
+
+    frontmatter = yaml.safe_load(skill.read_text(encoding="utf-8").split("---", 2)[1])
+    assert frontmatter["source_sha256"] == _sha256(payload)
+    assert "Digest-bound body." in skill.read_text(encoding="utf-8")
+
+
+def test_entry_outside_registered_manifest_is_rejected_before_source_read(
+    design_import: DesignImportFixture,
+) -> None:
+    unregistered = {
+        **design_import.entry,
+        "slug": "unregistered",
+        "source_path": "designs/unregistered.md",
+    }
+
+    with pytest.raises(ValueError, match="not part of the registered full manifest"):
+        importer.deploy_entry(
+            unregistered,
+            design_import.manifest,
+            design_import.target,
+            dry_run=False,
+        )
+
+    assert not design_import.target.exists()
+
+
+def test_duplicate_upstream_provenance_fields_are_rejected(
+    design_import: DesignImportFixture,
+) -> None:
+    _write_source(
+        design_import,
+        SOURCE_TEXT.replace(
+            "name: Fixture Design\n",
+            "name: Fixture Design\nsource: attacker\nsource: designdotmd\n",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="duplicates 'source' provenance"):
+        importer.deploy_entry(
+            design_import.entry,
+            design_import.manifest,
+            design_import.target,
+            dry_run=False,
+        )
+
+    assert not design_import.target.exists()
+
+
 def test_install_json_quotes_tags_after_a_block_scalar_description(
     design_import: DesignImportFixture,
 ) -> None:
-    design_import.source.write_text(
+    _write_source(
+        design_import,
         "---\n"
         "name: Fixture Design\n"
         "description: |-\n"
@@ -170,9 +468,9 @@ def test_install_json_quotes_tags_after_a_block_scalar_description(
         "  family: Fixture Sans\n"
         "---\n"
         "Body\n",
-        encoding="utf-8",
     )
     design_import.entry["tags"] = ["UI, UX", 'Quote "Tag"', "Hash # Tag", "Bracket ]"]
+    _write_bound_manifest(design_import)
 
     skill, _ = importer.deploy_entry(
         design_import.entry,
@@ -198,7 +496,8 @@ def test_install_json_quotes_tags_after_a_block_scalar_description(
 def test_install_places_tags_after_an_indentless_sequence_description(
     design_import: DesignImportFixture,
 ) -> None:
-    design_import.source.write_text(
+    _write_source(
+        design_import,
         "---\n"
         "name: Fixture Design\n"
         "description:\n"
@@ -207,7 +506,6 @@ def test_install_places_tags_after_an_indentless_sequence_description(
         "palette: [red, blue]\n"
         "---\n"
         "Body\n",
-        encoding="utf-8",
     )
 
     skill, _ = importer.deploy_entry(
@@ -257,9 +555,9 @@ def test_valid_description_forms_are_preserved_before_tag_injection(
     description_yaml: str,
     expected_description: str,
 ) -> None:
-    design_import.source.write_text(
+    _write_source(
+        design_import,
         f"---\nname: Fixture Design\n{description_yaml}palette: [red, blue]\n---\nBody\n",
-        encoding="utf-8",
     )
 
     skill, _ = importer.deploy_entry(
@@ -286,7 +584,7 @@ def test_description_repair_requires_parser_evidence_at_the_value_colon(
         "---\n"
         "Body\n"
     )
-    design_import.source.write_text(source_text, encoding="utf-8")
+    _write_source(design_import, source_text)
 
     assert importer._quote_invalid_description_scalar(source_text) == source_text
     with pytest.raises(ValueError, match="invalid YAML frontmatter"):
@@ -336,13 +634,13 @@ def test_yaml_and_target_guards_reject_edge_shapes(
 def test_install_quotes_the_corpus_plain_description_shape(
     design_import: DesignImportFixture,
 ) -> None:
-    design_import.source.write_text(
+    _write_source(
+        design_import,
         "---\n"
         "name: 3D Sculpt\n"
         "description: 3D viewport: studio grey, mesh cyan, normal magenta.\n"
         "---\n"
         "Body\n",
-        encoding="utf-8",
     )
 
     skill, _ = importer.deploy_entry(
@@ -362,7 +660,10 @@ def test_install_quotes_the_corpus_plain_description_shape(
     ) in content
 
 
-def test_checked_in_corpus_preflights_all_entries_without_writing(tmp_path: Path) -> None:
+def test_checked_in_unknown_license_corpus_fails_closed_without_writing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     manifest = importer.load_manifest()
     entries = manifest["entries"]
     assert entries
@@ -381,26 +682,25 @@ def test_checked_in_corpus_preflights_all_entries_without_writing(tmp_path: Path
             assert ": " in failed_line.removeprefix("description:")
 
     target = tmp_path / "real-corpus-dry-run"
-    planned = importer._preflight_manifest(manifest, target)
+    with pytest.raises(SystemExit) as exc_info:
+        importer._preflight_manifest(manifest, target)
 
-    assert len(planned) == len(entries)
-    assert {prepared[1] for _, prepared in planned} == {
-        target / f"designdotmd-{entry['slug']}" / "SKILL.md" for entry in entries
-    }
+    assert exc_info.value.code == 1
+    assert "registered immutable full-manifest binding" in capsys.readouterr().err
     assert not target.exists()
 
 
 def test_invalid_rendered_frontmatter_names_source_and_location(
     design_import: DesignImportFixture,
 ) -> None:
-    design_import.source.write_text(
+    _write_source(
+        design_import,
         "---\n"
         "name: Fixture Design\n"
         "description: Broken fixture: known upstream shape\n"
         "palette: [red\n"
         "---\n"
         "Body\n",
-        encoding="utf-8",
     )
 
     with pytest.raises(ValueError) as exc_info:
@@ -423,9 +723,9 @@ def test_frontmatter_closing_fence_must_be_exact(
     design_import: DesignImportFixture,
     closing_fence: str,
 ) -> None:
-    design_import.source.write_text(
+    _write_source(
+        design_import,
         f"---\nname: Fixture Design\ndescription: Valid description\n{closing_fence}\nBody\n",
-        encoding="utf-8",
     )
 
     with pytest.raises(ValueError, match="missing YAML frontmatter delimiters"):
@@ -474,7 +774,8 @@ def test_reinstall_is_idempotent_and_does_not_rewrite(
 def test_existing_attribution_and_top_level_tags_are_not_duplicated(
     design_import: DesignImportFixture,
 ) -> None:
-    design_import.source.write_text(
+    _write_source(
+        design_import,
         "<!-- designdotmd-import: upstream=old id=old fetched=old author=old -->\n"
         "---\n"
         "name: Fixture Design\n"
@@ -482,7 +783,6 @@ def test_existing_attribution_and_top_level_tags_are_not_duplicated(
         "tags: [upstream]\n"
         "---\n"
         "Body\n",
-        encoding="utf-8",
     )
 
     skill, _ = importer.deploy_entry(
@@ -510,7 +810,10 @@ def test_manifest_slug_must_match_strict_contained_format(
 ) -> None:
     design_import.entry["slug"] = slug
 
-    with pytest.raises(ValueError, match=r"slug: .* failed strict format check"):
+    with pytest.raises(
+        ValueError,
+        match=r"manifest\.entries\[1\]\.slug: expected a canonical",
+    ):
         importer.deploy_entry(
             design_import.entry,
             design_import.manifest,
@@ -528,13 +831,11 @@ def test_manifest_source_traversal_is_rejected(
 ) -> None:
     design_import.entry["source_path"] = source_path
 
-    with pytest.raises(ValueError, match=r"source_path: path traversal denied"):
-        importer.deploy_entry(
-            design_import.entry,
-            design_import.manifest,
-            design_import.target,
-            dry_run=False,
-        )
+    with pytest.raises(
+        ValueError,
+        match="canonical repository-relative POSIX path",
+    ):
+        _write_bound_manifest(design_import)
 
     assert not design_import.target.exists()
 
@@ -543,6 +844,7 @@ def test_missing_manifest_source_error_names_the_resolved_path(
     design_import: DesignImportFixture,
 ) -> None:
     design_import.entry["source_path"] = "designs/missing.md"
+    _write_bound_manifest(design_import)
     expected = (design_import.import_root / "designs" / "missing.md").resolve()
 
     with pytest.raises(FileNotFoundError) as exc_info:
@@ -565,6 +867,7 @@ def test_manifest_source_symlink_escape_is_rejected(
     link = design_import.source.parent / "linked.md"
     _symlink_or_skip(link, outside)
     design_import.entry["source_path"] = "designs/linked.md"
+    _write_bound_manifest(design_import)
 
     with pytest.raises(ValueError, match=r"source_path: .* resolves outside import root"):
         importer.deploy_entry(
@@ -586,7 +889,9 @@ def test_source_parent_swap_after_resolution_is_rejected(
 ) -> None:
     outside = design_import.root / "outside-source"
     outside.mkdir()
-    (outside / design_import.source.name).write_text(SOURCE_TEXT + "malicious\n", encoding="utf-8")
+    (outside / design_import.source.name).write_bytes(
+        (SOURCE_TEXT + "malicious\n").encode("utf-8"),
+    )
     source_parent = design_import.source.parent
     displaced = design_import.import_root / "displaced-designs"
     original_resolve = importer._resolve_within
@@ -925,7 +1230,10 @@ def test_checked_path_source_reader_uses_the_opened_regular_file(
         lambda *_args, **_kwargs: nullcontext(),
     )
 
-    source, content = importer._read_source_text(design_import.entry["source_path"])
+    source, content = importer._read_source_text(
+        design_import.entry["source_path"],
+        expected_sha256=design_import.entry["sha256"],
+    )
 
     assert source == design_import.source
     assert content == SOURCE_TEXT
@@ -935,6 +1243,7 @@ def test_source_directory_is_rejected_as_non_regular(
     design_import: DesignImportFixture,
 ) -> None:
     design_import.entry["source_path"] = "designs"
+    _write_bound_manifest(design_import)
 
     with pytest.raises(ValueError, match="source is not a regular file"):
         importer.deploy_entry(
@@ -1001,9 +1310,9 @@ def test_windows_install_update_and_junction_rejection(
         dry_run=False,
     )
     assert changed is True
-    design_import.source.write_text(
+    _write_source(
+        design_import,
         SOURCE_TEXT.replace("Keep this body unchanged.", "Updated on Windows."),
-        encoding="utf-8",
     )
     _, changed = importer.deploy_entry(
         design_import.entry,
@@ -1096,9 +1405,9 @@ def test_atomic_replacement_preserves_existing_destination_mode(
         dry_run=False,
     )
     skill.chmod(0o751)
-    design_import.source.write_text(
+    _write_source(
+        design_import,
         SOURCE_TEXT.replace("Keep this body unchanged.", "Updated while preserving mode."),
-        encoding="utf-8",
     )
 
     importer.deploy_entry(
@@ -1136,7 +1445,7 @@ def test_manifest_tags_type_error_names_entry_and_received_type(
 
     with pytest.raises(
         ValueError,
-        match=r"fixture-design: tags must be a list, got str",
+        match=r"manifest\.entries\[1\]\.tags: expected a list of strings",
     ):
         importer.deploy_entry(
             design_import.entry,
@@ -1220,9 +1529,9 @@ def test_malformed_attribution_is_a_concise_exit_1_error(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    design_import.source.write_text(
+    _write_source(
+        design_import,
         "<!-- designdotmd-import: upstream=broken\n" + SOURCE_TEXT,
-        encoding="utf-8",
     )
 
     with pytest.raises(SystemExit) as exc_info:
@@ -1301,10 +1610,10 @@ def test_cli_invalid_utf8_failure_is_concise(
     capsys: pytest.CaptureFixture[str],
     invalid_file: str,
 ) -> None:
-    invalid_path = (
-        design_import.manifest_path if invalid_file == "manifest" else design_import.source
-    )
-    invalid_path.write_bytes(b"\xff")
+    if invalid_file == "manifest":
+        design_import.manifest_path.write_bytes(b"\xff")
+    else:
+        _write_source_bytes(design_import, b"\xff")
 
     with pytest.raises(SystemExit) as exc_info:
         _run_main(monkeypatch, "--dry-run", "--target", str(design_import.target))
@@ -1331,28 +1640,36 @@ def test_cli_entry_validation_failure_is_a_concise_exit_1_error(
 
     assert exc_info.value.code == 1
     stderr = capsys.readouterr().err
-    assert "entry 1 ('fixture-design'): tags must be a list, got str" in stderr
+    assert (
+        "entry 1 ('fixture-design'): manifest.entries[1].tags: expected a list of strings"
+    ) in stderr
     assert "Traceback" not in stderr
     assert not design_import.target.exists()
 
 
-@pytest.mark.parametrize(
-    ("owner", "field", "value"),
-    [
-        ("manifest", "upstream", "https://example.test -->\ninjected"),
-        ("entry", "author", "Unsafe --> author"),
-    ],
-)
-def test_unsafe_attribution_values_are_rejected(
+def test_unsafe_manifest_upstream_is_rejected_before_attribution(
     design_import: DesignImportFixture,
-    owner: str,
-    field: str,
-    value: str,
 ) -> None:
-    container = design_import.manifest if owner == "manifest" else design_import.entry
-    container[field] = value
+    design_import.manifest["upstream"] = "https://example.test -->\ninjected"
 
-    with pytest.raises(ValueError, match=f"{field}.*unsafe attribution value"):
+    with pytest.raises(ValueError, match="upstream.*whitespace or control"):
+        importer.deploy_entry(
+            design_import.entry,
+            design_import.manifest,
+            design_import.target,
+            dry_run=False,
+        )
+
+    assert not design_import.target.exists()
+
+
+def test_registered_unsafe_author_is_rejected_during_attribution(
+    design_import: DesignImportFixture,
+) -> None:
+    design_import.entry["author"] = "Unsafe --> author"
+    _write_bound_manifest(design_import)
+
+    with pytest.raises(ValueError, match="author.*unsafe attribution value"):
         importer.deploy_entry(
             design_import.entry,
             design_import.manifest,
@@ -1391,18 +1708,19 @@ def test_install_preflights_malformed_later_entry_before_creating_target(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     malformed_source = design_import.source.parent / "broken-design.md"
-    malformed_source.write_text(
-        "---\nname: Broken Design\ndescription: Broken\npalette: [red\n---\nBody\n",
-        encoding="utf-8",
-    )
+    malformed_payload = (
+        "---\nname: Broken Design\ndescription: Broken\npalette: [red\n---\nBody\n"
+    ).encode("utf-8")
+    malformed_source.write_bytes(malformed_payload)
     malformed_entry = {
         **design_import.entry,
         "name": "Broken Design",
         "slug": "broken-design",
         "source_path": "designs/broken-design.md",
+        "sha256": _sha256(malformed_payload),
     }
     design_import.manifest["entries"].append(malformed_entry)
-    design_import.manifest_path.write_text(json.dumps(design_import.manifest), encoding="utf-8")
+    _write_bound_manifest(design_import)
 
     with pytest.raises(SystemExit) as exc_info:
         _run_main(monkeypatch, "--install", "--target", str(design_import.target))
@@ -1421,7 +1739,7 @@ def test_install_preflights_each_destination_parent_before_any_commit(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     second_source = design_import.source.parent / "blocked-design.md"
-    second_source.write_text(SOURCE_TEXT, encoding="utf-8")
+    second_source.write_bytes(SOURCE_TEXT.encode("utf-8"))
     second_entry = {
         **design_import.entry,
         "name": "Blocked Design",
@@ -1429,7 +1747,7 @@ def test_install_preflights_each_destination_parent_before_any_commit(
         "source_path": "designs/blocked-design.md",
     }
     design_import.manifest["entries"].append(second_entry)
-    design_import.manifest_path.write_text(json.dumps(design_import.manifest), encoding="utf-8")
+    _write_bound_manifest(design_import)
 
     design_import.target.mkdir()
     blocked_parent = design_import.target / "designdotmd-blocked-design"
@@ -1457,7 +1775,7 @@ def test_install_preflights_each_final_destination_before_any_commit(
     blocker_kind: str,
 ) -> None:
     second_source = design_import.source.parent / "blocked-design.md"
-    second_source.write_text(SOURCE_TEXT, encoding="utf-8")
+    second_source.write_bytes(SOURCE_TEXT.encode("utf-8"))
     second_entry = {
         **design_import.entry,
         "name": "Blocked Design",
@@ -1465,7 +1783,7 @@ def test_install_preflights_each_final_destination_before_any_commit(
         "source_path": "designs/blocked-design.md",
     }
     design_import.manifest["entries"].append(second_entry)
-    design_import.manifest_path.write_text(json.dumps(design_import.manifest), encoding="utf-8")
+    _write_bound_manifest(design_import)
 
     blocked_destination = design_import.target / "designdotmd-blocked-design" / "SKILL.md"
     blocked_destination.parent.mkdir(parents=True)
@@ -1493,22 +1811,18 @@ def test_install_preflights_each_final_destination_before_any_commit(
         assert stat.S_ISFIFO(blocked_destination.lstat().st_mode)
 
 
-def test_duplicate_manifest_destination_is_rejected_before_writes(
+def test_full_manifest_binding_rejects_duplicate_destination_slugs_before_writes(
     design_import: DesignImportFixture,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    design_import.manifest["entries"].append(dict(design_import.entry))
-    design_import.manifest_path.write_text(json.dumps(design_import.manifest), encoding="utf-8")
+    duplicate_source = design_import.import_root / "designs" / "duplicate-source.md"
+    duplicate_source.write_bytes(design_import.source.read_bytes())
+    duplicate_entry = dict(design_import.entry)
+    duplicate_entry["source_path"] = "designs/duplicate-source.md"
+    design_import.manifest["entries"].append(duplicate_entry)
 
-    with pytest.raises(SystemExit) as exc_info:
-        _run_main(monkeypatch, "--install", "--target", str(design_import.target))
+    with pytest.raises(ValueError, match="duplicate ingestion slug"):
+        _write_bound_manifest(design_import)
 
-    assert exc_info.value.code == 1
-    stderr = capsys.readouterr().err
-    assert "entry 2 ('fixture-design'): duplicate destination" in stderr
-    assert "already used by entry 1 ('fixture-design')" in stderr
-    assert "Traceback" not in stderr
     assert not design_import.target.exists()
 
 
@@ -1521,7 +1835,7 @@ def test_mixed_status_output_is_truthful_and_elided_once(
     for number in range(1, 8):
         slug = f"fixture-design-{number}"
         source = design_import.source.parent / f"{slug}.md"
-        source.write_text(SOURCE_TEXT, encoding="utf-8")
+        source.write_bytes(SOURCE_TEXT.encode("utf-8"))
         entries.append(
             {
                 **design_import.entry,
@@ -1531,10 +1845,7 @@ def test_mixed_status_output_is_truthful_and_elided_once(
             }
         )
     design_import.manifest["entries"] = entries
-    design_import.manifest_path.write_text(
-        json.dumps(design_import.manifest),
-        encoding="utf-8",
-    )
+    _write_bound_manifest(design_import)
 
     last_skill, _ = importer.deploy_entry(
         entries[-1],
