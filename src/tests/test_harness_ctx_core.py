@@ -2116,6 +2116,86 @@ class TestRecommendBundle:
             f"skill:helper-{index}" for index in range(8)
         }
 
+    def test_slow_rejection_telemetry_does_not_hold_event_lock(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.runtime_lifecycle as lifecycle
+
+        store = lifecycle.RuntimeLifecycleStore(root=tmp_path / "runtime")
+        first_telemetry_started = threading.Event()
+        release_first_telemetry = threading.Event()
+        call_lock = threading.Lock()
+        calls = 0
+
+        def slow_first_telemetry(_event: dict[str, Any]) -> None:
+            nonlocal calls
+            with call_lock:
+                calls += 1
+                call_number = calls
+            if call_number == 1:
+                first_telemetry_started.set()
+                assert release_first_telemetry.wait(timeout=5)
+
+        monkeypatch.setattr(
+            lifecycle,
+            "_record_runtime_lifecycle_telemetry",
+            slow_first_telemetry,
+        )
+        failures: list[BaseException] = []
+
+        def first_writer() -> None:
+            try:
+                store.remember_recommendation_rejections(
+                    session_id="slow-telemetry-a",
+                    rejected=["skill:first"],
+                )
+            except BaseException as exc:  # pragma: no cover - asserted below
+                failures.append(exc)
+
+        writer = threading.Thread(target=first_writer)
+        writer.start()
+        assert first_telemetry_started.wait(timeout=5)
+
+        assert store.remember_recommendation_rejections(
+            session_id="slow-telemetry-b",
+            rejected=["skill:second"],
+        ) == ["skill:second"]
+        release_first_telemetry.set()
+        writer.join(timeout=5)
+
+        assert not writer.is_alive()
+        assert failures == []
+        assert store.recommendation_rejections(session_id="slow-telemetry-a") == ["skill:first"]
+
+    def test_rejection_append_repairs_crash_partial_jsonl_tail(self, tmp_path: Path) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="partial-tail",
+            rejected=["skill:first"],
+        )
+        with store.events_path.open("ab") as handle:
+            handle.write(b'{"action":"recommendation_rejections"')
+
+        store.remember_recommendation_rejections(
+            session_id="partial-tail",
+            rejected=["agent:second"],
+            merge=True,
+        )
+        store.recommendation_checkpoint_path.unlink()
+
+        assert store.recommendation_rejections(session_id="partial-tail") == [
+            "skill:first",
+            "agent:second",
+        ]
+        assert all(
+            isinstance(json.loads(line), dict)
+            for line in store.events_path.read_text(encoding="utf-8").splitlines()
+        )
+
     def test_malformed_rejection_snapshot_retains_last_valid_state(
         self,
         tmp_path: Path,
@@ -2203,6 +2283,31 @@ class TestRecommendBundle:
         rebuilt = json.loads(store.recommendation_checkpoint_path.read_text(encoding="utf-8"))
         assert rebuilt["sessions"] == {"checkpoint-rebuild": ["agent:reviewer"]}
 
+    def test_rejection_checkpoint_tampering_rebuilds_from_events(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="checkpoint-integrity",
+            rejected=["skill:valid"],
+        )
+        checkpoint = json.loads(store.recommendation_checkpoint_path.read_text(encoding="utf-8"))
+        checkpoint["sessions"]["checkpoint-integrity"] = ["agent:tampered"]
+        store.recommendation_checkpoint_path.write_text(
+            json.dumps(checkpoint),
+            encoding="utf-8",
+        )
+
+        with caplog.at_level("WARNING"):
+            rejected = store.recommendation_rejections(session_id="checkpoint-integrity")
+
+        assert rejected == ["skill:valid"]
+        assert "rebuilding malformed rejection checkpoint" in caplog.text
+
     def test_context_policy_replaces_rejected_or_stale_applied_context(self) -> None:
         policy = _recommendation_context_policy(
             baseline_context=["mcp-server:codex-cli"],
@@ -2263,6 +2368,23 @@ class TestRecommendBundle:
         )
         assert bare_rejected["keep"] == []
         assert bare_rejected["unload"] == ["agent:rejected-reviewer"]
+
+    def test_context_policy_does_not_resolve_ambiguous_bare_graph_ids(self) -> None:
+        graph = nx.Graph()
+        graph.add_node("skill:shared", label="shared", type="skill")
+        graph.add_node("mcp-server:shared", label="shared", type="mcp-server")
+
+        policy = _recommendation_context_policy(
+            baseline_context=[],
+            active_context=["shared"],
+            rejected_context=["skill:shared"],
+            results=[],
+            graph=graph,
+        )
+
+        assert policy["keep"] == ["shared"]
+        assert policy["unload"] == []
+        assert policy["replace"] == []
 
     def test_language_inference_resolves_common_word_aliases(self) -> None:
         assert _infer_query_language("go through python tests") == "python"

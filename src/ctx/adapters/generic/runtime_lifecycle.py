@@ -37,7 +37,7 @@ from ctx.utils._secret_scan import redact_secret_text
 
 
 _logger = logging.getLogger(__name__)
-_REJECTION_CHECKPOINT_VERSION = 1
+_REJECTION_CHECKPOINT_VERSION = 2
 _REJECTION_CHECKPOINT_ANCHOR_BYTES = 4096
 _SESSION_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _ENTITY_TYPES = set(RECOMMENDABLE_ENTITY_TYPES)
@@ -289,22 +289,28 @@ class RuntimeLifecycleStore:
         supplied = _deduplicate_recommendation_ids(rejected)
         path = self.events_path
         reject_symlink_path(path)
+        recorded_event: dict[str, Any] | None = None
         with file_lock(path):
+            _repair_jsonl_tail(path)
             state = self._rejection_checkpoint_unlocked()
             stored = list(state.get(session_id, []))
             normalised = _deduplicate_recommendation_ids(stored + supplied) if merge else supplied
             if stored != normalised:
-                self._record(
+                recorded = self._record(
                     _lock_held=True,
+                    _emit_telemetry=False,
                     action="recommendation_rejections",
                     session_id=session_id,
                     rejected=normalised,
                 )
+                recorded_event = recorded["event"]
                 if normalised:
                     state[session_id] = normalised
                 else:
                     state.pop(session_id, None)
                 self._write_rejection_checkpoint_unlocked(state)
+        if recorded_event is not None:
+            _record_runtime_lifecycle_telemetry(recorded_event)
         return normalised
 
     def session_state(
@@ -491,7 +497,13 @@ class RuntimeLifecycleStore:
             "open_escalations": [event for event in escalations if event["status"] == "open"],
         }
 
-    def _record(self, *, _lock_held: bool = False, **event: Any) -> dict[str, Any]:
+    def _record(
+        self,
+        *,
+        _lock_held: bool = False,
+        _emit_telemetry: bool = True,
+        **event: Any,
+    ) -> dict[str, Any]:
         session_id = _validate_session_id(str(event.get("session_id") or ""))
         entity_type = event.get("entity_type")
         slug = event.get("slug")
@@ -505,19 +517,14 @@ class RuntimeLifecycleStore:
         event = _sanitize_lifecycle_event(event)
         path = self.events_path
 
-        def append() -> None:
-            reject_symlink_path(path)
-            ensure_private_event_file(path)
-            with path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(event, sort_keys=True) + "\n")
-
         if _lock_held:
-            append()
+            _append_jsonl_event(path, event)
         else:
             reject_symlink_path(path)
             with file_lock(path):
-                append()
-        _record_runtime_lifecycle_telemetry(event)
+                _append_jsonl_event(path, event)
+        if _emit_telemetry:
+            _record_runtime_lifecycle_telemetry(event)
         return {"ok": True, "event": event, "recorded": True}
 
     def _events_for_session(self, session_id: str) -> list[dict[str, Any]]:
@@ -569,6 +576,18 @@ class RuntimeLifecycleStore:
                     raise ValueError("event log identity changed")
                 if raw.get("anchor") != _event_log_anchor(events_path, raw_offset):
                     raise ValueError("event log checkpoint anchor changed")
+                if raw.get("checksum") != _rejection_checkpoint_checksum(raw):
+                    raise ValueError("checkpoint checksum changed")
+                raw_event_size = raw.get("event_size")
+                if isinstance(raw_event_size, bool) or not isinstance(raw_event_size, int):
+                    raise ValueError("invalid checkpoint event size")
+                if raw_event_size < raw_offset or raw_event_size > events_size:
+                    raise ValueError("checkpoint event size outside event log")
+                if raw_event_size == events_size and (
+                    raw.get("event_mtime_ns") != _stat_time_ns(events_stat, "st_mtime_ns")
+                    or raw.get("event_ctime_ns") != _stat_time_ns(events_stat, "st_ctime_ns")
+                ):
+                    raise ValueError("event log metadata changed")
                 state = _validate_rejection_checkpoint_sessions(raw.get("sessions"))
                 offset = raw_offset
                 checkpoint_valid = True
@@ -598,13 +617,17 @@ class RuntimeLifecycleStore:
         resolved_offset = (
             int(events_stat.st_size) if offset is None and events_stat else offset or 0
         )
-        payload = {
+        payload: dict[str, Any] = {
             "version": _REJECTION_CHECKPOINT_VERSION,
             "event_file_id": _event_file_id(events_stat),
+            "event_size": int(events_stat.st_size) if events_stat is not None else 0,
+            "event_mtime_ns": _stat_time_ns(events_stat, "st_mtime_ns"),
+            "event_ctime_ns": _stat_time_ns(events_stat, "st_ctime_ns"),
             "offset": resolved_offset,
             "anchor": _event_log_anchor(events_path, resolved_offset),
             "sessions": state,
         }
+        payload["checksum"] = _rejection_checkpoint_checksum(payload)
         safe_atomic_write_text(
             checkpoint_path,
             json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
@@ -620,6 +643,47 @@ class RuntimeLifecycleStore:
     @property
     def recommendation_checkpoint_path(self) -> Path:
         return self.events_path.with_name("recommendation-rejections.json")
+
+
+def _append_jsonl_event(path: Path, event: dict[str, Any]) -> None:
+    reject_symlink_path(path)
+    ensure_private_event_file(path)
+    _repair_jsonl_tail(path)
+    payload = (json.dumps(event, sort_keys=True) + "\n").encode("utf-8")
+    with path.open("ab") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _repair_jsonl_tail(path: Path) -> None:
+    """Remove a crash-partial final record before the next durable append."""
+    reject_symlink_path(path)
+    if not path.is_file():
+        return
+    with path.open("r+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        size = handle.tell()
+        if size == 0:
+            return
+        handle.seek(-1, os.SEEK_END)
+        if handle.read(1) == b"\n":
+            return
+
+        cursor = size
+        truncate_at = 0
+        while cursor > 0:
+            chunk_size = min(cursor, 64 * 1024)
+            cursor -= chunk_size
+            handle.seek(cursor)
+            chunk = handle.read(chunk_size)
+            newline = chunk.rfind(b"\n")
+            if newline >= 0:
+                truncate_at = cursor + newline + 1
+                break
+        handle.truncate(truncate_at)
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def _sanitize_lifecycle_event(event: dict[str, Any]) -> dict[str, Any]:
@@ -935,6 +999,22 @@ def _event_file_id(event_stat: os.stat_result | None) -> list[int]:
     if event_stat is None:
         return [0, 0]
     return [int(event_stat.st_dev), int(event_stat.st_ino)]
+
+
+def _stat_time_ns(event_stat: os.stat_result | None, field: str) -> int:
+    if event_stat is None:
+        return 0
+    value = getattr(event_stat, field, None)
+    if isinstance(value, int):
+        return value
+    seconds = getattr(event_stat, field.removesuffix("_ns"))
+    return int(float(seconds) * 1_000_000_000)
+
+
+def _rejection_checkpoint_checksum(payload: dict[str, Any]) -> str:
+    canonical = {key: value for key, value in payload.items() if key != "checksum"}
+    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _event_log_anchor(path: Path, offset: int) -> str:

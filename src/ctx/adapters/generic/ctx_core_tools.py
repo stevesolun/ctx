@@ -2322,6 +2322,14 @@ def _recommendation_policy_aliases(
     values: list[str],
     results: list[dict[str, Any]],
 ) -> dict[str, str]:
+    bare_values = [
+        value
+        for value in _recommendation_selection_values(values)
+        if _recommendation_selection_parts(value)[0] is None
+    ]
+    if graph is not None:
+        return _canonical_graph_recommendation_map(graph, bare_values)
+
     candidates: dict[str, set[str]] = {}
     for value in _recommendation_selection_values(
         values + [str(row.get("id") or "") for row in results]
@@ -2332,14 +2340,6 @@ def _recommendation_policy_aliases(
     aliases = {
         name: next(iter(matches)) for name, matches in candidates.items() if len(matches) == 1
     }
-    unresolved = [
-        value
-        for value in _recommendation_selection_values(values)
-        if _recommendation_selection_parts(value)[0] is None
-        and _recommendation_selection_key(value) not in aliases
-    ]
-    if graph is not None and unresolved:
-        aliases.update(_canonical_graph_recommendation_map(graph, unresolved))
     return aliases
 
 
