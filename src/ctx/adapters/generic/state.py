@@ -628,9 +628,15 @@ class JsonlObserver(LoopObserver):
         self._emit_session_start = emit_session_start
         self._persisted_message_count = persisted_message_count
         self._session_started = False
+        self._last_result: LoopResult | None = None
         # Track previous-iteration message count so we only persist
         # messages appended this iteration (not the full snapshot).
         self._last_message_count = 0
+
+    @property
+    def last_result(self) -> LoopResult | None:
+        """Return the last stop result successfully persisted by this observer."""
+        return self._last_result
 
     def _emit_start_if_needed(self, messages: list[Message]) -> None:
         if self._session_started:
@@ -714,6 +720,7 @@ class JsonlObserver(LoopObserver):
 
     def on_stop(self, result: LoopResult) -> None:
         self._store.write_stop(result)
+        self._last_result = result
 
 
 # ── Reader / replay ──────────────────────────────────────────────────────

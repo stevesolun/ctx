@@ -24,6 +24,7 @@ Plan 001 Phase H7.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext, redirect_stdout
 import json
 import logging
 import math
@@ -1850,7 +1851,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         )
         _load_runtime_agent(lifecycle, session_id=session_id, role="planner")
         try:
-            plan_artifact = planner.plan(args.task)
+            with redirect_stdout(sys.stderr) if args.json else nullcontext():
+                plan_artifact = planner.plan(args.task)
             _mark_runtime_agent_used(
                 lifecycle,
                 session_id=session_id,
@@ -2157,30 +2159,31 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     model=args.evaluator_model or args.model,
                 )
                 deferred_stop_observer = _DeferredStopObserver(observer)
-                eval_outcome = run_with_evaluation(
-                    provider=provider,
-                    system_prompt=system_prompt,
-                    task=args.task,
-                    evaluator=evaluator_agent,
-                    max_rounds=args.evaluator_rounds,
-                    planner=planner_agent,
-                    contract_builder=contract_builder,
-                    router=router,
-                    extra_tools=extra_tools or None,
-                    tool_executor=tool_executor,
-                    tool_policy=tool_policy,
-                    turn_controller=turn_controller,
-                    model=args.model,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    provider_timeout=args.provider_timeout,
-                    max_iterations=args.max_iterations,
-                    budget_usd=args.budget_usd,
-                    budget_tokens=args.budget_tokens,
-                    agent_usage_observer=observe_agent_usage,
-                    observer=deferred_stop_observer,
-                    compactor=compactor,
-                )
+                with redirect_stdout(sys.stderr) if args.json else nullcontext():
+                    eval_outcome = run_with_evaluation(
+                        provider=provider,
+                        system_prompt=system_prompt,
+                        task=args.task,
+                        evaluator=evaluator_agent,
+                        max_rounds=args.evaluator_rounds,
+                        planner=planner_agent,
+                        contract_builder=contract_builder,
+                        router=router,
+                        extra_tools=extra_tools or None,
+                        tool_executor=tool_executor,
+                        tool_policy=tool_policy,
+                        turn_controller=turn_controller,
+                        model=args.model,
+                        temperature=args.temperature,
+                        max_tokens=args.max_tokens,
+                        provider_timeout=args.provider_timeout,
+                        max_iterations=args.max_iterations,
+                        budget_usd=args.budget_usd,
+                        budget_tokens=args.budget_tokens,
+                        agent_usage_observer=observe_agent_usage,
+                        observer=deferred_stop_observer,
+                        compactor=compactor,
+                    )
                 result = replace(eval_outcome.final, usage=eval_outcome.total_usage)
                 observer.on_stop(result)
                 plan_artifact = eval_outcome.plan
@@ -2215,26 +2218,27 @@ def _cmd_run(args: argparse.Namespace) -> int:
                             file=sys.stderr,
                         )
             else:
-                result = run_loop(
-                    provider=provider,
-                    system_prompt=system_prompt,
-                    task=args.task,
-                    router=router,
-                    extra_tools=extra_tools or None,
-                    tool_executor=tool_executor,
-                    tool_policy=tool_policy,
-                    turn_controller=turn_controller,
-                    model=args.model,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    provider_timeout=args.provider_timeout,
-                    max_iterations=args.max_iterations,
-                    budget_usd=args.budget_usd,
-                    budget_tokens=args.budget_tokens,
-                    initial_usage=plan_artifact.usage if plan_artifact is not None else None,
-                    observer=observer,
-                    compactor=compactor,
-                )
+                with redirect_stdout(sys.stderr) if args.json else nullcontext():
+                    result = run_loop(
+                        provider=provider,
+                        system_prompt=system_prompt,
+                        task=args.task,
+                        router=router,
+                        extra_tools=extra_tools or None,
+                        tool_executor=tool_executor,
+                        tool_policy=tool_policy,
+                        turn_controller=turn_controller,
+                        model=args.model,
+                        temperature=args.temperature,
+                        max_tokens=args.max_tokens,
+                        provider_timeout=args.provider_timeout,
+                        max_iterations=args.max_iterations,
+                        budget_usd=args.budget_usd,
+                        budget_tokens=args.budget_tokens,
+                        initial_usage=plan_artifact.usage if plan_artifact is not None else None,
+                        observer=observer,
+                        compactor=compactor,
+                    )
         except Exception as exc:
             if result is None and deferred_stop_observer is not None:
                 result = deferred_stop_observer.failure_result(exc)
@@ -2251,27 +2255,35 @@ def _cmd_run(args: argparse.Namespace) -> int:
                         }
                     },
                 )
-            failure_payload = {
-                **_loop_result_payload(result),
-                **_adaptive_runtime_payload(turn_controller),
-            }
-            if deferred_stop_observer is not None:
-                failure_payload["ctx.usage.complete"] = False
-                failure_payload["ctx.usage.scope"] = "completed_generator_rounds"
-            failure_payload["ctx.evaluator.round_count"] = (
-                len(evaluator_rounds) if evaluator_rounds is not None else 0
-            )
-            _record_cli_telemetry(
-                "ctx.cli.run",
-                session_id=session_id,
-                phase="failed",
-                payload=failure_payload,
-                outcome="error",
-                duration_ms=_duration_ms(telemetry_started),
-                error_kind=type(exc).__name__,
-                exc=exc,
-            )
-            raise
+            if (
+                deferred_stop_observer is None
+                and result is None
+                and observer.last_result is not None
+                and observer.last_result.stop_reason == "provider_error"
+            ):
+                result = observer.last_result
+            else:
+                failure_payload = {
+                    **_loop_result_payload(result),
+                    **_adaptive_runtime_payload(turn_controller),
+                }
+                if deferred_stop_observer is not None:
+                    failure_payload["ctx.usage.complete"] = False
+                    failure_payload["ctx.usage.scope"] = "completed_generator_rounds"
+                failure_payload["ctx.evaluator.round_count"] = (
+                    len(evaluator_rounds) if evaluator_rounds is not None else 0
+                )
+                _record_cli_telemetry(
+                    "ctx.cli.run",
+                    session_id=session_id,
+                    phase="failed",
+                    payload=failure_payload,
+                    outcome="error",
+                    duration_ms=_duration_ms(telemetry_started),
+                    error_kind=type(exc).__name__,
+                    exc=exc,
+                )
+                raise
         finally:
             try:
                 for role in reversed(loaded_runtime_agents):
@@ -2569,51 +2581,59 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         try:
             if router is not None:
                 router.start()
-            result = run_loop(
-                provider=provider,
-                system_prompt=system_prompt,
-                task=args.task,
-                messages=resume_messages,
-                model=model,
-                observer=observer,
-                compactor=compactor,
-                router=router,
-                extra_tools=extra_tools or None,
-                tool_executor=tool_executor,
-                tool_policy=tool_policy,
-                turn_controller=turn_controller,
-                # Resume must keep the replayed transcript first; the
-                # follow-up task is appended at the end, not shoved before
-                # the prior conversation.
-                append_task_after_messages=True,
-                # Inherit the original run's safety limits when present
-                # so the resume doesn't blow past the original ceiling.
-                max_iterations=int(meta.get("max_iterations") or 25),
-                temperature=float(meta.get("temperature") or 0.7),
-                max_tokens=meta.get("max_tokens"),
-                provider_timeout=provider_timeout,
-                budget_usd=meta.get("budget_usd"),
-                budget_tokens=meta.get("budget_tokens"),
-                initial_usage=state.usage,
-            )
+            with redirect_stdout(sys.stderr) if args.json else nullcontext():
+                result = run_loop(
+                    provider=provider,
+                    system_prompt=system_prompt,
+                    task=args.task,
+                    messages=resume_messages,
+                    model=model,
+                    observer=observer,
+                    compactor=compactor,
+                    router=router,
+                    extra_tools=extra_tools or None,
+                    tool_executor=tool_executor,
+                    tool_policy=tool_policy,
+                    turn_controller=turn_controller,
+                    # Resume must keep the replayed transcript first; the
+                    # follow-up task is appended at the end, not shoved before
+                    # the prior conversation.
+                    append_task_after_messages=True,
+                    # Inherit the original run's safety limits when present
+                    # so the resume doesn't blow past the original ceiling.
+                    max_iterations=int(meta.get("max_iterations") or 25),
+                    temperature=float(meta.get("temperature") or 0.7),
+                    max_tokens=meta.get("max_tokens"),
+                    provider_timeout=provider_timeout,
+                    budget_usd=meta.get("budget_usd"),
+                    budget_tokens=meta.get("budget_tokens"),
+                    initial_usage=state.usage,
+                )
         except Exception as exc:
-            _record_cli_telemetry(
-                "ctx.cli.resume",
-                session_id=args.session_id,
-                phase="failed",
-                payload=_with_previous_trace_id(
-                    {
-                        **_loop_result_payload(result),
-                        **_adaptive_runtime_payload(turn_controller),
-                    },
-                    previous_trace_id,
-                ),
-                outcome="error",
-                duration_ms=_duration_ms(telemetry_started),
-                error_kind=type(exc).__name__,
-                exc=exc,
-            )
-            raise
+            if (
+                result is None
+                and observer.last_result is not None
+                and observer.last_result.stop_reason == "provider_error"
+            ):
+                result = observer.last_result
+            else:
+                _record_cli_telemetry(
+                    "ctx.cli.resume",
+                    session_id=args.session_id,
+                    phase="failed",
+                    payload=_with_previous_trace_id(
+                        {
+                            **_loop_result_payload(result),
+                            **_adaptive_runtime_payload(turn_controller),
+                        },
+                        previous_trace_id,
+                    ),
+                    outcome="error",
+                    duration_ms=_duration_ms(telemetry_started),
+                    error_kind=type(exc).__name__,
+                    exc=exc,
+                )
+                raise
         finally:
             try:
                 if turn_controller is not None:

@@ -1121,6 +1121,94 @@ class TestRunCommand:
             "cost_usd": None,
         }
 
+    def test_provider_error_is_valid_json_without_traceback(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        def completion(**kwargs: Any) -> None:
+            fake_litellm._calls.append(kwargs)
+            print("provider diagnostic")
+            raise RuntimeError("provider unavailable")
+
+        fake_litellm.completion = completion
+        exit_code = main(
+            [
+                "run",
+                "--model",
+                "ollama/x",
+                "--task",
+                "provider error",
+                "--sessions-dir",
+                str(tmp_path),
+                "--session-id",
+                "provider-error-json",
+                "--no-ctx-tools",
+                "--json",
+                "--quiet",
+            ]
+        )
+
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
+        assert exit_code == 2
+        assert captured.err == "provider diagnostic\n"
+        assert payload["stop_reason"] == "provider_error"
+        assert payload["detail"] == "provider raised RuntimeError: provider unavailable"
+
+    def test_resume_provider_error_is_valid_json_without_traceback(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        assert (
+            main(
+                [
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "initial",
+                    "--sessions-dir",
+                    str(tmp_path),
+                    "--session-id",
+                    "resume-provider-error-json",
+                    "--no-ctx-tools",
+                    "--quiet",
+                ]
+            )
+            == 0
+        )
+        capsys.readouterr()
+
+        def completion(**kwargs: Any) -> None:
+            fake_litellm._calls.append(kwargs)
+            print("resume provider diagnostic")
+            raise RuntimeError("resume provider unavailable")
+
+        fake_litellm.completion = completion
+        exit_code = main(
+            [
+                "resume",
+                "resume-provider-error-json",
+                "--task",
+                "retry",
+                "--sessions-dir",
+                str(tmp_path),
+                "--json",
+                "--quiet",
+            ]
+        )
+
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
+        assert exit_code == 2
+        assert captured.err == "resume provider diagnostic\n"
+        assert payload["stop_reason"] == "provider_error"
+        assert payload["detail"] == "provider raised RuntimeError: resume provider unavailable"
+
     def test_json_output(
         self,
         fake_litellm: Any,
