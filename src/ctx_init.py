@@ -55,6 +55,8 @@ from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
 
+from ctx.utils._fs_utils import safe_atomic_write_text
+
 
 # ─── Directory layout ───────────────────────────────────────────────────────
 
@@ -284,6 +286,28 @@ _GRAPH_RUNTIME_ROOT_FILES = frozenset(
         "versions-catalog.md",
     }
 )
+_RUNTIME_RECOMMENDATION_SEED_ID = "skill:python-testing"
+_RUNTIME_RECOMMENDATION_SEED_PATH = Path("converted/python-testing/SKILL.md")
+_RUNTIME_RECOMMENDATION_SEED = """\
+---
+name: python-testing
+description: Local Python testing workflow using pytest, focused regression tests, and coverage.
+---
+
+# Python Testing
+
+Use this skill for local Python test design, regression coverage, and failure diagnosis.
+
+1. Read the target behavior and nearby tests before changing code.
+2. Reproduce the failure with the narrowest deterministic pytest case.
+3. Implement the smallest behavior-preserving fix.
+4. Run the focused test first, then the affected test module or subsystem.
+5. Run configured lint, type, and broader test gates before delivery.
+
+Prefer behavior assertions over implementation details. Keep fixtures isolated,
+avoid network and wall-clock dependencies, and include the original regression
+case whenever a bug is fixed.
+"""
 
 
 def build_graph(
@@ -313,6 +337,8 @@ def build_graph(
                 allow_release_download=graph_url is None,
             )
             _refresh_graph_store(wiki_dir)
+            if install_mode == "runtime":
+                _ensure_runtime_recommendation_seed(wiki_dir)
         except Exception as exc:
             print(
                 f"  [error] graph overlay/store refresh failed: {type(exc).__name__}: {exc}",
@@ -359,7 +385,9 @@ def build_graph(
     try:
         _validate_graph_install_tree(wiki_dir)
         _refresh_graph_store(wiki_dir)
-    except ValueError as exc:
+        if install_mode == "runtime":
+            _ensure_runtime_recommendation_seed(wiki_dir)
+    except (OSError, ValueError) as exc:
         print(f"  [error] graph install validation failed: {exc}", file=sys.stderr)
         return 1
     return 0
@@ -778,6 +806,32 @@ def _refresh_graph_store(wiki_dir: Path) -> None:
         raise ValueError(
             f"graph-store.sqlite3 validation failed: {report.get('errors', [])}",
         )
+
+
+def _ensure_runtime_recommendation_seed(wiki_dir: Path) -> None:
+    """Install one trusted local skill when the runtime graph contains it."""
+    store = wiki_dir / "graphify-out" / "graph-store.sqlite3"
+    try:
+        with sqlite3.connect(f"{store.resolve().as_uri()}?mode=ro", uri=True) as conn:
+            present = (
+                conn.execute(
+                    "SELECT 1 FROM nodes WHERE id = ? LIMIT 1",
+                    (_RUNTIME_RECOMMENDATION_SEED_ID,),
+                ).fetchone()
+                is not None
+            )
+    except sqlite3.Error as exc:
+        raise ValueError(f"could not inspect runtime recommendation seed: {exc}") from exc
+    if not present:
+        return
+
+    destination = wiki_dir / _RUNTIME_RECOMMENDATION_SEED_PATH
+    if destination.is_file() and not destination.is_symlink():
+        return
+    if destination.exists() or destination.is_symlink():
+        raise ValueError(f"unsafe runtime recommendation seed path: {destination}")
+    _ensure_path_under_root(destination.parent, wiki_dir.resolve())
+    safe_atomic_write_text(destination, _RUNTIME_RECOMMENDATION_SEED, encoding="utf-8")
 
 
 def _validate_graph_install_tree(wiki_dir: Path) -> None:

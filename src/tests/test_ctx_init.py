@@ -16,6 +16,9 @@ from types import SimpleNamespace
 import networkx as nx
 import pytest
 import ctx_init as ci
+from ctx.adapters.claude_code.install.skill_install import install_skill
+from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
+from ctx.adapters.generic.providers import ToolCall
 from ctx.core.graph.graph_packs import write_base_pack
 from ctx.core.graph.graph_store import validate_graph_store
 from ctx.core.wiki.wiki_packs import write_wiki_base_pack
@@ -313,12 +316,19 @@ def _write_graph_archive(
     graph_pack_export_id: str = "test-export",
     include_wiki_pack: bool = False,
     wiki_pack_export_id: str = "test-export",
+    graph_nodes: list[dict[str, object]] | None = None,
 ) -> Path:
     source = tmp_path / "archive-source"
     graph_out = source / "graphify-out"
     graph_out.mkdir(parents=True)
     (graph_out / "graph.json").write_text(
-        json.dumps({"graph": {"export_id": "test-export"}, "nodes": [], "links": []}),
+        json.dumps(
+            {
+                "graph": {"export_id": "test-export"},
+                "nodes": graph_nodes or [],
+                "links": [],
+            }
+        ),
         encoding="utf-8",
     )
     (graph_out / "graph-delta.json").write_text(
@@ -747,6 +757,68 @@ def test_runtime_graph_install_extracts_harness_pages_after_required_files(
     assert ci.build_graph(claude) == 0
     assert (claude / "skill-wiki" / "entities" / "harnesses" / "text-to-cad.md").is_file()
     assert not (claude / "skill-wiki" / "entities" / "skills" / "not-runtime.md").exists()
+
+
+def test_runtime_graph_install_seeds_actionable_local_recommendation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _write_graph_archive(
+        tmp_path,
+        graph_nodes=[
+            {
+                "id": "skill:python-testing",
+                "label": "python-testing",
+                "type": "skill",
+                "tags": ["python", "testing", "pytest"],
+            }
+        ],
+    )
+    claude = tmp_path / "home"
+    wiki = claude / "skill-wiki"
+    monkeypatch.setattr(ci, "_find_local_graph_archive", lambda _mode="runtime": archive)
+    monkeypatch.setattr(ci, "_verify_local_graph_archive", lambda *_a, **_k: None)
+    monkeypatch.setattr(ci, "_install_graph_entity_overlay", lambda *_a, **_k: None)
+
+    assert ci.build_graph(claude, install_mode="runtime") == 0
+
+    source = wiki / "converted" / "python-testing" / "SKILL.md"
+    assert source.is_file()
+    assert not source.is_symlink()
+    toolbox = CtxCoreToolbox(
+        wiki_dir=wiki,
+        graph_path=wiki / "graphify-out" / "graph.json",
+    )
+    payload = json.loads(
+        toolbox.dispatch(
+            ToolCall(
+                id="clean-home",
+                name="ctx__recommend_bundle",
+                arguments={
+                    "query": "python testing",
+                    "top_k": 5,
+                    "local_code_task": True,
+                    "no_api_keys": True,
+                    "language": "python",
+                },
+            )
+        )
+    )
+    assert [(row["id"], row["installable"], row["load_status"]) for row in payload["results"]] == [
+        ("skill:python-testing", True, "local-wiki")
+    ]
+    install = install_skill(
+        "python-testing",
+        wiki_dir=wiki,
+        skills_dir=claude / "skills",
+        dry_run=True,
+    )
+    assert install.status == "would-install"
+    assert install.source_variant == "transformed"
+
+    source.write_text("user-owned body\n", encoding="utf-8")
+    assert ci.build_graph(claude, install_mode="runtime") == 0
+    assert source.read_text(encoding="utf-8") == "user-owned body\n"
 
 
 def test_runtime_graph_install_preserves_existing_non_harness_entities(

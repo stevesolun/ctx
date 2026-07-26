@@ -19,6 +19,7 @@ from typing import Any
 import networkx as nx
 import pytest
 
+import ctx
 import ctx.api
 import scan_repo
 from ctx.adapters.claude_code.hooks import context_monitor
@@ -76,6 +77,15 @@ def _write_golden_graph(graph_path: Path) -> nx.Graph:
         encoding="utf-8",
     )
     return graph
+
+
+def _write_golden_availability(wiki: Path) -> None:
+    skill = wiki / "converted" / "fastapi-python-async" / "SKILL.md"
+    agent = wiki / "entities" / "agents" / "fastapi-code-reviewer.md"
+    mcp = wiki / "entities" / "mcp-servers" / "f" / "fastapi-docs.md"
+    for path in (skill, agent, mcp):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {path.stem}\n", encoding="utf-8")
 
 
 def _rows(results: list[dict[str, Any]]) -> list[tuple[str, str]]:
@@ -389,6 +399,7 @@ def test_scan_repo_recommendations_use_shared_graph_bundle(
     wiki = tmp_path / "skill-wiki"
     graph_path = wiki / "graphify-out" / "graph.json"
     _write_golden_graph(graph_path)
+    _write_golden_availability(wiki)
     import ctx_config
 
     monkeypatch.setattr(
@@ -432,6 +443,7 @@ def test_scan_repo_recommendations_use_graph_packs_without_legacy_graph_json(
     wiki = tmp_path / "skill-wiki"
     graph_path = wiki / "graphify-out" / "graph.json"
     graph = _write_golden_graph(graph_path)
+    _write_golden_availability(wiki)
     graph_path.unlink()
     write_base_pack(
         pack_dir=wiki / "graphify-out" / "packs" / "base-export-1",
@@ -474,6 +486,57 @@ def test_scan_repo_recommendations_use_graph_packs_without_legacy_graph_json(
     assert "fastapi-python-async" in out
     assert "fastapi-code-reviewer" in out
     assert "fastapi-docs" in out
+
+
+def test_scan_repo_recommendations_enforce_enriched_availability_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wiki = tmp_path / "skill-wiki"
+    _write_golden_graph(wiki / "graphify-out" / "graph.json")
+    import ctx_config
+
+    monkeypatch.setattr(
+        ctx_config,
+        "cfg",
+        SimpleNamespace(wiki_dir=wiki, recommendation_top_k=5),
+    )
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_recommend_bundle(query: str, **kwargs: object) -> list[dict[str, object]]:
+        calls.append((query, kwargs))
+        return [
+            {
+                "name": "local",
+                "type": "skill",
+                "installable": True,
+                "load_status": "local-wiki",
+            },
+            {
+                "name": "missing",
+                "type": "skill",
+                "installable": False,
+                "load_status": "not-in-wiki",
+            },
+        ]
+
+    monkeypatch.setattr(ctx, "recommend_bundle", fake_recommend_bundle)
+    profile = {
+        "project_type": "api-service",
+        "languages": [{"name": "python", "confidence": 0.9}],
+        "frameworks": [{"name": "fastapi", "confidence": 0.9}],
+    }
+
+    rows = scan_repo._shared_recommendations(profile)
+
+    assert rows is not None
+    assert [row["name"] for row in rows] == ["local"]
+    assert calls == [
+        (
+            "api-service python fastapi",
+            {"top_k": 5, "local_code_task": True, "language": "python"},
+        )
+    ]
 
 
 def test_resolver_preserves_graph_entity_type_and_normalized_priority(

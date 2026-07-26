@@ -679,11 +679,8 @@ def _profile_recommendation_query(profile: dict) -> str:
 
 def _shared_recommendations(profile: dict) -> list[dict[str, Any]] | None:
     """Return shared recommender rows, or None when no graph is available."""
+    from ctx import recommend_bundle  # noqa: PLC0415
     from ctx.core.graph.resolve_graph import load_graph  # noqa: PLC0415
-    from ctx.core.resolve.recommendations import (  # noqa: PLC0415
-        query_to_tags,
-        recommend_by_tags,
-    )
     from ctx_config import cfg  # noqa: PLC0415
 
     graph_path = cfg.wiki_dir / "graphify-out" / "graph.json"
@@ -691,18 +688,27 @@ def _shared_recommendations(profile: dict) -> list[dict[str, Any]] | None:
     if graph.number_of_nodes() == 0:
         return None
     query = _profile_recommendation_query(profile)
-    tags = query_to_tags(query)
-    if not tags:
+    if not query:
         return []
-    return recommend_by_tags(
-        graph,
-        tags,
-        top_n=max(1, min(int(cfg.recommendation_top_k), 5)),
-        query=query,
-        entity_types=("skill", "agent", "mcp-server"),
-        min_normalized_score=cfg.recommendation_min_normalized_score,
-        use_semantic_query=True,
+    language = next(
+        (
+            str(item["name"])
+            for item in profile.get("languages", [])
+            if isinstance(item, dict) and item.get("name")
+        ),
+        None,
     )
+    rows = recommend_bundle(
+        query,
+        top_k=max(1, min(int(cfg.recommendation_top_k), 5)),
+        local_code_task=True,
+        language=language,
+    )
+    return [
+        row
+        for row in rows
+        if row.get("installable") is True and row.get("load_status") == "local-wiki"
+    ]
 
 
 def _row_reason(row: dict[str, Any]) -> str:
