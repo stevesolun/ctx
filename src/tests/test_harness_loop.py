@@ -2572,6 +2572,29 @@ class TestObserver:
         assert not obs.stops[0].usage.tokens_reported
         assert "provider network down" in obs.stops[0].detail
 
+    def test_provider_exception_redacts_secret_from_terminal_observation(
+        self,
+    ) -> None:
+        class _SecretProvider:
+            name = "secret-provider"
+
+            def complete(self, *args: Any, **kwargs: Any) -> CompletionResponse:
+                del args, kwargs
+                raise RuntimeError("authorization=sk-abcdefghijklmnopqrstuvwxyz")
+
+        obs = _RecordingObserver()
+
+        with pytest.raises(RuntimeError, match="authorization="):
+            run_loop(
+                provider=_SecretProvider(),
+                system_prompt="",
+                task="task",
+                observer=obs,
+            )
+
+        assert len(obs.stops) == 1
+        assert obs.stops[0].detail == "provider raised RuntimeError: authorization=[redacted]"
+
     def test_provider_timeout_returns_terminal_observation(self) -> None:
         obs = _RecordingObserver()
         started = time.monotonic()

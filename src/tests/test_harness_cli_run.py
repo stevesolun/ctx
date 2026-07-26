@@ -37,7 +37,7 @@ import ctx.cli.run as run_cli
 import ctx.telemetry as telemetry
 from ctx.adapters.generic.adaptive_runtime import SelectedSkill
 from ctx.adapters.generic.evaluator import EvaluationLoopResult
-from ctx.adapters.generic.loop import LoopResult
+from ctx.adapters.generic.loop import LoopResult, ProviderFailure
 from ctx.cli.run import (
     _apply_mcp_env_overlays,
     _compile_tool_policy,
@@ -1126,11 +1126,14 @@ class TestRunCommand:
         fake_litellm: Any,
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        telemetry_path = _enable_real_telemetry(monkeypatch, tmp_path)
+
         def completion(**kwargs: Any) -> None:
             fake_litellm._calls.append(kwargs)
             print("provider diagnostic")
-            raise RuntimeError("provider unavailable")
+            raise RuntimeError("provider unavailable authorization=sk-abcdefghijklmnopqrstuvwxyz")
 
         fake_litellm.completion = completion
         exit_code = main(
@@ -1155,7 +1158,25 @@ class TestRunCommand:
         assert exit_code == 2
         assert captured.err == "provider diagnostic\n"
         assert payload["stop_reason"] == "provider_error"
-        assert payload["detail"] == "provider raised RuntimeError: provider unavailable"
+        assert payload["detail"] == (
+            "provider raised RuntimeError: provider unavailable authorization=[redacted]"
+        )
+        session_raw = (tmp_path / "provider-error-json.jsonl").read_text(encoding="utf-8")
+        assert "sk-abcdefghijklmnopqrstuvwxyz" not in session_raw
+        assert "sk-abcdefghijklmnopqrstuvwxyz" not in captured.out
+        cli_events = [
+            event
+            for event in read_events(telemetry_path, trusted_root=tmp_path)
+            if event.event_name == "ctx.cli.run"
+        ]
+        assert [event.payload["ctx.run.phase"] for event in cli_events] == [
+            "started",
+            "finished",
+        ]
+        finished = cli_events[-1]
+        assert finished.payload["ctx.exception.message_hash"].startswith("sha256:")
+        assert finished.payload["ctx.exception.stack_hash"].startswith("sha256:")
+        assert finished.payload["ctx.exception.escaped"] is False
 
     def test_resume_provider_error_is_valid_json_without_traceback(
         self,
@@ -1208,6 +1229,49 @@ class TestRunCommand:
         assert captured.err == "resume provider diagnostic\n"
         assert payload["stop_reason"] == "provider_error"
         assert payload["detail"] == "provider raised RuntimeError: resume provider unavailable"
+
+    def test_unrelated_exception_after_provider_stop_is_not_swallowed(
+        self,
+        fake_litellm: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        del fake_litellm
+        provider_error = RuntimeError("provider unavailable")
+
+        def fail_after_provider_stop(*_args: Any, **kwargs: Any) -> None:
+            observer = kwargs["observer"]
+            result = LoopResult(
+                stop_reason="provider_error",
+                final_message="",
+                iterations=1,
+                usage=Usage(tokens_reported=False),
+                messages=(),
+                detail="provider raised RuntimeError: provider unavailable",
+            )
+            observer.on_stop(result)
+            observer.on_provider_failure(ProviderFailure(provider_error, result))
+            raise RuntimeError("cleanup failed")
+
+        monkeypatch.setattr(run_cli, "run_loop", fail_after_provider_stop)
+
+        with pytest.raises(RuntimeError, match="cleanup failed"):
+            main(
+                [
+                    "run",
+                    "--model",
+                    "ollama/x",
+                    "--task",
+                    "provider error",
+                    "--sessions-dir",
+                    str(tmp_path),
+                    "--session-id",
+                    "provider-error-cleanup",
+                    "--no-ctx-tools",
+                    "--json",
+                    "--quiet",
+                ]
+            )
 
     def test_json_output(
         self,

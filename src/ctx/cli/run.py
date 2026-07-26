@@ -854,6 +854,7 @@ def _record_cli_telemetry(
     duration_ms: float,
     error_kind: str | None = None,
     exc: BaseException | None = None,
+    exception_escaped: bool = True,
 ) -> None:
     event_payload = dict(payload)
     event_payload["ctx.run.phase"] = phase
@@ -866,6 +867,7 @@ def _record_cli_telemetry(
                 event_name,
                 source="ctx-cli",
                 exc=exc,
+                escaped=exception_escaped,
                 transport="cli",
                 actor="user",
                 session_id=session_id,
@@ -2087,6 +2089,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 print(f"[ctx] budget: ${args.budget_usd:.2f}", file=sys.stderr)
 
         evaluator_rounds: list[dict[str, Any]] | None = None
+        handled_provider_exception: Exception | None = None
         contract_artifact = None  # populated only on P/C/G/E path
         result = None
         deferred_stop_observer: _DeferredStopObserver | None = None
@@ -2255,13 +2258,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
                         }
                     },
                 )
+            provider_failure = observer.last_provider_failure
             if (
                 deferred_stop_observer is None
                 and result is None
-                and observer.last_result is not None
-                and observer.last_result.stop_reason == "provider_error"
+                and provider_failure is not None
+                and provider_failure.exception is exc
             ):
-                result = observer.last_result
+                result = provider_failure.result
+                handled_provider_exception = exc
             else:
                 failure_payload = {
                     **_loop_result_payload(result),
@@ -2324,6 +2329,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
             outcome=outcome,
             duration_ms=_duration_ms(telemetry_started),
             error_kind=error_kind,
+            exc=handled_provider_exception,
+            exception_escaped=handled_provider_exception is None,
         )
         return _emit_result(
             result,
@@ -2578,6 +2585,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         )
 
         result = None
+        handled_provider_exception: Exception | None = None
         try:
             if router is not None:
                 router.start()
@@ -2610,12 +2618,14 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                     initial_usage=state.usage,
                 )
         except Exception as exc:
+            provider_failure = observer.last_provider_failure
             if (
                 result is None
-                and observer.last_result is not None
-                and observer.last_result.stop_reason == "provider_error"
+                and provider_failure is not None
+                and provider_failure.exception is exc
             ):
-                result = observer.last_result
+                result = provider_failure.result
+                handled_provider_exception = exc
             else:
                 _record_cli_telemetry(
                     "ctx.cli.resume",
@@ -2670,6 +2680,8 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             outcome=outcome,
             duration_ms=_duration_ms(telemetry_started),
             error_kind=error_kind,
+            exc=handled_provider_exception,
+            exception_escaped=handled_provider_exception is None,
         )
         return _emit_result(result, args.session_id, as_json=args.json, quiet=args.quiet)
 

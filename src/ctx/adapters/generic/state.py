@@ -74,8 +74,9 @@ from typing import Any, Iterator, TextIO, cast
 
 from ctx.adapters.generic.loop import (
     EPHEMERAL_WIKI_TOOL_NAME,
-    LoopResult,
     LoopObserver,
+    LoopResult,
+    ProviderFailure,
     _prune_all_ephemeral_wiki_context,
 )
 from ctx.adapters.generic.providers import (
@@ -628,15 +629,15 @@ class JsonlObserver(LoopObserver):
         self._emit_session_start = emit_session_start
         self._persisted_message_count = persisted_message_count
         self._session_started = False
-        self._last_result: LoopResult | None = None
+        self._last_provider_failure: ProviderFailure | None = None
         # Track previous-iteration message count so we only persist
         # messages appended this iteration (not the full snapshot).
         self._last_message_count = 0
 
     @property
-    def last_result(self) -> LoopResult | None:
-        """Return the last stop result successfully persisted by this observer."""
-        return self._last_result
+    def last_provider_failure(self) -> ProviderFailure | None:
+        """Return the provider failure correlated with its persisted stop."""
+        return self._last_provider_failure
 
     def _emit_start_if_needed(self, messages: list[Message]) -> None:
         if self._session_started:
@@ -720,7 +721,9 @@ class JsonlObserver(LoopObserver):
 
     def on_stop(self, result: LoopResult) -> None:
         self._store.write_stop(result)
-        self._last_result = result
+
+    def on_provider_failure(self, failure: ProviderFailure) -> None:
+        self._last_provider_failure = failure
 
 
 # ── Reader / replay ──────────────────────────────────────────────────────

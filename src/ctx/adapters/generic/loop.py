@@ -59,6 +59,7 @@ from ctx.adapters.generic.providers import (
     Usage,
 )
 from ctx.adapters.generic.tools import McpRouter, McpServerError, TOOL_SEPARATOR
+from ctx.utils._secret_scan import redact_secret_text
 
 
 _logger = logging.getLogger(__name__)
@@ -241,6 +242,14 @@ class LoopResult:
     usage: Usage
     messages: tuple[Message, ...]
     detail: str = ""
+
+
+@dataclass(frozen=True)
+class ProviderFailure:
+    """Correlate a provider exception with its persisted terminal result."""
+
+    exception: Exception
+    result: LoopResult
 
 
 @dataclass(frozen=True)
@@ -942,19 +951,23 @@ def _run_prepared_turn(
     if failure is not None:
         _prune_all_ephemeral_wiki_context(conversation, observer=observer)
         if provider_failure is not None:
-            detail = f"provider raised {type(provider_failure).__name__}: {provider_failure}"
-            if close_error is not None:
-                detail += f"; {close_error}"
-            observer.on_stop(
-                LoopResult(
-                    stop_reason="provider_error",
-                    final_message=prior_final_message,
-                    iterations=iteration,
-                    usage=totals.as_usage(),
-                    messages=tuple(conversation),
-                    detail=detail,
-                )
+            detail = redact_secret_text(
+                f"provider raised {type(provider_failure).__name__}: {provider_failure}"
             )
+            if close_error is not None:
+                detail = redact_secret_text(f"{detail}; {close_error}")
+            result = LoopResult(
+                stop_reason="provider_error",
+                final_message=prior_final_message,
+                iterations=iteration,
+                usage=totals.as_usage(),
+                messages=tuple(conversation),
+                detail=detail,
+            )
+            observer.on_stop(result)
+            provider_failure_hook = getattr(observer, "on_provider_failure", None)
+            if callable(provider_failure_hook):
+                provider_failure_hook(ProviderFailure(provider_failure, result))
         if close_error is not None:
             raise RuntimeError(f"{failure}; {close_error}") from failure
         raise failure
