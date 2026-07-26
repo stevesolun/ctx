@@ -38,6 +38,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
+from ctx import __version__
 from ctx.adapters.generic.adaptive_runtime import AdaptiveRuntimeController, SelectedSkill
 from ctx.adapters.generic.compaction import TokenBudgetCompactor
 from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox, make_tool_executor
@@ -1468,6 +1469,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "tools attached."
         ),
     )
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
     # run

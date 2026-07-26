@@ -30,6 +30,7 @@ from typing import Any, cast
 
 import pytest
 
+from ctx import __version__
 import ctx.adapters.generic.runtime_lifecycle as runtime_lifecycle
 import ctx.adapters.generic.tools.mcp_router as mcp_router_module
 import ctx.cli.run as run_cli
@@ -51,6 +52,14 @@ from ctx.telemetry import read_events, record_event as real_record_event
 
 
 _MCP_FIXTURE = Path(__file__).parent / "fixtures" / "fake_mcp_server.py"
+
+
+def test_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--version"])
+
+    assert exc_info.value.code == 0
+    assert capsys.readouterr().out == f"ctx {__version__}\n"
 
 
 # ── Fixture: fake litellm so --provider ollama (no key) works ───────────────

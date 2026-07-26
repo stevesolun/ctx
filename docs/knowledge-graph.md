@@ -52,6 +52,22 @@ the harness pages used by `ctx-harness-install`:
 ctx-init --graph
 ```
 
+The runtime install includes a small actionable fallback set that does not
+depend on an external catalog or API key:
+
+- skills: `ctx-python-testing`, `ctx-javascript-testing`,
+  `ctx-rust-patterns`, and `ctx-typescript`;
+- agent: `ctx-python-reviewer`;
+- MCP server: `ctx-core`, installed only as the exact bare
+  `ctx-mcp-server` command.
+
+These six project-owned entities are MIT licensed and use reserved `ctx-*`
+identities. Installation preserves unrelated skill, agent, MCP, and
+converted-skill content; runtime-managed harness pages are refreshed from the
+installed artifact. Installation fails closed on identity or overlay
+collisions, changed reserved bodies, symlinked ancestors, command arguments,
+or substituted executable paths.
+
 To install the full shipped wiki, including the wiki-pack base for
 skill/agent/MCP entity pages, skill pages, concept pages, converted
 micro-skill pipelines, direct harness pages, and Obsidian vault metadata,

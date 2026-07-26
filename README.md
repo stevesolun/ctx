@@ -1,7 +1,7 @@
 # ctx
 
 [![CI](https://github.com/stevesolun/ctx/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
-[![Tests](https://img.shields.io/badge/Tests-5573_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/badge/Tests-5575_inventory-blue.svg)](https://github.com/stevesolun/ctx/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/claude-ctx.svg)](https://pypi.org/project/claude-ctx/)
 
 ctx is a Python CLI and library that recommends a small, relevant set of
@@ -35,6 +35,14 @@ ctx-scan-repo --repo . --recommend
 `ctx-init --graph` uses the bundled runtime artifact in a source checkout or
 downloads the matching release asset for a package install. The full packed
 wiki is optional; see the [knowledge graph guide](https://stevesolun.github.io/ctx/knowledge-graph/).
+
+Every clean graph install seeds six project-owned, MIT-licensed, no-key
+fallbacks: `ctx-python-testing`, `ctx-javascript-testing`,
+`ctx-rust-patterns`, `ctx-typescript`, the `ctx-python-reviewer` agent, and the
+local `ctx-core` MCP server. ctx preserves unrelated skill, agent, MCP, and
+converted-skill content; runtime-managed harness pages are refreshed from the
+installed artifact. Installation fails closed if a reserved `ctx-*` identity,
+body, overlay, or parent path is unexpected.
 
 ## Privacy And Telemetry
 
