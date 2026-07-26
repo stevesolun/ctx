@@ -2150,6 +2150,59 @@ class TestRecommendBundle:
         assert "bare-id" not in caplog.text
         assert "malformed-session" not in caplog.text
 
+    def test_rejection_checkpoint_incrementally_scans_new_events(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.runtime_lifecycle as lifecycle
+
+        store = lifecycle.RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="checkpoint-session",
+            rejected=["skill:valid"],
+        )
+        assert store.recommendation_checkpoint_path.is_file()
+        store.record_dev_event(
+            session_id="checkpoint-session",
+            event_type="test",
+        )
+
+        calls = 0
+        loads = lifecycle.json.loads
+
+        def count_loads(payload: Any, *args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            return loads(payload, *args, **kwargs)
+
+        monkeypatch.setattr(lifecycle.json, "loads", count_loads)
+
+        assert store.recommendation_rejections(session_id="checkpoint-session") == ["skill:valid"]
+        assert calls == 2
+
+    def test_rejection_checkpoint_corruption_rebuilds_from_events(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="checkpoint-rebuild",
+            rejected=["agent:reviewer"],
+        )
+        store.recommendation_checkpoint_path.write_text("{bad", encoding="utf-8")
+
+        with caplog.at_level("WARNING"):
+            rejected = store.recommendation_rejections(session_id="checkpoint-rebuild")
+
+        assert rejected == ["agent:reviewer"]
+        assert "rebuilding malformed rejection checkpoint" in caplog.text
+        rebuilt = json.loads(store.recommendation_checkpoint_path.read_text(encoding="utf-8"))
+        assert rebuilt["sessions"] == {"checkpoint-rebuild": ["agent:reviewer"]}
+
     def test_context_policy_replaces_rejected_or_stale_applied_context(self) -> None:
         policy = _recommendation_context_policy(
             baseline_context=["mcp-server:codex-cli"],

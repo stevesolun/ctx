@@ -8,6 +8,7 @@ and security-scan details before appending events.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -31,11 +32,13 @@ from ctx.telemetry import (
     telemetry_enabled,
 )
 from ctx.utils._file_lock import file_lock
-from ctx.utils._fs_utils import reject_symlink_path
+from ctx.utils._fs_utils import reject_symlink_path, safe_atomic_write_text
 from ctx.utils._secret_scan import redact_secret_text
 
 
 _logger = logging.getLogger(__name__)
+_REJECTION_CHECKPOINT_VERSION = 1
+_REJECTION_CHECKPOINT_ANCHOR_BYTES = 4096
 _SESSION_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _ENTITY_TYPES = set(RECOMMENDABLE_ENTITY_TYPES)
 _VALIDATION_STATUSES = {"passed", "failed", "skipped", "error"}
@@ -266,15 +269,13 @@ class RuntimeLifecycleStore:
     def recommendation_rejections(self, *, session_id: str) -> list[str]:
         """Return the latest canonical recommendation rejection set."""
         session_id = _validate_session_id(session_id)
-        rejected: list[str] = []
-        for event in self._events_for_session(session_id):
-            if event.get("action") != "recommendation_rejections":
-                continue
-            snapshot = _validated_rejection_snapshot(event.get("rejected"), session_id=session_id)
-            if snapshot is None:
-                continue
-            rejected = snapshot
-        return rejected
+        path = self.events_path
+        reject_symlink_path(path)
+        if not path.is_file():
+            return []
+        with file_lock(path):
+            state = self._rejection_checkpoint_unlocked()
+        return list(state.get(session_id, []))
 
     def remember_recommendation_rejections(
         self,
@@ -289,16 +290,8 @@ class RuntimeLifecycleStore:
         path = self.events_path
         reject_symlink_path(path)
         with file_lock(path):
-            stored: list[str] = []
-            for event in self._events_for_session_unlocked(session_id):
-                if event.get("action") != "recommendation_rejections":
-                    continue
-                snapshot = _validated_rejection_snapshot(
-                    event.get("rejected"),
-                    session_id=session_id,
-                )
-                if snapshot is not None:
-                    stored = snapshot
+            state = self._rejection_checkpoint_unlocked()
+            stored = list(state.get(session_id, []))
             normalised = _deduplicate_recommendation_ids(stored + supplied) if merge else supplied
             if stored != normalised:
                 self._record(
@@ -307,6 +300,11 @@ class RuntimeLifecycleStore:
                     session_id=session_id,
                     rejected=normalised,
                 )
+                if normalised:
+                    state[session_id] = normalised
+                else:
+                    state.pop(session_id, None)
+                self._write_rejection_checkpoint_unlocked(state)
         return normalised
 
     def session_state(
@@ -545,12 +543,83 @@ class RuntimeLifecycleStore:
                 events.append(event)
         return events
 
+    def _rejection_checkpoint_unlocked(self) -> dict[str, list[str]]:
+        events_path = self.events_path
+        checkpoint_path = self.recommendation_checkpoint_path
+        reject_symlink_path(events_path)
+        reject_symlink_path(checkpoint_path)
+        events_stat = events_path.stat() if events_path.is_file() else None
+        events_size = int(events_stat.st_size) if events_stat is not None else 0
+        state: dict[str, list[str]] = {}
+        offset = 0
+        checkpoint_valid = False
+
+        if checkpoint_path.is_file():
+            try:
+                raw = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                if not isinstance(raw, dict) or raw.get("version") != _REJECTION_CHECKPOINT_VERSION:
+                    raise ValueError("unsupported checkpoint")
+                raw_offset = raw.get("offset")
+                if isinstance(raw_offset, bool) or not isinstance(raw_offset, int):
+                    raise ValueError("invalid checkpoint offset")
+                if raw_offset < 0 or raw_offset > events_size:
+                    raise ValueError("checkpoint offset outside event log")
+                expected_file_id = _event_file_id(events_stat)
+                if raw.get("event_file_id") != expected_file_id:
+                    raise ValueError("event log identity changed")
+                if raw.get("anchor") != _event_log_anchor(events_path, raw_offset):
+                    raise ValueError("event log checkpoint anchor changed")
+                state = _validate_rejection_checkpoint_sessions(raw.get("sessions"))
+                offset = raw_offset
+                checkpoint_valid = True
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+                _logger.warning("ctx runtime lifecycle: rebuilding malformed rejection checkpoint")
+
+        updated_offset = _scan_rejection_events(
+            events_path,
+            offset=offset,
+            state=state,
+        )
+        if not checkpoint_valid or updated_offset != offset:
+            self._write_rejection_checkpoint_unlocked(state, offset=updated_offset)
+        return state
+
+    def _write_rejection_checkpoint_unlocked(
+        self,
+        state: dict[str, list[str]],
+        *,
+        offset: int | None = None,
+    ) -> None:
+        events_path = self.events_path
+        checkpoint_path = self.recommendation_checkpoint_path
+        reject_symlink_path(events_path)
+        reject_symlink_path(checkpoint_path)
+        events_stat = events_path.stat() if events_path.is_file() else None
+        resolved_offset = (
+            int(events_stat.st_size) if offset is None and events_stat else offset or 0
+        )
+        payload = {
+            "version": _REJECTION_CHECKPOINT_VERSION,
+            "event_file_id": _event_file_id(events_stat),
+            "offset": resolved_offset,
+            "anchor": _event_log_anchor(events_path, resolved_offset),
+            "sessions": state,
+        }
+        safe_atomic_write_text(
+            checkpoint_path,
+            json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+        )
+
     @property
     def events_path(self) -> Path:
         root = self.root
         if root is None:
             root = Path(os.environ.get("CTX_RUNTIME_LIFECYCLE_DIR", "~/.ctx/runtime")).expanduser()
         return root / "events.jsonl"
+
+    @property
+    def recommendation_checkpoint_path(self) -> Path:
+        return self.events_path.with_name("recommendation-rejections.json")
 
 
 def _sanitize_lifecycle_event(event: dict[str, Any]) -> dict[str, Any]:
@@ -802,6 +871,80 @@ def _log_malformed_rejection_snapshot(session_id: str) -> None:
         "ctx runtime lifecycle: skipped malformed recommendation rejection snapshot for session %s",
         hash_identifier(session_id),
     )
+
+
+def _validate_rejection_checkpoint_sessions(raw: Any) -> dict[str, list[str]]:
+    if not isinstance(raw, dict):
+        raise ValueError("checkpoint sessions must be an object")
+    sessions: dict[str, list[str]] = {}
+    for raw_session_id, raw_snapshot in raw.items():
+        if not isinstance(raw_session_id, str):
+            raise ValueError("checkpoint session id must be a string")
+        session_id = _validate_session_id(raw_session_id)
+        if not isinstance(raw_snapshot, list) or any(
+            not isinstance(value, str) for value in raw_snapshot
+        ):
+            raise ValueError("checkpoint rejection snapshot is malformed")
+        sessions[session_id] = _deduplicate_recommendation_ids(raw_snapshot)
+    return sessions
+
+
+def _scan_rejection_events(
+    path: Path,
+    *,
+    offset: int,
+    state: dict[str, list[str]],
+) -> int:
+    if not path.is_file():
+        return 0
+    consumed = offset
+    with path.open("rb") as handle:
+        handle.seek(offset)
+        while True:
+            line = handle.readline()
+            if not line or not line.endswith(b"\n"):
+                break
+            consumed += len(line)
+            try:
+                event = json.loads(line)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if not isinstance(event, dict) or event.get("action") != "recommendation_rejections":
+                continue
+            raw_session_id = event.get("session_id")
+            if not isinstance(raw_session_id, str):
+                continue
+            try:
+                session_id = _validate_session_id(raw_session_id)
+            except ValueError:
+                continue
+            snapshot = _validated_rejection_snapshot(
+                event.get("rejected"),
+                session_id=session_id,
+            )
+            if snapshot is None:
+                continue
+            if snapshot:
+                state[session_id] = snapshot
+            else:
+                state.pop(session_id, None)
+    return consumed
+
+
+def _event_file_id(event_stat: os.stat_result | None) -> list[int]:
+    if event_stat is None:
+        return [0, 0]
+    return [int(event_stat.st_dev), int(event_stat.st_ino)]
+
+
+def _event_log_anchor(path: Path, offset: int) -> str:
+    if offset <= 0 or not path.is_file():
+        return hashlib.sha256(b"").hexdigest()
+    start = max(0, offset - _REJECTION_CHECKPOINT_ANCHOR_BYTES)
+    with path.open("rb") as handle:
+        handle.seek(start)
+        payload = handle.read(offset - start)
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _validate_nonempty(raw: str, field: str) -> str:
