@@ -38,7 +38,7 @@ from ctx.utils._secret_scan import redact_secret_text
 
 
 _logger = logging.getLogger(__name__)
-_REJECTION_INDEX_VERSION = 1
+_REJECTION_INDEX_VERSION = 2
 _REJECTION_CHECKPOINT_ANCHOR_BYTES = 4096
 _REJECTION_HEAD_SEED = hashlib.sha256(b"").hexdigest()
 _SESSION_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
@@ -277,6 +277,10 @@ class RuntimeLifecycleStore:
         session_id = _validate_session_id(session_id)
         path = self.events_path
         reject_symlink_path(path)
+        if not path.exists():
+            return []
+        if not path.is_file():
+            raise ValueError(f"runtime lifecycle events must be a regular file: {path}")
         _prepare_private_lifecycle_lock(path)
         with file_lock(path):
             _repair_jsonl_tail(path)
@@ -566,12 +570,28 @@ class RuntimeLifecycleStore:
         assert connection is not None
         try:
             payload = _append_jsonl_event(path, event)
-            _update_rejection_index_after_append(
-                connection,
-                events_path=path,
-                event=event,
-                payload=payload,
-            )
+            try:
+                _update_rejection_index_after_append(
+                    connection,
+                    events_path=path,
+                    event=event,
+                    payload=payload,
+                )
+            except Exception:
+                _logger.warning(
+                    "ctx runtime lifecycle: discarded stale rejection index after "
+                    "canonical event append",
+                    exc_info=True,
+                )
+                connection.close()
+                try:
+                    _discard_rejection_index(self.recommendation_index_path)
+                except Exception:
+                    _logger.warning(
+                        "ctx runtime lifecycle: could not discard stale rejection index; "
+                        "the next lookup will rebuild it",
+                        exc_info=True,
+                    )
         finally:
             if owns_connection:
                 connection.close()
@@ -621,7 +641,7 @@ class RuntimeLifecycleStore:
 
     @property
     def recommendation_checkpoint_path(self) -> Path:
-        """Backward-compatible name for the derived recommendation index path."""
+        """Deprecated compatibility alias for the derived SQLite index path."""
         return self.recommendation_index_path
 
     @property
@@ -1043,6 +1063,7 @@ def _create_rejection_index_schema(connection: sqlite3.Connection) -> None:
             event_mtime_ns INTEGER NOT NULL,
             event_ctime_ns INTEGER NOT NULL,
             event_head TEXT NOT NULL,
+            prefix_anchor TEXT NOT NULL,
             tail_anchor TEXT NOT NULL,
             checksum TEXT NOT NULL
         )
@@ -1079,6 +1100,7 @@ def _rejection_index_schema_current(connection: sqlite3.Connection) -> bool:
         "event_mtime_ns",
         "event_ctime_ns",
         "event_head",
+        "prefix_anchor",
         "tail_anchor",
         "checksum",
     } and session_columns == {"session_id", "rejected_json", "checksum"}
@@ -1088,7 +1110,7 @@ def _read_rejection_index_metadata(connection: sqlite3.Connection) -> dict[str, 
     row = connection.execute(
         """
         SELECT version, event_dev, event_ino, event_size, event_mtime_ns,
-               event_ctime_ns, event_head, tail_anchor, checksum
+               event_ctime_ns, event_head, prefix_anchor, tail_anchor, checksum
         FROM metadata
         WHERE singleton = 1
         """
@@ -1103,8 +1125,9 @@ def _read_rejection_index_metadata(connection: sqlite3.Connection) -> dict[str, 
         "event_mtime_ns": row[4],
         "event_ctime_ns": row[5],
         "event_head": row[6],
-        "tail_anchor": row[7],
-        "checksum": row[8],
+        "prefix_anchor": row[7],
+        "tail_anchor": row[8],
+        "checksum": row[9],
     }
     if (
         metadata["version"] != _REJECTION_INDEX_VERSION
@@ -1119,6 +1142,7 @@ def _read_rejection_index_metadata(connection: sqlite3.Connection) -> dict[str, 
             )
         )
         or not _valid_sha256(metadata["event_head"])
+        or not _valid_sha256(metadata["prefix_anchor"])
         or not _valid_sha256(metadata["tail_anchor"])
         or metadata["checksum"] != _rejection_metadata_checksum(metadata)
     ):
@@ -1137,6 +1161,7 @@ def _rejection_index_matches_events(metadata: dict[str, Any], path: Path) -> boo
             "event_size",
             "event_mtime_ns",
             "event_ctime_ns",
+            "prefix_anchor",
             "tail_anchor",
         )
     )
@@ -1263,8 +1288,9 @@ def _write_rejection_index_metadata(
         """
         INSERT INTO metadata(
             singleton, version, event_dev, event_ino, event_size,
-            event_mtime_ns, event_ctime_ns, event_head, tail_anchor, checksum
-        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            event_mtime_ns, event_ctime_ns, event_head, prefix_anchor,
+            tail_anchor, checksum
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             metadata["version"],
@@ -1274,6 +1300,7 @@ def _write_rejection_index_metadata(
             metadata["event_mtime_ns"],
             metadata["event_ctime_ns"],
             metadata["event_head"],
+            metadata["prefix_anchor"],
             metadata["tail_anchor"],
             metadata["checksum"],
         ),
@@ -1357,6 +1384,7 @@ def _event_stat_metadata(
         "event_mtime_ns": _stat_time_ns(event_stat, "st_mtime_ns"),
         "event_ctime_ns": _stat_time_ns(event_stat, "st_ctime_ns"),
         "event_head": event_head,
+        "prefix_anchor": _event_log_prefix_anchor(path, event_size),
         "tail_anchor": _event_log_anchor(path, event_size),
     }
     metadata["checksum"] = _rejection_metadata_checksum(metadata)
@@ -1404,6 +1432,14 @@ def _event_log_anchor(path: Path, offset: int) -> str:
     with path.open("rb") as handle:
         handle.seek(start)
         payload = handle.read(offset - start)
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _event_log_prefix_anchor(path: Path, size: int) -> str:
+    if size <= 0 or not path.is_file():
+        return hashlib.sha256(b"").hexdigest()
+    with path.open("rb") as handle:
+        payload = handle.read(min(size, _REJECTION_CHECKPOINT_ANCHOR_BYTES))
     return hashlib.sha256(payload).hexdigest()
 
 

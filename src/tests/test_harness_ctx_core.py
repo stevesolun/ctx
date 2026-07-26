@@ -2106,6 +2106,22 @@ class TestRecommendBundle:
 
         assert calls == 1
 
+    def test_rejection_lookup_without_event_log_is_read_only(self, tmp_path: Path) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        absent_root = tmp_path / "absent-runtime"
+        absent_store = RuntimeLifecycleStore(root=absent_root)
+        assert absent_store.recommendation_rejections(session_id="fresh-session") == []
+        assert not absent_root.exists()
+
+        existing_root = tmp_path / "existing-runtime"
+        existing_root.mkdir(mode=0o755)
+        initial_mode = existing_root.stat().st_mode & 0o777
+        existing_store = RuntimeLifecycleStore(root=existing_root)
+        assert existing_store.recommendation_rejections(session_id="fresh-session") == []
+        assert list(existing_root.iterdir()) == []
+        assert existing_root.stat().st_mode & 0o777 == initial_mode
+
     def test_concurrent_session_rejections_merge_without_lost_updates(
         self,
         tmp_path: Path,
@@ -2357,10 +2373,11 @@ class TestRecommendBundle:
     def test_early_same_length_event_edit_is_rebuilt_before_ordinary_append(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+        import ctx.adapters.generic.runtime_lifecycle as lifecycle
 
-        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store = lifecycle.RuntimeLifecycleStore(root=tmp_path / "runtime")
         store.remember_recommendation_rejections(
             session_id="prefix-integrity",
             rejected=["skill:valid"],
@@ -2372,6 +2389,29 @@ class TestRecommendBundle:
                 payload={"index": index, "padding": "x" * 96},
             )
         assert store.events_path.stat().st_size > 8192
+
+        with sqlite3.connect(store.recommendation_index_path) as connection:
+            frozen_stat = connection.execute(
+                """
+                SELECT event_dev, event_ino, event_mtime_ns, event_ctime_ns
+                FROM metadata WHERE singleton = 1
+                """
+            ).fetchone()
+        assert frozen_stat is not None
+        monkeypatch.setattr(
+            lifecycle,
+            "_event_file_id",
+            lambda _event_stat: (frozen_stat[0], frozen_stat[1]),
+        )
+        frozen_times = {
+            "st_mtime_ns": frozen_stat[2],
+            "st_ctime_ns": frozen_stat[3],
+        }
+        monkeypatch.setattr(
+            lifecycle,
+            "_stat_time_ns",
+            lambda _event_stat, field: frozen_times[field],
+        )
 
         original = b"skill:valid"
         replacement = b"agent:evilx"
@@ -2413,13 +2453,30 @@ class TestRecommendBundle:
                 "_update_rejection_index_after_append",
                 crash_after_jsonl,
             )
-            with pytest.raises(RuntimeError, match="simulated index update crash"):
-                store.remember_recommendation_rejections(
-                    session_id="crash-recovery",
-                    rejected=["skill:durable"],
-                )
+            recorded = store.record_dev_event(
+                session_id="crash-recovery",
+                event_type="canonical-write",
+            )
+            assert recorded["ok"] is True
+            assert not store.recommendation_index_path.exists()
+            assert store.remember_recommendation_rejections(
+                session_id="crash-recovery",
+                rejected=["skill:durable"],
+            ) == ["skill:durable"]
+            assert not store.recommendation_index_path.exists()
 
         assert store.recommendation_rejections(session_id="crash-recovery") == ["skill:durable"]
+        assert store.remember_recommendation_rejections(
+            session_id="crash-recovery",
+            rejected=["skill:durable"],
+        ) == ["skill:durable"]
+        persisted = [
+            json.loads(line) for line in store.events_path.read_text(encoding="utf-8").splitlines()
+        ]
+        assert [event["action"] for event in persisted] == [
+            "dev_event",
+            "recommendation_rejections",
+        ]
 
     def test_legacy_rejection_checkpoint_is_rebuilt_from_jsonl(
         self,
