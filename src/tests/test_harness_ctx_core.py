@@ -13,10 +13,12 @@ Covers:
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import sys
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -2090,6 +2092,64 @@ class TestRecommendBundle:
 
         assert calls == 1
 
+    def test_concurrent_session_rejections_merge_without_lost_updates(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        barrier = threading.Barrier(8)
+
+        def remember(index: int) -> list[str]:
+            barrier.wait()
+            return store.remember_recommendation_rejections(
+                session_id="concurrent-session",
+                rejected=[f"skill:helper-{index}"],
+                merge=True,
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(remember, range(8)))
+
+        assert set(store.recommendation_rejections(session_id="concurrent-session")) == {
+            f"skill:helper-{index}" for index in range(8)
+        }
+
+    def test_malformed_rejection_snapshot_retains_last_valid_state(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="malformed-session",
+            rejected=["skill:valid"],
+        )
+        with store.events_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(
+                    {
+                        "action": "recommendation_rejections",
+                        "session_id": "malformed-session",
+                        "rejected": ["skill:valid", "bare-id", 7],
+                    }
+                )
+                + "\n"
+            )
+
+        with caplog.at_level("WARNING"):
+            rejected = store.recommendation_rejections(session_id="malformed-session")
+            state = store.session_state(session_id="malformed-session")
+
+        assert rejected == ["skill:valid"]
+        assert state["rejected_recommendations"] == ["skill:valid"]
+        assert "skipped malformed recommendation rejection snapshot" in caplog.text
+        assert "bare-id" not in caplog.text
+        assert "malformed-session" not in caplog.text
+
     def test_context_policy_replaces_rejected_or_stale_applied_context(self) -> None:
         policy = _recommendation_context_policy(
             baseline_context=["mcp-server:codex-cli"],
@@ -2131,6 +2191,25 @@ class TestRecommendBundle:
         ]
         assert policy["unload"] == ["agent:rejected-reviewer"]
         assert policy["deferred"] == ["agent:secondary"]
+
+        bare_baseline = _recommendation_context_policy(
+            baseline_context=["mcp-server:codex-cli"],
+            active_context=["codex-cli"],
+            rejected_context=["codex-cli"],
+            results=[],
+        )
+        assert bare_baseline["keep"] == ["mcp-server:codex-cli"]
+        assert bare_baseline["unload"] == []
+        assert bare_baseline["replace"] == []
+
+        bare_rejected = _recommendation_context_policy(
+            baseline_context=[],
+            active_context=["rejected-reviewer"],
+            rejected_context=["agent:rejected-reviewer"],
+            results=[],
+        )
+        assert bare_rejected["keep"] == []
+        assert bare_rejected["unload"] == ["agent:rejected-reviewer"]
 
     def test_language_inference_resolves_common_word_aliases(self) -> None:
         assert _infer_query_language("go through python tests") == "python"
@@ -2347,6 +2426,39 @@ class TestRecommendBundle:
         )
 
         assert result["companion_harnesses"] == []
+
+    def test_companion_harness_rejections_are_filtered_and_backfilled(
+        self,
+        toolbox: CtxCoreToolbox,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx_init
+
+        monkeypatch.setattr(
+            ctx_init,
+            "recommend_harnesses",
+            lambda *args, **kwargs: [
+                {"name": "rejected-runner", "fit_score": 0.99},
+                {"name": "accepted-runner", "fit_score": 0.90},
+            ],
+        )
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="harness-rejection",
+                    name="ctx__recommend_bundle",
+                    arguments={
+                        "query": "python agent workflow",
+                        "top_k": 1,
+                        "model_provider": "openai",
+                        "rejected": ["harness:rejected-runner"],
+                    },
+                )
+            )
+        )
+
+        assert [row["name"] for row in result["companion_harnesses"]] == ["accepted-runner"]
 
     def test_workflow_action_metadata_survives_generic_recommendation(
         self,

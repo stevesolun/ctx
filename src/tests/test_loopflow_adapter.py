@@ -275,6 +275,40 @@ def test_loopflow_session_rejections_filter_primary_capabilities(monkeypatch) ->
     ]
 
 
+def test_loopflow_session_rejections_filter_and_backfill_harnesses(monkeypatch) -> None:
+    monkeypatch.setattr(
+        loopflow.ctx_api,
+        "recommendation_rejections",
+        lambda rejected=None, **kwargs: list(rejected or []),
+    )
+    requested_top_k: list[int] = []
+
+    def fake_harnesses(goal: str, *, top_k: int, **kwargs: Any) -> list[dict[str, Any]]:
+        del goal, kwargs
+        requested_top_k.append(top_k)
+        return [
+            {"id": "harness:rejected-runner", "name": "rejected-runner", "type": "harness"},
+            {"id": "harness:accepted-runner", "name": "accepted-runner", "type": "harness"},
+        ]
+
+    monkeypatch.setattr(loopflow, "recommend_harnesses", fake_harnesses)
+
+    payload = loopflow.recommend_for_loop(
+        goal="run a local agent loop",
+        permissions={"harnesses"},
+        own_llm=True,
+        model_provider="ollama",
+        rejected=["harness:rejected-runner"],
+        session_id="harness-session",
+        top_k=1,
+    )
+
+    assert requested_top_k == [7]
+    assert [row["id"] for row in payload["capabilities"]["harnesses"]] == [
+        "harness:accepted-runner"
+    ]
+
+
 def test_mcp_server_tools_are_filtered_by_permission_groups(monkeypatch) -> None:
     monkeypatch.setattr(loopflow, "_recommend_capability_rows", lambda *args, **kwargs: [])
     monkeypatch.setattr(loopflow, "recommend_harnesses", lambda *args, **kwargs: [])

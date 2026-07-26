@@ -9,6 +9,7 @@ and security-scan details before appending events.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
@@ -29,10 +30,12 @@ from ctx.telemetry import (
     telemetry_span,
     telemetry_enabled,
 )
+from ctx.utils._file_lock import file_lock
 from ctx.utils._fs_utils import reject_symlink_path
 from ctx.utils._secret_scan import redact_secret_text
 
 
+_logger = logging.getLogger(__name__)
 _SESSION_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _ENTITY_TYPES = set(RECOMMENDABLE_ENTITY_TYPES)
 _VALIDATION_STATUSES = {"passed", "failed", "skipped", "error"}
@@ -267,12 +270,10 @@ class RuntimeLifecycleStore:
         for event in self._events_for_session(session_id):
             if event.get("action") != "recommendation_rejections":
                 continue
-            values = event.get("rejected")
-            if not isinstance(values, list):
+            snapshot = _validated_rejection_snapshot(event.get("rejected"), session_id=session_id)
+            if snapshot is None:
                 continue
-            rejected = [
-                _validate_recommendation_id(value) for value in values if isinstance(value, str)
-            ]
+            rejected = snapshot
         return rejected
 
     def remember_recommendation_rejections(
@@ -280,16 +281,32 @@ class RuntimeLifecycleStore:
         *,
         session_id: str,
         rejected: list[str],
+        merge: bool = False,
     ) -> list[str]:
-        """Persist a complete, canonical rejection snapshot when it changes."""
+        """Atomically persist a complete or merged canonical rejection snapshot."""
         session_id = _validate_session_id(session_id)
-        normalised = _deduplicate_recommendation_ids(rejected)
-        if self.recommendation_rejections(session_id=session_id) != normalised:
-            self._record(
-                action="recommendation_rejections",
-                session_id=session_id,
-                rejected=normalised,
-            )
+        supplied = _deduplicate_recommendation_ids(rejected)
+        path = self.events_path
+        reject_symlink_path(path)
+        with file_lock(path):
+            stored: list[str] = []
+            for event in self._events_for_session_unlocked(session_id):
+                if event.get("action") != "recommendation_rejections":
+                    continue
+                snapshot = _validated_rejection_snapshot(
+                    event.get("rejected"),
+                    session_id=session_id,
+                )
+                if snapshot is not None:
+                    stored = snapshot
+            normalised = _deduplicate_recommendation_ids(stored + supplied) if merge else supplied
+            if stored != normalised:
+                self._record(
+                    _lock_held=True,
+                    action="recommendation_rejections",
+                    session_id=session_id,
+                    rejected=normalised,
+                )
         return normalised
 
     def session_state(
@@ -311,13 +328,12 @@ class RuntimeLifecycleStore:
         for event in self._events_for_session(session_id):
             action = event.get("action")
             if action == "recommendation_rejections":
-                values = event.get("rejected")
-                if isinstance(values, list):
-                    rejected_recommendations = [
-                        _validate_recommendation_id(value)
-                        for value in values
-                        if isinstance(value, str)
-                    ]
+                snapshot = _validated_rejection_snapshot(
+                    event.get("rejected"),
+                    session_id=session_id,
+                )
+                if snapshot is not None:
+                    rejected_recommendations = snapshot
                 continue
             if action == "dev_event":
                 latest_dev_event_epoch = float(event.get("created_at_epoch") or 0)
@@ -477,7 +493,7 @@ class RuntimeLifecycleStore:
             "open_escalations": [event for event in escalations if event["status"] == "open"],
         }
 
-    def _record(self, **event: Any) -> dict[str, Any]:
+    def _record(self, *, _lock_held: bool = False, **event: Any) -> dict[str, Any]:
         session_id = _validate_session_id(str(event.get("session_id") or ""))
         entity_type = event.get("entity_type")
         slug = event.get("slug")
@@ -490,14 +506,31 @@ class RuntimeLifecycleStore:
         event["created_at_epoch"] = time.time()
         event = _sanitize_lifecycle_event(event)
         path = self.events_path
-        reject_symlink_path(path)
-        ensure_private_event_file(path)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(event, sort_keys=True) + "\n")
+
+        def append() -> None:
+            reject_symlink_path(path)
+            ensure_private_event_file(path)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(event, sort_keys=True) + "\n")
+
+        if _lock_held:
+            append()
+        else:
+            reject_symlink_path(path)
+            with file_lock(path):
+                append()
         _record_runtime_lifecycle_telemetry(event)
         return {"ok": True, "event": event, "recorded": True}
 
     def _events_for_session(self, session_id: str) -> list[dict[str, Any]]:
+        path = self.events_path
+        reject_symlink_path(path)
+        if not path.is_file():
+            return []
+        with file_lock(path):
+            return self._events_for_session_unlocked(session_id)
+
+    def _events_for_session_unlocked(self, session_id: str) -> list[dict[str, Any]]:
         path = self.events_path
         reject_symlink_path(path)
         if not path.is_file():
@@ -751,6 +784,24 @@ def _deduplicate_recommendation_ids(values: list[str]) -> list[str]:
         seen.add(key)
         normalised.append(value)
     return normalised
+
+
+def _validated_rejection_snapshot(raw: Any, *, session_id: str) -> list[str] | None:
+    if not isinstance(raw, list) or any(not isinstance(value, str) for value in raw):
+        _log_malformed_rejection_snapshot(session_id)
+        return None
+    try:
+        return _deduplicate_recommendation_ids(raw)
+    except ValueError:
+        _log_malformed_rejection_snapshot(session_id)
+        return None
+
+
+def _log_malformed_rejection_snapshot(session_id: str) -> None:
+    _logger.warning(
+        "ctx runtime lifecycle: skipped malformed recommendation rejection snapshot for session %s",
+        hash_identifier(session_id),
+    )
 
 
 def _validate_nonempty(raw: str, field: str) -> str:

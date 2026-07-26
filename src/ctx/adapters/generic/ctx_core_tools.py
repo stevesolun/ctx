@@ -979,16 +979,33 @@ class CtxCoreToolbox:
                 break
         model_provider = _optional_str(args.get("model_provider"))
         model = _optional_str(args.get("model"))
-        companion_harnesses = (
-            _recommend_companion_harnesses(
+        companion_harnesses: list[dict[str, Any]] = []
+        if (model_provider or model) and self._entity_type_allowed("harness"):
+            harness_exclusions = [
+                value
+                for value in selected + rejected + active_context + baseline_context
+                if _recommendation_selection_parts(value)[0] in {None, "harness"}
+            ]
+            harness_top_k = (
+                min(50, top_k + len(harness_exclusions) + 5) if harness_exclusions else top_k
+            )
+            for row in _recommend_companion_harnesses(
                 query,
-                top_k=top_k,
+                top_k=harness_top_k,
                 model_provider=model_provider,
                 model=model,
-            )
-            if (model_provider or model) and self._entity_type_allowed("harness")
-            else []
-        )
+            ):
+                candidate_keys = _recommendation_selection_keys(
+                    [
+                        f"harness:{row.get('name')}",
+                        str(row.get("name") or ""),
+                    ]
+                )
+                if candidate_keys & excluded:
+                    continue
+                companion_harnesses.append(row)
+                if len(companion_harnesses) >= top_k:
+                    break
         return _encode_response(
             {
                 "query": query,
@@ -1008,6 +1025,7 @@ class CtxCoreToolbox:
                     ),
                     rejected_context=rejected,
                     results=results,
+                    graph=graph,
                 ),
                 "results": results,
                 "companion_harnesses": companion_harnesses,
@@ -1432,17 +1450,21 @@ class CtxCoreToolbox:
         if session_id is None or mode == "ignore":
             return explicit
 
-        stored = self._lifecycle.recommendation_rejections(session_id=session_id)
         canonical = _canonical_graph_recommendation_ids(graph, explicit) if explicit else []
-        next_stored = (
-            canonical if mode == "replace" else _recommendation_selection_values(stored + canonical)
-        )
-        if next_stored != stored:
-            self._lifecycle.remember_recommendation_rejections(
+        if mode == "replace":
+            stored = self._lifecycle.remember_recommendation_rejections(
                 session_id=session_id,
-                rejected=next_stored,
+                rejected=canonical,
             )
-        return _recommendation_selection_values(next_stored + explicit)
+        elif canonical:
+            stored = self._lifecycle.remember_recommendation_rejections(
+                session_id=session_id,
+                rejected=canonical,
+                merge=True,
+            )
+        else:
+            stored = self._lifecycle.recommendation_rejections(session_id=session_id)
+        return _recommendation_selection_values(stored + explicit)
 
     def _serialise_page(
         self,
@@ -2044,17 +2066,26 @@ def _recommendation_context_policy(
     active_context: list[Any],
     results: list[dict[str, Any]],
     rejected_context: list[str] | None = None,
+    graph: Any | None = None,
 ) -> dict[str, Any]:
-    active = _recommendation_selection_values(active_context)
+    rejected_values = rejected_context or []
+    aliases = _recommendation_policy_aliases(
+        graph,
+        baseline_context + rejected_values + _recommendation_selection_values(active_context),
+        results,
+    )
+    baseline = _policy_context_values(baseline_context, aliases, retain_unknown_bare=True)
+    rejected = _policy_context_values(rejected_values, aliases, retain_unknown_bare=False)
+    active, actionable_active = _policy_active_context(active_context, aliases)
     action_reasons = _active_context_action_reasons(
-        baseline_context=baseline_context,
-        active_context=active_context,
-        rejected_context=rejected_context or [],
+        baseline_context=baseline,
+        active_context=actionable_active,
+        rejected_context=rejected,
     )
     action_keys = _recommendation_selection_keys(list(action_reasons))
     keep = [
         value
-        for value in _recommendation_selection_values(baseline_context + active)
+        for value in _recommendation_selection_values(baseline + active)
         if _recommendation_selection_key(value) not in action_keys
     ]
     keep_keys = _recommendation_selection_keys(keep)
@@ -2083,7 +2114,7 @@ def _recommendation_context_policy(
             }
         )
     return {
-        "baseline": baseline_context,
+        "baseline": baseline,
         "keep": keep,
         "load": [initial_id] if initial_id is not None and not replacements else [],
         "deferred": [row["id"] for row in loadable if row["id"] != initial_id],
@@ -2239,6 +2270,17 @@ def _recommendation_selection_parts(value: str) -> tuple[str | None, str]:
 
 
 def _canonical_graph_recommendation_ids(graph: Any, values: list[str]) -> list[str]:
+    resolved = _canonical_graph_recommendation_map(graph, values)
+    return _recommendation_selection_values(
+        [
+            resolved[_recommendation_selection_key(value)]
+            for value in _recommendation_selection_values(values)
+            if _recommendation_selection_key(value) in resolved
+        ]
+    )
+
+
+def _canonical_graph_recommendation_map(graph: Any, values: list[str]) -> dict[str, str]:
     canonical_nodes = {
         str(node_id).lower(): str(node_id)
         for node_id in graph.nodes
@@ -2253,7 +2295,7 @@ def _canonical_graph_recommendation_ids(graph: Any, values: list[str]) -> list[s
         if label:
             labels.setdefault(label, []).append(canonical)
 
-    resolved: list[str] = []
+    resolved: dict[str, str] = {}
     for value in _recommendation_selection_values(values):
         entity_type, name = _recommendation_selection_parts(value)
         if entity_type is not None:
@@ -2262,8 +2304,77 @@ def _canonical_graph_recommendation_ids(graph: Any, values: list[str]) -> list[s
             matches = labels.get(name.lower(), [])
             candidate = matches[0] if len(matches) == 1 else None
         if candidate is not None:
-            resolved.append(candidate)
+            resolved[_recommendation_selection_key(value)] = candidate
+    return resolved
+
+
+def _recommendation_policy_aliases(
+    graph: Any | None,
+    values: list[str],
+    results: list[dict[str, Any]],
+) -> dict[str, str]:
+    candidates: dict[str, set[str]] = {}
+    for value in _recommendation_selection_values(
+        values + [str(row.get("id") or "") for row in results]
+    ):
+        entity_type, name = _recommendation_selection_parts(value)
+        if entity_type is not None:
+            candidates.setdefault(name.lower(), set()).add(f"{entity_type}:{name}")
+    aliases = {
+        name: next(iter(matches)) for name, matches in candidates.items() if len(matches) == 1
+    }
+    unresolved = [
+        value
+        for value in _recommendation_selection_values(values)
+        if _recommendation_selection_parts(value)[0] is None
+        and _recommendation_selection_key(value) not in aliases
+    ]
+    if graph is not None and unresolved:
+        aliases.update(_canonical_graph_recommendation_map(graph, unresolved))
+    return aliases
+
+
+def _policy_context_values(
+    values: list[str],
+    aliases: Mapping[str, str],
+    *,
+    retain_unknown_bare: bool,
+) -> list[str]:
+    resolved: list[str] = []
+    for value in _recommendation_selection_values(values):
+        entity_type, _ = _recommendation_selection_parts(value)
+        canonical = aliases.get(_recommendation_selection_key(value))
+        if entity_type is not None:
+            resolved.append(canonical or value)
+        elif canonical is not None or retain_unknown_bare:
+            resolved.append(canonical or value)
     return _recommendation_selection_values(resolved)
+
+
+def _policy_active_context(
+    values: list[Any],
+    aliases: Mapping[str, str],
+) -> tuple[list[str], list[Any]]:
+    active: list[str] = []
+    actionable: list[Any] = []
+    for raw in values:
+        selected = _recommendation_selection_values([raw])
+        if not selected:
+            continue
+        value = selected[0]
+        entity_type, _ = _recommendation_selection_parts(value)
+        canonical = aliases.get(_recommendation_selection_key(value))
+        resolved = canonical or value
+        active.append(resolved)
+        if entity_type is None and canonical is None:
+            continue
+        if isinstance(raw, Mapping):
+            normalized = dict(raw)
+            normalized["id"] = resolved
+            actionable.append(normalized)
+        else:
+            actionable.append(resolved)
+    return _recommendation_selection_values(active), actionable
 
 
 def _recommendation_selection_node_ids(graph: Any, values: list[str]) -> set[str]:

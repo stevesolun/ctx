@@ -889,15 +889,19 @@ def recommend_for_loop(
         if any(harness_query_parts):
             harness_query_parts.append("harness")
         harness_goal = " ".join(part for part in harness_query_parts if part)
-        capability_bundle["harnesses"] = [
-            _compact_row(row)
-            for row in recommend_harnesses(
-                harness_goal,
-                top_k=safe_top_k,
-                model_provider=model_provider,
-                model=model,
-            )
-        ]
+        harness_top_k = min(50, safe_top_k + len(excluded_ids) + 5) if excluded_ids else safe_top_k
+        for row in recommend_harnesses(
+            harness_goal,
+            top_k=harness_top_k,
+            model_provider=model_provider,
+            model=model,
+        ):
+            name = str(row.get("name") or "").strip()
+            if not name or _row_selection_keys(row, name) & excluded_ids:
+                continue
+            capability_bundle["harnesses"].append(_compact_row(row))
+            if len(capability_bundle["harnesses"]) >= safe_top_k:
+                break
 
     use_skills = None
     skill_names: list[str] = []
