@@ -6,12 +6,15 @@ import functools
 import json
 import math
 import re
+import sqlite3
 import weakref
 from collections import defaultdict
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
 
+_INDEXED_RECOMMENDATION_GRAPH_MARKER = object()
 _TAG_STOPWORDS: frozenset[str] = frozenset(
     {
         # Tiny stoplist for query-to-tags tokenisation. This is intentionally
@@ -239,6 +242,13 @@ def _token_idf(graph: Any) -> dict[str, float]:
     tokens (``fastapi`` over ~10 nodes) get IDF around 7. The query
     ranker multiplies match scores by IDF so rare tokens dominate.
     """
+    graph_metadata = getattr(graph, "graph", {})
+    indexed = graph_metadata.get("_ctx_recommendation_token_idf")
+    if graph_metadata.get(
+        "_ctx_recommendation_graph_marker"
+    ) is _INDEXED_RECOMMENDATION_GRAPH_MARKER and isinstance(indexed, dict):
+        return {str(token): float(value) for token, value in indexed.items()}
+
     cached = _idf_cache.get(graph)
     if cached is not None:
         return cached
@@ -260,6 +270,18 @@ def _token_idf(graph: Any) -> dict[str, float]:
     table = {tok: math.log(n / max(d, 1)) for tok, d in df.items()}
     _idf_cache[graph] = table
     return table
+
+
+def _recommendation_degree(graph: Any, node_id: Any, node_data: dict[str, Any]) -> float:
+    indexed = node_data.get("_ctx_recommendation_degree")
+    if (
+        getattr(graph, "graph", {}).get("_ctx_recommendation_graph_marker")
+        is _INDEXED_RECOMMENDATION_GRAPH_MARKER
+        and isinstance(indexed, int | float)
+        and indexed >= 0
+    ):
+        return float(indexed)
+    return float(graph.degree(node_id))
 
 
 def query_to_tags(query: str) -> list[str]:
@@ -326,6 +348,258 @@ def _explicit_entity_match_boost(
         ):
             boost = max(boost, 1000.0 + (25.0 * len(alias_tokens)))
     return boost
+
+
+def recommend_by_tags_indexed(
+    db_path: Path,
+    tags: list[str],
+    *,
+    top_n: int = 10,
+    query: str | None = None,
+    entity_types: tuple[str, ...] | set[str] | None = None,
+    min_normalized_score: float = 0.0,
+    external_catalog_path: Path | None = None,
+) -> tuple[list[dict[str, Any]], int] | None:
+    """Rank from a validated graph-store snapshot without loading graph JSON.
+
+    The store supplies a complete candidate set, exact query-token IDF values,
+    and original graph degrees. The existing ``recommend_by_tags`` scorer then
+    applies the public ranking contract. ``None`` means the index cannot be
+    trusted and the caller must fall back to the source graph.
+    """
+    signals = _normalise_signals(tags)
+    if top_n < 1 or not signals:
+        return ([], 0)
+    if not db_path.is_file():
+        return None
+
+    try:
+        with closing(_open_recommendation_index(db_path)) as conn:
+            metadata = _recommendation_index_metadata(conn)
+            if metadata is None:
+                return None
+            total_nodes = int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
+            rows = _indexed_candidate_rows(conn, signals)
+            candidates = [_indexed_node(row) for row in rows]
+            non_external_nodes = total_nodes - _indexed_external_node_count(conn)
+            idf = _indexed_signal_idf(candidates, signals, non_external_nodes)
+            for node_id, node_data in candidates:
+                node_data["_ctx_recommendation_degree"] = _indexed_node_degree(conn, node_id)
+    except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error):
+        return None
+
+    import networkx as nx  # noqa: PLC0415
+
+    graph = nx.Graph()
+    graph.graph.update(_indexed_graph_metadata(metadata))
+    graph.graph["_ctx_recommendation_graph_marker"] = _INDEXED_RECOMMENDATION_GRAPH_MARKER
+    graph.graph["_ctx_recommendation_token_idf"] = idf
+    graph.add_nodes_from(candidates)
+    return (
+        recommend_by_tags(
+            graph,
+            signals,
+            top_n=top_n,
+            query=query,
+            entity_types=entity_types,
+            min_normalized_score=min_normalized_score,
+            use_semantic_query=False,
+            external_catalog_path=external_catalog_path,
+        ),
+        total_nodes,
+    )
+
+
+def resolve_recommendation_aliases_indexed(
+    db_path: Path,
+    *,
+    typed_ids: list[str],
+    bare_labels: list[str],
+    allowed_entity_types: tuple[str, ...],
+) -> tuple[dict[str, str], int] | None:
+    """Resolve typed IDs and unambiguous labels from a graph-store snapshot."""
+    typed = {value.strip().lower() for value in typed_ids if value.strip()}
+    labels = {value.strip().lower() for value in bare_labels if value.strip()}
+    if not db_path.is_file():
+        return None
+    try:
+        with closing(_open_recommendation_index(db_path)) as conn:
+            if _recommendation_index_metadata(conn) is None:
+                return None
+            total_nodes = int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
+            if not typed and not labels:
+                return {}, total_nodes
+            clauses: list[str] = []
+            params: list[str] = []
+            if typed:
+                placeholders = ",".join("?" for _ in typed)
+                clauses.append(f"lower(id) IN ({placeholders})")
+                params.extend(sorted(typed))
+            if labels:
+                placeholders = ",".join("?" for _ in labels)
+                clauses.append(
+                    "("
+                    f"lower(label) IN ({placeholders}) OR "
+                    f"lower(COALESCE(json_extract(attrs_json, '$.name'), '')) "
+                    f"IN ({placeholders})"
+                    ")"
+                )
+                ordered_labels = sorted(labels)
+                params.extend(ordered_labels)
+                params.extend(ordered_labels)
+            rows = conn.execute(
+                "SELECT id, label, attrs_json FROM nodes WHERE " + " OR ".join(clauses),
+                params,
+            ).fetchall()
+    except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error):
+        return None
+
+    allowed = set(allowed_entity_types)
+    typed_matches: dict[str, str] = {}
+    label_matches: dict[str, list[str]] = defaultdict(list)
+    for row in rows:
+        node_id = str(row["id"])
+        entity_type = node_id.split(":", 1)[0].lower()
+        if entity_type not in allowed:
+            continue
+        attrs = json.loads(str(row["attrs_json"]))
+        if not isinstance(attrs, dict):
+            return None
+        typed_key = node_id.lower()
+        if typed_key in typed:
+            typed_matches[typed_key] = node_id
+        label = str(attrs.get("label") or attrs.get("name") or "").strip().lower()
+        if label in labels:
+            label_matches[label].append(node_id)
+    resolved = dict(typed_matches)
+    resolved.update(
+        {label: matches[0] for label, matches in label_matches.items() if len(matches) == 1}
+    )
+    return resolved, total_nodes
+
+
+def _open_recommendation_index(db_path: Path) -> sqlite3.Connection:
+    uri = f"{db_path.resolve().as_uri()}?mode=ro&immutable=1"
+    conn = sqlite3.connect(uri, uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _recommendation_index_metadata(conn: sqlite3.Connection) -> dict[str, str] | None:
+    rows = conn.execute("SELECT key, value FROM metadata").fetchall()
+    metadata = {str(row["key"]): str(row["value"]) for row in rows}
+    if metadata.get("schema_version") != "1":
+        return None
+    return metadata
+
+
+def _indexed_candidate_rows(
+    conn: sqlite3.Connection,
+    signals: list[str],
+) -> list[sqlite3.Row]:
+    clauses: list[str] = []
+    params: list[str] = []
+    for signal in signals:
+        clauses.append(
+            "("
+            "instr(search_text, ?) > 0 OR "
+            "instr(lower(COALESCE(json_extract(attrs_json, '$.name'), '')), ?) > 0"
+            ")"
+        )
+        params.extend((signal, signal))
+    return conn.execute(
+        """
+        SELECT id, type, label, tags_json, attrs_json
+        FROM nodes
+        WHERE
+        """
+        + " OR ".join(clauses),
+        params,
+    ).fetchall()
+
+
+def _indexed_node(row: sqlite3.Row) -> tuple[str, dict[str, Any]]:
+    attrs = json.loads(str(row["attrs_json"]))
+    tags = json.loads(str(row["tags_json"]))
+    if not isinstance(attrs, dict) or not isinstance(tags, list):
+        raise ValueError("invalid graph-store node payload")
+    attrs.setdefault("type", row["type"] or "skill")
+    attrs.setdefault("label", row["label"] or str(row["id"]).split(":", 1)[-1])
+    attrs["tags"] = tags
+    return str(row["id"]), attrs
+
+
+def _indexed_external_node_count(conn: sqlite3.Connection) -> int:
+    rows = conn.execute(
+        """
+        SELECT type, attrs_json
+        FROM nodes
+        WHERE type = 'external-skill'
+           OR json_type(attrs_json, '$.external') IS NOT NULL
+        """
+    ).fetchall()
+    count = 0
+    for row in rows:
+        attrs = json.loads(str(row["attrs_json"]))
+        if not isinstance(attrs, dict):
+            raise ValueError("invalid graph-store node attributes")
+        if row["type"] == "external-skill" or attrs.get("external"):
+            count += 1
+    return count
+
+
+def _indexed_signal_idf(
+    candidates: list[tuple[str, dict[str, Any]]],
+    signals: list[str],
+    total_nodes: int,
+) -> dict[str, float]:
+    if total_nodes <= 0:
+        return {}
+    signal_set = set(signals)
+    document_frequency = dict.fromkeys(signals, 0)
+    for node_id, data in candidates:
+        if data.get("external") or data.get("type") == "external-skill":
+            continue
+        label = str(data.get("label") or _node_name(node_id))
+        tokens = set(_slug_tokens(label))
+        for tag in data.get("tags", []):
+            tokens.update(_slug_tokens(str(tag)))
+        for token in signal_set & tokens:
+            if len(token) >= 3:
+                document_frequency[token] += 1
+    return {
+        token: math.log(total_nodes / max(frequency, 1))
+        for token, frequency in document_frequency.items()
+        if len(token) >= 3
+    }
+
+
+def _indexed_node_degree(conn: sqlite3.Connection, node_id: str) -> int:
+    row = conn.execute(
+        """
+        SELECT
+          (SELECT COUNT(*) FROM edges INDEXED BY idx_edges_source WHERE source = ?)
+          +
+          (SELECT COUNT(*) FROM edges INDEXED BY idx_edges_target WHERE target = ?)
+        """,
+        (node_id, node_id),
+    ).fetchone()
+    return int(row[0])
+
+
+def _indexed_graph_metadata(metadata: dict[str, str]) -> dict[str, Any]:
+    graph_metadata: dict[str, Any] = {}
+    for key in ("ctx_graph_path", "external_catalog_nodes", "source_catalog_nodes"):
+        value = metadata.get(key)
+        if value is None:
+            continue
+        if key.endswith("_nodes"):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+        graph_metadata[key] = value
+    return graph_metadata
 
 
 def recommend_by_tags(
@@ -441,7 +715,7 @@ def recommend_by_tags(
         if score <= 0:
             continue
 
-        score += math.log1p(graph.degree(node_id))
+        score += math.log1p(_recommendation_degree(graph, node_id, node_data))
         scored.append((label, score, node_id, node_data, matching_tags, node_tags))
 
     ranked = sorted(

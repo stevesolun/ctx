@@ -879,8 +879,25 @@ class CtxCoreToolbox:
         rejection_mode: str = "use",
     ) -> list[str]:
         """Resolve explicit and remembered rejections for first-party adapters."""
-        graph = self._ensure_graph()
         explicit = _recommendation_selection_values(rejected or [])
+        index_path = self._recommendation_index_path()
+        if index_path is not None:
+            indexed = _canonical_index_recommendation_map(index_path, explicit)
+            if indexed is not None:
+                aliases, node_count = indexed
+                if node_count == 0:
+                    return explicit
+                return self._recommendation_rejections(
+                    None,
+                    {
+                        "rejected": explicit,
+                        "session_id": session_id,
+                        "rejection_mode": rejection_mode,
+                    },
+                    canonical_map=aliases,
+                )
+
+        graph = self._ensure_graph()
         if graph.number_of_nodes() == 0:
             return explicit
         return self._recommendation_rejections(
@@ -917,15 +934,6 @@ class CtxCoreToolbox:
                 }
             )
 
-        graph = self._ensure_graph()
-        if graph.number_of_nodes() == 0:
-            return json.dumps(
-                {
-                    "error": "knowledge graph not available; run ctx-wiki-graphify",
-                    "results": [],
-                }
-            )
-
         from ctx.core.resolve.recommendations import recommend_by_tags  # noqa: PLC0415
 
         semantic_cache_dir = None
@@ -943,7 +951,7 @@ class CtxCoreToolbox:
                 _response_format_from_args(args),
             )
         selected = _selection_values_from_args(args, "selected")
-        rejected = self._recommendation_rejections(graph, args)
+        explicit_rejected = _selection_values_from_args(args, "rejected")
         active_context_raw = args.get("active_context") or []
         active_context = (
             _recommendation_selection_values(active_context_raw)
@@ -954,21 +962,91 @@ class CtxCoreToolbox:
         baseline_context = _selection_values_from_args(args, "baseline_context")
         if not baseline_context and not include_baseline:
             baseline_context = list(_DEFAULT_BASELINE_CONTEXT)
-        excluded = _recommendation_selection_keys(
-            selected + rejected + active_context + ([] if include_baseline else baseline_context)
-        )
         recommendation_context = _recommendation_context_from_args(query, args)
-        raw_top_n = min(50, top_k + len(excluded) + 25)
-        raw = recommend_by_tags(
-            graph,
-            tags,
-            top_n=raw_top_n,
-            query=query,
-            entity_types=entity_types,
-            min_normalized_score=cfg.recommendation_min_normalized_score,
-            use_semantic_query=use_semantic_query,
-            semantic_cache_dir=semantic_cache_dir,
-        )
+
+        graph: Any | None = None
+        indexed_aliases: dict[str, str] | None = None
+        raw: list[dict[str, Any]] | None = None
+        rejected: list[str] = []
+        excluded: set[str] = set()
+        if not use_semantic_query:
+            index_path = self._recommendation_index_path()
+            if index_path is not None:
+                alias_values = selected + explicit_rejected + active_context + baseline_context
+                indexed = _canonical_index_recommendation_map(index_path, alias_values)
+                if indexed is not None and indexed[1] > 0:
+                    indexed_aliases = indexed[0]
+                    rejected = self._recommendation_rejections(
+                        None,
+                        args,
+                        canonical_map=indexed_aliases,
+                    )
+                    policy_aliases = _canonical_index_recommendation_map(
+                        index_path,
+                        selected + rejected + active_context + baseline_context,
+                    )
+                    if policy_aliases is not None:
+                        indexed_aliases = policy_aliases[0]
+                        excluded = _recommendation_selection_keys(
+                            selected
+                            + rejected
+                            + active_context
+                            + ([] if include_baseline else baseline_context)
+                        )
+                        raw_top_n = min(50, top_k + len(excluded) + 25)
+                        graph_path = self._graph_file_path()
+                        external_catalog_path = (
+                            graph_path.parent.parent
+                            / "external-catalogs"
+                            / "skills-sh"
+                            / "catalog.json"
+                            if graph_path is not None
+                            else None
+                        )
+                        from ctx.core.resolve.recommendations import (  # noqa: PLC0415
+                            recommend_by_tags_indexed,
+                        )
+
+                        indexed_result = recommend_by_tags_indexed(
+                            index_path,
+                            tags,
+                            top_n=raw_top_n,
+                            query=query,
+                            entity_types=entity_types,
+                            min_normalized_score=cfg.recommendation_min_normalized_score,
+                            external_catalog_path=external_catalog_path,
+                        )
+                        if indexed_result is not None and indexed_result[1] > 0:
+                            raw = indexed_result[0]
+
+        if raw is None:
+            graph = self._ensure_graph()
+            if graph.number_of_nodes() == 0:
+                return json.dumps(
+                    {
+                        "error": "knowledge graph not available; run ctx-wiki-graphify",
+                        "results": [],
+                    }
+                )
+            indexed_aliases = None
+            rejected = self._recommendation_rejections(graph, args)
+            excluded = _recommendation_selection_keys(
+                selected
+                + rejected
+                + active_context
+                + ([] if include_baseline else baseline_context)
+            )
+            raw_top_n = min(50, top_k + len(excluded) + 25)
+            raw = recommend_by_tags(
+                graph,
+                tags,
+                top_n=raw_top_n,
+                query=query,
+                entity_types=entity_types,
+                min_normalized_score=cfg.recommendation_min_normalized_score,
+                use_semantic_query=use_semantic_query,
+                semantic_cache_dir=semantic_cache_dir,
+            )
         results: list[dict[str, Any]] = []
         wiki_dir = self._wiki_dir_resolved()
         for r in raw:
@@ -1035,6 +1113,7 @@ class CtxCoreToolbox:
                     rejected_context=rejected,
                     results=results,
                     graph=graph,
+                    aliases=indexed_aliases,
                 ),
                 "results": results,
                 "companion_harnesses": companion_harnesses,
@@ -1447,8 +1526,10 @@ class CtxCoreToolbox:
 
     def _recommendation_rejections(
         self,
-        graph: Any,
+        graph: Any | None,
         args: Mapping[str, Any],
+        *,
+        canonical_map: Mapping[str, str] | None = None,
     ) -> list[str]:
         mode = str(args.get("rejection_mode") or "use").strip().lower()
         if mode not in _REJECTION_MODES:
@@ -1459,7 +1540,14 @@ class CtxCoreToolbox:
         if session_id is None or mode == "ignore":
             return explicit
 
-        canonical = _canonical_graph_recommendation_ids(graph, explicit) if explicit else []
+        if not explicit:
+            canonical = []
+        elif graph is not None:
+            canonical = _canonical_graph_recommendation_ids(graph, explicit)
+        elif canonical_map is not None:
+            canonical = _canonical_recommendation_ids(explicit, canonical_map)
+        else:
+            canonical = []
         if mode == "replace":
             stored = self._lifecycle.remember_recommendation_rejections(
                 session_id=session_id,
@@ -1525,6 +1613,15 @@ class CtxCoreToolbox:
         )
 
     # ── Lazy caches ─────────────────────────────────────────────────────
+
+    def _recommendation_index_path(self) -> Path | None:
+        graph_path = self._graph_file_path()
+        if graph_path is None:
+            return None
+        index_path = graph_path.parent / "graph-store.sqlite3"
+        if _recommendation_index_is_fresh(index_path, graph_path):
+            return index_path
+        return None
 
     def _ensure_graph(self) -> Any:
         graph_path = self._graph_file_path()
@@ -1681,6 +1778,45 @@ def _graph_file_signature(path: Path) -> GraphSignature:
 
 def _graph_source_available(path: Path) -> bool:
     return path.is_file() or (path.parent / "packs").is_dir()
+
+
+def _recommendation_index_is_fresh(index_path: Path, graph_path: Path) -> bool:
+    try:
+        index_mtime = index_path.stat().st_mtime_ns
+    except OSError:
+        return False
+
+    packs_dir = graph_path.parent / "packs"
+    source_paths: list[Path] = []
+    if packs_dir.is_dir():
+        try:
+            for pack_dir in packs_dir.iterdir():
+                if not pack_dir.is_dir():
+                    continue
+                source_paths.extend(
+                    path
+                    for name in (
+                        "graph-pack-manifest.json",
+                        "graph.json",
+                        "nodes.jsonl",
+                        "edges.jsonl",
+                        "tombstones.jsonl",
+                    )
+                    if (path := pack_dir / name).is_file()
+                )
+        except OSError:
+            return False
+    if not source_paths and graph_path.is_file():
+        source_paths.append(graph_path)
+    overlay_path = graph_path.with_name("entity-overlays.jsonl")
+    if overlay_path.is_file():
+        source_paths.append(overlay_path)
+    if not source_paths:
+        return False
+    try:
+        return all(path.stat().st_mtime_ns <= index_mtime for path in source_paths)
+    except OSError:
+        return False
 
 
 def _graph_pack_signature(graph_path: Path) -> PackSignature:
@@ -2076,16 +2212,26 @@ def _recommendation_context_policy(
     results: list[dict[str, Any]],
     rejected_context: list[str] | None = None,
     graph: Any | None = None,
+    aliases: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     rejected_values = rejected_context or []
-    aliases = _recommendation_policy_aliases(
+    resolved_aliases = _recommendation_policy_aliases(
         graph,
         baseline_context + rejected_values + _recommendation_selection_values(active_context),
         results,
+        aliases=aliases,
     )
-    baseline = _policy_context_values(baseline_context, aliases, retain_unknown_bare=True)
-    rejected = _policy_context_values(rejected_values, aliases, retain_unknown_bare=False)
-    active, actionable_active = _policy_active_context(active_context, aliases)
+    baseline = _policy_context_values(
+        baseline_context,
+        resolved_aliases,
+        retain_unknown_bare=True,
+    )
+    rejected = _policy_context_values(
+        rejected_values,
+        resolved_aliases,
+        retain_unknown_bare=False,
+    )
+    active, actionable_active = _policy_active_context(active_context, resolved_aliases)
     action_reasons = _active_context_action_reasons(
         baseline_context=baseline,
         active_context=actionable_active,
@@ -2279,7 +2425,16 @@ def _recommendation_selection_parts(value: str) -> tuple[str | None, str]:
 
 
 def _canonical_graph_recommendation_ids(graph: Any, values: list[str]) -> list[str]:
-    resolved = _canonical_graph_recommendation_map(graph, values)
+    return _canonical_recommendation_ids(
+        values,
+        _canonical_graph_recommendation_map(graph, values),
+    )
+
+
+def _canonical_recommendation_ids(
+    values: list[str],
+    resolved: Mapping[str, str],
+) -> list[str]:
     return _recommendation_selection_values(
         [
             resolved[_recommendation_selection_key(value)]
@@ -2317,11 +2472,51 @@ def _canonical_graph_recommendation_map(graph: Any, values: list[str]) -> dict[s
     return resolved
 
 
+def _canonical_index_recommendation_map(
+    index_path: Path,
+    values: list[str],
+) -> tuple[dict[str, str], int] | None:
+    from ctx.core.resolve.recommendations import (  # noqa: PLC0415
+        resolve_recommendation_aliases_indexed,
+    )
+
+    normalized = _recommendation_selection_values(values)
+    typed_ids: list[str] = []
+    bare_labels: list[str] = []
+    for value in normalized:
+        entity_type, name = _recommendation_selection_parts(value)
+        if entity_type is None:
+            bare_labels.append(name)
+        else:
+            typed_ids.append(f"{entity_type}:{name}")
+    indexed = resolve_recommendation_aliases_indexed(
+        index_path,
+        typed_ids=typed_ids,
+        bare_labels=bare_labels,
+        allowed_entity_types=tuple(dict.fromkeys(_RECOMMENDATION_ENTITY_TYPE_ALIASES.values())),
+    )
+    if indexed is None:
+        return None
+    matches, node_count = indexed
+    resolved: dict[str, str] = {}
+    for value in normalized:
+        entity_type, name = _recommendation_selection_parts(value)
+        lookup = f"{entity_type}:{name}".lower() if entity_type is not None else name.lower()
+        candidate = matches.get(lookup)
+        if candidate is not None:
+            resolved[_recommendation_selection_key(value)] = candidate
+    return resolved, node_count
+
+
 def _recommendation_policy_aliases(
     graph: Any | None,
     values: list[str],
     results: list[dict[str, Any]],
+    *,
+    aliases: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
+    if aliases is not None:
+        return dict(aliases)
     bare_values = [
         value
         for value in _recommendation_selection_values(values)
@@ -2337,10 +2532,10 @@ def _recommendation_policy_aliases(
         entity_type, name = _recommendation_selection_parts(value)
         if entity_type is not None:
             candidates.setdefault(name.lower(), set()).add(f"{entity_type}:{name}")
-    aliases = {
+    inferred = {
         name: next(iter(matches)) for name, matches in candidates.items() if len(matches) == 1
     }
-    return aliases
+    return inferred
 
 
 def _policy_context_values(
