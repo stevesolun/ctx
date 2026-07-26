@@ -14,6 +14,7 @@ import logging
 import math
 import os
 import re
+import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,13 +33,14 @@ from ctx.telemetry import (
     telemetry_enabled,
 )
 from ctx.utils._file_lock import file_lock
-from ctx.utils._fs_utils import reject_symlink_path, safe_atomic_write_text
+from ctx.utils._fs_utils import reject_symlink_path
 from ctx.utils._secret_scan import redact_secret_text
 
 
 _logger = logging.getLogger(__name__)
-_REJECTION_CHECKPOINT_VERSION = 2
+_REJECTION_INDEX_VERSION = 1
 _REJECTION_CHECKPOINT_ANCHOR_BYTES = 4096
+_REJECTION_HEAD_SEED = hashlib.sha256(b"").hexdigest()
 _SESSION_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _ENTITY_TYPES = set(RECOMMENDABLE_ENTITY_TYPES)
 _VALIDATION_STATUSES = {"passed", "failed", "skipped", "error"}
@@ -76,6 +78,10 @@ _SECURITY_SCAN_STATUSES = {
     "skipped",
     "not_provided",
 }
+
+
+class _InvalidRejectionIndex(RuntimeError):
+    """The derived rejection index cannot be trusted or upgraded in place."""
 
 
 @dataclass(frozen=True)
@@ -271,11 +277,18 @@ class RuntimeLifecycleStore:
         session_id = _validate_session_id(session_id)
         path = self.events_path
         reject_symlink_path(path)
-        if not path.is_file():
-            return []
+        _prepare_private_lifecycle_lock(path)
         with file_lock(path):
-            state = self._rejection_checkpoint_unlocked()
-        return list(state.get(session_id, []))
+            _repair_jsonl_tail(path)
+            connection = self._open_rejection_index_unlocked()
+            try:
+                return _rejection_index_lookup(
+                    connection,
+                    events_path=path,
+                    session_id=session_id,
+                )
+            finally:
+                connection.close()
 
     def remember_recommendation_rejections(
         self,
@@ -289,26 +302,33 @@ class RuntimeLifecycleStore:
         supplied = _deduplicate_recommendation_ids(rejected)
         path = self.events_path
         reject_symlink_path(path)
+        _prepare_private_lifecycle_lock(path)
         recorded_event: dict[str, Any] | None = None
+        normalised = supplied
         with file_lock(path):
             _repair_jsonl_tail(path)
-            state = self._rejection_checkpoint_unlocked()
-            stored = list(state.get(session_id, []))
-            normalised = _deduplicate_recommendation_ids(stored + supplied) if merge else supplied
-            if stored != normalised:
-                recorded = self._record(
-                    _lock_held=True,
-                    _emit_telemetry=False,
-                    action="recommendation_rejections",
+            connection = self._open_rejection_index_unlocked()
+            try:
+                stored = _rejection_index_lookup(
+                    connection,
+                    events_path=path,
                     session_id=session_id,
-                    rejected=normalised,
                 )
-                recorded_event = recorded["event"]
-                if normalised:
-                    state[session_id] = normalised
-                else:
-                    state.pop(session_id, None)
-                self._write_rejection_checkpoint_unlocked(state)
+                normalised = (
+                    _deduplicate_recommendation_ids(stored + supplied) if merge else supplied
+                )
+                if stored != normalised:
+                    recorded = self._record(
+                        _lock_held=True,
+                        _emit_telemetry=False,
+                        _index_connection=connection,
+                        action="recommendation_rejections",
+                        session_id=session_id,
+                        rejected=normalised,
+                    )
+                    recorded_event = recorded["event"]
+            finally:
+                connection.close()
         if recorded_event is not None:
             _record_runtime_lifecycle_telemetry(recorded_event)
         return normalised
@@ -502,6 +522,7 @@ class RuntimeLifecycleStore:
         *,
         _lock_held: bool = False,
         _emit_telemetry: bool = True,
+        _index_connection: sqlite3.Connection | None = None,
         **event: Any,
     ) -> dict[str, Any]:
         session_id = _validate_session_id(str(event.get("session_id") or ""))
@@ -518,20 +539,49 @@ class RuntimeLifecycleStore:
         path = self.events_path
 
         if _lock_held:
-            _append_jsonl_event(path, event)
+            self._append_lifecycle_event_unlocked(
+                event,
+                connection=_index_connection,
+            )
         else:
             reject_symlink_path(path)
+            _prepare_private_lifecycle_lock(path)
             with file_lock(path):
-                _append_jsonl_event(path, event)
+                self._append_lifecycle_event_unlocked(event)
         if _emit_telemetry:
             _record_runtime_lifecycle_telemetry(event)
         return {"ok": True, "event": event, "recorded": True}
+
+    def _append_lifecycle_event_unlocked(
+        self,
+        event: dict[str, Any],
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> None:
+        path = self.events_path
+        owns_connection = connection is None
+        if owns_connection:
+            _repair_jsonl_tail(path)
+            connection = self._open_rejection_index_unlocked()
+        assert connection is not None
+        try:
+            payload = _append_jsonl_event(path, event)
+            _update_rejection_index_after_append(
+                connection,
+                events_path=path,
+                event=event,
+                payload=payload,
+            )
+        finally:
+            if owns_connection:
+                connection.close()
 
     def _events_for_session(self, session_id: str) -> list[dict[str, Any]]:
         path = self.events_path
         reject_symlink_path(path)
         if not path.is_file():
             return []
+        _prepare_private_lifecycle_lock(path)
         with file_lock(path):
             return self._events_for_session_unlocked(session_id)
 
@@ -550,87 +600,12 @@ class RuntimeLifecycleStore:
                 events.append(event)
         return events
 
-    def _rejection_checkpoint_unlocked(self) -> dict[str, list[str]]:
+    def _open_rejection_index_unlocked(self) -> sqlite3.Connection:
         events_path = self.events_path
-        checkpoint_path = self.recommendation_checkpoint_path
-        reject_symlink_path(events_path)
-        reject_symlink_path(checkpoint_path)
-        events_stat = events_path.stat() if events_path.is_file() else None
-        events_size = int(events_stat.st_size) if events_stat is not None else 0
-        state: dict[str, list[str]] = {}
-        offset = 0
-        checkpoint_valid = False
-
-        if checkpoint_path.is_file():
-            try:
-                raw = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-                if not isinstance(raw, dict) or raw.get("version") != _REJECTION_CHECKPOINT_VERSION:
-                    raise ValueError("unsupported checkpoint")
-                raw_offset = raw.get("offset")
-                if isinstance(raw_offset, bool) or not isinstance(raw_offset, int):
-                    raise ValueError("invalid checkpoint offset")
-                if raw_offset < 0 or raw_offset > events_size:
-                    raise ValueError("checkpoint offset outside event log")
-                expected_file_id = _event_file_id(events_stat)
-                if raw.get("event_file_id") != expected_file_id:
-                    raise ValueError("event log identity changed")
-                if raw.get("anchor") != _event_log_anchor(events_path, raw_offset):
-                    raise ValueError("event log checkpoint anchor changed")
-                if raw.get("checksum") != _rejection_checkpoint_checksum(raw):
-                    raise ValueError("checkpoint checksum changed")
-                raw_event_size = raw.get("event_size")
-                if isinstance(raw_event_size, bool) or not isinstance(raw_event_size, int):
-                    raise ValueError("invalid checkpoint event size")
-                if raw_event_size < raw_offset or raw_event_size > events_size:
-                    raise ValueError("checkpoint event size outside event log")
-                if raw_event_size == events_size and (
-                    raw.get("event_mtime_ns") != _stat_time_ns(events_stat, "st_mtime_ns")
-                    or raw.get("event_ctime_ns") != _stat_time_ns(events_stat, "st_ctime_ns")
-                ):
-                    raise ValueError("event log metadata changed")
-                state = _validate_rejection_checkpoint_sessions(raw.get("sessions"))
-                offset = raw_offset
-                checkpoint_valid = True
-            except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
-                _logger.warning("ctx runtime lifecycle: rebuilding malformed rejection checkpoint")
-
-        updated_offset = _scan_rejection_events(
-            events_path,
-            offset=offset,
-            state=state,
-        )
-        if not checkpoint_valid or updated_offset != offset:
-            self._write_rejection_checkpoint_unlocked(state, offset=updated_offset)
-        return state
-
-    def _write_rejection_checkpoint_unlocked(
-        self,
-        state: dict[str, list[str]],
-        *,
-        offset: int | None = None,
-    ) -> None:
-        events_path = self.events_path
-        checkpoint_path = self.recommendation_checkpoint_path
-        reject_symlink_path(events_path)
-        reject_symlink_path(checkpoint_path)
-        events_stat = events_path.stat() if events_path.is_file() else None
-        resolved_offset = (
-            int(events_stat.st_size) if offset is None and events_stat else offset or 0
-        )
-        payload: dict[str, Any] = {
-            "version": _REJECTION_CHECKPOINT_VERSION,
-            "event_file_id": _event_file_id(events_stat),
-            "event_size": int(events_stat.st_size) if events_stat is not None else 0,
-            "event_mtime_ns": _stat_time_ns(events_stat, "st_mtime_ns"),
-            "event_ctime_ns": _stat_time_ns(events_stat, "st_ctime_ns"),
-            "offset": resolved_offset,
-            "anchor": _event_log_anchor(events_path, resolved_offset),
-            "sessions": state,
-        }
-        payload["checksum"] = _rejection_checkpoint_checksum(payload)
-        safe_atomic_write_text(
-            checkpoint_path,
-            json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+        return _open_rejection_index(
+            events_path=events_path,
+            index_path=self.recommendation_index_path,
+            legacy_checkpoint_path=self._legacy_recommendation_checkpoint_path,
         )
 
     @property
@@ -641,19 +616,34 @@ class RuntimeLifecycleStore:
         return root / "events.jsonl"
 
     @property
+    def recommendation_index_path(self) -> Path:
+        return self.events_path.with_name("recommendation-rejections.sqlite3")
+
+    @property
     def recommendation_checkpoint_path(self) -> Path:
+        """Backward-compatible name for the derived recommendation index path."""
+        return self.recommendation_index_path
+
+    @property
+    def _legacy_recommendation_checkpoint_path(self) -> Path:
         return self.events_path.with_name("recommendation-rejections.json")
 
 
-def _append_jsonl_event(path: Path, event: dict[str, Any]) -> None:
+def _append_jsonl_event(path: Path, event: dict[str, Any]) -> bytes:
     reject_symlink_path(path)
     ensure_private_event_file(path)
-    _repair_jsonl_tail(path)
     payload = (json.dumps(event, sort_keys=True) + "\n").encode("utf-8")
     with path.open("ab") as handle:
         handle.write(payload)
         handle.flush()
         os.fsync(handle.fileno())
+    return payload
+
+
+def _prepare_private_lifecycle_lock(path: Path) -> None:
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    reject_symlink_path(lock_path)
+    ensure_private_event_file(lock_path)
 
 
 def _repair_jsonl_tail(path: Path) -> None:
@@ -937,38 +927,369 @@ def _log_malformed_rejection_snapshot(session_id: str) -> None:
     )
 
 
-def _validate_rejection_checkpoint_sessions(raw: Any) -> dict[str, list[str]]:
-    if not isinstance(raw, dict):
-        raise ValueError("checkpoint sessions must be an object")
-    sessions: dict[str, list[str]] = {}
-    for raw_session_id, raw_snapshot in raw.items():
-        if not isinstance(raw_session_id, str):
-            raise ValueError("checkpoint session id must be a string")
-        session_id = _validate_session_id(raw_session_id)
-        if not isinstance(raw_snapshot, list) or any(
-            not isinstance(value, str) for value in raw_snapshot
-        ):
-            raise ValueError("checkpoint rejection snapshot is malformed")
-        sessions[session_id] = _deduplicate_recommendation_ids(raw_snapshot)
-    return sessions
-
-
-def _scan_rejection_events(
-    path: Path,
+def _open_rejection_index(
     *,
-    offset: int,
-    state: dict[str, list[str]],
-) -> int:
+    events_path: Path,
+    index_path: Path,
+    legacy_checkpoint_path: Path,
+) -> sqlite3.Connection:
+    reject_symlink_path(events_path)
+    _reject_rejection_index_symlinks(index_path)
+    reject_symlink_path(legacy_checkpoint_path)
+
+    for attempt in range(2):
+        connection: sqlite3.Connection | None = None
+        created = not index_path.exists()
+        try:
+            _ensure_private_sqlite_file(index_path)
+            connection = sqlite3.connect(
+                str(index_path),
+                timeout=0,
+                isolation_level=None,
+            )
+            _configure_rejection_index(connection)
+            if created:
+                _create_rejection_index_schema(connection)
+            elif not _rejection_index_schema_current(connection):
+                raise _InvalidRejectionIndex("unsupported rejection index schema")
+
+            metadata = _read_rejection_index_metadata(connection)
+            if metadata is None or not _rejection_index_matches_events(
+                metadata,
+                events_path,
+            ):
+                _rebuild_rejection_index(connection, events_path=events_path)
+            _remove_legacy_rejection_checkpoint(legacy_checkpoint_path)
+            _tighten_rejection_index_files(index_path)
+            return connection
+        except (sqlite3.DatabaseError, _InvalidRejectionIndex):
+            if connection is not None:
+                connection.close()
+            if attempt:
+                raise
+            _logger.warning("ctx runtime lifecycle: rebuilding malformed rejection index")
+            _discard_rejection_index(index_path)
+    raise AssertionError("rejection index recovery loop exhausted")
+
+
+def _ensure_private_sqlite_file(path: Path) -> None:
+    reject_symlink_path(path)
+    if path.exists() and not path.is_file():
+        raise ValueError(f"rejection index must be a regular file: {path}")
+    ensure_private_event_file(path)
+
+
+def _reject_rejection_index_symlinks(path: Path) -> None:
+    for candidate in _rejection_index_files(path):
+        reject_symlink_path(candidate)
+
+
+def _rejection_index_files(path: Path) -> tuple[Path, ...]:
+    return (
+        path,
+        Path(f"{path}-journal"),
+        Path(f"{path}-wal"),
+        Path(f"{path}-shm"),
+    )
+
+
+def _tighten_rejection_index_files(path: Path) -> None:
+    for candidate in _rejection_index_files(path):
+        if not candidate.exists():
+            continue
+        reject_symlink_path(candidate)
+        try:
+            os.chmod(candidate, 0o600)
+        except OSError:
+            pass
+
+
+def _discard_rejection_index(path: Path) -> None:
+    for candidate in reversed(_rejection_index_files(path)):
+        reject_symlink_path(candidate)
+        if not candidate.exists():
+            continue
+        if not candidate.is_file():
+            raise ValueError(f"rejection index state must be a regular file: {candidate}")
+        candidate.unlink()
+
+
+def _remove_legacy_rejection_checkpoint(path: Path) -> None:
+    reject_symlink_path(path)
+    if not path.exists():
+        return
     if not path.is_file():
-        return 0
-    consumed = offset
+        raise ValueError(f"legacy rejection checkpoint must be a regular file: {path}")
+    path.unlink()
+
+
+def _configure_rejection_index(connection: sqlite3.Connection) -> None:
+    journal_mode = connection.execute("PRAGMA journal_mode=DELETE").fetchone()
+    if not journal_mode or str(journal_mode[0]).lower() != "delete":
+        raise _InvalidRejectionIndex("rejection index must use DELETE journal mode")
+    connection.execute("PRAGMA synchronous=FULL")
+    connection.execute("PRAGMA trusted_schema=OFF")
+
+
+def _create_rejection_index_schema(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE metadata (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            version INTEGER NOT NULL,
+            event_dev INTEGER NOT NULL,
+            event_ino INTEGER NOT NULL,
+            event_size INTEGER NOT NULL,
+            event_mtime_ns INTEGER NOT NULL,
+            event_ctime_ns INTEGER NOT NULL,
+            event_head TEXT NOT NULL,
+            tail_anchor TEXT NOT NULL,
+            checksum TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE sessions (
+            session_id TEXT PRIMARY KEY,
+            rejected_json TEXT NOT NULL,
+            checksum TEXT NOT NULL
+        ) WITHOUT ROWID
+        """
+    )
+    connection.execute(f"PRAGMA user_version={_REJECTION_INDEX_VERSION}")
+
+
+def _rejection_index_schema_current(connection: sqlite3.Connection) -> bool:
+    version_row = connection.execute("PRAGMA user_version").fetchone()
+    if not version_row or int(version_row[0]) != _REJECTION_INDEX_VERSION:
+        return False
+    metadata_columns = {
+        str(row[1]) for row in connection.execute("PRAGMA table_info(metadata)").fetchall()
+    }
+    session_columns = {
+        str(row[1]) for row in connection.execute("PRAGMA table_info(sessions)").fetchall()
+    }
+    return metadata_columns == {
+        "singleton",
+        "version",
+        "event_dev",
+        "event_ino",
+        "event_size",
+        "event_mtime_ns",
+        "event_ctime_ns",
+        "event_head",
+        "tail_anchor",
+        "checksum",
+    } and session_columns == {"session_id", "rejected_json", "checksum"}
+
+
+def _read_rejection_index_metadata(connection: sqlite3.Connection) -> dict[str, Any] | None:
+    row = connection.execute(
+        """
+        SELECT version, event_dev, event_ino, event_size, event_mtime_ns,
+               event_ctime_ns, event_head, tail_anchor, checksum
+        FROM metadata
+        WHERE singleton = 1
+        """
+    ).fetchone()
+    if row is None:
+        return None
+    metadata = {
+        "version": row[0],
+        "event_dev": row[1],
+        "event_ino": row[2],
+        "event_size": row[3],
+        "event_mtime_ns": row[4],
+        "event_ctime_ns": row[5],
+        "event_head": row[6],
+        "tail_anchor": row[7],
+        "checksum": row[8],
+    }
+    if (
+        metadata["version"] != _REJECTION_INDEX_VERSION
+        or any(
+            isinstance(metadata[field], bool) or not isinstance(metadata[field], int)
+            for field in (
+                "event_dev",
+                "event_ino",
+                "event_size",
+                "event_mtime_ns",
+                "event_ctime_ns",
+            )
+        )
+        or not _valid_sha256(metadata["event_head"])
+        or not _valid_sha256(metadata["tail_anchor"])
+        or metadata["checksum"] != _rejection_metadata_checksum(metadata)
+    ):
+        raise _InvalidRejectionIndex("invalid rejection index metadata")
+    return metadata
+
+
+def _rejection_index_matches_events(metadata: dict[str, Any], path: Path) -> bool:
+    event_stat = path.stat() if path.is_file() else None
+    expected = _event_stat_metadata(path, event_stat=event_stat)
+    return all(
+        metadata[field] == expected[field]
+        for field in (
+            "event_dev",
+            "event_ino",
+            "event_size",
+            "event_mtime_ns",
+            "event_ctime_ns",
+            "tail_anchor",
+        )
+    )
+
+
+def _rebuild_rejection_index(
+    connection: sqlite3.Connection,
+    *,
+    events_path: Path,
+) -> None:
+    state, event_head = _scan_rejection_events(events_path)
+    metadata = _event_stat_metadata(
+        events_path,
+        event_stat=events_path.stat() if events_path.is_file() else None,
+        event_head=event_head,
+    )
+    rows = [_rejection_session_row(session_id, rejected) for session_id, rejected in state.items()]
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("DELETE FROM sessions")
+        connection.execute("DELETE FROM metadata")
+        connection.executemany(
+            "INSERT INTO sessions(session_id, rejected_json, checksum) VALUES (?, ?, ?)",
+            rows,
+        )
+        _write_rejection_index_metadata(connection, metadata)
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+
+def _rejection_index_lookup(
+    connection: sqlite3.Connection,
+    *,
+    events_path: Path,
+    session_id: str,
+) -> list[str]:
+    row = connection.execute(
+        "SELECT rejected_json, checksum FROM sessions WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()
+    if row is None:
+        return []
+    try:
+        rejected = _decode_rejection_session_row(session_id, row)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        _logger.warning("ctx runtime lifecycle: rebuilding malformed rejection index")
+        _rebuild_rejection_index(connection, events_path=events_path)
+        row = connection.execute(
+            "SELECT rejected_json, checksum FROM sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return []
+        rejected = _decode_rejection_session_row(session_id, row)
+    return rejected
+
+
+def _update_rejection_index_after_append(
+    connection: sqlite3.Connection,
+    *,
+    events_path: Path,
+    event: dict[str, Any],
+    payload: bytes,
+) -> None:
+    metadata = _read_rejection_index_metadata(connection)
+    if metadata is None:
+        raise _InvalidRejectionIndex("rejection index metadata is missing")
+    event_stat = events_path.stat()
+    if int(event_stat.st_size) != int(metadata["event_size"]) + len(payload):
+        raise _InvalidRejectionIndex("event log changed during append")
+    event_head = _advance_event_head(str(metadata["event_head"]), payload)
+    updated_metadata = _event_stat_metadata(
+        events_path,
+        event_stat=event_stat,
+        event_head=event_head,
+    )
+
+    action = event.get("action")
+    session_id: str | None = None
+    rejected: list[str] | None = None
+    if action == "recommendation_rejections":
+        session_id = _validate_session_id(str(event.get("session_id") or ""))
+        rejected = _validated_rejection_snapshot(
+            event.get("rejected"),
+            session_id=session_id,
+        )
+        if rejected is None:
+            raise ValueError("invalid recommendation rejection event")
+
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        if session_id is not None and rejected is not None:
+            if rejected:
+                connection.execute(
+                    """
+                    INSERT INTO sessions(session_id, rejected_json, checksum)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        rejected_json = excluded.rejected_json,
+                        checksum = excluded.checksum
+                    """,
+                    _rejection_session_row(session_id, rejected),
+                )
+            else:
+                connection.execute(
+                    "DELETE FROM sessions WHERE session_id = ?",
+                    (session_id,),
+                )
+        connection.execute("DELETE FROM metadata")
+        _write_rejection_index_metadata(connection, updated_metadata)
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+
+def _write_rejection_index_metadata(
+    connection: sqlite3.Connection,
+    metadata: dict[str, Any],
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO metadata(
+            singleton, version, event_dev, event_ino, event_size,
+            event_mtime_ns, event_ctime_ns, event_head, tail_anchor, checksum
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            metadata["version"],
+            metadata["event_dev"],
+            metadata["event_ino"],
+            metadata["event_size"],
+            metadata["event_mtime_ns"],
+            metadata["event_ctime_ns"],
+            metadata["event_head"],
+            metadata["tail_anchor"],
+            metadata["checksum"],
+        ),
+    )
+
+
+def _scan_rejection_events(path: Path) -> tuple[dict[str, list[str]], str]:
+    state: dict[str, list[str]] = {}
+    event_head = _REJECTION_HEAD_SEED
+    if not path.is_file():
+        return state, event_head
     with path.open("rb") as handle:
-        handle.seek(offset)
-        while True:
-            line = handle.readline()
-            if not line or not line.endswith(b"\n"):
+        for line in handle:
+            if not line.endswith(b"\n"):
                 break
-            consumed += len(line)
+            event_head = _advance_event_head(event_head, line)
             try:
                 event = json.loads(line)
             except (UnicodeDecodeError, json.JSONDecodeError):
@@ -992,13 +1313,60 @@ def _scan_rejection_events(
                 state[session_id] = snapshot
             else:
                 state.pop(session_id, None)
-    return consumed
+    return state, event_head
 
 
-def _event_file_id(event_stat: os.stat_result | None) -> list[int]:
+def _rejection_session_row(
+    session_id: str,
+    rejected: list[str],
+) -> tuple[str, str, str]:
+    rejected_json = json.dumps(rejected, separators=(",", ":"))
+    checksum = hashlib.sha256(f"{session_id}\0{rejected_json}".encode("utf-8")).hexdigest()
+    return session_id, rejected_json, checksum
+
+
+def _decode_rejection_session_row(
+    session_id: str,
+    row: tuple[Any, ...],
+) -> list[str]:
+    rejected_json, checksum = row
+    if not isinstance(rejected_json, str) or not isinstance(checksum, str):
+        raise ValueError("invalid rejection index session row")
+    expected = hashlib.sha256(f"{session_id}\0{rejected_json}".encode("utf-8")).hexdigest()
+    if checksum != expected:
+        raise ValueError("rejection index session checksum changed")
+    raw = json.loads(rejected_json)
+    if not isinstance(raw, list) or any(not isinstance(value, str) for value in raw):
+        raise ValueError("invalid rejection index session snapshot")
+    return _deduplicate_recommendation_ids(raw)
+
+
+def _event_stat_metadata(
+    path: Path,
+    *,
+    event_stat: os.stat_result | None,
+    event_head: str = _REJECTION_HEAD_SEED,
+) -> dict[str, Any]:
+    event_dev, event_ino = _event_file_id(event_stat)
+    event_size = int(event_stat.st_size) if event_stat is not None else 0
+    metadata: dict[str, Any] = {
+        "version": _REJECTION_INDEX_VERSION,
+        "event_dev": event_dev,
+        "event_ino": event_ino,
+        "event_size": event_size,
+        "event_mtime_ns": _stat_time_ns(event_stat, "st_mtime_ns"),
+        "event_ctime_ns": _stat_time_ns(event_stat, "st_ctime_ns"),
+        "event_head": event_head,
+        "tail_anchor": _event_log_anchor(path, event_size),
+    }
+    metadata["checksum"] = _rejection_metadata_checksum(metadata)
+    return metadata
+
+
+def _event_file_id(event_stat: os.stat_result | None) -> tuple[int, int]:
     if event_stat is None:
-        return [0, 0]
-    return [int(event_stat.st_dev), int(event_stat.st_ino)]
+        return 0, 0
+    return int(event_stat.st_dev), int(event_stat.st_ino)
 
 
 def _stat_time_ns(event_stat: os.stat_result | None, field: str) -> int:
@@ -1011,10 +1379,22 @@ def _stat_time_ns(event_stat: os.stat_result | None, field: str) -> int:
     return int(float(seconds) * 1_000_000_000)
 
 
-def _rejection_checkpoint_checksum(payload: dict[str, Any]) -> str:
+def _rejection_metadata_checksum(payload: dict[str, Any]) -> str:
     canonical = {key: value for key, value in payload.items() if key != "checksum"}
     encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _advance_event_head(previous: str, payload: bytes) -> str:
+    return hashlib.sha256(bytes.fromhex(previous) + payload).hexdigest()
+
+
+def _valid_sha256(raw: Any) -> bool:
+    return (
+        isinstance(raw, str)
+        and len(raw) == 64
+        and all(character in "0123456789abcdef" for character in raw)
+    )
 
 
 def _event_log_anchor(path: Path, offset: int) -> str:

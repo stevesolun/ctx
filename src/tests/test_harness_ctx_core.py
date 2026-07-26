@@ -13,12 +13,15 @@ Covers:
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import json
+import multiprocessing
 import os
+import sqlite3
 import sys
 from pathlib import Path
 import threading
+import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -39,6 +42,17 @@ from ctx.adapters.generic.ctx_core_tools import (
 from ctx.adapters.generic.providers import ToolCall, ToolDefinition
 from ctx.core.graph.graph_packs import write_base_pack, write_overlay_pack
 from ctx.core.wiki.wiki_packs import write_wiki_base_pack, write_wiki_overlay_pack
+
+
+def _remember_rejection_in_process(arguments: tuple[str, int]) -> list[str]:
+    from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+    runtime_root, index = arguments
+    return RuntimeLifecycleStore(root=Path(runtime_root)).remember_recommendation_rejections(
+        session_id="process-session",
+        rejected=[f"skill:process-{index}"],
+        merge=True,
+    )
 
 
 # ── Helpers: build a synthetic wiki + graph for the toolbox ────────────────
@@ -2116,6 +2130,28 @@ class TestRecommendBundle:
             f"skill:helper-{index}" for index in range(8)
         }
 
+    def test_cross_process_session_rejections_merge_without_lost_updates(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        runtime_root = tmp_path / "runtime"
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=4, mp_context=context) as executor:
+            list(
+                executor.map(
+                    _remember_rejection_in_process,
+                    [(str(runtime_root), index) for index in range(8)],
+                )
+            )
+
+        assert set(
+            RuntimeLifecycleStore(root=runtime_root).recommendation_rejections(
+                session_id="process-session"
+            )
+        ) == {f"skill:process-{index}" for index in range(8)}
+
     def test_slow_rejection_telemetry_does_not_hold_event_lock(
         self,
         tmp_path: Path,
@@ -2230,7 +2266,7 @@ class TestRecommendBundle:
         assert "bare-id" not in caplog.text
         assert "malformed-session" not in caplog.text
 
-    def test_rejection_checkpoint_incrementally_scans_new_events(
+    def test_rejection_index_tracks_every_lifecycle_append_without_rebuild(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -2243,25 +2279,30 @@ class TestRecommendBundle:
             rejected=["skill:valid"],
         )
         assert store.recommendation_checkpoint_path.is_file()
+        with sqlite3.connect(store.recommendation_checkpoint_path) as connection:
+            initial_size = connection.execute(
+                "SELECT event_size FROM metadata WHERE singleton = 1"
+            ).fetchone()[0]
+
         store.record_dev_event(
             session_id="checkpoint-session",
             event_type="test",
         )
+        with sqlite3.connect(store.recommendation_checkpoint_path) as connection:
+            updated_size = connection.execute(
+                "SELECT event_size FROM metadata WHERE singleton = 1"
+            ).fetchone()[0]
 
-        calls = 0
-        loads = lifecycle.json.loads
+        def unexpected_rebuild(*_args: Any, **_kwargs: Any) -> None:
+            raise AssertionError("steady lookup rebuilt the rejection index")
 
-        def count_loads(payload: Any, *args: Any, **kwargs: Any) -> Any:
-            nonlocal calls
-            calls += 1
-            return loads(payload, *args, **kwargs)
-
-        monkeypatch.setattr(lifecycle.json, "loads", count_loads)
+        monkeypatch.setattr(lifecycle, "_rebuild_rejection_index", unexpected_rebuild)
 
         assert store.recommendation_rejections(session_id="checkpoint-session") == ["skill:valid"]
-        assert calls == 2
+        assert updated_size > initial_size
+        assert updated_size == store.events_path.stat().st_size
 
-    def test_rejection_checkpoint_corruption_rebuilds_from_events(
+    def test_rejection_index_corruption_rebuilds_from_events(
         self,
         tmp_path: Path,
         caplog: pytest.LogCaptureFixture,
@@ -2273,17 +2314,22 @@ class TestRecommendBundle:
             session_id="checkpoint-rebuild",
             rejected=["agent:reviewer"],
         )
-        store.recommendation_checkpoint_path.write_text("{bad", encoding="utf-8")
+        store.recommendation_checkpoint_path.write_bytes(b"not a sqlite database")
 
         with caplog.at_level("WARNING"):
             rejected = store.recommendation_rejections(session_id="checkpoint-rebuild")
 
         assert rejected == ["agent:reviewer"]
-        assert "rebuilding malformed rejection checkpoint" in caplog.text
-        rebuilt = json.loads(store.recommendation_checkpoint_path.read_text(encoding="utf-8"))
-        assert rebuilt["sessions"] == {"checkpoint-rebuild": ["agent:reviewer"]}
+        assert "rebuilding malformed rejection index" in caplog.text
+        with sqlite3.connect(store.recommendation_checkpoint_path) as connection:
+            row = connection.execute(
+                "SELECT rejected_json FROM sessions WHERE session_id = ?",
+                ("checkpoint-rebuild",),
+            ).fetchone()
+        assert row is not None
+        assert json.loads(row[0]) == ["agent:reviewer"]
 
-    def test_rejection_checkpoint_tampering_rebuilds_from_events(
+    def test_rejection_index_row_tampering_rebuilds_from_events(
         self,
         tmp_path: Path,
         caplog: pytest.LogCaptureFixture,
@@ -2295,18 +2341,175 @@ class TestRecommendBundle:
             session_id="checkpoint-integrity",
             rejected=["skill:valid"],
         )
-        checkpoint = json.loads(store.recommendation_checkpoint_path.read_text(encoding="utf-8"))
-        checkpoint["sessions"]["checkpoint-integrity"] = ["agent:tampered"]
-        store.recommendation_checkpoint_path.write_text(
-            json.dumps(checkpoint),
-            encoding="utf-8",
-        )
+        with sqlite3.connect(store.recommendation_checkpoint_path) as connection:
+            connection.execute(
+                "UPDATE sessions SET rejected_json = ? WHERE session_id = ?",
+                ('["agent:tampered"]', "checkpoint-integrity"),
+            )
+            connection.commit()
 
         with caplog.at_level("WARNING"):
             rejected = store.recommendation_rejections(session_id="checkpoint-integrity")
 
         assert rejected == ["skill:valid"]
-        assert "rebuilding malformed rejection checkpoint" in caplog.text
+        assert "rebuilding malformed rejection index" in caplog.text
+
+    def test_early_same_length_event_edit_is_rebuilt_before_ordinary_append(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="prefix-integrity",
+            rejected=["skill:valid"],
+        )
+        for index in range(80):
+            store.record_dev_event(
+                session_id="prefix-integrity",
+                event_type="padding",
+                payload={"index": index, "padding": "x" * 96},
+            )
+        assert store.events_path.stat().st_size > 8192
+
+        original = b"skill:valid"
+        replacement = b"agent:evilx"
+        assert len(original) == len(replacement)
+        with store.events_path.open("r+b") as handle:
+            payload = handle.read()
+            offset = payload.index(original)
+            handle.seek(offset)
+            handle.write(replacement)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+        store.record_dev_event(
+            session_id="prefix-integrity",
+            event_type="after-prefix-edit",
+        )
+        indexed = store.recommendation_rejections(session_id="prefix-integrity")
+        store.recommendation_checkpoint_path.unlink()
+        rebuilt = store.recommendation_rejections(session_id="prefix-integrity")
+
+        assert indexed == ["agent:evilx"]
+        assert rebuilt == indexed
+
+    def test_jsonl_append_survives_index_update_crash(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.runtime_lifecycle as lifecycle
+
+        store = lifecycle.RuntimeLifecycleStore(root=tmp_path / "runtime")
+
+        def crash_after_jsonl(*_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError("simulated index update crash")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                lifecycle,
+                "_update_rejection_index_after_append",
+                crash_after_jsonl,
+            )
+            with pytest.raises(RuntimeError, match="simulated index update crash"):
+                store.remember_recommendation_rejections(
+                    session_id="crash-recovery",
+                    rejected=["skill:durable"],
+                )
+
+        assert store.recommendation_rejections(session_id="crash-recovery") == ["skill:durable"]
+
+    def test_legacy_rejection_checkpoint_is_rebuilt_from_jsonl(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="legacy-rebuild",
+            rejected=["skill:canonical"],
+        )
+        store.recommendation_checkpoint_path.unlink()
+        legacy_path = store.events_path.with_name("recommendation-rejections.json")
+        legacy_path.write_text(
+            json.dumps({"version": 2, "sessions": {"legacy-rebuild": ["agent:stale"]}}),
+            encoding="utf-8",
+        )
+
+        assert store.recommendation_rejections(session_id="legacy-rebuild") == ["skill:canonical"]
+        assert not legacy_path.exists()
+        assert store.recommendation_checkpoint_path.is_file()
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX ownership modes and symlinks")
+    def test_rejection_index_rejects_symlinks_and_keeps_state_private(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.remember_recommendation_rejections(
+            session_id="private-index",
+            rejected=["skill:valid"],
+        )
+        lock_path = store.events_path.with_suffix(store.events_path.suffix + ".lock")
+        assert {
+            store.events_path.stat().st_mode & 0o777,
+            store.recommendation_checkpoint_path.stat().st_mode & 0o777,
+            lock_path.stat().st_mode & 0o777,
+        } == {0o600}
+
+        store.recommendation_checkpoint_path.unlink()
+        victim = tmp_path / "victim.sqlite3"
+        victim.write_bytes(b"untouched")
+        store.recommendation_checkpoint_path.symlink_to(victim)
+
+        with pytest.raises(ValueError, match="symlinked path"):
+            store.recommendation_rejections(session_id="private-index")
+        assert victim.read_bytes() == b"untouched"
+
+    def test_rejection_index_100k_session_hot_path_budget(self, tmp_path: Path) -> None:
+        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+
+        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store.events_path.parent.mkdir(parents=True)
+        with store.events_path.open("w", encoding="utf-8") as handle:
+            for index in range(100_000):
+                handle.write(
+                    json.dumps(
+                        {
+                            "action": "recommendation_rejections",
+                            "session_id": f"session-{index:06d}",
+                            "rejected": [f"skill:item-{index:06d}"],
+                        },
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                )
+        os.chmod(store.events_path, 0o600)
+
+        target_session = "session-099999"
+        assert store.recommendation_rejections(session_id=target_session) == ["skill:item-099999"]
+
+        lookup_durations: list[float] = []
+        for _ in range(5):
+            started = time.perf_counter()
+            assert store.recommendation_rejections(session_id=target_session) == [
+                "skill:item-099999"
+            ]
+            lookup_durations.append(time.perf_counter() - started)
+        started = time.perf_counter()
+        assert store.remember_recommendation_rejections(
+            session_id=target_session,
+            rejected=["agent:reviewer"],
+        ) == ["agent:reviewer"]
+        update_duration = time.perf_counter() - started
+
+        assert sorted(lookup_durations)[2] < 0.2
+        assert update_duration < 0.2
 
     def test_context_policy_replaces_rejected_or_stale_applied_context(self) -> None:
         policy = _recommendation_context_policy(
