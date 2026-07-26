@@ -364,18 +364,36 @@ jobs:
           export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
           python scripts/build_reproducible_dist.py --verify --output-dir dist
 
+      - name: Resolve exact distribution manifest
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from scripts.build_reproducible_dist import verified_artifact_paths
+
+          artifacts = verified_artifact_paths(Path("dist"))
+          wheel = next(path for path in artifacts if path.name.endswith(".whl"))
+          sdist = next(path for path in artifacts if path.name.endswith(".tar.gz"))
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"CTX_WHEEL={wheel}\n")
+              env.write(f"CTX_SDIST={sdist}\n")
+          print(f"verified distribution manifest: {wheel.name}, {sdist.name}")
+          PY
+
       - name: Check distributions
-        run: python -m twine check dist/*
+        run: python -m twine check "$CTX_WHEEL" "$CTX_SDIST"
 
       - name: Check distribution contents
         run: |
           python - <<'PY'
+          import os
           import tarfile
           import zipfile
           from pathlib import Path
 
-          wheel = next(Path("dist").glob("*.whl"))
-          sdist = next(Path("dist").glob("*.tar.gz"))
+          wheel = Path(os.environ["CTX_WHEEL"])
+          sdist = Path(os.environ["CTX_SDIST"])
 
           with zipfile.ZipFile(wheel) as zf:
               wheel_names = set(zf.namelist())
@@ -398,12 +416,7 @@ jobs:
           python -m venv .venv-smoke
           . .venv-smoke/bin/activate
           python -m pip install --upgrade pip
-          wheel="$(python - <<'PY'
-          from pathlib import Path
-          print(next(Path("dist").glob("*.whl")))
-          PY
-          )"
-          python -m pip install "$wheel"
+          python -m pip install "$CTX_WHEEL"
           python -m pip check
           python - <<'PY'
           import tomllib
@@ -493,12 +506,7 @@ jobs:
       - name: Smoke install all runtime extras
         run: |
           . .venv-smoke/bin/activate
-          wheel="$(python - <<'PY'
-          from pathlib import Path
-          print(next(Path("dist").glob("*.whl")))
-          PY
-          )"
-          python -m pip install "${wheel}[ann,browser,embeddings,gcf,harness,viz]"
+          python -m pip install "${CTX_WHEEL}[ann,browser,embeddings,gcf,harness,viz]"
           python -m pip check
           python - <<'PY'
           from importlib.metadata import version
@@ -577,11 +585,15 @@ jobs:
           rm release-sbom/claude-ctx.repeat.cdx.json
           rm release-sbom/resolved-environment.json
 
+      - name: Revalidate exact distribution manifest
+        run: python scripts/build_reproducible_dist.py --check-output dist
+
       - name: Upload dist artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
           path: dist/
+          if-no-files-found: error
 
       - name: Upload release SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -611,6 +623,9 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
       - name: Download dist artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -630,12 +645,15 @@ jobs:
           name: graph-release-assets
           path: graph-release-assets
 
+      - name: Validate exact distribution manifest
+        run: python scripts/build_reproducible_dist.py --check-output dist
+
       - name: Attest release provenance
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-path: |
-            dist/*.whl
-            dist/*.tar.gz
+            dist/packages/*.whl
+            dist/packages/*.tar.gz
             release-sbom/*.json
 
       - name: Attest graph release provenance
@@ -653,8 +671,8 @@ jobs:
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-path: |
-            dist/*.whl
-            dist/*.tar.gz
+            dist/packages/*.whl
+            dist/packages/*.tar.gz
           sbom-path: release-sbom/claude-ctx.cdx.json
 
   release-assets:
@@ -714,18 +732,27 @@ jobs:
       name: pypi
       url: https://pypi.org/project/claude-ctx/
     steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
       - name: Download dist artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: dist
           path: dist/
 
+      - name: Validate exact distribution manifest
+        run: python scripts/build_reproducible_dist.py --check-output dist
+
       - name: Publish to PyPI
         if: github.event_name == 'push'
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        with:
+          packages-dir: dist/packages/
 
       - name: Publish to TestPyPI
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.repository == 'testpypi'
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
         with:
+          packages-dir: dist/packages/
           repository-url: https://test.pypi.org/legacy/

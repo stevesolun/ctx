@@ -7,6 +7,7 @@ import argparse
 import copy
 import gzip
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -25,6 +26,11 @@ _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 _TIME_PAX_FIELDS = frozenset({"atime", "birthtime", "creationtime", "ctime", "mtime"})
 _OWNER_PAX_FIELDS = frozenset({"gid", "gname", "uid", "uname"})
 _TRANSPORT_PAX_FIELDS = frozenset({"linkpath", "path", "size"})
+_TRANSPORT_PAX_NAMESPACES = frozenset({"libarchive", "schily"})
+_SEMANTIC_XATTR_PREFIXES = ("libarchive.xattr.", "schily.xattr.")
+_MANIFEST_NAME = "manifest.json"
+_PACKAGES_DIR = "packages"
+_MANIFEST_SCHEMA = 1
 
 
 class ReproducibleBuildError(RuntimeError):
@@ -48,6 +54,13 @@ class _MemberRecord:
     devminor: int
     pax_headers: tuple[tuple[str, str], ...]
     payload_sha256: str | None
+
+
+@dataclass(frozen=True)
+class _PathIdentity:
+    device: int
+    inode: int
+    mode: int
 
 
 def source_date_epoch(
@@ -95,7 +108,7 @@ def build_distributions(
         raise ReproducibleBuildError(f"output path is not a real directory: {target_dir}")
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix=".ctx-dist-build-", dir=target_dir.parent) as tmp:
+    with tempfile.TemporaryDirectory(prefix=".ctx-dist-build-") as tmp:
         staging_dir = Path(tmp) / "dist"
         staging_dir.mkdir()
         env = dict(os.environ)
@@ -171,13 +184,10 @@ def verify_reproducible_builds(
     repo_root = repo_root.resolve()
     epoch = source_date_epoch(repo_root)
     target_dir = _prepare_verified_output(output_dir) if output_dir is not None else None
+    target_identity = _path_identity(target_dir) if target_dir is not None else None
     results: list[dict[str, str]] = []
     first_artifacts: BuildArtifacts | None = None
-    temp_parent = target_dir.parent if target_dir is not None else None
-    with tempfile.TemporaryDirectory(
-        prefix=".ctx-reproducible-build-",
-        dir=temp_parent,
-    ) as tmp:
+    with tempfile.TemporaryDirectory(prefix=".ctx-reproducible-build-") as tmp:
         temp_root = Path(tmp)
         snapshot_root = _export_git_tree(
             repo_root,
@@ -212,11 +222,13 @@ def verify_reproducible_builds(
                 f"two builds were not byte-identical: {results[0]} != {results[1]}"
             )
         if target_dir is not None:
-            if first_artifacts is None:
+            if first_artifacts is None or target_identity is None:
                 raise ReproducibleBuildError("reproducibility verification produced no artifacts")
-            installed = BuildArtifacts(
-                wheel=_install_artifact(first_artifacts.wheel, target_dir),
-                sdist=_install_artifact(first_artifacts.sdist, target_dir),
+            installed = _install_verified_output(
+                first_artifacts,
+                results[0],
+                target_dir,
+                target_identity,
             )
             installed_hashes = {
                 installed.wheel.name: _sha256_path(installed.wheel),
@@ -274,6 +286,235 @@ def _prepare_verified_output(output_dir: Path) -> Path:
     if any(target_dir.iterdir()):
         raise ReproducibleBuildError(f"verified output directory must be empty: {target_dir}")
     return target_dir
+
+
+def _install_verified_output(
+    artifacts: BuildArtifacts,
+    expected_hashes: Mapping[str, str],
+    target_dir: Path,
+    target_identity: _PathIdentity,
+) -> BuildArtifacts:
+    _assert_guarded_directory(target_dir, target_identity, expected_entries=set())
+    with tempfile.TemporaryDirectory(
+        prefix=".ctx-dist-install-",
+        dir=target_dir.parent,
+    ) as tmp:
+        staged_root = Path(tmp) / "verified"
+        packages = staged_root / _PACKAGES_DIR
+        packages.mkdir(parents=True)
+        records: list[dict[str, object]] = []
+        for source in (artifacts.wheel, artifacts.sdist):
+            digest = expected_hashes.get(source.name)
+            if digest is None:
+                raise ReproducibleBuildError(
+                    f"verified artifact is missing from the hash manifest: {source.name}"
+                )
+            target = packages / source.name
+            copied_digest, size = _copy_regular_file(source, target)
+            if copied_digest != digest:
+                raise ReproducibleBuildError(
+                    f"artifact changed before final installation: {source.name}"
+                )
+            records.append({"filename": source.name, "sha256": digest, "size": size})
+
+        manifest = {
+            "artifacts": sorted(records, key=lambda record: str(record["filename"])),
+            "schema_version": _MANIFEST_SCHEMA,
+        }
+        manifest_path = staged_root / _MANIFEST_NAME
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        staged_paths = verified_artifact_paths(staged_root)
+        staged_hashes = {path.name: _sha256_path(path) for path in staged_paths}
+        if staged_hashes != dict(expected_hashes):
+            raise ReproducibleBuildError("staged artifacts differ from the verified build")
+        staged_identity = _path_identity(staged_root)
+
+        _assert_guarded_directory(target_dir, target_identity, expected_entries=set())
+        try:
+            target_dir.rmdir()
+            os.rename(staged_root, target_dir)
+        except OSError as exc:
+            raise ReproducibleBuildError(
+                f"could not atomically install verified output: {exc}"
+            ) from exc
+        _assert_guarded_directory(
+            target_dir,
+            staged_identity,
+            expected_entries={_MANIFEST_NAME, _PACKAGES_DIR},
+        )
+
+    installed_paths = verified_artifact_paths(target_dir)
+    installed = _build_artifacts_from_paths(installed_paths)
+    installed_hashes = {path.name: _sha256_path(path) for path in installed_paths}
+    if installed_hashes != dict(expected_hashes):
+        raise ReproducibleBuildError("installed artifacts differ from the verified build")
+    return installed
+
+
+def verified_artifact_paths(output_dir: Path) -> tuple[Path, ...]:
+    """Validate an installed manifest and return its exact artifact paths."""
+    root = Path(os.path.abspath(output_dir))
+    root_identity = _path_identity(root)
+    _assert_guarded_directory(
+        root,
+        root_identity,
+        expected_entries={_MANIFEST_NAME, _PACKAGES_DIR},
+    )
+    packages = root / _PACKAGES_DIR
+    packages_identity = _path_identity(packages)
+    if not stat.S_ISDIR(packages_identity.mode):
+        raise ReproducibleBuildError(f"package path is not a real directory: {packages}")
+
+    raw_manifest = _read_regular_file(root / _MANIFEST_NAME, "distribution manifest")
+    try:
+        manifest = json.loads(raw_manifest)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReproducibleBuildError(f"distribution manifest is invalid JSON: {exc}") from exc
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != {"artifacts", "schema_version"}
+        or manifest.get("schema_version") != _MANIFEST_SCHEMA
+        or not isinstance(manifest.get("artifacts"), list)
+    ):
+        raise ReproducibleBuildError("distribution manifest has an unsupported schema")
+
+    records = manifest["artifacts"]
+    if len(records) != 2:
+        raise ReproducibleBuildError("distribution manifest must list exactly two artifacts")
+    expected_names: set[str] = set()
+    expected_portable_names: set[str] = set()
+    paths: list[Path] = []
+    for record in records:
+        if not isinstance(record, dict) or set(record) != {"filename", "sha256", "size"}:
+            raise ReproducibleBuildError(
+                "distribution manifest contains an invalid artifact record"
+            )
+        filename = record["filename"]
+        digest = record["sha256"]
+        size = record["size"]
+        if not isinstance(filename, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._+-]*", filename
+        ):
+            raise ReproducibleBuildError("distribution manifest contains an unsafe filename")
+        portable_name = unicodedata.normalize("NFC", filename).casefold()
+        if filename in expected_names or portable_name in expected_portable_names:
+            raise ReproducibleBuildError("distribution manifest contains a duplicate filename")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ReproducibleBuildError(f"invalid artifact digest in manifest: {filename}")
+        if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+            raise ReproducibleBuildError(f"invalid artifact size in manifest: {filename}")
+        path = packages / filename
+        payload = _read_regular_file(path, f"artifact {filename}")
+        if len(payload) != size or hashlib.sha256(payload).hexdigest() != digest:
+            raise ReproducibleBuildError(f"artifact does not match manifest: {filename}")
+        expected_names.add(filename)
+        expected_portable_names.add(portable_name)
+        paths.append(path)
+
+    if (
+        sum(path.name.endswith(".whl") for path in paths) != 1
+        or sum(path.name.endswith(".tar.gz") for path in paths) != 1
+    ):
+        raise ReproducibleBuildError("distribution manifest must list one wheel and one sdist")
+    _assert_guarded_directory(packages, packages_identity, expected_entries=expected_names)
+    _assert_guarded_directory(
+        root,
+        root_identity,
+        expected_entries={_MANIFEST_NAME, _PACKAGES_DIR},
+    )
+    return tuple(sorted(paths, key=lambda path: path.name))
+
+
+def _build_artifacts_from_paths(paths: Sequence[Path]) -> BuildArtifacts:
+    wheels = [path for path in paths if path.name.endswith(".whl")]
+    sdists = [path for path in paths if path.name.endswith(".tar.gz")]
+    if len(wheels) != 1 or len(sdists) != 1:
+        raise ReproducibleBuildError("verified output does not contain one wheel and one sdist")
+    return BuildArtifacts(wheel=wheels[0], sdist=sdists[0])
+
+
+def _copy_regular_file(source: Path, target: Path) -> tuple[str, int]:
+    source_identity = _path_identity(source)
+    if not stat.S_ISREG(source_identity.mode):
+        raise ReproducibleBuildError(f"artifact source is not a regular file: {source}")
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with source.open("rb") as input_file, target.open("xb") as output_file:
+            opened = _PathIdentity(
+                device=os.fstat(input_file.fileno()).st_dev,
+                inode=os.fstat(input_file.fileno()).st_ino,
+                mode=os.fstat(input_file.fileno()).st_mode,
+            )
+            if opened != source_identity:
+                raise ReproducibleBuildError(f"artifact source changed while opening: {source}")
+            for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
+                output_file.write(chunk)
+                digest.update(chunk)
+                size += len(chunk)
+            output_file.flush()
+            os.fsync(output_file.fileno())
+    except OSError as exc:
+        raise ReproducibleBuildError(
+            f"could not stage verified artifact {source.name}: {exc}"
+        ) from exc
+    if _path_identity(source) != source_identity:
+        raise ReproducibleBuildError(f"artifact source changed while copying: {source}")
+    return digest.hexdigest(), size
+
+
+def _read_regular_file(path: Path, label: str) -> bytes:
+    identity = _path_identity(path)
+    if not stat.S_ISREG(identity.mode):
+        raise ReproducibleBuildError(f"{label} is not a regular file: {path}")
+    try:
+        with path.open("rb") as handle:
+            opened_stat = os.fstat(handle.fileno())
+            opened = _PathIdentity(
+                device=opened_stat.st_dev,
+                inode=opened_stat.st_ino,
+                mode=opened_stat.st_mode,
+            )
+            if opened != identity:
+                raise ReproducibleBuildError(f"{label} changed while opening: {path}")
+            payload = handle.read()
+    except OSError as exc:
+        raise ReproducibleBuildError(f"could not read {label}: {exc}") from exc
+    if _path_identity(path) != identity:
+        raise ReproducibleBuildError(f"{label} changed while reading: {path}")
+    return payload
+
+
+def _path_identity(path: Path) -> _PathIdentity:
+    try:
+        current = os.lstat(path)
+    except OSError as exc:
+        raise ReproducibleBuildError(f"could not inspect path {path}: {exc}") from exc
+    return _PathIdentity(device=current.st_dev, inode=current.st_ino, mode=current.st_mode)
+
+
+def _assert_guarded_directory(
+    path: Path,
+    expected_identity: _PathIdentity,
+    *,
+    expected_entries: set[str],
+) -> None:
+    identity = _path_identity(path)
+    if identity != expected_identity or not stat.S_ISDIR(identity.mode):
+        raise ReproducibleBuildError(f"verified output directory was replaced: {path}")
+    try:
+        entries = {entry.name for entry in os.scandir(path)}
+    except OSError as exc:
+        raise ReproducibleBuildError(f"could not inspect verified output directory: {exc}") from exc
+    if entries != expected_entries:
+        raise ReproducibleBuildError(
+            f"verified output directory contents changed: expected "
+            f"{sorted(expected_entries)}, found {sorted(entries)}"
+        )
 
 
 def _write_normalized_archive(source: Path, target: Path, epoch: int) -> None:
@@ -477,7 +718,16 @@ def _semantic_pax_headers(headers: Mapping[str, str]) -> tuple[tuple[str, str], 
 
 def _is_normalized_pax_field(key: str) -> bool:
     normalized = key.lower()
-    return normalized in _TIME_PAX_FIELDS or normalized in _OWNER_PAX_FIELDS
+    if normalized.startswith(_SEMANTIC_XATTR_PREFIXES):
+        return False
+    if normalized in _TIME_PAX_FIELDS or normalized in _OWNER_PAX_FIELDS:
+        return True
+    namespace, separator, field = normalized.partition(".")
+    return bool(
+        separator
+        and namespace in _TRANSPORT_PAX_NAMESPACES
+        and (field in _TIME_PAX_FIELDS or field in _OWNER_PAX_FIELDS)
+    )
 
 
 def _assert_normalized_archive(path: Path, epoch: int) -> None:
@@ -574,6 +824,8 @@ def _sync_snapshot_path(repo_root: Path, snapshot_root: Path, name: str) -> None
     _validate_member_name(name)
     source = _archive_target(repo_root, name)
     target = _archive_target(snapshot_root, name)
+    _reject_symlink_ancestors(repo_root, source)
+    _reject_symlink_ancestors(snapshot_root, target)
     if target.is_symlink() or target.is_file():
         target.unlink()
     elif target.is_dir():
@@ -590,9 +842,28 @@ def _sync_snapshot_path(repo_root: Path, snapshot_root: Path, name: str) -> None
         _safe_link_target(member)
         os.symlink(linkname, target)
     elif source.is_file():
+        try:
+            resolved_source = source.resolve(strict=True)
+            resolved_source.relative_to(repo_root)
+        except (OSError, ValueError) as exc:
+            raise ReproducibleBuildError(
+                f"worktree source resolves outside the repository: {name}"
+            ) from exc
         shutil.copy2(source, target)
     else:
         raise ReproducibleBuildError(f"unsupported worktree entry: {name}")
+
+
+def _reject_symlink_ancestors(root: Path, path: Path) -> None:
+    try:
+        relative = path.relative_to(root)
+    except ValueError as exc:
+        raise ReproducibleBuildError(f"path is outside its expected root: {path}") from exc
+    current = root
+    for part in relative.parts[:-1]:
+        current /= part
+        if current.is_symlink():
+            raise ReproducibleBuildError(f"path has a symlink ancestor: {path}")
 
 
 def _extract_git_archive(archive_path: Path, target: Path) -> None:
@@ -666,10 +937,16 @@ def _sha256_path(path: Path) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("repo", nargs="?", type=Path, default=Path.cwd())
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--verify",
         action="store_true",
         help="build the current worktree twice and compare artifact hashes",
+    )
+    mode.add_argument(
+        "--check-output",
+        type=Path,
+        help="validate a verified output manifest and print its exact artifact paths",
     )
     parser.add_argument(
         "--output-dir",
@@ -678,7 +955,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        if args.verify:
+        if args.check_output is not None:
+            for path in verified_artifact_paths(args.check_output):
+                print(path)
+        elif args.verify:
             hashes = verify_reproducible_builds(args.repo, output_dir=args.output_dir)
             for name, digest in sorted(hashes.items()):
                 print(f"{digest}  {name}")

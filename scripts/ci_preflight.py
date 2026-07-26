@@ -454,9 +454,10 @@ def select_checks(
     if not smoke_profile and package_required:
         out_dir = ".ci-preflight-dist"
         twine_script = (
-            "import glob, subprocess, sys; "
-            f"files=glob.glob({str(out_dir + '/*')!r}); "
-            "sys.exit(2 if not files else subprocess.call("
+            "import subprocess, sys; from pathlib import Path; "
+            "from scripts.build_reproducible_dist import verified_artifact_paths; "
+            f"files=verified_artifact_paths(Path({out_dir!r})); "
+            "sys.exit(subprocess.call("
             "[sys.executable, '-m', 'twine', 'check', *files]))"
         )
         checks.extend(

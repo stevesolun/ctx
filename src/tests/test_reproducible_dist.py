@@ -45,6 +45,7 @@ def _add_members(
     regular.mtime = mtime
     pax_headers = [
         ("mtime", f"{mtime}.5"),
+        ("LIBARCHIVE.creationtime", str(mtime)),
         ("SCHILY.xattr.user.mtime", "semantic-mtime"),
         ("SCHILY.xattr.user.test", "preserved"),
     ]
@@ -135,7 +136,9 @@ def test_normalize_sdist_removes_timestamp_and_order_drift(tmp_path: Path) -> No
     assert (
         by_name["example-1.0/data.txt"].pax_headers["SCHILY.xattr.user.mtime"] == "semantic-mtime"
     )
+    assert "LIBARCHIVE.creationtime" not in by_name["example-1.0/data.txt"].pax_headers
     assert not reproducible._is_normalized_pax_field("SCHILY.xattr.user.mtime")
+    assert reproducible._is_normalized_pax_field("LIBARCHIVE.creationtime")
     assert all(
         not reproducible._is_normalized_pax_field(key)
         for member in members
@@ -306,6 +309,99 @@ def test_verified_output_directory_must_be_empty(tmp_path: Path) -> None:
         reproducible._prepare_verified_output(output)
 
 
+def _install_fixture_output(tmp_path: Path) -> tuple[Path, reproducible.BuildArtifacts]:
+    sources = tmp_path / "sources"
+    sources.mkdir()
+    wheel = sources / "example-1.0-py3-none-any.whl"
+    sdist = sources / "example-1.0.tar.gz"
+    wheel.write_bytes(b"verified wheel")
+    sdist.write_bytes(b"verified sdist")
+    artifacts = reproducible.BuildArtifacts(wheel=wheel, sdist=sdist)
+    hashes = {wheel.name: _digest(wheel), sdist.name: _digest(sdist)}
+    output = reproducible._prepare_verified_output(tmp_path / "dist")
+    identity = reproducible._path_identity(output)
+    reproducible._install_verified_output(artifacts, hashes, output, identity)
+    return output, artifacts
+
+
+def test_verified_manifest_rejects_injected_and_replaced_artifacts(tmp_path: Path) -> None:
+    output, _artifacts = _install_fixture_output(tmp_path)
+    paths = reproducible.verified_artifact_paths(output)
+
+    assert {path.name for path in paths} == {
+        "example-1.0-py3-none-any.whl",
+        "example-1.0.tar.gz",
+    }
+    injected = output / "packages" / "injected-9.9-py3-none-any.whl"
+    injected.write_bytes(b"injected")
+    with pytest.raises(
+        reproducible.ReproducibleBuildError,
+        match="contents changed",
+    ):
+        reproducible.verified_artifact_paths(output)
+
+    injected.unlink()
+    paths[0].write_bytes(b"replaced")
+    with pytest.raises(
+        reproducible.ReproducibleBuildError,
+        match="does not match manifest",
+    ):
+        reproducible.verified_artifact_paths(output)
+
+
+def test_verified_install_rejects_output_content_and_replacement_races(tmp_path: Path) -> None:
+    sources = tmp_path / "sources"
+    sources.mkdir()
+    wheel = sources / "example-1.0-py3-none-any.whl"
+    sdist = sources / "example-1.0.tar.gz"
+    wheel.write_bytes(b"verified wheel")
+    sdist.write_bytes(b"verified sdist")
+    artifacts = reproducible.BuildArtifacts(wheel=wheel, sdist=sdist)
+    hashes = {wheel.name: _digest(wheel), sdist.name: _digest(sdist)}
+
+    output = reproducible._prepare_verified_output(tmp_path / "content-race")
+    identity = reproducible._path_identity(output)
+    (output / "injected.whl").write_bytes(b"injected")
+    with pytest.raises(reproducible.ReproducibleBuildError, match="contents changed"):
+        reproducible._install_verified_output(artifacts, hashes, output, identity)
+
+    replaced = reproducible._prepare_verified_output(tmp_path / "replacement-race")
+    replaced_identity = reproducible._path_identity(replaced)
+    replaced.rmdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        os.symlink(outside, replaced, target_is_directory=True)
+    except OSError:
+        pytest.skip("this platform does not permit test symlinks")
+    with pytest.raises(reproducible.ReproducibleBuildError, match="was replaced"):
+        reproducible._install_verified_output(artifacts, hashes, replaced, replaced_identity)
+
+
+def test_overlay_rejects_ignored_symlink_parent_escape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    snapshot = tmp_path / "snapshot"
+    outside = tmp_path / "outside"
+    repo.mkdir()
+    snapshot.mkdir()
+    outside.mkdir()
+    (outside / "data.txt").write_text("OUTSIDE_SECRET", encoding="utf-8")
+    try:
+        os.symlink(outside, repo / "pkg", target_is_directory=True)
+    except OSError:
+        pytest.skip("this platform does not permit test symlinks")
+
+    responses = iter([["pkg/data.txt"], []])
+    monkeypatch.setattr(reproducible, "_git_paths", lambda *_args, **_kwargs: next(responses))
+    with pytest.raises(reproducible.ReproducibleBuildError, match="symlink ancestor"):
+        reproducible._overlay_worktree(repo, snapshot)
+
+    assert not (snapshot / "pkg" / "data.txt").exists()
+
+
 @pytest.mark.integration
 def test_two_current_worktree_builds_are_byte_identical(tmp_path: Path) -> None:
     if importlib.util.find_spec("build") is None:
@@ -324,9 +420,11 @@ def test_two_current_worktree_builds_are_byte_identical(tmp_path: Path) -> None:
 
     output = tmp_path / "verified-dist"
     hashes = reproducible.verify_reproducible_builds(_ROOT, output_dir=output)
-    installed = {path.name: _digest(path) for path in output.iterdir()}
+    installed_paths = reproducible.verified_artifact_paths(output)
+    installed = {path.name: _digest(path) for path in installed_paths}
 
     assert len(hashes) == 2
     assert sum(name.endswith(".whl") for name in hashes) == 1
     assert sum(name.endswith(".tar.gz") for name in hashes) == 1
     assert installed == hashes
+    assert {path.name for path in output.iterdir()} == {"manifest.json", "packages"}

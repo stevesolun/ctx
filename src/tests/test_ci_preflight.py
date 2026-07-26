@@ -393,6 +393,7 @@ def test_preflight_pr_profile_runs_package_build_for_source_prs() -> None:
         python="python",
     )
     build = next(check for check in checks if check.name == "build wheel")
+    twine = next(check for check in checks if check.name == "twine check")
 
     assert build.argv == (
         "python",
@@ -401,7 +402,19 @@ def test_preflight_pr_profile_runs_package_build_for_source_prs() -> None:
         "--output-dir",
         ".ci-preflight-dist",
     )
-    assert "twine check" in [check.name for check in checks]
+    assert "verified_artifact_paths" in twine.argv[-1]
+    assert "glob" not in twine.argv[-1]
+
+
+def test_publish_workflow_consumes_only_manifest_verified_artifacts() -> None:
+    workflow = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
+
+    assert 'python -m twine check "$CTX_WHEEL" "$CTX_SDIST"' in workflow
+    assert "twine check dist/*" not in workflow
+    assert workflow.count("--check-output dist") >= 3
+    assert workflow.count("packages-dir: dist/packages/") == 2
+    assert "dist/packages/*.whl" in workflow
+    assert "dist/packages/*.tar.gz" in workflow
 
 
 def test_preflight_full_profile_forces_source_gates_for_docs_changes() -> None:
