@@ -52,7 +52,7 @@ jobs:
       - name: Install release tooling
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[dev]" build packaging twine
+          python -m pip install ".[dev]" build cyclonedx-bom==7.3.0 packaging twine
 
       - name: Validate release target
         run: |
@@ -485,18 +485,106 @@ jobs:
             echo "raw telemetry sentinel leaked into exported telemetry" >&2
             exit 1
           fi
-          python -m pip install "${wheel}[harness]"
-          python - <<'PY'
-          import litellm
 
-          print(f"harness extra import ok: litellm {getattr(litellm, '__version__', 'unknown')}")
+      - name: Smoke install all runtime extras
+        run: |
+          . .venv-smoke/bin/activate
+          wheel="$(python - <<'PY'
+          from pathlib import Path
+          print(next(Path("dist").glob("*.whl")))
           PY
+          )"
+          python -m pip install "${wheel}[ann,browser,embeddings,gcf,harness,viz]"
+          python -m pip check
+          python - <<'PY'
+          from importlib.metadata import version
+
+          expected = (
+              "click",
+              "gcf-python",
+              "hnswlib",
+              "litellm",
+              "playwright",
+              "plotly",
+              "sentence-transformers",
+              "torch",
+              "typer",
+          )
+          for distribution in expected:
+              print(f"{distribution}=={version(distribution)}")
+          PY
+
+      - name: Generate and validate CycloneDX runtime SBOM
+        run: |
+          mkdir -p release-sbom
+          .venv-smoke/bin/python - <<'PY'
+          import json
+          from importlib.metadata import distributions
+          from pathlib import Path
+
+          inventory = {
+              "distributions": sorted(
+                  (
+                      {
+                          "name": dist.metadata["Name"],
+                          "version": dist.version,
+                          "requires": list(dist.requires or ()),
+                      }
+                      for dist in distributions()
+                  ),
+                  key=lambda item: item["name"].lower(),
+              )
+          }
+          Path("release-sbom/resolved-environment.json").write_text(
+              json.dumps(inventory, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          python -m cyclonedx_py environment \
+            --spec-version 1.6 \
+            --output-format JSON \
+            --output-reproducible \
+            --validate \
+            --pyproject pyproject.toml \
+            --mc-type application \
+            --output-file release-sbom/claude-ctx.cdx.json \
+            .venv-smoke/bin/python
+          python -m cyclonedx_py environment \
+            --spec-version 1.6 \
+            --output-format JSON \
+            --output-reproducible \
+            --validate \
+            --pyproject pyproject.toml \
+            --mc-type application \
+            --output-file release-sbom/claude-ctx.repeat.cdx.json \
+            .venv-smoke/bin/python
+          cmp release-sbom/claude-ctx.cdx.json release-sbom/claude-ctx.repeat.cdx.json
+          python scripts/validate_release_sbom.py \
+            --sbom release-sbom/claude-ctx.cdx.json \
+            --pyproject pyproject.toml \
+            --inventory release-sbom/resolved-environment.json \
+            --extra ann \
+            --extra browser \
+            --extra embeddings \
+            --extra gcf \
+            --extra harness \
+            --extra viz \
+            --spec-version 1.6
+          rm release-sbom/claude-ctx.repeat.cdx.json
+          rm release-sbom/resolved-environment.json
 
       - name: Upload dist artifact
         uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
+
+      - name: Upload release SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-sbom
+          path: release-sbom/claude-ctx.cdx.json
+          if-no-files-found: error
 
       - name: Upload graph artifact bundle
         if: steps.resolve_graph_assets.outcome == 'success'
@@ -510,21 +598,84 @@ jobs:
             graph/communities.json
             graph/entity-overlays.jsonl
 
-  release-assets:
-    name: Upload graph release assets
+  attest:
+    name: Attest release artifacts
     needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+
+      - name: Download release SBOM
+        uses: actions/download-artifact@v8
+        with:
+          name: release-sbom
+          path: release-sbom
+
+      - name: Download graph artifact bundle
+        if: needs.build.outputs.graph_assets_available == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: graph-release-assets
+          path: graph-release-assets
+
+      - name: Attest release provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+            release-sbom/*.json
+
+      - name: Attest graph release provenance
+        if: needs.build.outputs.graph_assets_available == 'true'
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            graph-release-assets/wiki-graph.tar.gz
+            graph-release-assets/wiki-graph-runtime.tar.gz
+            graph-release-assets/skills-sh-catalog.json.gz
+            graph-release-assets/communities.json
+            graph-release-assets/entity-overlays.jsonl
+
+      - name: Attest release SBOM
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+          sbom-path: release-sbom/claude-ctx.cdx.json
+
+  release-assets:
+    name: Upload graph and SBOM release assets
+    needs:
+      - build
+      - attest
     if: github.event_name == 'push' && needs.build.outputs.graph_assets_available == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Download graph artifact bundle
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: graph-release-assets
           path: graph-release-assets
 
-      - name: Upload graph assets to GitHub release
+      - name: Download release SBOM
+        uses: actions/download-artifact@v8
+        with:
+          name: release-sbom
+          path: release-sbom
+
+      - name: Upload graph assets and SBOM to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
@@ -541,14 +692,16 @@ jobs:
             graph-release-assets/skills-sh-catalog.json.gz \
             graph-release-assets/communities.json \
             graph-release-assets/entity-overlays.jsonl \
+            release-sbom/claude-ctx.cdx.json \
             --clobber
 
   publish:
     name: Publish to PyPI
     needs:
       - build
+      - attest
       - release-assets
-    if: ${{ always() && needs.build.result == 'success' && (needs.release-assets.result == 'success' || (github.event_name == 'workflow_dispatch' && github.event.inputs.repository == 'testpypi')) }}
+    if: ${{ always() && needs.build.result == 'success' && needs.attest.result == 'success' && (needs.release-assets.result == 'success' || (github.event_name == 'workflow_dispatch' && github.event.inputs.repository == 'testpypi')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -558,7 +711,7 @@ jobs:
       url: https://pypi.org/project/claude-ctx/
     steps:
       - name: Download dist artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
