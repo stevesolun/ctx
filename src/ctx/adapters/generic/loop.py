@@ -30,6 +30,12 @@ HTTP errors, auth errors) — those bubble to the caller so a bad
 config fails loudly at call time instead of being silently swallowed
 as a dead loop iteration.
 
+Raw ``ctx__wiki_get`` tool calls and results are request-scoped: a
+completed pair is available to one subsequent provider request and is
+then removed. The loop does not guess whether ordinary model-authored
+assistant text quotes or summarizes that result; such text remains
+normal conversation history.
+
 Plan 001 Phase H3.
 """
 
@@ -82,6 +88,7 @@ DEFAULT_MAX_TURN_TOOLS = 32
 DEFAULT_MAX_TURN_SCHEMA_BYTES = 65_536
 DEFAULT_TURN_PREPARE_TIMEOUT = 1.0
 _EPHEMERAL_USER_CONTEXT_BOUNDARY = "\n\n--- current user request ---\n"
+EPHEMERAL_WIKI_TOOL_NAME = "ctx__wiki_get"
 
 
 @dataclass(frozen=True)
@@ -478,6 +485,7 @@ def run_loop(
             stop_detail = "cancel_event was set"
             break
 
+        _prune_malformed_ephemeral_wiki_context(conversation, observer=obs)
         obs.on_iteration_start(iteration, list(conversation))
         try:
             preparation = _prepare_turn(
@@ -530,6 +538,7 @@ def run_loop(
         final_message = step.final_message
         break
 
+    _prune_all_ephemeral_wiki_context(conversation, observer=obs)
     result = LoopResult(
         stop_reason=stop_reason,
         final_message=final_message,
@@ -669,6 +678,7 @@ def _run_prepared_turn(
                     step = _TurnStep("controller_error", provider_request_error)
                     break
 
+                consumed_wiki_call_ids = _completed_ephemeral_wiki_call_ids(conversation)
                 try:
                     response = _complete_provider(
                         provider,
@@ -690,8 +700,21 @@ def _run_prepared_turn(
                         break
                     provider_failure = exc
                     raise
+                finally:
+                    _prune_ephemeral_wiki_context(
+                        conversation,
+                        remove_ids=consumed_wiki_call_ids,
+                        observer=observer,
+                    )
 
                 totals.add(response.usage, provider_call=True)
+                tool_call_id_error = _tool_call_id_error(
+                    response.tool_calls,
+                    retained_ids=_retained_tool_call_ids(conversation),
+                )
+                if tool_call_id_error is not None:
+                    step = _TurnStep("provider_error", tool_call_id_error)
+                    break
                 observer.on_model_response(iteration, response)
                 conversation.append(
                     Message(
@@ -854,7 +877,8 @@ def _run_prepared_turn(
                 if step is not None:
                     break
 
-                if compactor is not None and compactor.should_compact(conversation):
+                if _should_compact_conversation(conversation, compactor):
+                    assert compactor is not None
                     budget_stop, budget_detail = _budget_stop_reason(
                         totals,
                         budget_usd=budget_usd,
@@ -916,6 +940,7 @@ def _run_prepared_turn(
             totals.add(close_usage)
 
     if failure is not None:
+        _prune_all_ephemeral_wiki_context(conversation, observer=observer)
         if provider_failure is not None:
             detail = f"provider raised {type(provider_failure).__name__}: {provider_failure}"
             if close_error is not None:
@@ -1090,6 +1115,169 @@ def _messages_for_turn(
                 content=(reference + _EPHEMERAL_USER_CONTEXT_BOUNDARY + current.content),
             )
     return messages
+
+
+def _completed_ephemeral_wiki_call_ids(messages: list[Message]) -> frozenset[str]:
+    call_counts: dict[str, int] = {}
+    result_counts: dict[str, int] = {}
+    wiki_call_ids: set[str] = set()
+    wiki_result_ids: set[str] = set()
+
+    for message in messages:
+        if message.role == "assistant":
+            for call in message.tool_calls:
+                if not isinstance(call.id, str) or not call.id.strip():
+                    continue
+                call_counts[call.id] = call_counts.get(call.id, 0) + 1
+                if call.name == EPHEMERAL_WIKI_TOOL_NAME:
+                    wiki_call_ids.add(call.id)
+        elif (
+            message.role == "tool"
+            and isinstance(message.tool_call_id, str)
+            and message.tool_call_id.strip()
+        ):
+            call_id = message.tool_call_id
+            result_counts[call_id] = result_counts.get(call_id, 0) + 1
+            if message.name == EPHEMERAL_WIKI_TOOL_NAME:
+                wiki_result_ids.add(call_id)
+
+    return frozenset(
+        call_id
+        for call_id in wiki_call_ids.intersection(wiki_result_ids)
+        if call_counts.get(call_id) == 1 and result_counts.get(call_id) == 1
+    )
+
+
+def _retained_tool_call_ids(messages: list[Message]) -> frozenset[str]:
+    retained: set[str] = set()
+    for message in messages:
+        for call in message.tool_calls:
+            if isinstance(call.id, str) and call.id.strip():
+                retained.add(call.id)
+    return frozenset(retained)
+
+
+def _tool_call_id_error(
+    tool_calls: tuple[ToolCall, ...],
+    *,
+    retained_ids: frozenset[str],
+) -> str | None:
+    seen: set[str] = set()
+    for call in tool_calls:
+        if not isinstance(call.id, str) or not call.id.strip():
+            return f"provider returned blank tool-call id for {call.name!r}"
+        if call.id in seen:
+            return f"provider returned duplicate tool-call id {call.id!r}"
+        if call.id in retained_ids:
+            return f"provider reused retained tool-call id {call.id!r}"
+        seen.add(call.id)
+    return None
+
+
+def _has_raw_ephemeral_wiki_result(messages: list[Message]) -> bool:
+    wiki_call_ids = {
+        call.id
+        for message in messages
+        for call in message.tool_calls
+        if call.name == EPHEMERAL_WIKI_TOOL_NAME and isinstance(call.id, str)
+    }
+    return any(
+        message.name == EPHEMERAL_WIKI_TOOL_NAME
+        or (isinstance(message.tool_call_id, str) and message.tool_call_id in wiki_call_ids)
+        for message in messages
+    )
+
+
+def _should_compact_conversation(
+    messages: list[Message],
+    compactor: Any | None,
+) -> bool:
+    if compactor is None or _has_raw_ephemeral_wiki_result(messages):
+        return False
+    return bool(compactor.should_compact(messages))
+
+
+def _prune_malformed_ephemeral_wiki_context(
+    conversation: list[Message],
+    *,
+    observer: LoopObserver | None = None,
+) -> None:
+    _prune_ephemeral_wiki_context(
+        conversation,
+        keep_ids=_completed_ephemeral_wiki_call_ids(conversation),
+        observer=observer,
+    )
+
+
+def _prune_all_ephemeral_wiki_context(
+    conversation: list[Message],
+    *,
+    observer: LoopObserver | None = None,
+) -> None:
+    _prune_ephemeral_wiki_context(
+        conversation,
+        observer=observer,
+    )
+
+
+def _prune_ephemeral_wiki_context(
+    conversation: list[Message],
+    *,
+    remove_ids: frozenset[str] | None = None,
+    keep_ids: frozenset[str] | None = None,
+    observer: LoopObserver | None = None,
+) -> None:
+    if remove_ids is not None and keep_ids is not None:
+        raise ValueError("remove_ids and keep_ids are mutually exclusive")
+    if remove_ids is not None and not remove_ids:
+        return
+
+    def should_remove(call_id: object) -> bool:
+        if remove_ids is not None:
+            return isinstance(call_id, str) and call_id in remove_ids
+        if keep_ids is not None:
+            return not isinstance(call_id, str) or call_id not in keep_ids
+        return True
+
+    wiki_call_ids = {
+        call.id
+        for message in conversation
+        for call in message.tool_calls
+        if call.name == EPHEMERAL_WIKI_TOOL_NAME and isinstance(call.id, str)
+    }
+    retained: list[Message] = []
+    pruned_ids: set[str] = set()
+    for message in conversation:
+        if message.tool_calls:
+            kept_calls: list[ToolCall] = []
+            for call in message.tool_calls:
+                if call.name == EPHEMERAL_WIKI_TOOL_NAME and should_remove(call.id):
+                    if isinstance(call.id, str):
+                        pruned_ids.add(call.id)
+                    continue
+                kept_calls.append(call)
+            tool_calls = tuple(kept_calls)
+            if tool_calls != message.tool_calls:
+                if tool_calls or message.content:
+                    retained.append(replace(message, tool_calls=tool_calls))
+                continue
+        if (
+            message.name == EPHEMERAL_WIKI_TOOL_NAME
+            or (isinstance(message.tool_call_id, str) and message.tool_call_id in wiki_call_ids)
+        ) and should_remove(message.tool_call_id):
+            if isinstance(message.tool_call_id, str):
+                pruned_ids.add(message.tool_call_id)
+            continue
+        retained.append(message)
+
+    removed_message_count = len(conversation) - len(retained)
+    conversation[:] = retained
+    hook = getattr(observer, "on_ephemeral_context_pruned", None)
+    if removed_message_count and callable(hook):
+        try:
+            hook(frozenset(pruned_ids), removed_message_count)
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("ephemeral-context observer hook raised: %s", exc)
 
 
 def _validate_tool_catalogue(

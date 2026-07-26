@@ -38,7 +38,8 @@ Event types this module emits:
                      system prompt, model, provider, budget caps.
     iteration_start  per iteration. Marks the boundary for --resume.
     model_response   the CompletionResponse from the provider.
-    tool_call        one per tool invocation. Has result + error.
+    tool_call        one per tool invocation. Has result + error;
+                     ephemeral wiki bodies are omitted.
     message          every Message appended to the conversation —
                      the canonical replay substrate.
     stop             one per session, last line. LoopResult summary.
@@ -50,6 +51,10 @@ Resume semantics (H4 v1):
     the original ``system_prompt``/``task`` to continue the run.
   * Sessions with a ``stop`` event are resumable — resume appends a
     new task and keeps going. Plan 001 Phase H7 wires the CLI flag.
+
+Only raw ``ctx__wiki_get`` tool calls and result messages are removed
+from durable replay and raw result payloads. Model-authored assistant
+text is not classified as an echo and remains ordinary session history.
 
 Plan 001 Phase H4.
 """
@@ -67,7 +72,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, TextIO, cast
 
-from ctx.adapters.generic.loop import LoopResult, LoopObserver
+from ctx.adapters.generic.loop import (
+    EPHEMERAL_WIKI_TOOL_NAME,
+    LoopResult,
+    LoopObserver,
+    _prune_all_ephemeral_wiki_context,
+)
 from ctx.adapters.generic.providers import (
     CompletionResponse,
     Message,
@@ -191,6 +201,73 @@ def _dict_to_message(d: dict[str, Any]) -> Message:
         tool_call_id=d.get("tool_call_id"),
         name=d.get("name"),
     )
+
+
+def _durable_messages(messages: list[Message]) -> list[Message]:
+    """Return history without raw wiki tool calls/results.
+
+    Assistant-authored content is retained even when its original response also
+    requested ``ctx__wiki_get``; generated echoes cannot be identified safely.
+    """
+    durable = list(messages)
+    _prune_all_ephemeral_wiki_context(durable)
+    return durable
+
+
+def _durable_seed_messages(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    messages: list[Message] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            messages.append(_dict_to_message(item))
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return [_message_to_dict(message) for message in _durable_messages(messages)]
+
+
+def _raw_message_references_ephemeral_wiki(payload: dict[str, Any]) -> bool:
+    if payload.get("name") == EPHEMERAL_WIKI_TOOL_NAME:
+        return True
+    raw_tool_calls = payload.get("tool_calls")
+    if isinstance(raw_tool_calls, dict):
+        raw_tool_calls = [raw_tool_calls]
+    if not isinstance(raw_tool_calls, (list, tuple)):
+        return False
+    return any(
+        isinstance(call, dict) and call.get("name") == EPHEMERAL_WIKI_TOOL_NAME
+        for call in raw_tool_calls
+    )
+
+
+def _durable_event_payload(
+    event_type: str,
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Enforce raw wiki record ephemerality at the lowest writer boundary."""
+    durable_payload = dict(payload)
+    if event_type == "session_start" and "seed_messages" in durable_payload:
+        durable_payload["seed_messages"] = _durable_seed_messages(durable_payload["seed_messages"])
+    elif event_type == "message":
+        try:
+            message = _dict_to_message(durable_payload)
+        except (AttributeError, TypeError, ValueError):
+            if _raw_message_references_ephemeral_wiki(durable_payload):
+                return None
+        else:
+            durable_messages = _durable_messages([message])
+            if not durable_messages:
+                return None
+            durable_payload = _message_to_dict(durable_messages[0])
+    elif event_type == "tool_call":
+        call = durable_payload.get("call")
+        call_name = call.get("name") if isinstance(call, dict) else None
+        if call_name == EPHEMERAL_WIKI_TOOL_NAME:
+            durable_payload["result"] = ""
+            durable_payload["result_ephemeral"] = True
+    return durable_payload
 
 
 def _repair_unresolved_tool_call_tail(
@@ -418,14 +495,17 @@ class SessionStore:
     # ── write primitives ────────────────────────────────────────────────
 
     def write_event(self, event_type: str, payload: dict[str, Any]) -> None:
-        """Write one event as a single JSONL line. Thread-safe, atomic-per-line."""
+        """Write one durable JSONL event, filtering raw wiki records by name."""
         if self._closed:
             raise RuntimeError(f"session {self._session_id!r} is closed")
+        durable_payload = _durable_event_payload(event_type, payload)
+        if durable_payload is None:
+            return
         event = {
             "type": event_type,
             "ts": _now_iso(),
             "session_id": self._session_id,
-            **payload,
+            **durable_payload,
         }
         line = json.dumps(event, ensure_ascii=False, default=_json_default) + "\n"
         with self._lock:
@@ -564,11 +644,12 @@ class JsonlObserver(LoopObserver):
         # Capture the seed conversation (system prompt + task + any
         # resumed messages) in the session_start event so a reader
         # can reconstruct the prior state without grepping messages.
-        payload["seed_messages"] = [_message_to_dict(m) for m in messages]
+        durable_messages = _durable_messages(messages)
+        payload["seed_messages"] = [_message_to_dict(m) for m in durable_messages]
         self._store.write_session_start(payload)
         # Persist each seed message as its own message event so
         # load_session()'s replay path produces the full conversation.
-        for msg in messages:
+        for msg in durable_messages:
             self._store.write_message(msg)
         self._last_message_count = len(messages)
         self._session_started = True
@@ -582,7 +663,7 @@ class JsonlObserver(LoopObserver):
         # practice only the first iteration has pre-existing messages
         # that weren't recorded; subsequent iterations append through
         # on_model_response + on_tool_call).
-        new_msgs = messages[self._last_message_count :]
+        new_msgs = _durable_messages(messages[self._last_message_count :])
         for msg in new_msgs:
             self._store.write_message(msg)
         self._last_message_count = len(messages)
@@ -594,7 +675,7 @@ class JsonlObserver(LoopObserver):
     ) -> None:
         self._store.write_model_response(iteration, response)
         # The loop appends an assistant Message directly after — we
-        # mirror that here so load_session replay has the full list.
+        # mirror it through SessionStore's fail-closed writer boundary.
         assistant = Message(
             role="assistant",
             content=response.content,
@@ -619,6 +700,17 @@ class JsonlObserver(LoopObserver):
         )
         self._store.write_message(tool_msg)
         self._last_message_count += 1
+
+    def on_ephemeral_context_pruned(
+        self,
+        call_ids: frozenset[str],
+        removed_message_count: int,
+    ) -> None:
+        del call_ids
+        self._last_message_count = max(
+            0,
+            self._last_message_count - removed_message_count,
+        )
 
     def on_stop(self, result: LoopResult) -> None:
         self._store.write_stop(result)
@@ -730,6 +822,7 @@ def load_session(
             current_run_usage = None
 
     usage_total = _combine_usage(usage_total, current_run_usage)
+    messages = _durable_messages(messages)
 
     return ReplayState(
         session_id=session_id,

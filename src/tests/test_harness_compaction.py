@@ -474,7 +474,10 @@ class TestLoopIntegration:
         tc = ToolCall(id="c1", name="srv__noop", arguments={})
         responses = [
             _resp(content="", tool_calls=(tc,)),  # iter 1 — tool call
-            _resp(content="", tool_calls=(tc,)),  # iter 2 — tool call
+            _resp(
+                content="",
+                tool_calls=(ToolCall(id="c2", name="srv__noop", arguments={}),),
+            ),  # iter 2 — tool call
             _resp(content="final answer"),  # iter 3 — stop
         ]
         provider = _Scripted(responses=responses)

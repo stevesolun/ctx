@@ -29,6 +29,7 @@ from ctx.adapters.generic.loop import (
     TurnAuthorization,
     TurnPreparation,
     _collect_tools,
+    _should_compact_conversation,
     run_loop,
 )
 from ctx.adapters.generic.providers import (
@@ -342,8 +343,12 @@ class TestCompletion:
 class TestMaxIterations:
     def test_hits_iteration_cap(self) -> None:
         """Model that never stops calling a tool hits the iteration cap."""
-        tc = ToolCall(id="c1", name="srv__noop", arguments={})
-        provider = _Scripted([_tool_response(tc) for _ in range(10)])
+        provider = _Scripted(
+            [
+                _tool_response(ToolCall(id=f"c{index}", name="srv__noop", arguments={}))
+                for index in range(10)
+            ]
+        )
         result = run_loop(
             provider=provider,
             system_prompt="",
@@ -395,18 +400,18 @@ class TestBudgets:
         assert not [m for m in result.messages if m.role == "tool"]
 
     def test_cost_budget_trips(self) -> None:
-        tc = ToolCall(id="c1", name="srv__noop", arguments={})
         # Each turn: $0.10 cost. Budget $0.25 trips on the third
         # provider response because the check is strictly ">".
-        expensive = CompletionResponse(
-            content="",
-            tool_calls=(tc,),
-            finish_reason="tool_calls",
-            usage=Usage(input_tokens=0, output_tokens=0, cost_usd=0.10),
-            provider="scripted",
-            model="x",
+        provider = _Scripted(
+            [
+                _tool_response(
+                    ToolCall(id=f"c{index}", name="srv__noop", arguments={}),
+                    usage=Usage(input_tokens=0, output_tokens=0, cost_usd=0.10),
+                )
+                for index in range(3)
+            ]
+            + [_stop_response()]
         )
-        provider = _Scripted([expensive, expensive, expensive, _stop_response()])
         result = run_loop(
             provider=provider,
             system_prompt="",
@@ -444,9 +449,16 @@ class TestBudgets:
         assert result.usage.cost_usd == pytest.approx(0.10)
 
     def test_token_budget_trips(self) -> None:
-        tc = ToolCall(id="c1", name="srv__noop", arguments={})
-        heavy = _tool_response(tc, usage=Usage(input_tokens=100, output_tokens=50))
-        provider = _Scripted([heavy, heavy, heavy, _stop_response()])
+        provider = _Scripted(
+            [
+                _tool_response(
+                    ToolCall(id=f"c{index}", name="srv__noop", arguments={}),
+                    usage=Usage(input_tokens=100, output_tokens=50),
+                )
+                for index in range(3)
+            ]
+            + [_stop_response()]
+        )
         result = run_loop(
             provider=provider,
             system_prompt="",
@@ -802,7 +814,12 @@ class TestCancel:
                 cancel.set()
             return "ok"
 
-        provider = _Scripted([_tool_response(tc), _tool_response(tc), _tool_response(tc)])
+        provider = _Scripted(
+            [
+                _tool_response(ToolCall(id=f"c{index}", name=tc.name, arguments={}))
+                for index in range(3)
+            ]
+        )
         result = run_loop(
             provider=provider,
             system_prompt="",
@@ -1029,6 +1046,303 @@ class TestToolDispatch:
         tool_msgs = [m for m in result.messages if m.role == "tool"]
         assert [m.content for m in tool_msgs] == ["result-c1", "result-c2"]
         assert [m.tool_call_id for m in tool_msgs] == ["c1", "c2"]
+
+    def test_raw_wiki_tool_result_is_available_for_exactly_one_provider_turn(
+        self,
+    ) -> None:
+        wiki = ToolCall(id="wiki-1", name="ctx__wiki_get", arguments={"slug": "secret"})
+        ordinary = ToolCall(id="ordinary-1", name="x__keep", arguments={})
+        follow_up = ToolCall(id="ordinary-2", name="x__next", arguments={})
+
+        class _CompactorProbe:
+            def __init__(self) -> None:
+                self.seen: list[list[Message]] = []
+
+            def should_compact(self, messages: list[Message]) -> bool:
+                self.seen.append(list(messages))
+                return False
+
+        compactor = _CompactorProbe()
+        provider = _Scripted(
+            [
+                _tool_response(wiki, ordinary, content="mixed call"),
+                _tool_response(follow_up),
+                _stop_response("done"),
+            ]
+        )
+
+        def execute(call: ToolCall) -> str:
+            return "private wiki body" if call.name == "ctx__wiki_get" else call.id
+
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            compactor=compactor,
+        )
+
+        second_turn = provider.calls[1]["messages"]
+        assert any(message.content == "private wiki body" for message in second_turn)
+        mixed_second = next(message for message in second_turn if message.content == "mixed call")
+        assert [call.name for call in mixed_second.tool_calls] == [
+            "ctx__wiki_get",
+            "x__keep",
+        ]
+
+        third_turn = provider.calls[2]["messages"]
+        assert not any(message.content == "private wiki body" for message in third_turn)
+        mixed_third = next(message for message in third_turn if message.content == "mixed call")
+        assert [call.name for call in mixed_third.tool_calls] == ["x__keep"]
+        assert any(
+            message.role == "tool" and message.name == "x__keep" and message.content == "ordinary-1"
+            for message in third_turn
+        )
+        assert not any(
+            call.name == "ctx__wiki_get"
+            for message in result.messages
+            for call in message.tool_calls
+        )
+        assert not any(
+            message.role == "tool" and message.name == "ctx__wiki_get"
+            for message in result.messages
+        )
+        assert len(compactor.seen) == 1
+        assert not any(message.content == "private wiki body" for message in compactor.seen[0])
+
+    def test_raw_wiki_tool_context_is_pruned_after_provider_failure(self) -> None:
+        wiki = ToolCall(id="wiki-1", name="ctx__wiki_get", arguments={"slug": "secret"})
+        provider = _Scripted([_tool_response(wiki)])
+        observer = _RecordingObserver()
+
+        with pytest.raises(RuntimeError, match="ran out of canned responses"):
+            run_loop(
+                provider=provider,
+                system_prompt="",
+                task="task",
+                tool_executor=lambda _call: "private wiki body",
+                observer=observer,
+            )
+
+        assert any(
+            message.content == "private wiki body" for message in provider.calls[1]["messages"]
+        )
+        assert len(observer.stops) == 1
+        assert not any(
+            call.name == "ctx__wiki_get"
+            for message in observer.stops[0].messages
+            for call in message.tool_calls
+        )
+        assert not any(
+            message.role == "tool" and message.name == "ctx__wiki_get"
+            for message in observer.stops[0].messages
+        )
+
+    def test_failed_wiki_call_leaves_no_raw_tool_history(self) -> None:
+        wiki = ToolCall(id="wiki-1", name="ctx__wiki_get", arguments={"slug": "missing"})
+
+        def fail(_call: ToolCall) -> str:
+            raise RuntimeError("wiki unavailable")
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(wiki)]),
+            system_prompt="",
+            task="task",
+            tool_executor=fail,
+        )
+
+        assert result.stop_reason == "tool_error"
+        assert "wiki unavailable" in result.detail
+        assert not any(
+            call.name == "ctx__wiki_get"
+            for message in result.messages
+            for call in message.tool_calls
+        )
+        assert not any(
+            message.role == "tool" and message.name == "ctx__wiki_get"
+            for message in result.messages
+        )
+
+    @pytest.mark.parametrize("bad_id", ["", "   "])
+    def test_blank_tool_call_id_is_rejected_before_any_side_effect(
+        self,
+        bad_id: str,
+    ) -> None:
+        call = ToolCall(id=bad_id, name="ctx__wiki_get", arguments={"slug": "secret"})
+        observer = _RecordingObserver()
+        executed: list[ToolCall] = []
+
+        class _CompactorProbe:
+            calls = 0
+
+            def should_compact(self, _messages: list[Message]) -> bool:
+                self.calls += 1
+                return False
+
+        def execute(tool_call: ToolCall) -> str:
+            executed.append(tool_call)
+            return "unreached"
+
+        compactor = _CompactorProbe()
+        result = run_loop(
+            provider=_Scripted([_tool_response(call)]),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            observer=observer,
+            compactor=compactor,
+        )
+
+        assert result.stop_reason == "provider_error"
+        assert "blank tool-call id" in result.detail
+        assert executed == []
+        assert observer.responses == []
+        assert compactor.calls == 0
+        assert [message.role for message in result.messages] == ["user"]
+
+    def test_duplicate_tool_call_id_is_rejected_before_any_side_effect(self) -> None:
+        wiki = ToolCall(id="duplicate", name="ctx__wiki_get", arguments={"slug": "secret"})
+        ordinary = ToolCall(id="duplicate", name="x__keep", arguments={})
+        observer = _RecordingObserver()
+        executed: list[ToolCall] = []
+
+        def execute(tool_call: ToolCall) -> str:
+            executed.append(tool_call)
+            return "unreached"
+
+        result = run_loop(
+            provider=_Scripted([_tool_response(wiki, ordinary)]),
+            system_prompt="",
+            task="task",
+            tool_executor=execute,
+            observer=observer,
+        )
+
+        assert result.stop_reason == "provider_error"
+        assert "duplicate tool-call id 'duplicate'" in result.detail
+        assert executed == []
+        assert observer.responses == []
+        assert [message.role for message in result.messages] == ["user"]
+
+    def test_retained_non_wiki_id_reused_by_wiki_is_rejected_before_side_effects(
+        self,
+    ) -> None:
+        prior = ToolCall(id="retained-id", name="x__keep", arguments={})
+        reused = ToolCall(
+            id=prior.id,
+            name="ctx__wiki_get",
+            arguments={"slug": "secret"},
+        )
+        observer = _RecordingObserver()
+        executed: list[ToolCall] = []
+
+        class _CompactorProbe:
+            calls = 0
+
+            def should_compact(self, _messages: list[Message]) -> bool:
+                self.calls += 1
+                return False
+
+        def execute(call: ToolCall) -> str:
+            executed.append(call)
+            return "unreached"
+
+        compactor = _CompactorProbe()
+        result = run_loop(
+            provider=_Scripted([_tool_response(reused)]),
+            system_prompt="",
+            task="next turn",
+            messages=[
+                Message(role="user", content="prior turn"),
+                Message(role="assistant", content="", tool_calls=(prior,)),
+                Message(
+                    role="tool",
+                    content="prior result",
+                    tool_call_id=prior.id,
+                    name=prior.name,
+                ),
+            ],
+            append_task_after_messages=True,
+            tool_executor=execute,
+            observer=observer,
+            compactor=compactor,
+        )
+
+        assert result.stop_reason == "provider_error"
+        assert "reused retained tool-call id 'retained-id'" in result.detail
+        assert executed == []
+        assert observer.responses == []
+        assert compactor.calls == 0
+        assert not any(
+            call.name == "ctx__wiki_get"
+            for message in result.messages
+            for call in message.tool_calls
+        )
+
+    def test_compaction_guard_skips_malformed_ambiguous_raw_wiki_result(
+        self,
+    ) -> None:
+        shared_id = "ambiguous-id"
+        messages = [
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=(
+                    ToolCall(id=shared_id, name="ctx__wiki_get", arguments={}),
+                    ToolCall(id=shared_id, name="x__keep", arguments={}),
+                ),
+            ),
+            Message(
+                role="user",
+                content="raw wiki result with malformed role and missing name",
+                tool_call_id=shared_id,
+            ),
+        ]
+
+        class _CompactorProbe:
+            calls = 0
+
+            def should_compact(self, _messages: list[Message]) -> bool:
+                self.calls += 1
+                return True
+
+        compactor = _CompactorProbe()
+
+        assert not _should_compact_conversation(messages, compactor)
+        assert compactor.calls == 0
+
+    def test_orphan_and_malformed_seeded_raw_wiki_results_are_removed(
+        self,
+    ) -> None:
+        provider = _Scripted([_stop_response("done")])
+        result = run_loop(
+            provider=provider,
+            system_prompt="",
+            task="task",
+            messages=[
+                Message(
+                    role="tool",
+                    content="orphan raw wiki result",
+                    tool_call_id="orphan",
+                    name="ctx__wiki_get",
+                ),
+                Message(
+                    role="user",
+                    content="malformed-role raw wiki result",
+                    tool_call_id="",
+                    name="ctx__wiki_get",
+                ),
+            ],
+        )
+
+        assert not any(
+            message.content == "orphan raw wiki result" for message in provider.calls[0]["messages"]
+        )
+        assert not any(
+            message.content == "malformed-role raw wiki result"
+            for message in provider.calls[0]["messages"]
+        )
+        assert not any(message.name == "ctx__wiki_get" for message in result.messages)
 
 
 # ── Tool catalogue + extra_tools ────────────────────────────────────────────
