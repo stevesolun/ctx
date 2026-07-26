@@ -15,6 +15,8 @@ import urllib.error
 import urllib.request
 import zlib
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -36,6 +38,8 @@ from ctx.monitor.api import mutations as mutations_api
 from ctx.monitor.api import readonly as readonly_api
 from ctx.monitor import routes as monitor_routes
 from ctx.monitor import cli as monitor_cli
+from ctx.monitor import security as monitor_security
+from ctx.monitor.server import MonitorHandlerDeps, build_monitor_handler
 from ctx.monitor.services import config as config_service
 from ctx.monitor.services import graph as graph_service
 from ctx.monitor.services import harness as harness_service
@@ -2098,6 +2102,207 @@ def test_monitor_post_rejects_cross_origin_with_valid_token(
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+@pytest.mark.parametrize(
+    "origin_kind",
+    [
+        "https-scheme",
+        "wrong-port",
+        "userinfo",
+        "path",
+    ],
+)
+def test_monitor_post_rejects_non_exact_origin_with_valid_token(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    origin_kind: str,
+) -> None:
+    calls: list[str] = []
+
+    def fake_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
+        calls.append(slug)
+        return True, f"loaded {entity_type}"
+
+    monkeypatch.setattr(mt, "perform_load", fake_load)
+    server, thread, port = _serve_monitor(monkeypatch)
+    body = json.dumps({"slug": "python-patterns"}).encode("utf-8")
+    origins = {
+        "https-scheme": f"https://127.0.0.1:{port}",
+        "wrong-port": f"http://127.0.0.1:{port + 1}",
+        "userinfo": f"http://ctx@127.0.0.1:{port}",
+        "path": f"http://127.0.0.1:{port}/dashboard",
+    }
+    try:
+        status, payload = _post_raw(
+            port,
+            "/api/load",
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+                "X-CTX-Monitor-Token": "test-token",
+                "Origin": origins[origin_kind],
+            },
+            body=body,
+        )
+        assert status == 403
+        assert "cross-origin" in payload["detail"]
+        assert calls == []
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_monitor_post_accepts_exact_http_origin_and_originless_client(
+    fake_claude: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_load(slug: str, entity_type: str = "skill") -> tuple[bool, str]:
+        calls.append(slug)
+        return True, f"loaded {entity_type}"
+
+    monkeypatch.setattr(mt, "perform_load", fake_load)
+    server, thread, port = _serve_monitor(monkeypatch)
+    body = json.dumps({"slug": "python-patterns"}).encode("utf-8")
+    try:
+        status, _ = _post_raw(
+            port,
+            "/api/load",
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+                "X-CTX-Monitor-Token": "test-token",
+                "Origin": f"http://127.0.0.1:{port}",
+            },
+            body=body,
+        )
+        assert status == 200
+
+        status, _ = _post_json(
+            port,
+            "/api/load",
+            {"slug": "python-patterns"},
+            token="test-token",
+        )
+        assert status == 200
+        assert calls == ["python-patterns", "python-patterns"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+@pytest.mark.parametrize(
+    ("origin", "host_header", "expected"),
+    [
+        ("http://localhost:8765", "localhost:8765", True),
+        ("http://[::1]:8765", "[::1]:8765", True),
+        ("http://[0:0:0:0:0:0:0:1]", "[::1]:80", True),
+        ("http://localhost", "localhost:80", True),
+        ("https://localhost:8765", "localhost:8765", False),
+        ("http://localhost:8766", "localhost:8765", False),
+        ("http://user@localhost:8765", "localhost:8765", False),
+        ("http://localhost:8765/", "localhost:8765", False),
+        ("http://localhost:8765?", "localhost:8765", False),
+        ("http://localhost:8765#", "localhost:8765", False),
+        ("http://localhost:8765?#", "localhost:8765", False),
+        ("http://localhost:8765?query", "localhost:8765", False),
+        ("http://localhost:8765#fragment", "localhost:8765", False),
+        (r"http://localhost:8765\dashboard", "localhost:8765", False),
+        ("http://localhost:8765", "user@localhost:8765", False),
+        ("http://localhost:8765", "localhost:", False),
+        ("http://localhost..:8765", "localhost:8765", False),
+        ("http://localhost:8765", "localhost..:8765", False),
+    ],
+)
+def test_origin_matches_http_host_exactly(
+    origin: str,
+    host_header: str,
+    expected: bool,
+) -> None:
+    assert monitor_security.origin_matches_http_host(origin, host_header) is expected
+
+
+@pytest.mark.parametrize(
+    "host_header",
+    [
+        "localhost:",
+        "localhost:notaport",
+        "127.0.0.1:99999",
+        "[::1]:",
+        "[::1]:bad",
+        "localhost/path",
+        "localhost?query",
+        "localhost#fragment",
+        r"localhost\path",
+    ],
+)
+def test_request_host_name_rejects_malformed_authority(host_header: str) -> None:
+    request_host = monitor_security.request_host_name(host_header)
+
+    assert request_host == ""
+    assert monitor_security.host_allows_mutations(request_host) is False
+
+
+@pytest.mark.parametrize(
+    "host_header",
+    [
+        "localhost:",
+        "localhost:notaport",
+        "127.0.0.1:99999",
+        "[::1]:",
+        "[::1]:bad",
+    ],
+)
+def test_monitor_handler_rejects_malformed_host_authority(
+    host_header: str,
+    tmp_path: Path,
+) -> None:
+    deps = MonitorHandlerDeps(
+        monitor_token=lambda: "monitor-secret",
+        mutations_enabled_default=lambda: True,
+        host_allows_mutations=monitor_security.host_allows_mutations,
+        request_host_name=monitor_security.request_host_name,
+        origin_host_name=monitor_security.origin_host_name,
+        read_token_cookie=monitor_security.read_token_cookie,
+        read_token_cookie_name=monitor_security.READ_TOKEN_COOKIE,
+        max_post_body_bytes=monitor_security.MAX_POST_BODY_BYTES,
+        audit_log_path=lambda: tmp_path / "audit.jsonl",
+        handle_get_route=lambda _handler, _route, _query: None,
+        handle_post_route=lambda _handler, _route, _body, _path: None,
+    )
+    handler_type = build_monitor_handler(deps)
+    handler = cast(Any, object.__new__(handler_type))
+    handler.server = SimpleNamespace(_ctx_mutations_enabled=True)
+    handler.headers = {"Host": host_header}
+
+    assert handler._same_origin() is False
+    assert handler._read_authorized({}) is False
+
+
+@pytest.mark.parametrize(
+    ("host_header", "expected"),
+    [
+        ("localhost", "localhost"),
+        ("localhost:8765", "localhost"),
+        ("127.0.0.1:8765", "127.0.0.1"),
+        ("[::1]:8765", "::1"),
+        ("[0:0:0:0:0:0:0:1]:8765", "::1"),
+    ],
+)
+def test_request_host_name_accepts_canonical_authority(
+    host_header: str,
+    expected: str,
+) -> None:
+    assert monitor_security.request_host_name(host_header) == expected
+
+
+def test_repeated_root_dot_is_not_loopback_authority() -> None:
+    assert monitor_security.request_host_name("localhost..:8765") == ""
+    assert monitor_security.host_allows_mutations("localhost..") is False
 
 
 def test_monitor_post_rejects_rebound_host_with_valid_token(
@@ -7062,6 +7267,53 @@ def test_cli_argparser_exposes_serve() -> None:
     with pytest.raises(SystemExit) as exc:
         mt.main(["serve", "--help"])
     assert exc.value.code == 0
+
+
+def test_cli_rejects_non_loopback_before_server_creation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[tuple[str, int]] = []
+
+    with pytest.raises(SystemExit) as exc:
+        monitor_cli.main(
+            ["serve", "--host", "0.0.0.0"],
+            serve_func=lambda **kwargs: calls.append((kwargs["host"], kwargs["port"])),
+        )
+
+    assert exc.value.code == 2
+    assert calls == []
+    assert "--allow-non-loopback" in capsys.readouterr().err
+
+
+def test_cli_allows_explicit_non_loopback_read_only_bind() -> None:
+    calls: list[tuple[str, int]] = []
+
+    result = monitor_cli.main(
+        [
+            "serve",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9876",
+            "--allow-non-loopback",
+        ],
+        serve_func=lambda **kwargs: calls.append((kwargs["host"], kwargs["port"])),
+    )
+
+    assert result == 0
+    assert calls == [("0.0.0.0", 9876)]
+
+
+def test_cli_loopback_bind_needs_no_exposure_flag() -> None:
+    calls: list[tuple[str, int]] = []
+
+    result = monitor_cli.main(
+        ["serve", "--host", "::1"],
+        serve_func=lambda **kwargs: calls.append((kwargs["host"], kwargs["port"])),
+    )
+
+    assert result == 0
+    assert calls == [("::1", 8765)]
 
 
 def test_monitor_server_suppresses_aborted_connection_traceback(
