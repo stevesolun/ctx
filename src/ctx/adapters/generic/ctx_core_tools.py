@@ -1433,14 +1433,15 @@ class CtxCoreToolbox:
             return explicit
 
         stored = self._lifecycle.recommendation_rejections(session_id=session_id)
-        canonical = _canonical_graph_recommendation_ids(graph, explicit)
+        canonical = _canonical_graph_recommendation_ids(graph, explicit) if explicit else []
         next_stored = (
             canonical if mode == "replace" else _recommendation_selection_values(stored + canonical)
         )
-        self._lifecycle.remember_recommendation_rejections(
-            session_id=session_id,
-            rejected=next_stored,
-        )
+        if next_stored != stored:
+            self._lifecycle.remember_recommendation_rejections(
+                session_id=session_id,
+                rejected=next_stored,
+            )
         return _recommendation_selection_values(next_stored + explicit)
 
     def _serialise_page(

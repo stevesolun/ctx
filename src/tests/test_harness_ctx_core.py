@@ -2046,6 +2046,50 @@ class TestRecommendBundle:
 
         assert state["rejected_recommendations"] == ["skill:fastapi-pro"]
 
+    def test_remembered_rejections_do_not_rescan_graph_without_new_feedback(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.ctx_core_tools as core_tools
+
+        toolbox = CtxCoreToolbox(
+            wiki_dir=_build_synthetic_wiki(tmp_path),
+            graph_path=_build_synthetic_graph(tmp_path),
+            lifecycle_dir=tmp_path / "runtime",
+            bound_session_id="steady-session",
+        )
+        calls = 0
+        canonicalize = core_tools._canonical_graph_recommendation_ids
+
+        def count_canonicalize(graph: Any, values: list[str]) -> list[str]:
+            nonlocal calls
+            calls += 1
+            return canonicalize(graph, values)
+
+        monkeypatch.setattr(
+            core_tools,
+            "_canonical_graph_recommendation_ids",
+            count_canonicalize,
+        )
+
+        for arguments in (
+            {"rejected": ["skill:fastapi-pro"]},
+            {},
+            {},
+        ):
+            json.loads(
+                toolbox.dispatch(
+                    ToolCall(
+                        id="steady",
+                        name="ctx__recommend_bundle",
+                        arguments={"query": "python web api", **arguments},
+                    )
+                )
+            )
+
+        assert calls == 1
+
     def test_context_policy_replaces_rejected_or_stale_applied_context(self) -> None:
         policy = _recommendation_context_policy(
             baseline_context=["mcp-server:codex-cli"],
