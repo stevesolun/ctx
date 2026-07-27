@@ -44,7 +44,7 @@ tenant isolation.
 | Cataloged command to host | Executable, arguments, output, filesystem and network activity | Requires explicit command flags; runs with the current user account |
 | Browser/client to monitor | Dashboard reads, rendered mutation token, mutation requests | Loopback reads are unauthenticated; exact Origin/Host authority and token checks gate mutations |
 | Local process to telemetry spool | Events, metrics, identifiers, failures, token usage | Redacted local files; sanitizer is a data-minimization control |
-| Telemetry spool to exporter | Redacted OTLP logs or metrics | Disabled by default; enabling export creates an intentional data-egress boundary |
+| Telemetry spool to exporter | Redacted OTLP logs, traces, or metrics | Disabled by default; enabling export creates an intentional data-egress boundary |
 
 ## Recommendation Is Not Execution
 
@@ -188,11 +188,12 @@ trustworthy.
 For approved full-body manifests, the registry binds the complete canonical
 manifest, including importer-consumed metadata, entry order, source paths, and
 body digests. Permission evidence must be a digest-verified checked-in file.
-Portable source paths reject traversal, ambiguous Unicode normalization,
-control/format characters, Windows device names, alternate-stream syntax, and
-case-insensitive collisions. The inherited Design.md corpus remains blocked
-until it has legal evidence, body digests, and a registered full-manifest
-binding.
+Installed wheels use a packaged copy of those evidence bytes when repository
+files are unavailable. Portable source paths reject traversal, ambiguous
+Unicode normalization, control/format characters, Windows device names,
+alternate-stream syntax, and case-insensitive collisions.
+The inherited Design.md corpus remains blocked until it has legal evidence,
+body digests, and a registered full-manifest binding.
 
 Metadata can affect ranking, explanations, availability labels, displayed
 links, and later operator decisions. Malicious or inaccurate metadata can

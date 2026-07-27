@@ -50,7 +50,7 @@ These controls are available in release `1.0.20` and the current source tree.
 Telemetry is enabled by default in `local_redacted` mode. Events are written to
 `~/.ctx/telemetry/events.jsonl`, metrics are written to
 `~/.ctx/telemetry/metrics.jsonl`, and raw prompts and queries are removed or
-hashed. Continuous event and metric exporters are disabled by default.
+hashed. Continuous log, trace, and metric exporters are disabled by default.
 
 A network export requires an explicit `ctx-telemetry-export` command or an
 operator-enabled exporter configuration. Local JSONL may retain a raw
