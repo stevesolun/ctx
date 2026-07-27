@@ -49,6 +49,7 @@ import tarfile
 import tempfile
 import urllib.request
 import zlib
+from contextlib import closing
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
@@ -937,9 +938,11 @@ def _install_runtime_availability_overlay(wiki_dir: Path) -> None:
     dashboard_index = graph_dir / "dashboard-neighborhoods.sqlite3"
     placeholders = ",".join("?" for _ in intended_ids)
     try:
-        with sqlite3.connect(
-            f"{dashboard_index.resolve().as_uri()}?mode=ro",
-            uri=True,
+        with closing(
+            sqlite3.connect(
+                f"{dashboard_index.resolve().as_uri()}?mode=ro",
+                uri=True,
+            )
         ) as conn:
             collisions = {
                 str(row[0])
@@ -1010,7 +1013,7 @@ def _ensure_runtime_availability_pack(wiki_dir: Path) -> None:
     entries = _load_runtime_availability_pack()["entries"]
     store = wiki_dir / "graphify-out" / "graph-store.sqlite3"
     try:
-        with sqlite3.connect(f"{store.resolve().as_uri()}?mode=ro", uri=True) as conn:
+        with closing(sqlite3.connect(f"{store.resolve().as_uri()}?mode=ro", uri=True)) as conn:
             placeholders = ",".join("?" for _ in entries)
             graph_rows = {
                 str(entity_id): (str(entity_type), json.loads(str(attrs_json)))

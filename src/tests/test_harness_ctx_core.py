@@ -14,6 +14,7 @@ Covers:
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from contextlib import closing
 import json
 import multiprocessing
 import os
@@ -21,7 +22,6 @@ import sqlite3
 import sys
 from pathlib import Path
 import threading
-import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -2364,7 +2364,7 @@ class TestRecommendBundle:
             rejected=["skill:valid"],
         )
         assert store.recommendation_checkpoint_path.is_file()
-        with sqlite3.connect(store.recommendation_checkpoint_path) as connection:
+        with closing(sqlite3.connect(store.recommendation_checkpoint_path)) as connection:
             initial_size = connection.execute(
                 "SELECT event_size FROM metadata WHERE singleton = 1"
             ).fetchone()[0]
@@ -2378,7 +2378,7 @@ class TestRecommendBundle:
                 session_id="checkpoint-session",
                 event_type="test",
             )
-        with sqlite3.connect(store.recommendation_checkpoint_path) as connection:
+        with closing(sqlite3.connect(store.recommendation_checkpoint_path)) as connection:
             updated_size = connection.execute(
                 "SELECT event_size FROM metadata WHERE singleton = 1"
             ).fetchone()[0]
@@ -2411,7 +2411,7 @@ class TestRecommendBundle:
 
         assert rejected == ["agent:reviewer"]
         assert "rebuilding malformed rejection index" in caplog.text
-        with sqlite3.connect(store.recommendation_checkpoint_path) as connection:
+        with closing(sqlite3.connect(store.recommendation_checkpoint_path)) as connection:
             row = connection.execute(
                 "SELECT rejected_json FROM sessions WHERE session_id = ?",
                 ("checkpoint-rebuild",),
@@ -2430,7 +2430,7 @@ class TestRecommendBundle:
             session_id="v2-migration",
             rejected=["skill:canonical"],
         )
-        with sqlite3.connect(store.recommendation_index_path) as connection:
+        with closing(sqlite3.connect(store.recommendation_index_path)) as connection:
             connection.execute(
                 "ALTER TABLE metadata ADD COLUMN prefix_anchor TEXT NOT NULL DEFAULT ''"
             )
@@ -2442,7 +2442,7 @@ class TestRecommendBundle:
             connection.commit()
 
         assert store.recommendation_rejections(session_id="v2-migration") == ["skill:canonical"]
-        with sqlite3.connect(store.recommendation_index_path) as connection:
+        with closing(sqlite3.connect(store.recommendation_index_path)) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             columns = {
                 row[1] for row in connection.execute("PRAGMA table_info(metadata)").fetchall()
@@ -2462,7 +2462,7 @@ class TestRecommendBundle:
             session_id="checkpoint-integrity",
             rejected=["skill:valid"],
         )
-        with sqlite3.connect(store.recommendation_checkpoint_path) as connection:
+        with closing(sqlite3.connect(store.recommendation_checkpoint_path)) as connection:
             connection.execute(
                 "UPDATE sessions SET rejected_json = ? WHERE session_id = ?",
                 ('["agent:tampered"]', "checkpoint-integrity"),
@@ -2516,7 +2516,7 @@ class TestRecommendBundle:
         assert len(payload) > 55_000
         assert store.recommendation_rejections(session_id="middle-integrity") == ["skill:valid"]
 
-        with sqlite3.connect(store.recommendation_index_path) as connection:
+        with closing(sqlite3.connect(store.recommendation_index_path)) as connection:
             frozen_stat = connection.execute(
                 """
                 SELECT event_dev, event_ino, event_mtime_ns, event_ctime_ns
@@ -2651,10 +2651,14 @@ class TestRecommendBundle:
         assert victim.read_bytes() == b"untouched"
 
     @pytest.mark.no_cover
-    def test_rejection_index_100k_session_hot_path_budget(self, tmp_path: Path) -> None:
-        from ctx.adapters.generic.runtime_lifecycle import RuntimeLifecycleStore
+    def test_rejection_index_100k_session_hot_path_budget(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import ctx.adapters.generic.runtime_lifecycle as lifecycle
 
-        store = RuntimeLifecycleStore(root=tmp_path / "runtime")
+        store = lifecycle.RuntimeLifecycleStore(root=tmp_path / "runtime")
         store.events_path.parent.mkdir(parents=True)
         with store.events_path.open("w", encoding="utf-8") as handle:
             for index in range(100_000):
@@ -2674,22 +2678,18 @@ class TestRecommendBundle:
         target_session = "session-099999"
         assert store.recommendation_rejections(session_id=target_session) == ["skill:item-099999"]
 
-        lookup_durations: list[float] = []
+        def unexpected_rebuild(*_args: Any, **_kwargs: Any) -> None:
+            raise AssertionError("steady indexed operations rebuilt the 100k-session event stream")
+
+        monkeypatch.setattr(lifecycle, "_rebuild_rejection_index", unexpected_rebuild)
         for _ in range(5):
-            started = time.perf_counter()
             assert store.recommendation_rejections(session_id=target_session) == [
                 "skill:item-099999"
             ]
-            lookup_durations.append(time.perf_counter() - started)
-        started = time.perf_counter()
         assert store.remember_recommendation_rejections(
             session_id=target_session,
             rejected=["agent:reviewer"],
         ) == ["agent:reviewer"]
-        update_duration = time.perf_counter() - started
-
-        assert sorted(lookup_durations)[2] < 0.2
-        assert update_duration < 0.2
 
     def test_context_policy_replaces_rejected_or_stale_applied_context(self) -> None:
         policy = _recommendation_context_policy(

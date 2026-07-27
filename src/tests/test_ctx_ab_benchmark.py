@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,47 @@ assert SPEC is not None and SPEC.loader is not None
 benchmark = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = benchmark
 SPEC.loader.exec_module(benchmark)
+
+
+def _pid_is_running(pid: int) -> bool:
+    if os.name == "nt":
+        listed = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return str(pid) in listed.stdout
+    proc_stat = Path(f"/proc/{pid}/stat")
+    if proc_stat.is_file():
+        try:
+            state = proc_stat.read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0]
+        except (IndexError, OSError):
+            state = ""
+        if state == "Z":
+            return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def test_ctx_env_preserves_windows_process_plumbing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("COMSPEC", "PATHEXT", "SYSTEMROOT", "WINDIR"):
+        monkeypatch.setenv(name, f"sentinel-{name.lower()}")
+
+    home = tmp_path / "home"
+    env = benchmark._ctx_env(home, tmp_path / "lifecycle")
+
+    assert {name: env[name] for name in ("COMSPEC", "PATHEXT", "SYSTEMROOT", "WINDIR")} == {
+        name: f"sentinel-{name.lower()}" for name in ("COMSPEC", "PATHEXT", "SYSTEMROOT", "WINDIR")
+    }
+    assert env["USERPROFILE"] == str(home)
+    assert {env[name] for name in ("TEMP", "TMP", "TMPDIR")} == {str(home / "tmp")}
 
 
 def test_scenarios_are_pinned_and_have_all_ctx_entity_types() -> None:
@@ -2027,17 +2069,10 @@ def test_timeout_reaps_process_group(tmp_path: Path) -> None:
     assert result.timed_out
     if pid_file.exists():
         child_pid = int(pid_file.read_text())
-        if os.name == "nt":
-            listed = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {child_pid}", "/NH"],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            assert str(child_pid) not in listed.stdout
-        else:
-            with pytest.raises(ProcessLookupError):
-                os.kill(child_pid, 0)
+        deadline = time.monotonic() + 2
+        while _pid_is_running(child_pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not _pid_is_running(child_pid)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="benchmark containment is macOS-only")

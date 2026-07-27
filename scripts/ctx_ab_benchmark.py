@@ -595,12 +595,26 @@ def _ctx_env(home: Path, lifecycle_root: Path) -> dict[str, str]:
     tmp.mkdir(parents=True, exist_ok=True)
     env = {
         key: os.environ[key]
-        for key in ("LANG", "LC_ALL", "LC_CTYPE", "PATH", "SSL_CERT_DIR", "SSL_CERT_FILE")
+        for key in (
+            "COMSPEC",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "PATH",
+            "PATHEXT",
+            "SSL_CERT_DIR",
+            "SSL_CERT_FILE",
+            "SYSTEMROOT",
+            "WINDIR",
+        )
         if os.environ.get(key)
     }
     env.update(
         {
             "HOME": str(home),
+            "USERPROFILE": str(home),
+            "TEMP": str(tmp),
+            "TMP": str(tmp),
             "TMPDIR": str(tmp),
             "PYTHONPATH": str(ROOT / "src"),
             "PYTHONNOUSERSITE": "1",
