@@ -1219,6 +1219,19 @@ def production_catalog_context_prompt(catalog: dict[str, Any]) -> str:
     return f"\n\nCTX SELECTED PRODUCTION CATALOG CONTEXT\n[SKILL {selected['slug']}]\n{body}\n"
 
 
+def production_skill_use_evidence_reason(
+    *,
+    production_catalog: bool,
+    ctx_enabled: bool,
+    context_delivery_verified: bool,
+) -> str | None:
+    if not production_catalog or not ctx_enabled:
+        return None
+    if not context_delivery_verified:
+        return "no_skill_delivered"
+    return "provider_does_not_expose_semantic_context_attribution"
+
+
 def write_catalog_recommendation_evidence(
     path: Path,
     catalog: dict[str, Any],
@@ -2969,11 +2982,13 @@ def _command_version(argv: list[str]) -> str:
 
 
 def collect_repository_state() -> dict[str, Any]:
+    head = run_process(["git", "rev-parse", "HEAD"], cwd=ROOT, timeout=30)
     status = run_process(
         ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=ROOT, timeout=30
     )
     tracked_diff = run_process(["git", "diff", "--binary", "HEAD"], cwd=ROOT, timeout=30)
     return {
+        "head": head.stdout.strip() if not head.returncode else "unavailable",
         "clean": not status.returncode and not status.stdout.strip(),
         "status": status.stdout.splitlines(),
         "tracked_diff_sha256": (
@@ -2994,6 +3009,24 @@ def require_clean_production_repository(repository_state: Mapping[str, Any], *, 
         )
 
 
+def write_final_repository_attestation(
+    output: Path,
+    initial_state: Mapping[str, Any],
+    initial_manifest: Mapping[str, Any],
+) -> tuple[bool, bool, dict[str, Any]]:
+    final_state = collect_repository_state()
+    state_matches = final_state == dict(initial_state)
+    manifest_path = output / "environment.json"
+    initial_bytes = (json.dumps(dict(initial_manifest), indent=2) + "\n").encode("utf-8")
+    manifest_matches = manifest_path.read_bytes() == initial_bytes
+    manifest = dict(initial_manifest)
+    manifest["repository_state_end"] = final_state
+    manifest["repository_state_matches_start_at_end"] = state_matches
+    manifest["environment_manifest_matches_start_at_end"] = manifest_matches
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return state_matches, manifest_matches, final_state
+
+
 def write_environment_manifest(
     *,
     output: Path,
@@ -3004,7 +3037,7 @@ def write_environment_manifest(
     run_config: dict[str, Any],
     schedule: list[dict[str, Any]],
     repository_state: dict[str, Any] | None = None,
-) -> None:
+) -> dict[str, Any]:
     revision = run_process(["git", "rev-parse", "HEAD"], cwd=ROOT, timeout=30)
     dependencies = run_process(
         [sys.executable, "-m", "pip", "freeze", "--all"], cwd=ROOT, timeout=60
@@ -3053,6 +3086,7 @@ def write_environment_manifest(
     (output / "environment.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
+    return manifest
 
 
 def run_production_trial(
@@ -3842,6 +3876,24 @@ def run_trial(
                 message="benchmark arm failed",
                 evidence="; ".join(reasons),
             )
+        if (
+            production_catalog
+            and catalog is not None
+            and context_delivery_verified
+            and store is not None
+        ):
+            assert isinstance(body_provenance, dict)
+            store.record_dev_event(
+                session_id=session_id,
+                event_type="context_delivered",
+                host="codex-cli",
+                cwd=str(workspace),
+                payload={
+                    "delivered_ids": delivered_ids,
+                    "prompt_sha256": treatment_hash,
+                    "body_sha256": body_provenance["body_sha256"],
+                },
+            )
         close_session()
         lifecycle = (
             catalog_lifecycle_evidence(
@@ -3854,19 +3906,6 @@ def run_trial(
         )
         if production_catalog and catalog is not None:
             assert catalog_snapshot is not None
-            if context_delivery_verified and store is not None:
-                assert isinstance(body_provenance, dict)
-                store.record_dev_event(
-                    session_id=session_id,
-                    event_type="context_delivered",
-                    host="codex-cli",
-                    cwd=str(workspace),
-                    payload={
-                        "delivered_ids": delivered_ids,
-                        "prompt_sha256": treatment_hash,
-                        "body_sha256": body_provenance["body_sha256"],
-                    },
-                )
             write_catalog_recommendation_evidence(
                 run_dir / "recommendations.json",
                 catalog,
@@ -3941,6 +3980,11 @@ def run_trial(
             "team_token_completeness": "unknown" if agent_attempted else "not_applicable",
             "skill_use_observed": (
                 None if production_catalog else skill_used if ctx_enabled else None
+            ),
+            "skill_use_evidence_unavailable_reason": production_skill_use_evidence_reason(
+                production_catalog=production_catalog,
+                ctx_enabled=ctx_enabled,
+                context_delivery_verified=context_delivery_verified,
             ),
             "mcp_tool_use_observed": mcp_used if ctx_enabled else None,
             "review_agent_use_observed": agent_used if ctx_enabled else None,
@@ -4244,7 +4288,12 @@ def build_performance_report(
             if isinstance(row.get("repo_url"), str) and row["repo_url"]
         }
     )
-    product_claim_eligible = len(scenario_ids) >= 6 and len(repositories) >= 3 and trials >= 3
+    product_claim_eligible = bool(
+        efficiency_claim_allowed
+        and len(scenario_ids) >= 6
+        and len(repositories) >= 3
+        and trials >= 3
+    )
     arm_outcomes = {}
     for arm in ("baseline", "ctx-light"):
         rows = [
@@ -4532,7 +4581,7 @@ def main(argv: list[str] | None = None) -> int:
             print(output)
             return 1
     schedule = trial_schedule(scenarios, arms, args.trials)
-    write_environment_manifest(
+    environment_manifest = write_environment_manifest(
         output=output,
         scenarios_path=args.scenarios,
         scenarios=scenarios,
@@ -4726,6 +4775,40 @@ def main(argv: list[str] | None = None) -> int:
         for arm in arms
         for trial in range(1, args.trials + 1)
     }
+    (
+        repository_state_matches,
+        environment_manifest_matches,
+        repository_state_end,
+    ) = write_final_repository_attestation(
+        output,
+        repository_state,
+        environment_manifest,
+    )
+    if args.engine == PRODUCTION_CATALOG_ENGINE and (
+        not repository_state_matches or not environment_manifest_matches
+    ):
+        incidents.add(
+            scenario="control",
+            arm="control",
+            attempt=1,
+            stage="run-attestation",
+            message="RunAttestationChanged",
+            evidence=json.dumps(
+                {
+                    "repository_state_start": repository_state,
+                    "repository_state_end": repository_state_end,
+                    "repository_state_matches_start_at_end": repository_state_matches,
+                    "environment_manifest_matches_start_at_end": (environment_manifest_matches),
+                },
+                sort_keys=True,
+            ),
+        )
+        for result in results:
+            result["production_efficiency_eligible"] = False
+            result["evidence_level"] = "run_attestation_changed"
+            result["repository_state_matches_start_at_end"] = repository_state_matches
+            result["environment_manifest_matches_start_at_end"] = environment_manifest_matches
+        write_summary(output, results)
     if args.dry_run:
         print(output)
         return (
@@ -4735,6 +4818,7 @@ def main(argv: list[str] | None = None) -> int:
                 expected_keys=expected_keys,
                 engine=args.engine,
             )
+            and incidents.unresolved_count() == 0
             else 1
         )
     performance = write_performance_report(
