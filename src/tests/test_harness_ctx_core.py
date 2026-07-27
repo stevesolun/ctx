@@ -2951,6 +2951,58 @@ class TestRecommendBundle:
         assert "skill:safe-api-helper" in {row["id"] for row in no_key_result["results"]}
         assert "skill:cloud-helper" not in {row["id"] for row in no_key_result["results"]}
 
+    def test_explicit_language_contributes_a_retrieval_tag(self, tmp_path: Path) -> None:
+        graph = nx.Graph()
+        graph.add_node(
+            "skill:ctx-python-testing",
+            label="ctx-python-testing",
+            type="skill",
+            tags=["ctx", "local", "no-api-key", "python", "testing"],
+            source="ctx-runtime-availability",
+            project_owned=True,
+            requires_api_keys=False,
+        )
+        graph.add_node(
+            "agent:ctx-python-reviewer",
+            label="ctx-python-reviewer",
+            type="agent",
+            tags=["ctx", "local", "no-api-key", "python", "reviewer"],
+            source="ctx-runtime-availability",
+            project_owned=True,
+            requires_api_keys=False,
+        )
+        graph_path = tmp_path / "graph.json"
+        graph_path.write_text(json.dumps(nx.node_link_data(graph, edges="edges")), encoding="utf-8")
+        wiki = tmp_path / "wiki"
+        converted = wiki / "converted" / "ctx-python-testing"
+        converted.mkdir(parents=True)
+        (converted / "SKILL.md").write_text("# ctx Python testing\n", encoding="utf-8")
+        toolbox = CtxCoreToolbox(
+            wiki_dir=wiki,
+            graph_path=graph_path,
+            lifecycle_dir=tmp_path / "runtime",
+        )
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="structured-language",
+                    name="ctx__recommend_bundle",
+                    arguments={
+                        "query": "fix and review frozen attrs field setter policy compatibility",
+                        "top_k": 5,
+                        "local_code_task": True,
+                        "no_api_keys": True,
+                        "language": "python",
+                    },
+                )
+            )
+        )
+
+        assert "python" in result["tags"]
+        assert "skill:ctx-python-testing" in {row["id"] for row in result["results"]}
+        assert result["context_policy"]["load"] == ["skill:ctx-python-testing"]
+
     def test_local_no_key_filters_do_not_starve_runtime_recommendations(
         self,
         tmp_path: Path,

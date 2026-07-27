@@ -974,6 +974,9 @@ class CtxCoreToolbox:
         )
 
         tags = _query_to_tags(query)
+        language = _normalize_language_hint(_optional_str(args.get("language")))
+        if language and language not in tags:
+            tags.append(language)
         use_semantic_query = bool(args.get("use_semantic_query"))
         if not tags and not use_semantic_query:
             return json.dumps(
