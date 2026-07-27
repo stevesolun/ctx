@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import closing
+import hashlib
 import json
 import multiprocessing
 import os
@@ -157,6 +158,70 @@ def _build_synthetic_wiki(tmp_path: Path) -> Path:
     converted.mkdir(parents=True)
     (converted / "SKILL.md").write_text("# body", encoding="utf-8")
     return wiki
+
+
+_PACKED_CATALOG_INTERNAL_SLUG = "skills-sh-breaking-brake-cc-wf-studio-code-review-small"
+_PACKED_CATALOG_PUBLIC_SLUG = "breaking-brake-cc-wf-studio-code-review-small"
+_PACKED_CATALOG_BODY = (
+    "# Code Review Small\n\nLightweight review for small PRs under 100 lines changed.\n"
+)
+
+
+def _build_packed_catalog_toolbox(
+    tmp_path: Path,
+    *,
+    include_body: bool,
+) -> tuple[CtxCoreToolbox, Path]:
+    graph = nx.Graph()
+    graph.graph["external_catalog_nodes"] = {"skills.sh": 1}
+    graph.graph["source_catalog_nodes"] = {"skills.sh": 1}
+    graph.add_node(
+        f"skill:{_PACKED_CATALOG_INTERNAL_SLUG}",
+        label=_PACKED_CATALOG_INTERNAL_SLUG,
+        type="skill",
+        tags=["code", "review"],
+        status="remote-cataloged",
+        source_catalog="skills.sh",
+        source="breaking-brake/cc-wf-studio",
+        skill_id="code-review-small",
+        install_command=(
+            "npx skills add https://github.com/breaking-brake/cc-wf-studio "
+            "--skill code-review-small"
+        ),
+    )
+    graph_path = tmp_path / "graph.json"
+    graph_path.write_text(
+        json.dumps(nx.node_link_data(graph, edges="edges")),
+        encoding="utf-8",
+    )
+
+    wiki = tmp_path / "wiki"
+    pages = {
+        f"entities/skills/{_PACKED_CATALOG_INTERNAL_SLUG}.md": (
+            "---\n"
+            f"name: {_PACKED_CATALOG_INTERNAL_SLUG}\n"
+            "type: skill\n"
+            "status: remote-cataloged\n"
+            "---\n"
+            "# Catalog metadata\n"
+        ),
+    }
+    if include_body:
+        pages[f"converted/{_PACKED_CATALOG_INTERNAL_SLUG}/SKILL.md"] = _PACKED_CATALOG_BODY
+    write_wiki_base_pack(
+        pack_dir=wiki / "wiki-packs" / "base-export-1",
+        pack_id="base-export-1",
+        base_export_id="export-1",
+        pages=pages,
+    )
+    return (
+        CtxCoreToolbox(
+            wiki_dir=wiki,
+            graph_path=graph_path,
+            lifecycle_dir=tmp_path / "runtime",
+        ),
+        wiki,
+    )
 
 
 @pytest.fixture()
@@ -2942,6 +3007,132 @@ class TestRecommendBundle:
         assert [row["id"] for row in result["results"]] == ["skill:ctx-python-testing"]
         assert result["results"][0]["source"] == "ctx-runtime-availability"
         assert result["results"][0]["installable"] is True
+
+    def test_local_no_key_uses_validated_packed_catalog_skill_body(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        toolbox, _wiki = _build_packed_catalog_toolbox(tmp_path, include_body=True)
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="packed-catalog",
+                    name="ctx__recommend_bundle",
+                    arguments={
+                        "query": "code review",
+                        "top_k": 1,
+                        "local_code_task": True,
+                        "no_api_keys": True,
+                    },
+                )
+            )
+        )
+
+        assert [row["id"] for row in result["results"]] == [f"skill:{_PACKED_CATALOG_PUBLIC_SLUG}"]
+        row = result["results"][0]
+        assert row["installable"] is True
+        assert row["load_status"] == "local-wiki"
+        assert row["source_path"] == (f"converted/{_PACKED_CATALOG_INTERNAL_SLUG}/SKILL.md")
+        assert row["body_provenance"] == "wiki-pack"
+
+        page = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="packed-catalog-page",
+                    name="ctx__wiki_get",
+                    arguments={
+                        "slug": _PACKED_CATALOG_PUBLIC_SLUG,
+                        "entity_type": "skill",
+                    },
+                )
+            )
+        )
+        assert page["slug"] == _PACKED_CATALOG_PUBLIC_SLUG
+        assert page["path"] == row["source_path"]
+        assert page["body"] == _PACKED_CATALOG_BODY
+
+    def test_packed_catalog_metadata_without_body_stays_unavailable(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        toolbox, _wiki = _build_packed_catalog_toolbox(tmp_path, include_body=False)
+
+        result = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="packed-catalog-missing-body",
+                    name="ctx__recommend_bundle",
+                    arguments={
+                        "query": "code review",
+                        "top_k": 1,
+                        "local_code_task": True,
+                        "no_api_keys": True,
+                        "include_unavailable": True,
+                    },
+                )
+            )
+        )
+
+        row = result["results"][0]
+        assert row["installable"] is False
+        assert row["load_status"] == "external-install-required"
+        assert row["source_path"].startswith("npx skills add ")
+
+        page = json.loads(
+            toolbox.dispatch(
+                ToolCall(
+                    id="packed-catalog-missing-page",
+                    name="ctx__wiki_get",
+                    arguments={
+                        "slug": _PACKED_CATALOG_PUBLIC_SLUG,
+                        "entity_type": "skill",
+                    },
+                )
+            )
+        )
+        assert "error" in page
+        assert "body" not in page
+
+    def test_packed_catalog_rejects_traversal_corrupt_metadata(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        toolbox, wiki = _build_packed_catalog_toolbox(tmp_path, include_body=True)
+        pack_dir = wiki / "wiki-packs" / "base-export-1"
+        pages_path = pack_dir / "pages.jsonl"
+        safe_path = f"converted/{_PACKED_CATALOG_INTERNAL_SLUG}/SKILL.md"
+        pages_text = pages_path.read_text(encoding="utf-8")
+        tampered_text = pages_text.replace(
+            safe_path,
+            "converted/../escape/SKILL.md",
+        )
+        assert tampered_text != pages_text
+        pages_path.write_text(tampered_text, encoding="utf-8")
+
+        manifest_path = pack_dir / "wiki-pack-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["checksums"]["pages.jsonl"] = hashlib.sha256(
+            tampered_text.encode("utf-8")
+        ).hexdigest()
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="page path is unsafe"):
+            toolbox.dispatch(
+                ToolCall(
+                    id="packed-catalog-corrupt",
+                    name="ctx__recommend_bundle",
+                    arguments={
+                        "query": "code review",
+                        "top_k": 1,
+                        "local_code_task": True,
+                        "no_api_keys": True,
+                    },
+                )
+            )
 
     def test_companion_harnesses_are_separate_from_dev_results(
         self,
