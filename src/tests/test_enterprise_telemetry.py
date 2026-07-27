@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from email.message import Message
 from io import BytesIO
 import json
 import os
@@ -26,8 +27,10 @@ from ctx.telemetry import (
     exception_payload,
     export_events,
     export_metrics,
+    export_traces,
     hash_identifier,
     plan_telemetry_retention,
+    preview_traces_export,
     read_events,
     read_metrics,
     record_counter,
@@ -953,6 +956,1214 @@ def test_export_events_posts_otlp_http_payload(
     assert "sess-otlp-private" not in json.dumps(payload)
 
 
+def test_export_traces_posts_otlp_resource_spans_and_redacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    with telemetry.telemetry_span(
+        trace_id="1" * 32,
+        span_id="2" * 16,
+        parent_span_id="3" * 16,
+    ):
+        first = record_event(
+            "ctx.api.recommend_bundle",
+            source="ctx-api",
+            session_id="sess-trace-private",
+            duration_ms=12.5,
+            payload={
+                "query": "private acme query",
+                "safe_note": "opened /Users/example/private-repo/app.py",
+            },
+            path=path,
+            trusted_root=tmp_path,
+            config={"path": str(path), "export": {"enabled": False}},
+        )
+        second = record_event(
+            "ctx.core.recommend_bundle",
+            source="ctx-core",
+            outcome="error",
+            error_kind="lookup_failed",
+            payload={"token": "ghp_private_trace_token"},
+            path=path,
+            trusted_root=tmp_path,
+            config={"path": str(path), "export": {"enabled": False}},
+        )
+    assert first is not None
+    assert second is not None
+    calls: list[tuple[dict[str, Any], dict[str, Any]]] = []
+
+    def fake_post_otlp_http(
+        payload: dict[str, Any],
+        settings: dict[str, Any],
+    ) -> None:
+        calls.append((payload, settings))
+
+    monkeypatch.setattr(telemetry, "_post_otlp_http", fake_post_otlp_http)
+    result = export_traces(
+        path,
+        trusted_root=tmp_path,
+        config={
+            "path": str(path),
+            "privacy": {"hash_salt": "tenant-a"},
+            "traces": {
+                "enabled": True,
+                "export": {
+                    "enabled": True,
+                    "span_maturity_seconds": 0,
+                    "sink": "otlp_http",
+                    "otlp": {
+                        "endpoint": "https://collector.example:4318/v1/traces",
+                        "allowed_hosts": ["collector.example"],
+                        "headers": {"Authorization": "Bearer trace-token"},
+                        "service_name": "ctx-test",
+                        "service_namespace": "ctx",
+                        "deployment_environment": "test",
+                    },
+                },
+            },
+        },
+    )
+
+    assert result.attempted == 1
+    assert result.exported == 1
+    assert result.failed == 0
+    assert result.status == "ok"
+    assert result.checkpoint_path == str(path) + ".trace-export-checkpoint.json"
+    assert result.status_path == str(path) + ".trace-export-status.json"
+    assert len(calls) == 1
+    payload, settings = calls[0]
+    assert settings["otlp_endpoint"] == "https://collector.example:4318/v1/traces"
+    assert settings["otlp_headers"] == {"Authorization": "Bearer trace-token"}
+    resource_spans = payload["resourceSpans"]
+    assert len(resource_spans) == 1
+    resource_attributes = {
+        item["key"]: item["value"] for item in resource_spans[0]["resource"]["attributes"]
+    }
+    assert resource_attributes["service.name"] == {"stringValue": "ctx-test"}
+    scope_spans = resource_spans[0]["scopeSpans"]
+    assert scope_spans[0]["scope"]["name"] == "ctx.telemetry"
+    spans = scope_spans[0]["spans"]
+    assert len(spans) == 1
+    span = spans[0]
+    assert span["traceId"] == "1" * 32
+    assert span["spanId"] == "2" * 16
+    assert span["parentSpanId"] == "3" * 16
+    assert span["name"] == "ctx.api.recommend_bundle"
+    assert span["kind"] == 1
+    assert int(span["startTimeUnixNano"]) <= int(span["endTimeUnixNano"])
+    assert span["status"] == {"code": 2, "message": "lookup_failed"}
+    assert [event["name"] for event in span["events"]] == [
+        "ctx.api.recommend_bundle",
+        "ctx.core.recommend_bundle",
+    ]
+    attributes = {item["key"]: item["value"] for item in span["attributes"]}
+    assert attributes["ctx.trace.event_count"] == {"intValue": "2"}
+    assert attributes["ctx.session.hash"]["stringValue"].startswith("sha256:")
+    assert "ctx.payload.query_hash" in attributes
+    payload_text = json.dumps(payload)
+    assert "sess-trace-private" not in payload_text
+    assert "private acme query" not in payload_text
+    assert "/Users/example/private-repo" not in payload_text
+    assert "private-repo" not in payload_text
+    assert "ghp_private_trace_token" not in payload_text
+
+
+def test_trace_export_preview_retry_and_checkpoint_is_independent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    log_export_path = tmp_path / "exported-events.jsonl"
+    event = record_event(
+        "ctx.api.recommend_bundle",
+        source="ctx-api",
+        path=path,
+        trusted_root=tmp_path,
+        config={"path": str(path), "export": {"enabled": False}},
+    )
+    assert event is not None
+    trace_config = {
+        "path": str(path),
+        "traces": {
+            "enabled": True,
+            "export": {
+                "enabled": True,
+                "span_maturity_seconds": 0,
+                "sink": "otlp_http",
+                "otlp": {
+                    "endpoint": "https://collector.example:4318/v1/traces",
+                    "allowed_hosts": ["collector.example"],
+                },
+            },
+        },
+    }
+    checkpoint_path = Path(str(path) + ".trace-export-checkpoint.json")
+    status_path = Path(str(path) + ".trace-export-status.json")
+
+    preview = preview_traces_export(path, trusted_root=tmp_path, config=trace_config)
+    assert preview.attempted == 1
+    assert preview.exported == 0
+    assert preview.status == "ok"
+    assert not checkpoint_path.exists()
+    assert not status_path.exists()
+
+    attempts = 0
+
+    def flaky_post_otlp_http(
+        payload: dict[str, Any],
+        settings: dict[str, Any],
+    ) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("collector unavailable")
+
+    monkeypatch.setattr(telemetry, "_post_otlp_http", flaky_post_otlp_http)
+    failed = export_traces(path, trusted_root=tmp_path, config=trace_config)
+    assert failed.failed == 1
+    assert failed.status == "failed"
+    assert not checkpoint_path.exists()
+    assert json.loads(status_path.read_text(encoding="utf-8"))["signal"] == "traces"
+
+    exported = export_traces(path, trusted_root=tmp_path, config=trace_config)
+    assert exported.exported == 1
+    assert exported.checkpoint_advanced is True
+    assert checkpoint_path.is_file()
+    assert not Path(str(path) + ".export-checkpoint.json").exists()
+
+    repeated = export_traces(path, trusted_root=tmp_path, config=trace_config)
+    assert repeated.attempted == 0
+    assert repeated.status == "noop"
+    log_result = export_events(
+        path,
+        trusted_root=tmp_path,
+        config={
+            "path": str(path),
+            "export": {
+                "enabled": True,
+                "sink": "local_jsonl",
+                "path": str(log_export_path),
+            },
+        },
+    )
+    assert log_result.exported == 1
+    assert Path(str(path) + ".export-checkpoint.json").is_file()
+
+
+def test_export_traces_resanitizes_legacy_payload_and_hashes_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    legacy_event = TelemetryEvent(
+        schema_version=SCHEMA_VERSION,
+        event_id="legacy-trace-event",
+        ts="2026-06-28T00:00:00Z",
+        event_name="ctx.mcp.request",
+        source="ctx-mcp-server",
+        session_id="legacy-session-private",
+        trace_id="1" * 32,
+        span_id="2" * 16,
+        privacy_mode="local_redacted",
+        payload={
+            "query": "private acme query",
+            "safe_note": "opened /Users/example/private-repo/app.py",
+        },
+    )
+    path.write_text(
+        json.dumps(asdict(legacy_event), separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    calls: list[dict[str, Any]] = []
+
+    def fake_post_otlp_http(
+        payload: dict[str, Any],
+        settings: dict[str, Any],
+    ) -> None:
+        calls.append(payload)
+
+    monkeypatch.setattr(telemetry, "_post_otlp_http", fake_post_otlp_http)
+    result = export_traces(
+        path,
+        trusted_root=tmp_path,
+        config={
+            "path": str(path),
+            "privacy": {"hash_salt": "tenant-a"},
+            "traces": {
+                "export": {
+                    "enabled": True,
+                    "span_maturity_seconds": 0,
+                    "sink": "otlp_http",
+                    "otlp": {
+                        "endpoint": "https://collector.example:4318/v1/traces",
+                        "allowed_hosts": ["collector.example"],
+                    },
+                },
+            },
+        },
+    )
+
+    assert result.exported == 1
+    span = calls[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+    assert span["traceId"] == legacy_event.trace_id
+    assert span["spanId"] == legacy_event.span_id
+    attributes = {item["key"]: item["value"] for item in span["attributes"]}
+    assert attributes["ctx.session.hash"] == {
+        "stringValue": hash_identifier("legacy-session-private", salt="tenant-a")
+    }
+    assert attributes["ctx.payload.query_hash"]["stringValue"].startswith("sha256:")
+    assert attributes["ctx.payload.safe_note"]["stringValue"].startswith(
+        "opened [path_hash:sha256:"
+    )
+    payload_text = json.dumps(calls[0])
+    assert "legacy-session-private" not in payload_text
+    assert "private acme query" not in payload_text
+    assert "/Users/example/private-repo" not in payload_text
+    assert "private-repo" not in payload_text
+
+
+def test_export_traces_is_disabled_by_default_and_validates_env_endpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    event = record_event(
+        "ctx.api.recommend_bundle",
+        source="ctx-api",
+        path=path,
+        trusted_root=tmp_path,
+        config={"path": str(path), "export": {"enabled": False}},
+    )
+    assert event is not None
+    disabled = export_traces(path, trusted_root=tmp_path, config={"path": str(path)})
+    assert disabled.status == "noop"
+    assert disabled.attempted == 0
+
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        "http://collector.example:4318/v1/traces",
+    )
+    with pytest.raises(ValueError, match="must use https"):
+        export_traces(
+            path,
+            trusted_root=tmp_path,
+            config={
+                "path": str(path),
+                "traces": {
+                    "export": {
+                        "enabled": True,
+                        "sink": "otlp_http",
+                        "otlp": {"allowed_hosts": ["collector.example"]},
+                    },
+                },
+            },
+        )
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_post_otlp_http(
+        payload: dict[str, Any],
+        settings: dict[str, Any],
+    ) -> None:
+        calls.append(settings)
+
+    monkeypatch.setattr(telemetry, "_post_otlp_http", fake_post_otlp_http)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://collector.example")
+    result = export_traces(
+        path,
+        trusted_root=tmp_path,
+        config={
+            "path": str(path),
+            "traces": {
+                "export": {
+                    "enabled": True,
+                    "span_maturity_seconds": 0,
+                    "sink": "otlp_http",
+                    "otlp": {"allowed_hosts": ["collector.example"]},
+                },
+            },
+        },
+    )
+    assert result.exported == 1
+    assert calls[0]["otlp_endpoint"] == "https://collector.example/v1/traces"
+
+
+@pytest.mark.parametrize(
+    ("trace_id", "span_id"),
+    [
+        (None, None),
+        ("invalid", "5" * 16),
+    ],
+)
+def test_export_traces_rejects_missing_or_invalid_context_without_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    trace_id: str | None,
+    span_id: str | None,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    invalid = TelemetryEvent(
+        schema_version=SCHEMA_VERSION,
+        event_id="invalid-trace-context",
+        ts="2026-06-28T00:00:00Z",
+        event_name="ctx.mcp.request",
+        source="ctx-mcp-server",
+        trace_id=trace_id,
+        span_id=span_id,
+        privacy_mode="local_redacted",
+    )
+    path.write_text(json.dumps(asdict(invalid)) + "\n", encoding="utf-8")
+    called = False
+
+    def fake_post_otlp_http(
+        payload: dict[str, Any],
+        settings: dict[str, Any],
+    ) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(telemetry, "_post_otlp_http", fake_post_otlp_http)
+    config = {
+        "path": str(path),
+        "traces": {
+            "export": {
+                "enabled": True,
+                "sink": "otlp_http",
+                "otlp": {
+                    "endpoint": "https://collector.example:4318/v1/traces",
+                    "allowed_hosts": ["collector.example"],
+                },
+            },
+        },
+    }
+    preview = preview_traces_export(
+        path,
+        trusted_root=tmp_path,
+        config=config,
+    )
+    assert preview.attempted == 1
+    assert preview.failed == 1
+    assert preview.status == "failed"
+    assert preview.error_kind == "ValueError"
+
+    result = export_traces(
+        path,
+        trusted_root=tmp_path,
+        config=config,
+    )
+
+    assert result.failed == 1
+    assert result.error_kind == "ValueError"
+    assert called is False
+    assert not Path(str(path) + ".trace-export-checkpoint.json").exists()
+
+
+def test_trace_preview_rejects_fresh_invalid_context_before_maturity_filter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    invalid = TelemetryEvent(
+        schema_version=SCHEMA_VERSION,
+        event_id="fresh-invalid-trace-context",
+        ts=telemetry._now_iso(),
+        event_name="ctx.api.failed",
+        source="ctx-api",
+        trace_id=None,
+        span_id=None,
+        privacy_mode="local_redacted",
+    )
+    path.write_text(json.dumps(asdict(invalid)) + "\n", encoding="utf-8")
+    called = False
+
+    def fake_post_otlp_http(
+        payload: dict[str, Any],
+        settings: dict[str, Any],
+    ) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(telemetry, "_post_otlp_http", fake_post_otlp_http)
+    config = {
+        "path": str(path),
+        "traces": {
+            "export": {
+                "enabled": True,
+                "sink": "otlp_http",
+                "otlp": {
+                    "endpoint": "https://collector.example:4318/v1/traces",
+                    "allowed_hosts": ["collector.example"],
+                },
+            },
+        },
+    }
+
+    preview = preview_traces_export(path, trusted_root=tmp_path, config=config)
+    result = export_traces(path, trusted_root=tmp_path, config=config)
+
+    assert preview.status == "failed"
+    assert preview.attempted == 1
+    assert preview.failed == 1
+    assert preview.error_kind == "ValueError"
+    assert preview.retained_events == 1
+    assert result.status == "failed"
+    assert result.attempted == 1
+    assert result.failed == 1
+    assert result.error_kind == "ValueError"
+    assert result.checkpoint_advanced is False
+    assert called is False
+    assert not Path(str(path) + ".trace-export-checkpoint.json").exists()
+
+
+def test_trace_export_partial_success_advances_checkpoint_without_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    record_config = {"path": str(path), "export": {"enabled": False}}
+    with telemetry.telemetry_span(trace_id="1" * 32, span_id="2" * 16):
+        first = record_event(
+            "ctx.api.recommend_bundle",
+            source="ctx-api",
+            path=path,
+            trusted_root=tmp_path,
+            config=record_config,
+        )
+    with telemetry.telemetry_span(trace_id="1" * 32, span_id="3" * 16):
+        second = record_event(
+            "ctx.core.recommend_bundle",
+            source="ctx-core",
+            path=path,
+            trusted_root=tmp_path,
+            config=record_config,
+        )
+    assert first is not None
+    assert second is not None
+    attempts = 0
+
+    class PartialSuccessResponse:
+        status = 200
+        headers: dict[str, str] = {}
+
+        def __enter__(self) -> PartialSuccessResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def getcode(self) -> int:
+            return self.status
+
+        def read(self, amount: int = -1) -> bytes:
+            return json.dumps(
+                {
+                    "partialSuccess": {
+                        "rejectedSpans": "1",
+                        "errorMessage": "ghp_private_collector_detail",
+                    }
+                }
+            ).encode()
+
+    class PartialSuccessOpener:
+        def open(self, request: object, timeout: float) -> PartialSuccessResponse:
+            nonlocal attempts
+            attempts += 1
+            return PartialSuccessResponse()
+
+    monkeypatch.setattr(telemetry, "build_opener", lambda *args: PartialSuccessOpener())
+    result = export_traces(
+        path,
+        trusted_root=tmp_path,
+        config={
+            "path": str(path),
+            "traces": {
+                "export": {
+                    "enabled": True,
+                    "span_maturity_seconds": 0,
+                    "sink": "otlp_http",
+                    "otlp": {
+                        "endpoint": "https://collector.example:4318/v1/traces",
+                        "allowed_hosts": ["collector.example"],
+                    },
+                },
+            },
+        },
+    )
+
+    checkpoint_path = Path(str(path) + ".trace-export-checkpoint.json")
+    status_path = Path(str(path) + ".trace-export-status.json")
+    assert result.attempted == 2
+    assert result.exported == 1
+    assert result.failed == 1
+    assert result.status == "partial_success"
+    assert result.error_kind == "otlp_partial_success"
+    assert result.error_message == "[redacted]"
+    assert attempts == 1
+    assert result.checkpoint_after_event_id == second.event_id
+    assert checkpoint_path.exists()
+    status_text = status_path.read_text(encoding="utf-8")
+    assert "ghp_private_collector_detail" not in status_text
+    status = json.loads(status_text)
+    assert status["status"] == "partial_success"
+    assert status["attempted"] == 2
+    assert status["exported"] == 1
+    assert status["failed"] == 1
+    assert status["error_kind"] == "otlp_partial_success"
+    assert status["error_message"] == "[redacted]"
+    assert status["checkpoint_advanced"] is True
+
+
+def test_trace_partial_success_never_checkpoints_past_malformed_pending_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    record_config = {"path": str(path), "export": {"enabled": False}}
+    with telemetry.telemetry_span(trace_id="1" * 32, span_id="2" * 16):
+        first = record_event(
+            "ctx.api.recommend_bundle",
+            source="ctx-api",
+            path=path,
+            trusted_root=tmp_path,
+            config=record_config,
+        )
+    with telemetry.telemetry_span(trace_id="1" * 32, span_id="3" * 16):
+        second = record_event(
+            "ctx.core.recommend_bundle",
+            source="ctx-core",
+            path=path,
+            trusted_root=tmp_path,
+            config=record_config,
+        )
+    assert first is not None
+    assert second is not None
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write("{malformed pending record}\n")
+    calls = 0
+
+    def partial_success(
+        payload: dict[str, Any],
+        settings: dict[str, Any],
+    ) -> telemetry._OTLPResponse:
+        nonlocal calls
+        calls += 1
+        return telemetry._OTLPResponse(rejected_records=1)
+
+    monkeypatch.setattr(telemetry, "_post_otlp_http", partial_success)
+    config = {
+        "path": str(path),
+        "traces": {
+            "export": {
+                "enabled": True,
+                "span_maturity_seconds": 0,
+                "sink": "otlp_http",
+                "otlp": {
+                    "endpoint": "https://collector.example:4318/v1/traces",
+                    "allowed_hosts": ["collector.example"],
+                },
+            },
+        },
+    }
+
+    result = export_traces(path, trusted_root=tmp_path, config=config)
+
+    assert calls == 1
+    assert result.status == "partial_success"
+    assert result.attempted == 2
+    assert result.exported == 1
+    assert result.failed == 1
+    assert result.malformed_pending_records == 1
+    assert result.checkpoint_after_event_id is None
+    assert result.checkpoint_advanced is False
+    assert not Path(str(path) + ".trace-export-checkpoint.json").exists()
+
+    preview = preview_traces_export(path, trusted_root=tmp_path, config=config)
+    assert preview.attempted == 2
+    assert preview.malformed_pending_records == 1
+    assert preview.status == "degraded"
+    assert preview.checkpoint_before_event_id is None
+
+
+def test_trace_export_sanitizes_all_outbound_string_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    secrets = {
+        "source": "ghp_abcdefghijklmnopqrstuvwxyz123456",
+        "actor": "sk-abcdefghijklmnopqrstuvwxyz123456",
+        "error": "ghp_zyxwvutsrqponmlkjihgfedcba654321",
+        "service": "sk-1234567890abcdefghijklmnopqrstuvwxyz",
+    }
+    event = TelemetryEvent(
+        schema_version=SCHEMA_VERSION,
+        event_id="legacy-secret-envelope",
+        ts="2026-06-28T00:00:00Z",
+        event_name="ctx.api.failed",
+        source=secrets["source"],
+        outcome="error",
+        actor=secrets["actor"],
+        error_kind=secrets["error"],
+        trace_id="1" * 32,
+        span_id="2" * 16,
+        privacy_mode="local_redacted",
+    )
+    path.write_text(json.dumps(asdict(event)) + "\n", encoding="utf-8")
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        telemetry,
+        "_post_otlp_http",
+        lambda payload, settings: calls.append(payload),
+    )
+
+    result = export_traces(
+        path,
+        trusted_root=tmp_path,
+        config={
+            "path": str(path),
+            "privacy": {"hash_salt": "tenant-a"},
+            "traces": {
+                "export": {
+                    "enabled": True,
+                    "sink": "otlp_http",
+                    "otlp": {
+                        "endpoint": "https://collector.example:4318/v1/traces",
+                        "allowed_hosts": ["collector.example"],
+                        "service_name": secrets["service"],
+                    },
+                },
+            },
+        },
+    )
+
+    assert result.exported == 1
+    payload_text = json.dumps(calls[0])
+    for value in secrets.values():
+        assert value not in payload_text
+    assert payload_text.count("[redacted]") >= 4
+
+
+def test_log_export_sanitizes_legacy_envelope_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    secrets = {
+        "source": "ghp_abcdefghijklmnopqrstuvwxyz123456",
+        "actor": "sk-abcdefghijklmnopqrstuvwxyz123456",
+        "error": "ghp_zyxwvutsrqponmlkjihgfedcba654321",
+        "outcome": "sk-1234567890abcdefghijklmnopqrstuvwxyz",
+        "service": "ghp_1234567890abcdefghijklmnopqrstuvwxyz",
+        "trace_id": "ghp_111111111111111111111111111111111111",
+        "span_id": "sk-222222222222222222222222222222222222",
+    }
+    event = TelemetryEvent(
+        schema_version=SCHEMA_VERSION,
+        event_id="legacy-secret-log-envelope",
+        ts="2026-06-28T00:00:00Z",
+        event_name="ctx.api.failed",
+        source=secrets["source"],
+        outcome=secrets["outcome"],
+        actor=secrets["actor"],
+        error_kind=secrets["error"],
+        trace_id=secrets["trace_id"],
+        span_id=secrets["span_id"],
+        privacy_mode="local_redacted",
+    )
+    path.write_text(json.dumps(asdict(event)) + "\n", encoding="utf-8")
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        telemetry,
+        "_post_otlp_http",
+        lambda payload, settings: calls.append(payload),
+    )
+
+    result = export_events(
+        path,
+        trusted_root=tmp_path,
+        config={
+            "path": str(path),
+            "privacy": {"hash_salt": "tenant-a"},
+            "export": {
+                "enabled": True,
+                "sink": "otlp_http",
+                "otlp": {
+                    "endpoint": "https://collector.example:4318/v1/logs",
+                    "allowed_hosts": ["collector.example"],
+                    "service_name": secrets["service"],
+                },
+            },
+        },
+    )
+
+    assert result.exported == 1
+    record = calls[0]["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]
+    attributes = {
+        item["key"]: item["value"]["stringValue"]
+        for item in record["attributes"]
+        if "stringValue" in item["value"]
+    }
+    assert "traceId" not in record
+    assert "spanId" not in record
+    assert attributes["ctx.trace_id"] == "[redacted]"
+    assert attributes["ctx.span_id"] == "[redacted]"
+    payload_text = json.dumps(calls[0])
+    for value in secrets.values():
+        assert value not in payload_text
+    assert payload_text.count("[redacted]") >= len(secrets)
+
+
+def test_metric_export_sanitizes_legacy_envelope_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "metrics.jsonl"
+    secrets = {
+        "source": "ghp_abcdefghijklmnopqrstuvwxyz123456",
+        "unit": "sk-abcdefghijklmnopqrstuvwxyz123456",
+        "service": "ghp_zyxwvutsrqponmlkjihgfedcba654321",
+    }
+    metric = TelemetryMetric(
+        schema_version=METRIC_SCHEMA_VERSION,
+        metric_id="legacy-secret-metric-envelope",
+        ts="2026-06-28T00:00:00Z",
+        name="ctx.api.requests",
+        instrument="counter",
+        value=1,
+        unit=secrets["unit"],
+        source=secrets["source"],
+        privacy_mode="local_redacted",
+    )
+    path.write_text(json.dumps(asdict(metric)) + "\n", encoding="utf-8")
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        telemetry,
+        "_post_otlp_http",
+        lambda payload, settings: calls.append(payload),
+    )
+
+    result = export_metrics(
+        path,
+        trusted_root=tmp_path,
+        config={
+            "privacy": {"hash_salt": "tenant-a"},
+            "metrics": {
+                "enabled": True,
+                "path": str(path),
+                "export": {
+                    "enabled": True,
+                    "sink": "otlp_http",
+                    "otlp": {
+                        "endpoint": "https://collector.example:4318/v1/metrics",
+                        "allowed_hosts": ["collector.example"],
+                        "service_name": secrets["service"],
+                    },
+                },
+            },
+        },
+    )
+
+    assert result.exported == 1
+    payload_text = json.dumps(calls[0])
+    for value in secrets.values():
+        assert value not in payload_text
+    assert payload_text.count("[redacted]") >= len(secrets)
+
+
+def test_trace_maturity_retains_tail_and_never_reopens_checkpointed_span(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    config = {
+        "path": str(path),
+        "traces": {
+            "export": {
+                "enabled": True,
+                "sink": "otlp_http",
+                "otlp": {
+                    "endpoint": "https://collector.example:4318/v1/traces",
+                    "allowed_hosts": ["collector.example"],
+                },
+            },
+        },
+    }
+    mature_config = {
+        "path": str(path),
+        "traces": {
+            "export": {
+                "enabled": True,
+                "span_maturity_seconds": 0,
+                "sink": "otlp_http",
+                "otlp": {
+                    "endpoint": "https://collector.example:4318/v1/traces",
+                    "allowed_hosts": ["collector.example"],
+                },
+            },
+        },
+    }
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        telemetry,
+        "_post_otlp_http",
+        lambda payload, settings: calls.append(payload),
+    )
+    record_config = {
+        "path": str(path),
+        "export": {"enabled": False},
+    }
+    first = record_event(
+        "ctx.api.started",
+        source="ctx-api",
+        trace_id="1" * 32,
+        span_id="2" * 16,
+        path=path,
+        trusted_root=tmp_path,
+        config=record_config,
+    )
+    assert first is not None
+    waiting = export_traces(path, trusted_root=tmp_path, config=config)
+    first_result = export_traces(path, trusted_root=tmp_path, config=mature_config)
+    second = record_event(
+        "ctx.api.completed",
+        source="ctx-api",
+        trace_id="1" * 32,
+        span_id="2" * 16,
+        path=path,
+        trusted_root=tmp_path,
+        config=record_config,
+    )
+    assert second is not None
+    late_result = export_traces(path, trusted_root=tmp_path, config=mature_config)
+
+    assert waiting.status == "pending"
+    assert waiting.attempted == 0
+    assert waiting.retained_events == 1
+    assert waiting.checkpoint_advanced is False
+    assert first_result.exported == 1
+    assert first_result.checkpoint_after_event_id == first.event_id
+    assert late_result.status == "degraded"
+    assert late_result.attempted == 0
+    assert late_result.retained_events == 1
+    assert late_result.late_span_events == 1
+    assert late_result.checkpoint_after_event_id == first.event_id
+    assert late_result.checkpoint_advanced is False
+    assert len(calls) == 1
+    span = calls[0]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+    assert span["traceId"] == "1" * 32
+    assert span["spanId"] == "2" * 16
+    assert [event["name"] for event in span["events"]] == ["ctx.api.started"]
+
+
+def test_trace_ids_match_logs_and_parent_topology_across_checkpoints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    parent = TelemetryEvent(
+        schema_version=SCHEMA_VERSION,
+        event_id="parent-event",
+        ts="2026-01-01T00:00:00Z",
+        event_name="ctx.api.parent",
+        source="ctx-api",
+        trace_id="1" * 32,
+        span_id="2" * 16,
+        privacy_mode="local_redacted",
+    )
+    child = TelemetryEvent(
+        schema_version=SCHEMA_VERSION,
+        event_id="child-event",
+        ts=telemetry._now_iso(),
+        event_name="ctx.core.child",
+        source="ctx-core",
+        trace_id="1" * 32,
+        span_id="3" * 16,
+        parent_span_id="2" * 16,
+        privacy_mode="local_redacted",
+    )
+    path.write_text(
+        "\n".join(json.dumps(asdict(event)) for event in (parent, child)) + "\n",
+        encoding="utf-8",
+    )
+    trace_payloads: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        telemetry,
+        "_post_otlp_http",
+        lambda payload, settings: trace_payloads.append(payload),
+    )
+    base_export = {
+        "enabled": True,
+        "sink": "otlp_http",
+        "otlp": {
+            "endpoint": "https://collector.example:4318/v1/traces",
+            "allowed_hosts": ["collector.example"],
+        },
+    }
+    first = export_traces(
+        path,
+        trusted_root=tmp_path,
+        config={"path": str(path), "traces": {"export": base_export}},
+    )
+    second_export = dict(base_export)
+    second_export["span_maturity_seconds"] = 0
+    second = export_traces(
+        path,
+        trusted_root=tmp_path,
+        config={"path": str(path), "traces": {"export": second_export}},
+    )
+
+    assert first.exported == 1
+    assert first.retained_events == 1
+    assert first.checkpoint_after_event_id == parent.event_id
+    assert second.exported == 1
+    assert second.checkpoint_after_event_id == child.event_id
+    trace_spans = [
+        payload["resourceSpans"][0]["scopeSpans"][0]["spans"][0] for payload in trace_payloads
+    ]
+    assert trace_spans[0]["traceId"] == parent.trace_id
+    assert trace_spans[0]["spanId"] == parent.span_id
+    assert trace_spans[1]["traceId"] == child.trace_id
+    assert trace_spans[1]["spanId"] == child.span_id
+    assert trace_spans[1]["parentSpanId"] == parent.span_id
+
+    log_payloads: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        telemetry,
+        "_post_otlp_http",
+        lambda payload, settings: log_payloads.append(payload),
+    )
+    log_result = export_events(
+        path,
+        trusted_root=tmp_path,
+        include_exported=True,
+        config={
+            "path": str(path),
+            "export": {
+                "enabled": True,
+                "sink": "otlp_http",
+                "otlp": {
+                    "endpoint": "https://collector.example:4318/v1/logs",
+                    "allowed_hosts": ["collector.example"],
+                },
+            },
+        },
+    )
+    assert log_result.exported == 2
+    log_records = log_payloads[0]["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
+    by_name = {record["body"]["stringValue"]: record for record in log_records}
+    assert by_name[parent.event_name]["traceId"] == trace_spans[0]["traceId"]
+    assert by_name[parent.event_name]["spanId"] == trace_spans[0]["spanId"]
+    assert by_name[child.event_name]["traceId"] == trace_spans[1]["traceId"]
+    assert by_name[child.event_name]["spanId"] == trace_spans[1]["spanId"]
+
+
+def test_otlp_http_retries_retryable_status_with_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    sleeps: list[float] = []
+
+    class SuccessResponse:
+        status = 200
+        headers: dict[str, str] = {}
+
+        def __enter__(self) -> SuccessResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def getcode(self) -> int:
+            return self.status
+
+        def read(self, amount: int = -1) -> bytes:
+            return b"{}"
+
+    class RetryOpener:
+        def open(self, request: object, timeout: float) -> SuccessResponse:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                headers = Message()
+                headers["Retry-After"] = "0"
+                raise telemetry.HTTPError(
+                    "https://collector.example/v1/traces",
+                    503,
+                    "private collector detail",
+                    headers,
+                    None,
+                )
+            return SuccessResponse()
+
+    monkeypatch.setattr(telemetry, "build_opener", lambda *args: RetryOpener())
+    monkeypatch.setattr(telemetry.time, "sleep", sleeps.append)
+    telemetry._post_otlp_http(
+        {"resourceSpans": []},
+        {
+            "otlp_endpoint": "https://collector.example/v1/traces",
+            "otlp_headers": {},
+            "otlp_timeout_seconds": 1.0,
+            "otlp_max_retries": 1,
+            "otlp_retry_backoff_seconds": 10.0,
+            "otlp_max_retry_delay_seconds": 1.0,
+        },
+    )
+
+    assert attempts == 2
+    assert sleeps == [0.0]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        telemetry.URLError("collector disconnected"),
+        telemetry.RemoteDisconnected("collector closed connection"),
+    ],
+)
+def test_otlp_http_retries_transport_disconnects_with_bounded_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: BaseException,
+) -> None:
+    attempts = 0
+    sleeps: list[float] = []
+
+    class SuccessResponse:
+        status = 200
+        headers: dict[str, str] = {}
+
+        def __enter__(self) -> SuccessResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def getcode(self) -> int:
+            return self.status
+
+        def read(self, amount: int = -1) -> bytes:
+            return b"{}"
+
+    class RetryOpener:
+        def open(self, request: object, timeout: float) -> SuccessResponse:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise failure
+            return SuccessResponse()
+
+    monkeypatch.setattr(telemetry, "build_opener", lambda *args: RetryOpener())
+    monkeypatch.setattr(telemetry.time, "sleep", sleeps.append)
+    response = telemetry._post_otlp_http(
+        {"resourceSpans": []},
+        {
+            "mode": "local_redacted",
+            "hash_salt": "tenant-a",
+            "max_payload_value_chars": 1024,
+            "otlp_endpoint": "https://collector.example/v1/traces",
+            "otlp_headers": {},
+            "otlp_timeout_seconds": 1.0,
+            "otlp_max_retries": 1,
+            "otlp_retry_backoff_seconds": 0.125,
+            "otlp_max_retry_delay_seconds": 1.0,
+            "otlp_retry_jitter_ratio": 0.0,
+        },
+    )
+
+    assert response.rejected_records == 0
+    assert attempts == 2
+    assert sleeps == [0.125]
+
+
+def test_otlp_http_mandatory_content_headers_cannot_be_overridden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[Any] = []
+
+    class SuccessResponse:
+        status = 200
+        headers: dict[str, str] = {}
+
+        def __enter__(self) -> SuccessResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def getcode(self) -> int:
+            return self.status
+
+        def read(self, amount: int = -1) -> bytes:
+            return b"{}"
+
+    class CapturingOpener:
+        def open(self, request: Any, timeout: float) -> SuccessResponse:
+            requests.append(request)
+            return SuccessResponse()
+
+    monkeypatch.setattr(telemetry, "build_opener", lambda *args: CapturingOpener())
+    telemetry._post_otlp_http(
+        {"resourceSpans": []},
+        {
+            "otlp_endpoint": "https://collector.example/v1/traces",
+            "otlp_headers": {
+                "content-type": "text/plain",
+                "CONTENT-ENCODING": "gzip",
+                "Authorization": "Bearer allowed",
+            },
+            "otlp_timeout_seconds": 1.0,
+            "otlp_max_retries": 0,
+        },
+    )
+
+    request = requests[0]
+    assert request.get_header("Content-type") == "application/json"
+    assert request.get_header("Content-encoding") == "identity"
+    assert request.get_header("Authorization") == "Bearer allowed"
+
+
+def test_otlp_http_rejects_oversized_response_with_bounded_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    read_amounts: list[int] = []
+
+    class OversizedResponse:
+        status = 200
+        headers: dict[str, str] = {}
+
+        def __enter__(self) -> OversizedResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def getcode(self) -> int:
+            return self.status
+
+        def read(self, amount: int = -1) -> bytes:
+            read_amounts.append(amount)
+            return b"x" * amount
+
+    class OversizedOpener:
+        def open(self, request: object, timeout: float) -> OversizedResponse:
+            return OversizedResponse()
+
+    monkeypatch.setattr(telemetry, "build_opener", lambda *args: OversizedOpener())
+    with pytest.raises(RuntimeError, match="response exceeded the size limit"):
+        telemetry._post_otlp_http(
+            {"resourceSpans": []},
+            {
+                "otlp_endpoint": "https://collector.example/v1/traces",
+                "otlp_headers": {},
+                "otlp_timeout_seconds": 1.0,
+                "otlp_max_retries": 0,
+            },
+        )
+
+    assert read_amounts == [telemetry._MAX_OTLP_RESPONSE_BYTES + 1]
+
+
 def test_export_events_hashes_legacy_session_id_for_otlp(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1743,6 +2954,134 @@ def test_telemetry_export_cli_writes_metric_local_jsonl(
     assert exported["metric_id"] == summary["last_metric_id"]
     assert "query" not in exported["attributes"]
     assert "private acme query" not in json.dumps(exported)
+
+
+def test_telemetry_export_cli_previews_and_exports_traces(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "events.jsonl"
+    event = record_event(
+        "ctx.api.recommend_bundle",
+        source="ctx-api",
+        session_id="private-session",
+        path=path,
+        trusted_root=tmp_path,
+        config={"path": str(path), "export": {"enabled": False}},
+    )
+    assert event is not None
+    calls: list[tuple[dict[str, Any], dict[str, Any]]] = []
+
+    def fake_post_otlp_http(
+        payload: dict[str, Any],
+        settings: dict[str, Any],
+    ) -> None:
+        calls.append((payload, settings))
+
+    monkeypatch.setattr(telemetry, "_post_otlp_http", fake_post_otlp_http)
+    monkeypatch.setattr(
+        telemetry_cli,
+        "_base_telemetry_config",
+        lambda: {
+            "path": str(path),
+            "privacy": {"hash_salt": "tenant-a"},
+            "traces": {
+                "enabled": True,
+                "export": {"enabled": False, "span_maturity_seconds": 0},
+            },
+        },
+    )
+    common_args = [
+        "--signal",
+        "traces",
+        "--path",
+        str(path),
+        "--trusted-root",
+        str(tmp_path),
+        "--sink",
+        "otlp_http",
+        "--otlp-endpoint",
+        "http://127.0.0.1:4318/v1/traces",
+        "--json",
+    ]
+
+    assert telemetry_cli.main([*common_args, "--dry-run"]) == 0
+    preview = json.loads(capsys.readouterr().out)
+    assert preview["signal"] == "traces"
+    assert preview["attempted"] == 1
+    assert preview["exported"] == 0
+    assert preview["checkpoint_advanced"] is False
+    assert preview["checkpoint_path"] == str(path) + ".trace-export-checkpoint.json"
+    assert calls == []
+
+    assert telemetry_cli.main(common_args) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["signal"] == "traces"
+    assert summary["attempted"] == 1
+    assert summary["exported"] == 1
+    assert summary["failed"] == 0
+    assert summary["checkpoint_after_event_id"] == event.event_id
+    assert summary["checkpoint_path"] == str(path) + ".trace-export-checkpoint.json"
+    assert summary["status_path"] == str(path) + ".trace-export-status.json"
+    assert len(calls) == 1
+    payload, settings = calls[0]
+    assert settings["otlp_endpoint"] == "http://127.0.0.1:4318/v1/traces"
+    assert payload["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    assert "private-session" not in json.dumps(payload)
+
+
+def test_telemetry_export_cli_trace_preview_fails_invalid_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "events.jsonl"
+    invalid = TelemetryEvent(
+        schema_version=SCHEMA_VERSION,
+        event_id="invalid-preview-trace",
+        ts="2026-06-28T00:00:00Z",
+        event_name="ctx.api.failed",
+        source="ctx-api",
+        trace_id="invalid",
+        span_id="2" * 16,
+        privacy_mode="local_redacted",
+    )
+    path.write_text(json.dumps(asdict(invalid)) + "\n", encoding="utf-8")
+    monkeypatch.setattr(
+        telemetry_cli,
+        "_base_telemetry_config",
+        lambda: {
+            "path": str(path),
+            "traces": {"enabled": True, "export": {"enabled": False}},
+        },
+    )
+
+    rc = telemetry_cli.main(
+        [
+            "--signal",
+            "traces",
+            "--path",
+            str(path),
+            "--trusted-root",
+            str(tmp_path),
+            "--sink",
+            "otlp_http",
+            "--otlp-endpoint",
+            "http://127.0.0.1:4318/v1/traces",
+            "--dry-run",
+            "--json",
+        ]
+    )
+
+    summary = json.loads(capsys.readouterr().out)
+    assert rc == 1
+    assert summary["attempted"] == 1
+    assert summary["exported"] == 0
+    assert summary["failed"] == 1
+    assert summary["status"] == "failed"
+    assert summary["error_kind"] == "ValueError"
+    assert summary["checkpoint_advanced"] is False
 
 
 def test_telemetry_export_cli_allows_remote_otlp_host(

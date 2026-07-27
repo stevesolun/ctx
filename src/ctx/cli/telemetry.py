@@ -14,9 +14,11 @@ from ctx.telemetry import (
     enforce_telemetry_retention,
     export_events,
     export_metrics,
+    export_traces,
     plan_telemetry_retention,
     preview_export,
     preview_metrics_export,
+    preview_traces_export,
 )
 
 
@@ -27,7 +29,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--signal",
-        choices=("events", "metrics"),
+        choices=("events", "metrics", "traces"),
         default="events",
         help="Telemetry signal to export.",
     )
@@ -52,7 +54,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--otlp-endpoint",
         default=None,
-        help="OTLP/HTTP logs or metrics endpoint for --sink otlp_http.",
+        help="OTLP/HTTP logs, metrics, or traces endpoint for --sink otlp_http.",
     )
     parser.add_argument(
         "--otlp-allowed-host",
@@ -154,6 +156,18 @@ def _effective_config(args: argparse.Namespace) -> dict[str, Any]:
             metrics["export"] = export
         if args.path is not None:
             metrics["path"] = str(args.path)
+    elif args.signal == "traces":
+        traces = config.get("traces")
+        if not isinstance(traces, dict):
+            traces = {}
+            config["traces"] = traces
+        traces["enabled"] = True
+        export = traces.get("export")
+        if not isinstance(export, dict):
+            export = {}
+            traces["export"] = export
+        if args.path is not None:
+            config["path"] = str(args.path)
     else:
         export = config.get("export")
         if args.path is not None:
@@ -162,6 +176,8 @@ def _effective_config(args: argparse.Namespace) -> dict[str, Any]:
         export = {}
         if args.signal == "metrics":
             config["metrics"]["export"] = export
+        elif args.signal == "traces":
+            config["traces"]["export"] = export
         else:
             config["export"] = export
     export["enabled"] = True
@@ -206,7 +222,7 @@ def _export_summary(result: Any, *, signal: str, dry_run: bool) -> dict[str, Any
         "signal": signal,
         "attempted": result.attempted,
         "exported": 0 if dry_run else result.exported,
-        "failed": 0 if dry_run else result.failed,
+        "failed": result.failed,
         "sink": result.sink,
         "status": result.status,
         "dry_run": dry_run,
@@ -220,6 +236,9 @@ def _export_summary(result: Any, *, signal: str, dry_run: bool) -> dict[str, Any
         "destination_hash": result.destination_hash,
         "last_success_at": result.last_success_at,
         "status_path": result.status_path,
+        "error_message": result.error_message if signal == "traces" else None,
+        "retained_events": result.retained_events if signal == "traces" else 0,
+        "late_span_events": result.late_span_events if signal == "traces" else 0,
     }
     if signal == "metrics":
         payload.update(
@@ -228,7 +247,7 @@ def _export_summary(result: Any, *, signal: str, dry_run: bool) -> dict[str, Any
                 "checkpoint_before_metric_id": result.checkpoint_before_metric_id,
                 "checkpoint_after_metric_id": result.checkpoint_after_metric_id,
                 "last_success_metric_id": result.last_success_metric_id,
-                "error_kind": None if dry_run else result.error_kind,
+                "error_kind": result.error_kind,
             }
         )
     else:
@@ -238,14 +257,18 @@ def _export_summary(result: Any, *, signal: str, dry_run: bool) -> dict[str, Any
                 "checkpoint_before_event_id": result.checkpoint_before_event_id,
                 "checkpoint_after_event_id": result.checkpoint_after_event_id,
                 "last_success_event_id": result.last_success_event_id,
-                "error_kind": None if dry_run else result.error_kind,
+                "error_kind": result.error_kind,
             }
         )
     return payload
 
 
 def _print_export_human(payload: Mapping[str, Any], *, dry_run: bool) -> None:
-    noun = "metric(s)" if payload["signal"] == "metrics" else "event(s)"
+    noun = {
+        "events": "event(s)",
+        "metrics": "metric(s)",
+        "traces": "span(s)",
+    }[str(payload["signal"])]
     if dry_run:
         print(f"Would export {payload['attempted']} telemetry {noun} to {payload['sink']}.")
     else:
@@ -279,6 +302,13 @@ def main(argv: list[str] | None = None) -> int:
                     config=config,
                     include_exported=args.all,
                 )
+            elif args.signal == "traces":
+                preview_result = preview_traces_export(
+                    args.path,
+                    trusted_root=args.trusted_root,
+                    config=config,
+                    include_exported=args.all,
+                )
             else:
                 preview_result = preview_export(
                     args.path,
@@ -292,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 _print_export_human(payload, dry_run=True)
             return _exit_code(
-                failed=0,
+                failed=int(payload["failed"]),
                 status=str(payload["status"]),
                 fail_on_degraded=args.fail_on_degraded,
             )
@@ -300,6 +330,13 @@ def main(argv: list[str] | None = None) -> int:
         export_result: Any
         if args.signal == "metrics":
             export_result = export_metrics(
+                args.path,
+                trusted_root=args.trusted_root,
+                config=config,
+                include_exported=args.all,
+            )
+        elif args.signal == "traces":
+            export_result = export_traces(
                 args.path,
                 trusted_root=args.trusted_root,
                 config=config,
