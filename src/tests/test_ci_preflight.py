@@ -184,6 +184,19 @@ def test_local_fast_lane_filters_are_composable() -> None:
     assert [lane.name for lane in filtered] == ["static", "unit"]
 
 
+def test_local_fast_reserves_cpu_for_nested_xdist(monkeypatch) -> None:
+    monkeypatch.setattr(local_fast_gate.os, "cpu_count", lambda: 18)
+    unit_check = Check(
+        "unit-linux equivalent",
+        ("python", "-m", "pytest", "-q", "-n", "auto", "--dist=loadfile"),
+    )
+
+    unit_lane = local_fast_gate.group_checks([unit_check])[0]
+
+    assert unit_lane.checks[0].argv[-3:] == ("-n", "4", "--dist=loadfile")
+    assert local_fast_gate._default_jobs() == 9
+
+
 def test_local_fast_main_accepts_repeated_lane_args(monkeypatch, capsys) -> None:
     checks = [
         Check("ruff", ("python", "-m", "ruff", "check", "src")),

@@ -61,6 +61,7 @@ def _selection(
 _SECURE_DIRFD_READS = (
     hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY") and os.open in os.supports_dir_fd
 )
+_SEMANTIC_SELECTION_TIMEOUT_MS = 5_000
 
 
 @pytest.mark.skipif(not _SECURE_DIRFD_READS, reason="secure dir_fd reads unavailable")
@@ -78,6 +79,7 @@ def test_selector_chooses_one_strong_local_match_without_graph(tmp_path: Path) -
     selected = select_installed_skill(
         "Investigate why this runtime wastes tokens",
         skill_roots=[root],
+        selection_timeout_ms=_SEMANTIC_SELECTION_TIMEOUT_MS,
     )
     elapsed = time.perf_counter() - started
 
@@ -113,10 +115,12 @@ def test_selector_uses_declared_intent_and_distinctive_technology(tmp_path: Path
     ci = select_installed_skill(
         "Fix the failing GitHub Actions checks on this PR",
         skill_roots=[root],
+        selection_timeout_ms=_SEMANTIC_SELECTION_TIMEOUT_MS,
     )
     browser = select_installed_skill(
         "Test the local web application with Playwright",
         skill_roots=[root],
+        selection_timeout_ms=_SEMANTIC_SELECTION_TIMEOUT_MS,
     )
 
     assert ci is not None and ci.name == "gh-fix-ci"
@@ -125,6 +129,7 @@ def test_selector_uses_declared_intent_and_distinctive_technology(tmp_path: Path
         select_installed_skill(
             "Sort a local JavaScript API response",
             skill_roots=[root],
+            selection_timeout_ms=_SEMANTIC_SELECTION_TIMEOUT_MS,
         )
         is None
     )
