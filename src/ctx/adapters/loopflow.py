@@ -18,6 +18,7 @@ from typing import Any
 import ctx.api as ctx_api
 from ctx.adapters.generic.ctx_core_tools import (
     _base_recommendation_row,
+    _infer_no_api_keys_constraint,
     _is_local_loadable_skill_row,
     _recommendation_context_from_args,
     _recommendation_context_skip_reason,
@@ -572,18 +573,17 @@ def _row_selection_keys(row: dict[str, Any], name: str) -> set[str]:
     return _selection_keys([str(row.get("id") or f"{row.get('type')}:{name}"), name])
 
 
-def _is_local_no_key_query(query: str) -> bool:
-    lower = query.lower()
-    return any(
-        marker in lower
-        for marker in (
-            "no api keys",
-            "no local api keys",
-            "local files",
-            "local repo",
-            "feature_implementation",
-            "feature implementation",
-        )
+def _loop_recommendation_context(
+    query: str,
+    *,
+    no_api_keys: bool | None,
+) -> dict[str, Any]:
+    resolved_no_api_keys = (
+        _infer_no_api_keys_constraint(query) if no_api_keys is None else no_api_keys
+    )
+    return _recommendation_context_from_args(
+        query,
+        {"no_api_keys": resolved_no_api_keys},
     )
 
 
@@ -737,6 +737,7 @@ def _project_owned_fallback_rows(
     query: str,
     entity_types: tuple[str, ...],
     wiki_dir: Path | None,
+    recommendation_context: dict[str, Any],
 ) -> list[dict[str, Any]]:
     try:
         node_ids = [
@@ -754,8 +755,9 @@ def _project_owned_fallback_rows(
     source_counts = dict(fallback_graph.graph.get("source_catalog_nodes") or {})
     source_counts["skills.sh"] = 1
     fallback_graph.graph["source_catalog_nodes"] = source_counts
-    context = _recommendation_context_from_args(query, {})
-    local_loadable_skills_only = _is_local_no_key_query(query)
+    local_loadable_skills_only = bool(
+        recommendation_context.get("local_code_task") or recommendation_context.get("no_api_keys")
+    )
     rows: list[dict[str, Any]] = []
     for raw in recommend_by_tags(
         fallback_graph,
@@ -772,7 +774,7 @@ def _project_owned_fallback_rows(
             and not _is_loadable_skill_row(row)
         ):
             continue
-        if _recommendation_context_skip_reason(row, context) is not None:
+        if _recommendation_context_skip_reason(row, recommendation_context) is not None:
             continue
         rows.append(row)
     return rows
@@ -783,6 +785,7 @@ def _recommend_capability_rows(
     *,
     permissions: set[str],
     top_k: int,
+    no_api_keys: bool | None = None,
 ) -> list[dict[str, Any]]:
     entity_types = [
         entity_type for group, entity_type in _GROUP_TO_ENTITY.items() if group in permissions
@@ -807,8 +810,11 @@ def _recommend_capability_rows(
     )
     wiki_dir = ctx_api.default_wiki_dir()
     rows = [_capability_row(row, wiki_dir=wiki_dir) for row in raw_rows]
-    recommendation_context = _recommendation_context_from_args(query, {})
-    if _is_local_no_key_query(query) or any(
+    recommendation_context = _loop_recommendation_context(
+        query,
+        no_api_keys=no_api_keys,
+    )
+    if any(
         bool(recommendation_context.get(key))
         for key in ("local_code_task", "no_api_keys", "language")
     ):
@@ -818,6 +824,7 @@ def _recommend_capability_rows(
                 query=query,
                 entity_types=tuple(entity_types),
                 wiki_dir=wiki_dir,
+                recommendation_context=recommendation_context,
             )
         )
     return rows
@@ -840,6 +847,7 @@ def recommend_for_loop(
     rejected: list[str] | None = None,
     session_id: str | None = None,
     rejection_mode: str = "use",
+    no_api_keys: bool | None = None,
     top_k: int = 5,
 ) -> dict[str, Any]:
     """Return a permissioned ctx adapter payload for a DSL or agent loop.
@@ -894,8 +902,13 @@ def recommend_for_loop(
             rejection_mode=rejection_mode,
         )
     excluded_ids = _selection_keys(selected_ids + rejected_ids)
-    local_loadable_skills_only = _is_local_no_key_query(ranking_query)
-    recommendation_context = _recommendation_context_from_args(ranking_query, {})
+    recommendation_context = _loop_recommendation_context(
+        ranking_query,
+        no_api_keys=no_api_keys,
+    )
+    local_loadable_skills_only = bool(
+        recommendation_context.get("local_code_task") or recommendation_context.get("no_api_keys")
+    )
     context_filters_active = any(
         bool(recommendation_context.get(key))
         for key in ("local_code_task", "no_api_keys", "language")
@@ -906,11 +919,19 @@ def recommend_for_loop(
             fetch_top_k = 50
         elif excluded_ids or local_loadable_skills_only:
             fetch_top_k = min(50, safe_top_k + len(excluded_ids) + 5)
-        rows = _recommend_capability_rows(
-            ranking_query,
-            permissions=granted,
-            top_k=fetch_top_k,
-        )
+        if no_api_keys is None:
+            rows = _recommend_capability_rows(
+                ranking_query,
+                permissions=granted,
+                top_k=fetch_top_k,
+            )
+        else:
+            rows = _recommend_capability_rows(
+                ranking_query,
+                permissions=granted,
+                top_k=fetch_top_k,
+                no_api_keys=no_api_keys,
+            )
         capability_bundle.update(
             _group_bundle(
                 rows,
@@ -1098,6 +1119,21 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--harness-privacy", default="")
     parser.add_argument("--harness-attach-mode", default="")
     parser.add_argument("--api-key-env", default="")
+    api_key_group = parser.add_mutually_exclusive_group()
+    api_key_group.add_argument(
+        "--no-api-keys",
+        dest="no_api_keys",
+        action="store_true",
+        default=None,
+        help="Force local/no-key recommendation filtering.",
+    )
+    api_key_group.add_argument(
+        "--api-keys-available",
+        dest="no_api_keys",
+        action="store_false",
+        default=None,
+        help="Disable inferred no-key filtering when credentials are available.",
+    )
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--compact", action="store_true", help="Print compact JSON.")
     return parser
@@ -1160,6 +1196,7 @@ def main(argv: list[str] | None = None) -> int:
         rejected=_split_csv(args.rejected),
         session_id=args.session_id,
         rejection_mode=args.rejection_mode,
+        no_api_keys=args.no_api_keys,
         top_k=args.top_k,
     )
     json.dump(payload, sys.stdout, indent=None if args.compact else 2, sort_keys=True)

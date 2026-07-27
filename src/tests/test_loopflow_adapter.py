@@ -13,7 +13,11 @@ from typing import Any
 import networkx as nx
 import pytest
 import ctx.api as ctx_api
-from ctx.adapters.generic.ctx_core_tools import CtxCoreToolbox
+from ctx.adapters.generic.ctx_core_tools import (
+    CtxCoreToolbox,
+    _infer_no_api_keys_constraint,
+    _recommendation_context_from_args,
+)
 from ctx.adapters.generic.providers import ToolCall
 from ctx.adapters import loopflow
 
@@ -39,6 +43,69 @@ def _expected_scoped_mcp_args(*entity_types: str) -> list[str]:
 class _FakeGraph:
     def number_of_nodes(self) -> int:
         return 10
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Run with no API key",
+        "Run with no API keys",
+        "Run with no API-key",
+        "Run without API keys",
+        "Run without an API key",
+        "Run without any API keys",
+        "Run with no local API key",
+        "Run without any local API-keys",
+        "Run with no external API",
+        "Run because no API key is available",
+        "Run because no API key may be available",
+        "Run because no API key might be required",
+        "Run because no API key is configured",
+        "Run because no API key exists",
+    ],
+)
+def test_shared_no_api_key_inference_recognizes_runtime_constraints(query: str) -> None:
+    assert _infer_no_api_keys_constraint(query) is True
+    assert _recommendation_context_from_args(query, {})["no_api_keys"] is True
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Ensure no API key is logged",
+        "Ensure no API key is printed",
+        "Ensure no API key is exposed",
+        "Ensure no API key is stored",
+        "Ensure no API key is leaked",
+        "Verify no API-key gets accidentally leaked",
+        "Continue without API keys being exposed in logs",
+        "Ensure no API key leaks into logs",
+        "Ensure no API key logging occurs",
+        "Ensure no API key exposure happens",
+        "Ensure no API key may be logged",
+        "Ensure no API key might be printed",
+    ],
+)
+def test_shared_no_api_key_inference_ignores_privacy_observations(query: str) -> None:
+    assert _infer_no_api_keys_constraint(query) is False
+    assert _recommendation_context_from_args(query, {})["no_api_keys"] is False
+
+
+def test_core_no_api_key_override_takes_precedence_over_inference() -> None:
+    assert (
+        _recommendation_context_from_args(
+            "Implement without any API keys",
+            {"no_api_keys": False},
+        )["no_api_keys"]
+        is False
+    )
+    assert (
+        _recommendation_context_from_args(
+            "Ensure no API key is logged",
+            {"no_api_keys": True},
+        )["no_api_keys"]
+        is True
+    )
 
 
 def test_parse_loop_file_reads_loopflow_context(tmp_path: Path) -> None:
@@ -726,7 +793,7 @@ def test_project_owned_fallback_survives_context_filtering_and_owned_llm(
     monkeypatch.setattr(loopflow, "recommend_by_tags", fake_recommend_by_tags)
 
     plain = loopflow.recommend_for_loop(
-        goal="Implement and test a local Python API feature with no API keys",
+        goal="Implement and test a local Python API feature with no API key",
         permissions={"skills"},
         top_k=1,
     )
@@ -853,6 +920,68 @@ def test_loopflow_local_no_key_loop_filters_related_recommendations(monkeypatch)
             "selection_state": "suggested_related",
         }
     ]
+
+
+def test_loopflow_no_api_key_override_controls_filters_without_query_leak(
+    monkeypatch,
+) -> None:
+    calls: list[bool | None] = []
+
+    def fake_recommend_rows(
+        query: str,
+        *,
+        permissions: set[str],
+        top_k: int,
+        no_api_keys: bool | None = None,
+    ) -> list[dict[str, Any]]:
+        del query, permissions, top_k
+        calls.append(no_api_keys)
+        return [
+            {
+                "id": "mcp-server:remote-openai",
+                "name": "remote-openai",
+                "type": "mcp-server",
+                "installable": False,
+                "external": True,
+                "status": "available",
+            },
+            {
+                "id": "skill:local-helper",
+                "name": "local-helper",
+                "type": "skill",
+                "installable": True,
+                "external": False,
+                "load_status": "local-wiki",
+            },
+        ]
+
+    monkeypatch.setattr(loopflow, "_recommend_capability_rows", fake_recommend_rows)
+
+    observational_goal = "Ensure no API key is logged while reviewing this feature"
+    inferred = loopflow.recommend_for_loop(
+        goal=observational_goal,
+        permissions={"skills", "mcps"},
+    )
+    forced_keyless = loopflow.recommend_for_loop(
+        goal=observational_goal,
+        permissions={"skills", "mcps"},
+        no_api_keys=True,
+    )
+    forced_available = loopflow.recommend_for_loop(
+        goal="Implement without any API keys",
+        permissions={"skills", "mcps"},
+        no_api_keys=False,
+    )
+
+    assert [row["id"] for row in inferred["capabilities"]["mcps"]] == ["mcp-server:remote-openai"]
+    assert forced_keyless["capabilities"]["mcps"] == []
+    assert [row["id"] for row in forced_keyless["capabilities"]["skills"]] == ["skill:local-helper"]
+    assert [row["id"] for row in forced_available["capabilities"]["mcps"]] == [
+        "mcp-server:remote-openai"
+    ]
+    assert forced_keyless["context"]["query"] == inferred["context"]["query"]
+    assert "--no-api-keys" not in forced_keyless["context"]["query"]
+    assert calls == [None, True, False]
 
 
 def test_related_recommendations_include_availability_metadata(tmp_path: Path) -> None:
@@ -1469,6 +1598,49 @@ def test_main_forwards_rejection_session_flags(monkeypatch, capsys) -> None:
     assert captured["rejected"] == ["skill:legacy-helper"]
     assert captured["session_id"] == "loop-cli-session"
     assert captured["rejection_mode"] == "replace"
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected"),
+    [
+        ("--no-api-keys", True),
+        ("--api-keys-available", False),
+    ],
+)
+def test_main_forwards_explicit_no_api_key_override(
+    flag: str,
+    expected: bool,
+    monkeypatch,
+    capsys,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_recommend_for_loop(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(loopflow, "recommend_for_loop", fake_recommend_for_loop)
+
+    assert loopflow.main(["--goal", "review API logging", flag, "--compact"]) == 0
+
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
+    assert captured["goal"] == "review API logging"
+    assert captured["no_api_keys"] is expected
+
+
+def test_main_rejects_conflicting_no_api_key_overrides(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        loopflow.main(
+            [
+                "--goal",
+                "review API logging",
+                "--no-api-keys",
+                "--api-keys-available",
+            ]
+        )
+
+    assert exc_info.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
 
 
 def test_main_uses_loop_file_ctx_grants_when_cli_permissions_absent(
