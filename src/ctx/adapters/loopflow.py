@@ -558,9 +558,7 @@ def _is_actionable_capability_row(row: dict[str, Any]) -> bool:
         return True
     if row.get("installable") is True:
         return True
-    return row.get("load_status") == "external-install-required" and bool(
-        str(row.get("install_command") or "").strip()
-    )
+    return bool(str(row.get("install_command") or "").strip())
 
 
 def _selection_key(value: str) -> str:

@@ -60,6 +60,8 @@ from ctx.adapters.generic.loop import (
     StopReason,
     ToolPolicy,
     TurnController,
+    _validate_budgets,
+    _validate_usage,
     run_loop,
 )
 from ctx.adapters.generic.planner import PlanArtifact, Planner, augmented_system_prompt
@@ -378,6 +380,10 @@ def run_with_evaluation(
         raise ValueError(f"max_rounds must be <= 2 (got {max_rounds})")
     if max_iterations < 1:
         raise ValueError(f"max_iterations must be >= 1 (got {max_iterations})")
+    _validate_budgets(
+        budget_usd=budget_usd,
+        budget_tokens=budget_tokens,
+    )
 
     # Planner pass — if supplied, transform the system prompt + give
     # the evaluator its spec-based criteria.
@@ -632,6 +638,7 @@ class _UsageTotals:
 
     @classmethod
     def from_usage(cls, usage: Usage) -> "_UsageTotals":
+        _validate_usage(usage, source="orchestration")
         return cls(
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
@@ -644,6 +651,7 @@ class _UsageTotals:
         )
 
     def add(self, usage: Usage) -> None:
+        _validate_usage(usage, source="auxiliary agent")
         self.has_usage = True
         self.input_tokens += usage.input_tokens
         self.output_tokens += usage.output_tokens

@@ -410,10 +410,11 @@ class RuntimeLifecycleStore:
                     current["source_context"] = (
                         event.get("source_context") or current["source_context"]
                     )
-                if action == "load_applied":
+                if action == "load_applied" and current["load_status"] != "applied":
                     current["load_status"] = "applied"
                     current["applied_at"] = event.get("created_at")
                     current["applied_at_epoch"] = float(event.get("created_at_epoch") or 0)
+                    current["dev_event_epoch"] = latest_dev_event_epoch
             elif action == "used" and key in loaded:
                 loaded[key]["used"] = True
                 loaded[key]["use_count"] = int(loaded[key]["use_count"]) + 1
@@ -503,7 +504,7 @@ class RuntimeLifecycleStore:
             for entry in loaded_entries
             if not entry["used"]
             and _loaded_before_latest_dev_event(entry, latest_dev_event_epoch)
-            and (min_age == 0 or now - float(entry.get("loaded_at_epoch") or 0) >= min_age)
+            and (min_age == 0 or now - float(entry.get("applied_at_epoch") or 0) >= min_age)
         ]
         return {
             "ok": True,

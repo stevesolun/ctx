@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import functools
+import gzip
 import hashlib
+from importlib import resources
 from ipaddress import IPv6Address
 import json
 import re
@@ -506,12 +511,45 @@ def _canonical_evidence_path(value: object, field: str) -> str:
     return normalized
 
 
+@functools.cache
+def _packaged_evidence() -> dict[str, bytes]:
+    try:
+        raw = resources.files("ctx.assets").joinpath("license-evidence.json").read_text(
+            encoding="utf-8",
+        )
+        packaged = json.loads(raw)
+        if not isinstance(packaged, dict) or not isinstance(packaged.get("gzip_base64"), str):
+            raise ValueError("expected gzip_base64")
+        compressed = base64.b64decode(packaged["gzip_base64"], validate=True)
+        encoded = json.loads(gzip.decompress(compressed))
+        if not isinstance(encoded, dict):
+            raise ValueError("expected an object")
+        if not all(
+            isinstance(path, str) and isinstance(value, str) for path, value in encoded.items()
+        ):
+            raise ValueError("expected string evidence entries")
+        return {path: base64.b64decode(value, validate=True) for path, value in encoded.items()}
+    except (EOFError, OSError, UnicodeError, ValueError, binascii.Error) as exc:
+        raise LicenseGateError(f"packaged evidence is unavailable: {exc}") from None
+
+
 def _verify_checked_in_evidence(path_value: str, digest: str, field: str) -> bytes:
     evidence_path = REPO_ROOT / path_value
     try:
         resolved = evidence_path.resolve(strict=True)
         repository = REPO_ROOT.resolve(strict=True)
-    except (FileNotFoundError, OSError) as exc:
+    except FileNotFoundError:
+        try:
+            payload = _packaged_evidence()[path_value]
+        except KeyError:
+            raise LicenseGateError(f"{field}: evidence file is unavailable") from None
+        actual = hashlib.sha256(payload).hexdigest()
+        if not secrets.compare_digest(actual, digest):
+            raise LicenseGateError(
+                f"{field}: evidence sha256 mismatch; expected={digest}, actual={actual}",
+            )
+        return payload
+    except OSError as exc:
         raise LicenseGateError(f"{field}: evidence file is unavailable: {exc}") from None
     try:
         resolved.relative_to(repository)

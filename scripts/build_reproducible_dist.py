@@ -108,7 +108,10 @@ def build_distributions(
         raise ReproducibleBuildError(f"output path is not a real directory: {target_dir}")
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix=".ctx-dist-build-") as tmp:
+    with tempfile.TemporaryDirectory(
+        prefix=".ctx-dist-build-",
+        dir=target_dir,
+    ) as tmp:
         staging_dir = Path(tmp) / "dist"
         staging_dir.mkdir()
         env = dict(os.environ)

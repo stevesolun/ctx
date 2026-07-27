@@ -36,6 +36,7 @@ from ctx.adapters.generic.loop import TurnAuthorization, TurnPreparation
 from ctx.adapters.generic.providers import Message, ToolCall, ToolDefinition, Usage
 from ctx.core.wiki.wiki_utils import validate_skill_name
 from ctx.telemetry import hash_identifier
+from ctx.utils._secret_scan import redact_secret_text
 from ctx_config import cfg
 
 
@@ -452,6 +453,8 @@ def _discover_candidates(
             if verified is None:
                 continue
             content, digest = verified
+            if redact_secret_text(content) != content:
+                continue
             description = _skill_description(content)
             if not description or description.lower().startswith("replace with description"):
                 continue

@@ -273,6 +273,7 @@ class _RunningTotals:
     cached_input_reported: bool = True
 
     def add(self, usage: Usage, *, provider_call: bool = False) -> None:
+        _validate_usage(usage, source="accumulated")
         self.input_tokens += usage.input_tokens
         self.output_tokens += usage.output_tokens
         if usage.cost_usd is not None:
@@ -350,6 +351,27 @@ def _budget_stop_reason(
     return None, ""
 
 
+def _validate_budgets(
+    *,
+    budget_usd: float | None,
+    budget_tokens: int | None,
+) -> None:
+    if budget_usd is not None:
+        if (
+            isinstance(budget_usd, bool)
+            or not isinstance(budget_usd, (int, float))
+            or not math.isfinite(budget_usd)
+            or budget_usd < 0
+        ):
+            raise ValueError("budget_usd must be a non-negative finite number or None")
+    if budget_tokens is not None and (
+        isinstance(budget_tokens, bool)
+        or not isinstance(budget_tokens, int)
+        or budget_tokens < 0
+    ):
+        raise ValueError("budget_tokens must be a non-negative integer or None")
+
+
 # ── Main loop ──────────────────────────────────────────────────────────────
 
 
@@ -422,6 +444,10 @@ def run_loop(
         raise ValueError(f"max_iterations must be >= 1 (got {max_iterations})")
     if provider_timeout is not None and provider_timeout <= 0:
         raise ValueError("provider_timeout must be > 0 when set")
+    _validate_budgets(
+        budget_usd=budget_usd,
+        budget_tokens=budget_tokens,
+    )
     if turn_prepare_timeout is not None:
         if (
             isinstance(turn_prepare_timeout, bool)

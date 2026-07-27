@@ -680,12 +680,10 @@ def _profile_recommendation_query(profile: dict) -> str:
 def _shared_recommendations(profile: dict) -> list[dict[str, Any]] | None:
     """Return shared recommender rows, or None when no graph is available."""
     from ctx import recommend_bundle  # noqa: PLC0415
-    from ctx.core.graph.resolve_graph import load_graph  # noqa: PLC0415
     from ctx_config import cfg  # noqa: PLC0415
 
-    graph_path = cfg.wiki_dir / "graphify-out" / "graph.json"
-    graph = load_graph(graph_path)
-    if graph.number_of_nodes() == 0:
+    graph_path = Path(cfg.wiki_dir) / "graphify-out" / "graph.json"
+    if not graph_path.is_file() and not (graph_path.parent / "packs").is_dir():
         return None
     query = _profile_recommendation_query(profile)
     if not query:

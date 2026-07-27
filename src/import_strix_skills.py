@@ -270,6 +270,98 @@ def _read_source_text(source_rel: str) -> tuple[Path, str]:
     )
 
 
+def _read_preflight_destination(
+    target_root: Path,
+    destination: Path,
+) -> tuple[tuple[int, int] | None, os.stat_result | None, str | None]:
+    if _supports_directory_fds():
+        target_fd = _open_anchored_directory(target_root, create=False)
+        if target_fd is None:
+            return None, None, None
+        parent_fd: int | None = None
+        try:
+            try:
+                parent_metadata = os.stat(
+                    destination.parent.name,
+                    dir_fd=target_fd,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                return None, None, None
+            if not stat.S_ISDIR(parent_metadata.st_mode) or stat.S_ISLNK(
+                parent_metadata.st_mode
+            ):
+                raise ValueError(f"skill dir {destination.parent} must be a real directory")
+            parent_fd = os.open(
+                destination.parent.name,
+                _DIRECTORY_OPEN_FLAGS,
+                dir_fd=target_fd,
+            )
+            if not os.path.samestat(parent_metadata, os.fstat(parent_fd)):
+                raise ValueError(f"skill dir {destination.parent} changed while opening")
+
+            metadata = _destination_state_at(parent_fd, destination.name)
+            if metadata is None:
+                return _identity(parent_metadata), None, None
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ValueError(f"destination {destination} must be a regular file")
+            fd = os.open(destination.name, _FILE_OPEN_FLAGS, dir_fd=parent_fd)
+            try:
+                opened = os.fstat(fd)
+                if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(metadata, opened):
+                    raise ValueError(f"destination {destination} changed while opening")
+                with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                    fd = -1
+                    return _identity(parent_metadata), metadata, handle.read()
+            finally:
+                if fd != -1:
+                    os.close(fd)
+        finally:
+            if parent_fd is not None:
+                os.close(parent_fd)
+            os.close(target_fd)
+
+    if _supports_windows_path_guards():
+        if not _validate_real_directory(target_root, label="target directory"):
+            return None, None, None
+        parent_metadata = _lstat_optional(destination.parent)
+        if parent_metadata is None:
+            return None, None, None
+        with _guard_windows_directories(
+            target_root,
+            destination.parent,
+            create_missing=False,
+        ):
+            guarded_parent = destination.parent.stat(follow_symlinks=False)
+            if not os.path.samestat(parent_metadata, guarded_parent):
+                raise ValueError(f"skill dir {destination.parent} changed while opening")
+            metadata = _lstat_optional(destination)
+            if metadata is None:
+                return _identity(parent_metadata), None, None
+            if (
+                stat.S_ISLNK(metadata.st_mode)
+                or _is_reparse_point(destination, metadata)
+                or not stat.S_ISREG(metadata.st_mode)
+            ):
+                raise ValueError(f"destination {destination} must be a regular file")
+            fd = os.open(destination, os.O_RDONLY)
+            try:
+                opened = os.fstat(fd)
+                if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(metadata, opened):
+                    raise ValueError(f"destination {destination} changed while opening")
+                with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                    fd = -1
+                    return _identity(parent_metadata), metadata, handle.read()
+            finally:
+                if fd != -1:
+                    os.close(fd)
+
+    raise RuntimeError(
+        "secure destination read unavailable: this platform must provide "
+        "directory-relative filesystem operations or Windows directory handles"
+    )
+
+
 def _prepare_entry(entry: dict, manifest: dict, target_dir: Path) -> PreparedEntry:
     # Manifest fields are untrusted input (the repo's imported-skills/
     # MANIFEST.json is checked-in today, but the path from parsing to
@@ -313,22 +405,18 @@ def _prepare_entry(entry: dict, manifest: dict, target_dir: Path) -> PreparedEnt
     content = header + body
 
     parent_is_symlink = skill_dir.is_symlink()
-    parent_identity = None
-    if skill_dir.exists():
-        parent_identity = _identity(skill_dir.stat(follow_symlinks=False))
-
-    destination_identity = None
-    destination_link_count = 0
-    existed = dest.exists()
-    changed = True
-    if existed:
-        destination_metadata = dest.stat(follow_symlinks=False)
-        if not stat.S_ISREG(destination_metadata.st_mode):
-            raise ValueError(f"destination {dest} must be a regular file")
-        destination_identity = _identity(destination_metadata)
-        destination_link_count = destination_metadata.st_nlink
-        existing = dest.read_text(encoding="utf-8")
-        changed = existing != content
+    parent_identity, destination_metadata, existing = _read_preflight_destination(
+        target_resolved,
+        dest,
+    )
+    existed = destination_metadata is not None
+    destination_identity = (
+        None if destination_metadata is None else _identity(destination_metadata)
+    )
+    destination_link_count = (
+        0 if destination_metadata is None else destination_metadata.st_nlink
+    )
+    changed = existing != content
 
     return PreparedEntry(
         destination=dest,

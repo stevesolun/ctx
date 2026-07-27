@@ -51,6 +51,7 @@ from ctx.adapters.generic.loop import (
     TurnActivation,
     TurnAuthorization,
     TurnPreparation,
+    _validate_usage,
     run_loop,
 )
 from ctx.adapters.generic.contract import ContractBuilder
@@ -1836,6 +1837,43 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
         raise
 
+    try:
+        store = SessionStore.create(
+            session_id=session_id,
+            sessions_dir=sdir,
+            overwrite=args.overwrite_session,
+        )
+    except FileExistsError:
+        print(
+            f"error: session {session_id!r} already exists; "
+            "use --overwrite-session to replace it or ctx resume to continue it.",
+            file=sys.stderr,
+        )
+        with telemetry_span():
+            _record_cli_telemetry(
+                "ctx.cli.run",
+                session_id=session_id,
+                phase="failed",
+                payload=_run_setup_failure_payload(args, stage="session_create"),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind="FileExistsError",
+            )
+        return 1
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        with telemetry_span():
+            _record_cli_telemetry(
+                "ctx.cli.run",
+                session_id=session_id,
+                phase="failed",
+                payload=_run_setup_failure_payload(args, stage="session_create"),
+                outcome="error",
+                duration_ms=_duration_ms(telemetry_started),
+                error_kind=type(exc).__name__,
+            )
+        return 1
+
     lifecycle = RuntimeLifecycleStore()
 
     # Planner pass (opt-in, SOLO path only — when --evaluator is set,
@@ -1855,6 +1893,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         try:
             with redirect_stdout(sys.stderr) if args.json else nullcontext():
                 plan_artifact = planner.plan(args.task)
+            _validate_usage(plan_artifact.usage, source="planner")
             _mark_runtime_agent_used(
                 lifecycle,
                 session_id=session_id,
@@ -1963,42 +2002,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
     compactor = None if args.no_compact else TokenBudgetCompactor()
     tool_policy = _compile_tool_policy(allow_tools, deny_tools)
 
-    try:
-        store = SessionStore.create(
-            session_id=session_id,
-            sessions_dir=sdir,
-            overwrite=args.overwrite_session,
-        )
-    except FileExistsError:
-        print(
-            f"error: session {session_id!r} already exists; "
-            "use --overwrite-session to replace it or ctx resume to continue it.",
-            file=sys.stderr,
-        )
-        with telemetry_span():
-            _record_cli_telemetry(
-                "ctx.cli.run",
-                session_id=session_id,
-                phase="failed",
-                payload=_run_setup_failure_payload(args, stage="session_create"),
-                outcome="error",
-                duration_ms=_duration_ms(telemetry_started),
-                error_kind="FileExistsError",
-            )
-        return 1
-    except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        with telemetry_span():
-            _record_cli_telemetry(
-                "ctx.cli.run",
-                session_id=session_id,
-                phase="failed",
-                payload=_run_setup_failure_payload(args, stage="session_create"),
-                outcome="error",
-                duration_ms=_duration_ms(telemetry_started),
-                error_kind=type(exc).__name__,
-            )
-        return 1
     with telemetry_span() as span:
         metadata = {
             "task": args.task,

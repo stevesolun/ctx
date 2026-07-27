@@ -24,6 +24,7 @@ RELEASE_RUNTIME_EXTRAS = (
     "harness",
     "viz",
 )
+_NON_RUNTIME_EXTRAS = frozenset({"dev"})
 _PYPI_PURL = re.compile(r"^pkg:pypi/([^@/?#]+)@([^?#]+)(?:\?[^#]+)?(?:#.+)?$")
 
 
@@ -183,7 +184,7 @@ def _release_requirements(
     optional = project.get("optional-dependencies")
     if not isinstance(optional, dict):
         raise ValueError("pyproject.toml must contain project.optional-dependencies")
-    expected_extras = set(RELEASE_RUNTIME_EXTRAS)
+    expected_extras = set(optional) - _NON_RUNTIME_EXTRAS
     if set(selected_extras) != expected_extras:
         raise ValueError(
             f"release SBOM must cover every supported runtime extra: {sorted(expected_extras)}"
