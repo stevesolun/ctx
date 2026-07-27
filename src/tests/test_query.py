@@ -10,6 +10,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 # Ensure the project root is importable regardless of working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -72,6 +74,18 @@ def _write_entity_page(
         ),
         encoding="utf-8",
     )
+    return path
+
+
+def _write_runtime_availability_page(wiki: Path, entity_id: str) -> Path:
+    spec = next(
+        spec
+        for spec in wq._runtime_availability_page_specs()
+        if f"{spec.entity_type}:{spec.slug}" == entity_id
+    )
+    path = wiki.joinpath(*spec.source_relpath.split("/"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(spec.content, encoding="utf-8")
     return path
 
 
@@ -191,6 +205,105 @@ class TestQueryKeywordMatch:
         by_name = {p.name: p for p in pages}
         assert set(by_name) == {"reviewer"}
         assert by_name["reviewer"].entity_type == "agent"
+
+    def test_pack_mode_merges_only_attested_runtime_availability_pages(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        wiki = make_wiki(tmp_path)
+        make_entity_page(
+            wiki,
+            "ctx-python-testing",
+            ["stale-physical"],
+            body="Stale physical content must not replace the pack.",
+        )
+        write_wiki_base_pack(
+            pack_dir=wiki / "wiki-packs" / "base-export-1",
+            pack_id="base-export-1",
+            base_export_id="wiki-export-1",
+            pages={
+                "entities/skills/ctx-python-testing.md": _entity_page_text(
+                    title="Packed Python Authority",
+                    entity_type="skill",
+                    tags=["pack-authoritative"],
+                    body="Packed content remains authoritative.",
+                ),
+                "entities/skills/pack-only.md": _entity_page_text(
+                    title="Pack Only",
+                    entity_type="skill",
+                    tags=["packed"],
+                    body="Ordinary packed page.",
+                ),
+            },
+        )
+        for entity_id in (
+            "skill:ctx-python-testing",
+            "skill:ctx-typescript",
+            "agent:ctx-python-reviewer",
+            "mcp-server:ctx-core",
+        ):
+            _write_runtime_availability_page(wiki, entity_id)
+        spoofed = wiki / "entities" / "agents" / "spoofed-runtime.md"
+        spoofed.parent.mkdir(parents=True, exist_ok=True)
+        spoofed.write_text(
+            "---\n"
+            "title: Spoofed Runtime\n"
+            "type: agent\n"
+            "source: ctx-runtime-availability\n"
+            "license: MIT\n"
+            "requires_api_keys: false\n"
+            "---\n\n"
+            "Must remain hidden in pack mode.\n",
+            encoding="utf-8",
+        )
+
+        pages = wq.load_all_pages(wiki)
+        by_key = {(page.entity_type, page.name): page for page in pages}
+
+        assert ("skill", "ctx-typescript") in by_key
+        assert ("agent", "ctx-python-reviewer") in by_key
+        assert ("mcp-server", "ctx-core") in by_key
+        assert ("agent", "spoofed-runtime") not in by_key
+        assert by_key[("skill", "ctx-python-testing")].title == "Packed Python Authority"
+        assert sum(page.name == "ctx-python-testing" for page in pages) == 1
+        assert [page.name for page in wq.search_by_query(pages, "nullable", top_n=10)] == [
+            "ctx-typescript"
+        ]
+        assert "ctx-python-reviewer" in {
+            page.name for page in wq.search_by_query(pages, "reviewer", top_n=10)
+        }
+        assert "ctx-core" in {
+            page.name for page in wq.search_by_query(pages, "lifecycle telemetry", top_n=10)
+        }
+
+    def test_pack_mode_rejects_symlinked_runtime_availability_page(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        wiki = make_wiki(tmp_path)
+        write_wiki_base_pack(
+            pack_dir=wiki / "wiki-packs" / "base-export-1",
+            pack_id="base-export-1",
+            base_export_id="wiki-export-1",
+            pages={"entities/skills/pack-only.md": "# Pack only\n"},
+        )
+        spec = next(
+            spec for spec in wq._runtime_availability_page_specs() if spec.entity_type == "skill"
+        )
+        outside = tmp_path / "outside-skill.md"
+        outside.write_text(spec.content, encoding="utf-8")
+        source = wiki.joinpath(*spec.source_relpath.split("/"))
+        source.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            source.symlink_to(outside)
+        except OSError:
+            pytest.skip("symlink creation is unavailable on this platform")
+
+        pages = wq.load_all_pages(wiki)
+
+        assert (spec.entity_type, spec.slug) not in {
+            (page.entity_type, page.name) for page in pages
+        }
 
     def test_load_all_pages_validates_mcp_shards_and_slugs(self, tmp_path: Path) -> None:
         wiki = make_wiki(tmp_path)
