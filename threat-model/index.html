@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://stevesolun.github.io/ctx/marketplace-registry/">
+        <link rel="canonical" href="https://stevesolun.github.io/ctx/threat-model/">
       
       
-        <link rel="prev" href="../skill-stack-matrix/">
+        <link rel="prev" href="../telemetry/">
       
       
-        <link rel="next" href="../skills-health/">
+        <link rel="next" href="../enterprise-readiness-review/">
       
       
       <link rel="icon" href="../assets/images/favicon.png">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Marketplace registry - ctx</title>
+        <title>Threat model - ctx</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#entity-source-registry" class="md-skip">
+        <a href="#threat-model" class="md-skip">
           Skip to content
         </a>
       
@@ -110,7 +110,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Marketplace registry
+              Threat model
             
           </span>
         </div>
@@ -336,9 +336,11 @@
         
   
   
+    
   
-    <li class="md-tabs__item">
-      <a href="../threat-model/" class="md-tabs__link">
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
         
   
     
@@ -410,12 +412,10 @@
         
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href="../skill-router/" class="md-tabs__link">
           
   
@@ -638,10 +638,30 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../threat-model/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Threat model
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   <span class="md-ellipsis">
@@ -650,6 +670,149 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scope
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      Security Goals
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trust-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      Trust Boundaries
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommendation-is-not-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      Recommendation Is Not Execution
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implemented-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      Implemented Controls
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implemented Controls">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#harness-source-acquisition" class="md-nav__link">
+    <span class="md-ellipsis">
+      Harness Source Acquisition
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#harness-command-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      Harness Command Execution
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#monitor-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      Monitor Boundary
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#telemetry-and-exporters" class="md-nav__link">
+    <span class="md-ellipsis">
+      Telemetry and Exporters
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#graph-and-catalog-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      Graph and Catalog Metadata
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#residual-risks" class="md-nav__link">
+    <span class="md-ellipsis">
+      Residual Risks
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operator-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      Operator Baseline
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommended-hardening-not-yet-implemented" class="md-nav__link">
+    <span class="md-ellipsis">
+      Recommended Hardening Not Yet Implemented
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1043,8 +1206,6 @@
       
   
   
-    
-  
   
   
     
@@ -1063,19 +1224,16 @@
     
     
       
-        
-        
-      
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_12" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_12" >
         
           
           
@@ -1091,13 +1249,13 @@
             </a>
             
               
-              <label class="md-nav__link " for="__nav_12" id="__nav_12_label" tabindex="">
+              <label class="md-nav__link " for="__nav_12" id="__nav_12_label" tabindex="0">
                 <span class="md-nav__icon md-icon"></span>
               </label>
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_12">
             <span class="md-nav__icon md-icon"></span>
             Skill router
@@ -1152,30 +1310,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  <span class="md-ellipsis">
-    Marketplace registry
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../marketplace-registry/" class="md-nav__link">
         
   
   <span class="md-ellipsis">
@@ -1184,113 +1322,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#registered-sources" class="md-nav__link">
-    <span class="md-ellipsis">
-      Registered Sources
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Registered Sources">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#shipped-graph-and-llm-wiki" class="md-nav__link">
-    <span class="md-ellipsis">
-      Shipped Graph And LLM-Wiki
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#user-local-assets" class="md-nav__link">
-    <span class="md-ellipsis">
-      User Local Assets
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#skill-index" class="md-nav__link">
-    <span class="md-ellipsis">
-      Skill Index
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#github-entity-repositories" class="md-nav__link">
-    <span class="md-ellipsis">
-      GitHub Entity Repositories
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#mcp-and-harness-sources" class="md-nav__link">
-    <span class="md-ellipsis">
-      MCP And Harness Sources
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#query-protocol" class="md-nav__link">
-    <span class="md-ellipsis">
-      Query Protocol
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#update-rules" class="md-nav__link">
-    <span class="md-ellipsis">
-      Update Rules
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#security-notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      Security Notes
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1471,55 +1502,91 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#registered-sources" class="md-nav__link">
+  <a href="#scope" class="md-nav__link">
     <span class="md-ellipsis">
-      Registered Sources
+      Scope
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Registered Sources">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      Security Goals
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trust-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      Trust Boundaries
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommendation-is-not-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      Recommendation Is Not Execution
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implemented-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      Implemented Controls
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implemented Controls">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#shipped-graph-and-llm-wiki" class="md-nav__link">
+  <a href="#harness-source-acquisition" class="md-nav__link">
     <span class="md-ellipsis">
-      Shipped Graph And LLM-Wiki
+      Harness Source Acquisition
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#user-local-assets" class="md-nav__link">
+  <a href="#harness-command-execution" class="md-nav__link">
     <span class="md-ellipsis">
-      User Local Assets
+      Harness Command Execution
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#skill-index" class="md-nav__link">
+  <a href="#monitor-boundary" class="md-nav__link">
     <span class="md-ellipsis">
-      Skill Index
+      Monitor Boundary
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#github-entity-repositories" class="md-nav__link">
+  <a href="#telemetry-and-exporters" class="md-nav__link">
     <span class="md-ellipsis">
-      GitHub Entity Repositories
+      Telemetry and Exporters
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#mcp-and-harness-sources" class="md-nav__link">
+  <a href="#graph-and-catalog-metadata" class="md-nav__link">
     <span class="md-ellipsis">
-      MCP And Harness Sources
+      Graph and Catalog Metadata
     </span>
   </a>
   
@@ -1531,27 +1598,27 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#query-protocol" class="md-nav__link">
+  <a href="#residual-risks" class="md-nav__link">
     <span class="md-ellipsis">
-      Query Protocol
+      Residual Risks
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#update-rules" class="md-nav__link">
+  <a href="#operator-baseline" class="md-nav__link">
     <span class="md-ellipsis">
-      Update Rules
+      Operator Baseline
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#security-notes" class="md-nav__link">
+  <a href="#recommended-hardening-not-yet-implemented" class="md-nav__link">
     <span class="md-ellipsis">
-      Security Notes
+      Recommended Hardening Not Yet Implemented
     </span>
   </a>
   
@@ -1572,7 +1639,7 @@
                   
 
   
-    <a href="https://github.com/stevesolun/ctx/edit/main/docs/marketplace-registry.md" title="Edit this page" class="md-content__button md-icon">
+    <a href="https://github.com/stevesolun/ctx/edit/main/docs/threat-model.md" title="Edit this page" class="md-content__button md-icon">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -1580,111 +1647,331 @@
   
 
 
-<h1 id="entity-source-registry">Entity Source Registry<a class="headerlink" href="#entity-source-registry" title="Permanent link">&para;</a></h1>
-<p>ctx keeps entity sources separate from install state. A source entry can be
-searched and recommended without being installed, and duplicate/update paths must
-show what would change before replacing an existing entity.</p>
-<h2 id="registered-sources">Registered Sources<a class="headerlink" href="#registered-sources" title="Permanent link">&para;</a></h2>
-<h3 id="shipped-graph-and-llm-wiki">Shipped Graph And LLM-Wiki<a class="headerlink" href="#shipped-graph-and-llm-wiki" title="Permanent link">&para;</a></h3>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ctx-shipped-graph</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">compressed-runtime</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nt">paths</span><span class="p">:</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">graph</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">graph/wiki-graph-runtime.tar.gz</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">skills</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">graph/skills-sh-catalog.json.gz</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nt">refresh</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">release-time</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
-</span></code></pre></div>
-<p>The shipped runtime is the first source for recommendations. It contains the
-first-class skills, agents, MCP servers, harnesses, graph edges, quality scores,
-usage fields, and wiki pages that ctx can use offline.</p>
-<h3 id="user-local-assets">User Local Assets<a class="headerlink" href="#user-local-assets" title="Permanent link">&para;</a></h3>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">user-local</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filesystem</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">paths</span><span class="p">:</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">skills</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.claude/skills</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">agents</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.claude/agents</span>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">mcp</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">project/user MCP config files</span>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">harnesses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.ctx/harnesses</span>
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="nt">refresh</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">always current</span>
-</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
-</span></code></pre></div>
-<p>Local assets override shipped suggestions when names collide, but updates
-still require an explicit review if replacement content is proposed.</p>
-<h3 id="skill-index">Skill Index<a class="headerlink" href="#skill-index" title="Permanent link">&para;</a></h3>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shipped-skills</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shipped-index</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">shipped_entries</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">67024</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nt">local_index</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">graph/skills-sh-catalog.json.gz</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="nt">hydrated_wiki</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">external-catalogs/&lt;source&gt;/catalog.json</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="nt">refresh</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">on-demand</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
-</span></code></pre></div>
-<p>Skill index entries are stored as first-class skill entities in the graph/wiki.
-Hydrated <code>SKILL.md</code> bodies pass through the micro-skill gate before they are
-packed into the shipped runtime.</p>
-<h3 id="github-entity-repositories">GitHub Entity Repositories<a class="headerlink" href="#github-entity-repositories" title="Permanent link">&para;</a></h3>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github-entity-repos</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">git</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nt">entrypoints</span><span class="p">:</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">skills</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ctx-skill-add</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="nt">agents</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ctx-agent-add</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span><span class="nt">mcp</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ctx-mcp-add</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span><span class="nt">harnesses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ctx-harness-add</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="nt">refresh</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">on-demand</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4</span>
-</span></code></pre></div>
-<p>GitHub stars, forks, releases, and update timestamps can be stored as source
-metadata for a candidate entity. The ctx repository's own star count is not
-hard-coded in docs because it changes continuously; read it from GitHub when
-needed.</p>
-<h3 id="mcp-and-harness-sources">MCP And Harness Sources<a class="headerlink" href="#mcp-and-harness-sources" title="Permanent link">&para;</a></h3>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mcp-and-harness-sources</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">curated-source</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nt">entrypoints</span><span class="p">:</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">mcp</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ctx-mcp-fetch, ctx-mcp-add</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">harnesses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ctx-harness-add, ctx-harness-install</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="nt">refresh</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">on-demand</span>
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
-</span></code></pre></div>
-<p>MCP servers and harnesses are recorded as entities with install guidance,
-permission notes, compatibility tags, and quality/security review status.</p>
-<h2 id="query-protocol">Query Protocol<a class="headerlink" href="#query-protocol" title="Permanent link">&para;</a></h2>
-<p>When a user asks for help or the scanner detects a stack/task gap:</p>
+<h1 id="threat-model">Threat Model<a class="headerlink" href="#threat-model" title="Permanent link">&para;</a></h1>
+<p>This document describes the security boundaries implemented by the current ctx
+codebase. It is not a claim that ctx is a sandbox or a multi-tenant security
+service. Vulnerabilities should be reported through the
+<a href="https://github.com/stevesolun/ctx/blob/main/SECURITY.md">SECURITY.md policy</a>.</p>
+<h2 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h2>
+<p>The model covers:</p>
+<ul>
+<li>graph, wiki, and external catalog metadata used for recommendations;</li>
+<li>remote and local harness acquisition, installation, and cataloged commands;</li>
+<li>the <code>ctx-monitor</code> HTTP boundary;</li>
+<li>local telemetry spools and optional exporters; and</li>
+<li>the transition from an advisory recommendation to operator-approved execution.</li>
+</ul>
+<p>The host operating system, LLM provider, external telemetry collector, remote
+source repository, and tools launched by a harness remain separate trust
+domains. A control in one domain does not make another domain trusted.</p>
+<h2 id="security-goals">Security Goals<a class="headerlink" href="#security-goals" title="Permanent link">&para;</a></h2>
+<p>ctx aims to:</p>
 <ol>
-<li>Search the local graph/wiki first.</li>
-<li>Search the shipped skill index and, when needed, the <code>find-skills</code>
-   helper for fresher remote results.</li>
-<li>Search local user assets and configured entity repositories.</li>
-<li>Deduplicate by slug, source URL, canonical name, tags, and semantic overlap.</li>
-<li>Score candidates with the shared recommendation engine.</li>
-<li>Present at most the configured cap with reasons, quality/usage notes, and
-   install/update commands.</li>
-<li>If an existing entity would be replaced, show the update review: benefits,
-   drawbacks, changed files, security posture, and rollback path.</li>
+<li>keep recommendations advisory until a user or host explicitly selects an
+   execution path;</li>
+<li>make remote harness source revisions reproducible by default;</li>
+<li>avoid passing ambient credentials into cataloged harness commands;</li>
+<li>keep the monitor local by default and disable remote mutations;</li>
+<li>keep telemetry local and redacted by default; and</li>
+<li>preserve enough source, status, and lifecycle evidence for an operator to
+   audit a decision.</li>
 </ol>
-<h2 id="update-rules">Update Rules<a class="headerlink" href="#update-rules" title="Permanent link">&para;</a></h2>
-<p>Entity updates are intentionally explicit:</p>
+<p>These goals reduce risk. They do not establish code safety, content safety, or
+tenant isolation.</p>
+<h2 id="trust-boundaries">Trust Boundaries<a class="headerlink" href="#trust-boundaries" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Boundary</th>
+<th>Data crossing it</th>
+<th>Current trust decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Catalog/graph to recommender</td>
+<td>Names, tags, descriptions, URLs, install commands, status, relationships</td>
+<td>Treat as untrusted advisory metadata</td>
+</tr>
+<tr>
+<td>Remote repository to local install</td>
+<td>Git objects and working-tree files</td>
+<td>HTTPS and immutable revision required by default; content is still untrusted</td>
+</tr>
+<tr>
+<td>Cataloged command to host</td>
+<td>Executable, arguments, output, filesystem and network activity</td>
+<td>Requires explicit command flags; runs with the current user account</td>
+</tr>
+<tr>
+<td>Browser/client to monitor</td>
+<td>Dashboard reads, rendered mutation token, mutation requests</td>
+<td>Loopback reads are unauthenticated; exact Origin/Host authority and token checks gate mutations</td>
+</tr>
+<tr>
+<td>Local process to telemetry spool</td>
+<td>Events, metrics, identifiers, failures, token usage</td>
+<td>Redacted local files; sanitizer is a data-minimization control</td>
+</tr>
+<tr>
+<td>Telemetry spool to exporter</td>
+<td>Redacted OTLP logs, traces, or metrics</td>
+<td>Disabled by default; enabling export creates an intentional data-egress boundary</td>
+</tr>
+</tbody>
+</table>
+<h2 id="recommendation-is-not-execution">Recommendation Is Not Execution<a class="headerlink" href="#recommendation-is-not-execution" title="Permanent link">&para;</a></h2>
+<p>The graph walk is advisory. Recommendation rows can report availability,
+<code>installable</code>, <code>load_status</code>, and a source reference, but those fields do not
+prove that the referenced code is safe. Graph errors are handled as advisory
+warnings rather than as permission to execute.</p>
+<p>A recommendation does not run an <code>install_command</code>, clone a repository, launch
+an MCP server, or execute harness setup. Execution begins only through a
+separate installer or runtime operation selected by the user or host. The
+harness installer then has additional explicit gates:</p>
 <ul>
-<li><code>ctx-skill-add</code>, <code>ctx-agent-add</code>, <code>ctx-mcp-add</code>, and <code>ctx-harness-add</code> create
-  new entities when no duplicate exists.</li>
-<li>If a duplicate exists, the command emits an update review and refuses to
-  replace content unless the user passes the update flag.</li>
-<li>New or updated skills go through the micro-skill line-count gate from config.</li>
-<li>Security/cyber checks run before entity content is promoted.</li>
-<li>Graph/wiki artifacts are rebuilt, validated, packed, and atomically promoted.</li>
+<li>local paths and <code>file://</code> sources require <code>--allow-local-source</code>;</li>
+<li>a remote source without a full commit SHA requires
+  <code>--allow-mutable-repo-head</code>;</li>
+<li>setup commands require <code>--approve-commands</code>; and</li>
+<li>verification commands require <code>--run-verify</code>.</li>
 </ul>
-<h2 id="security-notes">Security Notes<a class="headerlink" href="#security-notes" title="Permanent link">&para;</a></h2>
+<p>Hosts that publish runtime tools remain responsible for applying their own
+permission policy. Recommendation quality, availability, and ranking are not
+authorization decisions.</p>
+<h2 id="implemented-controls">Implemented Controls<a class="headerlink" href="#implemented-controls" title="Permanent link">&para;</a></h2>
+<h3 id="harness-source-acquisition">Harness Source Acquisition<a class="headerlink" href="#harness-source-acquisition" title="Permanent link">&para;</a></h3>
+<p>Remote harness URLs must use <code>https://</code>, contain a host, omit embedded
+credentials, and not start with an option-like <code>-</code>. Git is launched with
+<code>GIT_ALLOW_PROTOCOL=https</code>.</p>
+<p>URL validation does not classify or block loopback, private, link-local, or
+other internal destinations, and it does not resolve or pin DNS before Git
+connects. An attacker-controlled catalog <code>repo_url</code> can therefore cause clone
+or fetch traffic, once an operator invokes installation, to reach
+private-network services or a hostname whose address changes after validation.
+Requiring HTTPS and a commit SHA protects transport and revision
+reproducibility; it does not prevent SSRF or DNS rebinding.</p>
+<p>By default, a remote catalog entry must provide a full 40- or 64-character
+commit SHA. ctx fetches and checks out that revision in detached mode and
+records the resolved commit in the install manifest. The
+<code>--allow-mutable-repo-head</code> override weakens this guarantee deliberately and
+records that mutable <code>HEAD</code> was used.</p>
+<p>Local sources are disabled by default. When explicitly enabled, ctx rejects a
+symlinked source root and any symlink found in that local source tree before
+copying it.</p>
+<p>Important limitation: the tree-wide symlink check is currently applied to
+local sources only. ctx does not perform an equivalent post-check of a remotely
+cloned working tree. Pinning proves which revision was fetched; it does not
+prove that the revision is benign.</p>
+<h3 id="harness-command-execution">Harness Command Execution<a class="headerlink" href="#harness-command-execution" title="Permanent link">&para;</a></h3>
+<p>Cataloged setup and verification commands are split into argument vectors and
+executed without a shell. The child environment is rebuilt from a small
+allowlist of operating-system and runtime variables. Variables whose names
+look like API keys, tokens, passwords, credentials, or other secrets are not
+passed through by that allowlist.</p>
+<p>Captured command output is truncated and passed through token-shaped and
+ambient-secret redaction before it is stored in a result or manifest. Commands
+also have a finite subprocess timeout.</p>
+<p>ctx does <strong>not</strong> provide process isolation or network isolation. Cataloged
+commands run as the current operating-system user, in the materialized harness
+directory, with the host's ordinary filesystem permissions and network access.
+Environment allowlisting does not stop a process from reading accessible files
+or reaching the network. Output redaction does not prevent exfiltration.</p>
+<h3 id="monitor-boundary">Monitor Boundary<a class="headerlink" href="#monitor-boundary" title="Permanent link">&para;</a></h3>
+<p><code>ctx-monitor</code> defaults to <code>127.0.0.1</code> and is designed as a local operator tool.
+On a loopback bind:</p>
 <ul>
-<li>Never auto-install without user confirmation.</li>
-<li>Always show the source URL, entity type, install command, and permissions.</li>
-<li>Reject missing <code>SKILL.md</code> bodies for skill imports unless the source is only a
-  catalog pointer.</li>
-<li>Never execute repository scripts during cataloging without explicit user
-  approval.</li>
-<li>Warn on network, filesystem, shell, credential, or system-level permissions.</li>
-<li>Preserve last-good graph/wiki artifacts so a failed refresh cannot ship a
-  corrupt runtime.</li>
+<li>reads are available to loopback clients without authentication;</li>
+<li>mutations require a generated per-process token; and</li>
+<li>browser requests that send an <code>Origin</code> header must have the same normalized
+  HTTP authority as the request <code>Host</code>, including the effective port.</li>
 </ul>
+<p>The origin check accepts only <code>http</code>, compares the canonical hostname and
+effective port, normalizes equivalent IP literals, and rejects malformed
+authorities. Originless mutation clients are accepted only when they provide
+the valid monitor token.</p>
+<p>Loopback mutation pages embed the token in rendered JavaScript so the page can
+send authenticated POST requests. Because loopback reads do not require that
+token, another local process that can read a mutation page can recover it. The
+token is therefore a browser-CSRF and mutation gate, not isolation from another
+process running on the same host or account.</p>
+<p>Binding to a non-loopback address requires the explicit
+<code>--allow-non-loopback</code> CLI flag. On that bind, mutation routes are disabled.
+Reads require the generated token, supplied directly or through the HttpOnly,
+<code>SameSite=Strict</code> cookie established by the token URL.</p>
+<p>The built-in server does not provide TLS, user identities, RBAC, durable
+sessions, or multi-tenant authorization. The printed token URL is a bearer
+secret. A non-loopback deployment must not be treated as an internet-facing
+enterprise service without a separately managed authenticated TLS boundary.</p>
+<h3 id="telemetry-and-exporters">Telemetry and Exporters<a class="headerlink" href="#telemetry-and-exporters" title="Permanent link">&para;</a></h3>
+<p>Telemetry defaults to <code>local_redacted</code>. Events and metrics are written to local
+JSONL files that ctx creates or tightens to owner-only permissions where the
+operating system permits it, and network exporters are disabled by default.
+Payload sanitization removes or hashes known raw-input, repository, workspace,
+path, command-output, and secret-shaped values. Export paths sanitize records
+again before delivery.</p>
+<p>Enabling OTLP export creates a new trust boundary. Remote endpoints must use
+HTTPS and must be listed in the configured host allowlist. Userinfo, query
+strings, fragments, and redirects are rejected. Literal private, reserved,
+link-local, multicast, or unspecified remote IP addresses are also rejected.
+Plain HTTP is accepted only for loopback collectors.</p>
+<p>Exporter headers can carry credentials and the destination collector receives
+the exported data. Operators must protect telemetry configuration, the local
+spool, hash salts, bearer headers, collector credentials, and the collector
+itself. Redaction is best effort and should not be used as permission to place
+secrets in telemetry fields. See the <a href="../telemetry/">telemetry guide</a> for
+configuration and retention behavior.</p>
+<h3 id="graph-and-catalog-metadata">Graph and Catalog Metadata<a class="headerlink" href="#graph-and-catalog-metadata" title="Permanent link">&para;</a></h3>
+<p>Graph, wiki, and catalog content can originate outside the current repository.
+The <code>ctx.core.source_registry</code> module and <code>ctx-source-registry</code> CLI can validate
+the built-in registry or an explicitly supplied registry. They record source
+revisions, import modes, licenses, and permission evidence, and reject
+unapproved full-body import plans submitted to that validator.</p>
+<p>The Design.md full-body importer now applies this registry policy, but it is
+not a universal ingestion gate. Production graph, wiki, catalog, and
+recommendation ingestion paths do not all call it, so content can enter
+through a path that bypasses the registry policy. Even when the validator is
+used, provenance and licensing do not establish that imported text or code is
+trustworthy.</p>
+<p>For approved full-body manifests, the registry binds the complete canonical
+manifest, including importer-consumed metadata, entry order, source paths, and
+body digests. Permission evidence must be a digest-verified checked-in file.
+Installed wheels use a packaged copy of those evidence bytes when repository
+files are unavailable. Portable source paths reject traversal, ambiguous
+Unicode normalization, control/format characters, Windows device names,
+alternate-stream syntax, and case-insensitive collisions.
+The inherited Design.md corpus remains blocked until it has legal evidence,
+body digests, and a registered full-manifest binding.</p>
+<p>Metadata can affect ranking, explanations, availability labels, displayed
+links, and later operator decisions. Malicious or inaccurate metadata can
+therefore cause recommendation poisoning, misleading availability, unsafe
+instructions, or prompt injection when content is supplied to an LLM. A local
+file check or an <code>installable=true</code> result means that material is available,
+not that it has passed a security review.</p>
+<p>The generic provider loop exposes a raw <code>ctx__wiki_get</code> call and result to one
+subsequent provider request, then removes both. It rejects blank, duplicate,
+or reused tool-call IDs before execution, blocks compaction while raw wiki
+context exists, and strips raw wiki results from durable session records and
+replay. Text that the model independently quotes or summarizes is ordinary
+assistant output and can remain in history; ctx cannot reliably distinguish
+that text from a legitimate answer.</p>
+<p>Cataloged URLs and commands must remain data until the relevant explicit
+installation or execution gate is reached. Consumers should render metadata
+as text, preserve provenance, and avoid treating a recommendation score as a
+permission grant.</p>
+<h2 id="residual-risks">Residual Risks<a class="headerlink" href="#residual-risks" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Why it remains</th>
+<th>Current mitigation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Malicious pinned source</td>
+<td>An immutable commit can still contain hostile code</td>
+<td>Review the exact revision before approval</td>
+</tr>
+<tr>
+<td>Remote clone SSRF or DNS rebinding</td>
+<td>Harness URL validation accepts internal HTTPS destinations and does not resolve or pin DNS</td>
+<td>Restrict egress and permit only reviewed repository hosts</td>
+</tr>
+<tr>
+<td>Remote repository symlinks</td>
+<td>Remote clones do not receive the local-source tree scan</td>
+<td>Inspect the checkout and use an external sandbox</td>
+</tr>
+<tr>
+<td>Host compromise by a command</td>
+<td>Commands inherit the user's filesystem rights and network</td>
+<td>Do not approve unreviewed commands; use OS isolation outside ctx</td>
+</tr>
+<tr>
+<td>Recommendation poisoning</td>
+<td>Untrusted metadata influences ranking and explanations</td>
+<td>Preserve provenance, availability, and operator review</td>
+</tr>
+<tr>
+<td>Prompt injection from catalog text</td>
+<td>Content may be shown to an LLM or human</td>
+<td>Treat catalog text as untrusted input, not instructions</td>
+</tr>
+<tr>
+<td>Model-authored catalog echo</td>
+<td>A model can quote or summarize ephemeral wiki content into ordinary assistant history</td>
+<td>Minimize requested bodies and treat provider outputs as potentially sensitive</td>
+</tr>
+<tr>
+<td>Monitor token disclosure</td>
+<td>The token URL is a bearer credential and built-in HTTP has no TLS</td>
+<td>Keep loopback defaults; use a trusted TLS/auth proxy if exposed</td>
+</tr>
+<tr>
+<td>Local monitor mutation</td>
+<td>An unauthenticated loopback reader can extract the rendered mutation token</td>
+<td>Treat local processes as trusted or isolate the monitor by OS identity</td>
+</tr>
+<tr>
+<td>Telemetry disclosure</td>
+<td>Sanitizers can miss novel sensitive values; collectors can be compromised</td>
+<td>Minimize payloads, keep export disabled unless required, audit the sink</td>
+</tr>
+<tr>
+<td>Exporter DNS rebinding</td>
+<td>Host allowlisting does not pin or continuously validate a hostname's resolved addresses</td>
+<td>Use controlled DNS and an egress-restricted collector path</td>
+</tr>
+<tr>
+<td>Registry-policy bypass</td>
+<td>External ingestion paths are not universally wired through <code>source_registry</code></td>
+<td>Run the validator explicitly and review ingestion provenance</td>
+</tr>
+<tr>
+<td>Same-user local access</td>
+<td>Owner-only files do not isolate mutually untrusted processes under one account</td>
+<td>Use separate OS identities or hosts for stronger separation</td>
+</tr>
+<tr>
+<td>Mutable-source override</td>
+<td><code>HEAD</code> can change between review and installation</td>
+<td>Prefer a full commit SHA and record the resolved revision</td>
+</tr>
+</tbody>
+</table>
+<h2 id="operator-baseline">Operator Baseline<a class="headerlink" href="#operator-baseline" title="Permanent link">&para;</a></h2>
+<p>For the lowest-risk supported posture:</p>
+<ol>
+<li>keep <code>ctx-monitor</code> on loopback;</li>
+<li>leave telemetry network export disabled, or use a loopback collector;</li>
+<li>allow remote harness network access only to reviewed repository hosts and
+   install from an inspected full commit SHA;</li>
+<li>leave cataloged commands disabled until their exact arguments are reviewed;</li>
+<li>run <code>ctx-source-registry</code> as an explicit pre-ingestion check;</li>
+<li>do not treat graph or catalog metadata as trusted instructions; and</li>
+<li>run untrusted tools in an OS-level sandbox, container, VM, or disposable
+   account that the operator configures outside ctx.</li>
+</ol>
+<h2 id="recommended-hardening-not-yet-implemented">Recommended Hardening Not Yet Implemented<a class="headerlink" href="#recommended-hardening-not-yet-implemented" title="Permanent link">&para;</a></h2>
+<p>The following are recommendations, not current ctx features:</p>
+<ul>
+<li>reject symlinks and other special files after every remote checkout;</li>
+<li>resolve and validate remote repository addresses, reject internal networks,
+  pin approved hosts, and enforce outbound network policy before Git connects;</li>
+<li>add a documented process sandbox and deny-by-default network policy for
+  executed harnesses and MCP servers;</li>
+<li>wire source-registry validation into every external ingestion entry point
+  and reject content without approved provenance;</li>
+<li>add signed source attestations and stronger artifact provenance checks;</li>
+<li>put shared monitor deployments behind enterprise TLS, authentication, and
+  authorization; and</li>
+<li>add policy-driven content scanning for catalog metadata before it is supplied
+  to a model.</li>
+</ul>
+<p>Until those controls exist, deployment policy must account for the residual
+risks above.</p>
 
 
 

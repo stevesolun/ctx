@@ -336,6 +336,40 @@
         
   
   
+  
+    <li class="md-tabs__item">
+      <a href="../../threat-model/" class="md-tabs__link">
+        
+  
+    
+  
+  Threat model
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../enterprise-readiness-review/" class="md-tabs__link">
+        
+  
+    
+  
+  Enterprise readiness
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
     
   
   
@@ -604,6 +638,46 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../../threat-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Threat model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../enterprise-readiness-review/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Enterprise readiness
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -632,10 +706,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" checked>
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="">
             
   
   <span class="md-ellipsis">
@@ -646,8 +720,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_10">
             <span class="md-nav__icon md-icon"></span>
             Harness
           </label>
@@ -867,7 +941,7 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
         
           
           
@@ -883,14 +957,14 @@
             </a>
             
               
-              <label class="md-nav__link " for="__nav_9" id="__nav_9_label" tabindex="0">
+              <label class="md-nav__link " for="__nav_11" id="__nav_11_label" tabindex="0">
                 <span class="md-nav__icon md-icon"></span>
               </label>
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_9">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
             <span class="md-nav__icon md-icon"></span>
             Toolbox
           </label>
@@ -1104,7 +1178,7 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_12" >
         
           
           
@@ -1120,14 +1194,14 @@
             </a>
             
               
-              <label class="md-nav__link " for="__nav_10" id="__nav_10_label" tabindex="0">
+              <label class="md-nav__link " for="__nav_12" id="__nav_12_label" tabindex="0">
                 <span class="md-nav__icon md-icon"></span>
               </label>
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_10">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_12">
             <span class="md-nav__icon md-icon"></span>
             Skill router
           </label>
@@ -1234,10 +1308,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_13" >
         
           
-          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_13" id="__nav_13_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -1248,8 +1322,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_11">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_13">
             <span class="md-nav__icon md-icon"></span>
             Health
           </label>
@@ -1641,6 +1715,51 @@ stable.</p>
 <p>After a failed observe step, LoopFlow passes the new failure text back into the
 next adapter call. That is the agent-loop back edge: LoopFlow keeps the retry
 logic, and ctx refreshes recommendations based on what just failed.</p>
+<p>For a long-lived runner that executes accepted recommendations, share one
+<code>ActivationLeaseRegistry</code> across all nested or parallel loops:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ctx.adapters.loopflow</span><span class="w"> </span><span class="kn">import</span> <span class="n">ActivationLeaseRegistry</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">leases</span> <span class="o">=</span> <span class="n">ActivationLeaseRegistry</span><span class="p">()</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">apply_ctx_actions</span><span class="p">(</span><span class="n">actions</span><span class="p">):</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">runner</span><span class="o">.</span><span class="n">load_all</span><span class="p">(</span><span class="n">actions</span><span class="o">.</span><span class="n">load</span><span class="p">)</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">runner</span><span class="o">.</span><span class="n">mark_used</span><span class="p">(</span><span class="n">actions</span><span class="o">.</span><span class="n">use</span><span class="p">)</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="n">runner</span><span class="o">.</span><span class="n">unload_all</span><span class="p">(</span><span class="n">actions</span><span class="o">.</span><span class="n">unload</span><span class="p">)</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">lease_id</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">run</span><span class="o">.</span><span class="n">id</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">loop</span><span class="o">.</span><span class="n">id</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">loop</span><span class="o">.</span><span class="n">invocation_id</span><span class="si">}</span><span class="s2">&quot;</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="n">desired</span> <span class="o">=</span> <span class="n">loop</span><span class="o">.</span><span class="n">accepted_ctx_ids</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="k">with</span> <span class="n">leases</span><span class="o">.</span><span class="n">lease</span><span class="p">(</span>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>    <span class="n">lease_id</span><span class="p">,</span>
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>    <span class="n">desired</span><span class="o">=</span><span class="n">desired</span><span class="p">,</span>
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>    <span class="n">used</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">loop</span><span class="o">.</span><span class="n">used_ctx_ids</span><span class="p">,</span>
+</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>    <span class="n">permissions</span><span class="o">=</span><span class="n">loop</span><span class="o">.</span><span class="n">ctx_permissions</span><span class="p">,</span>
+</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>    <span class="n">apply</span><span class="o">=</span><span class="n">apply_ctx_actions</span><span class="p">,</span>
+</span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="p">):</span>
+</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>    <span class="n">loop</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</span></code></pre></div>
+<p>The registry serializes transitions inside one host process. It commits
+ownership only after <code>apply_ctx_actions</code> returns, so failed loads and unloads
+remain retryable, and it unloads shared context only after the final owning
+loop exits. Host load/unload operations must be idempotent because a host may
+partially apply an action set before raising.</p>
+<p>Each live context-manager lease ID must be unique; include the loop invocation
+or attempt ID, not only the static loop name. Pass a <code>used</code> supplier so the
+registry reads observed use after execution, including failure and cancellation
+paths, rather than recording planned use before the loop starts.
+The applier must be synchronous and must not call the registry or wait for a
+worker that calls it. Such callback re-entry fails fast with
+<code>ActivationLeaseBusyError</code> so it cannot deadlock all loop transitions. The
+context manager waits for unrelated transitions automatically; direct
+<code>sync(...)</code> or <code>release(...)</code> calls may either retry that error or explicitly
+pass <code>wait_for_transition=True</code> when they are outside an applier.</p>
+<p>The subprocess CLI is recommendation-only and does not coordinate activation
+leases across processes. Recommendation feedback is stateless unless the runner
+supplies <code>--session-id</code>; with that opt-in, canonical rejected IDs persist in the
+local lifecycle store according to <code>--rejection-mode</code> (<code>use</code>, <code>replace</code>, or
+<code>ignore</code>). This memory suppresses repeated recommendations only. It does not
+create or share activation leases. A runner that needs live load/use/unload
+behavior must use the direct Python integration above (or own a persistent
+coordinator) and keep LoopFlow in control of physical tool changes.</p>
 <h2 id="permission-model">Permission model<a class="headerlink" href="#permission-model" title="Permanent link">&para;</a></h2>
 <p>The adapter fails closed:</p>
 <ul>
@@ -1660,7 +1779,7 @@ logic, and ctx refreshes recommendations based on what just failed.</p>
   would be installed; it does not mutate the host.</li>
 </ul>
 <p><code>.loop</code> files can request ctx grants with one small line:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>ctx grants: skills, mcps, harnesses
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>ctx grants: skills, mcps, harnesses
 </span></code></pre></div>
 <p>CLI/API grants take precedence. If the command passes <code>--permissions</code>, those
 grants replace the <code>.loop</code> line. If the API caller passes <code>permissions=...</code>,

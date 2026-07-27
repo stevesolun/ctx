@@ -337,6 +337,40 @@
   
   
   
+    <li class="md-tabs__item">
+      <a href="../threat-model/" class="md-tabs__link">
+        
+  
+    
+  
+  Threat model
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../enterprise-readiness-review/" class="md-tabs__link">
+        
+  
+    
+  
+  Enterprise readiness
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
     
     
       <li class="md-tabs__item">
@@ -606,6 +640,46 @@
   
   
   
+    <li class="md-nav__item">
+      <a href="../threat-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Threat model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-readiness-review/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Enterprise readiness
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
     
     
       
@@ -627,10 +701,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -641,8 +715,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_10">
             <span class="md-nav__icon md-icon"></span>
             Harness
           </label>
@@ -764,7 +838,7 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" checked>
         
           
           
@@ -780,14 +854,14 @@
             </a>
             
               
-              <label class="md-nav__link " for="__nav_9" id="__nav_9_label" tabindex="">
+              <label class="md-nav__link " for="__nav_11" id="__nav_11_label" tabindex="">
                 <span class="md-nav__icon md-icon"></span>
               </label>
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_9">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_11">
             <span class="md-nav__icon md-icon"></span>
             Toolbox
           </label>
@@ -1143,7 +1217,7 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_12" >
         
           
           
@@ -1159,14 +1233,14 @@
             </a>
             
               
-              <label class="md-nav__link " for="__nav_10" id="__nav_10_label" tabindex="0">
+              <label class="md-nav__link " for="__nav_12" id="__nav_12_label" tabindex="0">
                 <span class="md-nav__icon md-icon"></span>
               </label>
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_10">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_12">
             <span class="md-nav__icon md-icon"></span>
             Skill router
           </label>
@@ -1273,10 +1347,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_13" >
         
           
-          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_13" id="__nav_13_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -1287,8 +1361,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_11">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_13">
             <span class="md-nav__icon md-icon"></span>
             Health
           </label>
@@ -1549,9 +1623,10 @@ manifests, etc.).</p>
    <code>~/.claude</code> in a file/tree/memory path tracked by <code>BackupConfig</code>.</li>
 <li>If tracked, shells out to
    <code>python &lt;repo&gt;/src/backup_mirror.py snapshot-if-changed --reason &lt;tool&gt;:&lt;basename&gt;</code>.</li>
-<li><code>snapshot-if-changed</code> hashes every tracked file, compares against the
-   most recent snapshot's <code>manifest.json</code>, and only creates a new folder
-   when at least one SHA differs.</li>
+<li><code>snapshot-if-changed</code> hashes the same eligible file set that capture would
+   persist, including the size cap and tree/memory destination exclusions. It
+   compares that state against the most recent snapshot's <code>manifest.json</code> and
+   only creates a new folder when at least one SHA differs.</li>
 </ol>
 <p>No-op edits don't create folders. The hook always exits 0 so a bug in
 the backup layer cannot stall a Claude session.</p>
@@ -1578,8 +1653,9 @@ path to this checkout — on Windows this is a path like
 </span></code></pre></div>
 <p>Notes:</p>
 <ul>
-<li>The <code>matcher</code> is a regex against the tool name — the three names above
-  are the only tools that touch files.</li>
+<li>The <code>matcher</code> is a regex against the tool name. The three names above are the
+  supported direct file-edit events; use the watchdog below to catch changes
+  made by Bash commands, external editors, or other processes.</li>
 <li>Use forward slashes in the path even on Windows.</li>
 <li>If <code>python</code> on your PATH is not the interpreter you want, give the
   absolute path instead (e.g.
@@ -1610,6 +1686,14 @@ changed, or removed.</p>
   UNC paths, <code>.</code> entries, or <code>..</code> traversal.</li>
 <li><strong>trees</strong> — <code>agents/</code>, <code>skills/</code>.</li>
 <li><strong>memory</strong> — <code>projects/*/memory/**</code> when <code>memory_glob</code> is true.</li>
+<li><strong>max_file_bytes</strong> — <code>5242880</code> (5 MiB) by default. Files exactly at the cap
+  are included. For larger top-level, tree, and memory files, capture records a
+  <code>too_large</code> manifest entry without storing the content, and change detection
+  ignores the file.</li>
+<li><strong>excludes</strong> — optional destination-relative patterns for tree and memory
+  files. A pattern matches either the complete destination path or every file
+  with the same basename. These custom patterns do not suppress an explicitly
+  configured <code>top_files</code> entry; use <code>top_files</code> to control that list.</li>
 <li><strong>always excluded</strong> — <code>.credentials.json</code>, <code>claude.json</code>, token
   caches; these are dropped even if a user config lists them.</li>
 </ul>
@@ -1636,9 +1720,8 @@ Example:</p>
 <code>manifest.json</code> that records the reason alongside every file's SHA-256.</p>
 <h2 id="watchdog-snapshot-on-changes-outside-a-claude-session">Watchdog — snapshot on changes outside a Claude session<a class="headerlink" href="#watchdog-snapshot-on-changes-outside-a-claude-session" title="Permanent link">&para;</a></h2>
 <p>The PostToolUse hook only fires on <code>Edit</code> / <code>Write</code> / <code>MultiEdit</code> tool
-calls <em>inside</em> a Claude session. If you edit <code>~/.claude/settings.json</code>
-in VS Code, or a <code>git pull</code> updates an agent file, the hook never
-sees it.</p>
+calls <em>inside</em> a Claude session. If a Bash command, VS Code edit, <code>git pull</code>,
+or another process updates a tracked file, the hook never sees it.</p>
 <p>For that gap, run the polling watchdog — a simple loop that calls
 <code>snapshot-if-changed</code> every N seconds:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>python<span class="w"> </span>-m<span class="w"> </span>backup_mirror<span class="w"> </span>watchdog<span class="w"> </span>--interval<span class="w"> </span><span class="m">60</span>

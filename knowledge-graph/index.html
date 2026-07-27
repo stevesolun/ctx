@@ -339,6 +339,40 @@
   
   
   
+    <li class="md-tabs__item">
+      <a href="../threat-model/" class="md-tabs__link">
+        
+  
+    
+  
+  Threat model
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../enterprise-readiness-review/" class="md-tabs__link">
+        
+  
+    
+  
+  Enterprise readiness
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
     
     
       <li class="md-tabs__item">
@@ -775,6 +809,46 @@
   
   
   
+    <li class="md-nav__item">
+      <a href="../threat-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Threat model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-readiness-review/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Enterprise readiness
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
     
     
       
@@ -796,10 +870,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -810,8 +884,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_10">
             <span class="md-nav__icon md-icon"></span>
             Harness
           </label>
@@ -928,7 +1002,7 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
         
           
           
@@ -944,14 +1018,14 @@
             </a>
             
               
-              <label class="md-nav__link " for="__nav_9" id="__nav_9_label" tabindex="0">
+              <label class="md-nav__link " for="__nav_11" id="__nav_11_label" tabindex="0">
                 <span class="md-nav__icon md-icon"></span>
               </label>
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_9">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
             <span class="md-nav__icon md-icon"></span>
             Toolbox
           </label>
@@ -1165,7 +1239,7 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_12" >
         
           
           
@@ -1181,14 +1255,14 @@
             </a>
             
               
-              <label class="md-nav__link " for="__nav_10" id="__nav_10_label" tabindex="0">
+              <label class="md-nav__link " for="__nav_12" id="__nav_12_label" tabindex="0">
                 <span class="md-nav__icon md-icon"></span>
               </label>
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_10">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_12">
             <span class="md-nav__icon md-icon"></span>
             Skill router
           </label>
@@ -1295,10 +1369,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_13" >
         
           
-          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_13" id="__nav_13_label" tabindex="0">
             
   
   <span class="md-ellipsis">
@@ -1309,8 +1383,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_11">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_13">
             <span class="md-nav__icon md-icon"></span>
             Health
           </label>
@@ -1677,6 +1751,21 @@ release asset for the installed package version. This installs
 the harness pages used by <code>ctx-harness-install</code>:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ctx-init<span class="w"> </span>--graph
 </span></code></pre></div>
+<p>The runtime install includes a small actionable fallback set that does not
+depend on an external catalog or API key:</p>
+<ul>
+<li>skills: <code>ctx-python-testing</code>, <code>ctx-javascript-testing</code>,
+  <code>ctx-rust-patterns</code>, and <code>ctx-typescript</code>;</li>
+<li>agent: <code>ctx-python-reviewer</code>;</li>
+<li>MCP server: <code>ctx-core</code>, installed only as the exact bare
+  <code>ctx-mcp-server</code> command.</li>
+</ul>
+<p>These six project-owned entities are MIT licensed and use reserved <code>ctx-*</code>
+identities. Installation preserves unrelated skill, agent, MCP, and
+converted-skill content; runtime-managed harness pages are refreshed from the
+installed artifact. Installation fails closed on identity or overlay
+collisions, changed reserved bodies, symlinked ancestors, command arguments,
+or substituted executable paths.</p>
 <p>To install the full shipped wiki, including the wiki-pack base for
 skill/agent/MCP entity pages, skill pages, concept pages, converted
 micro-skill pipelines, direct harness pages, and Obsidian vault metadata,
@@ -2021,10 +2110,10 @@ review reports and never auto-modify the inventory.</p>
   <code>.dedup-allowlist.txt</code>. The current snapshot has 15,976 findings,
   most of which are within-MCP near-duplicates (multiple wrappers
   around the same upstream service).</li>
-<li><strong><code>ctx-tag-backfill</code></strong> — finds skills/agents with empty <code>tags:</code>
-  frontmatter and proposes a backfill drawn from slug tokens, body
-  keywords, and the existing tag vocabulary. Report-only by default;
-  pass <code>--apply</code> to write. Backfills are additive only.</li>
+<li><strong><code>ctx-tag-backfill</code></strong> — finds installed skills/agents with empty <code>tags:</code>
+  frontmatter and proposes a backfill from slug tokens and an allowlist of
+  body keywords. Existing tag frequency breaks keyword ties. Report-only by
+  default; pass <code>--apply</code> to write. Backfills are additive only.</li>
 <li><strong><code>ctx-skillspector-audit</code></strong> — runs a static <code>--no-llm</code> check over
   shipped skill bodies with
   <a href="https://github.com/NVIDIA/SkillSpector">NVIDIA SkillSpector</a>, writes
