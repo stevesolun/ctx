@@ -6021,6 +6021,356 @@ def test_entity_search_and_detail_apis_support_edit_flow(
         server.server_close()
 
 
+def test_entity_detail_api_falls_back_to_exact_runtime_graph_entity() -> None:
+    graph_calls: list[tuple[str, int, int, str | None]] = []
+
+    def graph_neighborhood(
+        slug: str,
+        hops: int,
+        limit: int,
+        entity_type: str | None,
+    ) -> dict[str, object]:
+        graph_calls.append((slug, hops, limit, entity_type))
+        return {
+            "center": "mcp-server:github",
+            "nodes": [
+                {
+                    "data": {
+                        "id": "mcp-server:github",
+                        "label": "GitHub",
+                        "type": "mcp-server",
+                        "description": "GitHub MCP integration",
+                        "tags": ["reference"],
+                    }
+                }
+            ],
+        }
+
+    deps = readonly_api.ReadOnlyApiDeps(
+        summarize_sessions=lambda: {},
+        read_manifest=lambda: {},
+        status_payload=lambda: {},
+        kpi_summary=lambda: None,
+        grade_distribution_payload=lambda: {},
+        sidecar_page_payload=lambda _qs: {},
+        runtime_lifecycle_summary=lambda: {},
+        skillspector_audit_payload=lambda _qs: {},
+        effective_config_payload=lambda: {},
+        search_wiki_entities=lambda _q, _type, _limit: [],
+        wiki_entity_detail=lambda _slug, _type: None,
+        load_sidecar=lambda _slug, _type: None,
+        graph_neighborhood=graph_neighborhood,
+        normalize_dashboard_entity_type=mt.normalize_dashboard_entity_type,
+    )
+
+    response = readonly_api.handle_readonly_route(
+        "api_entity",
+        {"slug": "github"},
+        {"type": "mcp-server"},
+        deps,
+    )
+
+    assert response is not None
+    assert response.status == 200
+    assert response.payload == {
+        "slug": "github",
+        "type": "mcp-server",
+        "path": "",
+        "frontmatter": {
+            "title": "GitHub",
+            "type": "mcp-server",
+            "description": "GitHub MCP integration",
+            "tags": ["reference"],
+            "source": "runtime-graph",
+        },
+        "body": "GitHub MCP integration",
+    }
+    assert graph_calls == [("github", 1, 1, "mcp-server")]
+
+
+def test_entity_detail_api_requires_type_for_ambiguous_runtime_graph_slug() -> None:
+    graph_calls: list[str | None] = []
+
+    def graph_neighborhood(
+        slug: str,
+        _hops: int,
+        _limit: int,
+        entity_type: str | None,
+    ) -> dict[str, object]:
+        graph_calls.append(entity_type)
+        if entity_type not in {"skill", "mcp-server"}:
+            return {"center": "", "nodes": []}
+        center = f"{entity_type}:{slug}"
+        return {
+            "center": center,
+            "nodes": [
+                {
+                    "data": {
+                        "id": center,
+                        "label": slug,
+                        "type": entity_type,
+                    }
+                }
+            ],
+        }
+
+    deps = readonly_api.ReadOnlyApiDeps(
+        summarize_sessions=lambda: {},
+        read_manifest=lambda: {},
+        status_payload=lambda: {},
+        kpi_summary=lambda: None,
+        grade_distribution_payload=lambda: {},
+        sidecar_page_payload=lambda _qs: {},
+        runtime_lifecycle_summary=lambda: {},
+        skillspector_audit_payload=lambda _qs: {},
+        effective_config_payload=lambda: {},
+        search_wiki_entities=lambda _q, _type, _limit: [],
+        wiki_entity_detail=lambda _slug, _type: None,
+        load_sidecar=lambda _slug, _type: None,
+        graph_neighborhood=graph_neighborhood,
+        normalize_dashboard_entity_type=mt.normalize_dashboard_entity_type,
+    )
+
+    response = readonly_api.handle_readonly_route(
+        "api_entity",
+        {"slug": "shared"},
+        {},
+        deps,
+    )
+
+    assert response is not None
+    assert response.status == 400
+    assert response.payload == {
+        "detail": (
+            "multiple runtime graph entity types match 'shared'; "
+            "the type query parameter is required"
+        )
+    }
+    assert graph_calls == ["skill", "agent", "mcp-server", "harness"]
+
+
+def test_entity_detail_api_bounds_runtime_graph_metadata() -> None:
+    huge_value = "x" * 1_000_000
+
+    def graph_neighborhood(
+        slug: str,
+        _hops: int,
+        _limit: int,
+        entity_type: str | None,
+    ) -> dict[str, object]:
+        center = f"{entity_type}:{slug}"
+        return {
+            "center": center,
+            "nodes": [
+                {
+                    "data": {
+                        "id": center,
+                        "label": huge_value,
+                        "type": entity_type,
+                        "description": huge_value,
+                        "tags": [huge_value] * 13,
+                    }
+                }
+            ],
+        }
+
+    deps = readonly_api.ReadOnlyApiDeps(
+        summarize_sessions=lambda: {},
+        read_manifest=lambda: {},
+        status_payload=lambda: {},
+        kpi_summary=lambda: None,
+        grade_distribution_payload=lambda: {},
+        sidecar_page_payload=lambda _qs: {},
+        runtime_lifecycle_summary=lambda: {},
+        skillspector_audit_payload=lambda _qs: {},
+        effective_config_payload=lambda: {},
+        search_wiki_entities=lambda _q, _type, _limit: [],
+        wiki_entity_detail=lambda _slug, _type: None,
+        load_sidecar=lambda _slug, _type: None,
+        graph_neighborhood=graph_neighborhood,
+        normalize_dashboard_entity_type=mt.normalize_dashboard_entity_type,
+    )
+
+    response = readonly_api.handle_readonly_route(
+        "api_entity",
+        {"slug": "oversized"},
+        {"type": "skill"},
+        deps,
+    )
+
+    assert response is not None
+    assert response.status == 200
+    assert len(response.payload["frontmatter"]["title"]) == 200
+    assert len(response.payload["frontmatter"]["description"]) == 1_000
+    assert len(response.payload["body"]) == 4_000
+    assert len(response.payload["frontmatter"]["tags"]) == 12
+    assert all(len(tag) == 80 for tag in response.payload["frontmatter"]["tags"])
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("label", {"nested": "title"}),
+        ("description", ["nested description"]),
+        ("tags", {"nested": "tag"}),
+        ("tags", [{"nested": "tag"}]),
+    ],
+)
+def test_entity_detail_api_rejects_non_scalar_runtime_graph_metadata(
+    field: str,
+    value: object,
+) -> None:
+    def graph_neighborhood(
+        slug: str,
+        _hops: int,
+        _limit: int,
+        entity_type: str | None,
+    ) -> dict[str, object]:
+        center = f"{entity_type}:{slug}"
+        data: dict[str, object] = {
+            "id": center,
+            "label": "Safe title",
+            "type": entity_type or "skill",
+            "description": "Safe description",
+            "tags": ["safe"],
+        }
+        data[field] = value
+        return {"center": center, "nodes": [{"data": data}]}
+
+    deps = readonly_api.ReadOnlyApiDeps(
+        summarize_sessions=lambda: {},
+        read_manifest=lambda: {},
+        status_payload=lambda: {},
+        kpi_summary=lambda: None,
+        grade_distribution_payload=lambda: {},
+        sidecar_page_payload=lambda _qs: {},
+        runtime_lifecycle_summary=lambda: {},
+        skillspector_audit_payload=lambda _qs: {},
+        effective_config_payload=lambda: {},
+        search_wiki_entities=lambda _q, _type, _limit: [],
+        wiki_entity_detail=lambda _slug, _type: None,
+        load_sidecar=lambda _slug, _type: None,
+        graph_neighborhood=graph_neighborhood,
+        normalize_dashboard_entity_type=mt.normalize_dashboard_entity_type,
+    )
+
+    response = readonly_api.handle_readonly_route(
+        "api_entity",
+        {"slug": "malformed"},
+        {"type": "skill"},
+        deps,
+    )
+
+    assert response is not None
+    assert response.status == 404
+
+
+@pytest.mark.parametrize(
+    ("slug", "requested_type", "center"),
+    [
+        ("../github", "mcp-server", "mcp-server:github"),
+        ("github", "skill", "mcp-server:github"),
+        ("github", "mcp-server", "mcp-server:github-actions"),
+    ],
+)
+def test_entity_detail_api_rejects_unsafe_or_inexact_graph_fallbacks(
+    slug: str,
+    requested_type: str,
+    center: str,
+) -> None:
+    graph_calls = 0
+
+    def graph_neighborhood(
+        _slug: str,
+        _hops: int,
+        _limit: int,
+        _entity_type: str | None,
+    ) -> dict[str, object]:
+        nonlocal graph_calls
+        graph_calls += 1
+        return {
+            "center": center,
+            "nodes": [
+                {
+                    "data": {
+                        "id": center,
+                        "label": "GitHub",
+                        "type": center.partition(":")[0],
+                    }
+                }
+            ],
+        }
+
+    deps = readonly_api.ReadOnlyApiDeps(
+        summarize_sessions=lambda: {},
+        read_manifest=lambda: {},
+        status_payload=lambda: {},
+        kpi_summary=lambda: None,
+        grade_distribution_payload=lambda: {},
+        sidecar_page_payload=lambda _qs: {},
+        runtime_lifecycle_summary=lambda: {},
+        skillspector_audit_payload=lambda _qs: {},
+        effective_config_payload=lambda: {},
+        search_wiki_entities=lambda _q, _type, _limit: [],
+        wiki_entity_detail=lambda _slug, _type: None,
+        load_sidecar=lambda _slug, _type: None,
+        graph_neighborhood=graph_neighborhood,
+        normalize_dashboard_entity_type=mt.normalize_dashboard_entity_type,
+    )
+
+    response = readonly_api.handle_readonly_route(
+        "api_entity",
+        {"slug": slug},
+        {"type": requested_type},
+        deps,
+    )
+
+    assert response is not None
+    assert response.status == 404
+    assert graph_calls == (0 if slug == "../github" else 1)
+
+
+def test_entity_detail_api_preserves_full_wiki_page_precedence() -> None:
+    wiki_detail = {
+        "slug": "github",
+        "type": "mcp-server",
+        "path": "entities/mcp-servers/g/github.md",
+        "frontmatter": {"title": "Full GitHub page"},
+        "body": "Full wiki content",
+    }
+
+    def unexpected_graph(*_args: object) -> dict[str, object]:
+        raise AssertionError("runtime graph fallback must not replace a full wiki page")
+
+    deps = readonly_api.ReadOnlyApiDeps(
+        summarize_sessions=lambda: {},
+        read_manifest=lambda: {},
+        status_payload=lambda: {},
+        kpi_summary=lambda: None,
+        grade_distribution_payload=lambda: {},
+        sidecar_page_payload=lambda _qs: {},
+        runtime_lifecycle_summary=lambda: {},
+        skillspector_audit_payload=lambda _qs: {},
+        effective_config_payload=lambda: {},
+        search_wiki_entities=lambda _q, _type, _limit: [],
+        wiki_entity_detail=lambda _slug, _type: wiki_detail,
+        load_sidecar=lambda _slug, _type: None,
+        graph_neighborhood=unexpected_graph,
+        normalize_dashboard_entity_type=mt.normalize_dashboard_entity_type,
+    )
+
+    response = readonly_api.handle_readonly_route(
+        "api_entity",
+        {"slug": "github"},
+        {"type": "mcp-server"},
+        deps,
+    )
+
+    assert response is not None
+    assert response.status == 200
+    assert response.payload is wiki_detail
+
+
 def test_entity_search_uses_dashboard_index_for_live_graph_search(
     fake_claude: Path,
     monkeypatch: pytest.MonkeyPatch,

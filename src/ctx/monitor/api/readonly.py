@@ -6,6 +6,17 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from ctx.utils._safe_name import is_safe_source_name
+
+
+_RUNTIME_GRAPH_ENTITY_TYPES = ("skill", "agent", "mcp-server", "harness")
+_RUNTIME_GRAPH_TITLE_MAX_CHARS = 200
+_RUNTIME_GRAPH_DESCRIPTION_MAX_CHARS = 1_000
+_RUNTIME_GRAPH_BODY_MAX_CHARS = 4_000
+_RUNTIME_GRAPH_TAG_MAX_CHARS = 80
+_RUNTIME_GRAPH_TAG_LIMIT = 12
+_GRAPH_SCALAR_TYPES = (str, int, float, bool)
+
 
 @dataclass(frozen=True)
 class ReadOnlyApiResponse:
@@ -50,6 +61,140 @@ def _grade_payload_from_summary(summary: Any) -> dict[str, Any] | None:
         except (TypeError, ValueError):
             grades[grade] = 0
     return {"grades": grades, "total": sum(grades.values())}
+
+
+def _bounded_graph_text(
+    value: Any,
+    *,
+    default: str,
+    max_chars: int,
+) -> tuple[bool, str]:
+    if value is None or value == "":
+        return True, default[:max_chars]
+    if not isinstance(value, _GRAPH_SCALAR_TYPES):
+        return False, ""
+    try:
+        return True, str(value)[:max_chars]
+    except (OverflowError, ValueError):
+        return False, ""
+
+
+def _runtime_graph_entity_detail_for_type(
+    slug: str,
+    entity_type: str,
+    deps: ReadOnlyApiDeps,
+) -> dict[str, Any] | None:
+    graph = deps.graph_neighborhood(slug, 1, 1, entity_type)
+    if not isinstance(graph, Mapping):
+        return None
+    center = graph.get("center")
+    nodes = graph.get("nodes")
+    if not isinstance(center, str) or not center or not isinstance(nodes, list):
+        return None
+
+    center_data: Mapping[str, Any] | None = None
+    for node in nodes:
+        if not isinstance(node, Mapping):
+            continue
+        data = node.get("data")
+        if isinstance(data, Mapping) and data.get("id") == center:
+            center_data = data
+            break
+    if center_data is None:
+        return None
+
+    prefix, separator, resolved_slug = center.partition(":")
+    raw_type = center_data.get("type")
+    if raw_type is not None and not isinstance(raw_type, str):
+        return None
+    resolved_type = deps.normalize_dashboard_entity_type(raw_type or prefix)
+    if (
+        not separator
+        or resolved_slug != slug
+        or resolved_type is None
+        or center != f"{resolved_type}:{slug}"
+        or resolved_type != entity_type
+    ):
+        return None
+
+    title_ok, title = _bounded_graph_text(
+        center_data.get("label"),
+        default=slug,
+        max_chars=_RUNTIME_GRAPH_TITLE_MAX_CHARS,
+    )
+    description_ok, description = _bounded_graph_text(
+        center_data.get("description"),
+        default="",
+        max_chars=_RUNTIME_GRAPH_DESCRIPTION_MAX_CHARS,
+    )
+    body_ok, body = _bounded_graph_text(
+        center_data.get("description"),
+        default="",
+        max_chars=_RUNTIME_GRAPH_BODY_MAX_CHARS,
+    )
+    if not title_ok or not description_ok or not body_ok:
+        return None
+
+    raw_tags = center_data.get("tags")
+    if raw_tags is None:
+        raw_tags = []
+    if not isinstance(raw_tags, list):
+        return None
+    tags: list[str] = []
+    for raw_tag in raw_tags[:_RUNTIME_GRAPH_TAG_LIMIT]:
+        tag_ok, tag = _bounded_graph_text(
+            raw_tag,
+            default="",
+            max_chars=_RUNTIME_GRAPH_TAG_MAX_CHARS,
+        )
+        if not tag_ok:
+            return None
+        if tag:
+            tags.append(tag)
+
+    return {
+        "slug": slug,
+        "type": resolved_type,
+        "path": "",
+        "frontmatter": {
+            "title": title,
+            "type": resolved_type,
+            "description": description,
+            "tags": tags,
+            "source": "runtime-graph",
+        },
+        "body": body,
+    }
+
+
+def _runtime_graph_entity_detail(
+    slug: str,
+    requested_type: str | None,
+    deps: ReadOnlyApiDeps,
+) -> dict[str, Any] | None:
+    """Return an exact graph-backed entity when no full wiki page is installed."""
+    if not is_safe_source_name(slug):
+        return None
+    normalized_type = (
+        deps.normalize_dashboard_entity_type(requested_type) if requested_type is not None else None
+    )
+    if requested_type is not None and normalized_type is None:
+        raise ValueError(f"unsupported entity_type: {requested_type!r}")
+
+    candidate_types = (
+        (normalized_type,) if normalized_type is not None else _RUNTIME_GRAPH_ENTITY_TYPES
+    )
+    matches = [
+        detail
+        for entity_type in candidate_types
+        if (detail := _runtime_graph_entity_detail_for_type(slug, entity_type, deps)) is not None
+    ]
+    if len(matches) > 1:
+        raise ValueError(
+            f"multiple runtime graph entity types match {slug!r}; "
+            "the type query parameter is required"
+        )
+    return matches[0] if matches else None
 
 
 def handle_readonly_route(
@@ -100,6 +245,8 @@ def handle_readonly_route(
         slug = params["slug"]
         try:
             detail = deps.wiki_entity_detail(slug, query.get("type"))
+            if detail is None:
+                detail = _runtime_graph_entity_detail(slug, query.get("type"), deps)
         except ValueError as exc:
             return ReadOnlyApiResponse({"detail": str(exc)}, status=400)
         if detail is None:
